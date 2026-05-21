@@ -1,0 +1,32 @@
+# ── .NET / shuttle-api ───────────────────────────────────────────────────────
+shuttle-api/**/bin/
+shuttle-api/**/obj/
+shuttle-api/**/*.user
+shuttle-api/.vs/
+shuttle-api/**/.env
+shuttle-api/**/appsettings.*.json
+!shuttle-api/**/appsettings.json
+shuttle-api/**/*.pfx
+shuttle-api/**/*.p12
+
+# ── Flutter / shuttle_tablet ─────────────────────────────────────────────────
+shuttle_tablet/.dart_tool/
+shuttle_tablet/.flutter-plugins
+shuttle_tablet/.flutter-plugins-dependencies
+shuttle_tablet/.pub-cache/
+shuttle_tablet/.pub/
+shuttle_tablet/build/
+shuttle_tablet/**/*.class
+shuttle_tablet/**/*.log
+shuttle_tablet/android/app/debug/
+shuttle_tablet/android/app/profile/
+shuttle_tablet/android/app/release/
+shuttle_tablet/**/*.iml
+shuttle_tablet/.idea/
+shuttle_tablet/**/.env
+
+# ── General ──────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+.env
