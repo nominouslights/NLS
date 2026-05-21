@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: shuttle_postgres
+    environment:
+      POSTGRES_DB: shuttle_db
+      POSTGRES_USER: shuttle_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shuttle_pass_dev}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shuttle_user -d shuttle_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - shuttle_net
+
+  api:
+    build:
+      context: .
+      dockerfile: src/ShuttleApi.Api/Dockerfile
+    container_name: shuttle_api
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__DefaultConnection: >-
+        Host=postgres;Port=5432;Database=shuttle_db;Username=shuttle_user;Password=${POSTGRES_PASSWORD:-shuttle_pass_dev}
+      JwtSettings__Secret: ${JWT_SECRET:-dev_secret_min_32_chars_here_change}
+      JwtSettings__Issuer: shuttle-api
+      JwtSettings__Audience: shuttle-tablet
+    ports:
+      - "5046:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - shuttle_net
+
+volumes:
+  postgres_data:
+
+networks:
+  shuttle_net:
+    driver: bridge
