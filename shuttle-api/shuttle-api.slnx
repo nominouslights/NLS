@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ShuttleApi.Api/ShuttleApi.Api.csproj" />
+    <Project Path="src/ShuttleApi.Application/ShuttleApi.Application.csproj" />
+    <Project Path="src/ShuttleApi.Domain/ShuttleApi.Domain.csproj" />
+    <Project Path="src/ShuttleApi.Infrastructure/ShuttleApi.Infrastructure.csproj" />
+  </Folder>
+</Solution>
