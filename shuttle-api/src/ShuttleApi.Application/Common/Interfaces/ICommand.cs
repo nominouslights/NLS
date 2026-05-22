@@ -1,4 +1,4 @@
-using MediatR;
+using ShuttleApi.Application.Common.Mediator;
 
 namespace ShuttleApi.Application.Common.Interfaces;
 

@@ -1,6 +1,6 @@
-using MediatR;
 using Microsoft.Extensions.Logging;
 using ShuttleApi.Application.Common.Interfaces;
+using ShuttleApi.Application.Common.Mediator;
 
 namespace ShuttleApi.Application.Common.Behaviors;
 

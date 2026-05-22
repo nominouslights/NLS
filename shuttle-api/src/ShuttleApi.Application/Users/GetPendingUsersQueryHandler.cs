@@ -1,4 +1,4 @@
-using MediatR;
+using ShuttleApi.Application.Common.Mediator;
 using ShuttleApi.Domain.Users;
 
 namespace ShuttleApi.Application.Users;

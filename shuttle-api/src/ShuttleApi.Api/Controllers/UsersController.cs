@@ -1,7 +1,7 @@
 using System.Security.Claims;
-using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ShuttleApi.Application.Common.Mediator;
 using ShuttleApi.Application.Users;
 
 namespace ShuttleApi.Api.Controllers;

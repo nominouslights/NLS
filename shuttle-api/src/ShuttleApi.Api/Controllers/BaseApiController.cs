@@ -1,5 +1,5 @@
-using MediatR;
 using Microsoft.AspNetCore.Mvc;
+using ShuttleApi.Application.Common.Mediator;
 
 namespace ShuttleApi.Api.Controllers;
 
