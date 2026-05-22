@@ -129,8 +129,12 @@ class _ClientFormSheetState extends ConsumerState<ClientFormSheet>
   @override
   Widget build(BuildContext context) {
     final isLoading = ref.watch(clientFormProvider).isLoading;
+    final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
+    final safeBottom = MediaQuery.of(context).padding.bottom;
 
-    return Container(
+    return Padding(
+      padding: EdgeInsets.only(bottom: keyboardHeight),
+      child: Container(
       height: MediaQuery.of(context).size.height * 0.92,
       decoration: const BoxDecoration(
         color: Colors.white,
@@ -225,7 +229,7 @@ class _ClientFormSheetState extends ConsumerState<ClientFormSheet>
           ),
           // Footer
           Container(
-            padding: EdgeInsets.fromLTRB(16, 12, 16, MediaQuery.of(context).padding.bottom + 12),
+            padding: EdgeInsets.fromLTRB(16, 12, 16, (keyboardHeight > 0 ? 12 : safeBottom + 12)),
             decoration: const BoxDecoration(
               border: Border(top: BorderSide(color: Color(0xFFE5E7EB))),
             ),
@@ -253,6 +257,7 @@ class _ClientFormSheetState extends ConsumerState<ClientFormSheet>
           ),
         ],
       ),
+    ),
     );
   }
 }
