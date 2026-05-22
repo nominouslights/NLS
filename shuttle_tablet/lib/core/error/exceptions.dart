@@ -20,3 +20,7 @@ class ConflictException implements Exception {
   final String message;
   const ConflictException([this.message = 'A conflict occurred.']);
 }
+
+class NotFoundException implements Exception {
+  const NotFoundException();
+}

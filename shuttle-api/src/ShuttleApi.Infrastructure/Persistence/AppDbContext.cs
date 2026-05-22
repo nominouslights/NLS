@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using ShuttleApi.Application.Common.Interfaces;
+using ShuttleApi.Domain.Clients;
 using ShuttleApi.Domain.Common;
 using ShuttleApi.Domain.Users;
 
@@ -11,6 +12,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
 {
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<User> Users => Set<User>();
+    public DbSet<Client> Clients => Set<Client>();
+    public DbSet<Contract> Contracts => Set<Contract>();
+    public DbSet<ContractRateLine> ContractRateLines => Set<ContractRateLine>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -8,6 +8,7 @@ using ShuttleApi.Application.Common.Interfaces;
 using ShuttleApi.Application.Services;
 using ShuttleApi.Infrastructure.Auth;
 using ShuttleApi.Infrastructure.Persistence;
+using ShuttleApi.Domain.Clients;
 using ShuttleApi.Domain.Users;
 using ShuttleApi.Infrastructure.Persistence.Repositories;
 using ShuttleApi.Infrastructure.Services;
@@ -28,6 +29,8 @@ public static class DependencyInjection
         services.Configure<JwtSettings>(configuration.GetSection(JwtSettings.SectionName));
         services.AddScoped<IJwtTokenService, JwtTokenService>();
         services.AddScoped<IUserRepository, UserRepository>();
+        services.AddScoped<IClientRepository, ClientRepository>();
+        services.AddScoped<IContractRepository, ContractRepository>();
         services.AddScoped<IPasswordHasher, BcryptPasswordHasher>();
 
         var jwtSettings = configuration.GetSection(JwtSettings.SectionName).Get<JwtSettings>()!;

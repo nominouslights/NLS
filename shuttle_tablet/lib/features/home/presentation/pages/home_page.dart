@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../clients/presentation/pages/clients_list_page.dart';
 import '../widgets/home_dashboard.dart';
 
 class HomePage extends StatefulWidget {
@@ -21,7 +22,7 @@ class _HomePageState extends State<HomePage> {
         index: _selectedIndex,
         children: const [
           HomeDashboard(),
-          _PlaceholderTab(label: 'Clients'),
+          ClientsListPage(),
           _PlaceholderTab(label: 'Dispatch'),
           _PlaceholderTab(label: 'Drivers'),
           _PlaceholderTab(label: 'More'),

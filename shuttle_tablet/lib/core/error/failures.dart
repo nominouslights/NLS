@@ -26,3 +26,7 @@ class UnexpectedFailure extends Failure {
 class ConflictFailure extends Failure {
   const ConflictFailure([super.message = 'Email already in use.']);
 }
+
+class NotFoundFailure extends Failure {
+  const NotFoundFailure([super.message = 'The requested resource was not found.']);
+}
