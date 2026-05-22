@@ -6,7 +6,7 @@ import 'interceptors/logging_interceptor.dart';
 import '../storage/secure_storage_service.dart';
 
 Dio buildDioClient(SecureStorageService storageService) {
-  final baseUrl = 'http://192.168.1.28:5046/api';
+  final baseUrl = dotenv.env['API_BASE_URL']!;
 
   final refreshDio = Dio(BaseOptions(baseUrl: baseUrl));
 

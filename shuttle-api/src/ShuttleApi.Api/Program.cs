@@ -45,11 +45,8 @@ builder.Services.AddHealthChecks()
 
 var app = builder.Build();
 
-if (app.Environment.IsDevelopment())
-{
-    var seederLogger = app.Services.GetRequiredService<ILogger<Program>>();
-    await ShuttleApi.Infrastructure.Persistence.Seeder.DevDataSeeder.SeedAsync(app.Services, seederLogger);
-}
+var startupLogger = app.Services.GetRequiredService<ILogger<Program>>();
+await ShuttleApi.Infrastructure.Persistence.Seeder.DevDataSeeder.SeedAsync(app.Services, startupLogger);
 
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseMiddleware<CorrelationIdMiddleware>();
