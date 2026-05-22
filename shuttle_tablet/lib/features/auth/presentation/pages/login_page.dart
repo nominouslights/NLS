@@ -47,6 +47,8 @@ class _LoginPageState extends ConsumerState<LoginPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(message)),
         );
+      } else if (next is AsyncData<String?> && next.value != null) {
+        context.go(RouteNames.home);
       }
     });
 

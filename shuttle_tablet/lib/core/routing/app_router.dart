@@ -5,6 +5,7 @@ import '../../features/auth/presentation/pages/login_page.dart';
 import '../../features/auth/presentation/pages/pending_approval_page.dart';
 import '../../features/auth/presentation/pages/register_page.dart';
 import '../../features/auth/presentation/providers/auth_provider.dart';
+import '../../features/home/presentation/pages/home_page.dart';
 import '../../features/users/presentation/pages/pending_users_page.dart';
 import 'route_names.dart';
 
@@ -16,6 +17,10 @@ final routerProvider = Provider<GoRouter>((ref) {
     refreshListenable: notifier,
     redirect: notifier.redirect,
     routes: [
+      GoRoute(
+        path: RouteNames.home,
+        builder: (_, __) => const HomePage(),
+      ),
       GoRoute(
         path: RouteNames.login,
         builder: (_, __) => const LoginPage(),
@@ -80,12 +85,12 @@ class _RouterNotifier extends ChangeNotifier {
 
     // Authenticated: redirect away from public routes
     if (isPublic) {
-      return role == 'Admin' ? RouteNames.pendingUsers : RouteNames.trips;
+      return role == 'Admin' ? RouteNames.pendingUsers : RouteNames.home;
     }
 
     // Protect admin route from non-admins
     if (location == RouteNames.pendingUsers && role != 'Admin') {
-      return RouteNames.trips;
+      return RouteNames.home;
     }
 
     return null;
