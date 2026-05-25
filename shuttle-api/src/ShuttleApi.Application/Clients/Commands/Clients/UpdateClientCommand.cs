@@ -3,7 +3,8 @@ using ShuttleApi.Domain.Clients;
 
 namespace ShuttleApi.Application.Clients;
 
-public sealed record CreateClientCommand(
+public sealed record UpdateClientCommand(
+    Guid Id,
     string BusinessName,
     ServiceType ServiceType,
     string PrimaryContactName,
@@ -18,6 +19,7 @@ public sealed record CreateClientCommand(
     string PreferredPaymentMethod,
     int NetPaymentTerms,
     string? ComplianceNotes,
-    bool IsMinesite) : ICommand<CreateClientResult>;
-
-public sealed record CreateClientResult(Guid Id);
+    bool IsMinesite,
+    bool IsActive,
+    string? Industry,
+    string? ProjectSite) : ICommand;

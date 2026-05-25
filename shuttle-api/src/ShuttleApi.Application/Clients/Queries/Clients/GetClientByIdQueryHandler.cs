@@ -51,6 +51,8 @@ internal sealed class GetClientByIdQueryHandler(
             client.IsMinesite,
             client.IsActive,
             client.CreatedAt,
-            contractSummary);
+            contractSummary,
+            client.Industry,
+            client.ProjectSite);
     }
 }

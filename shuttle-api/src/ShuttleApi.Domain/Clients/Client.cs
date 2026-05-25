@@ -22,6 +22,8 @@ public sealed class Client : AggregateRoot<Guid>
     public bool IsMinesite { get; private set; }
     public bool IsActive { get; private set; }
     public DateTime CreatedAt { get; private set; }
+    public string? Industry { get; private set; }
+    public string? ProjectSite { get; private set; }
 
     private Client() { }
 
@@ -40,7 +42,9 @@ public sealed class Client : AggregateRoot<Guid>
         string preferredPaymentMethod,
         int netPaymentTerms,
         string? complianceNotes,
-        bool isMinesite)
+        bool isMinesite,
+        string? industry,
+        string? projectSite)
     {
         return new Client
         {
@@ -62,7 +66,9 @@ public sealed class Client : AggregateRoot<Guid>
             ComplianceNotes = complianceNotes,
             IsMinesite = isMinesite,
             IsActive = true,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            Industry = industry,
+            ProjectSite = projectSite
         };
     }
 
@@ -81,7 +87,9 @@ public sealed class Client : AggregateRoot<Guid>
         string preferredPaymentMethod,
         int netPaymentTerms,
         string? complianceNotes,
-        bool isMinesite)
+        bool isMinesite,
+        string? industry,
+        string? projectSite)
     {
         BusinessName = businessName;
         ServiceType = serviceType;
@@ -98,6 +106,8 @@ public sealed class Client : AggregateRoot<Guid>
         NetPaymentTerms = netPaymentTerms;
         ComplianceNotes = complianceNotes;
         IsMinesite = isMinesite;
+        Industry = industry;
+        ProjectSite = projectSite;
     }
 
     public void Deactivate() => IsActive = false;

@@ -117,6 +117,8 @@ class ClientRemoteDataSource implements IClientRemoteDataSource {
         'netPaymentTerms': params.netPaymentTerms,
         'complianceNotes': params.complianceNotes,
         'isMinesite': params.isMinesite,
+        'industry': params.industry,
+        'projectSite': params.projectSite,
       };
 
   String _serviceTypeToString(ServiceType t) =>

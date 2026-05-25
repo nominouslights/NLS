@@ -25,6 +25,8 @@ class ClientModel extends Client {
     ContractModel? activeContract,
     super.activeContractRenewalDate,
     super.listItemIsExpiringSoon = false,
+    super.industry,
+    super.projectSite,
   }) : super(activeContract: activeContract);
 
   factory ClientModel.fromJson(Map<String, dynamic> json) {
@@ -53,6 +55,8 @@ class ClientModel extends Client {
       activeContract: contractJson != null ? ContractModel.fromJson(contractJson) : null,
       activeContractRenewalDate: renewalDateRaw != null ? DateTime.tryParse(renewalDateRaw) : null,
       listItemIsExpiringSoon: json['isExpiringSoon'] as bool? ?? false,
+      industry: json['industry'] as String?,
+      projectSite: json['projectSite'] as String?,
     );
   }
 
@@ -73,6 +77,8 @@ class ClientModel extends Client {
         'complianceNotes': complianceNotes,
         'isMinesite': isMinesite,
         'isActive': isActive,
+        'industry': industry,
+        'projectSite': projectSite,
       };
 
   static ServiceType _parseServiceType(String value) {

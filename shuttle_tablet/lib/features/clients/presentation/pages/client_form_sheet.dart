@@ -23,6 +23,8 @@ class _ClientFormSheetState extends ConsumerState<ClientFormSheet>
   // General Info
   final _businessNameCtrl = TextEditingController();
   ServiceType _serviceType = ServiceType.corporate;
+  final _industryCtrl = TextEditingController();
+  final _projectSiteCtrl = TextEditingController();
   final _contactNameCtrl = TextEditingController();
   final _contactTitleCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
@@ -31,7 +33,7 @@ class _ClientFormSheetState extends ConsumerState<ClientFormSheet>
   // Address
   final _streetCtrl = TextEditingController();
   final _cityCtrl = TextEditingController();
-  final _provinceCtrl = TextEditingController();
+  String _province = 'MB';
   final _postalCtrl = TextEditingController();
 
   // Billing
@@ -51,19 +53,22 @@ class _ClientFormSheetState extends ConsumerState<ClientFormSheet>
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
+    _tabController.addListener(() { if (mounted) setState(() {}); });
     if (_isEditing) _populate(widget.client!);
   }
 
   void _populate(Client c) {
     _businessNameCtrl.text = c.businessName;
     _serviceType = c.serviceType;
+    _industryCtrl.text = c.industry ?? '';
+    _projectSiteCtrl.text = c.projectSite ?? '';
     _contactNameCtrl.text = c.primaryContactName;
     _contactTitleCtrl.text = c.primaryContactTitle;
     _phoneCtrl.text = c.phone;
     _emailCtrl.text = c.email;
     _streetCtrl.text = c.streetAddress;
     _cityCtrl.text = c.city;
-    _provinceCtrl.text = c.province;
+    _province = ['MB', 'SK', 'ON'].contains(c.province) ? c.province : 'MB';
     _postalCtrl.text = c.postalCode;
     _gstCtrl.text = c.gstHstNumber ?? '';
     _paymentMethod = c.preferredPaymentMethod;
@@ -77,8 +82,9 @@ class _ClientFormSheetState extends ConsumerState<ClientFormSheet>
   void dispose() {
     _tabController.dispose();
     for (final c in [
-      _businessNameCtrl, _contactNameCtrl, _contactTitleCtrl,
-      _phoneCtrl, _emailCtrl, _streetCtrl, _cityCtrl, _provinceCtrl,
+      _businessNameCtrl, _industryCtrl, _projectSiteCtrl,
+      _contactNameCtrl, _contactTitleCtrl,
+      _phoneCtrl, _emailCtrl, _streetCtrl, _cityCtrl,
       _postalCtrl, _gstCtrl, _complianceCtrl,
     ]) {
       c.dispose();
@@ -86,8 +92,29 @@ class _ClientFormSheetState extends ConsumerState<ClientFormSheet>
     super.dispose();
   }
 
+  int _firstTabWithErrors() {
+    final emailOk = RegExp(r'^[^@]+@[^@]+\.[^@]+').hasMatch(_emailCtrl.text.trim());
+    if (_businessNameCtrl.text.trim().isEmpty ||
+        _contactNameCtrl.text.trim().isEmpty ||
+        _phoneCtrl.text.trim().isEmpty ||
+        !emailOk) return 0;
+    if (_streetCtrl.text.trim().isEmpty ||
+        _cityCtrl.text.trim().isEmpty ||
+        _postalCtrl.text.trim().isEmpty ||
+        !RegExp(r'^[A-Za-z]\d[A-Za-z] ?\d[A-Za-z]\d$').hasMatch(_postalCtrl.text.trim())) return 2;
+    return _tabController.index;
+  }
+
   Future<void> _submit() async {
-    if (!_formKey.currentState!.validate()) return;
+    if (!_formKey.currentState!.validate()) {
+      _tabController.animateTo(_firstTabWithErrors());
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please correct the highlighted fields.')),
+        );
+      }
+      return;
+    }
     final params = UpdateClientParams(
       businessName: _businessNameCtrl.text.trim(),
       serviceType: _serviceType,
@@ -97,7 +124,7 @@ class _ClientFormSheetState extends ConsumerState<ClientFormSheet>
       email: _emailCtrl.text.trim(),
       streetAddress: _streetCtrl.text.trim(),
       city: _cityCtrl.text.trim(),
-      province: _provinceCtrl.text.trim().toUpperCase(),
+      province: _province,
       postalCode: _postalCtrl.text.trim().toUpperCase(),
       gstHstNumber: _gstCtrl.text.trim().isEmpty ? null : _gstCtrl.text.trim(),
       preferredPaymentMethod: _paymentMethod,
@@ -105,6 +132,8 @@ class _ClientFormSheetState extends ConsumerState<ClientFormSheet>
       complianceNotes: _complianceCtrl.text.trim().isEmpty ? null : _complianceCtrl.text.trim(),
       isMinesite: _isMinesite,
       isActive: _isActive,
+      industry: _industryCtrl.text.trim().isEmpty ? null : _industryCtrl.text.trim(),
+      projectSite: _projectSiteCtrl.text.trim().isEmpty ? null : _projectSiteCtrl.text.trim(),
     );
 
     try {
@@ -186,15 +215,18 @@ class _ClientFormSheetState extends ConsumerState<ClientFormSheet>
             ],
           ),
           const Divider(height: 1),
-          // Body
+          // Body — IndexedStack keeps all tabs in the tree so Form.validate()
+          // runs every validator regardless of which tab is currently visible.
           Expanded(
             child: Form(
               key: _formKey,
-              child: TabBarView(
-                controller: _tabController,
+              child: IndexedStack(
+                index: _tabController.index,
                 children: [
                   _GeneralInfoTab(
                     businessNameCtrl: _businessNameCtrl,
+                    industryCtrl: _industryCtrl,
+                    projectSiteCtrl: _projectSiteCtrl,
                     contactNameCtrl: _contactNameCtrl,
                     contactTitleCtrl: _contactTitleCtrl,
                     phoneCtrl: _phoneCtrl,
@@ -215,7 +247,8 @@ class _ClientFormSheetState extends ConsumerState<ClientFormSheet>
                   _AddressTab(
                     streetCtrl: _streetCtrl,
                     cityCtrl: _cityCtrl,
-                    provinceCtrl: _provinceCtrl,
+                    province: _province,
+                    onProvinceChanged: (v) => setState(() => _province = v),
                     postalCtrl: _postalCtrl,
                   ),
                   _ComplianceTab(
@@ -266,6 +299,8 @@ class _ClientFormSheetState extends ConsumerState<ClientFormSheet>
 
 class _GeneralInfoTab extends StatelessWidget {
   final TextEditingController businessNameCtrl;
+  final TextEditingController industryCtrl;
+  final TextEditingController projectSiteCtrl;
   final TextEditingController contactNameCtrl;
   final TextEditingController contactTitleCtrl;
   final TextEditingController phoneCtrl;
@@ -278,6 +313,8 @@ class _GeneralInfoTab extends StatelessWidget {
 
   const _GeneralInfoTab({
     required this.businessNameCtrl,
+    required this.industryCtrl,
+    required this.projectSiteCtrl,
     required this.contactNameCtrl,
     required this.contactTitleCtrl,
     required this.phoneCtrl,
@@ -305,6 +342,10 @@ class _GeneralInfoTab extends StatelessWidget {
           ],
           onChanged: onServiceTypeChanged,
         ),
+        const SizedBox(height: 16),
+        _Field(controller: industryCtrl, label: 'Industry'),
+        const SizedBox(height: 16),
+        _Field(controller: projectSiteCtrl, label: 'Project / Site'),
         const SizedBox(height: 16),
         _Field(controller: contactNameCtrl, label: 'Primary Contact Name', required: true),
         const SizedBox(height: 16),
@@ -396,13 +437,15 @@ class _BillingTab extends StatelessWidget {
 class _AddressTab extends StatelessWidget {
   final TextEditingController streetCtrl;
   final TextEditingController cityCtrl;
-  final TextEditingController provinceCtrl;
+  final String province;
+  final ValueChanged<String> onProvinceChanged;
   final TextEditingController postalCtrl;
 
   const _AddressTab({
     required this.streetCtrl,
     required this.cityCtrl,
-    required this.provinceCtrl,
+    required this.province,
+    required this.onProvinceChanged,
     required this.postalCtrl,
   });
 
@@ -418,16 +461,15 @@ class _AddressTab extends StatelessWidget {
         Row(
           children: [
             Expanded(
-              child: _Field(
-                controller: provinceCtrl,
+              child: _DropdownField<String>(
                 label: 'Province',
-                required: true,
-                maxLength: 2,
-                validator: (v) {
-                  if (v == null || v.isEmpty) return 'Required';
-                  if (v.length != 2) return 'Use 2-letter code (e.g. ON)';
-                  return null;
-                },
+                value: province,
+                items: const [
+                  DropdownMenuItem(value: 'MB', child: Text('Manitoba')),
+                  DropdownMenuItem(value: 'SK', child: Text('Saskatchewan')),
+                  DropdownMenuItem(value: 'ON', child: Text('Ontario')),
+                ],
+                onChanged: onProvinceChanged,
               ),
             ),
             const SizedBox(width: 12),

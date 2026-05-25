@@ -33,5 +33,7 @@ public sealed class ClientConfiguration : IEntityTypeConfiguration<Client>
         builder.Property(c => c.IsMinesite).IsRequired();
         builder.Property(c => c.IsActive).IsRequired();
         builder.Property(c => c.CreatedAt).IsRequired();
+        builder.Property(c => c.Industry).HasMaxLength(200);
+        builder.Property(c => c.ProjectSite).HasMaxLength(200);
     }
 }

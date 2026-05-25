@@ -26,6 +26,8 @@ class CreateClientParams {
   final int netPaymentTerms;
   final String? complianceNotes;
   final bool isMinesite;
+  final String? industry;
+  final String? projectSite;
 
   const CreateClientParams({
     required this.businessName,
@@ -43,6 +45,8 @@ class CreateClientParams {
     required this.netPaymentTerms,
     this.complianceNotes,
     required this.isMinesite,
+    this.industry,
+    this.projectSite,
   });
 }
 
@@ -66,5 +70,7 @@ class UpdateClientParams extends CreateClientParams {
     super.complianceNotes,
     required super.isMinesite,
     required this.isActive,
+    super.industry,
+    super.projectSite,
   });
 }

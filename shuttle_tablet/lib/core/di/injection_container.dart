@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:get_it/get_it.dart';
+import '../auth/auth_event_bus.dart';
 import '../network/dio_client.dart';
 import '../storage/secure_storage_service.dart';
 import '../../features/auth/data/datasources/auth_remote_datasource.dart';
@@ -30,6 +31,23 @@ import '../../features/clients/domain/usecases/update_client_usecase.dart';
 import '../../features/users/domain/usecases/approve_user_usecase.dart';
 import '../../features/users/domain/usecases/get_pending_users_usecase.dart';
 import '../../features/users/domain/usecases/reject_user_usecase.dart';
+import '../../features/drivers/data/datasources/driver_remote_datasource.dart';
+import '../../features/drivers/data/repositories/driver_repository_impl.dart';
+import '../../features/drivers/domain/repositories/i_driver_repository.dart';
+import '../../features/drivers/domain/usecases/create_driver_usecase.dart';
+import '../../features/drivers/domain/usecases/update_driver_usecase.dart';
+import '../../features/drivers/domain/usecases/delete_driver_usecase.dart';
+import '../../features/drivers/domain/usecases/set_driver_status_usecase.dart';
+import '../../features/drivers/domain/usecases/get_drivers_usecase.dart';
+import '../../features/drivers/domain/usecases/get_driver_by_id_usecase.dart';
+import '../../features/drivers/domain/usecases/get_driver_documents_usecase.dart';
+import '../../features/drivers/domain/usecases/upload_driver_document_usecase.dart';
+import '../../features/drivers/domain/usecases/download_driver_document_usecase.dart';
+import '../../features/drivers/domain/usecases/delete_driver_document_usecase.dart';
+import '../../features/drivers/domain/usecases/get_driver_roster_usecase.dart';
+import '../../features/drivers/domain/usecases/get_fleet_roster_usecase.dart';
+import '../../features/drivers/domain/usecases/upsert_roster_entry_usecase.dart';
+import '../../features/drivers/domain/usecases/delete_roster_entry_usecase.dart';
 
 final sl = GetIt.instance;
 
@@ -40,7 +58,8 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton<SecureStorageService>(
     () => SecureStorageService(sl()),
   );
-  sl.registerLazySingleton<Dio>(() => buildDioClient(sl()));
+  sl.registerLazySingleton<AuthEventBus>(() => AuthEventBus());
+  sl.registerLazySingleton<Dio>(() => buildDioClient(sl(), sl()));
 
   // Auth feature
   sl.registerLazySingleton<IAuthRemoteDataSource>(
@@ -86,4 +105,26 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton(() => AddRateLineUseCase(sl()));
   sl.registerLazySingleton(() => DeleteRateLineUseCase(sl()));
   sl.registerLazySingleton(() => GetRateLinesByClientUseCase(sl()));
+
+  // Drivers feature
+  sl.registerLazySingleton<IDriverRemoteDataSource>(
+    () => DriverRemoteDataSource(sl()),
+  );
+  sl.registerLazySingleton<IDriverRepository>(
+    () => DriverRepositoryImpl(sl()),
+  );
+  sl.registerLazySingleton(() => GetDriversUseCase(sl()));
+  sl.registerLazySingleton(() => GetDriverByIdUseCase(sl()));
+  sl.registerLazySingleton(() => CreateDriverUseCase(sl()));
+  sl.registerLazySingleton(() => UpdateDriverUseCase(sl()));
+  sl.registerLazySingleton(() => DeleteDriverUseCase(sl()));
+  sl.registerLazySingleton(() => SetDriverStatusUseCase(sl()));
+  sl.registerLazySingleton(() => GetDriverDocumentsUseCase(sl()));
+  sl.registerLazySingleton(() => UploadDriverDocumentUseCase(sl()));
+  sl.registerLazySingleton(() => DownloadDriverDocumentUseCase(sl()));
+  sl.registerLazySingleton(() => DeleteDriverDocumentUseCase(sl()));
+  sl.registerLazySingleton(() => GetDriverRosterUseCase(sl()));
+  sl.registerLazySingleton(() => GetFleetRosterUseCase(sl()));
+  sl.registerLazySingleton(() => UpsertRosterEntryUseCase(sl()));
+  sl.registerLazySingleton(() => DeleteRosterEntryUseCase(sl()));
 }

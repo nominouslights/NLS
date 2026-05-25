@@ -49,7 +49,9 @@ public sealed class ClientsController(ISender sender) : BaseApiController(sender
             request.NetPaymentTerms,
             request.ComplianceNotes,
             request.IsMinesite,
-            request.IsActive), cancellationToken);
+            request.IsActive,
+            request.Industry,
+            request.ProjectSite), cancellationToken);
         return NoContent();
     }
 
@@ -130,7 +132,9 @@ public sealed record UpdateClientRequest(
     int NetPaymentTerms,
     string? ComplianceNotes,
     bool IsMinesite,
-    bool IsActive);
+    bool IsActive,
+    string? Industry,
+    string? ProjectSite);
 
 public sealed record CreateContractRequest(
     DateTime StartDate,
