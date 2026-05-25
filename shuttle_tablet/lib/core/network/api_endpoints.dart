@@ -9,6 +9,13 @@ class ApiEndpoints {
 
   static const String drivers = '/drivers';
   static String driverById(String id) => '/drivers/$id';
+  static String driverStatus(String id) => '/drivers/$id/status';
+  static String driverDocuments(String id) => '/drivers/$id/documents';
+  static String driverDocumentById(String dId, String docId) => '/drivers/$dId/documents/$docId';
+  static String driverDocumentDownload(String dId, String docId) => '/drivers/$dId/documents/$docId/download';
+  static String driverRoster(String id) => '/drivers/$id/roster';
+  static String driverRosterEntry(String dId, String eId) => '/drivers/$dId/roster/$eId';
+  static const String fleetRoster = '/drivers/roster';
 
   static const String passengers = '/passengers';
   static String passengerById(String id) => '/passengers/$id';

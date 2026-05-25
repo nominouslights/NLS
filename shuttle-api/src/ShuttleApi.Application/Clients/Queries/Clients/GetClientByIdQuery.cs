@@ -24,7 +24,9 @@ public sealed record ClientDetailResult(
     bool IsMinesite,
     bool IsActive,
     DateTime CreatedAt,
-    ContractSummaryResult? ActiveContract);
+    ContractSummaryResult? ActiveContract,
+    string? Industry,
+    string? ProjectSite);
 
 public sealed record ContractSummaryResult(
     Guid Id,

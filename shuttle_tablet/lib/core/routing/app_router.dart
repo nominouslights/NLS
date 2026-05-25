@@ -5,6 +5,7 @@ import '../../features/auth/presentation/pages/login_page.dart';
 import '../../features/auth/presentation/pages/pending_approval_page.dart';
 import '../../features/auth/presentation/pages/register_page.dart';
 import '../../features/auth/presentation/providers/auth_provider.dart';
+import '../../features/drivers/presentation/pages/drivers_list_page.dart';
 import '../../features/home/presentation/pages/home_page.dart';
 import '../../features/users/presentation/pages/pending_users_page.dart';
 import 'route_names.dart';
@@ -43,7 +44,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: RouteNames.drivers,
-        builder: (_, __) => const _PlaceholderPage(title: 'Drivers'),
+        builder: (_, __) => const DriversListPage(),
       ),
       GoRoute(
         path: RouteNames.passengers,

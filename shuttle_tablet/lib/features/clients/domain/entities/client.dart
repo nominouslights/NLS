@@ -27,6 +27,8 @@ class Client extends Equatable {
   // Populated from list endpoint only (no full contract object in list response)
   final DateTime? activeContractRenewalDate;
   final bool listItemIsExpiringSoon;
+  final String? industry;
+  final String? projectSite;
 
   const Client({
     required this.id,
@@ -51,11 +53,13 @@ class Client extends Equatable {
     this.activeContract,
     this.activeContractRenewalDate,
     this.listItemIsExpiringSoon = false,
+    this.industry,
+    this.projectSite,
   });
 
   @override
   List<Object?> get props => [id, businessName, serviceType, primaryContactName, primaryContactTitle,
     phone, email, streetAddress, city, province, postalCode, gstHstNumber, preferredPaymentMethod,
     netPaymentTerms, outstandingBalance, complianceNotes, isMinesite, isActive, createdAt,
-    activeContract, activeContractRenewalDate, listItemIsExpiringSoon];
+    activeContract, activeContractRenewalDate, listItemIsExpiringSoon, industry, projectSite];
 }

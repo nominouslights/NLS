@@ -23,7 +23,9 @@ internal sealed class CreateClientCommandHandler(IClientRepository clientReposit
             request.PreferredPaymentMethod,
             request.NetPaymentTerms,
             request.ComplianceNotes,
-            request.IsMinesite);
+            request.IsMinesite,
+            request.Industry,
+            request.ProjectSite);
 
         await clientRepository.AddAsync(client, cancellationToken);
 

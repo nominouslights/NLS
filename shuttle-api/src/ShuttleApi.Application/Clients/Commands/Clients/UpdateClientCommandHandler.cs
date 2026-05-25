@@ -27,7 +27,9 @@ internal sealed class UpdateClientCommandHandler(IClientRepository clientReposit
             request.PreferredPaymentMethod,
             request.NetPaymentTerms,
             request.ComplianceNotes,
-            request.IsMinesite);
+            request.IsMinesite,
+            request.Industry,
+            request.ProjectSite);
 
         if (request.IsActive) client.Activate(); else client.Deactivate();
 

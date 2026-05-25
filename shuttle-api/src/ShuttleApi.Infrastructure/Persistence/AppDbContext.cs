@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using ShuttleApi.Application.Common.Interfaces;
 using ShuttleApi.Domain.Clients;
 using ShuttleApi.Domain.Common;
+using ShuttleApi.Domain.Drivers;
 using ShuttleApi.Domain.Users;
 
 namespace ShuttleApi.Infrastructure.Persistence;
@@ -15,6 +16,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Client> Clients => Set<Client>();
     public DbSet<Contract> Contracts => Set<Contract>();
     public DbSet<ContractRateLine> ContractRateLines => Set<ContractRateLine>();
+    public DbSet<Driver> Drivers => Set<Driver>();
+    public DbSet<DriverDocument> DriverDocuments => Set<DriverDocument>();
+    public DbSet<DriverRosterEntry> DriverRosterEntries => Set<DriverRosterEntry>();
+    public DbSet<DocumentFileBlob> DocumentFileBlobs => Set<DocumentFileBlob>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
