@@ -1,27 +1,45 @@
-name: Build and Publish .NET App to GHCR
+name: CI / Build & Publish
 
+# ── Triggers ────────────────────────────────────────────────────────────────
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
+# Cancel in-progress runs for the same branch on new PR pushes
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# ── Shared env ───────────────────────────────────────────────────────────────
 env:
   REGISTRY: ghcr.io
+  # Silence dotnet CLI noise that isn't useful in CI
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
 
 permissions:
   contents: read
   packages: write
 
+# ── Jobs ─────────────────────────────────────────────────────────────────────
 jobs:
-  build-and-push:
+
+  # ── 1. API — restore + build ───────────────────────────────────────────────
+  validate-api:
+    name: "API · restore & build"
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup .NET
+      # actions/setup-dotnet has a persistent CDN issue on codeload.github.com.
+      # Install directly from Microsoft's official script instead.
+      - name: Install .NET 10
         shell: bash
         run: |
           curl -fsSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
@@ -30,16 +48,36 @@ jobs:
           echo "$HOME/.dotnet" >> "$GITHUB_PATH"
           echo "DOTNET_ROOT=$HOME/.dotnet" >> "$GITHUB_ENV"
 
-      - name: Restore dependencies
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('shuttle-api/**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore
         run: dotnet restore ./shuttle-api/shuttle-api.slnx
 
-      - name: Build application
+      - name: Build
         run: dotnet build ./shuttle-api/shuttle-api.slnx --configuration Release --no-restore
 
+  # ── 2. Docker — build & push to GHCR (main only) ─────────────────────────
+  publish:
+    name: "Docker · build & push"
+    runs-on: ubuntu-latest
+    needs: [validate-api]
+    # Only publish when validation passes on a push to main
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # GITHUB_REPOSITORY is case-sensitive; GHCR requires lowercase
       - name: Set lowercase image name
         run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
 
-      - name: Log in to GitHub Container Registry
+      - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -53,9 +91,13 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,prefix=sha-
+            type=sha,prefix=sha-,format=short
 
-      - name: Build and push Docker image
+      # Buildx is required for layer caching support
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: ./shuttle-api
@@ -63,3 +105,6 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Use GitHub Actions cache for Docker layer caching (faster rebuilds)
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
