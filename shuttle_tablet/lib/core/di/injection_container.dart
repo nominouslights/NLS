@@ -48,6 +48,19 @@ import '../../features/drivers/domain/usecases/get_driver_roster_usecase.dart';
 import '../../features/drivers/domain/usecases/get_fleet_roster_usecase.dart';
 import '../../features/drivers/domain/usecases/upsert_roster_entry_usecase.dart';
 import '../../features/drivers/domain/usecases/delete_roster_entry_usecase.dart';
+import '../../features/trips/data/datasources/trip_remote_datasource.dart';
+import '../../features/trips/data/repositories/trip_repository_impl.dart';
+import '../../features/trips/domain/repositories/i_trip_repository.dart';
+import '../../features/trips/domain/usecases/get_trips_usecase.dart';
+import '../../features/trips/domain/usecases/get_trip_by_id_usecase.dart';
+import '../../features/trips/domain/usecases/create_trip_usecase.dart';
+import '../../features/trips/domain/usecases/update_trip_usecase.dart';
+import '../../features/trips/domain/usecases/delete_trip_usecase.dart';
+import '../../features/trips/domain/usecases/assign_driver_usecase.dart';
+import '../../features/trips/domain/usecases/dispatch_trip_usecase.dart';
+import '../../features/trips/domain/usecases/update_trip_status_usecase.dart';
+import '../../features/trips/domain/usecases/submit_pre_inspection_usecase.dart';
+import '../../features/trips/domain/usecases/submit_post_report_usecase.dart';
 
 final sl = GetIt.instance;
 
@@ -127,4 +140,22 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton(() => GetFleetRosterUseCase(sl()));
   sl.registerLazySingleton(() => UpsertRosterEntryUseCase(sl()));
   sl.registerLazySingleton(() => DeleteRosterEntryUseCase(sl()));
+
+  // Trips feature
+  sl.registerLazySingleton<ITripRemoteDataSource>(
+    () => TripRemoteDataSource(sl()),
+  );
+  sl.registerLazySingleton<ITripRepository>(
+    () => TripRepositoryImpl(sl()),
+  );
+  sl.registerLazySingleton(() => GetTripsUseCase(sl()));
+  sl.registerLazySingleton(() => GetTripByIdUseCase(sl()));
+  sl.registerLazySingleton(() => CreateTripUseCase(sl()));
+  sl.registerLazySingleton(() => UpdateTripUseCase(sl()));
+  sl.registerLazySingleton(() => DeleteTripUseCase(sl()));
+  sl.registerLazySingleton(() => AssignDriverUseCase(sl()));
+  sl.registerLazySingleton(() => DispatchTripUseCase(sl()));
+  sl.registerLazySingleton(() => UpdateTripStatusUseCase(sl()));
+  sl.registerLazySingleton(() => SubmitPreInspectionUseCase(sl()));
+  sl.registerLazySingleton(() => SubmitPostReportUseCase(sl()));
 }

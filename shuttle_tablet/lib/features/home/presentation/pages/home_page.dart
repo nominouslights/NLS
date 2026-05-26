@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../clients/presentation/pages/clients_list_page.dart';
 import '../../../drivers/presentation/pages/drivers_list_page.dart';
+import '../../../trips/presentation/pages/trips_page.dart';
 import '../widgets/home_dashboard.dart';
 
 class HomePage extends StatefulWidget {
@@ -24,7 +25,7 @@ class _HomePageState extends State<HomePage> {
         children: const [
           HomeDashboard(),
           ClientsListPage(),
-          _PlaceholderTab(label: 'Dispatch'),
+          TripsPage(),
           DriversListPage(),
           _PlaceholderTab(label: 'More'),
         ],
