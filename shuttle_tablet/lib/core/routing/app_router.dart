@@ -7,6 +7,11 @@ import '../../features/auth/presentation/pages/register_page.dart';
 import '../../features/auth/presentation/providers/auth_provider.dart';
 import '../../features/drivers/presentation/pages/drivers_list_page.dart';
 import '../../features/home/presentation/pages/home_page.dart';
+import '../../features/trips/presentation/pages/trips_page.dart';
+import '../../features/trips/presentation/pages/trip_manifest_form_page.dart';
+import '../../features/trips/presentation/pages/driver_trip_page.dart';
+import '../../features/trips/presentation/pages/pre_trip_inspection_page.dart';
+import '../../features/trips/presentation/pages/post_trip_report_page.dart';
 import '../../features/users/presentation/pages/pending_users_page.dart';
 import 'route_names.dart';
 
@@ -40,7 +45,39 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: RouteNames.trips,
-        builder: (_, __) => const _PlaceholderPage(title: 'Trips'),
+        builder: (_, __) => const TripsPage(),
+      ),
+      GoRoute(
+        path: RouteNames.tripManifestNew,
+        builder: (_, __) => const TripManifestFormPage(),
+      ),
+      GoRoute(
+        path: RouteNames.tripManifestEdit,
+        builder: (_, state) {
+          final id = state.pathParameters['id']!;
+          return TripManifestFormPage(key: ValueKey(id));
+        },
+      ),
+      GoRoute(
+        path: RouteNames.driverTrip,
+        builder: (_, state) {
+          final id = state.pathParameters['id']!;
+          return DriverTripPage(tripId: id);
+        },
+      ),
+      GoRoute(
+        path: RouteNames.preTripInspection,
+        builder: (_, state) {
+          final id = state.pathParameters['id']!;
+          return PreTripInspectionPage(tripId: id);
+        },
+      ),
+      GoRoute(
+        path: RouteNames.postTripReport,
+        builder: (_, state) {
+          final id = state.pathParameters['id']!;
+          return PostTripReportPage(tripId: id);
+        },
       ),
       GoRoute(
         path: RouteNames.drivers,

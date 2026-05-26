@@ -4,6 +4,7 @@ using ShuttleApi.Application.Common.Interfaces;
 using ShuttleApi.Domain.Clients;
 using ShuttleApi.Domain.Common;
 using ShuttleApi.Domain.Drivers;
+using ShuttleApi.Domain.Trips;
 using ShuttleApi.Domain.Users;
 
 namespace ShuttleApi.Infrastructure.Persistence;
@@ -20,6 +21,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<DriverDocument> DriverDocuments => Set<DriverDocument>();
     public DbSet<DriverRosterEntry> DriverRosterEntries => Set<DriverRosterEntry>();
     public DbSet<DocumentFileBlob> DocumentFileBlobs => Set<DocumentFileBlob>();
+    public DbSet<Trip> Trips => Set<Trip>();
+    public DbSet<TripStop> TripStops => Set<TripStop>();
+    public DbSet<TripPreInspection> TripPreInspections => Set<TripPreInspection>();
+    public DbSet<TripInspectionItem> TripInspectionItems => Set<TripInspectionItem>();
+    public DbSet<TripPostReport> TripPostReports => Set<TripPostReport>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
