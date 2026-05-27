@@ -15,6 +15,8 @@ internal sealed class GetDriversQueryHandler(IDriverRepository driverRepository)
         return drivers.Select(d => new DriverListItemResult(
             d.Id,
             d.EmployeeId,
+            d.FirstName,
+            d.LastName,
             d.FullName,
             d.Phone,
             d.Email,

@@ -7,6 +7,8 @@ import '../../features/auth/presentation/pages/register_page.dart';
 import '../../features/auth/presentation/providers/auth_provider.dart';
 import '../../features/drivers/presentation/pages/drivers_list_page.dart';
 import '../../features/home/presentation/pages/home_page.dart';
+import '../../features/vehicles/presentation/pages/vehicles_list_page.dart';
+import '../../features/vehicles/presentation/pages/vehicle_detail_page.dart';
 import '../../features/trips/presentation/pages/trips_page.dart';
 import '../../features/trips/presentation/pages/trip_manifest_form_page.dart';
 import '../../features/trips/presentation/pages/driver_trip_page.dart';
@@ -89,7 +91,14 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: RouteNames.vehicles,
-        builder: (_, __) => const _PlaceholderPage(title: 'Vehicles'),
+        builder: (_, __) => const VehiclesListPage(),
+      ),
+      GoRoute(
+        path: RouteNames.vehicleDetail,
+        builder: (_, state) {
+          final id = state.pathParameters['id']!;
+          return VehicleDetailPage(vehicleId: id);
+        },
       ),
     ],
   );
