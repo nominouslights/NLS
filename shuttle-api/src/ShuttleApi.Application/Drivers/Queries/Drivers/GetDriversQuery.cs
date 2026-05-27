@@ -7,6 +7,8 @@ public sealed record GetDriversQuery : IQuery<IReadOnlyList<DriverListItemResult
 public sealed record DriverListItemResult(
     Guid Id,
     string EmployeeId,
+    string FirstName,
+    string LastName,
     string FullName,
     string Phone,
     string Email,

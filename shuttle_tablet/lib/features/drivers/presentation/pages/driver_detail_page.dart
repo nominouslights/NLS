@@ -351,6 +351,7 @@ class _DriverDetailPageState extends ConsumerState<DriverDetailPage>
             child: _SectionCard(
               title: 'Employment',
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _LabeledValue(
                     label: 'Employee ID',
@@ -442,43 +443,50 @@ class _DriverSidebar extends StatelessWidget {
       color: Colors.white,
       padding: const EdgeInsets.all(20),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Avatar
-          Container(
-            width: 80,
-            height: 80,
-            decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                  color: AppColors.primary.withValues(alpha: 0.25)),
-            ),
-            child: Center(
-              child: Text(
-                initials,
-                style: const TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.primary),
+          Center(
+            child: Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                    color: AppColors.primary.withValues(alpha: 0.25)),
+              ),
+              child: Center(
+                child: Text(
+                  initials,
+                  style: const TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.primary),
+                ),
               ),
             ),
           ),
           const SizedBox(height: 14),
           if (!isEditing) ...[
-            Text(
-              driver.fullName,
-              style: const TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF111827)),
-              textAlign: TextAlign.center,
+            Center(
+              child: Text(
+                driver.fullName,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF111827)),
+              ),
             ),
             const SizedBox(height: 4),
-            Text(
-              driver.employeeId,
-              style: const TextStyle(
-                  fontSize: 13, color: AppColors.brandGray),
-              textAlign: TextAlign.center,
+            Center(
+              child: Text(
+                driver.employeeId,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    fontSize: 13, color: AppColors.brandGray),
+              ),
             ),
           ] else ...[
             Row(
@@ -486,7 +494,6 @@ class _DriverSidebar extends StatelessWidget {
                 Expanded(
                   child: TextField(
                     controller: firstNameCtrl,
-                    textAlign: TextAlign.center,
                     decoration: _inputDec('First Name'),
                   ),
                 ),
@@ -494,7 +501,6 @@ class _DriverSidebar extends StatelessWidget {
                 Expanded(
                   child: TextField(
                     controller: lastNameCtrl,
-                    textAlign: TextAlign.center,
                     decoration: _inputDec('Last Name'),
                   ),
                 ),
@@ -503,28 +509,29 @@ class _DriverSidebar extends StatelessWidget {
             const SizedBox(height: 8),
             TextField(
               controller: employeeIdCtrl,
-              textAlign: TextAlign.center,
               decoration: _inputDec('Employee ID'),
             ),
           ],
           const SizedBox(height: 12),
           // Status badge
-          Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-            decoration: BoxDecoration(
-              color: statusColor.withValues(alpha: 0.12),
-              border: Border.all(
-                  color: statusColor.withValues(alpha: 0.35)),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Text(
-              statusLabel,
-              style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: statusColor,
-                  letterSpacing: 0.5),
+          Center(
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+              decoration: BoxDecoration(
+                color: statusColor.withValues(alpha: 0.12),
+                border: Border.all(
+                    color: statusColor.withValues(alpha: 0.35)),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                statusLabel,
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: statusColor,
+                    letterSpacing: 0.5),
+              ),
             ),
           ),
           const SizedBox(height: 20),
@@ -764,6 +771,8 @@ class _DocumentsTabState extends ConsumerState<_DocumentsTab> {
         DocumentType.driversLicense => "Driver's License",
         DocumentType.policeRecordCheck => 'Police Record Check',
         DocumentType.driverAbstract => 'Driver Abstract',
+        DocumentType.norcatOrientation => 'NORCAT Orientation (Mine Site)',
+        DocumentType.whmis => 'WHMIS (Optional)',
       };
 
   @override

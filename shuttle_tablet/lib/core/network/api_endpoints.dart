@@ -27,7 +27,17 @@ class ApiEndpoints {
 
   static const String vehicles = '/vehicles';
   static String vehicleById(String id) => '/vehicles/$id';
-  static String vehicleLocation(String id) => '/vehicles/$id/location';
+  static String vehicleStatus(String id) => '/vehicles/$id/status';
+  static String vehicleOutOfService(String id) => '/vehicles/$id/out-of-service';
+  static String vehicleOdometer(String id) => '/vehicles/$id/odometer';
+  static String vehicleServiceRecords(String id) => '/vehicles/$id/service-records';
+  static String vehicleServiceRecordById(String vId, String rId) =>
+      '/vehicles/$vId/service-records/$rId';
+  static String vehicleServiceRecordComplete(String vId, String rId) =>
+      '/vehicles/$vId/service-records/$rId/complete';
+  static String vehicleInspectionRecords(String id) => '/vehicles/$id/inspection-records';
+  static String vehicleInspectionRecordById(String vId, String rId) =>
+      '/vehicles/$vId/inspection-records/$rId';
 
   static const String auditEvents = '/audit-events';
 

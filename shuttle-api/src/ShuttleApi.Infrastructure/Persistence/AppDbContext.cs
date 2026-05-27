@@ -6,6 +6,7 @@ using ShuttleApi.Domain.Common;
 using ShuttleApi.Domain.Drivers;
 using ShuttleApi.Domain.Trips;
 using ShuttleApi.Domain.Users;
+using ShuttleApi.Domain.Vehicles;
 
 namespace ShuttleApi.Infrastructure.Persistence;
 
@@ -26,6 +27,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<TripPreInspection> TripPreInspections => Set<TripPreInspection>();
     public DbSet<TripInspectionItem> TripInspectionItems => Set<TripInspectionItem>();
     public DbSet<TripPostReport> TripPostReports => Set<TripPostReport>();
+    public DbSet<Vehicle> Vehicles => Set<Vehicle>();
+    public DbSet<VehicleServiceRecord> VehicleServiceRecords => Set<VehicleServiceRecord>();
+    public DbSet<VehicleInspectionRecord> VehicleInspectionRecords => Set<VehicleInspectionRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

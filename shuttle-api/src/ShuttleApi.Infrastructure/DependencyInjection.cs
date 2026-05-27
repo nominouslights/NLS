@@ -12,6 +12,7 @@ using ShuttleApi.Domain.Clients;
 using ShuttleApi.Domain.Drivers;
 using ShuttleApi.Domain.Trips;
 using ShuttleApi.Domain.Users;
+using ShuttleApi.Domain.Vehicles;
 using ShuttleApi.Infrastructure.Persistence.Repositories;
 using ShuttleApi.Infrastructure.Services;
 
@@ -35,6 +36,7 @@ public static class DependencyInjection
         services.AddScoped<IContractRepository, ContractRepository>();
         services.AddScoped<IDriverRepository, DriverRepository>();
         services.AddScoped<ITripRepository, TripRepository>();
+        services.AddScoped<IVehicleRepository, VehicleRepository>();
         services.AddScoped<IFileStorageService, DatabaseFileStorageService>();
         services.AddScoped<IPasswordHasher, BcryptPasswordHasher>();
 

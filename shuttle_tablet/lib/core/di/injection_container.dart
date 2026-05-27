@@ -61,6 +61,24 @@ import '../../features/trips/domain/usecases/dispatch_trip_usecase.dart';
 import '../../features/trips/domain/usecases/update_trip_status_usecase.dart';
 import '../../features/trips/domain/usecases/submit_pre_inspection_usecase.dart';
 import '../../features/trips/domain/usecases/submit_post_report_usecase.dart';
+import '../../features/vehicles/data/datasources/vehicle_remote_datasource.dart';
+import '../../features/vehicles/data/repositories/vehicle_repository_impl.dart';
+import '../../features/vehicles/domain/repositories/i_vehicle_repository.dart';
+import '../../features/vehicles/domain/usecases/get_vehicles_usecase.dart';
+import '../../features/vehicles/domain/usecases/get_vehicle_by_id_usecase.dart';
+import '../../features/vehicles/domain/usecases/create_vehicle_usecase.dart';
+import '../../features/vehicles/domain/usecases/update_vehicle_usecase.dart';
+import '../../features/vehicles/domain/usecases/delete_vehicle_usecase.dart';
+import '../../features/vehicles/domain/usecases/set_vehicle_status_usecase.dart';
+import '../../features/vehicles/domain/usecases/set_vehicle_out_of_service_usecase.dart';
+import '../../features/vehicles/domain/usecases/update_odometer_usecase.dart';
+import '../../features/vehicles/domain/usecases/add_service_record_usecase.dart';
+import '../../features/vehicles/domain/usecases/update_service_record_usecase.dart';
+import '../../features/vehicles/domain/usecases/complete_service_record_usecase.dart';
+import '../../features/vehicles/domain/usecases/delete_service_record_usecase.dart';
+import '../../features/vehicles/domain/usecases/add_inspection_record_usecase.dart';
+import '../../features/vehicles/domain/usecases/update_inspection_record_usecase.dart';
+import '../../features/vehicles/domain/usecases/delete_inspection_record_usecase.dart';
 
 final sl = GetIt.instance;
 
@@ -158,4 +176,27 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton(() => UpdateTripStatusUseCase(sl()));
   sl.registerLazySingleton(() => SubmitPreInspectionUseCase(sl()));
   sl.registerLazySingleton(() => SubmitPostReportUseCase(sl()));
+
+  // Vehicles feature
+  sl.registerLazySingleton<IVehicleRemoteDataSource>(
+    () => VehicleRemoteDataSource(sl()),
+  );
+  sl.registerLazySingleton<IVehicleRepository>(
+    () => VehicleRepositoryImpl(sl()),
+  );
+  sl.registerLazySingleton(() => GetVehiclesUseCase(sl()));
+  sl.registerLazySingleton(() => GetVehicleByIdUseCase(sl()));
+  sl.registerLazySingleton(() => CreateVehicleUseCase(sl()));
+  sl.registerLazySingleton(() => UpdateVehicleUseCase(sl()));
+  sl.registerLazySingleton(() => DeleteVehicleUseCase(sl()));
+  sl.registerLazySingleton(() => SetVehicleStatusUseCase(sl()));
+  sl.registerLazySingleton(() => SetVehicleOutOfServiceUseCase(sl()));
+  sl.registerLazySingleton(() => UpdateOdometerUseCase(sl()));
+  sl.registerLazySingleton(() => AddServiceRecordUseCase(sl()));
+  sl.registerLazySingleton(() => UpdateServiceRecordUseCase(sl()));
+  sl.registerLazySingleton(() => CompleteServiceRecordUseCase(sl()));
+  sl.registerLazySingleton(() => DeleteServiceRecordUseCase(sl()));
+  sl.registerLazySingleton(() => AddInspectionRecordUseCase(sl()));
+  sl.registerLazySingleton(() => UpdateInspectionRecordUseCase(sl()));
+  sl.registerLazySingleton(() => DeleteInspectionRecordUseCase(sl()));
 }

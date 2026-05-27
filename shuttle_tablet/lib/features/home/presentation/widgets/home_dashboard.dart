@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 
 class HomeDashboard extends StatefulWidget {
-  const HomeDashboard({super.key});
+  /// Called when the dashboard wants to navigate to a specific tab index.
+  final ValueChanged<int>? onNavigateTo;
+
+  const HomeDashboard({super.key, this.onNavigateTo});
 
   @override
   State<HomeDashboard> createState() => _HomeDashboardState();
@@ -168,11 +171,12 @@ class _HomeDashboardState extends State<HomeDashboard> {
           crossAxisSpacing: 20,
           mainAxisSpacing: 20,
           childAspectRatio: isWide ? 0.95 : 1.05,
-          children: const [
-            _TotalTripsCard(),
-            _UnassignedTripsCard(),
-            _ActiveDriversCard(),
-            _PendingInspectionsCard(),
+          children: [
+            const _TotalTripsCard(),
+            const _UnassignedTripsCard(),
+            const _ActiveDriversCard(),
+            _PendingInspectionsCard(
+                onViewFleet: () => widget.onNavigateTo?.call(4)),
           ],
         );
       },
@@ -187,18 +191,21 @@ class _HomeDashboardState extends State<HomeDashboard> {
         if (constraints.maxWidth > 700) {
           return Row(
             crossAxisAlignment: CrossAxisAlignment.start,
-            children: const [
-              Expanded(flex: 2, child: _DispatchCard()),
-              SizedBox(width: 24),
-              Expanded(flex: 1, child: _QuickActionsCard()),
+            children: [
+              const Expanded(flex: 2, child: _DispatchCard()),
+              const SizedBox(width: 24),
+              Expanded(
+                  flex: 1,
+                  child: _QuickActionsCard(
+                      onNavigateTo: widget.onNavigateTo)),
             ],
           );
         }
-        return const Column(
+        return Column(
           children: [
-            _DispatchCard(),
-            SizedBox(height: 24),
-            _QuickActionsCard(),
+            const _DispatchCard(),
+            const SizedBox(height: 24),
+            _QuickActionsCard(onNavigateTo: widget.onNavigateTo),
           ],
         );
       },
@@ -478,7 +485,8 @@ class _ActiveDriversCard extends StatelessWidget {
 }
 
 class _PendingInspectionsCard extends StatelessWidget {
-  const _PendingInspectionsCard();
+  final VoidCallback? onViewFleet;
+  const _PendingInspectionsCard({this.onViewFleet});
 
   @override
   Widget build(BuildContext context) {
@@ -524,20 +532,23 @@ class _PendingInspectionsCard extends StatelessWidget {
             ],
           ),
           const Divider(height: 28, color: Color(0xFFF9FAFB), thickness: 1),
-          Row(
-            children: [
-              const Text(
-                'View vehicles',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  color: AppColors.warning,
+          GestureDetector(
+            onTap: onViewFleet,
+            child: const Row(
+              children: [
+                Text(
+                  'View Fleet',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.warning,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 4),
-              const Icon(Icons.arrow_forward_rounded,
-                  size: 13, color: AppColors.warning),
-            ],
+                SizedBox(width: 4),
+                Icon(Icons.arrow_forward_rounded,
+                    size: 13, color: AppColors.warning),
+              ],
+            ),
           ),
         ],
       ),
@@ -871,14 +882,8 @@ class _StatusBadge extends StatelessWidget {
 // ─── Quick Actions ────────────────────────────────────────────────────────────
 
 class _QuickActionsCard extends StatelessWidget {
-  const _QuickActionsCard();
-
-  static const _actions = [
-    (Icons.description_outlined, 'Create Manifest'),
-    (Icons.send_rounded, 'Send Update'),
-    (Icons.checklist_rounded, 'Log Inspection'),
-    (Icons.receipt_long_rounded, 'Generate Invoice'),
-  ];
+  final ValueChanged<int>? onNavigateTo;
+  const _QuickActionsCard({this.onNavigateTo});
 
   @override
   Widget build(BuildContext context) {
@@ -904,10 +909,23 @@ class _QuickActionsCard extends StatelessWidget {
             crossAxisSpacing: 10,
             mainAxisSpacing: 10,
             childAspectRatio: 1.1,
-            children: _actions
-                .map((a) =>
-                    _QuickActionButton(icon: a.$1, label: a.$2))
-                .toList(),
+            children: [
+              const _QuickActionButton(
+                  icon: Icons.description_outlined,
+                  label: 'Create Manifest'),
+              const _QuickActionButton(
+                  icon: Icons.people_outline_rounded,
+                  label: 'Drivers'),
+              _QuickActionButton(
+                icon: Icons.directions_bus_rounded,
+                label: 'Fleet',
+                onTap: () => onNavigateTo?.call(4),
+                highlight: true,
+              ),
+              const _QuickActionButton(
+                  icon: Icons.receipt_long_rounded,
+                  label: 'Generate Invoice'),
+            ],
           ),
         ],
       ),
@@ -918,7 +936,15 @@ class _QuickActionsCard extends StatelessWidget {
 class _QuickActionButton extends StatefulWidget {
   final IconData icon;
   final String label;
-  const _QuickActionButton({required this.icon, required this.label});
+  final VoidCallback? onTap;
+  final bool highlight;
+
+  const _QuickActionButton({
+    required this.icon,
+    required this.label,
+    this.onTap,
+    this.highlight = false,
+  });
 
   @override
   State<_QuickActionButton> createState() => _QuickActionButtonState();
@@ -929,18 +955,19 @@ class _QuickActionButtonState extends State<_QuickActionButton> {
 
   @override
   Widget build(BuildContext context) {
+    final active = _hovered || widget.highlight;
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         decoration: BoxDecoration(
-          color: _hovered
+          color: active
               ? AppColors.primary.withValues(alpha: 0.05)
               : const Color(0xFFF9FAFB),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: _hovered
+            color: active
                 ? AppColors.primary.withValues(alpha: 0.3)
                 : const Color(0xFFF3F4F6),
           ),
@@ -948,7 +975,7 @@ class _QuickActionButtonState extends State<_QuickActionButton> {
         child: Material(
           color: Colors.transparent,
           child: InkWell(
-            onTap: () {},
+            onTap: widget.onTap,
             borderRadius: BorderRadius.circular(12),
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -958,7 +985,7 @@ class _QuickActionButtonState extends State<_QuickActionButton> {
                   Icon(
                     widget.icon,
                     size: 24,
-                    color: _hovered
+                    color: active
                         ? AppColors.primary
                         : const Color(0xFF9CA3AF),
                   ),
@@ -969,7 +996,7 @@ class _QuickActionButtonState extends State<_QuickActionButton> {
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
-                      color: _hovered
+                      color: active
                           ? AppColors.primary
                           : const Color(0xFF374151),
                     ),

@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
-import '../../../../core/di/injection_container.dart';
 import '../../../../core/theme/app_colors.dart';
-import '../../../clients/domain/usecases/get_clients_usecase.dart';
-import '../../../drivers/domain/usecases/get_drivers_usecase.dart';
-import '../../../../core/usecases/usecase.dart';
+import '../../../clients/presentation/providers/clients_provider.dart';
+import '../../../drivers/presentation/providers/drivers_provider.dart';
 import '../../domain/entities/trip.dart';
 import '../../domain/repositories/i_trip_repository.dart';
 import '../providers/trip_form_provider.dart';
@@ -130,6 +128,7 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
       bottomNavigationBar: _BottomBar(
         currentStep: _currentStep,
         isSaving: _isSaving,
+        onCancel: _currentStep == 0 ? () => Navigator.of(context).pop() : null,
         onBack: _currentStep > 0 ? _goBack : null,
         onNext: _currentStep == 0 ? _goNext : null,
         onSaveDraft: _currentStep == 1 ? _saveDraft : null,
@@ -347,12 +346,7 @@ class _Step1 extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final clientsAsync = ref.watch(
-      FutureProvider((r) async {
-        final result = await sl<GetClientsUseCase>()(const NoParams());
-        return result.fold((f) => throw Exception(f.message), (c) => c);
-      }),
-    );
+    final clientsAsync = ref.watch(clientsProvider);
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
@@ -649,12 +643,7 @@ class _Step2 extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final driversAsync = ref.watch(
-      FutureProvider((r) async {
-        final result = await sl<GetDriversUseCase>()(const NoParams());
-        return result.fold((f) => throw Exception(f.message), (d) => d);
-      }),
-    );
+    final driversAsync = ref.watch(driversProvider);
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
@@ -777,6 +766,7 @@ class _SummaryRow extends StatelessWidget {
 class _BottomBar extends StatelessWidget {
   final int currentStep;
   final bool isSaving;
+  final VoidCallback? onCancel;
   final VoidCallback? onBack;
   final VoidCallback? onNext;
   final VoidCallback? onSaveDraft;
@@ -785,6 +775,7 @@ class _BottomBar extends StatelessWidget {
   const _BottomBar({
     required this.currentStep,
     required this.isSaving,
+    this.onCancel,
     this.onBack,
     this.onNext,
     this.onSaveDraft,
@@ -802,6 +793,11 @@ class _BottomBar extends StatelessWidget {
         ),
         child: Row(
           children: [
+            if (onCancel != null)
+              OutlinedButton(
+                onPressed: isSaving ? null : onCancel,
+                child: const Text('Cancel'),
+              ),
             if (onBack != null)
               OutlinedButton.icon(
                 onPressed: isSaving ? null : onBack,

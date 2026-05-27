@@ -19,17 +19,20 @@ class DriverModel extends Driver {
 
   factory DriverModel.fromJson(Map<String, dynamic> json) {
     final docsJson = json['documents'] as List<dynamic>?;
+    final fullName = json['fullName'] as String? ?? '';
+    final nameParts = fullName.split(' ');
     return DriverModel(
       id: json['id'] as String,
-      employeeId: json['employeeId'] as String,
-      firstName: json['firstName'] as String,
-      lastName: json['lastName'] as String,
-      phone: json['phone'] as String,
-      email: json['email'] as String,
-      hireDate: DateTime.tryParse(json['hireDate'] as String? ?? '') ?? DateTime.now(),
+      employeeId: json['employeeId'] as String? ?? '',
+      firstName: json['firstName'] as String? ?? nameParts.first,
+      lastName: json['lastName'] as String? ??
+          (nameParts.length > 1 ? nameParts.skip(1).join(' ') : ''),
+      phone: json['phone'] as String? ?? '',
+      email: json['email'] as String? ?? '',
+      hireDate: DateTime.tryParse(json['hireDate'] as String? ?? '') ?? DateTime(2000),
       status: _parseDriverStatus(json['status'] as String? ?? ''),
       isActive: json['isActive'] as bool? ?? true,
-      createdAt: DateTime.tryParse(json['createdAt'] as String? ?? '') ?? DateTime.now(),
+      createdAt: DateTime.tryParse(json['createdAt'] as String? ?? '') ?? DateTime(2000),
       hasExpiringDocuments: json['hasExpiringDocuments'] as bool? ?? false,
       documents: docsJson != null
           ? docsJson

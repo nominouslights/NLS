@@ -3,6 +3,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../clients/presentation/pages/clients_list_page.dart';
 import '../../../drivers/presentation/pages/drivers_list_page.dart';
 import '../../../trips/presentation/pages/trips_page.dart';
+import '../../../vehicles/presentation/pages/vehicles_list_page.dart';
 import '../widgets/home_dashboard.dart';
 
 class HomePage extends StatefulWidget {
@@ -22,12 +23,14 @@ class _HomePageState extends State<HomePage> {
       appBar: const _HomeAppBar(),
       body: IndexedStack(
         index: _selectedIndex,
-        children: const [
-          HomeDashboard(),
-          ClientsListPage(),
-          TripsPage(),
-          DriversListPage(),
-          _PlaceholderTab(label: 'More'),
+        children: [
+          HomeDashboard(
+            onNavigateTo: (i) => setState(() => _selectedIndex = i),
+          ),
+          const ClientsListPage(),
+          const TripsPage(),
+          const DriversListPage(),
+          const VehiclesListPage(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -60,9 +63,10 @@ class _HomePageState extends State<HomePage> {
             label: 'Drivers',
           ),
           NavigationDestination(
-            icon: Icon(Icons.menu_rounded),
-            selectedIcon: Icon(Icons.menu_rounded, color: AppColors.primary),
-            label: 'More',
+            icon: Icon(Icons.directions_bus_outlined),
+            selectedIcon: Icon(Icons.directions_bus_rounded,
+                color: AppColors.primary),
+            label: 'Fleet',
           ),
         ],
       ),
@@ -218,19 +222,3 @@ class _HomeAppBar extends StatelessWidget implements PreferredSizeWidget {
   }
 }
 
-// ─── Placeholder tabs ─────────────────────────────────────────────────────────
-
-class _PlaceholderTab extends StatelessWidget {
-  final String label;
-  const _PlaceholderTab({required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Text(
-        '$label — coming soon',
-        style: const TextStyle(fontSize: 16, color: AppColors.textSecondary),
-      ),
-    );
-  }
-}

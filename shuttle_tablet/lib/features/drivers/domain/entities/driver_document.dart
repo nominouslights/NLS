@@ -1,6 +1,13 @@
 import 'package:equatable/equatable.dart';
 
-enum DocumentType { drugAndAlcoholTest, driversLicense, policeRecordCheck, driverAbstract }
+enum DocumentType {
+  drugAndAlcoholTest,
+  driversLicense,
+  policeRecordCheck,
+  driverAbstract,
+  norcatOrientation,
+  whmis,
+}
 
 enum TestResult { pass, fail, pending }
 
@@ -45,6 +52,8 @@ class DriverDocument extends Equatable {
         DocumentType.driversLicense => "Driver's License",
         DocumentType.policeRecordCheck => 'Police Record Check',
         DocumentType.driverAbstract => 'Driver Abstract',
+        DocumentType.norcatOrientation => 'NORCAT Orientation',
+        DocumentType.whmis => 'WHMIS',
       };
 
   const DriverDocument({

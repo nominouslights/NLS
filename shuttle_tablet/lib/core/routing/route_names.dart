@@ -13,5 +13,6 @@ class RouteNames {
   static const String drivers = '/drivers';
   static const String passengers = '/passengers';
   static const String vehicles = '/vehicles';
+  static const String vehicleDetail = '/vehicles/:id';
   static const String pendingUsers = '/admin/pending-users';
 }
