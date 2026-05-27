@@ -37,13 +37,13 @@ internal sealed class UploadDriverDocumentCommandHandler(
             request.ContentType,
             storageKey,
             request.FileData.LongLength,
-            request.ExpiryDate,
-            request.TestDate,
+            AsUtc(request.ExpiryDate),
+            AsUtc(request.TestDate),
             request.TestResultValue,
             request.TestedBy,
             request.LicenseNumber,
             request.LicenseClass,
-            request.IssuedDate,
+            AsUtc(request.IssuedDate),
             request.LicenseProvince,
             request.CheckResultValue,
             request.IssuingAuthority,
@@ -56,4 +56,7 @@ internal sealed class UploadDriverDocumentCommandHandler(
 
         return new UploadDriverDocumentResult(document.Id);
     }
+
+    private static DateTime? AsUtc(DateTime? dt) =>
+        dt.HasValue ? DateTime.SpecifyKind(dt.Value, DateTimeKind.Utc) : null;
 }
