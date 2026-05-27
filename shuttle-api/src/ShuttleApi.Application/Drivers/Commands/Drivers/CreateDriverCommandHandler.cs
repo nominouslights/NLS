@@ -20,7 +20,7 @@ internal sealed class CreateDriverCommandHandler(IDriverRepository driverReposit
             request.LastName,
             request.Phone,
             request.Email,
-            request.HireDate);
+            DateTime.SpecifyKind(request.HireDate, DateTimeKind.Utc));
 
         await driverRepository.AddAsync(driver, cancellationToken);
 

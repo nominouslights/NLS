@@ -18,7 +18,7 @@ internal sealed class UpdateDriverCommandHandler(IDriverRepository driverReposit
             request.LastName,
             request.Phone,
             request.Email,
-            request.HireDate,
+            DateTime.SpecifyKind(request.HireDate, DateTimeKind.Utc),
             request.IsActive);
 
         await driverRepository.UpdateAsync(driver, cancellationToken);

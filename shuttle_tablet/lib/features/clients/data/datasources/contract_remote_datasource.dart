@@ -41,8 +41,8 @@ class ContractRemoteDataSource implements IContractRemoteDataSource {
       final response = await _dio.post(
         ApiEndpoints.contractsByClient(params.clientId),
         data: {
-          'startDate': params.startDate.toIso8601String(),
-          'renewalDate': params.renewalDate.toIso8601String(),
+          'startDate': params.startDate.toUtc().toIso8601String(),
+          'renewalDate': params.renewalDate.toUtc().toIso8601String(),
           'notes': params.notes,
           'rateLines': params.rateLines.map((r) => {
             'billingCode': r.billingCode,
@@ -72,8 +72,8 @@ class ContractRemoteDataSource implements IContractRemoteDataSource {
       await _dio.put(
         ApiEndpoints.contractById(clientId, contractId),
         data: {
-          'startDate': params.startDate.toIso8601String(),
-          'renewalDate': params.renewalDate.toIso8601String(),
+          'startDate': params.startDate.toUtc().toIso8601String(),
+          'renewalDate': params.renewalDate.toUtc().toIso8601String(),
           'notes': params.notes,
         },
       );

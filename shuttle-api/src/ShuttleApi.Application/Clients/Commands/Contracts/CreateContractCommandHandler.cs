@@ -23,7 +23,11 @@ internal sealed class CreateContractCommandHandler(
             await contractRepository.UpdateAsync(existing, cancellationToken);
         }
 
-        var contract = Contract.Create(request.ClientId, request.StartDate, request.RenewalDate, request.Notes);
+        var contract = Contract.Create(
+            request.ClientId,
+            DateTime.SpecifyKind(request.StartDate, DateTimeKind.Utc),
+            DateTime.SpecifyKind(request.RenewalDate, DateTimeKind.Utc),
+            request.Notes);
         await contractRepository.AddAsync(contract, cancellationToken);
 
         foreach (var dto in request.RateLines)

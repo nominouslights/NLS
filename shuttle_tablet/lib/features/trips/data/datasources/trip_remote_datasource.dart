@@ -264,7 +264,7 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
         'clientId': p.clientId,
         'purchaseOrderNumber': p.purchaseOrderNumber,
         'vehicleType': p.vehicleType,
-        'scheduledAt': p.scheduledAt.toIso8601String(),
+        'scheduledAt': p.scheduledAt.toUtc().toIso8601String(),
         'notes': p.notes,
         'stops': p.stops
             .map((s) => {
@@ -278,7 +278,7 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
   static Map<String, dynamic> _updateTripToJson(UpdateTripParams p) => {
         'purchaseOrderNumber': p.purchaseOrderNumber,
         'vehicleType': p.vehicleType,
-        'scheduledAt': p.scheduledAt.toIso8601String(),
+        'scheduledAt': p.scheduledAt.toUtc().toIso8601String(),
         'notes': p.notes,
         'stops': p.stops
             .map((s) => {

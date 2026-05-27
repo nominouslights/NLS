@@ -21,7 +21,7 @@ internal sealed class CreateTripCommandHandler(
             client.Id,
             request.PurchaseOrderNumber,
             request.VehicleType,
-            request.ScheduledAt,
+            DateTime.SpecifyKind(request.ScheduledAt, DateTimeKind.Utc),
             request.Notes,
             stops);
 

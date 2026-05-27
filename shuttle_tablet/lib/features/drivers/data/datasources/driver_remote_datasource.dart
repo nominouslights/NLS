@@ -284,7 +284,7 @@ class DriverRemoteDataSource implements IDriverRemoteDataSource {
         'lastName': p.lastName,
         'phone': p.phone,
         'email': p.email,
-        'hireDate': p.hireDate.toIso8601String(),
+        'hireDate': p.hireDate.toUtc().toIso8601String(),
       };
 
   String _driverStatusToString(DriverStatus s) => _capitalize(s.name);
