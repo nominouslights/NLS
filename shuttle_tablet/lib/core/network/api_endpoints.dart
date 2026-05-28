@@ -52,4 +52,7 @@ class ApiEndpoints {
   static const String pendingUsers = '/users/pending';
   static String approveUser(String id) => '/users/$id/approve';
   static String rejectUser(String id) => '/users/$id/reject';
+
+  static const String locations = '/locations';
+  static String locationById(String id) => '/locations/$id';
 }

@@ -79,6 +79,13 @@ import '../../features/vehicles/domain/usecases/delete_service_record_usecase.da
 import '../../features/vehicles/domain/usecases/add_inspection_record_usecase.dart';
 import '../../features/vehicles/domain/usecases/update_inspection_record_usecase.dart';
 import '../../features/vehicles/domain/usecases/delete_inspection_record_usecase.dart';
+import '../../features/locations/data/datasources/location_remote_datasource.dart';
+import '../../features/locations/data/repositories/location_repository_impl.dart';
+import '../../features/locations/domain/repositories/i_location_repository.dart';
+import '../../features/locations/domain/usecases/get_locations_usecase.dart';
+import '../../features/locations/domain/usecases/create_location_usecase.dart';
+import '../../features/locations/domain/usecases/update_location_usecase.dart';
+import '../../features/locations/domain/usecases/delete_location_usecase.dart';
 
 final sl = GetIt.instance;
 
@@ -199,4 +206,16 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton(() => AddInspectionRecordUseCase(sl()));
   sl.registerLazySingleton(() => UpdateInspectionRecordUseCase(sl()));
   sl.registerLazySingleton(() => DeleteInspectionRecordUseCase(sl()));
+
+  // Locations feature
+  sl.registerLazySingleton<ILocationRemoteDataSource>(
+    () => LocationRemoteDataSource(sl()),
+  );
+  sl.registerLazySingleton<ILocationRepository>(
+    () => LocationRepositoryImpl(sl()),
+  );
+  sl.registerLazySingleton(() => GetLocationsUseCase(sl()));
+  sl.registerLazySingleton(() => CreateLocationUseCase(sl()));
+  sl.registerLazySingleton(() => UpdateLocationUseCase(sl()));
+  sl.registerLazySingleton(() => DeleteLocationUseCase(sl()));
 }

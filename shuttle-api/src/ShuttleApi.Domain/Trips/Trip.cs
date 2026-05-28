@@ -8,6 +8,7 @@ public sealed class Trip : AggregateRoot<Guid>
     private readonly List<TripStop> _stops = [];
 
     public Guid ClientId { get; private set; }
+    public Guid VehicleId { get; private set; }
     public Guid? DriverId { get; private set; }
     public string? PurchaseOrderNumber { get; private set; }
     public string? VehicleType { get; private set; }
@@ -24,6 +25,7 @@ public sealed class Trip : AggregateRoot<Guid>
 
     public static Trip Create(
         Guid clientId,
+        Guid vehicleId,
         string? purchaseOrderNumber,
         string? vehicleType,
         DateTime scheduledAt,
@@ -34,6 +36,7 @@ public sealed class Trip : AggregateRoot<Guid>
         {
             Id = Guid.NewGuid(),
             ClientId = clientId,
+            VehicleId = vehicleId,
             PurchaseOrderNumber = purchaseOrderNumber,
             VehicleType = vehicleType,
             ScheduledAt = scheduledAt,
@@ -51,6 +54,7 @@ public sealed class Trip : AggregateRoot<Guid>
     }
 
     public void Update(
+        Guid vehicleId,
         string? purchaseOrderNumber,
         string? vehicleType,
         DateTime scheduledAt,
@@ -59,6 +63,7 @@ public sealed class Trip : AggregateRoot<Guid>
     {
         Guard.Against(Status != TripStatus.Scheduled, "Only scheduled trips can be updated.");
 
+        VehicleId = vehicleId;
         PurchaseOrderNumber = purchaseOrderNumber;
         VehicleType = vehicleType;
         ScheduledAt = scheduledAt;

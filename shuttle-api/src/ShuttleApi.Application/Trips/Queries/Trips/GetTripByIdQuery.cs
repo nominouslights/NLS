@@ -7,6 +7,7 @@ public sealed record GetTripByIdQuery(Guid Id) : IQuery<TripDetailResult>;
 public sealed record TripDetailResult(
     Guid Id,
     Guid ClientId,
+    Guid VehicleId,
     Guid? DriverId,
     string? PurchaseOrderNumber,
     string? VehicleType,

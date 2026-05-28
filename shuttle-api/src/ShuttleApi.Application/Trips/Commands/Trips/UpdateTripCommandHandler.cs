@@ -15,6 +15,7 @@ internal sealed class UpdateTripCommandHandler(ITripRepository tripRepository)
         var stops = request.Stops.Select(s => (s.SequenceOrder, s.LocationName, s.Address));
 
         trip.Update(
+            request.VehicleId,
             request.PurchaseOrderNumber,
             request.VehicleType,
             DateTime.SpecifyKind(request.ScheduledAt, DateTimeKind.Utc),

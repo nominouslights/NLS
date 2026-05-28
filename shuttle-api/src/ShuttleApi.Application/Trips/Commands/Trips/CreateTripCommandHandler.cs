@@ -19,6 +19,7 @@ internal sealed class CreateTripCommandHandler(
 
         var trip = Trip.Create(
             client.Id,
+            request.VehicleId,
             request.PurchaseOrderNumber,
             request.VehicleType,
             DateTime.SpecifyKind(request.ScheduledAt, DateTimeKind.Utc),

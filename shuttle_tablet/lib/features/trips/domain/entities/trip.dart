@@ -8,6 +8,7 @@ enum TripStatus { scheduled, dispatched, enRoute, completed, cancelled }
 class Trip extends Equatable {
   final String id;
   final String clientId;
+  final String vehicleId;
   final String? driverId;
   final String? purchaseOrderNumber;
   final String? vehicleType;
@@ -22,6 +23,7 @@ class Trip extends Equatable {
   const Trip({
     required this.id,
     required this.clientId,
+    required this.vehicleId,
     this.driverId,
     this.purchaseOrderNumber,
     this.vehicleType,
@@ -44,6 +46,7 @@ class Trip extends Equatable {
   List<Object?> get props => [
         id,
         clientId,
+        vehicleId,
         driverId,
         purchaseOrderNumber,
         vehicleType,

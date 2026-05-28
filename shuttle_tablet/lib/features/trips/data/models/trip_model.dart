@@ -7,6 +7,7 @@ class TripModel extends Trip {
   const TripModel({
     required super.id,
     required super.clientId,
+    required super.vehicleId,
     super.driverId,
     super.purchaseOrderNumber,
     super.vehicleType,
@@ -28,6 +29,7 @@ class TripModel extends Trip {
     return TripModel(
       id: json['id'] as String,
       clientId: json['clientId'] as String,
+      vehicleId: json['vehicleId'] as String,
       driverId: json['driverId'] as String?,
       purchaseOrderNumber: json['purchaseOrderNumber'] as String?,
       vehicleType: json['vehicleType'] as String?,
@@ -75,6 +77,7 @@ class TripModel extends Trip {
 
   Map<String, dynamic> toJson() => {
         'clientId': clientId,
+        'vehicleId': vehicleId,
         'driverId': driverId,
         'purchaseOrderNumber': purchaseOrderNumber,
         'vehicleType': vehicleType,

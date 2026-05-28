@@ -6,11 +6,13 @@ namespace ShuttleApi.Application.Trips;
 public sealed record GetTripsQuery(
     TripStatus? Status,
     Guid? ClientId,
-    Guid? DriverId) : IQuery<IReadOnlyList<TripListItemResult>>;
+    Guid? DriverId,
+    Guid? VehicleId) : IQuery<IReadOnlyList<TripListItemResult>>;
 
 public sealed record TripListItemResult(
     Guid Id,
     Guid ClientId,
+    Guid VehicleId,
     Guid? DriverId,
     string? PurchaseOrderNumber,
     string? VehicleType,

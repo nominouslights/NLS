@@ -4,6 +4,9 @@ import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../clients/presentation/providers/clients_provider.dart';
 import '../../../drivers/presentation/providers/drivers_provider.dart';
+import '../../../locations/domain/entities/saved_location.dart';
+import '../../../locations/presentation/providers/locations_provider.dart';
+import '../../../vehicles/presentation/providers/vehicles_provider.dart';
 import '../../domain/entities/trip.dart';
 import '../../domain/repositories/i_trip_repository.dart';
 import '../providers/trip_form_provider.dart';
@@ -26,8 +29,8 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
   // Step 1 state
   final _formKey1 = GlobalKey<FormState>();
   String? _selectedClientId;
+  String? _selectedVehicleId;
   final _poController = TextEditingController();
-  final _vehicleTypeController = TextEditingController();
   final _notesController = TextEditingController();
   DateTime _scheduledAt = DateTime.now().add(const Duration(hours: 1));
   final List<_StopEntry> _stops = [
@@ -45,8 +48,8 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
     if (widget.trip != null) {
       final t = widget.trip!;
       _selectedClientId = t.clientId;
+      _selectedVehicleId = t.vehicleId;
       _poController.text = t.purchaseOrderNumber ?? '';
-      _vehicleTypeController.text = t.vehicleType ?? '';
       _notesController.text = t.notes ?? '';
       _scheduledAt = t.scheduledAt;
       _stops.clear();
@@ -70,7 +73,6 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
   void dispose() {
     _pageController.dispose();
     _poController.dispose();
-    _vehicleTypeController.dispose();
     _notesController.dispose();
     for (final s in _stops) {
       s.dispose();
@@ -80,6 +82,14 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
 
   @override
   Widget build(BuildContext context) {
+    final vehiclesAsync = ref.watch(vehiclesProvider);
+    final selectedVehicle = vehiclesAsync.value
+        ?.where((v) => v.id == _selectedVehicleId)
+        .firstOrNull;
+    final vehicleLabel = selectedVehicle != null
+        ? '${selectedVehicle.unitCode} — ${selectedVehicle.make} ${selectedVehicle.model}'
+        : '';
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -106,8 +116,9 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
             formKey: _formKey1,
             selectedClientId: _selectedClientId,
             onClientChanged: (v) => setState(() => _selectedClientId = v),
+            selectedVehicleId: _selectedVehicleId,
+            onVehicleChanged: (v) => setState(() => _selectedVehicleId = v),
             poController: _poController,
-            vehicleTypeController: _vehicleTypeController,
             notesController: _notesController,
             scheduledAt: _scheduledAt,
             onScheduledChanged: (dt) => setState(() => _scheduledAt = dt),
@@ -119,7 +130,7 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
             formKey: _formKey2,
             stops: _stops,
             scheduledAt: _scheduledAt,
-            vehicleType: _vehicleTypeController.text,
+            vehicleLabel: vehicleLabel,
             selectedDriverId: _selectedDriverId,
             onDriverChanged: (v) => setState(() => _selectedDriverId = v),
           ),
@@ -174,6 +185,12 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
       );
       return;
     }
+    if (_selectedVehicleId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a vehicle')),
+      );
+      return;
+    }
     if (_stops.any((s) => s.locationController.text.trim().isEmpty)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('All stops must have a location')),
@@ -201,18 +218,24 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
           ))
       .toList();
 
+  String? get _vehicleType => ref
+      .read(vehiclesProvider)
+      .value
+      ?.where((v) => v.id == _selectedVehicleId)
+      .firstOrNull
+      ?.vehicleType;
+
   Future<void> _saveDraft() async {
     setState(() => _isSaving = true);
     try {
       if (widget.trip == null) {
         final params = CreateTripParams(
           clientId: _selectedClientId!,
+          vehicleId: _selectedVehicleId!,
           purchaseOrderNumber: _poController.text.trim().isEmpty
               ? null
               : _poController.text.trim(),
-          vehicleType: _vehicleTypeController.text.trim().isEmpty
-              ? null
-              : _vehicleTypeController.text.trim(),
+          vehicleType: _vehicleType,
           scheduledAt: _scheduledAt,
           notes: _notesController.text.trim().isEmpty
               ? null
@@ -226,20 +249,17 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
                 id,
                 AssignDriverParams(
                   driverId: _selectedDriverId!,
-                  vehicleType: _vehicleTypeController.text.trim().isEmpty
-                      ? null
-                      : _vehicleTypeController.text.trim(),
+                  vehicleType: _vehicleType,
                 ),
               );
         }
       } else {
         final params = UpdateTripParams(
+          vehicleId: _selectedVehicleId!,
           purchaseOrderNumber: _poController.text.trim().isEmpty
               ? null
               : _poController.text.trim(),
-          vehicleType: _vehicleTypeController.text.trim().isEmpty
-              ? null
-              : _vehicleTypeController.text.trim(),
+          vehicleType: _vehicleType,
           scheduledAt: _scheduledAt,
           notes: _notesController.text.trim().isEmpty
               ? null
@@ -274,12 +294,11 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
     try {
       final params = CreateTripParams(
         clientId: _selectedClientId!,
+        vehicleId: _selectedVehicleId!,
         purchaseOrderNumber: _poController.text.trim().isEmpty
             ? null
             : _poController.text.trim(),
-        vehicleType: _vehicleTypeController.text.trim().isEmpty
-            ? null
-            : _vehicleTypeController.text.trim(),
+        vehicleType: _vehicleType,
         scheduledAt: _scheduledAt,
         notes: _notesController.text.trim().isEmpty
             ? null
@@ -292,9 +311,7 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
             id,
             AssignDriverParams(
               driverId: _selectedDriverId!,
-              vehicleType: _vehicleTypeController.text.trim().isEmpty
-                  ? null
-                  : _vehicleTypeController.text.trim(),
+              vehicleType: _vehicleType,
             ),
           );
 
@@ -321,8 +338,9 @@ class _Step1 extends ConsumerWidget {
   final GlobalKey<FormState> formKey;
   final String? selectedClientId;
   final ValueChanged<String?> onClientChanged;
+  final String? selectedVehicleId;
+  final ValueChanged<String?> onVehicleChanged;
   final TextEditingController poController;
-  final TextEditingController vehicleTypeController;
   final TextEditingController notesController;
   final DateTime scheduledAt;
   final ValueChanged<DateTime> onScheduledChanged;
@@ -334,8 +352,9 @@ class _Step1 extends ConsumerWidget {
     required this.formKey,
     required this.selectedClientId,
     required this.onClientChanged,
+    required this.selectedVehicleId,
+    required this.onVehicleChanged,
     required this.poController,
-    required this.vehicleTypeController,
     required this.notesController,
     required this.scheduledAt,
     required this.onScheduledChanged,
@@ -347,6 +366,7 @@ class _Step1 extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final clientsAsync = ref.watch(clientsProvider);
+    final vehiclesAsync = ref.watch(vehiclesProvider);
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
@@ -376,36 +396,34 @@ class _Step1 extends ConsumerWidget {
               ),
             ),
             const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _Label('Purchase Order #'),
-                      const SizedBox(height: 6),
-                      TextFormField(
-                        controller: poController,
-                        decoration: _inputDecoration('e.g. PO-2024-001'),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _Label('Vehicle Type'),
-                      const SizedBox(height: 6),
-                      TextFormField(
-                        controller: vehicleTypeController,
-                        decoration: _inputDecoration('e.g. Shuttle Bus'),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+            _Label('Vehicle *'),
+            const SizedBox(height: 6),
+            vehiclesAsync.when(
+              loading: () => const LinearProgressIndicator(),
+              error: (e, _) => Text('Failed to load vehicles: $e',
+                  style: const TextStyle(color: AppColors.danger)),
+              data: (vehicles) => DropdownButtonFormField<String>(
+                value: selectedVehicleId,
+                decoration: _inputDecoration('Select vehicle'),
+                isExpanded: true,
+                items: vehicles
+                    .where((v) => v.isActive)
+                    .map((v) => DropdownMenuItem(
+                          value: v.id,
+                          child: Text(
+                              '${v.unitCode} — ${v.make} ${v.model}'),
+                        ))
+                    .toList(),
+                onChanged: onVehicleChanged,
+                validator: (v) => v == null ? 'Required' : null,
+              ),
+            ),
+            const SizedBox(height: 16),
+            _Label('Purchase Order #'),
+            const SizedBox(height: 6),
+            TextFormField(
+              controller: poController,
+              decoration: _inputDecoration('e.g. PO-2024-001'),
             ),
             const SizedBox(height: 16),
             _Label('Scheduled Date & Time *'),
@@ -523,7 +541,7 @@ class _Step1 extends ConsumerWidget {
       );
 }
 
-class _StopRow extends StatelessWidget {
+class _StopRow extends ConsumerWidget {
   final _StopEntry stop;
   final int index;
   final bool canRemove;
@@ -537,7 +555,7 @@ class _StopRow extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -578,7 +596,16 @@ class _StopRow extends StatelessWidget {
                     fontSize: 13, fontWeight: FontWeight.w700),
               ),
               const Spacer(),
-              if (canRemove)
+              IconButton(
+                onPressed: () => _pickSavedLocation(context, ref),
+                icon: const Icon(Icons.bookmark_add_outlined,
+                    size: 18, color: AppColors.primary),
+                tooltip: 'Pick saved location',
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
+              if (canRemove) ...[
+                const SizedBox(width: 4),
                 IconButton(
                   onPressed: onRemove,
                   icon: const Icon(Icons.remove_circle_outline_rounded,
@@ -586,6 +613,7 @@ class _StopRow extends StatelessWidget {
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
                 ),
+              ],
             ],
           ),
           const SizedBox(height: 10),
@@ -620,6 +648,213 @@ class _StopRow extends StatelessWidget {
       ),
     );
   }
+
+  Future<void> _pickSavedLocation(BuildContext context, WidgetRef ref) async {
+    final result = await showModalBottomSheet<SavedLocation>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const _LocationPickerSheet(),
+    );
+    if (result != null) {
+      stop.locationController.text = result.name;
+      stop.addressController.text = result.address ?? '';
+    }
+  }
+}
+
+// ── Location Picker Sheet ─────────────────────────────────────────────────────
+
+class _LocationPickerSheet extends ConsumerStatefulWidget {
+  const _LocationPickerSheet();
+
+  @override
+  ConsumerState<_LocationPickerSheet> createState() =>
+      _LocationPickerSheetState();
+}
+
+class _LocationPickerSheetState extends ConsumerState<_LocationPickerSheet> {
+  String _search = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final locationsAsync = ref.watch(locationsProvider);
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.6,
+      minChildSize: 0.4,
+      maxChildSize: 0.9,
+      expand: false,
+      builder: (_, scrollController) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          children: [
+            const SizedBox(height: 8),
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE5E7EB),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 20),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Pick a Saved Location',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF111827),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: TextField(
+                autofocus: true,
+                decoration: InputDecoration(
+                  hintText: 'Search locations…',
+                  prefixIcon: const Icon(Icons.search_rounded, size: 18),
+                  isDense: true,
+                  filled: true,
+                  fillColor: const Color(0xFFF9FAFB),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                ),
+                onChanged: (v) => setState(() => _search = v),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: locationsAsync.when(
+                loading: () =>
+                    const Center(child: CircularProgressIndicator()),
+                error: (e, _) => Center(
+                  child: Text('Failed to load: $e',
+                      style: const TextStyle(color: AppColors.danger)),
+                ),
+                data: (locations) {
+                  final filtered = _search.isEmpty
+                      ? locations
+                      : locations
+                          .where((l) =>
+                              l.name
+                                  .toLowerCase()
+                                  .contains(_search.toLowerCase()) ||
+                              (l.address
+                                      ?.toLowerCase()
+                                      .contains(_search.toLowerCase()) ??
+                                  false))
+                          .toList();
+
+                  if (locations.isEmpty) {
+                    return const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(24),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.bookmark_border_rounded,
+                                size: 40, color: AppColors.brandGray),
+                            SizedBox(height: 8),
+                            Text(
+                              'No saved locations yet',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.brandGray),
+                            ),
+                            SizedBox(height: 4),
+                            Text(
+                              'Add locations from the Saved Locations page.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                  fontSize: 12, color: AppColors.brandGray),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }
+
+                  if (filtered.isEmpty) {
+                    return const Center(
+                      child: Text('No locations match your search.',
+                          style: TextStyle(color: AppColors.brandGray)),
+                    );
+                  }
+
+                  return ListView.builder(
+                    controller: scrollController,
+                    padding: const EdgeInsets.only(bottom: 16),
+                    itemCount: filtered.length,
+                    itemBuilder: (_, i) {
+                      final loc = filtered[i];
+                      return ListTile(
+                        leading: const Icon(Icons.place_rounded,
+                            color: AppColors.primary, size: 20),
+                        title: Text(
+                          loc.name,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                          ),
+                        ),
+                        subtitle: loc.address != null
+                            ? Text(
+                                loc.address!,
+                                style: const TextStyle(
+                                    fontSize: 12,
+                                    color: AppColors.brandGray),
+                              )
+                            : null,
+                        trailing: loc.hasCoordinates
+                            ? Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: AppColors.secondary
+                                      .withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  '${loc.latitude!.toStringAsFixed(3)}, ${loc.longitude!.toStringAsFixed(3)}',
+                                  style: const TextStyle(
+                                    fontSize: 10,
+                                    color: AppColors.secondary,
+                                  ),
+                                ),
+                              )
+                            : null,
+                        onTap: () => Navigator.pop(context, loc),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 // ── Step 2 ────────────────────────────────────────────────────────────────────
@@ -628,7 +863,7 @@ class _Step2 extends ConsumerWidget {
   final GlobalKey<FormState> formKey;
   final List<_StopEntry> stops;
   final DateTime scheduledAt;
-  final String vehicleType;
+  final String vehicleLabel;
   final String? selectedDriverId;
   final ValueChanged<String?> onDriverChanged;
 
@@ -636,7 +871,7 @@ class _Step2 extends ConsumerWidget {
     required this.formKey,
     required this.stops,
     required this.scheduledAt,
-    required this.vehicleType,
+    required this.vehicleLabel,
     required this.selectedDriverId,
     required this.onDriverChanged,
   });
@@ -672,8 +907,8 @@ class _Step2 extends ConsumerWidget {
                   _SummaryRow('Scheduled', DateFormat('MMM d, yyyy · h:mm a')
                       .format(scheduledAt.toLocal())),
                   _SummaryRow('Stops', '${stops.length}'),
-                  if (vehicleType.isNotEmpty)
-                    _SummaryRow('Vehicle', vehicleType),
+                  if (vehicleLabel.isNotEmpty)
+                    _SummaryRow('Vehicle', vehicleLabel),
                   ...stops.map((s) => _SummaryRow(
                         s.label,
                         s.locationController.text.isEmpty
