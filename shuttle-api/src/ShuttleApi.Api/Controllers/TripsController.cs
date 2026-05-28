@@ -15,8 +15,9 @@ public sealed class TripsController(ISender sender) : BaseApiController(sender)
         [FromQuery] TripStatus? status,
         [FromQuery] Guid? clientId,
         [FromQuery] Guid? driverId,
+        [FromQuery] Guid? vehicleId,
         CancellationToken cancellationToken) =>
-        Ok(await Sender.Send(new GetTripsQuery(status, clientId, driverId), cancellationToken));
+        Ok(await Sender.Send(new GetTripsQuery(status, clientId, driverId, vehicleId), cancellationToken));
 
     [HttpGet]
     [Route("api/trips/{id:guid}")]
@@ -32,6 +33,7 @@ public sealed class TripsController(ISender sender) : BaseApiController(sender)
     {
         var result = await Sender.Send(new CreateTripCommand(
             request.ClientId,
+            request.VehicleId,
             request.PurchaseOrderNumber,
             request.VehicleType,
             request.ScheduledAt,
@@ -51,6 +53,7 @@ public sealed class TripsController(ISender sender) : BaseApiController(sender)
     {
         await Sender.Send(new UpdateTripCommand(
             id,
+            request.VehicleId,
             request.PurchaseOrderNumber,
             request.VehicleType,
             request.ScheduledAt,
@@ -143,6 +146,7 @@ public sealed class TripsController(ISender sender) : BaseApiController(sender)
 
 public sealed record CreateTripRequest(
     Guid ClientId,
+    Guid VehicleId,
     string? PurchaseOrderNumber,
     string? VehicleType,
     DateTime ScheduledAt,
@@ -150,6 +154,7 @@ public sealed record CreateTripRequest(
     IReadOnlyList<StopRequestDto> Stops);
 
 public sealed record UpdateTripRequest(
+    Guid VehicleId,
     string? PurchaseOrderNumber,
     string? VehicleType,
     DateTime ScheduledAt,

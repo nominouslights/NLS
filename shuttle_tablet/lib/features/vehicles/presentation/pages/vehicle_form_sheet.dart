@@ -43,6 +43,7 @@ class _VehicleFormSheetState extends ConsumerState<VehicleFormSheet>
   final _modelCtrl = TextEditingController();
   final _yearCtrl = TextEditingController();
   final _colorCtrl = TextEditingController();
+  final _licensePlateCtrl = TextEditingController();
   String _vehicleType = 'PassengerVan';
   String _province = 'ON';
   final _capacityCtrl = TextEditingController();
@@ -76,6 +77,7 @@ class _VehicleFormSheetState extends ConsumerState<VehicleFormSheet>
     _modelCtrl.text = v.model;
     _yearCtrl.text = v.year.toString();
     _colorCtrl.text = v.color;
+    _licensePlateCtrl.text = v.licensePlate;
     _vehicleType = v.vehicleType;
     _province = v.province;
     _capacityCtrl.text = v.passengerCapacity.toString();
@@ -94,8 +96,8 @@ class _VehicleFormSheetState extends ConsumerState<VehicleFormSheet>
     _tabController.dispose();
     for (final c in [
       _unitCodeCtrl, _vinCtrl, _makeCtrl, _modelCtrl, _yearCtrl,
-      _colorCtrl, _capacityCtrl, _odometerCtrl, _insuranceProviderCtrl,
-      _policyNumberCtrl, _notesCtrl,
+      _colorCtrl, _licensePlateCtrl, _capacityCtrl, _odometerCtrl,
+      _insuranceProviderCtrl, _policyNumberCtrl, _notesCtrl,
     ]) {
       c.dispose();
     }
@@ -118,7 +120,7 @@ class _VehicleFormSheetState extends ConsumerState<VehicleFormSheet>
       model: _modelCtrl.text.trim(),
       year: int.tryParse(_yearCtrl.text.trim()) ?? DateTime.now().year,
       color: _colorCtrl.text.trim(),
-      licensePlate: '', // updated below for UpdateVehicleParams
+      licensePlate: _licensePlateCtrl.text.trim().toUpperCase(),
       province: _province,
       vehicleType: _vehicleType,
       passengerCapacity: int.tryParse(_capacityCtrl.text.trim()) ?? 1,
@@ -146,7 +148,7 @@ class _VehicleFormSheetState extends ConsumerState<VehicleFormSheet>
           model: params.model,
           year: params.year,
           color: params.color,
-          licensePlate: widget.vehicle!.licensePlate,
+          licensePlate: params.licensePlate,
           province: params.province,
           vehicleType: params.vehicleType,
           passengerCapacity: params.passengerCapacity,
@@ -250,6 +252,7 @@ class _VehicleFormSheetState extends ConsumerState<VehicleFormSheet>
                       modelCtrl: _modelCtrl,
                       yearCtrl: _yearCtrl,
                       colorCtrl: _colorCtrl,
+                      licensePlateCtrl: _licensePlateCtrl,
                       vehicleType: _vehicleType,
                       province: _province,
                       capacityCtrl: _capacityCtrl,
@@ -333,6 +336,7 @@ class _VehicleDetailsTab extends StatelessWidget {
   final TextEditingController modelCtrl;
   final TextEditingController yearCtrl;
   final TextEditingController colorCtrl;
+  final TextEditingController licensePlateCtrl;
   final String vehicleType;
   final String province;
   final TextEditingController capacityCtrl;
@@ -349,6 +353,7 @@ class _VehicleDetailsTab extends StatelessWidget {
     required this.modelCtrl,
     required this.yearCtrl,
     required this.colorCtrl,
+    required this.licensePlateCtrl,
     required this.vehicleType,
     required this.province,
     required this.capacityCtrl,
@@ -443,18 +448,34 @@ class _VehicleDetailsTab extends StatelessWidget {
           onChanged: onVehicleTypeChanged,
         ),
         const SizedBox(height: 14),
-        // Province
-        DropdownButtonFormField<String>(
-          value: province,
-          decoration: InputDecoration(
-            labelText: 'Province/Territory *',
-            border:
-                OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-          ),
-          items: _kProvinces
-              .map((p) => DropdownMenuItem(value: p, child: Text(p)))
-              .toList(),
-          onChanged: onProvinceChanged,
+        // License Plate + Province
+        Row(
+          children: [
+            Expanded(
+              child: _FormField(
+                controller: licensePlateCtrl,
+                label: 'License Plate',
+                required: true,
+                hintText: 'e.g. ABC 123',
+                textCapitalization: TextCapitalization.characters,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                value: province,
+                decoration: InputDecoration(
+                  labelText: 'Province/Territory *',
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+                items: _kProvinces
+                    .map((p) => DropdownMenuItem(value: p, child: Text(p)))
+                    .toList(),
+                onChanged: onProvinceChanged,
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 14),
         // Capacity + Odometer

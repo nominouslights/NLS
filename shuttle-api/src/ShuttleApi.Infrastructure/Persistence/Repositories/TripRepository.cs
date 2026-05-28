@@ -9,6 +9,7 @@ internal sealed class TripRepository(AppDbContext dbContext) : ITripRepository
         TripStatus? status = null,
         Guid? clientId = null,
         Guid? driverId = null,
+        Guid? vehicleId = null,
         CancellationToken cancellationToken = default)
     {
         var query = dbContext.Trips
@@ -23,6 +24,9 @@ internal sealed class TripRepository(AppDbContext dbContext) : ITripRepository
 
         if (driverId.HasValue)
             query = query.Where(t => t.DriverId == driverId.Value);
+
+        if (vehicleId.HasValue)
+            query = query.Where(t => t.VehicleId == vehicleId.Value);
 
         return await query
             .OrderByDescending(t => t.ScheduledAt)

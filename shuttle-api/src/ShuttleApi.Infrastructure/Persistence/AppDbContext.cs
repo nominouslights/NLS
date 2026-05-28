@@ -4,6 +4,7 @@ using ShuttleApi.Application.Common.Interfaces;
 using ShuttleApi.Domain.Clients;
 using ShuttleApi.Domain.Common;
 using ShuttleApi.Domain.Drivers;
+using ShuttleApi.Domain.Locations;
 using ShuttleApi.Domain.Trips;
 using ShuttleApi.Domain.Users;
 using ShuttleApi.Domain.Vehicles;
@@ -30,6 +31,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Vehicle> Vehicles => Set<Vehicle>();
     public DbSet<VehicleServiceRecord> VehicleServiceRecords => Set<VehicleServiceRecord>();
     public DbSet<VehicleInspectionRecord> VehicleInspectionRecords => Set<VehicleInspectionRecord>();
+    public DbSet<SavedLocation> SavedLocations => Set<SavedLocation>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

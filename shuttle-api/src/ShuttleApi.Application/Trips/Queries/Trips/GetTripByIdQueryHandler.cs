@@ -52,6 +52,7 @@ internal sealed class GetTripByIdQueryHandler(ITripRepository tripRepository)
         return new TripDetailResult(
             trip.Id,
             trip.ClientId,
+            trip.VehicleId,
             trip.DriverId,
             trip.PurchaseOrderNumber,
             trip.VehicleType,

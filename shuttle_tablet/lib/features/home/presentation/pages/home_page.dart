@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../clients/presentation/pages/clients_list_page.dart';
 import '../../../drivers/presentation/pages/drivers_list_page.dart';
+import '../../../locations/presentation/pages/saved_locations_page.dart';
 import '../../../trips/presentation/pages/trips_page.dart';
 import '../../../vehicles/presentation/pages/vehicles_list_page.dart';
 import '../widgets/home_dashboard.dart';
@@ -31,6 +32,7 @@ class _HomePageState extends State<HomePage> {
           const TripsPage(),
           const DriversListPage(),
           const VehiclesListPage(),
+          const SavedLocationsPage(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -67,6 +69,11 @@ class _HomePageState extends State<HomePage> {
             selectedIcon: Icon(Icons.directions_bus_rounded,
                 color: AppColors.primary),
             label: 'Fleet',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.bookmark_border_rounded),
+            selectedIcon: Icon(Icons.bookmark_rounded, color: AppColors.primary),
+            label: 'Locations',
           ),
         ],
       ),

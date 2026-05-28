@@ -399,6 +399,36 @@ namespace ShuttleApi.Infrastructure.Migrations
                     b.ToTable("driver_roster_entries", (string)null);
                 });
 
+            modelBuilder.Entity("ShuttleApi.Domain.Locations.SavedLocation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Address")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<double?>("Latitude")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("Longitude")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name");
+
+                    b.ToTable("saved_locations", (string)null);
+                });
+
             modelBuilder.Entity("ShuttleApi.Domain.Trips.Trip", b =>
                 {
                     b.Property<Guid>("Id")
@@ -428,6 +458,9 @@ namespace ShuttleApi.Infrastructure.Migrations
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
+
+                    b.Property<Guid>("VehicleId")
+                        .HasColumnType("uuid");
 
                     b.Property<string>("VehicleType")
                         .HasMaxLength(100)

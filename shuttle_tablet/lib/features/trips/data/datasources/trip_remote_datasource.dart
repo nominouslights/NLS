@@ -11,6 +11,7 @@ abstract interface class ITripRemoteDataSource {
     TripStatus? status,
     String? clientId,
     String? driverId,
+    String? vehicleId,
   });
 
   Future<TripModel> getTripById(String id);
@@ -42,12 +43,14 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
     TripStatus? status,
     String? clientId,
     String? driverId,
+    String? vehicleId,
   }) async {
     try {
       final queryParams = <String, dynamic>{};
       if (status != null) queryParams['status'] = _statusToString(status);
       if (clientId != null) queryParams['clientId'] = clientId;
       if (driverId != null) queryParams['driverId'] = driverId;
+      if (vehicleId != null) queryParams['vehicleId'] = vehicleId;
 
       final response = await _dio.get(
         ApiEndpoints.trips,
@@ -262,6 +265,7 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
 
   static Map<String, dynamic> _createTripToJson(CreateTripParams p) => {
         'clientId': p.clientId,
+        'vehicleId': p.vehicleId,
         'purchaseOrderNumber': p.purchaseOrderNumber,
         'vehicleType': p.vehicleType,
         'scheduledAt': p.scheduledAt.toUtc().toIso8601String(),
@@ -276,6 +280,7 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
       };
 
   static Map<String, dynamic> _updateTripToJson(UpdateTripParams p) => {
+        'vehicleId': p.vehicleId,
         'purchaseOrderNumber': p.purchaseOrderNumber,
         'vehicleType': p.vehicleType,
         'scheduledAt': p.scheduledAt.toUtc().toIso8601String(),

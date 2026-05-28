@@ -8,8 +8,9 @@ class GetTripsParams {
   final TripStatus? status;
   final String? clientId;
   final String? driverId;
+  final String? vehicleId;
 
-  const GetTripsParams({this.status, this.clientId, this.driverId});
+  const GetTripsParams({this.status, this.clientId, this.driverId, this.vehicleId});
 }
 
 class GetTripsUseCase implements UseCase<List<Trip>, GetTripsParams> {
@@ -22,5 +23,6 @@ class GetTripsUseCase implements UseCase<List<Trip>, GetTripsParams> {
         status: params.status,
         clientId: params.clientId,
         driverId: params.driverId,
+        vehicleId: params.vehicleId,
       );
 }

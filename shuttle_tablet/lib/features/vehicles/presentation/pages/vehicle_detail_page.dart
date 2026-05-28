@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../trips/domain/entities/trip.dart';
+import '../../../trips/domain/entities/trip_post_report.dart';
 import '../../domain/entities/vehicle.dart';
 import '../../domain/entities/vehicle_inspection_record.dart';
 import '../../domain/entities/vehicle_service_record.dart';
 import '../../domain/repositories/i_vehicle_repository.dart';
 import '../providers/vehicle_detail_provider.dart';
 import '../providers/vehicle_records_provider.dart';
+import '../providers/vehicle_trips_provider.dart';
 import '../providers/vehicles_provider.dart';
 import '../widgets/inspection_record_card.dart';
 import '../widgets/service_record_card.dart';
@@ -674,6 +677,7 @@ class _OverviewTab extends StatelessWidget {
                 child: _SectionCard(
                   title: 'Vehicle Info',
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _LabeledValue(
                           label: 'VIN', value: vehicle.vin),
@@ -716,6 +720,7 @@ class _OverviewTab extends StatelessWidget {
                     _SectionCard(
                       title: 'Registration & Insurance',
                       child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           _ExpiryRow(
                             label: 'Registration Expiry',
@@ -1170,46 +1175,72 @@ class _InspectionsTab extends ConsumerWidget {
 
 // ── History Tab ───────────────────────────────────────────────────────────────
 
-class _HistoryTab extends StatelessWidget {
+class _HistoryTab extends ConsumerWidget {
   final Vehicle vehicle;
   const _HistoryTab({required this.vehicle});
 
   @override
-  Widget build(BuildContext context) {
-    // Build unified timeline sorted by date desc (CarFax style)
-    final entries = <_HistoryEntry>[];
-    for (final r in vehicle.serviceRecords) {
-      final date = r.completedDate ?? r.scheduledDate ?? r.createdAt;
-      entries.add(_HistoryEntry.service(date, r));
-    }
-    for (final r in vehicle.inspectionRecords) {
-      entries.add(_HistoryEntry.inspection(r.inspectedAt, r));
-    }
-    entries.sort((a, b) => b.date.compareTo(a.date));
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tripsAsync = ref.watch(vehicleTripsProvider(vehicle.id));
 
-    if (entries.isEmpty) {
-      return const Center(
+    return tripsAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.history_rounded,
+            const Icon(Icons.error_outline_rounded,
                 size: 48, color: AppColors.brandGray),
-            SizedBox(height: 12),
-            Text('No history yet',
-                style: TextStyle(
-                    color: AppColors.brandGray, fontSize: 15)),
+            const SizedBox(height: 12),
+            Text('Failed to load trip history: $e',
+                style: const TextStyle(color: AppColors.brandGray)),
+            const SizedBox(height: 12),
+            OutlinedButton(
+              onPressed: () =>
+                  ref.invalidate(vehicleTripsProvider(vehicle.id)),
+              child: const Text('Retry'),
+            ),
           ],
         ),
-      );
-    }
+      ),
+      data: (trips) {
+        final entries = <_HistoryEntry>[];
+        for (final r in vehicle.serviceRecords) {
+          final date = r.completedDate ?? r.scheduledDate ?? r.createdAt;
+          entries.add(_HistoryEntry.service(date, r));
+        }
+        for (final r in vehicle.inspectionRecords) {
+          entries.add(_HistoryEntry.inspection(r.inspectedAt, r));
+        }
+        for (final t in trips) {
+          if (t.preInspection != null || t.postReport != null) {
+            entries.add(_HistoryEntry.trip(t.scheduledAt, t));
+          }
+        }
+        entries.sort((a, b) => b.date.compareTo(a.date));
 
-    return ListView.separated(
-      padding: const EdgeInsets.all(16),
-      itemCount: entries.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 8),
-      itemBuilder: (_, i) {
-        final e = entries[i];
-        return _HistoryEntryCard(entry: e);
+        if (entries.isEmpty) {
+          return const Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.history_rounded,
+                    size: 48, color: AppColors.brandGray),
+                SizedBox(height: 12),
+                Text('No history yet',
+                    style: TextStyle(
+                        color: AppColors.brandGray, fontSize: 15)),
+              ],
+            ),
+          );
+        }
+
+        return ListView.separated(
+          padding: const EdgeInsets.all(16),
+          itemCount: entries.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 8),
+          itemBuilder: (_, i) => _HistoryEntryCard(entry: entries[i]),
+        );
       },
     );
   }
@@ -1219,11 +1250,21 @@ class _HistoryEntry {
   final DateTime date;
   final VehicleServiceRecord? service;
   final VehicleInspectionRecord? inspection;
+  final Trip? trip;
 
-  _HistoryEntry.service(this.date, this.service) : inspection = null;
-  _HistoryEntry.inspection(this.date, this.inspection) : service = null;
+  _HistoryEntry.service(this.date, this.service)
+      : inspection = null,
+        trip = null;
+  _HistoryEntry.inspection(this.date, this.inspection)
+      : service = null,
+        trip = null;
+  _HistoryEntry.trip(this.date, this.trip)
+      : service = null,
+        inspection = null;
 
   bool get isService => service != null;
+  bool get isInspection => inspection != null;
+  bool get isTrip => trip != null;
 }
 
 class _HistoryEntryCard extends StatelessWidget {
@@ -1232,6 +1273,7 @@ class _HistoryEntryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (entry.isTrip) return _TripHistoryCard(trip: entry.trip!);
     if (entry.isService) {
       final r = entry.service!;
       final priorityColor = switch (r.priority.toLowerCase()) {
@@ -1349,6 +1391,199 @@ class _HistoryEntryCard extends StatelessWidget {
         ),
       );
     }
+  }
+}
+
+// ── Trip History Card ─────────────────────────────────────────────────────────
+
+class _TripHistoryCard extends StatelessWidget {
+  final Trip trip;
+  const _TripHistoryCard({required this.trip});
+
+  @override
+  Widget build(BuildContext context) {
+    final pre = trip.preInspection;
+    final post = trip.postReport;
+    final from = trip.firstStopLocation ?? 'Trip';
+    final to = trip.lastStopLocation;
+    final routeLabel = to != null ? '$from → $to' : from;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header row
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.route_rounded,
+                    size: 18, color: AppColors.primary),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      routeLabel,
+                      style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF111827)),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      DateFormat('MMM d, yyyy · h:mm a')
+                          .format(trip.scheduledAt.toLocal()),
+                      style: const TextStyle(
+                          fontSize: 11, color: AppColors.brandGray),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          // Pre-inspection row
+          if (pre != null) ...[
+            const SizedBox(height: 10),
+            const Divider(height: 1, color: Color(0xFFF3F4F6)),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                const Icon(Icons.checklist_rounded,
+                    size: 14, color: AppColors.brandGray),
+                const SizedBox(width: 6),
+                Text(
+                  'Pre-trip  ·  ${_fmt(pre.odometerStart)} km start',
+                  style: const TextStyle(
+                      fontSize: 12, color: AppColors.textSecondary),
+                ),
+                const SizedBox(width: 8),
+                if (pre.items.isNotEmpty)
+                  _CheckSummaryBadge(
+                    passed: pre.items.where((i) => i.passed).length,
+                    total: pre.items.length,
+                  ),
+              ],
+            ),
+          ],
+          // Post-report row
+          if (post != null) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                const Icon(Icons.flag_rounded,
+                    size: 14, color: AppColors.brandGray),
+                const SizedBox(width: 6),
+                Text(
+                  'Post-trip  ·  ${post.distanceKm} km driven',
+                  style: const TextStyle(
+                      fontSize: 12, color: AppColors.textSecondary),
+                ),
+                if (post.fuelAddedLitres != null) ...[
+                  const SizedBox(width: 8),
+                  Text(
+                    '${post.fuelAddedLitres!.toStringAsFixed(1)} L fuel',
+                    style: const TextStyle(
+                        fontSize: 12, color: AppColors.textSecondary),
+                  ),
+                ],
+                if (post.hasIncident) ...[
+                  const SizedBox(width: 8),
+                  _IncidentBadge(type: post.incidentType),
+                ],
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  static String _fmt(int n) => n
+      .toString()
+      .replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+          (m) => '${m[1]},');
+}
+
+class _CheckSummaryBadge extends StatelessWidget {
+  final int passed;
+  final int total;
+  const _CheckSummaryBadge({required this.passed, required this.total});
+
+  @override
+  Widget build(BuildContext context) {
+    final allPassed = passed == total;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: allPassed
+            ? AppColors.success.withValues(alpha: 0.1)
+            : AppColors.warning.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        '$passed/$total checks',
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: allPassed ? AppColors.success : AppColors.warning,
+        ),
+      ),
+    );
+  }
+}
+
+class _IncidentBadge extends StatelessWidget {
+  final IncidentType? type;
+  const _IncidentBadge({required this.type});
+
+  @override
+  Widget build(BuildContext context) {
+    final label = switch (type) {
+      IncidentType.delay => 'Delay',
+      IncidentType.passengerNoShow => 'No-show',
+      IncidentType.vehicleIssue => 'Vehicle Issue',
+      IncidentType.cargoDamage => 'Cargo Damage',
+      IncidentType.accident => 'Accident',
+      null => 'Incident',
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppColors.danger.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.warning_amber_rounded,
+              size: 11, color: AppColors.danger),
+          const SizedBox(width: 3),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: AppColors.danger,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

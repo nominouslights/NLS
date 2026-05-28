@@ -12,6 +12,7 @@ internal sealed class GetTripsQueryHandler(ITripRepository tripRepository)
             request.Status,
             request.ClientId,
             request.DriverId,
+            request.VehicleId,
             cancellationToken);
 
         return trips.Select(t =>
@@ -20,6 +21,7 @@ internal sealed class GetTripsQueryHandler(ITripRepository tripRepository)
             return new TripListItemResult(
                 t.Id,
                 t.ClientId,
+                t.VehicleId,
                 t.DriverId,
                 t.PurchaseOrderNumber,
                 t.VehicleType,

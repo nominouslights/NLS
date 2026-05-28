@@ -4,6 +4,7 @@ namespace ShuttleApi.Application.Trips;
 
 public sealed record CreateTripCommand(
     Guid ClientId,
+    Guid VehicleId,
     string? PurchaseOrderNumber,
     string? VehicleType,
     DateTime ScheduledAt,

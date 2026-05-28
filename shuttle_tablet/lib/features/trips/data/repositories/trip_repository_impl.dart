@@ -14,12 +14,14 @@ class TripRepositoryImpl implements ITripRepository {
     TripStatus? status,
     String? clientId,
     String? driverId,
+    String? vehicleId,
   }) async {
     try {
       final result = await _remoteDataSource.getTrips(
         status: status,
         clientId: clientId,
         driverId: driverId,
+        vehicleId: vehicleId,
       );
       return Right(result);
     } on UnauthorizedException {

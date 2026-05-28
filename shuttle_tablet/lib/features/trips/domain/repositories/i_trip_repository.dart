@@ -8,6 +8,7 @@ abstract interface class ITripRepository {
     TripStatus? status,
     String? clientId,
     String? driverId,
+    String? vehicleId,
   });
 
   Future<Either<Failure, Trip>> getTripById(String id);
@@ -63,6 +64,7 @@ class InspectionItemParams {
 
 class CreateTripParams {
   final String clientId;
+  final String vehicleId;
   final String? purchaseOrderNumber;
   final String? vehicleType;
   final DateTime scheduledAt;
@@ -71,6 +73,7 @@ class CreateTripParams {
 
   const CreateTripParams({
     required this.clientId,
+    required this.vehicleId,
     this.purchaseOrderNumber,
     this.vehicleType,
     required this.scheduledAt,
@@ -80,6 +83,7 @@ class CreateTripParams {
 }
 
 class UpdateTripParams {
+  final String vehicleId;
   final String? purchaseOrderNumber;
   final String? vehicleType;
   final DateTime scheduledAt;
@@ -87,6 +91,7 @@ class UpdateTripParams {
   final List<StopParams> stops;
 
   const UpdateTripParams({
+    required this.vehicleId,
     this.purchaseOrderNumber,
     this.vehicleType,
     required this.scheduledAt,
