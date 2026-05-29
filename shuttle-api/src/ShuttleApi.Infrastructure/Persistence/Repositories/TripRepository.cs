@@ -10,10 +10,12 @@ internal sealed class TripRepository(AppDbContext dbContext) : ITripRepository
         Guid? clientId = null,
         Guid? driverId = null,
         Guid? vehicleId = null,
+        TripServiceType? serviceType = null,
         CancellationToken cancellationToken = default)
     {
         var query = dbContext.Trips
             .Include(t => t.Stops)
+            .Include(t => t.Passengers)
             .AsQueryable();
 
         if (status.HasValue)
@@ -28,6 +30,9 @@ internal sealed class TripRepository(AppDbContext dbContext) : ITripRepository
         if (vehicleId.HasValue)
             query = query.Where(t => t.VehicleId == vehicleId.Value);
 
+        if (serviceType.HasValue)
+            query = query.Where(t => t.ServiceType == serviceType.Value);
+
         return await query
             .OrderByDescending(t => t.ScheduledAt)
             .ToListAsync(cancellationToken);
@@ -36,6 +41,7 @@ internal sealed class TripRepository(AppDbContext dbContext) : ITripRepository
     public async Task<Trip?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         await dbContext.Trips
             .Include(t => t.Stops)
+            .Include(t => t.Passengers)
             .Include(t => t.PreInspection)
                 .ThenInclude(p => p!.Items)
             .Include(t => t.PostReport)

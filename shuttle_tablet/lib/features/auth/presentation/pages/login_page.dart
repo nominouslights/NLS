@@ -19,7 +19,6 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   final _passwordController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _obscurePassword = true;
-  int _selectedRole = 0;
 
   @override
   void dispose() {
@@ -48,7 +47,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
           SnackBar(content: Text(message)),
         );
       } else if (next is AsyncData<String?> && next.value != null) {
-        context.go(RouteNames.home);
+        context.go(RouteNames.modeSelection);
       }
     });
 
@@ -137,12 +136,9 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                                   emailController: _emailController,
                                   passwordController: _passwordController,
                                   obscurePassword: _obscurePassword,
-                                  selectedRole: _selectedRole,
                                   isLoading: isLoading,
                                   onToggleObscure: () => setState(
                                       () => _obscurePassword = !_obscurePassword),
-                                  onRoleSelected: (i) =>
-                                      setState(() => _selectedRole = i),
                                   onSubmit: _submit,
                                   onRegister: _register,
                                 ),
@@ -166,12 +162,9 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                             emailController: _emailController,
                             passwordController: _passwordController,
                             obscurePassword: _obscurePassword,
-                            selectedRole: _selectedRole,
                             isLoading: isLoading,
                             onToggleObscure: () => setState(
                                 () => _obscurePassword = !_obscurePassword),
-                            onRoleSelected: (i) =>
-                                setState(() => _selectedRole = i),
                             onSubmit: _submit,
                             onRegister: _register,
                           ),

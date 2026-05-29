@@ -434,7 +434,7 @@ namespace ShuttleApi.Infrastructure.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid>("ClientId")
+                    b.Property<Guid?>("ClientId")
                         .HasColumnType("uuid");
 
                     b.Property<DateTime>("CreatedAt")
@@ -447,12 +447,24 @@ namespace ShuttleApi.Infrastructure.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
 
+                    b.Property<decimal?>("PricePerSeat")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
+
                     b.Property<string>("PurchaseOrderNumber")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
                     b.Property<DateTime>("ScheduledAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("SeatCapacity")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ServiceType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -469,6 +481,8 @@ namespace ShuttleApi.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ClientId");
+
+                    b.HasIndex("ServiceType");
 
                     b.HasIndex("Status");
 
@@ -502,6 +516,38 @@ namespace ShuttleApi.Infrastructure.Migrations
                     b.HasIndex("PreInspectionId");
 
                     b.ToTable("trip_inspection_items", (string)null);
+                });
+
+            modelBuilder.Entity("ShuttleApi.Domain.Trips.TripPassenger", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContactInfo")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("PaymentStatus")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<int?>("SeatNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("TripId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TripId");
+
+                    b.ToTable("trip_passengers", (string)null);
                 });
 
             modelBuilder.Entity("ShuttleApi.Domain.Trips.TripPostReport", b =>
@@ -987,6 +1033,15 @@ namespace ShuttleApi.Infrastructure.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("ShuttleApi.Domain.Trips.TripPassenger", b =>
+                {
+                    b.HasOne("ShuttleApi.Domain.Trips.Trip", null)
+                        .WithMany("Passengers")
+                        .HasForeignKey("TripId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("ShuttleApi.Domain.Trips.TripPostReport", b =>
                 {
                     b.HasOne("ShuttleApi.Domain.Trips.Trip", null)
@@ -1046,6 +1101,8 @@ namespace ShuttleApi.Infrastructure.Migrations
 
             modelBuilder.Entity("ShuttleApi.Domain.Trips.Trip", b =>
                 {
+                    b.Navigation("Passengers");
+
                     b.Navigation("PostReport");
 
                     b.Navigation("PreInspection");

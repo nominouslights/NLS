@@ -14,7 +14,12 @@ import '../providers/trips_provider.dart';
 
 class TripManifestFormPage extends ConsumerStatefulWidget {
   final Trip? trip; // null = create, non-null = edit
-  const TripManifestFormPage({super.key, this.trip});
+  final TripServiceType serviceType;
+  const TripManifestFormPage({
+    super.key,
+    this.trip,
+    this.serviceType = TripServiceType.charter,
+  });
 
   @override
   ConsumerState<TripManifestFormPage> createState() =>
@@ -32,6 +37,8 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
   String? _selectedVehicleId;
   final _poController = TextEditingController();
   final _notesController = TextEditingController();
+  final _seatCapacityController = TextEditingController();
+  final _pricePerSeatController = TextEditingController();
   DateTime _scheduledAt = DateTime.now().add(const Duration(hours: 1));
   final List<_StopEntry> _stops = [
     _StopEntry(sequenceOrder: 1, label: 'Pickup'),
@@ -66,6 +73,9 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
         ));
       }
       _selectedDriverId = t.driverId;
+      _seatCapacityController.text = t.seatCapacity?.toString() ?? '';
+      _pricePerSeatController.text =
+          t.pricePerSeat != null ? t.pricePerSeat!.toStringAsFixed(2) : '';
     }
   }
 
@@ -74,6 +84,8 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
     _pageController.dispose();
     _poController.dispose();
     _notesController.dispose();
+    _seatCapacityController.dispose();
+    _pricePerSeatController.dispose();
     for (final s in _stops) {
       s.dispose();
     }
@@ -114,11 +126,14 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
         children: [
           _Step1(
             formKey: _formKey1,
+            serviceType: widget.serviceType,
             selectedClientId: _selectedClientId,
             onClientChanged: (v) => setState(() => _selectedClientId = v),
             selectedVehicleId: _selectedVehicleId,
             onVehicleChanged: (v) => setState(() => _selectedVehicleId = v),
             poController: _poController,
+            seatCapacityController: _seatCapacityController,
+            pricePerSeatController: _pricePerSeatController,
             notesController: _notesController,
             scheduledAt: _scheduledAt,
             onScheduledChanged: (dt) => setState(() => _scheduledAt = dt),
@@ -179,11 +194,20 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
 
   void _goNext() {
     if (!_formKey1.currentState!.validate()) return;
-    if (_selectedClientId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a client')),
-      );
-      return;
+    if (widget.serviceType == TripServiceType.charter) {
+      if (_selectedClientId == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please select a client')),
+        );
+        return;
+      }
+    } else {
+      if (_seatCapacityController.text.trim().isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Seat capacity is required')),
+        );
+        return;
+      }
     }
     if (_selectedVehicleId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -230,7 +254,10 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
     try {
       if (widget.trip == null) {
         final params = CreateTripParams(
-          clientId: _selectedClientId!,
+          serviceType: widget.serviceType,
+          clientId: widget.serviceType == TripServiceType.charter
+              ? _selectedClientId!
+              : null,
           vehicleId: _selectedVehicleId!,
           purchaseOrderNumber: _poController.text.trim().isEmpty
               ? null
@@ -241,9 +268,14 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
               ? null
               : _notesController.text.trim(),
           stops: _stopParams,
+          seatCapacity: widget.serviceType == TripServiceType.community
+              ? int.tryParse(_seatCapacityController.text.trim())
+              : null,
+          pricePerSeat: widget.serviceType == TripServiceType.community
+              ? double.tryParse(_pricePerSeatController.text.trim())
+              : null,
         );
         final id = await ref.read(tripFormProvider.notifier).createTrip(params);
-        // Optionally assign driver if selected
         if (_selectedDriverId != null) {
           await ref.read(tripFormProvider.notifier).assignDriver(
                 id,
@@ -265,6 +297,12 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
               ? null
               : _notesController.text.trim(),
           stops: _stopParams,
+          seatCapacity: widget.serviceType == TripServiceType.community
+              ? int.tryParse(_seatCapacityController.text.trim())
+              : null,
+          pricePerSeat: widget.serviceType == TripServiceType.community
+              ? double.tryParse(_pricePerSeatController.text.trim())
+              : null,
         );
         await ref
             .read(tripFormProvider.notifier)
@@ -293,7 +331,10 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
     setState(() => _isSaving = true);
     try {
       final params = CreateTripParams(
-        clientId: _selectedClientId!,
+        serviceType: widget.serviceType,
+        clientId: widget.serviceType == TripServiceType.charter
+            ? _selectedClientId!
+            : null,
         vehicleId: _selectedVehicleId!,
         purchaseOrderNumber: _poController.text.trim().isEmpty
             ? null
@@ -304,6 +345,12 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
             ? null
             : _notesController.text.trim(),
         stops: _stopParams,
+        seatCapacity: widget.serviceType == TripServiceType.community
+            ? int.tryParse(_seatCapacityController.text.trim())
+            : null,
+        pricePerSeat: widget.serviceType == TripServiceType.community
+            ? double.tryParse(_pricePerSeatController.text.trim())
+            : null,
       );
       final id = await ref.read(tripFormProvider.notifier).createTrip(params);
 
@@ -336,11 +383,14 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
 
 class _Step1 extends ConsumerWidget {
   final GlobalKey<FormState> formKey;
+  final TripServiceType serviceType;
   final String? selectedClientId;
   final ValueChanged<String?> onClientChanged;
   final String? selectedVehicleId;
   final ValueChanged<String?> onVehicleChanged;
   final TextEditingController poController;
+  final TextEditingController seatCapacityController;
+  final TextEditingController pricePerSeatController;
   final TextEditingController notesController;
   final DateTime scheduledAt;
   final ValueChanged<DateTime> onScheduledChanged;
@@ -350,11 +400,14 @@ class _Step1 extends ConsumerWidget {
 
   const _Step1({
     required this.formKey,
+    required this.serviceType,
     required this.selectedClientId,
     required this.onClientChanged,
     required this.selectedVehicleId,
     required this.onVehicleChanged,
     required this.poController,
+    required this.seatCapacityController,
+    required this.pricePerSeatController,
     required this.notesController,
     required this.scheduledAt,
     required this.onScheduledChanged,
@@ -375,27 +428,84 @@ class _Step1 extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _Label('Client *'),
-            const SizedBox(height: 6),
-            clientsAsync.when(
-              loading: () => const LinearProgressIndicator(),
-              error: (e, _) => Text('Failed to load clients: $e',
-                  style: const TextStyle(color: AppColors.danger)),
-              data: (clients) => DropdownButtonFormField<String>(
-                value: selectedClientId,
-                decoration: _inputDecoration('Select client'),
-                isExpanded: true,
-                items: clients
-                    .map((c) => DropdownMenuItem(
-                          value: c.id,
-                          child: Text(c.businessName),
-                        ))
-                    .toList(),
-                onChanged: onClientChanged,
-                validator: (v) => v == null ? 'Required' : null,
+            if (serviceType == TripServiceType.charter) ...[
+              _Label('Client *'),
+              const SizedBox(height: 6),
+              clientsAsync.when(
+                loading: () => const LinearProgressIndicator(),
+                error: (e, _) => Text('Failed to load clients: $e',
+                    style: const TextStyle(color: AppColors.danger)),
+                data: (clients) => DropdownButtonFormField<String>(
+                  value: selectedClientId,
+                  decoration: _inputDecoration('Select client'),
+                  isExpanded: true,
+                  items: clients
+                      .map((c) => DropdownMenuItem(
+                            value: c.id,
+                            child: Text(c.businessName),
+                          ))
+                      .toList(),
+                  onChanged: onClientChanged,
+                  validator: (v) => v == null ? 'Required' : null,
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
+              const SizedBox(height: 16),
+              _Label('Purchase Order #'),
+              const SizedBox(height: 6),
+              TextFormField(
+                controller: poController,
+                decoration: _inputDecoration('e.g. PO-2024-001'),
+              ),
+              const SizedBox(height: 16),
+            ] else ...[
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _Label('Seat Capacity *'),
+                        const SizedBox(height: 6),
+                        TextFormField(
+                          controller: seatCapacityController,
+                          keyboardType: TextInputType.number,
+                          decoration: _inputDecoration('e.g. 14'),
+                          validator: (v) {
+                            if (v == null || v.trim().isEmpty) return 'Required';
+                            if (int.tryParse(v.trim()) == null || int.parse(v.trim()) < 1) {
+                              return 'Enter a valid number';
+                            }
+                            return null;
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _Label('Price Per Seat (TTD)'),
+                        const SizedBox(height: 6),
+                        TextFormField(
+                          controller: pricePerSeatController,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          decoration: _inputDecoration('e.g. 25.00'),
+                          validator: (v) {
+                            if (v == null || v.trim().isEmpty) return null;
+                            if (double.tryParse(v.trim()) == null) return 'Invalid amount';
+                            return null;
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+            ],
             _Label('Vehicle *'),
             const SizedBox(height: 6),
             vehiclesAsync.when(
@@ -417,13 +527,6 @@ class _Step1 extends ConsumerWidget {
                 onChanged: onVehicleChanged,
                 validator: (v) => v == null ? 'Required' : null,
               ),
-            ),
-            const SizedBox(height: 16),
-            _Label('Purchase Order #'),
-            const SizedBox(height: 6),
-            TextFormField(
-              controller: poController,
-              decoration: _inputDecoration('e.g. PO-2024-001'),
             ),
             const SizedBox(height: 16),
             _Label('Scheduled Date & Time *'),
@@ -679,178 +782,186 @@ class _LocationPickerSheetState extends ConsumerState<_LocationPickerSheet> {
   @override
   Widget build(BuildContext context) {
     final locationsAsync = ref.watch(locationsProvider);
+    final keyboardHeight = MediaQuery.viewInsetsOf(context).bottom;
+    final maxHeight = MediaQuery.sizeOf(context).height * 0.75;
 
-    return DraggableScrollableSheet(
-      initialChildSize: 0.6,
-      minChildSize: 0.4,
-      maxChildSize: 0.9,
-      expand: false,
-      builder: (_, scrollController) => Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        child: Column(
-          children: [
-            const SizedBox(height: 8),
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE5E7EB),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 20),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Pick a Saved Location',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF111827),
+    // Shrink max content height by keyboard height so content + keyboard ≤ screen.
+    final contentMaxHeight = (maxHeight - keyboardHeight).clamp(200.0, maxHeight);
+
+    return SizedBox(
+      height: contentMaxHeight + keyboardHeight,
+      child: Padding(
+        padding: EdgeInsets.only(bottom: keyboardHeight),
+        child: Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.max,
+            children: [
+              const SizedBox(height: 8),
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE5E7EB),
+                    borderRadius: BorderRadius.circular(2),
                   ),
                 ),
               ),
-            ),
-            const SizedBox(height: 12),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: TextField(
-                autofocus: true,
-                decoration: InputDecoration(
-                  hintText: 'Search locations…',
-                  prefixIcon: const Icon(Icons.search_rounded, size: 18),
-                  isDense: true,
-                  filled: true,
-                  fillColor: const Color(0xFFF9FAFB),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+              const SizedBox(height: 12),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 20),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Pick a Saved Location',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF111827),
+                    ),
                   ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
                 ),
-                onChanged: (v) => setState(() => _search = v),
               ),
-            ),
-            const SizedBox(height: 8),
-            Expanded(
-              child: locationsAsync.when(
-                loading: () =>
-                    const Center(child: CircularProgressIndicator()),
-                error: (e, _) => Center(
-                  child: Text('Failed to load: $e',
-                      style: const TextStyle(color: AppColors.danger)),
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: TextField(
+                  autofocus: true,
+                  decoration: InputDecoration(
+                    hintText: 'Search locations…',
+                    prefixIcon: const Icon(Icons.search_rounded, size: 18),
+                    isDense: true,
+                    filled: true,
+                    fillColor: const Color(0xFFF9FAFB),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                  onChanged: (v) => setState(() => _search = v),
                 ),
-                data: (locations) {
-                  final filtered = _search.isEmpty
-                      ? locations
-                      : locations
-                          .where((l) =>
-                              l.name
-                                  .toLowerCase()
-                                  .contains(_search.toLowerCase()) ||
-                              (l.address
-                                      ?.toLowerCase()
-                                      .contains(_search.toLowerCase()) ??
-                                  false))
-                          .toList();
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: locationsAsync.when(
+                  loading: () =>
+                      const Center(child: CircularProgressIndicator()),
+                  error: (e, _) => Center(
+                    child: Text('Failed to load: $e',
+                        style: const TextStyle(color: AppColors.danger)),
+                  ),
+                  data: (locations) {
+                    final filtered = _search.isEmpty
+                        ? locations
+                        : locations
+                            .where((l) =>
+                                l.name
+                                    .toLowerCase()
+                                    .contains(_search.toLowerCase()) ||
+                                (l.address
+                                        ?.toLowerCase()
+                                        .contains(_search.toLowerCase()) ??
+                                    false))
+                            .toList();
 
-                  if (locations.isEmpty) {
-                    return const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(24),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.bookmark_border_rounded,
-                                size: 40, color: AppColors.brandGray),
-                            SizedBox(height: 8),
-                            Text(
-                              'No saved locations yet',
-                              style: TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  color: AppColors.brandGray),
-                            ),
-                            SizedBox(height: 4),
-                            Text(
-                              'Add locations from the Saved Locations page.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                  fontSize: 12, color: AppColors.brandGray),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  }
-
-                  if (filtered.isEmpty) {
-                    return const Center(
-                      child: Text('No locations match your search.',
-                          style: TextStyle(color: AppColors.brandGray)),
-                    );
-                  }
-
-                  return ListView.builder(
-                    controller: scrollController,
-                    padding: const EdgeInsets.only(bottom: 16),
-                    itemCount: filtered.length,
-                    itemBuilder: (_, i) {
-                      final loc = filtered[i];
-                      return ListTile(
-                        leading: const Icon(Icons.place_rounded,
-                            color: AppColors.primary, size: 20),
-                        title: Text(
-                          loc.name,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 14,
+                    if (locations.isEmpty) {
+                      return const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(24),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.bookmark_border_rounded,
+                                  size: 40, color: AppColors.brandGray),
+                              SizedBox(height: 8),
+                              Text(
+                                'No saved locations yet',
+                                style: TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.brandGray),
+                              ),
+                              SizedBox(height: 4),
+                              Text(
+                                'Add locations from the Saved Locations page.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                    fontSize: 12, color: AppColors.brandGray),
+                              ),
+                            ],
                           ),
                         ),
-                        subtitle: loc.address != null
-                            ? Text(
-                                loc.address!,
-                                style: const TextStyle(
-                                    fontSize: 12,
-                                    color: AppColors.brandGray),
-                              )
-                            : null,
-                        trailing: loc.hasCoordinates
-                            ? Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: AppColors.secondary
-                                      .withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  '${loc.latitude!.toStringAsFixed(3)}, ${loc.longitude!.toStringAsFixed(3)}',
-                                  style: const TextStyle(
-                                    fontSize: 10,
-                                    color: AppColors.secondary,
-                                  ),
-                                ),
-                              )
-                            : null,
-                        onTap: () => Navigator.pop(context, loc),
                       );
-                    },
-                  );
-                },
+                    }
+
+                    if (filtered.isEmpty) {
+                      return const Center(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(vertical: 24),
+                          child: Text('No locations match your search.',
+                              style: TextStyle(color: AppColors.brandGray)),
+                        ),
+                      );
+                    }
+
+                    return ListView.builder(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      itemCount: filtered.length,
+                      itemBuilder: (_, i) {
+                        final loc = filtered[i];
+                        return ListTile(
+                          leading: const Icon(Icons.place_rounded,
+                              color: AppColors.primary, size: 20),
+                          title: Text(
+                            loc.name,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 14,
+                            ),
+                          ),
+                          subtitle: loc.address != null
+                              ? Text(
+                                  loc.address!,
+                                  style: const TextStyle(
+                                      fontSize: 12,
+                                      color: AppColors.brandGray),
+                                )
+                              : null,
+                          trailing: loc.hasCoordinates
+                              ? Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.secondary
+                                        .withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    '${loc.latitude!.toStringAsFixed(3)}, ${loc.longitude!.toStringAsFixed(3)}',
+                                    style: const TextStyle(
+                                      fontSize: 10,
+                                      color: AppColors.secondary,
+                                    ),
+                                  ),
+                                )
+                              : null,
+                          onTap: () => Navigator.pop(context, loc),
+                        );
+                      },
+                    );
+                  },
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import '../../../../core/di/injection_container.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../domain/entities/trip.dart';
+import '../../domain/entities/trip_passenger.dart';
 import '../../domain/repositories/i_trip_repository.dart';
+import '../../domain/usecases/add_passenger_usecase.dart';
+import '../../domain/usecases/remove_passenger_usecase.dart';
+import '../../domain/usecases/update_passenger_payment_status_usecase.dart';
 import '../providers/trip_form_provider.dart';
 import '../providers/trips_provider.dart';
 import 'trip_status_badge.dart';
@@ -117,6 +123,14 @@ class _TripDetail extends ConsumerWidget {
             _SectionHeader('Actions', Icons.bolt_rounded),
             const SizedBox(height: 12),
             _ActionsBar(trip: trip, onRefresh: onRefresh),
+            const SizedBox(height: 20),
+            const Divider(),
+            const SizedBox(height: 16),
+          ],
+
+          // Passenger manifest (community trips only)
+          if (trip.serviceType == TripServiceType.community) ...[
+            _PassengerManifest(trip: trip, onRefresh: onRefresh),
             const SizedBox(height: 20),
             const Divider(),
             const SizedBox(height: 16),
@@ -347,4 +361,447 @@ class _DetailRow extends StatelessWidget {
           ],
         ),
       );
+}
+
+// ── Passenger Manifest ───────────────────────────────────────────────────────
+
+class _PassengerManifest extends StatelessWidget {
+  final Trip trip;
+  final VoidCallback onRefresh;
+
+  const _PassengerManifest({required this.trip, required this.onRefresh});
+
+  @override
+  Widget build(BuildContext context) {
+    final passengers = trip.passengers;
+    final active = passengers
+        .where((p) => p.paymentStatus != PassengerPaymentStatus.cancelled)
+        .toList();
+    final capacity = trip.seatCapacity ?? 0;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.people_rounded, size: 16, color: AppColors.primary),
+            const SizedBox(width: 6),
+            Text(
+              'Passengers (${active.length} / $capacity)',
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textPrimary,
+                letterSpacing: 0.3,
+              ),
+            ),
+            const Spacer(),
+            TextButton.icon(
+              onPressed: () => _showAddPassengerDialog(context),
+              icon: const Icon(Icons.person_add_alt_1_rounded, size: 16),
+              label: const Text('Add'),
+              style: TextButton.styleFrom(foregroundColor: const Color(0xFF0F766E)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        if (passengers.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF9FAFB),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFE5E7EB)),
+            ),
+            child: const Center(
+              child: Text(
+                'No passengers yet',
+                style: TextStyle(color: AppColors.brandGray, fontSize: 13),
+              ),
+            ),
+          )
+        else
+          ...passengers.map(
+            (p) => _PassengerCard(
+              passenger: p,
+              tripId: trip.id,
+              onRefresh: onRefresh,
+            ),
+          ),
+      ],
+    );
+  }
+
+  Future<void> _showAddPassengerDialog(BuildContext context) async {
+    await showDialog(
+      context: context,
+      builder: (ctx) => _AddPassengerDialog(tripId: trip.id, onRefresh: onRefresh),
+    );
+  }
+}
+
+class _PassengerCard extends StatelessWidget {
+  final TripPassenger passenger;
+  final String tripId;
+  final VoidCallback onRefresh;
+
+  const _PassengerCard({
+    required this.passenger,
+    required this.tripId,
+    required this.onRefresh,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: _statusColor(passenger.paymentStatus).withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(
+                passenger.name.isNotEmpty
+                    ? passenger.name[0].toUpperCase()
+                    : '?',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: _statusColor(passenger.paymentStatus),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  passenger.name,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                    color: Color(0xFF111827),
+                  ),
+                ),
+                if (passenger.contactInfo != null)
+                  Text(
+                    passenger.contactInfo!,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          if (passenger.seatNumber != null)
+            Container(
+              margin: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF3F4F6),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                'Seat ${passenger.seatNumber}',
+                style: const TextStyle(
+                    fontSize: 11, fontWeight: FontWeight.w600),
+              ),
+            ),
+          _StatusBadge(passenger.paymentStatus),
+          const SizedBox(width: 4),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert_rounded,
+                size: 18, color: AppColors.brandGray),
+            onSelected: (v) => _handleAction(context, v),
+            itemBuilder: (_) => [
+              const PopupMenuItem(
+                  value: 'pending',
+                  child: Text('Mark Pending')),
+              const PopupMenuItem(
+                  value: 'paid',
+                  child: Text('Mark Paid')),
+              const PopupMenuItem(
+                  value: 'cancel',
+                  child: Text('Cancel Booking')),
+              const PopupMenuDivider(),
+              const PopupMenuItem(
+                  value: 'remove',
+                  child: Text('Remove Passenger',
+                      style: TextStyle(color: AppColors.danger))),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handleAction(BuildContext context, String action) async {
+    if (action == 'remove') {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Remove Passenger'),
+          content: Text('Remove ${passenger.name} from this trip?'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+              child: const Text('Remove'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !context.mounted) return;
+      final result =
+          await sl<RemovePassengerUseCase>()(RemovePassengerParams(
+        tripId: tripId,
+        passengerId: passenger.id,
+      ));
+      result.fold(
+        (f) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                  content: Text(f.message),
+                  backgroundColor: AppColors.danger),
+            );
+          }
+        },
+        (_) => onRefresh(),
+      );
+      return;
+    }
+
+    PassengerPaymentStatus newStatus;
+    switch (action) {
+      case 'paid':
+        newStatus = PassengerPaymentStatus.paid;
+      case 'cancel':
+        newStatus = PassengerPaymentStatus.cancelled;
+      default:
+        newStatus = PassengerPaymentStatus.pending;
+    }
+
+    final result = await sl<UpdatePassengerPaymentStatusUseCase>()(
+      UpdatePassengerPaymentStatusParams(
+        tripId: tripId,
+        passengerId: passenger.id,
+        paymentStatus: newStatus,
+      ),
+    );
+    result.fold(
+      (f) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content: Text(f.message),
+                backgroundColor: AppColors.danger),
+          );
+        }
+      },
+      (_) => onRefresh(),
+    );
+  }
+
+  Color _statusColor(PassengerPaymentStatus status) {
+    switch (status) {
+      case PassengerPaymentStatus.paid:
+        return const Color(0xFF059669);
+      case PassengerPaymentStatus.cancelled:
+        return AppColors.danger;
+      case PassengerPaymentStatus.pending:
+        return const Color(0xFFD97706);
+    }
+  }
+}
+
+class _StatusBadge extends StatelessWidget {
+  final PassengerPaymentStatus status;
+  const _StatusBadge(this.status);
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, color) = switch (status) {
+      PassengerPaymentStatus.paid => ('Paid', const Color(0xFF059669)),
+      PassengerPaymentStatus.pending => ('Pending', const Color(0xFFD97706)),
+      PassengerPaymentStatus.cancelled => ('Cancelled', AppColors.danger),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: color,
+        ),
+      ),
+    );
+  }
+}
+
+class _AddPassengerDialog extends StatefulWidget {
+  final String tripId;
+  final VoidCallback onRefresh;
+
+  const _AddPassengerDialog({required this.tripId, required this.onRefresh});
+
+  @override
+  State<_AddPassengerDialog> createState() => _AddPassengerDialogState();
+}
+
+class _AddPassengerDialogState extends State<_AddPassengerDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
+  final _contactController = TextEditingController();
+  final _seatController = TextEditingController();
+  PassengerPaymentStatus _paymentStatus = PassengerPaymentStatus.pending;
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _contactController.dispose();
+    _seatController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _confirm() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _saving = true);
+
+    final result = await sl<AddPassengerUseCase>()(AddPassengerParams(
+      tripId: widget.tripId,
+      name: _nameController.text.trim(),
+      contactInfo: _contactController.text.trim().isEmpty
+          ? null
+          : _contactController.text.trim(),
+      seatNumber: _seatController.text.trim().isEmpty
+          ? null
+          : int.tryParse(_seatController.text.trim()),
+      paymentStatus: _paymentStatus,
+    ));
+
+    if (!mounted) return;
+    setState(() => _saving = false);
+
+    result.fold(
+      (f) => ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(f.message), backgroundColor: AppColors.danger),
+      ),
+      (_) {
+        widget.onRefresh();
+        Navigator.of(context).pop();
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Add Passenger'),
+      content: SizedBox(
+        width: 380,
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: _nameController,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(
+                  labelText: 'Passenger Name *',
+                  isDense: true,
+                ),
+                validator: (v) =>
+                    (v == null || v.trim().isEmpty) ? 'Name is required' : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _contactController,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(
+                  labelText: 'Contact Info',
+                  hintText: 'Phone or email',
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _seatController,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                decoration: const InputDecoration(
+                  labelText: 'Seat Number',
+                  hintText: 'Auto-assigned if blank',
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 16),
+              SegmentedButton<PassengerPaymentStatus>(
+                selected: {_paymentStatus},
+                onSelectionChanged: (s) =>
+                    setState(() => _paymentStatus = s.first),
+                style: SegmentedButton.styleFrom(
+                  selectedBackgroundColor:
+                      const Color(0xFF0F766E).withValues(alpha: 0.1),
+                  selectedForegroundColor: const Color(0xFF0F766E),
+                ),
+                segments: const [
+                  ButtonSegment(
+                    value: PassengerPaymentStatus.pending,
+                    label: Text('Pending'),
+                  ),
+                  ButtonSegment(
+                    value: PassengerPaymentStatus.paid,
+                    label: Text('Paid'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _saving ? null : _confirm,
+          style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
+          child: _saving
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white),
+                )
+              : const Text('Add Passenger'),
+        ),
+      ],
+    );
+  }
 }

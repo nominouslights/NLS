@@ -14,6 +14,7 @@ class TripsNotifier extends AsyncNotifier<List<Trip>> {
   TripStatus? _statusFilter;
   String? _clientIdFilter;
   String? _driverIdFilter;
+  TripServiceType? _serviceTypeFilter;
 
   @override
   Future<List<Trip>> build() => _load();
@@ -23,6 +24,7 @@ class TripsNotifier extends AsyncNotifier<List<Trip>> {
       status: _statusFilter,
       clientId: _clientIdFilter,
       driverId: _driverIdFilter,
+      serviceType: _serviceTypeFilter,
     ));
     return result.fold(
       (failure) => throw Exception(failure.message),
@@ -30,10 +32,16 @@ class TripsNotifier extends AsyncNotifier<List<Trip>> {
     );
   }
 
-  void setFilter({TripStatus? status, String? clientId, String? driverId}) {
+  void setFilter({
+    TripStatus? status,
+    String? clientId,
+    String? driverId,
+    TripServiceType? serviceType,
+  }) {
     _statusFilter = status;
     _clientIdFilter = clientId;
     _driverIdFilter = driverId;
+    _serviceTypeFilter = serviceType;
     ref.invalidateSelf();
   }
 

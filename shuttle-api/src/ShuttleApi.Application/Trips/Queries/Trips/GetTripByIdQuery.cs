@@ -6,18 +6,30 @@ public sealed record GetTripByIdQuery(Guid Id) : IQuery<TripDetailResult>;
 
 public sealed record TripDetailResult(
     Guid Id,
-    Guid ClientId,
+    Guid? ClientId,
     Guid VehicleId,
     Guid? DriverId,
+    string ServiceType,
     string? PurchaseOrderNumber,
     string? VehicleType,
     DateTime ScheduledAt,
     string Status,
     string? Notes,
     DateTime CreatedAt,
+    int? SeatCapacity,
+    decimal? PricePerSeat,
     IReadOnlyList<TripStopResult> Stops,
+    IReadOnlyList<PassengerResult> Passengers,
     TripPreInspectionResult? PreInspection,
     TripPostReportResult? PostReport);
+
+public sealed record PassengerResult(
+    Guid Id,
+    Guid TripId,
+    string Name,
+    string? ContactInfo,
+    int? SeatNumber,
+    string PaymentStatus);
 
 public sealed record TripStopResult(
     Guid Id,

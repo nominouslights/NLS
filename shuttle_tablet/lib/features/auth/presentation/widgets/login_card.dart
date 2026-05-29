@@ -6,19 +6,10 @@ class LoginCard extends StatelessWidget {
   final TextEditingController emailController;
   final TextEditingController passwordController;
   final bool obscurePassword;
-  final int selectedRole;
   final bool isLoading;
   final VoidCallback onToggleObscure;
-  final ValueChanged<int> onRoleSelected;
   final VoidCallback onSubmit;
   final VoidCallback onRegister;
-
-  static const _roles = [
-    (label: 'Admin', icon: Icons.business_center),
-    (label: 'Dispatch', icon: Icons.headset_mic),
-    (label: 'Driver', icon: Icons.drive_eta),
-    (label: 'Client', icon: Icons.business),
-  ];
 
   const LoginCard({
     super.key,
@@ -26,10 +17,8 @@ class LoginCard extends StatelessWidget {
     required this.emailController,
     required this.passwordController,
     required this.obscurePassword,
-    required this.selectedRole,
     required this.isLoading,
     required this.onToggleObscure,
-    required this.onRoleSelected,
     required this.onSubmit,
     required this.onRegister,
   });
@@ -155,80 +144,7 @@ class LoginCard extends StatelessWidget {
                       validator: (v) =>
                           (v == null || v.isEmpty) ? 'Password is required' : null,
                     ),
-                    const SizedBox(height: 16),
-                    // Role selector label
-                    Text(
-                      'CONNECTING AS',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: AppColors.textSecondary,
-                        letterSpacing: 1.5,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    // Role tiles
-                    Row(
-                      children: List.generate(_roles.length, (i) {
-                        final role = _roles[i];
-                        final isSelected = selectedRole == i;
-                        return Expanded(
-                          child: Padding(
-                            padding: EdgeInsets.only(
-                              left: i == 0 ? 0 : 4,
-                              right: i == _roles.length - 1 ? 0 : 4,
-                            ),
-                            child: InkWell(
-                              onTap: () => onRoleSelected(i),
-                              borderRadius: BorderRadius.circular(8),
-                              child: AnimatedContainer(
-                                duration: const Duration(milliseconds: 150),
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: isSelected
-                                      ? const Color(0xFFEFF6FF)
-                                      : const Color(0xFFF9FAFB),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(
-                                    color: isSelected
-                                        ? const Color(0xFF005493)
-                                        : const Color(0xFFF3F4F6),
-                                    width: isSelected ? 2 : 1,
-                                  ),
-                                ),
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      role.icon,
-                                      size: 18,
-                                      color: isSelected
-                                          ? const Color(0xFF005493)
-                                          : AppColors.brandGray,
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      role.label,
-                                      style: TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: isSelected
-                                            ? FontWeight.w600
-                                            : FontWeight.w500,
-                                        color: isSelected
-                                            ? const Color(0xFF005493)
-                                            : AppColors.textSecondary,
-                                      ),
-                                      textAlign: TextAlign.center,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        );
-                      }),
-                    ),
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 20),
                     // Sign-in button
                     SizedBox(
                       width: double.infinity,

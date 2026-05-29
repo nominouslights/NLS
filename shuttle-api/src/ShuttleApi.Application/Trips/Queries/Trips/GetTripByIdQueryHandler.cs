@@ -49,18 +49,32 @@ internal sealed class GetTripByIdQueryHandler(ITripRepository tripRepository)
                 trip.PostReport.IsReadyToInvoice);
         }
 
+        var passengers = trip.Passengers
+            .Select(p => new PassengerResult(
+                p.Id,
+                p.TripId,
+                p.Name,
+                p.ContactInfo,
+                p.SeatNumber,
+                p.PaymentStatus.ToString()))
+            .ToList();
+
         return new TripDetailResult(
             trip.Id,
             trip.ClientId,
             trip.VehicleId,
             trip.DriverId,
+            trip.ServiceType.ToString(),
             trip.PurchaseOrderNumber,
             trip.VehicleType,
             trip.ScheduledAt,
             trip.Status.ToString(),
             trip.Notes,
             trip.CreatedAt,
+            trip.SeatCapacity,
+            trip.PricePerSeat,
             stops,
+            passengers,
             preInspection,
             postReport);
     }

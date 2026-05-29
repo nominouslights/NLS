@@ -1,6 +1,7 @@
 import 'package:fpdart/fpdart.dart';
 import '../../../../core/error/failures.dart';
 import '../entities/trip.dart';
+import '../entities/trip_passenger.dart';
 import '../entities/trip_post_report.dart';
 
 abstract interface class ITripRepository {
@@ -9,6 +10,7 @@ abstract interface class ITripRepository {
     String? clientId,
     String? driverId,
     String? vehicleId,
+    TripServiceType? serviceType,
   });
 
   Future<Either<Failure, Trip>> getTripById(String id);
@@ -32,6 +34,16 @@ abstract interface class ITripRepository {
 
   Future<Either<Failure, void>> submitPostReport(
       String tripId, SubmitPostReportParams params);
+
+  Future<Either<Failure, List<TripPassenger>>> getPassengers(String tripId);
+
+  Future<Either<Failure, String>> addPassenger(AddPassengerParams params);
+
+  Future<Either<Failure, void>> removePassenger(
+      String tripId, String passengerId);
+
+  Future<Either<Failure, void>> updatePassengerPaymentStatus(
+      UpdatePassengerPaymentStatusParams params);
 }
 
 // ── Shared ──────────────────────────────────────────────────────────────────
@@ -63,22 +75,28 @@ class InspectionItemParams {
 // ── Trip CRUD ────────────────────────────────────────────────────────────────
 
 class CreateTripParams {
-  final String clientId;
+  final TripServiceType serviceType;
+  final String? clientId;
   final String vehicleId;
   final String? purchaseOrderNumber;
   final String? vehicleType;
   final DateTime scheduledAt;
   final String? notes;
   final List<StopParams> stops;
+  final int? seatCapacity;
+  final double? pricePerSeat;
 
   const CreateTripParams({
-    required this.clientId,
+    this.serviceType = TripServiceType.charter,
+    this.clientId,
     required this.vehicleId,
     this.purchaseOrderNumber,
     this.vehicleType,
     required this.scheduledAt,
     this.notes,
     required this.stops,
+    this.seatCapacity,
+    this.pricePerSeat,
   });
 }
 
@@ -89,6 +107,8 @@ class UpdateTripParams {
   final DateTime scheduledAt;
   final String? notes;
   final List<StopParams> stops;
+  final int? seatCapacity;
+  final double? pricePerSeat;
 
   const UpdateTripParams({
     required this.vehicleId,
@@ -97,6 +117,36 @@ class UpdateTripParams {
     required this.scheduledAt,
     this.notes,
     required this.stops,
+    this.seatCapacity,
+    this.pricePerSeat,
+  });
+}
+
+class AddPassengerParams {
+  final String tripId;
+  final String name;
+  final String? contactInfo;
+  final int? seatNumber;
+  final PassengerPaymentStatus paymentStatus;
+
+  const AddPassengerParams({
+    required this.tripId,
+    required this.name,
+    this.contactInfo,
+    this.seatNumber,
+    this.paymentStatus = PassengerPaymentStatus.pending,
+  });
+}
+
+class UpdatePassengerPaymentStatusParams {
+  final String tripId;
+  final String passengerId;
+  final PassengerPaymentStatus paymentStatus;
+
+  const UpdatePassengerPaymentStatusParams({
+    required this.tripId,
+    required this.passengerId,
+    required this.paymentStatus,
   });
 }
 

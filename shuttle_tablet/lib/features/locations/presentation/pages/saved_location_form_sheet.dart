@@ -107,13 +107,18 @@ class _SavedLocationFormSheetState
         color: Colors.white,
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      padding: EdgeInsets.fromLTRB(24, 20, 24, 24 + bottomInset),
+      // cap height so it never fills the whole screen
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.sizeOf(context).height * 0.88,
+      ),
       child: Form(
         key: _formKey,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+        child: SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(24, 20, 24, 24 + bottomInset),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
             // Handle
             Center(
               child: Container(
@@ -245,6 +250,7 @@ class _SavedLocationFormSheetState
               ],
             ),
           ],
+        ),
         ),
       ),
     );

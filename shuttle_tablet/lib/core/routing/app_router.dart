@@ -5,8 +5,10 @@ import '../../features/auth/presentation/pages/login_page.dart';
 import '../../features/auth/presentation/pages/pending_approval_page.dart';
 import '../../features/auth/presentation/pages/register_page.dart';
 import '../../features/auth/presentation/providers/auth_provider.dart';
+import '../../features/community/presentation/pages/community_home_page.dart';
 import '../../features/drivers/presentation/pages/drivers_list_page.dart';
 import '../../features/home/presentation/pages/home_page.dart';
+import '../../features/home/presentation/pages/mode_selection_page.dart';
 import '../../features/vehicles/presentation/pages/vehicles_list_page.dart';
 import '../../features/vehicles/presentation/pages/vehicle_detail_page.dart';
 import '../../features/trips/presentation/pages/trips_page.dart';
@@ -26,8 +28,16 @@ final routerProvider = Provider<GoRouter>((ref) {
     redirect: notifier.redirect,
     routes: [
       GoRoute(
+        path: RouteNames.modeSelection,
+        builder: (_, __) => const ModeSelectionPage(),
+      ),
+      GoRoute(
         path: RouteNames.home,
         builder: (_, __) => const HomePage(),
+      ),
+      GoRoute(
+        path: RouteNames.community,
+        builder: (_, __) => const CommunityHomePage(),
       ),
       GoRoute(
         path: RouteNames.login,
@@ -132,12 +142,12 @@ class _RouterNotifier extends ChangeNotifier {
 
     // Authenticated: redirect away from public routes
     if (isPublic) {
-      return role == 'Admin' ? RouteNames.pendingUsers : RouteNames.home;
+      return role == 'Admin' ? RouteNames.pendingUsers : RouteNames.modeSelection;
     }
 
     // Protect admin route from non-admins
     if (location == RouteNames.pendingUsers && role != 'Admin') {
-      return RouteNames.home;
+      return RouteNames.modeSelection;
     }
 
     return null;

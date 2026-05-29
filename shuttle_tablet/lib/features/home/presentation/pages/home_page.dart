@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import '../../../../core/routing/route_names.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../clients/presentation/pages/clients_list_page.dart';
 import '../../../drivers/presentation/pages/drivers_list_page.dart';
@@ -146,6 +148,15 @@ class _HomeAppBar extends StatelessWidget implements PreferredSizeWidget {
             ],
           ),
           const Spacer(),
+          IconButton(
+            onPressed: () => context.go(RouteNames.modeSelection),
+            icon: const Icon(Icons.swap_horiz_rounded),
+            tooltip: 'Switch Mode',
+            style: IconButton.styleFrom(
+              foregroundColor: AppColors.brandGray,
+            ),
+          ),
+          const SizedBox(width: 4),
           Stack(
             children: [
               Container(

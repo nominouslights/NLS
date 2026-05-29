@@ -7,6 +7,7 @@ public interface ITripRepository
         Guid? clientId = null,
         Guid? driverId = null,
         Guid? vehicleId = null,
+        TripServiceType? serviceType = null,
         CancellationToken cancellationToken = default);
 
     Task<Trip?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
