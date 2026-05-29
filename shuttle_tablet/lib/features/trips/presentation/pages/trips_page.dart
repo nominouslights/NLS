@@ -8,7 +8,8 @@ import '../widgets/trip_detail_workspace.dart';
 import 'trip_manifest_form_page.dart';
 
 class TripsPage extends ConsumerStatefulWidget {
-  const TripsPage({super.key});
+  final TripServiceType? serviceType;
+  const TripsPage({super.key, this.serviceType});
 
   @override
   ConsumerState<TripsPage> createState() => _TripsPageState();
@@ -18,6 +19,18 @@ class _TripsPageState extends ConsumerState<TripsPage> {
   String _search = '';
   TripStatus? _statusFilter;
   String? _selectedTripId;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.serviceType != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ref.read(tripsProvider.notifier).setFilter(
+              serviceType: widget.serviceType,
+            );
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -137,14 +150,18 @@ class _TripsPageState extends ConsumerState<TripsPage> {
         onPressed: () async {
           final created = await Navigator.of(context).push<bool>(
             MaterialPageRoute(
-              builder: (_) => const TripManifestFormPage(),
+              builder: (_) => TripManifestFormPage(
+                serviceType: widget.serviceType ?? TripServiceType.charter,
+              ),
             ),
           );
           if (created == true) {
             ref.invalidate(tripsProvider);
           }
         },
-        backgroundColor: AppColors.primary,
+        backgroundColor: widget.serviceType == TripServiceType.community
+            ? const Color(0xFF0F766E)
+            : AppColors.primary,
         icon: const Icon(Icons.add_rounded),
         label: const Text('New Trip'),
       ),

@@ -2,9 +2,11 @@ import 'package:dio/dio.dart';
 import '../../../../core/error/exceptions.dart';
 import '../../../../core/network/api_endpoints.dart';
 import '../../domain/entities/trip.dart';
+import '../../domain/entities/trip_passenger.dart';
 import '../../domain/entities/trip_post_report.dart';
 import '../../domain/repositories/i_trip_repository.dart';
 import '../models/trip_model.dart';
+import '../models/trip_passenger_model.dart';
 
 abstract interface class ITripRemoteDataSource {
   Future<List<TripModel>> getTrips({
@@ -12,6 +14,7 @@ abstract interface class ITripRemoteDataSource {
     String? clientId,
     String? driverId,
     String? vehicleId,
+    TripServiceType? serviceType,
   });
 
   Future<TripModel> getTripById(String id);
@@ -32,6 +35,15 @@ abstract interface class ITripRemoteDataSource {
       String tripId, SubmitPreInspectionParams params);
 
   Future<void> submitPostReport(String tripId, SubmitPostReportParams params);
+
+  Future<List<TripPassengerModel>> getPassengers(String tripId);
+
+  Future<String> addPassenger(AddPassengerParams params);
+
+  Future<void> removePassenger(String tripId, String passengerId);
+
+  Future<void> updatePassengerPaymentStatus(
+      UpdatePassengerPaymentStatusParams params);
 }
 
 class TripRemoteDataSource implements ITripRemoteDataSource {
@@ -44,6 +56,7 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
     String? clientId,
     String? driverId,
     String? vehicleId,
+    TripServiceType? serviceType,
   }) async {
     try {
       final queryParams = <String, dynamic>{};
@@ -51,6 +64,9 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
       if (clientId != null) queryParams['clientId'] = clientId;
       if (driverId != null) queryParams['driverId'] = driverId;
       if (vehicleId != null) queryParams['vehicleId'] = vehicleId;
+      if (serviceType != null) {
+        queryParams['serviceType'] = _serviceTypeToString(serviceType);
+      }
 
       final response = await _dio.get(
         ApiEndpoints.trips,
@@ -238,6 +254,81 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
     }
   }
 
+  @override
+  Future<List<TripPassengerModel>> getPassengers(String tripId) async {
+    try {
+      final response = await _dio.get(ApiEndpoints.tripPassengers(tripId));
+      final list = response.data as List<dynamic>;
+      return list
+          .map((e) => TripPassengerModel.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 401) throw const UnauthorizedException();
+      if (e.response?.statusCode == 404) throw const NotFoundException();
+      throw ServerException(
+        message: e.message ?? 'Failed to load passengers',
+        statusCode: e.response?.statusCode,
+      );
+    }
+  }
+
+  @override
+  Future<String> addPassenger(AddPassengerParams params) async {
+    try {
+      final response = await _dio.post(
+        ApiEndpoints.tripPassengers(params.tripId),
+        data: {
+          'name': params.name,
+          'contactInfo': params.contactInfo,
+          'seatNumber': params.seatNumber,
+          'paymentStatus': _paymentStatusToString(params.paymentStatus),
+        },
+      );
+      final data = response.data as Map<String, dynamic>;
+      return data['passengerId'] as String;
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 401) throw const UnauthorizedException();
+      if (e.response?.statusCode == 404) throw const NotFoundException();
+      throw ServerException(
+        message: e.message ?? 'Failed to add passenger',
+        statusCode: e.response?.statusCode,
+      );
+    }
+  }
+
+  @override
+  Future<void> removePassenger(String tripId, String passengerId) async {
+    try {
+      await _dio.delete(ApiEndpoints.tripPassengerById(tripId, passengerId));
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 401) throw const UnauthorizedException();
+      if (e.response?.statusCode == 404) throw const NotFoundException();
+      throw ServerException(
+        message: e.message ?? 'Failed to remove passenger',
+        statusCode: e.response?.statusCode,
+      );
+    }
+  }
+
+  @override
+  Future<void> updatePassengerPaymentStatus(
+      UpdatePassengerPaymentStatusParams params) async {
+    try {
+      await _dio.put(
+        ApiEndpoints.tripPassengerPaymentStatus(
+            params.tripId, params.passengerId),
+        data: {'paymentStatus': _paymentStatusToString(params.paymentStatus)},
+      );
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 401) throw const UnauthorizedException();
+      if (e.response?.statusCode == 404) throw const NotFoundException();
+      throw ServerException(
+        message: e.message ?? 'Failed to update payment status',
+        statusCode: e.response?.statusCode,
+      );
+    }
+  }
+
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   static String _statusToString(TripStatus status) {
@@ -263,7 +354,25 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
     return map[type];
   }
 
+  static String _serviceTypeToString(TripServiceType type) {
+    const map = {
+      TripServiceType.charter: 'Charter',
+      TripServiceType.community: 'Community',
+    };
+    return map[type]!;
+  }
+
+  static String _paymentStatusToString(PassengerPaymentStatus status) {
+    const map = {
+      PassengerPaymentStatus.pending: 'Pending',
+      PassengerPaymentStatus.paid: 'Paid',
+      PassengerPaymentStatus.cancelled: 'Cancelled',
+    };
+    return map[status]!;
+  }
+
   static Map<String, dynamic> _createTripToJson(CreateTripParams p) => {
+        'serviceType': _serviceTypeToString(p.serviceType),
         'clientId': p.clientId,
         'vehicleId': p.vehicleId,
         'purchaseOrderNumber': p.purchaseOrderNumber,
@@ -277,6 +386,8 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
                   'address': s.address,
                 })
             .toList(),
+        'seatCapacity': p.seatCapacity,
+        'pricePerSeat': p.pricePerSeat,
       };
 
   static Map<String, dynamic> _updateTripToJson(UpdateTripParams p) => {
@@ -292,5 +403,7 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
                   'address': s.address,
                 })
             .toList(),
+        'seatCapacity': p.seatCapacity,
+        'pricePerSeat': p.pricePerSeat,
       };
 }

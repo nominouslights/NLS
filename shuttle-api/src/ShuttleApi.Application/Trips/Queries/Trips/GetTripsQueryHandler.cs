@@ -13,6 +13,7 @@ internal sealed class GetTripsQueryHandler(ITripRepository tripRepository)
             request.ClientId,
             request.DriverId,
             request.VehicleId,
+            request.ServiceType,
             cancellationToken);
 
         return trips.Select(t =>
@@ -23,6 +24,7 @@ internal sealed class GetTripsQueryHandler(ITripRepository tripRepository)
                 t.ClientId,
                 t.VehicleId,
                 t.DriverId,
+                t.ServiceType.ToString(),
                 t.PurchaseOrderNumber,
                 t.VehicleType,
                 t.ScheduledAt,
@@ -31,7 +33,9 @@ internal sealed class GetTripsQueryHandler(ITripRepository tripRepository)
                 t.CreatedAt,
                 t.Stops.Count,
                 orderedStops.FirstOrDefault()?.LocationName,
-                orderedStops.LastOrDefault()?.LocationName);
+                orderedStops.LastOrDefault()?.LocationName,
+                t.SeatCapacity,
+                t.Passengers.Count);
         }).ToList();
     }
 }

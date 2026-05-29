@@ -7,13 +7,15 @@ public sealed record GetTripsQuery(
     TripStatus? Status,
     Guid? ClientId,
     Guid? DriverId,
-    Guid? VehicleId) : IQuery<IReadOnlyList<TripListItemResult>>;
+    Guid? VehicleId,
+    TripServiceType? ServiceType) : IQuery<IReadOnlyList<TripListItemResult>>;
 
 public sealed record TripListItemResult(
     Guid Id,
-    Guid ClientId,
+    Guid? ClientId,
     Guid VehicleId,
     Guid? DriverId,
+    string ServiceType,
     string? PurchaseOrderNumber,
     string? VehicleType,
     DateTime ScheduledAt,
@@ -22,4 +24,6 @@ public sealed record TripListItemResult(
     DateTime CreatedAt,
     int StopCount,
     string? FirstStopLocation,
-    string? LastStopLocation);
+    string? LastStopLocation,
+    int? SeatCapacity,
+    int PassengerCount);

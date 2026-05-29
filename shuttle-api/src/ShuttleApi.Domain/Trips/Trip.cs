@@ -6,35 +6,44 @@ namespace ShuttleApi.Domain.Trips;
 public sealed class Trip : AggregateRoot<Guid>
 {
     private readonly List<TripStop> _stops = [];
+    private readonly List<TripPassenger> _passengers = [];
 
-    public Guid ClientId { get; private set; }
+    public Guid? ClientId { get; private set; }
     public Guid VehicleId { get; private set; }
     public Guid? DriverId { get; private set; }
+    public TripServiceType ServiceType { get; private set; }
     public string? PurchaseOrderNumber { get; private set; }
     public string? VehicleType { get; private set; }
     public DateTime ScheduledAt { get; private set; }
     public TripStatus Status { get; private set; }
     public string? Notes { get; private set; }
     public DateTime CreatedAt { get; private set; }
+    public int? SeatCapacity { get; private set; }
+    public decimal? PricePerSeat { get; private set; }
 
     public IReadOnlyList<TripStop> Stops => _stops.AsReadOnly();
+    public IReadOnlyList<TripPassenger> Passengers => _passengers.AsReadOnly();
     public TripPreInspection? PreInspection { get; private set; }
     public TripPostReport? PostReport { get; private set; }
 
     private Trip() { }
 
     public static Trip Create(
-        Guid clientId,
+        TripServiceType serviceType,
+        Guid? clientId,
         Guid vehicleId,
         string? purchaseOrderNumber,
         string? vehicleType,
         DateTime scheduledAt,
         string? notes,
-        IEnumerable<(int SequenceOrder, string LocationName, string? Address)> stops)
+        IEnumerable<(int SequenceOrder, string LocationName, string? Address)> stops,
+        int? seatCapacity = null,
+        decimal? pricePerSeat = null)
     {
         var trip = new Trip
         {
             Id = Guid.NewGuid(),
+            ServiceType = serviceType,
             ClientId = clientId,
             VehicleId = vehicleId,
             PurchaseOrderNumber = purchaseOrderNumber,
@@ -42,7 +51,9 @@ public sealed class Trip : AggregateRoot<Guid>
             ScheduledAt = scheduledAt,
             Status = TripStatus.Scheduled,
             Notes = notes,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            SeatCapacity = seatCapacity,
+            PricePerSeat = pricePerSeat
         };
 
         foreach (var (seq, loc, addr) in stops)
@@ -59,7 +70,9 @@ public sealed class Trip : AggregateRoot<Guid>
         string? vehicleType,
         DateTime scheduledAt,
         string? notes,
-        IEnumerable<(int SequenceOrder, string LocationName, string? Address)> stops)
+        IEnumerable<(int SequenceOrder, string LocationName, string? Address)> stops,
+        int? seatCapacity = null,
+        decimal? pricePerSeat = null)
     {
         Guard.Against(Status != TripStatus.Scheduled, "Only scheduled trips can be updated.");
 
@@ -68,10 +81,43 @@ public sealed class Trip : AggregateRoot<Guid>
         VehicleType = vehicleType;
         ScheduledAt = scheduledAt;
         Notes = notes;
+        SeatCapacity = seatCapacity;
+        PricePerSeat = pricePerSeat;
 
         _stops.Clear();
         foreach (var (seq, loc, addr) in stops)
             _stops.Add(TripStop.Create(Id, seq, loc, addr));
+    }
+
+    public TripPassenger AddPassenger(
+        string name,
+        string? contactInfo,
+        int? seatNumber,
+        PassengerPaymentStatus paymentStatus)
+    {
+        Guard.Against(ServiceType != TripServiceType.Community, "Passengers can only be added to Community trips.");
+
+        var passenger = TripPassenger.Create(Id, name, contactInfo, seatNumber, paymentStatus);
+        _passengers.Add(passenger);
+        return passenger;
+    }
+
+    public void RemovePassenger(Guid passengerId)
+    {
+        Guard.Against(ServiceType != TripServiceType.Community, "Passengers can only be removed from Community trips.");
+
+        var passenger = _passengers.FirstOrDefault(p => p.Id == passengerId)
+            ?? throw new InvalidOperationException($"Passenger {passengerId} not found on this trip.");
+        _passengers.Remove(passenger);
+    }
+
+    public void UpdatePassengerPaymentStatus(Guid passengerId, PassengerPaymentStatus status)
+    {
+        Guard.Against(ServiceType != TripServiceType.Community, "Passenger payment status can only be updated on Community trips.");
+
+        var passenger = _passengers.FirstOrDefault(p => p.Id == passengerId)
+            ?? throw new InvalidOperationException($"Passenger {passengerId} not found on this trip.");
+        passenger.UpdatePaymentStatus(status);
     }
 
     public void AssignDriver(Guid driverId, string? vehicleType)

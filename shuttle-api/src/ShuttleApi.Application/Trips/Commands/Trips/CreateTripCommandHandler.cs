@@ -12,19 +12,32 @@ internal sealed class CreateTripCommandHandler(
 {
     public async Task<CreateTripResult> Handle(CreateTripCommand request, CancellationToken cancellationToken)
     {
-        var client = await clientRepository.GetByIdAsync(request.ClientId, cancellationToken)
-            ?? throw new NotFoundException($"Client {request.ClientId} not found.");
+        Guid? clientId = null;
+
+        if (request.ServiceType == TripServiceType.Charter)
+        {
+            if (request.ClientId is null)
+                throw new InvalidOperationException("ClientId is required for Charter trips.");
+
+            var client = await clientRepository.GetByIdAsync(request.ClientId.Value, cancellationToken)
+                ?? throw new NotFoundException($"Client {request.ClientId} not found.");
+
+            clientId = client.Id;
+        }
 
         var stops = request.Stops.Select(s => (s.SequenceOrder, s.LocationName, s.Address));
 
         var trip = Trip.Create(
-            client.Id,
+            request.ServiceType,
+            clientId,
             request.VehicleId,
             request.PurchaseOrderNumber,
             request.VehicleType,
             DateTime.SpecifyKind(request.ScheduledAt, DateTimeKind.Utc),
             request.Notes,
-            stops);
+            stops,
+            request.SeatCapacity,
+            request.PricePerSeat);
 
         await tripRepository.AddAsync(trip, cancellationToken);
 

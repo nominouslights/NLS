@@ -9,4 +9,6 @@ public sealed record UpdateTripCommand(
     string? VehicleType,
     DateTime ScheduledAt,
     string? Notes,
-    IReadOnlyList<StopDto> Stops) : ICommand;
+    IReadOnlyList<StopDto> Stops,
+    int? SeatCapacity,
+    decimal? PricePerSeat) : ICommand;

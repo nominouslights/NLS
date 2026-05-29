@@ -16,8 +16,9 @@ public sealed class TripsController(ISender sender) : BaseApiController(sender)
         [FromQuery] Guid? clientId,
         [FromQuery] Guid? driverId,
         [FromQuery] Guid? vehicleId,
+        [FromQuery] TripServiceType? serviceType,
         CancellationToken cancellationToken) =>
-        Ok(await Sender.Send(new GetTripsQuery(status, clientId, driverId, vehicleId), cancellationToken));
+        Ok(await Sender.Send(new GetTripsQuery(status, clientId, driverId, vehicleId, serviceType), cancellationToken));
 
     [HttpGet]
     [Route("api/trips/{id:guid}")]
@@ -32,13 +33,16 @@ public sealed class TripsController(ISender sender) : BaseApiController(sender)
         CancellationToken cancellationToken)
     {
         var result = await Sender.Send(new CreateTripCommand(
+            request.ServiceType,
             request.ClientId,
             request.VehicleId,
             request.PurchaseOrderNumber,
             request.VehicleType,
             request.ScheduledAt,
             request.Notes,
-            request.Stops.Select(s => new StopDto(s.SequenceOrder, s.LocationName, s.Address)).ToList()),
+            request.Stops.Select(s => new StopDto(s.SequenceOrder, s.LocationName, s.Address)).ToList(),
+            request.SeatCapacity,
+            request.PricePerSeat),
             cancellationToken);
         return Ok(result);
     }
@@ -58,7 +62,9 @@ public sealed class TripsController(ISender sender) : BaseApiController(sender)
             request.VehicleType,
             request.ScheduledAt,
             request.Notes,
-            request.Stops.Select(s => new StopDto(s.SequenceOrder, s.LocationName, s.Address)).ToList()),
+            request.Stops.Select(s => new StopDto(s.SequenceOrder, s.LocationName, s.Address)).ToList(),
+            request.SeatCapacity,
+            request.PricePerSeat),
             cancellationToken);
         return NoContent();
     }
@@ -142,16 +148,67 @@ public sealed class TripsController(ISender sender) : BaseApiController(sender)
             cancellationToken);
         return NoContent();
     }
+
+    [HttpGet]
+    [Route("api/trips/{id:guid}/passengers")]
+    public async Task<IActionResult> GetPassengers(Guid id, CancellationToken cancellationToken) =>
+        Ok(await Sender.Send(new GetPassengersQuery(id), cancellationToken));
+
+    [Authorize(Policy = "AdminOnly")]
+    [HttpPost]
+    [Route("api/trips/{id:guid}/passengers")]
+    public async Task<IActionResult> AddPassenger(
+        Guid id,
+        [FromBody] AddPassengerRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(new AddPassengerCommand(
+            id,
+            request.Name,
+            request.ContactInfo,
+            request.SeatNumber,
+            request.PaymentStatus),
+            cancellationToken);
+        return Ok(result);
+    }
+
+    [Authorize(Policy = "AdminOnly")]
+    [HttpDelete]
+    [Route("api/trips/{id:guid}/passengers/{passengerId:guid}")]
+    public async Task<IActionResult> RemovePassenger(
+        Guid id,
+        Guid passengerId,
+        CancellationToken cancellationToken)
+    {
+        await Sender.Send(new RemovePassengerCommand(id, passengerId), cancellationToken);
+        return NoContent();
+    }
+
+    [Authorize(Policy = "AdminOnly")]
+    [HttpPut]
+    [Route("api/trips/{id:guid}/passengers/{passengerId:guid}/payment-status")]
+    public async Task<IActionResult> UpdatePassengerPaymentStatus(
+        Guid id,
+        Guid passengerId,
+        [FromBody] UpdatePassengerPaymentStatusRequest request,
+        CancellationToken cancellationToken)
+    {
+        await Sender.Send(new UpdatePassengerPaymentStatusCommand(id, passengerId, request.PaymentStatus), cancellationToken);
+        return NoContent();
+    }
 }
 
 public sealed record CreateTripRequest(
-    Guid ClientId,
+    TripServiceType ServiceType,
+    Guid? ClientId,
     Guid VehicleId,
     string? PurchaseOrderNumber,
     string? VehicleType,
     DateTime ScheduledAt,
     string? Notes,
-    IReadOnlyList<StopRequestDto> Stops);
+    IReadOnlyList<StopRequestDto> Stops,
+    int? SeatCapacity,
+    decimal? PricePerSeat);
 
 public sealed record UpdateTripRequest(
     Guid VehicleId,
@@ -159,7 +216,9 @@ public sealed record UpdateTripRequest(
     string? VehicleType,
     DateTime ScheduledAt,
     string? Notes,
-    IReadOnlyList<StopRequestDto> Stops);
+    IReadOnlyList<StopRequestDto> Stops,
+    int? SeatCapacity,
+    decimal? PricePerSeat);
 
 public sealed record StopRequestDto(int SequenceOrder, string LocationName, string? Address);
 
@@ -182,3 +241,11 @@ public sealed record SubmitPostReportRequest(
     string? IncidentDescription,
     string? AdditionalNotes,
     bool IsReadyToInvoice);
+
+public sealed record AddPassengerRequest(
+    string Name,
+    string? ContactInfo,
+    int? SeatNumber,
+    PassengerPaymentStatus PaymentStatus);
+
+public sealed record UpdatePassengerPaymentStatusRequest(PassengerPaymentStatus PaymentStatus);

@@ -15,8 +15,12 @@ public sealed class TripConfiguration : IEntityTypeConfiguration<Trip>
         builder.HasKey(t => t.Id);
         builder.Property(t => t.Id).ValueGeneratedNever();
 
-        builder.Property(t => t.ClientId).IsRequired();
+        builder.Property(t => t.ClientId);
         builder.Property(t => t.DriverId);
+        builder.Property(t => t.ServiceType)
+            .HasConversion<string>()
+            .HasMaxLength(20)
+            .IsRequired();
         builder.Property(t => t.PurchaseOrderNumber).HasMaxLength(100);
         builder.Property(t => t.VehicleType).HasMaxLength(100);
         builder.Property(t => t.ScheduledAt).IsRequired();
@@ -26,14 +30,22 @@ public sealed class TripConfiguration : IEntityTypeConfiguration<Trip>
             .IsRequired();
         builder.Property(t => t.Notes).HasMaxLength(2000);
         builder.Property(t => t.CreatedAt).IsRequired();
+        builder.Property(t => t.SeatCapacity);
+        builder.Property(t => t.PricePerSeat).HasPrecision(10, 2);
 
         builder.HasIndex(t => t.Status);
         builder.HasIndex(t => t.ClientId);
+        builder.HasIndex(t => t.ServiceType);
         builder.HasIndex(t => new { t.DriverId, t.Status });
 
         builder.HasMany(t => t.Stops)
             .WithOne()
             .HasForeignKey(s => s.TripId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasMany(t => t.Passengers)
+            .WithOne()
+            .HasForeignKey(p => p.TripId)
             .OnDelete(DeleteBehavior.Cascade);
 
         builder.HasOne(t => t.PreInspection)

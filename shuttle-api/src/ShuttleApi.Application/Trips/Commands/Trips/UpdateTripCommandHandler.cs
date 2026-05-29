@@ -20,7 +20,9 @@ internal sealed class UpdateTripCommandHandler(ITripRepository tripRepository)
             request.VehicleType,
             DateTime.SpecifyKind(request.ScheduledAt, DateTimeKind.Utc),
             request.Notes,
-            stops);
+            stops,
+            request.SeatCapacity,
+            request.PricePerSeat);
 
         await tripRepository.UpdateAsync(trip, cancellationToken);
     }

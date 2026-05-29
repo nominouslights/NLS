@@ -61,6 +61,10 @@ import '../../features/trips/domain/usecases/dispatch_trip_usecase.dart';
 import '../../features/trips/domain/usecases/update_trip_status_usecase.dart';
 import '../../features/trips/domain/usecases/submit_pre_inspection_usecase.dart';
 import '../../features/trips/domain/usecases/submit_post_report_usecase.dart';
+import '../../features/trips/domain/usecases/get_passengers_usecase.dart';
+import '../../features/trips/domain/usecases/add_passenger_usecase.dart';
+import '../../features/trips/domain/usecases/remove_passenger_usecase.dart';
+import '../../features/trips/domain/usecases/update_passenger_payment_status_usecase.dart';
 import '../../features/vehicles/data/datasources/vehicle_remote_datasource.dart';
 import '../../features/vehicles/data/repositories/vehicle_repository_impl.dart';
 import '../../features/vehicles/domain/repositories/i_vehicle_repository.dart';
@@ -183,6 +187,10 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton(() => UpdateTripStatusUseCase(sl()));
   sl.registerLazySingleton(() => SubmitPreInspectionUseCase(sl()));
   sl.registerLazySingleton(() => SubmitPostReportUseCase(sl()));
+  sl.registerLazySingleton(() => GetPassengersUseCase(sl()));
+  sl.registerLazySingleton(() => AddPassengerUseCase(sl()));
+  sl.registerLazySingleton(() => RemovePassengerUseCase(sl()));
+  sl.registerLazySingleton(() => UpdatePassengerPaymentStatusUseCase(sl()));
 
   // Vehicles feature
   sl.registerLazySingleton<IVehicleRemoteDataSource>(

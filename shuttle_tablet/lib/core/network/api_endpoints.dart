@@ -11,6 +11,10 @@ class ApiEndpoints {
   static String tripStatus(String id) => '/trips/$id/status';
   static String tripPreInspection(String id) => '/trips/$id/pre-inspection';
   static String tripPostReport(String id) => '/trips/$id/post-report';
+  static String tripPassengers(String id) => '/trips/$id/passengers';
+  static String tripPassengerById(String id, String pid) => '/trips/$id/passengers/$pid';
+  static String tripPassengerPaymentStatus(String id, String pid) =>
+      '/trips/$id/passengers/$pid/payment-status';
 
   static const String drivers = '/drivers';
   static String driverById(String id) => '/drivers/$id';
