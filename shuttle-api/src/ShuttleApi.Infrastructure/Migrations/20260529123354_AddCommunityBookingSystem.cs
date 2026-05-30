@@ -85,7 +85,7 @@ namespace ShuttleApi.Infrastructure.Migrations
                 table: "trip_passengers",
                 column: "BookingReference",
                 unique: true,
-                filter: "booking_reference IS NOT NULL");
+                filter: "\"BookingReference\" IS NOT NULL");
 
             migrationBuilder.CreateIndex(
                 name: "IX_community_calendar_blocks_BlockedDate",
