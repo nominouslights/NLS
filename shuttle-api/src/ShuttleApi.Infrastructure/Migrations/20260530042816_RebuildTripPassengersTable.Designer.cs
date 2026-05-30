@@ -12,8 +12,8 @@ using ShuttleApi.Infrastructure.Persistence;
 namespace ShuttleApi.Infrastructure.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260530041511_MigratePassengerPaymentStatusValues")]
-    partial class MigratePassengerPaymentStatusValues
+    [Migration("20260530042816_RebuildTripPassengersTable")]
+    partial class RebuildTripPassengersTable
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
