@@ -12,8 +12,8 @@ using ShuttleApi.Infrastructure.Persistence;
 namespace ShuttleApi.Infrastructure.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260526021759_AddTripTables")]
-    partial class AddTripTables
+    [Migration("20260530135535_InitialCreate")]
+    partial class InitialCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -229,6 +229,30 @@ namespace ShuttleApi.Infrastructure.Migrations
                     b.ToTable("document_file_blobs", (string)null);
                 });
 
+            modelBuilder.Entity("ShuttleApi.Domain.CommunityCalendar.CommunityCalendarBlock", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("BlockedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateOnly>("BlockedDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BlockedDate")
+                        .IsUnique();
+
+                    b.ToTable("community_calendar_blocks", (string)null);
+                });
+
             modelBuilder.Entity("ShuttleApi.Domain.Drivers.Driver", b =>
                 {
                     b.Property<Guid>("Id")
@@ -402,12 +426,42 @@ namespace ShuttleApi.Infrastructure.Migrations
                     b.ToTable("driver_roster_entries", (string)null);
                 });
 
+            modelBuilder.Entity("ShuttleApi.Domain.Locations.SavedLocation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Address")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<double?>("Latitude")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("Longitude")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name");
+
+                    b.ToTable("saved_locations", (string)null);
+                });
+
             modelBuilder.Entity("ShuttleApi.Domain.Trips.Trip", b =>
                 {
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid>("ClientId")
+                    b.Property<Guid?>("ClientId")
                         .HasColumnType("uuid");
 
                     b.Property<DateTime>("CreatedAt")
@@ -420,6 +474,10 @@ namespace ShuttleApi.Infrastructure.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
 
+                    b.Property<decimal?>("PricePerSeat")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
+
                     b.Property<string>("PurchaseOrderNumber")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
@@ -427,10 +485,21 @@ namespace ShuttleApi.Infrastructure.Migrations
                     b.Property<DateTime>("ScheduledAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int?>("SeatCapacity")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ServiceType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
+
+                    b.Property<Guid?>("VehicleId")
+                        .HasColumnType("uuid");
 
                     b.Property<string>("VehicleType")
                         .HasMaxLength(100)
@@ -439,6 +508,8 @@ namespace ShuttleApi.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ClientId");
+
+                    b.HasIndex("ServiceType");
 
                     b.HasIndex("Status");
 
@@ -472,6 +543,67 @@ namespace ShuttleApi.Infrastructure.Migrations
                     b.HasIndex("PreInspectionId");
 
                     b.ToTable("trip_inspection_items", (string)null);
+                });
+
+            modelBuilder.Entity("ShuttleApi.Domain.Trips.TripPassenger", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("BookedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("BookingReference")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<string>("ContactInfo")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("CutoffDeadline")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Direction")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<decimal?>("Fare")
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("PaymentStatus")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Phone")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<int?>("SeatNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("TripId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BookingReference")
+                        .IsUnique()
+                        .HasFilter("\"BookingReference\" IS NOT NULL");
+
+                    b.HasIndex("TripId");
+
+                    b.ToTable("trip_passengers", (string)null);
                 });
 
             modelBuilder.Entity("ShuttleApi.Domain.Trips.TripPostReport", b =>
@@ -616,6 +748,262 @@ namespace ShuttleApi.Infrastructure.Migrations
                     b.ToTable("users", (string)null);
                 });
 
+            modelBuilder.Entity("ShuttleApi.Domain.Vehicles.Vehicle", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("AcquisitionDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Color")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("CurrentOdometerKm")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("InsuranceExpiry")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("InsurancePolicyNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("InsuranceProvider")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("LicensePlate")
+                        .IsRequired()
+                        .HasMaxLength(15)
+                        .HasColumnType("character varying(15)");
+
+                    b.Property<string>("Make")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<int>("PassengerCapacity")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Province")
+                        .IsRequired()
+                        .HasMaxLength(2)
+                        .HasColumnType("character varying(2)");
+
+                    b.Property<DateTime?>("RegistrationExpiry")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("StatusNote")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("UnitCode")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("VIN")
+                        .IsRequired()
+                        .HasMaxLength(17)
+                        .HasColumnType("character varying(17)");
+
+                    b.Property<string>("VehicleType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LicensePlate")
+                        .IsUnique();
+
+                    b.HasIndex("UnitCode")
+                        .IsUnique();
+
+                    b.HasIndex("VIN")
+                        .IsUnique();
+
+                    b.ToTable("vehicles", (string)null);
+                });
+
+            modelBuilder.Entity("ShuttleApi.Domain.Vehicles.VehicleInspectionRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CertificateNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("CorrectiveActionNotes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<decimal?>("CostDollars")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DeficienciesNotes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime?>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("InspectedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("InspectionFacility")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("InspectionResult")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<string>("InspectionType")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<string>("InspectorName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid>("VehicleId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("VehicleId");
+
+                    b.HasIndex("VehicleId", "InspectionType");
+
+                    b.ToTable("vehicle_inspection_records", (string)null);
+                });
+
+            modelBuilder.Entity("ShuttleApi.Domain.Vehicles.VehicleServiceRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal?>("ActualCostDollars")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<DateTime?>("CompletedDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<decimal?>("EstimatedCostDollars")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<string>("FluidType")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<bool>("IsPlanned")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsWarrantyWork")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("NextServiceDueDateUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("NextServiceDueOdometerKm")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("OdometerAtService")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("PartsNotes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("Priority")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime?>("ScheduledDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ServiceCategory")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<string>("ServiceProvider")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("ServiceStatus")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime?>("StartedDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TechnicianName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid>("VehicleId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("VehicleId");
+
+                    b.HasIndex("VehicleId", "ServiceCategory");
+
+                    b.ToTable("vehicle_service_records", (string)null);
+                });
+
             modelBuilder.Entity("ShuttleApi.Infrastructure.Persistence.AuditEvent", b =>
                 {
                     b.Property<Guid>("Id")
@@ -701,6 +1089,15 @@ namespace ShuttleApi.Infrastructure.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("ShuttleApi.Domain.Trips.TripPassenger", b =>
+                {
+                    b.HasOne("ShuttleApi.Domain.Trips.Trip", null)
+                        .WithMany("Passengers")
+                        .HasForeignKey("TripId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("ShuttleApi.Domain.Trips.TripPostReport", b =>
                 {
                     b.HasOne("ShuttleApi.Domain.Trips.Trip", null)
@@ -728,6 +1125,24 @@ namespace ShuttleApi.Infrastructure.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("ShuttleApi.Domain.Vehicles.VehicleInspectionRecord", b =>
+                {
+                    b.HasOne("ShuttleApi.Domain.Vehicles.Vehicle", null)
+                        .WithMany("InspectionRecords")
+                        .HasForeignKey("VehicleId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ShuttleApi.Domain.Vehicles.VehicleServiceRecord", b =>
+                {
+                    b.HasOne("ShuttleApi.Domain.Vehicles.Vehicle", null)
+                        .WithMany("ServiceRecords")
+                        .HasForeignKey("VehicleId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("ShuttleApi.Domain.Clients.Contract", b =>
                 {
                     b.Navigation("RateLines");
@@ -742,6 +1157,8 @@ namespace ShuttleApi.Infrastructure.Migrations
 
             modelBuilder.Entity("ShuttleApi.Domain.Trips.Trip", b =>
                 {
+                    b.Navigation("Passengers");
+
                     b.Navigation("PostReport");
 
                     b.Navigation("PreInspection");
@@ -752,6 +1169,13 @@ namespace ShuttleApi.Infrastructure.Migrations
             modelBuilder.Entity("ShuttleApi.Domain.Trips.TripPreInspection", b =>
                 {
                     b.Navigation("Items");
+                });
+
+            modelBuilder.Entity("ShuttleApi.Domain.Vehicles.Vehicle", b =>
+                {
+                    b.Navigation("InspectionRecords");
+
+                    b.Navigation("ServiceRecords");
                 });
 #pragma warning restore 612, 618
         }
