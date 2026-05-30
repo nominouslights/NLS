@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using ShuttleApi.Application.Common.Interfaces;
 using ShuttleApi.Application.Common.Mediator;
 using ShuttleApi.Domain.Common;
@@ -100,9 +101,12 @@ internal sealed class BookSeatCommandHandler(
             ? "Thompson → Lynn Lake"
             : "Lynn Lake → Thompson";
 
+        var tzId = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? "Central Standard Time"
+            : "America/Chicago";
         var cutoffFormatted = TimeZoneInfo.ConvertTimeFromUtc(
             cutoff,
-            TimeZoneInfo.FindSystemTimeZoneById("Central Standard Time"));
+            TimeZoneInfo.FindSystemTimeZoneById(tzId));
 
         var smsBody = $"Booking confirmed: {reference}. Route: {route} on {request.Date:MMM d, yyyy}. " +
                       $"Fare: ${fare}. Your seat is TENTATIVE. Payment due Thursday {cutoffFormatted:MMM d} at 6:00 PM CT. " +

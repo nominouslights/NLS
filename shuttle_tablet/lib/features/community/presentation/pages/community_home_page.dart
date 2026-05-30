@@ -62,8 +62,8 @@ class _CommunityHomePageState extends ConsumerState<CommunityHomePage> {
         ),
       ),
       body: isAdmin
-          ? IndexedStack(index: _adminIndex, children: _adminPages)
-          : IndexedStack(index: _bookingIndex, children: _bookingPages),
+          ? _adminPages[_adminIndex]
+          : _bookingPages[_bookingIndex],
       bottomNavigationBar: isAdmin
           ? NavigationBar(
               selectedIndex: _adminIndex,
