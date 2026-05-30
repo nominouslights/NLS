@@ -10,24 +10,26 @@ namespace ShuttleApi.Infrastructure.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            // Create new table with the complete, correct schema
+            // Create staging table using _new suffix on constraints to avoid name
+            // collision with the still-live trip_passengers table (PostgreSQL
+            // constraint/index names are schema-scoped, not table-scoped).
             migrationBuilder.Sql(@"
                 CREATE TABLE trip_passengers_new (
-                    ""Id""              uuid                        NOT NULL,
-                    ""TripId""          uuid                        NOT NULL,
-                    ""Name""            character varying(200)      NOT NULL,
-                    ""ContactInfo""     character varying(200),
-                    ""SeatNumber""      integer,
-                    ""PaymentStatus""   character varying(20)       NOT NULL,
+                    ""Id""               uuid                        NOT NULL,
+                    ""TripId""           uuid                        NOT NULL,
+                    ""Name""             character varying(200)      NOT NULL,
+                    ""ContactInfo""      character varying(200),
+                    ""SeatNumber""       integer,
+                    ""PaymentStatus""    character varying(20)       NOT NULL,
                     ""BookingReference"" character varying(10),
-                    ""Phone""           character varying(20),
-                    ""Email""           character varying(200),
-                    ""Direction""       character varying(20),
-                    ""CutoffDeadline""  timestamp with time zone,
-                    ""BookedAt""        timestamp with time zone    NOT NULL DEFAULT NOW(),
-                    ""Fare""            numeric(10,2),
-                    CONSTRAINT ""PK_trip_passengers"" PRIMARY KEY (""Id""),
-                    CONSTRAINT ""FK_trip_passengers_trips_TripId"" FOREIGN KEY (""TripId"")
+                    ""Phone""            character varying(20),
+                    ""Email""            character varying(200),
+                    ""Direction""        character varying(20),
+                    ""CutoffDeadline""   timestamp with time zone,
+                    ""BookedAt""         timestamp with time zone    NOT NULL DEFAULT NOW(),
+                    ""Fare""             numeric(10,2),
+                    CONSTRAINT ""PK_trip_passengers_new"" PRIMARY KEY (""Id""),
+                    CONSTRAINT ""FK_trip_passengers_new_trips_TripId"" FOREIGN KEY (""TripId"")
                         REFERENCES trips(""Id"") ON DELETE CASCADE
                 );
             ");
@@ -52,10 +54,14 @@ namespace ShuttleApi.Infrastructure.Migrations
                 FROM trip_passengers;
             ");
 
-            // Drop old table and promote the new one
+            // Drop old table, promote the staging table, then rename constraints
+            // to the names EF Core expects (must happen after the DROP so the
+            // original PK/FK names are free in the schema).
             migrationBuilder.Sql(@"
                 DROP TABLE trip_passengers;
                 ALTER TABLE trip_passengers_new RENAME TO trip_passengers;
+                ALTER TABLE trip_passengers RENAME CONSTRAINT ""PK_trip_passengers_new"" TO ""PK_trip_passengers"";
+                ALTER TABLE trip_passengers RENAME CONSTRAINT ""FK_trip_passengers_new_trips_TripId"" TO ""FK_trip_passengers_trips_TripId"";
             ");
 
             // Recreate indexes on the renamed table
