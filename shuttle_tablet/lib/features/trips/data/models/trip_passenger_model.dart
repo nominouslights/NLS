@@ -8,6 +8,13 @@ class TripPassengerModel extends TripPassenger {
     super.contactInfo,
     super.seatNumber,
     required super.paymentStatus,
+    super.bookingReference,
+    super.phone,
+    super.email,
+    super.direction,
+    super.cutoffDeadline,
+    super.bookedAt,
+    super.fare,
   });
 
   factory TripPassengerModel.fromJson(Map<String, dynamic> json) {
@@ -18,16 +25,32 @@ class TripPassengerModel extends TripPassenger {
       contactInfo: json['contactInfo'] as String?,
       seatNumber: json['seatNumber'] as int?,
       paymentStatus: _parsePaymentStatus(json['paymentStatus'] as String? ?? ''),
+      bookingReference: json['bookingReference'] as String?,
+      phone: json['phone'] as String?,
+      email: json['email'] as String?,
+      direction: json['direction'] as String?,
+      cutoffDeadline: json['cutoffDeadline'] != null
+          ? DateTime.tryParse(json['cutoffDeadline'] as String)
+          : null,
+      bookedAt: json['bookedAt'] != null
+          ? DateTime.tryParse(json['bookedAt'] as String)
+          : null,
+      fare: (json['fare'] as num?)?.toDouble(),
     );
   }
 
   static PassengerPaymentStatus _parsePaymentStatus(String value) {
     const map = {
-      'Pending': PassengerPaymentStatus.pending,
-      'Paid': PassengerPaymentStatus.paid,
+      'Tentative': PassengerPaymentStatus.tentative,
+      'AwaitingPayment': PassengerPaymentStatus.awaitingPayment,
+      'Confirmed': PassengerPaymentStatus.confirmed,
+      'Released': PassengerPaymentStatus.released,
       'Cancelled': PassengerPaymentStatus.cancelled,
+      // Backward compat
+      'Pending': PassengerPaymentStatus.tentative,
+      'Paid': PassengerPaymentStatus.confirmed,
     };
-    return map[value] ?? PassengerPaymentStatus.pending;
+    return map[value] ?? PassengerPaymentStatus.tentative;
   }
 
   Map<String, dynamic> toJson() => {
@@ -37,13 +60,24 @@ class TripPassengerModel extends TripPassenger {
         'contactInfo': contactInfo,
         'seatNumber': seatNumber,
         'paymentStatus': _paymentStatusToString(paymentStatus),
+        'bookingReference': bookingReference,
+        'phone': phone,
+        'email': email,
+        'direction': direction,
+        'cutoffDeadline': cutoffDeadline?.toIso8601String(),
+        'bookedAt': bookedAt?.toIso8601String(),
+        'fare': fare,
       };
 
   static String _paymentStatusToString(PassengerPaymentStatus status) {
     const map = {
-      PassengerPaymentStatus.pending: 'Pending',
-      PassengerPaymentStatus.paid: 'Paid',
+      PassengerPaymentStatus.tentative: 'Tentative',
+      PassengerPaymentStatus.awaitingPayment: 'AwaitingPayment',
+      PassengerPaymentStatus.confirmed: 'Confirmed',
+      PassengerPaymentStatus.released: 'Released',
       PassengerPaymentStatus.cancelled: 'Cancelled',
+      PassengerPaymentStatus.pending: 'Tentative',
+      PassengerPaymentStatus.paid: 'Confirmed',
     };
     return map[status]!;
   }

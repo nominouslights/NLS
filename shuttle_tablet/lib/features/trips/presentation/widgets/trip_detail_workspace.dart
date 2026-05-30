@@ -10,6 +10,8 @@ import '../../domain/repositories/i_trip_repository.dart';
 import '../../domain/usecases/add_passenger_usecase.dart';
 import '../../domain/usecases/remove_passenger_usecase.dart';
 import '../../domain/usecases/update_passenger_payment_status_usecase.dart';
+import '../../../drivers/domain/entities/driver.dart';
+import '../../../drivers/presentation/providers/drivers_provider.dart';
 import '../providers/trip_form_provider.dart';
 import '../providers/trips_provider.dart';
 import 'trip_status_badge.dart';
@@ -57,6 +59,15 @@ class _TripDetail extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final drivers = ref.watch(driversProvider).valueOrNull ?? [];
+    final driverName = trip.driverId == null
+        ? 'Unassigned'
+        : drivers
+                .cast<Driver?>()
+                .firstWhere((d) => d?.id == trip.driverId, orElse: () => null)
+                ?.fullName ??
+            'Unassigned';
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
@@ -110,7 +121,7 @@ class _TripDetail extends ConsumerWidget {
           _SectionHeader('Details', Icons.info_outline_rounded),
           const SizedBox(height: 12),
           _DetailRow('Vehicle Type', trip.vehicleType ?? '—'),
-          _DetailRow('Driver', trip.driverId ?? 'Unassigned'),
+          _DetailRow('Driver', driverName),
           _DetailRow('Created',
               DateFormat('MMM d, yyyy').format(trip.createdAt.toLocal())),
           if (trip.notes != null) _DetailRow('Notes', trip.notes!),
@@ -433,9 +444,11 @@ class _PassengerManifest extends StatelessWidget {
   }
 
   Future<void> _showAddPassengerDialog(BuildContext context) async {
-    await showDialog(
+    await showModalBottomSheet(
       context: context,
-      builder: (ctx) => _AddPassengerDialog(tripId: trip.id, onRefresh: onRefresh),
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _AddPassengerSheet(tripId: trip.id, onRefresh: onRefresh),
     );
   }
 }
@@ -591,11 +604,11 @@ class _PassengerCard extends StatelessWidget {
     PassengerPaymentStatus newStatus;
     switch (action) {
       case 'paid':
-        newStatus = PassengerPaymentStatus.paid;
+        newStatus = PassengerPaymentStatus.confirmed;
       case 'cancel':
         newStatus = PassengerPaymentStatus.cancelled;
       default:
-        newStatus = PassengerPaymentStatus.pending;
+        newStatus = PassengerPaymentStatus.tentative;
     }
 
     final result = await sl<UpdatePassengerPaymentStatusUseCase>()(
@@ -620,14 +633,13 @@ class _PassengerCard extends StatelessWidget {
   }
 
   Color _statusColor(PassengerPaymentStatus status) {
-    switch (status) {
-      case PassengerPaymentStatus.paid:
-        return const Color(0xFF059669);
-      case PassengerPaymentStatus.cancelled:
-        return AppColors.danger;
-      case PassengerPaymentStatus.pending:
-        return const Color(0xFFD97706);
-    }
+    return switch (status) {
+      PassengerPaymentStatus.confirmed || PassengerPaymentStatus.paid =>
+        const Color(0xFF059669),
+      PassengerPaymentStatus.cancelled || PassengerPaymentStatus.released =>
+        AppColors.danger,
+      _ => const Color(0xFFD97706),
+    };
   }
 }
 
@@ -638,9 +650,16 @@ class _StatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (label, color) = switch (status) {
-      PassengerPaymentStatus.paid => ('Paid', const Color(0xFF059669)),
-      PassengerPaymentStatus.pending => ('Pending', const Color(0xFFD97706)),
-      PassengerPaymentStatus.cancelled => ('Cancelled', AppColors.danger),
+      PassengerPaymentStatus.confirmed || PassengerPaymentStatus.paid =>
+        ('Confirmed', const Color(0xFF059669)),
+      PassengerPaymentStatus.tentative || PassengerPaymentStatus.pending =>
+        ('Tentative', const Color(0xFFD97706)),
+      PassengerPaymentStatus.awaitingPayment =>
+        ('Awaiting Payment', const Color(0xFFEA580C)),
+      PassengerPaymentStatus.released =>
+        ('Released', AppColors.danger),
+      PassengerPaymentStatus.cancelled =>
+        ('Cancelled', AppColors.danger),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -661,22 +680,22 @@ class _StatusBadge extends StatelessWidget {
   }
 }
 
-class _AddPassengerDialog extends StatefulWidget {
+class _AddPassengerSheet extends StatefulWidget {
   final String tripId;
   final VoidCallback onRefresh;
 
-  const _AddPassengerDialog({required this.tripId, required this.onRefresh});
+  const _AddPassengerSheet({required this.tripId, required this.onRefresh});
 
   @override
-  State<_AddPassengerDialog> createState() => _AddPassengerDialogState();
+  State<_AddPassengerSheet> createState() => _AddPassengerSheetState();
 }
 
-class _AddPassengerDialogState extends State<_AddPassengerDialog> {
+class _AddPassengerSheetState extends State<_AddPassengerSheet> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _contactController = TextEditingController();
   final _seatController = TextEditingController();
-  PassengerPaymentStatus _paymentStatus = PassengerPaymentStatus.pending;
+  PassengerPaymentStatus _paymentStatus = PassengerPaymentStatus.tentative;
   bool _saving = false;
 
   @override
@@ -717,49 +736,100 @@ class _AddPassengerDialogState extends State<_AddPassengerDialog> {
     );
   }
 
+  Widget _label(String text) => Text(
+        text,
+        style: const TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          color: Color(0xFF374151),
+        ),
+      );
+
+  InputDecoration _inputDec(String hint) => InputDecoration(
+        hintText: hint,
+        isDense: true,
+        filled: true,
+        fillColor: const Color(0xFFF9FAFB),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+        ),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      );
+
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Add Passenger'),
-      content: SizedBox(
-        width: 380,
-        child: Form(
-          key: _formKey,
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.sizeOf(context).height * 0.88,
+      ),
+      child: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(24, 20, 24, 24 + bottomInset),
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE5E7EB),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Add Passenger',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF111827),
+                ),
+              ),
+              const SizedBox(height: 20),
+              _label('Passenger Name *'),
+              const SizedBox(height: 6),
               TextFormField(
                 controller: _nameController,
                 textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(
-                  labelText: 'Passenger Name *',
-                  isDense: true,
-                ),
+                decoration: _inputDec('e.g. Jane Smith'),
                 validator: (v) =>
                     (v == null || v.trim().isEmpty) ? 'Name is required' : null,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 14),
+              _label('Contact Info'),
+              const SizedBox(height: 6),
               TextFormField(
                 controller: _contactController,
                 keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(
-                  labelText: 'Contact Info',
-                  hintText: 'Phone or email',
-                  isDense: true,
-                ),
+                decoration: _inputDec('Phone or email'),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 14),
+              _label('Seat Number'),
+              const SizedBox(height: 6),
               TextFormField(
                 controller: _seatController,
                 keyboardType: TextInputType.number,
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: const InputDecoration(
-                  labelText: 'Seat Number',
-                  hintText: 'Auto-assigned if blank',
-                  isDense: true,
-                ),
+                decoration: _inputDec('Auto-assigned if blank'),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 14),
+              _label('Payment Status'),
+              const SizedBox(height: 8),
               SegmentedButton<PassengerPaymentStatus>(
                 selected: {_paymentStatus},
                 onSelectionChanged: (s) =>
@@ -771,12 +841,40 @@ class _AddPassengerDialogState extends State<_AddPassengerDialog> {
                 ),
                 segments: const [
                   ButtonSegment(
-                    value: PassengerPaymentStatus.pending,
-                    label: Text('Pending'),
+                    value: PassengerPaymentStatus.tentative,
+                    label: Text('Tentative'),
                   ),
                   ButtonSegment(
-                    value: PassengerPaymentStatus.paid,
-                    label: Text('Paid'),
+                    value: PassengerPaymentStatus.confirmed,
+                    label: Text('Confirmed'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed:
+                          _saving ? null : () => Navigator.of(context).pop(),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _saving ? null : _confirm,
+                      style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF0F766E)),
+                      child: _saving
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Text('Add Passenger'),
+                    ),
                   ),
                 ],
               ),
@@ -784,24 +882,6 @@ class _AddPassengerDialogState extends State<_AddPassengerDialog> {
           ),
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: _saving ? null : () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: _saving ? null : _confirm,
-          style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
-          child: _saving
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white),
-                )
-              : const Text('Add Passenger'),
-        ),
-      ],
     );
   }
 }

@@ -90,6 +90,14 @@ import '../../features/locations/domain/usecases/get_locations_usecase.dart';
 import '../../features/locations/domain/usecases/create_location_usecase.dart';
 import '../../features/locations/domain/usecases/update_location_usecase.dart';
 import '../../features/locations/domain/usecases/delete_location_usecase.dart';
+import '../../features/community/data/datasources/community_remote_datasource.dart';
+import '../../features/community/data/repositories/community_repository_impl.dart';
+import '../../features/community/domain/repositories/i_community_repository.dart';
+import '../../features/community/domain/usecases/get_calendar_usecase.dart';
+import '../../features/community/domain/usecases/book_seat_usecase.dart';
+import '../../features/community/domain/usecases/get_booking_usecase.dart';
+import '../../features/community/domain/usecases/block_day_usecase.dart';
+import '../../features/community/domain/usecases/unblock_day_usecase.dart';
 
 final sl = GetIt.instance;
 
@@ -226,4 +234,17 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton(() => CreateLocationUseCase(sl()));
   sl.registerLazySingleton(() => UpdateLocationUseCase(sl()));
   sl.registerLazySingleton(() => DeleteLocationUseCase(sl()));
+
+  // Community feature
+  sl.registerLazySingleton<ICommunityRemoteDataSource>(
+    () => CommunityRemoteDataSource(sl()),
+  );
+  sl.registerLazySingleton<ICommunityRepository>(
+    () => CommunityRepositoryImpl(sl()),
+  );
+  sl.registerLazySingleton(() => GetCalendarUseCase(sl()));
+  sl.registerLazySingleton(() => BookSeatUseCase(sl()));
+  sl.registerLazySingleton(() => GetBookingUseCase(sl()));
+  sl.registerLazySingleton(() => BlockDayUseCase(sl()));
+  sl.registerLazySingleton(() => UnblockDayUseCase(sl()));
 }

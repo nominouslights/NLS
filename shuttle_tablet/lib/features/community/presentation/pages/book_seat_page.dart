@@ -22,7 +22,7 @@ class _BookSeatPageState extends ConsumerState<BookSeatPage> {
   final _nameController = TextEditingController();
   final _contactController = TextEditingController();
   final _seatController = TextEditingController();
-  PassengerPaymentStatus _paymentStatus = PassengerPaymentStatus.pending;
+  PassengerPaymentStatus _paymentStatus = PassengerPaymentStatus.tentative;
   bool _saving = false;
 
   @override
@@ -176,14 +176,14 @@ class _BookSeatPageState extends ConsumerState<BookSeatPage> {
                       ),
                       segments: const [
                         ButtonSegment(
-                          value: PassengerPaymentStatus.pending,
+                          value: PassengerPaymentStatus.tentative,
                           icon: Icon(Icons.pending_outlined, size: 16),
-                          label: Text('Pending'),
+                          label: Text('Tentative'),
                         ),
                         ButtonSegment(
-                          value: PassengerPaymentStatus.paid,
+                          value: PassengerPaymentStatus.confirmed,
                           icon: Icon(Icons.check_circle_outline_rounded, size: 16),
-                          label: Text('Paid'),
+                          label: Text('Confirmed'),
                         ),
                       ],
                     ),

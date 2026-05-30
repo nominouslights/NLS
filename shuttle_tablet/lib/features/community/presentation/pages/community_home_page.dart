@@ -6,10 +6,11 @@ import '../../../../core/routing/route_names.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../drivers/presentation/pages/drivers_list_page.dart';
 import '../../../locations/presentation/pages/saved_locations_page.dart';
-import '../../../trips/domain/entities/trip.dart';
-import '../../../trips/presentation/pages/trips_page.dart';
-import 'available_runs_page.dart';
+import 'admin_bookings_list_page.dart';
+import 'admin_calendar_page.dart';
+import 'booking_flow_page.dart';
 import 'community_dashboard_page.dart';
+import 'my_bookings_page.dart';
 
 class CommunityHomePage extends ConsumerStatefulWidget {
   const CommunityHomePage({super.key});
@@ -22,16 +23,26 @@ class _CommunityHomePageState extends ConsumerState<CommunityHomePage> {
   int _adminIndex = 0;
   int _bookingIndex = 0;
 
-  static const _adminPages = [
-    CommunityDashboardPage(),
-    TripsPage(serviceType: TripServiceType.community),
-    DriversListPage(),
-    SavedLocationsPage(),
-  ];
+  late final List<Widget> _adminPages;
+
+  @override
+  void initState() {
+    super.initState();
+    _adminPages = [
+      CommunityDashboardPage(
+        onCalendarTap: () => setState(() => _adminIndex = 1),
+        onBookingsTap: () => setState(() => _adminIndex = 2),
+      ),
+      const AdminCalendarPage(),
+      const AdminBookingsListPage(),
+      const DriversListPage(),
+      const SavedLocationsPage(),
+    ];
+  }
 
   static const _bookingPages = [
-    AvailableRunsPage(),
-    SizedBox.shrink(),
+    BookingFlowPage(),
+    MyBookingsPage(),
   ];
 
   @override
@@ -52,10 +63,7 @@ class _CommunityHomePageState extends ConsumerState<CommunityHomePage> {
       ),
       body: isAdmin
           ? IndexedStack(index: _adminIndex, children: _adminPages)
-          : IndexedStack(
-              index: _bookingIndex,
-              children: _bookingPages,
-            ),
+          : IndexedStack(index: _bookingIndex, children: _bookingPages),
       bottomNavigationBar: isAdmin
           ? NavigationBar(
               selectedIndex: _adminIndex,
@@ -73,10 +81,16 @@ class _CommunityHomePageState extends ConsumerState<CommunityHomePage> {
                   label: 'Dashboard',
                 ),
                 NavigationDestination(
-                  icon: Icon(Icons.route_outlined),
+                  icon: Icon(Icons.calendar_month_outlined),
+                  selectedIcon: Icon(Icons.calendar_month_rounded,
+                      color: AppColors.primary),
+                  label: 'Calendar',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.list_alt_outlined),
                   selectedIcon:
-                      Icon(Icons.route_rounded, color: AppColors.primary),
-                  label: 'Runs',
+                      Icon(Icons.list_alt_rounded, color: AppColors.primary),
+                  label: 'Bookings',
                 ),
                 NavigationDestination(
                   icon: Icon(Icons.people_outline_rounded),
@@ -105,13 +119,13 @@ class _CommunityHomePageState extends ConsumerState<CommunityHomePage> {
                   icon: Icon(Icons.directions_bus_outlined),
                   selectedIcon: Icon(Icons.directions_bus_rounded,
                       color: AppColors.primary),
-                  label: 'Available Runs',
+                  label: 'Book a Seat',
                 ),
                 NavigationDestination(
-                  icon: Icon(Icons.edit_note_outlined),
-                  selectedIcon:
-                      Icon(Icons.edit_note_rounded, color: AppColors.primary),
-                  label: 'Booking',
+                  icon: Icon(Icons.confirmation_number_outlined),
+                  selectedIcon: Icon(Icons.confirmation_number_rounded,
+                      color: AppColors.primary),
+                  label: 'My Bookings',
                 ),
               ],
             ),
@@ -154,7 +168,8 @@ class _CommunityAppBar extends StatelessWidget {
                 ),
               ],
             ),
-            child: const Icon(Icons.people_rounded, color: Colors.white, size: 18),
+            child: const Icon(Icons.people_rounded,
+                color: Colors.white, size: 18),
           ),
           const SizedBox(width: 10),
           const Column(
@@ -196,7 +211,8 @@ class _CommunityAppBar extends StatelessWidget {
                 segments: const [
                   ButtonSegment(
                     value: CommunityViewMode.admin,
-                    icon: Icon(Icons.admin_panel_settings_outlined, size: 16),
+                    icon:
+                        Icon(Icons.admin_panel_settings_outlined, size: 16),
                     label: Text('Admin'),
                   ),
                   ButtonSegment(

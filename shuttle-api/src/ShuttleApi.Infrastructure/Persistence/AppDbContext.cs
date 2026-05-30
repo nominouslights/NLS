@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using ShuttleApi.Application.Common.Interfaces;
 using ShuttleApi.Domain.Clients;
 using ShuttleApi.Domain.Common;
+using ShuttleApi.Domain.CommunityCalendar;
 using ShuttleApi.Domain.Drivers;
 using ShuttleApi.Domain.Locations;
 using ShuttleApi.Domain.Trips;
@@ -33,6 +34,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<VehicleServiceRecord> VehicleServiceRecords => Set<VehicleServiceRecord>();
     public DbSet<VehicleInspectionRecord> VehicleInspectionRecords => Set<VehicleInspectionRecord>();
     public DbSet<SavedLocation> SavedLocations => Set<SavedLocation>();
+    public DbSet<CommunityCalendarBlock> CommunityCalendarBlocks => Set<CommunityCalendarBlock>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -4,7 +4,7 @@ namespace ShuttleApi.Application.Trips;
 
 public sealed record UpdateTripCommand(
     Guid TripId,
-    Guid VehicleId,
+    Guid? VehicleId,
     string? PurchaseOrderNumber,
     string? VehicleType,
     DateTime ScheduledAt,

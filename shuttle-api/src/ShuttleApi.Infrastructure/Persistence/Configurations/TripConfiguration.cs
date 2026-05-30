@@ -16,6 +16,7 @@ public sealed class TripConfiguration : IEntityTypeConfiguration<Trip>
         builder.Property(t => t.Id).ValueGeneratedNever();
 
         builder.Property(t => t.ClientId);
+        builder.Property(t => t.VehicleId); // nullable — community trips start without a vehicle
         builder.Property(t => t.DriverId);
         builder.Property(t => t.ServiceType)
             .HasConversion<string>()

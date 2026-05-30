@@ -19,7 +19,14 @@ internal sealed class GetPassengersQueryHandler(ITripRepository tripRepository)
                 p.Name,
                 p.ContactInfo,
                 p.SeatNumber,
-                p.PaymentStatus.ToString()))
+                p.PaymentStatus.ToString(),
+                p.BookingReference,
+                p.Phone,
+                p.Email,
+                p.Direction,
+                p.CutoffDeadline,
+                p.BookedAt,
+                p.Fare))
             .ToList();
     }
 }

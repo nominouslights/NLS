@@ -6,7 +6,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 using ShuttleApi.Application.Common.Interfaces;
 using ShuttleApi.Application.Services;
+using ShuttleApi.Domain.CommunityCalendar;
 using ShuttleApi.Infrastructure.Auth;
+using ShuttleApi.Infrastructure.Notifications;
 using ShuttleApi.Infrastructure.Persistence;
 using ShuttleApi.Domain.Clients;
 using ShuttleApi.Domain.Drivers;
@@ -14,6 +16,7 @@ using ShuttleApi.Domain.Locations;
 using ShuttleApi.Domain.Trips;
 using ShuttleApi.Domain.Users;
 using ShuttleApi.Domain.Vehicles;
+using ShuttleApi.Infrastructure.BackgroundJobs;
 using ShuttleApi.Infrastructure.Persistence.Repositories;
 using ShuttleApi.Infrastructure.Services;
 
@@ -39,8 +42,11 @@ public static class DependencyInjection
         services.AddScoped<ITripRepository, TripRepository>();
         services.AddScoped<IVehicleRepository, VehicleRepository>();
         services.AddScoped<ISavedLocationRepository, SavedLocationRepository>();
+        services.AddScoped<ICommunityCalendarBlockRepository, CommunityCalendarBlockRepository>();
         services.AddScoped<IFileStorageService, DatabaseFileStorageService>();
         services.AddScoped<IPasswordHasher, BcryptPasswordHasher>();
+        services.AddScoped<INotificationService, NoOpNotificationService>();
+        services.AddHostedService<CutoffProcessorHostedService>();
 
         var jwtSettings = configuration.GetSection(JwtSettings.SectionName).Get<JwtSettings>()!;
 

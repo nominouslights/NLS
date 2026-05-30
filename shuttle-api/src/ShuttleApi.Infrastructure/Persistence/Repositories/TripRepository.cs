@@ -47,6 +47,41 @@ internal sealed class TripRepository(AppDbContext dbContext) : ITripRepository
             .Include(t => t.PostReport)
             .FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
 
+    public async Task<IReadOnlyList<Trip>> GetByDateRangeAsync(
+        DateOnly from, DateOnly to, TripServiceType serviceType,
+        CancellationToken cancellationToken = default) =>
+        await dbContext.Trips
+            .Include(t => t.Stops)
+            .Include(t => t.Passengers)
+            .Where(t => t.ServiceType == serviceType
+                && DateOnly.FromDateTime(t.ScheduledAt) >= from
+                && DateOnly.FromDateTime(t.ScheduledAt) <= to)
+            .OrderBy(t => t.ScheduledAt)
+            .ToListAsync(cancellationToken);
+
+    public async Task<Trip?> FindCommunityTripAsync(
+        DateOnly date, string direction, CancellationToken cancellationToken = default) =>
+        await dbContext.Trips
+            .Include(t => t.Stops)
+            .Include(t => t.Passengers)
+            .Where(t => t.ServiceType == TripServiceType.Community
+                && DateOnly.FromDateTime(t.ScheduledAt) == date
+                && t.Passengers.Any(p => p.Direction == direction)
+                    || (t.ServiceType == TripServiceType.Community
+                        && DateOnly.FromDateTime(t.ScheduledAt) == date
+                        && !t.Passengers.Any()))
+            .FirstOrDefaultAsync(cancellationToken);
+
+    public async Task<bool> BookingReferenceExistsAsync(
+        string reference, CancellationToken cancellationToken = default) =>
+        await dbContext.TripPassengers
+            .AnyAsync(p => p.BookingReference == reference, cancellationToken);
+
+    public async Task<TripPassenger?> GetPassengerByReferenceAsync(
+        string reference, CancellationToken cancellationToken = default) =>
+        await dbContext.TripPassengers
+            .FirstOrDefaultAsync(p => p.BookingReference == reference, cancellationToken);
+
     public async Task AddAsync(Trip trip, CancellationToken cancellationToken = default)
     {
         await dbContext.Trips.AddAsync(trip, cancellationToken);

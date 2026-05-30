@@ -9,7 +9,7 @@ public sealed class Trip : AggregateRoot<Guid>
     private readonly List<TripPassenger> _passengers = [];
 
     public Guid? ClientId { get; private set; }
-    public Guid VehicleId { get; private set; }
+    public Guid? VehicleId { get; private set; }
     public Guid? DriverId { get; private set; }
     public TripServiceType ServiceType { get; private set; }
     public string? PurchaseOrderNumber { get; private set; }
@@ -31,7 +31,7 @@ public sealed class Trip : AggregateRoot<Guid>
     public static Trip Create(
         TripServiceType serviceType,
         Guid? clientId,
-        Guid vehicleId,
+        Guid? vehicleId,
         string? purchaseOrderNumber,
         string? vehicleType,
         DateTime scheduledAt,
@@ -40,6 +40,12 @@ public sealed class Trip : AggregateRoot<Guid>
         int? seatCapacity = null,
         decimal? pricePerSeat = null)
     {
+        if (serviceType == TripServiceType.Charter && clientId is null)
+            throw new InvalidOperationException("ClientId is required for Charter trips.");
+
+        if (serviceType == TripServiceType.Charter && vehicleId is null)
+            throw new InvalidOperationException("VehicleId is required for Charter trips.");
+
         var trip = new Trip
         {
             Id = Guid.NewGuid(),
@@ -64,8 +70,14 @@ public sealed class Trip : AggregateRoot<Guid>
         return trip;
     }
 
+    public void AssignVehicle(Guid vehicleId)
+    {
+        Guard.Against(ServiceType != TripServiceType.Community, "AssignVehicle is only for community trips.");
+        VehicleId = vehicleId;
+    }
+
     public void Update(
-        Guid vehicleId,
+        Guid? vehicleId,
         string? purchaseOrderNumber,
         string? vehicleType,
         DateTime scheduledAt,
@@ -76,7 +88,7 @@ public sealed class Trip : AggregateRoot<Guid>
     {
         Guard.Against(Status != TripStatus.Scheduled, "Only scheduled trips can be updated.");
 
-        VehicleId = vehicleId;
+        if (vehicleId.HasValue) VehicleId = vehicleId.Value;
         PurchaseOrderNumber = purchaseOrderNumber;
         VehicleType = vehicleType;
         ScheduledAt = scheduledAt;
@@ -93,11 +105,20 @@ public sealed class Trip : AggregateRoot<Guid>
         string name,
         string? contactInfo,
         int? seatNumber,
-        PassengerPaymentStatus paymentStatus)
+        PassengerPaymentStatus paymentStatus,
+        string? bookingReference = null,
+        string? phone = null,
+        string? email = null,
+        string? direction = null,
+        DateTime? cutoffDeadline = null,
+        DateTime? bookedAt = null,
+        decimal? fare = null)
     {
         Guard.Against(ServiceType != TripServiceType.Community, "Passengers can only be added to Community trips.");
 
-        var passenger = TripPassenger.Create(Id, name, contactInfo, seatNumber, paymentStatus);
+        var passenger = TripPassenger.Create(
+            Id, name, contactInfo, seatNumber, paymentStatus,
+            bookingReference, phone, email, direction, cutoffDeadline, bookedAt, fare);
         _passengers.Add(passenger);
         return passenger;
     }
@@ -130,6 +151,7 @@ public sealed class Trip : AggregateRoot<Guid>
     public void Dispatch()
     {
         Guard.Against(DriverId is null, "A driver must be assigned before dispatching.");
+        Guard.Against(VehicleId is null, "A vehicle must be assigned before dispatching.");
         Guard.Against(Status != TripStatus.Scheduled, "Only scheduled trips can be dispatched.");
 
         Status = TripStatus.Dispatched;

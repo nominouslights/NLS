@@ -8,7 +8,7 @@ class TripModel extends Trip {
   const TripModel({
     required super.id,
     super.clientId,
-    required super.vehicleId,
+    super.vehicleId,
     super.driverId,
     super.serviceType = TripServiceType.charter,
     super.purchaseOrderNumber,
@@ -34,7 +34,7 @@ class TripModel extends Trip {
     return TripModel(
       id: json['id'] as String,
       clientId: json['clientId'] as String?,
-      vehicleId: json['vehicleId'] as String,
+      vehicleId: json['vehicleId'] as String?,
       driverId: json['driverId'] as String?,
       serviceType: _parseServiceType(json['serviceType'] as String? ?? ''),
       purchaseOrderNumber: json['purchaseOrderNumber'] as String?,

@@ -22,6 +22,17 @@ public sealed class TripPassengerConfiguration : IEntityTypeConfiguration<TripPa
             .HasMaxLength(20)
             .IsRequired();
 
+        builder.Property(p => p.BookingReference).HasMaxLength(10);
+        builder.Property(p => p.Phone).HasMaxLength(20);
+        builder.Property(p => p.Email).HasMaxLength(200);
+        builder.Property(p => p.Direction).HasMaxLength(20);
+        builder.Property(p => p.CutoffDeadline);
+        builder.Property(p => p.BookedAt).IsRequired();
+        builder.Property(p => p.Fare).HasColumnType("numeric(10,2)");
+
         builder.HasIndex(p => p.TripId);
+        builder.HasIndex(p => p.BookingReference)
+            .IsUnique()
+            .HasFilter("booking_reference IS NOT NULL");
     }
 }

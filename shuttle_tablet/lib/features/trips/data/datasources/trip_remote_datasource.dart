@@ -364,9 +364,13 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
 
   static String _paymentStatusToString(PassengerPaymentStatus status) {
     const map = {
-      PassengerPaymentStatus.pending: 'Pending',
-      PassengerPaymentStatus.paid: 'Paid',
+      PassengerPaymentStatus.tentative: 'Tentative',
+      PassengerPaymentStatus.awaitingPayment: 'AwaitingPayment',
+      PassengerPaymentStatus.confirmed: 'Confirmed',
+      PassengerPaymentStatus.released: 'Released',
       PassengerPaymentStatus.cancelled: 'Cancelled',
+      PassengerPaymentStatus.pending: 'Tentative',
+      PassengerPaymentStatus.paid: 'Confirmed',
     };
     return map[status]!;
   }
