@@ -1,6 +1,15 @@
 import 'package:equatable/equatable.dart';
 
-enum PassengerPaymentStatus { pending, paid, cancelled }
+enum PassengerPaymentStatus {
+  tentative,
+  awaitingPayment,
+  confirmed,
+  released,
+  cancelled,
+  // Legacy API values mapped to tentative/confirmed on parse
+  pending,
+  paid,
+}
 
 class TripPassenger extends Equatable {
   final String id;
@@ -9,6 +18,13 @@ class TripPassenger extends Equatable {
   final String? contactInfo;
   final int? seatNumber;
   final PassengerPaymentStatus paymentStatus;
+  final String? bookingReference;
+  final String? phone;
+  final String? email;
+  final String? direction;
+  final DateTime? cutoffDeadline;
+  final DateTime? bookedAt;
+  final double? fare;
 
   const TripPassenger({
     required this.id,
@@ -17,9 +33,29 @@ class TripPassenger extends Equatable {
     this.contactInfo,
     this.seatNumber,
     required this.paymentStatus,
+    this.bookingReference,
+    this.phone,
+    this.email,
+    this.direction,
+    this.cutoffDeadline,
+    this.bookedAt,
+    this.fare,
   });
 
   @override
-  List<Object?> get props =>
-      [id, tripId, name, contactInfo, seatNumber, paymentStatus];
+  List<Object?> get props => [
+        id,
+        tripId,
+        name,
+        contactInfo,
+        seatNumber,
+        paymentStatus,
+        bookingReference,
+        phone,
+        email,
+        direction,
+        cutoffDeadline,
+        bookedAt,
+        fare,
+      ];
 }

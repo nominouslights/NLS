@@ -201,7 +201,7 @@ public sealed class TripsController(ISender sender) : BaseApiController(sender)
 public sealed record CreateTripRequest(
     TripServiceType ServiceType,
     Guid? ClientId,
-    Guid VehicleId,
+    Guid? VehicleId,
     string? PurchaseOrderNumber,
     string? VehicleType,
     DateTime ScheduledAt,
@@ -211,7 +211,7 @@ public sealed record CreateTripRequest(
     decimal? PricePerSeat);
 
 public sealed record UpdateTripRequest(
-    Guid VehicleId,
+    Guid? VehicleId,
     string? PurchaseOrderNumber,
     string? VehicleType,
     DateTime ScheduledAt,

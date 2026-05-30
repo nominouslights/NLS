@@ -43,6 +43,13 @@ class ApiEndpoints {
   static String vehicleInspectionRecordById(String vId, String rId) =>
       '/vehicles/$vId/inspection-records/$rId';
 
+  static const String communityCalendar = '/community/calendar';
+  static const String communityAdminCalendar = '/community/calendar/admin';
+  static const String communityBookings = '/community/bookings';
+  static String bookingByRef(String r) => '/community/bookings/$r';
+  static const String communityBlocks = '/community/calendar/blocks';
+  static String blockByDate(String d) => '/community/calendar/blocks/$d';
+
   static const String auditEvents = '/audit-events';
 
   static const String clients = '/clients';

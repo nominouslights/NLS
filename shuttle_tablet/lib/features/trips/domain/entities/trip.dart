@@ -11,7 +11,7 @@ enum TripServiceType { charter, community }
 class Trip extends Equatable {
   final String id;
   final String? clientId;
-  final String vehicleId;
+  final String? vehicleId;
   final String? driverId;
   final TripServiceType serviceType;
   final String? purchaseOrderNumber;
@@ -30,7 +30,7 @@ class Trip extends Equatable {
   const Trip({
     required this.id,
     this.clientId,
-    required this.vehicleId,
+    this.vehicleId,
     this.driverId,
     this.serviceType = TripServiceType.charter,
     this.purchaseOrderNumber,

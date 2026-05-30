@@ -13,7 +13,7 @@ public sealed record GetTripsQuery(
 public sealed record TripListItemResult(
     Guid Id,
     Guid? ClientId,
-    Guid VehicleId,
+    Guid? VehicleId,
     Guid? DriverId,
     string ServiceType,
     string? PurchaseOrderNumber,

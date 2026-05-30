@@ -226,6 +226,30 @@ namespace ShuttleApi.Infrastructure.Migrations
                     b.ToTable("document_file_blobs", (string)null);
                 });
 
+            modelBuilder.Entity("ShuttleApi.Domain.CommunityCalendar.CommunityCalendarBlock", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("BlockedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateOnly>("BlockedDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BlockedDate")
+                        .IsUnique();
+
+                    b.ToTable("community_calendar_blocks", (string)null);
+                });
+
             modelBuilder.Entity("ShuttleApi.Domain.Drivers.Driver", b =>
                 {
                     b.Property<Guid>("Id")
@@ -471,7 +495,7 @@ namespace ShuttleApi.Infrastructure.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
-                    b.Property<Guid>("VehicleId")
+                    b.Property<Guid?>("VehicleId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("VehicleType")
@@ -523,9 +547,30 @@ namespace ShuttleApi.Infrastructure.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTime>("BookedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("BookingReference")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
                     b.Property<string>("ContactInfo")
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("CutoffDeadline")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Direction")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<decimal?>("Fare")
+                        .HasColumnType("numeric(10,2)");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -537,6 +582,10 @@ namespace ShuttleApi.Infrastructure.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
+                    b.Property<string>("Phone")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
                     b.Property<int?>("SeatNumber")
                         .HasColumnType("integer");
 
@@ -544,6 +593,10 @@ namespace ShuttleApi.Infrastructure.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("BookingReference")
+                        .IsUnique()
+                        .HasFilter("booking_reference IS NOT NULL");
 
                     b.HasIndex("TripId");
 

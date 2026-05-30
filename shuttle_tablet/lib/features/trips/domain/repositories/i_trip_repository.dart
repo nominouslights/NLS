@@ -77,7 +77,7 @@ class InspectionItemParams {
 class CreateTripParams {
   final TripServiceType serviceType;
   final String? clientId;
-  final String vehicleId;
+  final String? vehicleId;
   final String? purchaseOrderNumber;
   final String? vehicleType;
   final DateTime scheduledAt;
@@ -89,7 +89,7 @@ class CreateTripParams {
   const CreateTripParams({
     this.serviceType = TripServiceType.charter,
     this.clientId,
-    required this.vehicleId,
+    this.vehicleId,
     this.purchaseOrderNumber,
     this.vehicleType,
     required this.scheduledAt,
@@ -101,7 +101,7 @@ class CreateTripParams {
 }
 
 class UpdateTripParams {
-  final String vehicleId;
+  final String? vehicleId;
   final String? purchaseOrderNumber;
   final String? vehicleType;
   final DateTime scheduledAt;
@@ -111,7 +111,7 @@ class UpdateTripParams {
   final double? pricePerSeat;
 
   const UpdateTripParams({
-    required this.vehicleId,
+    this.vehicleId,
     this.purchaseOrderNumber,
     this.vehicleType,
     required this.scheduledAt,
@@ -134,7 +134,7 @@ class AddPassengerParams {
     required this.name,
     this.contactInfo,
     this.seatNumber,
-    this.paymentStatus = PassengerPaymentStatus.pending,
+    this.paymentStatus = PassengerPaymentStatus.tentative,
   });
 }
 

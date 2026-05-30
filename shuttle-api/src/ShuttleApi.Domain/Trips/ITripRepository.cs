@@ -12,6 +12,19 @@ public interface ITripRepository
 
     Task<Trip?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<Trip>> GetByDateRangeAsync(
+        DateOnly from, DateOnly to, TripServiceType serviceType,
+        CancellationToken cancellationToken = default);
+
+    Task<Trip?> FindCommunityTripAsync(
+        DateOnly date, string direction, CancellationToken cancellationToken = default);
+
+    Task<bool> BookingReferenceExistsAsync(
+        string reference, CancellationToken cancellationToken = default);
+
+    Task<TripPassenger?> GetPassengerByReferenceAsync(
+        string reference, CancellationToken cancellationToken = default);
+
     Task AddAsync(Trip trip, CancellationToken cancellationToken = default);
 
     Task UpdateAsync(Trip trip, CancellationToken cancellationToken = default);
