@@ -33,6 +33,6 @@ public sealed class TripPassengerConfiguration : IEntityTypeConfiguration<TripPa
         builder.HasIndex(p => p.TripId);
         builder.HasIndex(p => p.BookingReference)
             .IsUnique()
-            .HasFilter("booking_reference IS NOT NULL");
+            .HasFilter("\"BookingReference\" IS NOT NULL");
     }
 }

@@ -21,7 +21,26 @@ class CommunityDashboardPage extends ConsumerWidget {
 
     return tripsAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => Center(child: Text('$e')),
+      error: (e, _) => Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline_rounded,
+                size: 40, color: Color(0xFF9CA3AF)),
+            const SizedBox(height: 12),
+            Text(
+              'Could not load dashboard data.',
+              style: TextStyle(
+                  fontSize: 14, color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: () => ref.invalidate(tripsProvider),
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      ),
       data: (trips) {
         final communityTrips = trips
             .where((t) => t.serviceType == TripServiceType.community)
