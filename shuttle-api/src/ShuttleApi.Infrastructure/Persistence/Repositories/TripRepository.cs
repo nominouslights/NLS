@@ -60,17 +60,21 @@ internal sealed class TripRepository(AppDbContext dbContext) : ITripRepository
             .ToListAsync(cancellationToken);
 
     public async Task<Trip?> FindCommunityTripAsync(
-        DateOnly date, string direction, CancellationToken cancellationToken = default) =>
-        await dbContext.Trips
+        DateOnly date, string direction, string destination, CancellationToken cancellationToken = default)
+    {
+        var destinationStopName = destination.Equals("LeafRapids", StringComparison.OrdinalIgnoreCase)
+            ? "Leaf Rapids"
+            : "Lynn Lake";
+
+        return await dbContext.Trips
             .Include(t => t.Stops)
             .Include(t => t.Passengers)
             .Where(t => t.ServiceType == TripServiceType.Community
                 && DateOnly.FromDateTime(t.ScheduledAt) == date
-                && t.Passengers.Any(p => p.Direction == direction)
-                    || (t.ServiceType == TripServiceType.Community
-                        && DateOnly.FromDateTime(t.ScheduledAt) == date
-                        && !t.Passengers.Any()))
+                && t.Stops.Any(s => s.LocationName == destinationStopName)
+                && (t.Passengers.Any(p => p.Direction == direction) || !t.Passengers.Any()))
             .FirstOrDefaultAsync(cancellationToken);
+    }
 
     public async Task<bool> BookingReferenceExistsAsync(
         string reference, CancellationToken cancellationToken = default) =>

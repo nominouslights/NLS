@@ -20,6 +20,7 @@ class BookSeatParams {
   final DateTime date;
   final String direction;
   final String tripType;
+  final String destination;
   final String fullName;
   final String phone;
   final String email;
@@ -28,6 +29,7 @@ class BookSeatParams {
     required this.date,
     required this.direction,
     required this.tripType,
+    required this.destination,
     required this.fullName,
     required this.phone,
     required this.email,

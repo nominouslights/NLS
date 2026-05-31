@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
-using ShuttleApi.Application.Common.Interfaces;
 using ShuttleApi.Application.Common.Mediator;
+using ShuttleApi.Application.Services;
 using ShuttleApi.Domain.Common;
 using ShuttleApi.Domain.Trips;
 
@@ -12,41 +12,53 @@ internal sealed class BookSeatCommandHandler(
     : IRequestHandler<BookSeatCommand, BookSeatResult>
 {
     private const int MinimumThreshold = 2;
-    private const decimal OneWayFare = 90m;
-    private const decimal ReturnFare = 170m;
 
-    // Fixed route stops: direction "Outbound" = Thompson → Lynn Lake
-    private static readonly (int Order, string Name, string? Address)[] OutboundStops =
-    [
-        (1, "Thompson", "Thompson, MB"),
-        (2, "Lynn Lake", "Lynn Lake, MB")
-    ];
+    // Fares per destination (one-way)
+    private static decimal GetOneWayFare(string destination) =>
+        destination.Equals("LeafRapids", StringComparison.OrdinalIgnoreCase) ? 100m : 120m;
 
-    private static readonly (int Order, string Name, string? Address)[] InboundStops =
-    [
-        (1, "Lynn Lake", "Lynn Lake, MB"),
-        (2, "Thompson", "Thompson, MB")
-    ];
+    private static decimal GetReturnFare(string destination) =>
+        GetOneWayFare(destination) * 2;
+
+    // Stops by destination + direction
+    private static readonly Dictionary<string, (int Order, string Name, string? Address)[]> OutboundStops = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["LynnLake"] = [(1, "Thompson", "Thompson, MB"), (2, "Lynn Lake", "Lynn Lake, MB")],
+        ["LeafRapids"] = [(1, "Thompson", "Thompson, MB"), (2, "Leaf Rapids", "Leaf Rapids, MB")],
+    };
+
+    private static readonly Dictionary<string, (int Order, string Name, string? Address)[]> InboundStops = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["LynnLake"] = [(1, "Lynn Lake", "Lynn Lake, MB"), (2, "Thompson", "Thompson, MB")],
+        ["LeafRapids"] = [(1, "Leaf Rapids", "Leaf Rapids, MB"), (2, "Thompson", "Thompson, MB")],
+    };
+
+    private static string DestinationDisplayName(string destination) =>
+        destination.Equals("LeafRapids", StringComparison.OrdinalIgnoreCase) ? "Leaf Rapids" : "Lynn Lake";
 
     public async Task<BookSeatResult> Handle(BookSeatCommand request, CancellationToken cancellationToken)
     {
+        var oneWayFare = GetOneWayFare(request.Destination);
         var fare = request.TripType.Equals("Return", StringComparison.OrdinalIgnoreCase)
-            ? ReturnFare
-            : OneWayFare;
+            ? GetReturnFare(request.Destination)
+            : oneWayFare;
+
+        var destinationName = DestinationDisplayName(request.Destination);
 
         var departureTime = new DateTime(
             request.Date.Year, request.Date.Month, request.Date.Day,
             8, 0, 0, DateTimeKind.Utc);
 
-        // Find or create community trip for this date+direction
         var trip = await tripRepository.FindCommunityTripAsync(
-            request.Date, request.Direction, cancellationToken);
+            request.Date, request.Direction, request.Destination, cancellationToken);
 
         if (trip is null)
         {
-            var stops = request.Direction.Equals("Outbound", StringComparison.OrdinalIgnoreCase)
+            var stopsDict = request.Direction.Equals("Outbound", StringComparison.OrdinalIgnoreCase)
                 ? OutboundStops
                 : InboundStops;
+
+            var stops = stopsDict.TryGetValue(request.Destination, out var s) ? s : stopsDict["LynnLake"];
 
             trip = Trip.Create(
                 TripServiceType.Community,
@@ -58,16 +70,14 @@ internal sealed class BookSeatCommandHandler(
                 notes: null,
                 stops: stops,
                 seatCapacity: 14,
-                pricePerSeat: OneWayFare);
+                pricePerSeat: oneWayFare);
 
             await tripRepository.AddAsync(trip, cancellationToken);
 
-            // Reload with tracking context
             trip = await tripRepository.GetByIdAsync(trip.Id, cancellationToken)
                 ?? throw new InvalidOperationException("Failed to retrieve newly created trip.");
         }
 
-        // Validate capacity
         var activeCount = trip.Passengers.Count(p =>
             p.PaymentStatus is PassengerPaymentStatus.Tentative
                 or PassengerPaymentStatus.AwaitingPayment
@@ -76,10 +86,7 @@ internal sealed class BookSeatCommandHandler(
         if (trip.SeatCapacity.HasValue && activeCount >= trip.SeatCapacity.Value)
             throw new InvalidOperationException("No seats available on this departure.");
 
-        // Generate unique booking reference NL-XXXX
         var reference = await GenerateUniqueReferenceAsync(cancellationToken);
-
-        // Compute Thursday 6PM CT cutoff for the departure week
         var cutoff = ComputeThursdayCutoff(request.Date);
 
         var passenger = trip.AddPassenger(
@@ -98,8 +105,8 @@ internal sealed class BookSeatCommandHandler(
         await tripRepository.UpdateAsync(trip, cancellationToken);
 
         var route = request.Direction.Equals("Outbound", StringComparison.OrdinalIgnoreCase)
-            ? "Thompson → Lynn Lake"
-            : "Lynn Lake → Thompson";
+            ? $"Thompson → {destinationName}"
+            : $"{destinationName} → Thompson";
 
         var tzId = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
             ? "Central Standard Time"
@@ -147,12 +154,10 @@ internal sealed class BookSeatCommandHandler(
 
     private static DateTime ComputeThursdayCutoff(DateOnly departureDate)
     {
-        // Find the Thursday at or before the departure date
         var date = departureDate;
         while (date.DayOfWeek != DayOfWeek.Thursday)
             date = date.AddDays(-1);
 
-        // Thursday 6:00 PM CST (UTC-6) = Thursday 24:00 UTC = Friday 00:00 UTC
         var friday = date.AddDays(1);
         return new DateTime(friday.Year, friday.Month, friday.Day, 0, 0, 0, DateTimeKind.Utc);
     }

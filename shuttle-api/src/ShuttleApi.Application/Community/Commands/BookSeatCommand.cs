@@ -6,6 +6,7 @@ public sealed record BookSeatCommand(
     DateOnly Date,
     string Direction,
     string TripType,
+    string Destination,
     string FullName,
     string Phone,
     string Email) : ICommand<BookSeatResult>;

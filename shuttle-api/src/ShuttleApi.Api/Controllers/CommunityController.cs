@@ -28,6 +28,7 @@ public sealed class CommunityController(ISender sender) : BaseApiController(send
             request.Date,
             request.Direction,
             request.TripType,
+            request.Destination,
             request.FullName,
             request.Phone,
             request.Email),
@@ -64,6 +65,7 @@ public sealed record BookSeatRequest(
     DateOnly Date,
     string Direction,
     string TripType,
+    string Destination,
     string FullName,
     string Phone,
     string Email);
