@@ -20,5 +20,13 @@ class SecureStorageService {
 
   Future<String?> getRole() => _storage.read(key: 'user_role');
 
+  Future<void> saveMustChangePassword(bool value) =>
+      _storage.write(key: 'must_change_password', value: value.toString());
+
+  Future<bool> getMustChangePassword() async {
+    final value = await _storage.read(key: 'must_change_password');
+    return value == 'true';
+  }
+
   Future<void> clearAll() => _storage.deleteAll();
 }

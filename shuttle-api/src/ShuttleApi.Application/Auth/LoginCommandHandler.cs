@@ -28,6 +28,6 @@ internal sealed class LoginCommandHandler(
         user.SetRefreshToken(refreshToken, DateTime.UtcNow.AddDays(7));
         await userRepository.UpdateAsync(user, cancellationToken);
 
-        return new LoginResult(accessToken, refreshToken, user.Role.ToString());
+        return new LoginResult(accessToken, refreshToken, user.Role.ToString(), user.MustChangePassword);
     }
 }

@@ -24,6 +24,6 @@ internal sealed class RefreshTokenCommandHandler(
         user.SetRefreshToken(newRefreshToken, DateTime.UtcNow.AddDays(7));
         await userRepository.UpdateAsync(user, cancellationToken);
 
-        return new LoginResult(accessToken, newRefreshToken, user.Role.ToString());
+        return new LoginResult(accessToken, newRefreshToken, user.Role.ToString(), user.MustChangePassword);
     }
 }
