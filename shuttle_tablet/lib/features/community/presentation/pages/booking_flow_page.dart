@@ -134,34 +134,62 @@ class RouteSelectionStep extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final flow = ref.watch(bookingFlowProvider);
+    final dest = flow.destination;
+    final destName = dest?.displayName ?? 'destination';
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const _SectionTitle('Direction'),
+          const _SectionTitle('Destination'),
           const SizedBox(height: 12),
           _DirectionCard(
-            label: 'Thompson → Lynn Lake',
-            subtitle: 'Outbound departure',
-            icon: Icons.arrow_forward_rounded,
-            selected: flow.direction == TripDirection.outbound,
+            label: 'Lynn Lake',
+            subtitle: '\$120 one way · \$240 return',
+            icon: Icons.location_on_rounded,
+            selected: flow.destination == TripDestination.lynnLake,
             onTap: () => ref
                 .read(bookingFlowProvider.notifier)
-                .setRoute(TripDirection.outbound,
-                    flow.tripType ?? TripType.oneWay),
+                .setDestination(TripDestination.lynnLake),
           ),
           const SizedBox(height: 12),
           _DirectionCard(
-            label: 'Lynn Lake → Thompson',
+            label: 'Leaf Rapids',
+            subtitle: '\$100 one way · \$200 return',
+            icon: Icons.location_on_rounded,
+            selected: flow.destination == TripDestination.leafRapids,
+            onTap: () => ref
+                .read(bookingFlowProvider.notifier)
+                .setDestination(TripDestination.leafRapids),
+          ),
+          const SizedBox(height: 28),
+          const _SectionTitle('Direction'),
+          const SizedBox(height: 12),
+          _DirectionCard(
+            label: 'Thompson → $destName',
+            subtitle: 'Outbound departure',
+            icon: Icons.arrow_forward_rounded,
+            selected: flow.direction == TripDirection.outbound,
+            onTap: dest == null
+                ? null
+                : () => ref
+                    .read(bookingFlowProvider.notifier)
+                    .setRoute(TripDirection.outbound,
+                        flow.tripType ?? TripType.oneWay),
+          ),
+          const SizedBox(height: 12),
+          _DirectionCard(
+            label: '$destName → Thompson',
             subtitle: 'Inbound return',
             icon: Icons.arrow_back_rounded,
             selected: flow.direction == TripDirection.inbound,
-            onTap: () => ref
-                .read(bookingFlowProvider.notifier)
-                .setRoute(TripDirection.inbound,
-                    flow.tripType ?? TripType.oneWay),
+            onTap: dest == null
+                ? null
+                : () => ref
+                    .read(bookingFlowProvider.notifier)
+                    .setRoute(TripDirection.inbound,
+                        flow.tripType ?? TripType.oneWay),
           ),
           const SizedBox(height: 28),
           const _SectionTitle('Trip Type'),
@@ -171,7 +199,9 @@ class RouteSelectionStep extends ConsumerWidget {
               Expanded(
                 child: _TripTypeCard(
                   label: 'One Way',
-                  price: '\$90',
+                  price: dest != null
+                      ? '\$${dest.oneWayFare.toStringAsFixed(0)}'
+                      : '—',
                   selected: flow.tripType == TripType.oneWay ||
                       flow.tripType == null,
                   onTap: () => ref
@@ -184,7 +214,9 @@ class RouteSelectionStep extends ConsumerWidget {
               Expanded(
                 child: _TripTypeCard(
                   label: 'Return',
-                  price: '\$170',
+                  price: dest != null
+                      ? '\$${dest.returnFare.toStringAsFixed(0)}'
+                      : '—',
                   selected: flow.tripType == TripType.returnTrip,
                   onTap: () => ref
                       .read(bookingFlowProvider.notifier)
@@ -205,7 +237,9 @@ class RouteSelectionStep extends ConsumerWidget {
             width: double.infinity,
             height: 52,
             child: ElevatedButton(
-              onPressed: flow.direction != null ? onNext : null,
+              onPressed: flow.destination != null && flow.direction != null
+                  ? onNext
+                  : null,
               style: _primaryButtonStyle(),
               child: const Text('Next: Choose a Date',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
@@ -222,7 +256,7 @@ class _DirectionCard extends StatelessWidget {
   final String subtitle;
   final IconData icon;
   final bool selected;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   const _DirectionCard({
     required this.label,

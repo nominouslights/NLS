@@ -95,7 +95,7 @@ class CommunityDashboardPage extends ConsumerWidget {
               t.passengers
                   .where(
                       (p) => p.paymentStatus == PassengerPaymentStatus.confirmed)
-                  .fold<double>(0.0, (s, p) => s + (p.fare ?? 90.0)),
+                  .fold<double>(0.0, (s, p) => s + (p.fare ?? 120.0)),
         );
 
         final todayPassengers = [

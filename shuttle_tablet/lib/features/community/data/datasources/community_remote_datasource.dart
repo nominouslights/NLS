@@ -41,6 +41,7 @@ class CommunityRemoteDataSource implements ICommunityRemoteDataSource {
           'date': _formatDate(params.date),
           'direction': params.direction,
           'tripType': params.tripType,
+          'destination': params.destination,
           'fullName': params.fullName,
           'phone': params.phone,
           'email': params.email,

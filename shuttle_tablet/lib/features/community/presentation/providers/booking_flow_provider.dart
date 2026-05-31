@@ -6,6 +6,7 @@ import '../../domain/repositories/i_community_repository.dart';
 import '../../domain/usecases/book_seat_usecase.dart';
 
 class BookingFlowState {
+  final TripDestination? destination;
   final TripDirection? direction;
   final TripType? tripType;
   final CalendarDay? selectedDay;
@@ -17,6 +18,7 @@ class BookingFlowState {
   final String? error;
 
   const BookingFlowState({
+    this.destination,
     this.direction,
     this.tripType,
     this.selectedDay,
@@ -29,6 +31,7 @@ class BookingFlowState {
   });
 
   BookingFlowState copyWith({
+    TripDestination? destination,
     TripDirection? direction,
     TripType? tripType,
     CalendarDay? selectedDay,
@@ -42,6 +45,7 @@ class BookingFlowState {
     bool clearError = false,
   }) {
     return BookingFlowState(
+      destination: destination ?? this.destination,
       direction: direction ?? this.direction,
       tripType: tripType ?? this.tripType,
       selectedDay: selectedDay ?? this.selectedDay,
@@ -63,6 +67,10 @@ class BookingFlowNotifier extends Notifier<BookingFlowState> {
   @override
   BookingFlowState build() => const BookingFlowState();
 
+  void setDestination(TripDestination destination) {
+    state = state.copyWith(destination: destination);
+  }
+
   void setRoute(TripDirection direction, TripType tripType) {
     state = state.copyWith(direction: direction, tripType: tripType);
   }
@@ -78,7 +86,8 @@ class BookingFlowNotifier extends Notifier<BookingFlowState> {
 
   Future<bool> submitBooking() async {
     final s = state;
-    if (s.direction == null ||
+    if (s.destination == null ||
+        s.direction == null ||
         s.tripType == null ||
         s.selectedDay == null ||
         s.fullName == null ||
@@ -97,6 +106,7 @@ class BookingFlowNotifier extends Notifier<BookingFlowState> {
       date: date,
       direction: directionStr,
       tripType: tripTypeStr,
+      destination: s.destination!.apiValue,
       fullName: s.fullName!,
       phone: s.phone!,
       email: s.email!,

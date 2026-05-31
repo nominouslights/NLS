@@ -4,6 +4,28 @@ enum TripType { oneWay, returnTrip }
 
 enum TripDirection { outbound, inbound }
 
+enum TripDestination {
+  lynnLake,
+  leafRapids;
+
+  String get displayName => switch (this) {
+        TripDestination.lynnLake => 'Lynn Lake',
+        TripDestination.leafRapids => 'Leaf Rapids',
+      };
+
+  String get apiValue => switch (this) {
+        TripDestination.lynnLake => 'LynnLake',
+        TripDestination.leafRapids => 'LeafRapids',
+      };
+
+  double get oneWayFare => switch (this) {
+        TripDestination.lynnLake => 120.0,
+        TripDestination.leafRapids => 100.0,
+      };
+
+  double get returnFare => oneWayFare * 2;
+}
+
 class CommunityBooking extends Equatable {
   final String bookingReference;
   final String fullName;

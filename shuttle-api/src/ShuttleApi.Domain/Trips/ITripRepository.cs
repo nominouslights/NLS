@@ -17,7 +17,7 @@ public interface ITripRepository
         CancellationToken cancellationToken = default);
 
     Task<Trip?> FindCommunityTripAsync(
-        DateOnly date, string direction, CancellationToken cancellationToken = default);
+        DateOnly date, string direction, string destination, CancellationToken cancellationToken = default);
 
     Task<bool> BookingReferenceExistsAsync(
         string reference, CancellationToken cancellationToken = default);
