@@ -1,10 +1,13 @@
 using System;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using ShuttleApi.Infrastructure.Persistence;
 
 #nullable disable
 
 namespace ShuttleApi.Infrastructure.Migrations
 {
+    [DbContext(typeof(AppDbContext))]
     [Migration("20260530000001_InitialCreate")]
     public partial class InitialCreate : Migration
     {
