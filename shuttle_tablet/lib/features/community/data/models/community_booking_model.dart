@@ -17,16 +17,19 @@ class CommunityBookingModel extends CommunityBooking {
   });
 
   factory CommunityBookingModel.fromJson(Map<String, dynamic> json) {
+    final rawDate = json['departureDate'] as String?;
+    final departureDate = rawDate != null
+        ? DateTime.tryParse(rawDate) ?? DateTime.now()
+        : DateTime.now();
+
     return CommunityBookingModel(
       bookingReference: json['bookingReference'] as String,
-      fullName: json['fullName'] as String,
+      fullName: json['fullName'] as String? ?? '',
       phone: json['phone'] as String?,
       email: json['email'] as String?,
       direction: _parseDirection(json['direction'] as String?),
       tripType: _parseTripType(json['tripType'] as String? ?? ''),
-      departureDate:
-          DateTime.tryParse(json['departureDate'] as String? ?? '') ??
-              DateTime.now(),
+      departureDate: departureDate,
       route: json['route'] as String? ?? '',
       fare: (json['fare'] as num?)?.toDouble() ?? 0.0,
       status: json['status'] as String? ?? '',

@@ -16,4 +16,12 @@ public sealed record BookSeatResult(
     string BookingReference,
     DateTime CutoffDeadline,
     decimal Fare,
-    string Route);
+    string Route,
+    string FullName,
+    string? Phone,
+    string? Email,
+    string Direction,
+    string TripType,
+    DateOnly DepartureDate,
+    string Status,
+    DateTime BookedAt);
