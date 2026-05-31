@@ -5,12 +5,14 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace ShuttleApi.Infrastructure.Migrations
 {
-    /// <inheritdoc />
+    [Migration("20260530000002_AddClients")]
     public partial class AddClients : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.Sql(@"DROP TABLE IF EXISTS clients CASCADE;");
+
             migrationBuilder.CreateTable(
                 name: "clients",
                 columns: table => new

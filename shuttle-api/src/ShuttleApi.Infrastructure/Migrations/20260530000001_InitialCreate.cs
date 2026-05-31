@@ -5,12 +5,16 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace ShuttleApi.Infrastructure.Migrations
 {
-    /// <inheritdoc />
+    [Migration("20260530000001_InitialCreate")]
     public partial class InitialCreate : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            // Drop if exists to safely handle re-runs on a DB that has stale tables
+            migrationBuilder.Sql(@"DROP TABLE IF EXISTS ""DomainEventLog"" CASCADE;");
+            migrationBuilder.Sql(@"DROP TABLE IF EXISTS users CASCADE;");
+
             migrationBuilder.CreateTable(
                 name: "users",
                 columns: table => new

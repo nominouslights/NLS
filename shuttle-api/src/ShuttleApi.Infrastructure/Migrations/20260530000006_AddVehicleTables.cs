@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace ShuttleApi.Infrastructure.Migrations
 {
     /// <inheritdoc />
+    [Migration("20260530000006_AddVehicleTables")]
     public partial class AddVehicleTables : Migration
     {
         /// <inheritdoc />
