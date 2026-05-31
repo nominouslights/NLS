@@ -10,6 +10,11 @@ final userRoleProvider = FutureProvider<String?>((ref) async {
   return sl<SecureStorageService>().getRole();
 });
 
+final mustChangePasswordProvider = FutureProvider<bool>((ref) async {
+  ref.watch(authProvider);
+  return sl<SecureStorageService>().getMustChangePassword();
+});
+
 class AuthNotifier extends AsyncNotifier<String?> {
   @override
   Future<String?> build() async {
@@ -31,6 +36,7 @@ class AuthNotifier extends AsyncNotifier<String?> {
           await storage.saveAccessToken(token.accessToken);
           await storage.saveRefreshToken(token.refreshToken);
           await storage.saveRole(token.role);
+          await storage.saveMustChangePassword(token.mustChangePassword);
           state = AsyncData(token.accessToken);
         },
       );

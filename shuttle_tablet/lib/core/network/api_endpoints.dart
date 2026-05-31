@@ -3,6 +3,10 @@ class ApiEndpoints {
   static const String login = '/auth/login';
   static const String register = '/auth/register';
   static const String refresh = '/auth/refresh';
+  static const String changePassword = '/auth/change-password';
+
+  static const String setupStatus = '/setup/status';
+  static const String setupInitialize = '/setup/initialize';
 
   static const String trips = '/trips';
   static String tripById(String id) => '/trips/$id';

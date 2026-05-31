@@ -98,6 +98,12 @@ import '../../features/community/domain/usecases/book_seat_usecase.dart';
 import '../../features/community/domain/usecases/get_booking_usecase.dart';
 import '../../features/community/domain/usecases/block_day_usecase.dart';
 import '../../features/community/domain/usecases/unblock_day_usecase.dart';
+import '../../features/auth/domain/usecases/change_password_usecase.dart';
+import '../../features/setup/data/datasources/setup_remote_datasource.dart';
+import '../../features/setup/data/repositories/setup_repository_impl.dart';
+import '../../features/setup/domain/repositories/i_setup_repository.dart';
+import '../../features/setup/domain/usecases/get_setup_status_usecase.dart';
+import '../../features/setup/domain/usecases/initialize_system_usecase.dart';
 
 final sl = GetIt.instance;
 
@@ -120,6 +126,7 @@ Future<void> initDependencies() async {
   );
   sl.registerLazySingleton(() => LoginUseCase(sl()));
   sl.registerLazySingleton(() => RegisterUseCase(sl()));
+  sl.registerLazySingleton(() => ChangePasswordUseCase(sl()));
 
   // Users feature
   sl.registerLazySingleton<IUsersRemoteDataSource>(
@@ -234,6 +241,16 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton(() => CreateLocationUseCase(sl()));
   sl.registerLazySingleton(() => UpdateLocationUseCase(sl()));
   sl.registerLazySingleton(() => DeleteLocationUseCase(sl()));
+
+  // Setup feature
+  sl.registerLazySingleton<ISetupRemoteDataSource>(
+    () => SetupRemoteDataSource(sl()),
+  );
+  sl.registerLazySingleton<ISetupRepository>(
+    () => SetupRepositoryImpl(sl()),
+  );
+  sl.registerLazySingleton(() => GetSetupStatusUseCase(sl()));
+  sl.registerLazySingleton(() => InitializeSystemUseCase(sl()));
 
   // Community feature
   sl.registerLazySingleton<ICommunityRemoteDataSource>(

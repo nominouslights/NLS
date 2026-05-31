@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ShuttleApi.Application.Auth;
@@ -33,8 +34,19 @@ public sealed class AuthController(ISender sender) : BaseApiController(sender)
     [Route("api/auth/refresh")]
     public async Task<IActionResult> Refresh([FromBody] RefreshRequest request) =>
         Ok(await Sender.Send(new RefreshTokenCommand(request.RefreshToken)));
+
+    [Authorize]
+    [HttpPost]
+    [Route("api/auth/change-password")]
+    public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request, CancellationToken ct)
+    {
+        var userId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        await Sender.Send(new ChangePasswordCommand(userId, request.CurrentPassword, request.NewPassword), ct);
+        return NoContent();
+    }
 }
 
 public sealed record LoginRequest(string Email, string Password);
 public sealed record RegisterRequest(string Email, string Password, string Role = "Client");
 public sealed record RefreshRequest(string RefreshToken);
+public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);

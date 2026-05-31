@@ -23,6 +23,9 @@ internal sealed class UserRepository(AppDbContext dbContext) : IUserRepository
             .OrderBy(u => u.CreatedAt)
             .ToListAsync(cancellationToken);
 
+    public async Task<bool> AnyAdminExistsAsync(CancellationToken cancellationToken = default) =>
+        await dbContext.Users.AnyAsync(u => u.Role == UserRole.Admin, cancellationToken);
+
     public async Task AddAsync(User user, CancellationToken cancellationToken = default)
     {
         await dbContext.Users.AddAsync(user, cancellationToken);

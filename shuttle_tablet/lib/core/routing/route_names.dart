@@ -17,4 +17,6 @@ class RouteNames {
   static const String vehicles = '/vehicles';
   static const String vehicleDetail = '/vehicles/:id';
   static const String pendingUsers = '/admin/pending-users';
+  static const String setup = '/setup';
+  static const String changePassword = '/change-password';
 }

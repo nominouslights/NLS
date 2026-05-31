@@ -11,6 +11,7 @@ public sealed class User : AggregateRoot<Guid>
     public bool IsActive { get; private set; }
     public string? RefreshToken { get; private set; }
     public DateTime? RefreshTokenExpiry { get; private set; }
+    public bool MustChangePassword { get; private set; }
 
     private User() { }
 
@@ -24,12 +25,23 @@ public sealed class User : AggregateRoot<Guid>
             Role = role,
             CreatedAt = DateTime.UtcNow,
             IsActive = false,
+            MustChangePassword = false,
         };
     }
 
     public void Activate() => IsActive = true;
 
     public void Deactivate() => IsActive = false;
+
+    public void RequirePasswordChange() => MustChangePassword = true;
+
+    public void ClearPasswordChangeRequired() => MustChangePassword = false;
+
+    public void ChangePassword(string newHash)
+    {
+        PasswordHash = newHash;
+        MustChangePassword = false;
+    }
 
     public void SetRefreshToken(string token, DateTime expiry)
     {

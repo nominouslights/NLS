@@ -9,6 +9,7 @@ class AuthTokenModel extends AuthToken {
     required super.accessToken,
     required super.refreshToken,
     required super.role,
+    super.mustChangePassword = false,
   });
 
   factory AuthTokenModel.fromJson(Map<String, dynamic> json) =>

@@ -7,6 +7,7 @@ abstract interface class IAuthRemoteDataSource {
   Future<AuthTokenModel> login(String email, String password);
   Future<AuthTokenModel> refreshToken(String refreshToken);
   Future<void> register(String email, String password, String role);
+  Future<void> changePassword(String currentPassword, String newPassword);
 }
 
 class AuthRemoteDataSource implements IAuthRemoteDataSource {
@@ -62,6 +63,22 @@ class AuthRemoteDataSource implements IAuthRemoteDataSource {
       }
       throw ServerException(
         message: e.message ?? 'Registration failed',
+        statusCode: e.response?.statusCode,
+      );
+    }
+  }
+
+  @override
+  Future<void> changePassword(String currentPassword, String newPassword) async {
+    try {
+      await _dio.post(
+        ApiEndpoints.changePassword,
+        data: {'currentPassword': currentPassword, 'newPassword': newPassword},
+      );
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 401) throw const UnauthorizedException();
+      throw ServerException(
+        message: e.message ?? 'Password change failed',
         statusCode: e.response?.statusCode,
       );
     }

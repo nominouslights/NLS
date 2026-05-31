@@ -4,13 +4,15 @@ class AuthToken extends Equatable {
   final String accessToken;
   final String refreshToken;
   final String role;
+  final bool mustChangePassword;
 
   const AuthToken({
     required this.accessToken,
     required this.refreshToken,
     required this.role,
+    this.mustChangePassword = false,
   });
 
   @override
-  List<Object?> get props => [accessToken, refreshToken, role];
+  List<Object?> get props => [accessToken, refreshToken, role, mustChangePassword];
 }

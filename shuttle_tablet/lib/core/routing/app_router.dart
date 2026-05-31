@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../features/auth/presentation/pages/change_password_page.dart';
 import '../../features/auth/presentation/pages/login_page.dart';
 import '../../features/auth/presentation/pages/pending_approval_page.dart';
 import '../../features/auth/presentation/pages/register_page.dart';
@@ -9,6 +10,8 @@ import '../../features/community/presentation/pages/community_home_page.dart';
 import '../../features/drivers/presentation/pages/drivers_list_page.dart';
 import '../../features/home/presentation/pages/home_page.dart';
 import '../../features/home/presentation/pages/mode_selection_page.dart';
+import '../../features/setup/presentation/pages/setup_page.dart';
+import '../../features/setup/presentation/providers/setup_provider.dart';
 import '../../features/vehicles/presentation/pages/vehicles_list_page.dart';
 import '../../features/vehicles/presentation/pages/vehicle_detail_page.dart';
 import '../../features/trips/presentation/pages/trips_page.dart';
@@ -27,6 +30,14 @@ final routerProvider = Provider<GoRouter>((ref) {
     refreshListenable: notifier,
     redirect: notifier.redirect,
     routes: [
+      GoRoute(
+        path: RouteNames.setup,
+        builder: (_, __) => const SetupPage(),
+      ),
+      GoRoute(
+        path: RouteNames.changePassword,
+        builder: (_, __) => const ChangePasswordPage(),
+      ),
       GoRoute(
         path: RouteNames.modeSelection,
         builder: (_, __) => const ModeSelectionPage(),
@@ -120,39 +131,69 @@ class _RouterNotifier extends ChangeNotifier {
   _RouterNotifier(this._ref) {
     _ref.listen(authProvider, (_, __) => notifyListeners());
     _ref.listen(userRoleProvider, (_, __) => notifyListeners());
+    _ref.listen(setupStatusProvider, (_, __) => notifyListeners());
+    _ref.listen(mustChangePasswordProvider, (_, __) => notifyListeners());
   }
 
   String? redirect(BuildContext context, GoRouterState state) {
+    final setupAsync = _ref.read(setupStatusProvider);
     final auth = _ref.read(authProvider);
     final roleAsync = _ref.read(userRoleProvider);
+    final mustChangeAsync = _ref.read(mustChangePasswordProvider);
+
+    // Wait for setup status before making any routing decisions
+    if (setupAsync.isLoading) return null;
+
+    final location = state.matchedLocation;
+    final isSetupComplete = setupAsync.valueOrNull ?? true;
+
+    // 1. System not yet initialized — force setup screen
+    if (!isSetupComplete) {
+      return location == RouteNames.setup ? null : RouteNames.setup;
+    }
+
+    // 2. System ready but user is on the setup screen — move to login
+    if (location == RouteNames.setup) return RouteNames.login;
 
     if (auth.isLoading || roleAsync.isLoading) return null;
 
     final isAuthenticated = auth.valueOrNull != null;
     final role = roleAsync.valueOrNull;
-    final location = state.matchedLocation;
 
-    // Public routes — always accessible
-    final publicRoutes = {RouteNames.login, RouteNames.register, RouteNames.pendingApproval};
+    final publicRoutes = {
+      RouteNames.login,
+      RouteNames.register,
+      RouteNames.pendingApproval,
+    };
     final isPublic = publicRoutes.contains(location);
 
+    // 3. Not authenticated — send to login unless already on a public route
     if (!isAuthenticated) {
       return isPublic ? null : RouteNames.login;
     }
 
-    // Authenticated: redirect away from public routes
+    // 4. Authenticated — check if forced password change is required
+    if (!mustChangeAsync.isLoading) {
+      final mustChange = mustChangeAsync.valueOrNull ?? false;
+      if (mustChange && location != RouteNames.changePassword) {
+        return RouteNames.changePassword;
+      }
+      // Allow change-password page through for authenticated users
+      if (location == RouteNames.changePassword) return null;
+    }
+
+    // 5. Authenticated: redirect away from public routes
     if (isPublic) {
       return role == 'Admin' ? RouteNames.pendingUsers : RouteNames.modeSelection;
     }
 
-    // Protect admin route from non-admins
+    // 6. Protect admin route from non-admins
     if (location == RouteNames.pendingUsers && role != 'Admin') {
       return RouteNames.modeSelection;
     }
 
     return null;
   }
-
 }
 
 class _PlaceholderPage extends StatelessWidget {

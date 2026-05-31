@@ -6,4 +6,5 @@ abstract interface class IAuthRepository {
   Future<Either<Failure, AuthToken>> login(String email, String password);
   Future<Either<Failure, AuthToken>> refreshToken(String refreshToken);
   Future<Either<Failure, void>> register(String email, String password, String role);
+  Future<Either<Failure, void>> changePassword(String currentPassword, String newPassword);
 }

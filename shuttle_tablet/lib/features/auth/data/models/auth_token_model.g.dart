@@ -11,6 +11,7 @@ AuthTokenModel _$AuthTokenModelFromJson(Map<String, dynamic> json) =>
       accessToken: json['accessToken'] as String,
       refreshToken: json['refreshToken'] as String,
       role: json['role'] as String,
+      mustChangePassword: json['mustChangePassword'] as bool? ?? false,
     );
 
 Map<String, dynamic> _$AuthTokenModelToJson(AuthTokenModel instance) =>
@@ -18,4 +19,5 @@ Map<String, dynamic> _$AuthTokenModelToJson(AuthTokenModel instance) =>
       'accessToken': instance.accessToken,
       'refreshToken': instance.refreshToken,
       'role': instance.role,
+      'mustChangePassword': instance.mustChangePassword,
     };
