@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 using ShuttleApi.Application.Common.Mediator;
-using ShuttleApi.Application.Services;
+using ShuttleApi.Application.Common.Interfaces;
 using ShuttleApi.Domain.Common;
 using ShuttleApi.Domain.Trips;
 
