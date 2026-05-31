@@ -129,7 +129,20 @@ internal sealed class BookSeatCommandHandler(
         await notificationService.SendSmsAsync(request.Phone, smsBody, cancellationToken);
         await notificationService.SendEmailAsync(request.Email, emailSubject, emailBody, cancellationToken);
 
-        return new BookSeatResult(passenger.Id, reference, cutoff, fare, route);
+        return new BookSeatResult(
+            PassengerId: passenger.Id,
+            BookingReference: reference,
+            CutoffDeadline: cutoff,
+            Fare: fare,
+            Route: route,
+            FullName: request.FullName,
+            Phone: request.Phone,
+            Email: request.Email,
+            Direction: request.Direction,
+            TripType: request.TripType,
+            DepartureDate: request.Date,
+            Status: "Tentative",
+            BookedAt: passenger.BookedAt);
     }
 
     private async Task<string> GenerateUniqueReferenceAsync(CancellationToken cancellationToken)
