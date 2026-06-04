@@ -141,7 +141,10 @@ class _TripsPageState extends ConsumerState<TripsPage> {
           // ── Right Panel ──────────────────────────────────────────────────
           Expanded(
             child: _selectedTripId != null
-                ? TripDetailWorkspace(tripId: _selectedTripId!)
+                ? TripDetailWorkspace(
+                    tripId: _selectedTripId!,
+                    onDeleted: () => setState(() => _selectedTripId = null),
+                  )
                 : const _EmptyDetailState(),
           ),
         ],

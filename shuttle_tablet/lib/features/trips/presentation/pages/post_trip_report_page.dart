@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../domain/entities/delay_entry.dart';
 import '../../domain/entities/trip_post_report.dart';
 import '../../domain/repositories/i_trip_repository.dart';
 import '../providers/trip_form_provider.dart';
@@ -10,7 +11,8 @@ import '../providers/trips_provider.dart';
 
 class PostTripReportPage extends ConsumerStatefulWidget {
   final String tripId;
-  const PostTripReportPage({super.key, required this.tripId});
+  final DelayHandoff? delayHandoff;
+  const PostTripReportPage({super.key, required this.tripId, this.delayHandoff});
 
   @override
   ConsumerState<PostTripReportPage> createState() =>
@@ -29,6 +31,17 @@ class _PostTripReportPageState extends ConsumerState<PostTripReportPage> {
   IncidentType? _incidentType;
   bool _isReadyToInvoice = false;
   bool _isSaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final handoff = widget.delayHandoff;
+    if (handoff != null) {
+      _hasIncident = true;
+      _incidentType = handoff.type;
+      _incidentDescController.text = handoff.description;
+    }
+  }
 
   int? get _odometerStart {
     final tripAsync = ref.read(tripDetailProvider(widget.tripId));

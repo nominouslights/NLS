@@ -16,6 +16,8 @@ public sealed class Driver : AggregateRoot<Guid>
     public DriverStatus Status { get; private set; }
     public bool IsActive { get; private set; }
     public DateTime CreatedAt { get; private set; }
+    public bool IsDeleted { get; private set; }
+    public DateTime? DeletedAt { get; private set; }
 
     public IReadOnlyList<DriverDocument> Documents => _documents.AsReadOnly();
     public IReadOnlyList<DriverRosterEntry> RosterEntries => _rosterEntries.AsReadOnly();
@@ -93,5 +95,19 @@ public sealed class Driver : AggregateRoot<Guid>
         var entry = _rosterEntries.FirstOrDefault(r => r.Id == entryId);
         if (entry is not null)
             _rosterEntries.Remove(entry);
+    }
+
+    public void SoftDelete()
+    {
+        Guard.Against(Status == DriverStatus.OnTrip, "Driver is currently on a trip and cannot be archived.");
+        IsDeleted = true;
+        DeletedAt = DateTime.UtcNow;
+    }
+
+    public void Restore()
+    {
+        Guard.Against(!IsDeleted, "Driver is not archived.");
+        IsDeleted = false;
+        DeletedAt = null;
     }
 }

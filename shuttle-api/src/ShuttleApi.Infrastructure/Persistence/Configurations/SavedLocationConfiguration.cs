@@ -20,6 +20,8 @@ public sealed class SavedLocationConfiguration : IEntityTypeConfiguration<SavedL
         builder.Property(l => l.Latitude);
         builder.Property(l => l.Longitude);
         builder.Property(l => l.CreatedAt).IsRequired();
+        builder.Property(l => l.IsDeleted).IsRequired().HasDefaultValue(false);
+        builder.Property(l => l.DeletedAt);
 
         builder.HasIndex(l => l.Name);
     }

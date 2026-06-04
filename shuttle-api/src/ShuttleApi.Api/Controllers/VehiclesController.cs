@@ -14,6 +14,12 @@ public sealed class VehiclesController(ISender sender) : BaseApiController(sende
 {
     // ── Vehicles CRUD ─────────────────────────────────────────────────────────
 
+    [Authorize(Policy = "AdminOnly")]
+    [HttpGet]
+    [Route("api/vehicles/archived")]
+    public async Task<IActionResult> GetArchived(CancellationToken cancellationToken) =>
+        Ok(await Sender.Send(new GetArchivedVehiclesQuery(), cancellationToken));
+
     [HttpGet]
     [Route("api/vehicles")]
     public async Task<IActionResult> GetAll(CancellationToken cancellationToken) =>
@@ -68,6 +74,15 @@ public sealed class VehiclesController(ISender sender) : BaseApiController(sende
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
         await Sender.Send(new DeleteVehicleCommand(id), cancellationToken);
+        return NoContent();
+    }
+
+    [Authorize(Policy = "AdminOnly")]
+    [HttpPost]
+    [Route("api/vehicles/{id:guid}/restore")]
+    public async Task<IActionResult> Restore(Guid id, CancellationToken cancellationToken)
+    {
+        await Sender.Send(new RestoreVehicleCommand(id), cancellationToken);
         return NoContent();
     }
 

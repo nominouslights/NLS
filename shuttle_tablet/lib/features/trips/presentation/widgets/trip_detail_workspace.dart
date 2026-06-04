@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/di/injection_container.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -19,7 +20,8 @@ import 'trip_stop_list.dart';
 
 class TripDetailWorkspace extends ConsumerWidget {
   final String tripId;
-  const TripDetailWorkspace({super.key, required this.tripId});
+  final VoidCallback? onDeleted;
+  const TripDetailWorkspace({super.key, required this.tripId, this.onDeleted});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -43,7 +45,7 @@ class TripDetailWorkspace extends ConsumerWidget {
           ],
         ),
       ),
-      data: (trip) => _TripDetail(trip: trip, onRefresh: () {
+      data: (trip) => _TripDetail(trip: trip, onDeleted: onDeleted, onRefresh: () {
         ref.invalidate(tripDetailProvider(tripId));
         ref.invalidate(tripsProvider);
       }),
@@ -54,8 +56,9 @@ class TripDetailWorkspace extends ConsumerWidget {
 class _TripDetail extends ConsumerWidget {
   final Trip trip;
   final VoidCallback onRefresh;
+  final VoidCallback? onDeleted;
 
-  const _TripDetail({required this.trip, required this.onRefresh});
+  const _TripDetail({required this.trip, required this.onRefresh, this.onDeleted});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -103,6 +106,17 @@ class _TripDetail extends ConsumerWidget {
                 ),
               ),
               TripStatusBadge(trip.status),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                onPressed: () => context.push('/driver/trips/${trip.id}'),
+                icon: const Icon(Icons.open_in_new_rounded, size: 15),
+                label: const Text('Full View'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.primary,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 20),
@@ -133,7 +147,7 @@ class _TripDetail extends ConsumerWidget {
           if (_showActions(trip.status)) ...[
             _SectionHeader('Actions', Icons.bolt_rounded),
             const SizedBox(height: 12),
-            _ActionsBar(trip: trip, onRefresh: onRefresh),
+            _ActionsBar(trip: trip, onRefresh: onRefresh, onDeleted: onDeleted),
             const SizedBox(height: 20),
             const Divider(),
             const SizedBox(height: 16),
@@ -168,14 +182,14 @@ class _TripDetail extends ConsumerWidget {
     );
   }
 
-  bool _showActions(TripStatus s) =>
-      s == TripStatus.scheduled || s == TripStatus.dispatched;
+  bool _showActions(TripStatus s) => s != TripStatus.completed;
 }
 
 class _ActionsBar extends ConsumerWidget {
   final Trip trip;
   final VoidCallback onRefresh;
-  const _ActionsBar({required this.trip, required this.onRefresh});
+  final VoidCallback? onDeleted;
+  const _ActionsBar({required this.trip, required this.onRefresh, this.onDeleted});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -197,6 +211,12 @@ class _ActionsBar extends ConsumerWidget {
             label: const Text('Cancel Trip'),
             style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger),
           ),
+        OutlinedButton.icon(
+          onPressed: () => _archive(context, ref),
+          icon: const Icon(Icons.archive_outlined, size: 16),
+          label: const Text('Archive Trip'),
+          style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger),
+        ),
       ],
     );
   }
@@ -246,6 +266,48 @@ class _ActionsBar extends ConsumerWidget {
     await ref.read(tripsProvider.notifier).updateStatus(
           trip.id, TripStatus.cancelled);
     onRefresh();
+  }
+
+  Future<void> _archive(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Archive Trip'),
+        content: const Text(
+          'This trip will be moved to the archive. You can restore it later from the archive.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            child: const Text('Archive'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    try {
+      await ref.read(tripsProvider.notifier).deleteTrip(trip.id);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Trip archived')),
+        );
+      }
+      onDeleted?.call();
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to archive: $e'),
+            backgroundColor: AppColors.danger,
+          ),
+        );
+      }
+    }
   }
 }
 

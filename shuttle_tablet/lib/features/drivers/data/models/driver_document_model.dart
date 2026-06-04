@@ -25,10 +25,10 @@ class DriverDocumentModel extends DriverDocument {
     super.notes,
   });
 
-  factory DriverDocumentModel.fromJson(Map<String, dynamic> json) {
+  factory DriverDocumentModel.fromJson(Map<String, dynamic> json, String driverId) {
     return DriverDocumentModel(
       id: json['id'] as String,
-      driverId: json['driverId'] as String,
+      driverId: json['driverId'] as String? ?? driverId,
       documentType: _parseDocumentType(json['documentType'] as String? ?? ''),
       fileName: json['fileName'] as String,
       contentType: json['contentType'] as String,

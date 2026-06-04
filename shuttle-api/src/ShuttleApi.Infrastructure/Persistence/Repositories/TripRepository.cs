@@ -16,6 +16,7 @@ internal sealed class TripRepository(AppDbContext dbContext) : ITripRepository
         var query = dbContext.Trips
             .Include(t => t.Stops)
             .Include(t => t.Passengers)
+            .Where(t => !t.IsDeleted)
             .AsQueryable();
 
         if (status.HasValue)
@@ -45,7 +46,34 @@ internal sealed class TripRepository(AppDbContext dbContext) : ITripRepository
             .Include(t => t.PreInspection)
                 .ThenInclude(p => p!.Items)
             .Include(t => t.PostReport)
-            .FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
+            .FirstOrDefaultAsync(t => t.Id == id && !t.IsDeleted, cancellationToken);
+
+    public async Task<Trip?> GetDeletedByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+        await dbContext.Trips
+            .Include(t => t.Stops)
+            .Include(t => t.Passengers)
+            .FirstOrDefaultAsync(t => t.Id == id && t.IsDeleted, cancellationToken);
+
+    public async Task<IReadOnlyList<Trip>> GetAllArchivedAsync(CancellationToken cancellationToken = default) =>
+        await dbContext.Trips
+            .Include(t => t.Stops)
+            .Include(t => t.Passengers)
+            .Where(t => t.IsDeleted)
+            .OrderByDescending(t => t.DeletedAt)
+            .ToListAsync(cancellationToken);
+
+    public async Task PurgeExpiredAsync(DateTime cutoffUtc, CancellationToken cancellationToken = default)
+    {
+        var expired = await dbContext.Trips
+            .Where(t => t.IsDeleted && t.DeletedAt < cutoffUtc)
+            .ToListAsync(cancellationToken);
+
+        if (expired.Count == 0)
+            return;
+
+        dbContext.Trips.RemoveRange(expired);
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
 
     public async Task<IReadOnlyList<Trip>> GetByDateRangeAsync(
         DateOnly from, DateOnly to, TripServiceType serviceType,
@@ -53,7 +81,8 @@ internal sealed class TripRepository(AppDbContext dbContext) : ITripRepository
         await dbContext.Trips
             .Include(t => t.Stops)
             .Include(t => t.Passengers)
-            .Where(t => t.ServiceType == serviceType
+            .Where(t => !t.IsDeleted
+                && t.ServiceType == serviceType
                 && DateOnly.FromDateTime(t.ScheduledAt) >= from
                 && DateOnly.FromDateTime(t.ScheduledAt) <= to)
             .OrderBy(t => t.ScheduledAt)
@@ -69,7 +98,8 @@ internal sealed class TripRepository(AppDbContext dbContext) : ITripRepository
         return await dbContext.Trips
             .Include(t => t.Stops)
             .Include(t => t.Passengers)
-            .Where(t => t.ServiceType == TripServiceType.Community
+            .Where(t => !t.IsDeleted
+                && t.ServiceType == TripServiceType.Community
                 && DateOnly.FromDateTime(t.ScheduledAt) == date
                 && t.Stops.Any(s => s.LocationName == destinationStopName)
                 && (t.Passengers.Any(p => p.Direction == direction) || !t.Passengers.Any()))

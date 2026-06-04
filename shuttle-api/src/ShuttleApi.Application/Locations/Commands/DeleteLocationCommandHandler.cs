@@ -12,6 +12,7 @@ internal sealed class DeleteLocationCommandHandler(ISavedLocationRepository loca
         var location = await locationRepository.GetByIdAsync(request.Id, cancellationToken)
             ?? throw new NotFoundException($"SavedLocation {request.Id} not found.");
 
-        await locationRepository.DeleteAsync(location, cancellationToken);
+        location.SoftDelete();
+        await locationRepository.UpdateAsync(location, cancellationToken);
     }
 }

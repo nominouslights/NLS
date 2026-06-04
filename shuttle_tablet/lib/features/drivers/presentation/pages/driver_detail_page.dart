@@ -1,7 +1,12 @@
+import 'dart:io';
 import 'dart:typed_data';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:open_file/open_file.dart';
+import 'package:path_provider/path_provider.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../domain/entities/driver.dart';
 import '../../domain/entities/driver_document.dart';
@@ -676,14 +681,91 @@ class _DocumentsTab extends ConsumerStatefulWidget {
 }
 
 class _DocumentsTabState extends ConsumerState<_DocumentsTab> {
+  bool _isUploading = false;
+  String? _viewingDocId;
+
+  Future<void> _viewDocument(DriverDocument doc) async {
+    setState(() => _viewingDocId = doc.id);
+    try {
+      final bytes = await ref
+          .read(driverDocumentsProvider(widget.driverId).notifier)
+          .downloadDocument(doc.id);
+      if (!mounted) return;
+      if (doc.contentType.startsWith('image/')) {
+        _showImageViewer(bytes, doc.fileName);
+      } else {
+        await _openWithSystem(bytes, doc.fileName);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Could not open document: $e'),
+          backgroundColor: AppColors.danger,
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _viewingDocId = null);
+    }
+  }
+
+  void _showImageViewer(Uint8List bytes, String fileName) {
+    showDialog(
+      context: context,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.black,
+        insetPadding: EdgeInsets.zero,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            InteractiveViewer(
+              minScale: 0.5,
+              maxScale: 6,
+              child: Center(child: Image.memory(bytes)),
+            ),
+            Positioned(
+              top: 40,
+              right: 16,
+              child: IconButton(
+                icon: const Icon(Icons.close_rounded, color: Colors.white, size: 28),
+                onPressed: () => Navigator.pop(context),
+                tooltip: 'Close',
+              ),
+            ),
+            Positioned(
+              top: 44,
+              left: 16,
+              child: Text(
+                fileName,
+                style: const TextStyle(color: Colors.white70, fontSize: 13),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openWithSystem(Uint8List bytes, String fileName) async {
+    final dir = await getTemporaryDirectory();
+    final file = File('${dir.path}/$fileName');
+    await file.writeAsBytes(bytes, flush: true);
+    await OpenFile.open(file.path);
+  }
+
   Future<void> _showUploadDialog() async {
     DocumentType docType = DocumentType.drugAndAlcoholTest;
     DateTime? expiryDate;
+    Uint8List? pickedBytes;
+    String? pickedFileName;
+    String? pickedContentType;
 
     final confirmed = await showDialog<bool>(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
+        builder: (ctx, setDialogState) => HeroMode(
+          enabled: false,
+          child: AlertDialog(
           title: const Text('Upload Document',
               style: TextStyle(fontWeight: FontWeight.w700)),
           content: SizedBox(
@@ -726,7 +808,7 @@ class _DocumentsTabState extends ConsumerState<_DocumentsTab> {
                       size: 18),
                   onTap: () async {
                     final picked = await showDatePicker(
-                      context: ctx,
+                      context: context,
                       initialDate: DateTime.now()
                           .add(const Duration(days: 365)),
                       firstDate: DateTime.now(),
@@ -737,13 +819,73 @@ class _DocumentsTabState extends ConsumerState<_DocumentsTab> {
                     }
                   },
                 ),
-                const SizedBox(height: 8),
-                const Text(
-                  'File upload requires the device file picker — coming in next release.',
-                  style: TextStyle(
-                      fontSize: 11, color: AppColors.brandGray),
-                  textAlign: TextAlign.center,
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.camera_alt_outlined, size: 16),
+                        label: const Text('Camera'),
+                        onPressed: () async {
+                          final image = await ImagePicker().pickImage(
+                            source: ImageSource.camera,
+                            imageQuality: 85,
+                          );
+                          if (image != null) {
+                            final bytes = await image.readAsBytes();
+                            setDialogState(() {
+                              pickedBytes = bytes;
+                              pickedFileName = image.name;
+                              pickedContentType = 'image/jpeg';
+                            });
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.upload_file_outlined, size: 16),
+                        label: const Text('From Device'),
+                        onPressed: () async {
+                          final result = await FilePicker.platform.pickFiles(
+                            type: FileType.custom,
+                            allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png'],
+                            withData: true,
+                          );
+                          if (result != null &&
+                              result.files.single.bytes != null) {
+                            final file = result.files.single;
+                            setDialogState(() {
+                              pickedBytes = file.bytes;
+                              pickedFileName = file.name;
+                              pickedContentType =
+                                  _mimeType(file.extension ?? '');
+                            });
+                          }
+                        },
+                      ),
+                    ),
+                  ],
                 ),
+                if (pickedFileName != null) ...[
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      const Icon(Icons.check_circle_outline,
+                          size: 14, color: Colors.green),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          pickedFileName!,
+                          style: const TextStyle(
+                              fontSize: 12, color: Color(0xFF374151)),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),
@@ -752,7 +894,9 @@ class _DocumentsTabState extends ConsumerState<_DocumentsTab> {
                 onPressed: () => Navigator.pop(ctx, false),
                 child: const Text('Cancel')),
             FilledButton(
-              onPressed: () => Navigator.pop(ctx, false),
+              onPressed: pickedBytes == null
+                  ? null
+                  : () => Navigator.pop(ctx, true),
               style: FilledButton.styleFrom(
                   backgroundColor: AppColors.primary),
               child: const Text('Upload'),
@@ -760,9 +904,64 @@ class _DocumentsTabState extends ConsumerState<_DocumentsTab> {
           ],
         ),
       ),
+      ),
     );
-    if (confirmed == true) {
-      // File picker integration — placeholder until file_picker is wired
+
+    if (confirmed == true && pickedBytes != null) {
+      await _doUpload(
+        docType: docType,
+        expiryDate: expiryDate,
+        bytes: pickedBytes!,
+        fileName: pickedFileName!,
+        contentType: pickedContentType!,
+      );
+    }
+  }
+
+  String _mimeType(String extension) => switch (extension.toLowerCase()) {
+        'pdf' => 'application/pdf',
+        'png' => 'image/png',
+        'jpg' || 'jpeg' => 'image/jpeg',
+        _ => 'application/octet-stream',
+      };
+
+  Future<void> _doUpload({
+    required DocumentType docType,
+    required DateTime? expiryDate,
+    required Uint8List bytes,
+    required String fileName,
+    required String contentType,
+  }) async {
+    setState(() => _isUploading = true);
+    try {
+      await ref
+          .read(driverDocumentsProvider(widget.driverId).notifier)
+          .uploadDocument(UploadDocumentParams(
+            documentType: docType,
+            fileName: fileName,
+            contentType: contentType,
+            fileBytes: bytes,
+            expiryDate: expiryDate,
+          ));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Document uploaded successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Upload failed: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isUploading = false);
     }
   }
 
@@ -797,13 +996,20 @@ class _DocumentsTabState extends ConsumerState<_DocumentsTab> {
                     color: Color(0xFF111827)),
               ),
               const Spacer(),
-              TextButton.icon(
-                onPressed: _showUploadDialog,
-                icon: const Icon(Icons.upload_rounded, size: 16),
-                label: const Text('Upload'),
-                style: TextButton.styleFrom(
-                    foregroundColor: AppColors.primary),
-              ),
+              if (_isUploading)
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else
+                TextButton.icon(
+                  onPressed: _showUploadDialog,
+                  icon: const Icon(Icons.upload_rounded, size: 16),
+                  label: const Text('Upload'),
+                  style: TextButton.styleFrom(
+                      foregroundColor: AppColors.primary),
+                ),
             ],
           ),
         ),
@@ -853,6 +1059,8 @@ class _DocumentsTabState extends ConsumerState<_DocumentsTab> {
                     const SizedBox(height: 8),
                 itemBuilder: (_, i) => _DocumentCard(
                   doc: docs[i],
+                  isLoadingView: _viewingDocId == docs[i].id,
+                  onView: () => _viewDocument(docs[i]),
                   onDelete: () async {
                     final messenger = ScaffoldMessenger.of(context);
                     final confirmed = await showDialog<bool>(
@@ -892,27 +1100,6 @@ class _DocumentsTabState extends ConsumerState<_DocumentsTab> {
                       }
                     }
                   },
-                  onDownload: () async {
-                    final messenger = ScaffoldMessenger.of(context);
-                    try {
-                      final Uint8List bytes = await ref
-                          .read(driverDocumentsProvider(
-                                  widget.driverId)
-                              .notifier)
-                          .downloadDocument(docs[i].id);
-                      messenger.showSnackBar(
-                        SnackBar(
-                            content: Text(
-                                'Downloaded ${docs[i].fileName} (${bytes.length} bytes)')),
-                      );
-                    } catch (e) {
-                      messenger.showSnackBar(
-                        SnackBar(
-                            content: Text('Download failed: $e'),
-                            backgroundColor: AppColors.danger),
-                      );
-                    }
-                  },
                 ),
               );
             },
@@ -926,12 +1113,14 @@ class _DocumentsTabState extends ConsumerState<_DocumentsTab> {
 class _DocumentCard extends StatelessWidget {
   final DriverDocument doc;
   final VoidCallback onDelete;
-  final VoidCallback onDownload;
+  final VoidCallback onView;
+  final bool isLoadingView;
 
   const _DocumentCard({
     required this.doc,
     required this.onDelete,
-    required this.onDownload,
+    required this.onView,
+    this.isLoadingView = false,
   });
 
   @override
@@ -1008,12 +1197,18 @@ class _DocumentCard extends StatelessWidget {
               ],
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.download_rounded, size: 20),
-            color: AppColors.primary,
-            onPressed: onDownload,
-            tooltip: 'Download',
-          ),
+          isLoadingView
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : IconButton(
+                  icon: const Icon(Icons.visibility_outlined, size: 20),
+                  color: AppColors.primary,
+                  onPressed: onView,
+                  tooltip: 'View',
+                ),
           IconButton(
             icon: const Icon(Icons.delete_outline_rounded, size: 20),
             color: AppColors.danger,

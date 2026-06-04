@@ -9,6 +9,8 @@ public sealed class SavedLocation : AggregateRoot<Guid>
     public double? Latitude { get; private set; }
     public double? Longitude { get; private set; }
     public DateTime CreatedAt { get; private set; }
+    public bool IsDeleted { get; private set; }
+    public DateTime? DeletedAt { get; private set; }
 
     private SavedLocation() { }
 
@@ -39,5 +41,18 @@ public sealed class SavedLocation : AggregateRoot<Guid>
         Address = address;
         Latitude = latitude;
         Longitude = longitude;
+    }
+
+    public void SoftDelete()
+    {
+        IsDeleted = true;
+        DeletedAt = DateTime.UtcNow;
+    }
+
+    public void Restore()
+    {
+        Guard.Against(!IsDeleted, "Location is not archived.");
+        IsDeleted = false;
+        DeletedAt = null;
     }
 }

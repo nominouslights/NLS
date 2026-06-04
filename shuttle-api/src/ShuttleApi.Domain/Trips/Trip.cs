@@ -20,6 +20,8 @@ public sealed class Trip : AggregateRoot<Guid>
     public DateTime CreatedAt { get; private set; }
     public int? SeatCapacity { get; private set; }
     public decimal? PricePerSeat { get; private set; }
+    public bool IsDeleted { get; private set; }
+    public DateTime? DeletedAt { get; private set; }
 
     public IReadOnlyList<TripStop> Stops => _stops.AsReadOnly();
     public IReadOnlyList<TripPassenger> Passengers => _passengers.AsReadOnly();
@@ -213,5 +215,19 @@ public sealed class Trip : AggregateRoot<Guid>
 
         Status = TripStatus.Completed;
         RaiseDomainEvent(new TripCompletedEvent(Id));
+    }
+
+    public void SoftDelete()
+    {
+        Guard.Against(Status == TripStatus.Completed, "Completed trips cannot be deleted.");
+        IsDeleted = true;
+        DeletedAt = DateTime.UtcNow;
+    }
+
+    public void Restore()
+    {
+        Guard.Against(!IsDeleted, "Trip is not deleted.");
+        IsDeleted = false;
+        DeletedAt = null;
     }
 }

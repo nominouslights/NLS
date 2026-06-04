@@ -42,6 +42,8 @@ public sealed class Vehicle : AggregateRoot<Guid>
     public bool IsActive { get; private set; }
     public DateTime CreatedAt { get; private set; }
     public string? Notes { get; private set; }
+    public bool IsDeleted { get; private set; }
+    public DateTime? DeletedAt { get; private set; }
 
     public IReadOnlyList<VehicleServiceRecord> ServiceRecords => _serviceRecords.AsReadOnly();
     public IReadOnlyList<VehicleInspectionRecord> InspectionRecords => _inspectionRecords.AsReadOnly();
@@ -188,5 +190,18 @@ public sealed class Vehicle : AggregateRoot<Guid>
         var record = _inspectionRecords.FirstOrDefault(r => r.Id == recordId);
         if (record is not null)
             _inspectionRecords.Remove(record);
+    }
+
+    public void SoftDelete()
+    {
+        IsDeleted = true;
+        DeletedAt = DateTime.UtcNow;
+    }
+
+    public void Restore()
+    {
+        Guard.Against(!IsDeleted, "Vehicle is not archived.");
+        IsDeleted = false;
+        DeletedAt = null;
     }
 }
