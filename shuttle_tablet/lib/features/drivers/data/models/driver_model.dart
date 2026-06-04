@@ -36,7 +36,7 @@ class DriverModel extends Driver {
       hasExpiringDocuments: json['hasExpiringDocuments'] as bool? ?? false,
       documents: docsJson != null
           ? docsJson
-              .map((e) => DriverDocumentModel.fromJson(e as Map<String, dynamic>))
+              .map((e) => DriverDocumentModel.fromJson(e as Map<String, dynamic>, json['id'] as String))
               .toList()
           : const [],
     );

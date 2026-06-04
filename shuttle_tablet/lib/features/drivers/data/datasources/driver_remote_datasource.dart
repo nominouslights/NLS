@@ -118,7 +118,7 @@ class DriverRemoteDataSource implements IDriverRemoteDataSource {
       final response = await _dio.get(ApiEndpoints.driverDocuments(driverId));
       final list = response.data as List<dynamic>;
       return list
-          .map((e) => DriverDocumentModel.fromJson(e as Map<String, dynamic>))
+          .map((e) => DriverDocumentModel.fromJson(e as Map<String, dynamic>, driverId))
           .toList();
     } on DioException catch (e) {
       _handleDioException(e, 'Failed to load documents');

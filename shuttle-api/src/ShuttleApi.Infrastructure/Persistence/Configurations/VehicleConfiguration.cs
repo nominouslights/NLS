@@ -56,6 +56,8 @@ public sealed class VehicleConfiguration : IEntityTypeConfiguration<Vehicle>
         builder.Property(v => v.IsActive).IsRequired();
         builder.Property(v => v.CreatedAt).IsRequired();
         builder.Property(v => v.Notes).HasMaxLength(2000);
+        builder.Property(v => v.IsDeleted).IsRequired().HasDefaultValue(false);
+        builder.Property(v => v.DeletedAt);
 
         // Computed properties — not persisted
         builder.Ignore(v => v.IsRegistrationExpiringSoon);

@@ -26,6 +26,8 @@ public sealed class DriverConfiguration : IEntityTypeConfiguration<Driver>
         builder.Property(d => d.Status).HasConversion<string>().HasMaxLength(20).IsRequired();
         builder.Property(d => d.IsActive).IsRequired();
         builder.Property(d => d.CreatedAt).IsRequired();
+        builder.Property(d => d.IsDeleted).IsRequired().HasDefaultValue(false);
+        builder.Property(d => d.DeletedAt);
 
         builder.Ignore(d => d.FullName);
 

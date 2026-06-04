@@ -16,6 +16,12 @@ public sealed class DriversController(ISender sender) : BaseApiController(sender
 {
     // ── Drivers CRUD ─────────────────────────────────────────────────────────
 
+    [Authorize(Policy = "AdminOnly")]
+    [HttpGet]
+    [Route("api/drivers/archived")]
+    public async Task<IActionResult> GetArchived(CancellationToken cancellationToken) =>
+        Ok(await Sender.Send(new GetArchivedDriversQuery(), cancellationToken));
+
     [HttpGet]
     [Route("api/drivers")]
     public async Task<IActionResult> GetAll(CancellationToken cancellationToken) =>
@@ -58,6 +64,15 @@ public sealed class DriversController(ISender sender) : BaseApiController(sender
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
         await Sender.Send(new DeleteDriverCommand(id), cancellationToken);
+        return NoContent();
+    }
+
+    [Authorize(Policy = "AdminOnly")]
+    [HttpPost]
+    [Route("api/drivers/{id:guid}/restore")]
+    public async Task<IActionResult> Restore(Guid id, CancellationToken cancellationToken)
+    {
+        await Sender.Send(new RestoreDriverCommand(id), cancellationToken);
         return NoContent();
     }
 

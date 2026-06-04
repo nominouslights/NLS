@@ -12,6 +12,12 @@ public interface ITripRepository
 
     Task<Trip?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
+    Task<Trip?> GetDeletedByIdAsync(Guid id, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<Trip>> GetAllArchivedAsync(CancellationToken cancellationToken = default);
+
+    Task PurgeExpiredAsync(DateTime cutoffUtc, CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<Trip>> GetByDateRangeAsync(
         DateOnly from, DateOnly to, TripServiceType serviceType,
         CancellationToken cancellationToken = default);

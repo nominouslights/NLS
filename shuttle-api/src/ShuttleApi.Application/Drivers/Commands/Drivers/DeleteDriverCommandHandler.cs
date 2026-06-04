@@ -12,6 +12,7 @@ internal sealed class DeleteDriverCommandHandler(IDriverRepository driverReposit
         var driver = await driverRepository.GetByIdAsync(request.Id, cancellationToken)
             ?? throw new NotFoundException($"Driver {request.Id} not found.");
 
-        await driverRepository.DeleteAsync(driver, cancellationToken);
+        driver.SoftDelete();
+        await driverRepository.UpdateAsync(driver, cancellationToken);
     }
 }

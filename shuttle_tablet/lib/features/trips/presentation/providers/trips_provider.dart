@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/di/injection_container.dart';
+import '../../domain/entities/delay_entry.dart';
 import '../../domain/entities/trip.dart';
 import '../../domain/usecases/delete_trip_usecase.dart';
 import '../../domain/usecases/dispatch_trip_usecase.dart';
@@ -85,3 +86,11 @@ final tripDetailProvider =
     (trip) => trip,
   );
 });
+
+// Tracks which stop index the driver is currently at during execution (client-side only).
+final currentStopIndexProvider =
+    StateProvider.family<int, String>((ref, tripId) => 0);
+
+// Accumulates delay entries logged mid-trip (client-side only, passed to post-trip report).
+final tripDelayLogsProvider =
+    StateProvider.family<List<DelayEntry>, String>((ref, tripId) => []);

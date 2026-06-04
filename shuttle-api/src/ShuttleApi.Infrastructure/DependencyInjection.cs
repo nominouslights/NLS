@@ -19,6 +19,7 @@ using ShuttleApi.Domain.Vehicles;
 using ShuttleApi.Infrastructure.BackgroundJobs;
 using ShuttleApi.Infrastructure.Persistence.Repositories;
 using ShuttleApi.Infrastructure.Services;
+using ShuttleApi.Infrastructure.Spaces;
 
 namespace ShuttleApi.Infrastructure;
 
@@ -43,7 +44,8 @@ public static class DependencyInjection
         services.AddScoped<IVehicleRepository, VehicleRepository>();
         services.AddScoped<ISavedLocationRepository, SavedLocationRepository>();
         services.AddScoped<ICommunityCalendarBlockRepository, CommunityCalendarBlockRepository>();
-        services.AddScoped<IFileStorageService, DatabaseFileStorageService>();
+        services.Configure<SpacesSettings>(configuration.GetSection(SpacesSettings.SectionName));
+        services.AddScoped<IFileStorageService, SpacesFileStorageService>();
         services.AddScoped<IPasswordHasher, BcryptPasswordHasher>();
         services.AddScoped<INotificationService, NoOpNotificationService>();
         services.AddHostedService<CutoffProcessorHostedService>();

@@ -12,8 +12,8 @@ internal sealed class DeleteTripCommandHandler(ITripRepository tripRepository)
         var trip = await tripRepository.GetByIdAsync(request.TripId, cancellationToken)
             ?? throw new NotFoundException($"Trip {request.TripId} not found.");
 
-        Guard.Against(trip.Status != TripStatus.Scheduled, "Only scheduled trips can be deleted.");
+        trip.SoftDelete();
 
-        await tripRepository.DeleteAsync(trip, cancellationToken);
+        await tripRepository.UpdateAsync(trip, cancellationToken);
     }
 }

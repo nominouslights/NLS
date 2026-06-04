@@ -8,6 +8,12 @@ namespace ShuttleApi.Api.Controllers;
 [Authorize]
 public sealed class LocationsController(ISender sender) : BaseApiController(sender)
 {
+    [Authorize(Policy = "AdminOnly")]
+    [HttpGet]
+    [Route("api/locations/archived")]
+    public async Task<IActionResult> GetArchived(CancellationToken cancellationToken) =>
+        Ok(await Sender.Send(new GetArchivedLocationsQuery(), cancellationToken));
+
     [HttpGet]
     [Route("api/locations")]
     public async Task<IActionResult> GetAll(CancellationToken cancellationToken) =>
@@ -46,6 +52,15 @@ public sealed class LocationsController(ISender sender) : BaseApiController(send
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
         await Sender.Send(new DeleteLocationCommand(id), cancellationToken);
+        return NoContent();
+    }
+
+    [Authorize(Policy = "AdminOnly")]
+    [HttpPost]
+    [Route("api/locations/{id:guid}/restore")]
+    public async Task<IActionResult> Restore(Guid id, CancellationToken cancellationToken)
+    {
+        await Sender.Send(new RestoreLocationCommand(id), cancellationToken);
         return NoContent();
     }
 }

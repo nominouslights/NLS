@@ -12,6 +12,7 @@ internal sealed class DeleteVehicleCommandHandler(IVehicleRepository vehicleRepo
         var vehicle = await vehicleRepository.GetByIdAsync(request.Id, cancellationToken)
             ?? throw new NotFoundException($"Vehicle {request.Id} not found.");
 
-        await vehicleRepository.DeleteAsync(vehicle, cancellationToken);
+        vehicle.SoftDelete();
+        await vehicleRepository.UpdateAsync(vehicle, cancellationToken);
     }
 }
