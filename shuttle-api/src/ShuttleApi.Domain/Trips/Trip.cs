@@ -114,21 +114,19 @@ public sealed class Trip : AggregateRoot<Guid>
         string? direction = null,
         DateTime? cutoffDeadline = null,
         DateTime? bookedAt = null,
-        decimal? fare = null)
+        decimal? fare = null,
+        bool isAddedAfterDeparture = false)
     {
-        Guard.Against(ServiceType != TripServiceType.Community, "Passengers can only be added to Community trips.");
-
         var passenger = TripPassenger.Create(
             Id, name, contactInfo, seatNumber, paymentStatus,
-            bookingReference, phone, email, direction, cutoffDeadline, bookedAt, fare);
+            bookingReference, phone, email, direction, cutoffDeadline, bookedAt, fare,
+            isAddedAfterDeparture);
         _passengers.Add(passenger);
         return passenger;
     }
 
     public void RemovePassenger(Guid passengerId)
     {
-        Guard.Against(ServiceType != TripServiceType.Community, "Passengers can only be removed from Community trips.");
-
         var passenger = _passengers.FirstOrDefault(p => p.Id == passengerId)
             ?? throw new InvalidOperationException($"Passenger {passengerId} not found on this trip.");
         _passengers.Remove(passenger);
@@ -136,8 +134,6 @@ public sealed class Trip : AggregateRoot<Guid>
 
     public void UpdatePassengerPaymentStatus(Guid passengerId, PassengerPaymentStatus status)
     {
-        Guard.Against(ServiceType != TripServiceType.Community, "Passenger payment status can only be updated on Community trips.");
-
         var passenger = _passengers.FirstOrDefault(p => p.Id == passengerId)
             ?? throw new InvalidOperationException($"Passenger {passengerId} not found on this trip.");
         passenger.UpdatePaymentStatus(status);

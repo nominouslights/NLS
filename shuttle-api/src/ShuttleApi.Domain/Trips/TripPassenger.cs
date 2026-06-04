@@ -18,6 +18,7 @@ public sealed class TripPassenger : Entity<Guid>
     public DateTime? CutoffDeadline { get; private set; }
     public DateTime BookedAt { get; private set; }
     public decimal? Fare { get; private set; }
+    public bool IsAddedAfterDeparture { get; private set; }
 
     private TripPassenger() { }
 
@@ -33,7 +34,8 @@ public sealed class TripPassenger : Entity<Guid>
         string? direction = null,
         DateTime? cutoffDeadline = null,
         DateTime? bookedAt = null,
-        decimal? fare = null)
+        decimal? fare = null,
+        bool isAddedAfterDeparture = false)
     {
         return new TripPassenger
         {
@@ -49,7 +51,8 @@ public sealed class TripPassenger : Entity<Guid>
             Direction = direction,
             CutoffDeadline = cutoffDeadline,
             BookedAt = bookedAt ?? DateTime.UtcNow,
-            Fare = fare
+            Fare = fare,
+            IsAddedAfterDeparture = isAddedAfterDeparture
         };
     }
 

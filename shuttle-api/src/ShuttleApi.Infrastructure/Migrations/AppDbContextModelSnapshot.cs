@@ -596,6 +596,11 @@ namespace ShuttleApi.Infrastructure.Migrations
                     b.Property<decimal?>("Fare")
                         .HasColumnType("numeric(10,2)");
 
+                    b.Property<bool>("IsAddedAfterDeparture")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)

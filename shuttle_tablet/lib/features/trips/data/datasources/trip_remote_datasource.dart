@@ -282,6 +282,7 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
           'contactInfo': params.contactInfo,
           'seatNumber': params.seatNumber,
           'paymentStatus': _paymentStatusToString(params.paymentStatus),
+          'isAddedAfterDeparture': params.isAddedAfterDeparture,
         },
       );
       final data = response.data as Map<String, dynamic>;

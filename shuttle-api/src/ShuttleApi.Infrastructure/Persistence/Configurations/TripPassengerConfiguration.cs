@@ -29,6 +29,7 @@ public sealed class TripPassengerConfiguration : IEntityTypeConfiguration<TripPa
         builder.Property(p => p.CutoffDeadline);
         builder.Property(p => p.BookedAt).IsRequired();
         builder.Property(p => p.Fare).HasColumnType("numeric(10,2)");
+        builder.Property(p => p.IsAddedAfterDeparture).IsRequired().HasDefaultValue(false);
 
         builder.HasIndex(p => p.TripId);
         builder.HasIndex(p => p.BookingReference)

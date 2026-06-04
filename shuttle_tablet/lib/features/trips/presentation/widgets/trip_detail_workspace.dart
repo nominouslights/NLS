@@ -153,13 +153,11 @@ class _TripDetail extends ConsumerWidget {
             const SizedBox(height: 16),
           ],
 
-          // Passenger manifest (community trips only)
-          if (trip.serviceType == TripServiceType.community) ...[
-            _PassengerManifest(trip: trip, onRefresh: onRefresh),
-            const SizedBox(height: 20),
-            const Divider(),
-            const SizedBox(height: 16),
-          ],
+          // Passenger manifest
+          _PassengerManifest(trip: trip, onRefresh: onRefresh),
+          const SizedBox(height: 20),
+          const Divider(),
+          const SizedBox(height: 16),
 
           // Pre-inspection summary
           if (trip.preInspection != null) ...[
@@ -444,13 +442,18 @@ class _PassengerManifest extends StatelessWidget {
 
   const _PassengerManifest({required this.trip, required this.onRefresh});
 
+  bool get _isLocked => trip.status == TripStatus.enRoute;
+
   @override
   Widget build(BuildContext context) {
     final passengers = trip.passengers;
     final active = passengers
         .where((p) => p.paymentStatus != PassengerPaymentStatus.cancelled)
         .toList();
-    final capacity = trip.seatCapacity ?? 0;
+    final capacity = trip.seatCapacity;
+    final countLabel = capacity != null
+        ? 'Passengers (${active.length} / $capacity)'
+        : 'Passengers (${active.length})';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -460,7 +463,7 @@ class _PassengerManifest extends StatelessWidget {
             const Icon(Icons.people_rounded, size: 16, color: AppColors.primary),
             const SizedBox(width: 6),
             Text(
-              'Passengers (${active.length} / $capacity)',
+              countLabel,
               style: const TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
@@ -469,15 +472,40 @@ class _PassengerManifest extends StatelessWidget {
               ),
             ),
             const Spacer(),
-            TextButton.icon(
-              onPressed: () => _showAddPassengerDialog(context),
-              icon: const Icon(Icons.person_add_alt_1_rounded, size: 16),
-              label: const Text('Add'),
-              style: TextButton.styleFrom(foregroundColor: const Color(0xFF0F766E)),
-            ),
+            if (_isLocked)
+              TextButton.icon(
+                onPressed: () => _showOverrideConfirm(context),
+                icon: const Icon(Icons.lock_open_rounded, size: 16),
+                label: const Text('Override Add'),
+                style: TextButton.styleFrom(foregroundColor: AppColors.danger),
+              )
+            else
+              TextButton.icon(
+                onPressed: () => _showAddSheet(context, isOverride: false),
+                icon: const Icon(Icons.person_add_alt_1_rounded, size: 16),
+                label: const Text('Add'),
+                style: TextButton.styleFrom(foregroundColor: const Color(0xFF0F766E)),
+              ),
           ],
         ),
-        const SizedBox(height: 10),
+        if (_isLocked)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              children: [
+                const Icon(Icons.lock_rounded, size: 12, color: AppColors.textSecondary),
+                const SizedBox(width: 4),
+                Text(
+                  'Manifest locked — trip is en route',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: AppColors.textSecondary.withValues(alpha: 0.8),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        const SizedBox(height: 4),
         if (passengers.isEmpty)
           Container(
             padding: const EdgeInsets.all(16),
@@ -505,12 +533,42 @@ class _PassengerManifest extends StatelessWidget {
     );
   }
 
-  Future<void> _showAddPassengerDialog(BuildContext context) async {
+  Future<void> _showOverrideConfirm(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Override Manifest Lock'),
+        content: const Text(
+          'This trip has already departed. Adding a passenger now will flag them as a late addition and highlight them in red on the manifest.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            child: const Text('Override & Add'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    await _showAddSheet(context, isOverride: true);
+  }
+
+  Future<void> _showAddSheet(BuildContext context,
+      {required bool isOverride}) async {
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => _AddPassengerSheet(tripId: trip.id, onRefresh: onRefresh),
+      builder: (ctx) => _AddPassengerSheet(
+        tripId: trip.id,
+        onRefresh: onRefresh,
+        isOverride: isOverride,
+      ),
     );
   }
 }
@@ -528,13 +586,20 @@ class _PassengerCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isOverride = passenger.isAddedAfterDeparture;
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isOverride
+            ? AppColors.danger.withValues(alpha: 0.04)
+            : Colors.white,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
+        border: Border.all(
+          color: isOverride
+              ? AppColors.danger.withValues(alpha: 0.35)
+              : const Color(0xFFE5E7EB),
+        ),
       ),
       child: Row(
         children: [
@@ -542,7 +607,9 @@ class _PassengerCard extends StatelessWidget {
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: _statusColor(passenger.paymentStatus).withValues(alpha: 0.1),
+              color: isOverride
+                  ? AppColors.danger.withValues(alpha: 0.12)
+                  : _statusColor(passenger.paymentStatus).withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
             child: Center(
@@ -552,7 +619,9 @@ class _PassengerCard extends StatelessWidget {
                     : '?',
                 style: TextStyle(
                   fontWeight: FontWeight.w700,
-                  color: _statusColor(passenger.paymentStatus),
+                  color: isOverride
+                      ? AppColors.danger
+                      : _statusColor(passenger.paymentStatus),
                 ),
               ),
             ),
@@ -562,13 +631,37 @@ class _PassengerCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  passenger.name,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 14,
-                    color: Color(0xFF111827),
-                  ),
+                Row(
+                  children: [
+                    Text(
+                      passenger.name,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                        color: Color(0xFF111827),
+                      ),
+                    ),
+                    if (isOverride) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 5, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppColors.danger.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text(
+                          'LATE ADD',
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.danger,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
                 if (passenger.contactInfo != null)
                   Text(
@@ -745,8 +838,13 @@ class _StatusBadge extends StatelessWidget {
 class _AddPassengerSheet extends StatefulWidget {
   final String tripId;
   final VoidCallback onRefresh;
+  final bool isOverride;
 
-  const _AddPassengerSheet({required this.tripId, required this.onRefresh});
+  const _AddPassengerSheet({
+    required this.tripId,
+    required this.onRefresh,
+    this.isOverride = false,
+  });
 
   @override
   State<_AddPassengerSheet> createState() => _AddPassengerSheetState();
@@ -782,6 +880,7 @@ class _AddPassengerSheetState extends State<_AddPassengerSheet> {
           ? null
           : int.tryParse(_seatController.text.trim()),
       paymentStatus: _paymentStatus,
+      isAddedAfterDeparture: widget.isOverride,
     ));
 
     if (!mounted) return;
@@ -854,14 +953,41 @@ class _AddPassengerSheetState extends State<_AddPassengerSheet> {
                 ),
               ),
               const SizedBox(height: 16),
-              const Text(
-                'Add Passenger',
-                style: TextStyle(
+              Text(
+                widget.isOverride ? 'Add Passenger (Override)' : 'Add Passenger',
+                style: const TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
                   color: Color(0xFF111827),
                 ),
               ),
+              if (widget.isOverride) ...[
+                const SizedBox(height: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: AppColors.danger.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppColors.danger.withValues(alpha: 0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.warning_amber_rounded,
+                          size: 14, color: AppColors.danger),
+                      const SizedBox(width: 6),
+                      const Expanded(
+                        child: Text(
+                          'This passenger will be flagged as a late addition.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppColors.danger,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 20),
               _label('Passenger Name *'),
               const SizedBox(height: 6),

@@ -128,6 +128,7 @@ class AddPassengerParams {
   final String? contactInfo;
   final int? seatNumber;
   final PassengerPaymentStatus paymentStatus;
+  final bool isAddedAfterDeparture;
 
   const AddPassengerParams({
     required this.tripId,
@@ -135,6 +136,7 @@ class AddPassengerParams {
     this.contactInfo,
     this.seatNumber,
     this.paymentStatus = PassengerPaymentStatus.tentative,
+    this.isAddedAfterDeparture = false,
   });
 }
 
