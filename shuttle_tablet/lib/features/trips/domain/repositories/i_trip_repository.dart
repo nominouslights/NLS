@@ -128,6 +128,8 @@ class AddPassengerParams {
   final String? contactInfo;
   final int? seatNumber;
   final PassengerPaymentStatus paymentStatus;
+  final String? phone;
+  final String? email;
   final bool isAddedAfterDeparture;
 
   const AddPassengerParams({
@@ -136,6 +138,8 @@ class AddPassengerParams {
     this.contactInfo,
     this.seatNumber,
     this.paymentStatus = PassengerPaymentStatus.tentative,
+    this.phone,
+    this.email,
     this.isAddedAfterDeparture = false,
   });
 }

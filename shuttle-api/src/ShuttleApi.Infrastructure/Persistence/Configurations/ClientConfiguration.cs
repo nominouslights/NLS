@@ -35,5 +35,10 @@ public sealed class ClientConfiguration : IEntityTypeConfiguration<Client>
         builder.Property(c => c.CreatedAt).IsRequired();
         builder.Property(c => c.Industry).HasMaxLength(200);
         builder.Property(c => c.ProjectSite).HasMaxLength(200);
+
+        builder.HasMany(c => c.NotificationEmails)
+            .WithOne()
+            .HasForeignKey(e => e.ClientId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

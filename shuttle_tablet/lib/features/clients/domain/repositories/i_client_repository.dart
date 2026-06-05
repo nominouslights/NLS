@@ -28,6 +28,9 @@ class CreateClientParams {
   final bool isMinesite;
   final String? industry;
   final String? projectSite;
+  final List<String> notificationEmails;
+  final List<String> tripDepartureArrivalEmails;
+  final List<String> passengerBookingEmails;
 
   const CreateClientParams({
     required this.businessName,
@@ -47,6 +50,9 @@ class CreateClientParams {
     required this.isMinesite,
     this.industry,
     this.projectSite,
+    this.notificationEmails = const [],
+    this.tripDepartureArrivalEmails = const [],
+    this.passengerBookingEmails = const [],
   });
 }
 
@@ -72,5 +78,8 @@ class UpdateClientParams extends CreateClientParams {
     required this.isActive,
     super.industry,
     super.projectSite,
+    super.notificationEmails = const [],
+    super.tripDepartureArrivalEmails = const [],
+    super.passengerBookingEmails = const [],
   });
 }

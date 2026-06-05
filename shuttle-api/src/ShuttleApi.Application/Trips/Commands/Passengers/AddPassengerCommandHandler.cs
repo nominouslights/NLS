@@ -17,6 +17,8 @@ internal sealed class AddPassengerCommandHandler(ITripRepository tripRepository)
             request.ContactInfo,
             request.SeatNumber,
             request.PaymentStatus,
+            phone: request.Phone,
+            email: request.Email,
             isAddedAfterDeparture: request.IsAddedAfterDeparture);
 
         await tripRepository.UpdateAsync(trip, cancellationToken);

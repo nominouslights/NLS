@@ -9,7 +9,9 @@ internal sealed class ClientRepository(AppDbContext dbContext) : IClientReposito
         await dbContext.Clients.OrderBy(c => c.BusinessName).ToListAsync(cancellationToken);
 
     public async Task<Client?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
-        await dbContext.Clients.FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
+        await dbContext.Clients
+            .Include(c => c.NotificationEmails)
+            .FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
 
     public async Task AddAsync(Client client, CancellationToken cancellationToken = default)
     {

@@ -183,6 +183,8 @@ public sealed class TripsController(ISender sender) : BaseApiController(sender)
             request.ContactInfo,
             request.SeatNumber,
             request.PaymentStatus,
+            request.Phone,
+            request.Email,
             request.IsAddedAfterDeparture),
             cancellationToken);
         return Ok(result);
@@ -263,6 +265,8 @@ public sealed record AddPassengerRequest(
     string? ContactInfo,
     int? SeatNumber,
     PassengerPaymentStatus PaymentStatus,
+    string? Phone = null,
+    string? Email = null,
     bool IsAddedAfterDeparture = false);
 
 public sealed record UpdatePassengerPaymentStatusRequest(PassengerPaymentStatus PaymentStatus);

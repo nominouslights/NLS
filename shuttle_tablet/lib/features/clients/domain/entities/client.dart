@@ -29,6 +29,9 @@ class Client extends Equatable {
   final bool listItemIsExpiringSoon;
   final String? industry;
   final String? projectSite;
+  final List<String> notificationEmails;
+  final List<String> tripDepartureArrivalEmails;
+  final List<String> passengerBookingEmails;
 
   const Client({
     required this.id,
@@ -55,11 +58,15 @@ class Client extends Equatable {
     this.listItemIsExpiringSoon = false,
     this.industry,
     this.projectSite,
+    this.notificationEmails = const [],
+    this.tripDepartureArrivalEmails = const [],
+    this.passengerBookingEmails = const [],
   });
 
   @override
   List<Object?> get props => [id, businessName, serviceType, primaryContactName, primaryContactTitle,
     phone, email, streetAddress, city, province, postalCode, gstHstNumber, preferredPaymentMethod,
     netPaymentTerms, outstandingBalance, complianceNotes, isMinesite, isActive, createdAt,
-    activeContract, activeContractRenewalDate, listItemIsExpiringSoon, industry, projectSite];
+    activeContract, activeContractRenewalDate, listItemIsExpiringSoon, industry, projectSite,
+    notificationEmails, tripDepartureArrivalEmails, passengerBookingEmails];
 }

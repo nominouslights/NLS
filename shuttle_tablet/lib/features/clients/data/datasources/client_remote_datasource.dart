@@ -119,6 +119,9 @@ class ClientRemoteDataSource implements IClientRemoteDataSource {
         'isMinesite': params.isMinesite,
         'industry': params.industry,
         'projectSite': params.projectSite,
+        'notificationEmails': params.notificationEmails,
+        'tripDepartureArrivalEmails': params.tripDepartureArrivalEmails,
+        'passengerBookingEmails': params.passengerBookingEmails,
       };
 
   String _serviceTypeToString(ServiceType t) =>

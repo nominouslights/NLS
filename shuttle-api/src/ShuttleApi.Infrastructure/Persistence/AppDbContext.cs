@@ -18,6 +18,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<User> Users => Set<User>();
     public DbSet<Client> Clients => Set<Client>();
+    public DbSet<ClientNotificationEmail> ClientNotificationEmails => Set<ClientNotificationEmail>();
     public DbSet<Contract> Contracts => Set<Contract>();
     public DbSet<ContractRateLine> ContractRateLines => Set<ContractRateLine>();
     public DbSet<Driver> Drivers => Set<Driver>();

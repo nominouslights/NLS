@@ -52,6 +52,10 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
   bool _isActive = true;
   String _province = 'MB';
 
+  List<String> _notificationEmails = [];
+  List<String> _tripDepartureArrivalEmails = [];
+  List<String> _passengerBookingEmails = [];
+
   Client? _original;
 
   @override
@@ -105,6 +109,9 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
     _province = ['MB', 'SK', 'ON', 'AB', 'BC', 'QC'].contains(client.province)
         ? client.province
         : 'MB';
+    _notificationEmails = List.from(client.notificationEmails);
+    _tripDepartureArrivalEmails = List.from(client.tripDepartureArrivalEmails);
+    _passengerBookingEmails = List.from(client.passengerBookingEmails);
     _populated = true;
   }
 
@@ -140,6 +147,9 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
           projectSite: _projectSiteCtrl.text.trim().isEmpty
               ? null
               : _projectSiteCtrl.text.trim(),
+          notificationEmails: _notificationEmails,
+          tripDepartureArrivalEmails: _tripDepartureArrivalEmails,
+          passengerBookingEmails: _passengerBookingEmails,
         ),
       );
       ref.invalidate(clientDetailProvider(widget.clientId));
@@ -355,6 +365,8 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
               children: [
                 _buildContactCard(client),
                 const SizedBox(height: 16),
+                _buildNotificationEmailsCard(client),
+                const SizedBox(height: 16),
                 _buildConstraintsCard(client),
               ],
             ),
@@ -555,6 +567,51 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
               decoration: _inputDec('Postal Code *'),
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNotificationEmailsCard(Client client) {
+    return _SectionCard(
+      title: 'Notification Emails',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Configure who receives automated emails for this client.',
+            style: TextStyle(fontSize: 12, color: AppColors.brandGray),
+          ),
+          const SizedBox(height: 14),
+          _NotificationEmailGroup(
+            title: 'General Notifications',
+            subtitle: 'Operational alerts and account updates',
+            emails: _isEditing ? _notificationEmails : client.notificationEmails,
+            isEditing: _isEditing,
+            onChanged: (emails) => setState(() => _notificationEmails = emails),
+          ),
+          const SizedBox(height: 14),
+          _NotificationEmailGroup(
+            title: 'Trip Departures & Arrivals',
+            subtitle: 'Updates when trips depart or arrive',
+            emails: _isEditing
+                ? _tripDepartureArrivalEmails
+                : client.tripDepartureArrivalEmails,
+            isEditing: _isEditing,
+            onChanged: (emails) =>
+                setState(() => _tripDepartureArrivalEmails = emails),
+          ),
+          const SizedBox(height: 14),
+          _NotificationEmailGroup(
+            title: 'Passenger Booking Alerts',
+            subtitle: 'Notified when passengers are booked on trips',
+            emails: _isEditing
+                ? _passengerBookingEmails
+                : client.passengerBookingEmails,
+            isEditing: _isEditing,
+            onChanged: (emails) =>
+                setState(() => _passengerBookingEmails = emails),
+          ),
         ],
       ),
     );
@@ -1425,6 +1482,145 @@ class _ContractCardState extends State<_ContractCard> {
           ],
         ],
       ),
+    );
+  }
+}
+
+class _NotificationEmailGroup extends StatefulWidget {
+  final String title;
+  final String subtitle;
+  final List<String> emails;
+  final bool isEditing;
+  final ValueChanged<List<String>> onChanged;
+
+  const _NotificationEmailGroup({
+    required this.title,
+    required this.subtitle,
+    required this.emails,
+    required this.isEditing,
+    required this.onChanged,
+  });
+
+  @override
+  State<_NotificationEmailGroup> createState() => _NotificationEmailGroupState();
+}
+
+class _NotificationEmailGroupState extends State<_NotificationEmailGroup> {
+  final _inputCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _inputCtrl.dispose();
+    super.dispose();
+  }
+
+  bool _isValidEmail(String value) {
+    return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value);
+  }
+
+  void _addEmail() {
+    final email = _inputCtrl.text.trim();
+    if (email.isEmpty) return;
+    if (!_isValidEmail(email)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Enter a valid email address'),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+      return;
+    }
+    if (widget.emails.any((e) => e.toLowerCase() == email.toLowerCase())) {
+      _inputCtrl.clear();
+      return;
+    }
+    widget.onChanged([...widget.emails, email]);
+    _inputCtrl.clear();
+  }
+
+  void _removeEmail(String email) {
+    widget.onChanged(widget.emails.where((e) => e != email).toList());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          widget.title.toUpperCase(),
+          style: const TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            color: AppColors.brandGray,
+            letterSpacing: 0.6,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          widget.subtitle,
+          style: const TextStyle(fontSize: 11, color: AppColors.brandGray),
+        ),
+        const SizedBox(height: 8),
+        if (widget.emails.isEmpty && !widget.isEditing)
+          const Text(
+            'No emails configured',
+            style: TextStyle(fontSize: 13, color: AppColors.brandGray),
+          )
+        else if (widget.emails.isNotEmpty)
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: widget.emails
+                .map(
+                  (email) => InputChip(
+                    label: Text(email),
+                    deleteIcon: widget.isEditing
+                        ? const Icon(Icons.close_rounded, size: 16)
+                        : null,
+                    onDeleted:
+                        widget.isEditing ? () => _removeEmail(email) : null,
+                    backgroundColor: const Color(0xFFF3F4F6),
+                    side: const BorderSide(color: Color(0xFFE5E7EB)),
+                  ),
+                )
+                .toList(),
+          ),
+        if (widget.isEditing) ...[
+          if (widget.emails.isNotEmpty) const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _inputCtrl,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: InputDecoration(
+                    hintText: 'Add email address',
+                    isDense: true,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                  ),
+                  onSubmitted: (_) => _addEmail(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton.filled(
+                onPressed: _addEmail,
+                icon: const Icon(Icons.add_rounded, size: 18),
+                style: IconButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ],
     );
   }
 }
