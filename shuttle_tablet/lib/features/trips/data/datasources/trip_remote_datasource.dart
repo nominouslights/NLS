@@ -1,5 +1,4 @@
 import 'package:dio/dio.dart';
-import '../../../../core/debug/agent_log.dart';
 import '../../../../core/error/exceptions.dart';
 import '../../../../core/network/api_endpoints.dart';
 import '../../domain/entities/trip.dart';
@@ -83,18 +82,6 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
           .map((e) => TripModel.fromJson(e as Map<String, dynamic>))
           .toList();
     } on DioException catch (e) {
-      // #region agent log
-      agentLog(
-        location: 'trip_remote_datasource.dart:getTrips',
-        message: 'trips list failed',
-        hypothesisId: 'A',
-        data: {
-          'statusCode': e.response?.statusCode,
-          'error': e.message,
-          'body': e.response?.data?.toString(),
-        },
-      );
-      // #endregion
       if (e.response?.statusCode == 401) throw const UnauthorizedException();
       throw ServerException(
         message: e.message ?? 'Failed to load trips',
@@ -107,36 +94,8 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
   Future<TripModel> getTripById(String id) async {
     try {
       final response = await _dio.get(ApiEndpoints.tripById(id));
-      // #region agent log
-      final data = response.data as Map<String, dynamic>;
-      agentLog(
-        location: 'trip_remote_datasource.dart:getTripById',
-        message: 'trip detail response',
-        hypothesisId: 'A',
-        data: {
-          'tripId': id,
-          'statusCode': response.statusCode,
-          'hasCargoItems': data.containsKey('cargoItems'),
-          'hasCargoItemsPascal': data.containsKey('CargoItems'),
-          'cargoItemsType': data['cargoItems']?.runtimeType.toString(),
-        },
-      );
-      // #endregion
-      return TripModel.fromJson(data);
+      return TripModel.fromJson(response.data as Map<String, dynamic>);
     } on DioException catch (e) {
-      // #region agent log
-      agentLog(
-        location: 'trip_remote_datasource.dart:getTripById',
-        message: 'trip detail failed',
-        hypothesisId: 'A',
-        data: {
-          'tripId': id,
-          'statusCode': e.response?.statusCode,
-          'error': e.message,
-          'body': e.response?.data?.toString(),
-        },
-      );
-      // #endregion
       if (e.response?.statusCode == 401) throw const UnauthorizedException();
       if (e.response?.statusCode == 404) throw const NotFoundException();
       throw ServerException(

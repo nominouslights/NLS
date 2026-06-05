@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/constants/app_constants.dart';
-import '../../../../core/debug/agent_log.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../domain/entities/trip.dart';
 import '../../domain/entities/trip_cargo_item.dart';
@@ -62,18 +61,6 @@ class AdminTripExecutionPage extends ConsumerWidget {
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('$e')),
         data: (trip) {
-          // #region agent log
-          agentLog(
-            location: 'admin_trip_execution_page.dart:build',
-            message: 'admin trip page data',
-            hypothesisId: 'D',
-            data: {
-              'tripId': tripId,
-              'status': trip.status.name,
-              'cargoCount': trip.cargoItems.length,
-            },
-          );
-          // #endregion
           return _AdminTripBody(
             trip: trip,
             onRefresh: () {

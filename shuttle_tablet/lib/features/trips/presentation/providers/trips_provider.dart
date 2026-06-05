@@ -1,5 +1,4 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../../core/debug/agent_log.dart';
 import '../../../../core/di/injection_container.dart';
 import '../../domain/entities/delay_entry.dart';
 import '../../domain/entities/trip.dart';
@@ -83,32 +82,8 @@ final tripDetailProvider =
     FutureProvider.family<Trip, String>((ref, id) async {
   final result = await sl<GetTripByIdUseCase>()(TripIdParams(id));
   return result.fold(
-    (failure) {
-      // #region agent log
-      agentLog(
-        location: 'trips_provider.dart:tripDetailProvider',
-        message: 'trip detail provider failed',
-        hypothesisId: 'A',
-        data: {'tripId': id, 'failure': failure.message},
-      );
-      // #endregion
-      throw Exception(failure.message);
-    },
-    (trip) {
-      // #region agent log
-      agentLog(
-        location: 'trips_provider.dart:tripDetailProvider',
-        message: 'trip detail provider success',
-        hypothesisId: 'D',
-        data: {
-          'tripId': id,
-          'cargoCount': trip.cargoItems.length,
-          'passengerCount': trip.passengers.length,
-        },
-      );
-      // #endregion
-      return trip;
-    },
+    (failure) => throw Exception(failure.message),
+    (trip) => trip,
   );
 });
 

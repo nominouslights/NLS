@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
-import '../../../../core/debug/agent_log.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../domain/entities/trip.dart';
 import '../../domain/repositories/i_trip_repository.dart';
@@ -105,17 +104,7 @@ class _TripDetail extends ConsumerWidget {
               TripStatusBadge(trip.status),
               const SizedBox(width: 8),
               OutlinedButton.icon(
-                onPressed: () {
-                  // #region agent log
-                  agentLog(
-                    location: 'trip_detail_workspace.dart:fullScreen',
-                    message: 'navigate full screen',
-                    hypothesisId: 'C',
-                    data: {'tripId': trip.id, 'route': '/trips/${trip.id}/view'},
-                  );
-                  // #endregion
-                  context.push('/trips/${trip.id}/view');
-                },
+                onPressed: () => context.push('/trips/${trip.id}/view'),
                 icon: const Icon(Icons.open_in_full_rounded, size: 15),
                 label: const Text('Full Screen'),
                 style: OutlinedButton.styleFrom(
