@@ -222,4 +222,34 @@ class TripRepositoryImpl implements ITripRepository {
       return Left(ServerFailure(e.message));
     }
   }
+
+  @override
+  Future<Either<Failure, String>> addCargoItem(
+      AddCargoItemParams params) async {
+    try {
+      final id = await _remoteDataSource.addCargoItem(params);
+      return Right(id);
+    } on UnauthorizedException {
+      return const Left(UnauthorizedFailure());
+    } on NotFoundException {
+      return const Left(NotFoundFailure());
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message));
+    }
+  }
+
+  @override
+  Future<Either<Failure, void>> removeCargoItem(
+      String tripId, String cargoItemId) async {
+    try {
+      await _remoteDataSource.removeCargoItem(tripId, cargoItemId);
+      return const Right(null);
+    } on UnauthorizedException {
+      return const Left(UnauthorizedFailure());
+    } on NotFoundException {
+      return const Left(NotFoundFailure());
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message));
+    }
+  }
 }

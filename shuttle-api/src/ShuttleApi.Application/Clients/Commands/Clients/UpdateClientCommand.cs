@@ -22,4 +22,7 @@ public sealed record UpdateClientCommand(
     bool IsMinesite,
     bool IsActive,
     string? Industry,
-    string? ProjectSite) : ICommand;
+    string? ProjectSite,
+    IReadOnlyList<string>? NotificationEmails,
+    IReadOnlyList<string>? TripDepartureArrivalEmails,
+    IReadOnlyList<string>? PassengerBookingEmails) : ICommand;

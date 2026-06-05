@@ -53,6 +53,18 @@ internal sealed class GetClientByIdQueryHandler(
             client.CreatedAt,
             contractSummary,
             client.Industry,
-            client.ProjectSite);
+            client.ProjectSite,
+            client.NotificationEmails
+                .Where(e => e.Category == ClientNotificationCategory.Notifications)
+                .Select(e => e.Email)
+                .ToList(),
+            client.NotificationEmails
+                .Where(e => e.Category == ClientNotificationCategory.TripDepartureArrival)
+                .Select(e => e.Email)
+                .ToList(),
+            client.NotificationEmails
+                .Where(e => e.Category == ClientNotificationCategory.PassengerBooking)
+                .Select(e => e.Email)
+                .ToList());
     }
 }

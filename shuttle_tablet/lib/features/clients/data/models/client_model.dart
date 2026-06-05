@@ -27,6 +27,9 @@ class ClientModel extends Client {
     super.listItemIsExpiringSoon = false,
     super.industry,
     super.projectSite,
+    super.notificationEmails = const [],
+    super.tripDepartureArrivalEmails = const [],
+    super.passengerBookingEmails = const [],
   }) : super(activeContract: activeContract);
 
   factory ClientModel.fromJson(Map<String, dynamic> json) {
@@ -57,7 +60,15 @@ class ClientModel extends Client {
       listItemIsExpiringSoon: json['isExpiringSoon'] as bool? ?? false,
       industry: json['industry'] as String?,
       projectSite: json['projectSite'] as String?,
+      notificationEmails: _parseEmailList(json['notificationEmails']),
+      tripDepartureArrivalEmails: _parseEmailList(json['tripDepartureArrivalEmails']),
+      passengerBookingEmails: _parseEmailList(json['passengerBookingEmails']),
     );
+  }
+
+  static List<String> _parseEmailList(dynamic value) {
+    if (value is! List) return const [];
+    return value.map((e) => e.toString()).toList();
   }
 
   Map<String, dynamic> toJson() => {
@@ -79,6 +90,9 @@ class ClientModel extends Client {
         'isActive': isActive,
         'industry': industry,
         'projectSite': projectSite,
+        'notificationEmails': notificationEmails,
+        'tripDepartureArrivalEmails': tripDepartureArrivalEmails,
+        'passengerBookingEmails': passengerBookingEmails,
       };
 
   static ServiceType _parseServiceType(String value) {

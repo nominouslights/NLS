@@ -18,6 +18,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<User> Users => Set<User>();
     public DbSet<Client> Clients => Set<Client>();
+    public DbSet<ClientNotificationEmail> ClientNotificationEmails => Set<ClientNotificationEmail>();
     public DbSet<Contract> Contracts => Set<Contract>();
     public DbSet<ContractRateLine> ContractRateLines => Set<ContractRateLine>();
     public DbSet<Driver> Drivers => Set<Driver>();
@@ -27,6 +28,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Trip> Trips => Set<Trip>();
     public DbSet<TripStop> TripStops => Set<TripStop>();
     public DbSet<TripPassenger> TripPassengers => Set<TripPassenger>();
+    public DbSet<TripCargoItem> TripCargoItems => Set<TripCargoItem>();
     public DbSet<TripPreInspection> TripPreInspections => Set<TripPreInspection>();
     public DbSet<TripInspectionItem> TripInspectionItems => Set<TripInspectionItem>();
     public DbSet<TripPostReport> TripPostReports => Set<TripPostReport>();

@@ -51,7 +51,10 @@ public sealed class ClientsController(ISender sender) : BaseApiController(sender
             request.IsMinesite,
             request.IsActive,
             request.Industry,
-            request.ProjectSite), cancellationToken);
+            request.ProjectSite,
+            request.NotificationEmails,
+            request.TripDepartureArrivalEmails,
+            request.PassengerBookingEmails), cancellationToken);
         return NoContent();
     }
 
@@ -134,7 +137,10 @@ public sealed record UpdateClientRequest(
     bool IsMinesite,
     bool IsActive,
     string? Industry,
-    string? ProjectSite);
+    string? ProjectSite,
+    IReadOnlyList<string>? NotificationEmails,
+    IReadOnlyList<string>? TripDepartureArrivalEmails,
+    IReadOnlyList<string>? PassengerBookingEmails);
 
 public sealed record CreateContractRequest(
     DateTime StartDate,

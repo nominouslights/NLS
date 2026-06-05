@@ -20,8 +20,16 @@ public sealed record TripDetailResult(
     decimal? PricePerSeat,
     IReadOnlyList<TripStopResult> Stops,
     IReadOnlyList<PassengerResult> Passengers,
+    IReadOnlyList<CargoItemResult> CargoItems,
     TripPreInspectionResult? PreInspection,
     TripPostReportResult? PostReport);
+
+public sealed record CargoItemResult(
+    Guid Id,
+    Guid TripId,
+    string CargoType,
+    string? Description,
+    int Quantity);
 
 public sealed record PassengerResult(
     Guid Id,

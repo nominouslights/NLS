@@ -1,79 +1,27 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../../core/di/injection_container.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../trips/domain/entities/trip.dart';
 import '../../../trips/domain/entities/trip_passenger.dart';
-import '../../../trips/domain/repositories/i_trip_repository.dart';
-import '../../../trips/domain/usecases/add_passenger_usecase.dart';
 import '../../../trips/presentation/providers/trips_provider.dart';
+import '../../../trips/presentation/widgets/add_passenger_sheet.dart';
 
-class BookSeatPage extends ConsumerStatefulWidget {
+class BookSeatPage extends ConsumerWidget {
   final Trip trip;
   const BookSeatPage({super.key, required this.trip});
 
   @override
-  ConsumerState<BookSeatPage> createState() => _BookSeatPageState();
-}
-
-class _BookSeatPageState extends ConsumerState<BookSeatPage> {
-  final _formKey = GlobalKey<FormState>();
-  final _nameController = TextEditingController();
-  final _contactController = TextEditingController();
-  final _seatController = TextEditingController();
-  PassengerPaymentStatus _paymentStatus = PassengerPaymentStatus.tentative;
-  bool _saving = false;
-
-  @override
-  void dispose() {
-    _nameController.dispose();
-    _contactController.dispose();
-    _seatController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _confirm() async {
-    if (!_formKey.currentState!.validate()) return;
-    setState(() => _saving = true);
-
-    final result = await sl<AddPassengerUseCase>()(AddPassengerParams(
-      tripId: widget.trip.id,
-      name: _nameController.text.trim(),
-      contactInfo: _contactController.text.trim().isEmpty
-          ? null
-          : _contactController.text.trim(),
-      seatNumber: _seatController.text.trim().isEmpty
-          ? null
-          : int.tryParse(_seatController.text.trim()),
-      paymentStatus: _paymentStatus,
-    ));
-
-    if (!mounted) return;
-    setState(() => _saving = false);
-
-    result.fold(
-      (failure) => ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(failure.message),
-          backgroundColor: AppColors.danger,
-        ),
-      ),
-      (_) {
-        ref.invalidate(tripsProvider);
-        Navigator.of(context).pop();
-      },
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final trip = widget.trip;
+  Widget build(BuildContext context, WidgetRef ref) {
     final booked = trip.passengers
         .where((p) => p.paymentStatus != PassengerPaymentStatus.cancelled)
         .length;
     final capacity = trip.seatCapacity ?? 0;
     final remaining = capacity - booked;
+
+    void onRefresh() {
+      ref.invalidate(tripsProvider);
+      if (context.mounted) Navigator.of(context).pop();
+    }
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -119,177 +67,47 @@ class _BookSeatPageState extends ConsumerState<BookSeatPage> {
                 color: Color(0xFF111827),
               ),
             ),
-            const SizedBox(height: 16),
-            Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _FormField(
-                    label: 'Passenger Name',
-                    required: true,
-                    child: TextFormField(
-                      controller: _nameController,
-                      textCapitalization: TextCapitalization.words,
-                      decoration: _inputDecoration('Full name'),
-                      validator: (v) =>
-                          (v == null || v.trim().isEmpty) ? 'Name is required' : null,
-                    ),
+            const SizedBox(height: 8),
+            Text(
+              remaining > 0
+                  ? '$remaining seat${remaining == 1 ? '' : 's'} available on this run.'
+                  : 'This run is at capacity.',
+              style: const TextStyle(
+                fontSize: 13,
+                color: AppColors.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: FilledButton.icon(
+                onPressed: remaining > 0
+                    ? () => showAddPassengerSheet(
+                          context,
+                          tripId: trip.id,
+                          onRefresh: onRefresh,
+                        )
+                    : null,
+                icon: const Icon(Icons.person_add_alt_1_rounded, size: 20),
+                label: const Text('Add Passenger'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF0F766E),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  const SizedBox(height: 16),
-                  _FormField(
-                    label: 'Contact Info',
-                    child: TextFormField(
-                      controller: _contactController,
-                      keyboardType: TextInputType.phone,
-                      decoration: _inputDecoration('Phone or email (optional)'),
-                    ),
+                  elevation: 0,
+                  textStyle: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
                   ),
-                  const SizedBox(height: 16),
-                  _FormField(
-                    label: 'Seat Number',
-                    child: TextFormField(
-                      controller: _seatController,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      decoration: _inputDecoration('Auto-assigned if blank'),
-                      validator: (v) {
-                        if (v == null || v.trim().isEmpty) return null;
-                        final n = int.tryParse(v.trim());
-                        if (n == null || n < 1) return 'Enter a valid seat number';
-                        if (n > capacity) return 'Seat number exceeds capacity';
-                        return null;
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  _FormField(
-                    label: 'Payment Status',
-                    child: SegmentedButton<PassengerPaymentStatus>(
-                      selected: {_paymentStatus},
-                      onSelectionChanged: (s) =>
-                          setState(() => _paymentStatus = s.first),
-                      style: SegmentedButton.styleFrom(
-                        selectedBackgroundColor:
-                            const Color(0xFF0F766E).withValues(alpha: 0.1),
-                        selectedForegroundColor: const Color(0xFF0F766E),
-                      ),
-                      segments: const [
-                        ButtonSegment(
-                          value: PassengerPaymentStatus.tentative,
-                          icon: Icon(Icons.pending_outlined, size: 16),
-                          label: Text('Tentative'),
-                        ),
-                        ButtonSegment(
-                          value: PassengerPaymentStatus.confirmed,
-                          icon: Icon(Icons.check_circle_outline_rounded, size: 16),
-                          label: Text('Confirmed'),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 32),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 52,
-                    child: ElevatedButton.icon(
-                      onPressed: _saving ? null : _confirm,
-                      icon: _saving
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Icon(Icons.check_rounded, size: 20),
-                      label: Text(_saving ? 'Saving…' : 'Confirm Booking'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0F766E),
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        elevation: 0,
-                        textStyle: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+                ),
               ),
             ),
           ],
         ),
       ),
-    );
-  }
-
-  InputDecoration _inputDecoration(String hint) => InputDecoration(
-        hintText: hint,
-        hintStyle: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 14),
-        filled: true,
-        fillColor: Colors.white,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: Color(0xFF0F766E), width: 1.5),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: AppColors.danger),
-        ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      );
-}
-
-class _FormField extends StatelessWidget {
-  final String label;
-  final bool required;
-  final Widget child;
-
-  const _FormField({
-    required this.label,
-    this.required = false,
-    required this.child,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        RichText(
-          text: TextSpan(
-            text: label,
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: Color(0xFF374151),
-            ),
-            children: required
-                ? const [
-                    TextSpan(
-                      text: ' *',
-                      style: TextStyle(color: AppColors.danger),
-                    ),
-                  ]
-                : [],
-          ),
-        ),
-        const SizedBox(height: 6),
-        child,
-      ],
     );
   }
 }

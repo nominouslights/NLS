@@ -4,6 +4,8 @@ namespace ShuttleApi.Domain.Clients;
 
 public sealed class Client : AggregateRoot<Guid>
 {
+    private readonly List<ClientNotificationEmail> _notificationEmails = [];
+
     public string BusinessName { get; private set; } = string.Empty;
     public ServiceType ServiceType { get; private set; }
     public string PrimaryContactName { get; private set; } = string.Empty;
@@ -24,6 +26,7 @@ public sealed class Client : AggregateRoot<Guid>
     public DateTime CreatedAt { get; private set; }
     public string? Industry { get; private set; }
     public string? ProjectSite { get; private set; }
+    public IReadOnlyList<ClientNotificationEmail> NotificationEmails => _notificationEmails.AsReadOnly();
 
     private Client() { }
 
@@ -115,4 +118,19 @@ public sealed class Client : AggregateRoot<Guid>
     public void Activate() => IsActive = true;
 
     public void SetOutstandingBalance(decimal balance) => OutstandingBalance = balance;
+
+    public void SetNotificationEmails(
+        ClientNotificationCategory category,
+        IReadOnlyList<string> emails)
+    {
+        _notificationEmails.RemoveAll(e => e.Category == category);
+
+        foreach (var email in emails
+                     .Select(e => e.Trim())
+                     .Where(e => !string.IsNullOrWhiteSpace(e))
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            _notificationEmails.Add(ClientNotificationEmail.Create(Id, category, email));
+        }
+    }
 }

@@ -33,6 +33,16 @@ internal sealed class UpdateClientCommandHandler(IClientRepository clientReposit
 
         if (request.IsActive) client.Activate(); else client.Deactivate();
 
+        client.SetNotificationEmails(
+            ClientNotificationCategory.Notifications,
+            request.NotificationEmails ?? []);
+        client.SetNotificationEmails(
+            ClientNotificationCategory.TripDepartureArrival,
+            request.TripDepartureArrivalEmails ?? []);
+        client.SetNotificationEmails(
+            ClientNotificationCategory.PassengerBooking,
+            request.PassengerBookingEmails ?? []);
+
         await clientRepository.UpdateAsync(client, cancellationToken);
     }
 }

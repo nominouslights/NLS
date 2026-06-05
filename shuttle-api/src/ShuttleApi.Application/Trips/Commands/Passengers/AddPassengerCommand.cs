@@ -8,6 +8,9 @@ public sealed record AddPassengerCommand(
     string Name,
     string? ContactInfo,
     int? SeatNumber,
-    PassengerPaymentStatus PaymentStatus) : ICommand<AddPassengerResult>;
+    PassengerPaymentStatus PaymentStatus,
+    string? Phone = null,
+    string? Email = null,
+    bool IsAddedAfterDeparture = false) : ICommand<AddPassengerResult>;
 
 public sealed record AddPassengerResult(Guid PassengerId);

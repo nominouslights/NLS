@@ -26,7 +26,10 @@ public sealed record ClientDetailResult(
     DateTime CreatedAt,
     ContractSummaryResult? ActiveContract,
     string? Industry,
-    string? ProjectSite);
+    string? ProjectSite,
+    IReadOnlyList<string> NotificationEmails,
+    IReadOnlyList<string> TripDepartureArrivalEmails,
+    IReadOnlyList<string> PassengerBookingEmails);
 
 public sealed record ContractSummaryResult(
     Guid Id,

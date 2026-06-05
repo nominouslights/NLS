@@ -1,6 +1,7 @@
 import 'package:fpdart/fpdart.dart';
 import '../../../../core/error/failures.dart';
 import '../entities/trip.dart';
+import '../entities/trip_cargo_item.dart';
 import '../entities/trip_passenger.dart';
 import '../entities/trip_post_report.dart';
 
@@ -44,6 +45,11 @@ abstract interface class ITripRepository {
 
   Future<Either<Failure, void>> updatePassengerPaymentStatus(
       UpdatePassengerPaymentStatusParams params);
+
+  Future<Either<Failure, String>> addCargoItem(AddCargoItemParams params);
+
+  Future<Either<Failure, void>> removeCargoItem(
+      String tripId, String cargoItemId);
 }
 
 // ── Shared ──────────────────────────────────────────────────────────────────
@@ -128,6 +134,9 @@ class AddPassengerParams {
   final String? contactInfo;
   final int? seatNumber;
   final PassengerPaymentStatus paymentStatus;
+  final String? phone;
+  final String? email;
+  final bool isAddedAfterDeparture;
 
   const AddPassengerParams({
     required this.tripId,
@@ -135,6 +144,9 @@ class AddPassengerParams {
     this.contactInfo,
     this.seatNumber,
     this.paymentStatus = PassengerPaymentStatus.tentative,
+    this.phone,
+    this.email,
+    this.isAddedAfterDeparture = false,
   });
 }
 
@@ -147,6 +159,30 @@ class UpdatePassengerPaymentStatusParams {
     required this.tripId,
     required this.passengerId,
     required this.paymentStatus,
+  });
+}
+
+class AddCargoItemParams {
+  final String tripId;
+  final TripCargoType cargoType;
+  final String? description;
+  final int quantity;
+
+  const AddCargoItemParams({
+    required this.tripId,
+    required this.cargoType,
+    this.description,
+    this.quantity = 1,
+  });
+}
+
+class RemoveCargoItemParams {
+  final String tripId;
+  final String cargoItemId;
+
+  const RemoveCargoItemParams({
+    required this.tripId,
+    required this.cargoItemId,
   });
 }
 

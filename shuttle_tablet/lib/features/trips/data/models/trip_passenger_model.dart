@@ -15,6 +15,7 @@ class TripPassengerModel extends TripPassenger {
     super.cutoffDeadline,
     super.bookedAt,
     super.fare,
+    super.isAddedAfterDeparture = false,
   });
 
   factory TripPassengerModel.fromJson(Map<String, dynamic> json) {
@@ -36,6 +37,7 @@ class TripPassengerModel extends TripPassenger {
           ? DateTime.tryParse(json['bookedAt'] as String)
           : null,
       fare: (json['fare'] as num?)?.toDouble(),
+      isAddedAfterDeparture: json['isAddedAfterDeparture'] as bool? ?? false,
     );
   }
 
@@ -67,6 +69,7 @@ class TripPassengerModel extends TripPassenger {
         'cutoffDeadline': cutoffDeadline?.toIso8601String(),
         'bookedAt': bookedAt?.toIso8601String(),
         'fare': fare,
+        'isAddedAfterDeparture': isAddedAfterDeparture,
       };
 
   static String _paymentStatusToString(PassengerPaymentStatus status) {

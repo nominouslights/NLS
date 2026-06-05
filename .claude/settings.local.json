@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-ChildItem -Path \"c:\\\\Users\\\\Emelio Campbell\\\\Documents\\\\GitHub\\\\Shuttle Software\\\\shuttle-api\\\\src\" -Directory | ForEach-Object { $_.Name })"
+    ]
+  }
+}

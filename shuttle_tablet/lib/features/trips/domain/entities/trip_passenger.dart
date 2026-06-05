@@ -25,6 +25,7 @@ class TripPassenger extends Equatable {
   final DateTime? cutoffDeadline;
   final DateTime? bookedAt;
   final double? fare;
+  final bool isAddedAfterDeparture;
 
   const TripPassenger({
     required this.id,
@@ -40,6 +41,7 @@ class TripPassenger extends Equatable {
     this.cutoffDeadline,
     this.bookedAt,
     this.fare,
+    this.isAddedAfterDeparture = false,
   });
 
   @override
@@ -57,5 +59,6 @@ class TripPassenger extends Equatable {
         cutoffDeadline,
         bookedAt,
         fare,
+        isAddedAfterDeparture,
       ];
 }
