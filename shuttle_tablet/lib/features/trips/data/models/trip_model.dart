@@ -1,4 +1,3 @@
-import '../../../../core/debug/agent_log.dart';
 import '../../domain/entities/trip.dart';
 import 'trip_cargo_item_model.dart';
 import 'trip_passenger_model.dart';
@@ -32,18 +31,6 @@ class TripModel extends Trip {
     final stopsJson = json['stops'] as List<dynamic>? ?? [];
     final passengersJson = json['passengers'] as List<dynamic>? ?? [];
     final cargoJson = (json['cargoItems'] ?? json['CargoItems']) as List<dynamic>? ?? [];
-    // #region agent log
-    agentLog(
-      location: 'trip_model.dart:fromJson',
-      message: 'parsing trip json',
-      hypothesisId: 'B',
-      data: {
-        'tripId': json['id']?.toString(),
-        'cargoCount': cargoJson.length,
-        'keys': json.keys.take(20).toList(),
-      },
-    );
-    // #endregion
     final preInspectionJson = json['preInspection'] as Map<String, dynamic>?;
     final postReportJson = json['postReport'] as Map<String, dynamic>?;
 
@@ -71,27 +58,9 @@ class TripModel extends Trip {
       passengers: passengersJson
           .map((e) => TripPassengerModel.fromJson(e as Map<String, dynamic>))
           .toList(),
-      cargoItems: () {
-        try {
-          return cargoJson
-              .map((e) => TripCargoItemModel.fromJson(e as Map<String, dynamic>))
-              .toList();
-        } catch (e, st) {
-          // #region agent log
-          agentLog(
-            location: 'trip_model.dart:fromJson',
-            message: 'cargo parse failed',
-            hypothesisId: 'B',
-            data: {
-              'error': e.toString(),
-              'stack': st.toString().split('\n').take(3).join(' | '),
-              'sample': cargoJson.isNotEmpty ? cargoJson.first.toString() : null,
-            },
-          );
-          // #endregion
-          rethrow;
-        }
-      }(),
+      cargoItems: cargoJson
+          .map((e) => TripCargoItemModel.fromJson(e as Map<String, dynamic>))
+          .toList(),
       preInspection: preInspectionJson != null
           ? TripPreInspectionModel.fromJson(preInspectionJson)
           : null,
