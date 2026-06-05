@@ -11,6 +11,7 @@ import '../providers/client_detail_provider.dart';
 import '../providers/client_form_provider.dart';
 import '../providers/clients_provider.dart';
 import '../providers/contracts_provider.dart';
+import '../widgets/client_email_templates_section.dart';
 
 const _kAmber = Color(0xFFE8A020);
 const _kAmberLight = Color(0xFFFFF8EC);
@@ -61,7 +62,7 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 5, vsync: this);
     _gstHstCtrl = TextEditingController();
     _contactNameCtrl = TextEditingController();
     _contactTitleCtrl = TextEditingController();
@@ -328,6 +329,7 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
                 dividerColor: Colors.transparent,
                 tabs: const [
                   Tab(text: 'Overview & Billing'),
+                  Tab(text: 'Email Templates'),
                   Tab(text: 'Documents'),
                   Tab(text: 'Communication Log'),
                   Tab(text: 'Trip History'),
@@ -342,6 +344,7 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
             controller: _tabController,
             children: [
               _buildOverviewTab(client),
+              ClientEmailTemplatesSection(clientId: widget.clientId),
               _buildPlaceholderTab(Icons.folder_open_outlined, 'Documents coming soon',
                   subtitle: '7-year retention per CRA requirements'),
               _buildPlaceholderTab(Icons.chat_bubble_outline_rounded, 'Communication log coming soon'),

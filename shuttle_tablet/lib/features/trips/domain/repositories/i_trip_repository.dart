@@ -46,6 +46,11 @@ abstract interface class ITripRepository {
   Future<Either<Failure, void>> updatePassengerPaymentStatus(
       UpdatePassengerPaymentStatusParams params);
 
+  Future<Either<Failure, void>> sendPassengerConfirmation(
+      SendPassengerConfirmationParams params);
+
+  Future<Either<Failure, void>> sendStopUpdate(SendStopUpdateParams params);
+
   Future<Either<Failure, String>> addCargoItem(AddCargoItemParams params);
 
   Future<Either<Failure, void>> removeCargoItem(
@@ -159,6 +164,35 @@ class UpdatePassengerPaymentStatusParams {
     required this.tripId,
     required this.passengerId,
     required this.paymentStatus,
+  });
+}
+
+enum ConfirmationDirection { outbound, inbound }
+
+class SendPassengerConfirmationParams {
+  final String tripId;
+  final String passengerId;
+  final ConfirmationDirection direction;
+
+  const SendPassengerConfirmationParams({
+    required this.tripId,
+    required this.passengerId,
+    required this.direction,
+  });
+
+  String get directionValue =>
+      direction == ConfirmationDirection.inbound ? 'Inbound' : 'Outbound';
+}
+
+class SendStopUpdateParams {
+  final String tripId;
+  final String? stopId;
+  final String? status;
+
+  const SendStopUpdateParams({
+    required this.tripId,
+    this.stopId,
+    this.status,
   });
 }
 

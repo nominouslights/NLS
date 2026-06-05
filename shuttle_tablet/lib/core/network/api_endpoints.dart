@@ -19,6 +19,9 @@ class ApiEndpoints {
   static String tripPassengerById(String id, String pid) => '/trips/$id/passengers/$pid';
   static String tripPassengerPaymentStatus(String id, String pid) =>
       '/trips/$id/passengers/$pid/payment-status';
+  static String tripPassengerSendConfirmation(String id, String pid) =>
+      '/trips/$id/passengers/$pid/send-confirmation';
+  static String tripSendStopUpdate(String id) => '/trips/$id/send-stop-update';
   static String tripCargo(String id) => '/trips/$id/cargo';
   static String tripCargoById(String id, String cid) => '/trips/$id/cargo/$cid';
 
@@ -65,6 +68,9 @@ class ApiEndpoints {
   static String contractRates(String clientId, String contractId) => '/clients/$clientId/contracts/$contractId/rates';
   static String deleteRateLine(String clientId, String rateLineId) => '/clients/$clientId/rates/$rateLineId';
   static String rateLinesByClient(String clientId) => '/clients/$clientId/rate-lines';
+  static String clientEmailTemplates(String clientId) => '/clients/$clientId/email-templates';
+  static String clientEmailTemplateByType(String clientId, String type) =>
+      '/clients/$clientId/email-templates/$type';
 
   static const String pendingUsers = '/users/pending';
   static String approveUser(String id) => '/users/$id/approve';
