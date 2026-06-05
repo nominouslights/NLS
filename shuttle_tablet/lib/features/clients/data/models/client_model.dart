@@ -30,11 +30,14 @@ class ClientModel extends Client {
     super.notificationEmails = const [],
     super.tripDepartureArrivalEmails = const [],
     super.passengerBookingEmails = const [],
+    super.apiSupportsNotificationEmails = false,
   }) : super(activeContract: activeContract);
 
   factory ClientModel.fromJson(Map<String, dynamic> json) {
     final contractJson = json['activeContract'] as Map<String, dynamic>?;
     final renewalDateRaw = json['activeContractRenewalDate'] as String?;
+    final supportsNotificationEmails = json.containsKey('notificationEmails') ||
+        json.containsKey('NotificationEmails');
     return ClientModel(
       id: json['id'] as String,
       businessName: json['businessName'] as String,
@@ -60,9 +63,14 @@ class ClientModel extends Client {
       listItemIsExpiringSoon: json['isExpiringSoon'] as bool? ?? false,
       industry: json['industry'] as String?,
       projectSite: json['projectSite'] as String?,
-      notificationEmails: _parseEmailList(json['notificationEmails']),
-      tripDepartureArrivalEmails: _parseEmailList(json['tripDepartureArrivalEmails']),
-      passengerBookingEmails: _parseEmailList(json['passengerBookingEmails']),
+      notificationEmails: _parseEmailList(
+          json['notificationEmails'] ?? json['NotificationEmails']),
+      tripDepartureArrivalEmails: _parseEmailList(
+          json['tripDepartureArrivalEmails'] ??
+              json['TripDepartureArrivalEmails']),
+      passengerBookingEmails: _parseEmailList(json['passengerBookingEmails'] ??
+          json['PassengerBookingEmails']),
+      apiSupportsNotificationEmails: supportsNotificationEmails,
     );
   }
 
