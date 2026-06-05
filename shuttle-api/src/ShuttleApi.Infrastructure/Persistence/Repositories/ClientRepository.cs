@@ -21,7 +21,9 @@ internal sealed class ClientRepository(AppDbContext dbContext) : IClientReposito
 
     public async Task UpdateAsync(Client client, CancellationToken cancellationToken = default)
     {
-        dbContext.Clients.Update(client);
+        if (dbContext.Entry(client).State == EntityState.Detached)
+            dbContext.Clients.Update(client);
+
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
