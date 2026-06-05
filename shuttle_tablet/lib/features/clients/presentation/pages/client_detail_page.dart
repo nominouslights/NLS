@@ -117,6 +117,13 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
 
   Future<void> _saveEdit() async {
     if (_original == null) return;
+
+    final apiUnsupported = !_original!.apiSupportsNotificationEmails;
+    final hasNotificationEmails = _notificationEmails.isNotEmpty ||
+        _tripDepartureArrivalEmails.isNotEmpty ||
+        _passengerBookingEmails.isNotEmpty;
+    final omitNotificationEmails = apiUnsupported && hasNotificationEmails;
+
     setState(() => _isSaving = true);
     try {
       await ref.read(clientFormProvider.notifier).updateClient(
@@ -147,14 +154,37 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
           projectSite: _projectSiteCtrl.text.trim().isEmpty
               ? null
               : _projectSiteCtrl.text.trim(),
-          notificationEmails: _notificationEmails,
-          tripDepartureArrivalEmails: _tripDepartureArrivalEmails,
-          passengerBookingEmails: _passengerBookingEmails,
+          notificationEmails:
+              omitNotificationEmails ? null : _notificationEmails,
+          tripDepartureArrivalEmails: omitNotificationEmails
+              ? null
+              : _tripDepartureArrivalEmails,
+          passengerBookingEmails:
+              omitNotificationEmails ? null : _passengerBookingEmails,
         ),
       );
       ref.invalidate(clientDetailProvider(widget.clientId));
       ref.invalidate(clientsProvider);
-      if (mounted) setState(() { _isEditing = false; _isSaving = false; _populated = false; });
+      if (mounted) {
+        setState(() {
+          _isEditing = false;
+          _isSaving = false;
+          _populated = false;
+        });
+        if (omitNotificationEmails) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Other changes were saved, but notification emails were skipped '
+                'because the server has not been updated yet. Redeploy the '
+                'latest shuttle-api on DigitalOcean, then try again.',
+              ),
+              backgroundColor: AppColors.danger,
+              duration: Duration(seconds: 8),
+            ),
+          );
+        }
+      }
     } catch (e) {
       if (mounted) {
         setState(() => _isSaving = false);
@@ -582,6 +612,38 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
             'Configure who receives automated emails for this client.',
             style: TextStyle(fontSize: 12, color: AppColors.brandGray),
           ),
+          if (!client.apiSupportsNotificationEmails) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppColors.danger.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: AppColors.danger.withValues(alpha: 0.3),
+                ),
+              ),
+              child: const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.cloud_off_outlined,
+                      size: 16, color: AppColors.danger),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'The server has not been updated yet — notification '
+                      'emails cannot be saved until the latest shuttle-api is '
+                      'deployed.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppColors.danger,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 14),
           _NotificationEmailGroup(
             title: 'General Notifications',

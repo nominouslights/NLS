@@ -72,10 +72,7 @@ class ClientRemoteDataSource implements IClientRemoteDataSource {
     try {
       await _dio.put(
         ApiEndpoints.clientById(id),
-        data: {
-          ..._clientParamsToJson(params),
-          'isActive': params.isActive,
-        },
+        data: _updateClientParamsToJson(params),
       );
     } on DioException catch (e) {
       if (e.response?.statusCode == 401) throw const UnauthorizedException();
@@ -119,10 +116,24 @@ class ClientRemoteDataSource implements IClientRemoteDataSource {
         'isMinesite': params.isMinesite,
         'industry': params.industry,
         'projectSite': params.projectSite,
-        'notificationEmails': params.notificationEmails,
-        'tripDepartureArrivalEmails': params.tripDepartureArrivalEmails,
-        'passengerBookingEmails': params.passengerBookingEmails,
       };
+
+  Map<String, dynamic> _updateClientParamsToJson(UpdateClientParams params) {
+    final json = {
+      ..._clientParamsToJson(params),
+      'isActive': params.isActive,
+    };
+    if (params.notificationEmails != null) {
+      json['notificationEmails'] = params.notificationEmails;
+    }
+    if (params.tripDepartureArrivalEmails != null) {
+      json['tripDepartureArrivalEmails'] = params.tripDepartureArrivalEmails;
+    }
+    if (params.passengerBookingEmails != null) {
+      json['passengerBookingEmails'] = params.passengerBookingEmails;
+    }
+    return json;
+  }
 
   String _serviceTypeToString(ServiceType t) =>
       t.name[0].toUpperCase() + t.name.substring(1);

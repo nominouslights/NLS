@@ -32,6 +32,8 @@ class Client extends Equatable {
   final List<String> notificationEmails;
   final List<String> tripDepartureArrivalEmails;
   final List<String> passengerBookingEmails;
+  /// True when GET /api/clients/{id} includes notification email fields.
+  final bool apiSupportsNotificationEmails;
 
   const Client({
     required this.id,
@@ -61,6 +63,7 @@ class Client extends Equatable {
     this.notificationEmails = const [],
     this.tripDepartureArrivalEmails = const [],
     this.passengerBookingEmails = const [],
+    this.apiSupportsNotificationEmails = false,
   });
 
   @override
@@ -68,5 +71,6 @@ class Client extends Equatable {
     phone, email, streetAddress, city, province, postalCode, gstHstNumber, preferredPaymentMethod,
     netPaymentTerms, outstandingBalance, complianceNotes, isMinesite, isActive, createdAt,
     activeContract, activeContractRenewalDate, listItemIsExpiringSoon, industry, projectSite,
-    notificationEmails, tripDepartureArrivalEmails, passengerBookingEmails];
+    notificationEmails, tripDepartureArrivalEmails, passengerBookingEmails,
+    apiSupportsNotificationEmails];
 }
