@@ -16,6 +16,7 @@ internal sealed class TripRepository(AppDbContext dbContext) : ITripRepository
         var query = dbContext.Trips
             .Include(t => t.Stops)
             .Include(t => t.Passengers)
+            .Include(t => t.CargoItems)
             .Where(t => !t.IsDeleted)
             .AsQueryable();
 
@@ -43,6 +44,7 @@ internal sealed class TripRepository(AppDbContext dbContext) : ITripRepository
         await dbContext.Trips
             .Include(t => t.Stops)
             .Include(t => t.Passengers)
+            .Include(t => t.CargoItems)
             .Include(t => t.PreInspection)
                 .ThenInclude(p => p!.Items)
             .Include(t => t.PostReport)

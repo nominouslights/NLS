@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import 'trip_cargo_item.dart';
 import 'trip_passenger.dart';
 import 'trip_stop.dart';
 import 'trip_pre_inspection.dart';
@@ -24,6 +25,7 @@ class Trip extends Equatable {
   final double? pricePerSeat;
   final List<TripStop> stops;
   final List<TripPassenger> passengers;
+  final List<TripCargoItem> cargoItems;
   final TripPreInspection? preInspection;
   final TripPostReport? postReport;
 
@@ -43,6 +45,7 @@ class Trip extends Equatable {
     this.pricePerSeat,
     this.stops = const [],
     this.passengers = const [],
+    this.cargoItems = const [],
     this.preInspection,
     this.postReport,
   });
@@ -70,6 +73,7 @@ class Trip extends Equatable {
         pricePerSeat,
         stops,
         passengers,
+        cargoItems,
         preInspection,
         postReport,
       ];

@@ -214,6 +214,35 @@ public sealed class TripsController(ISender sender) : BaseApiController(sender)
         await Sender.Send(new UpdatePassengerPaymentStatusCommand(id, passengerId, request.PaymentStatus), cancellationToken);
         return NoContent();
     }
+
+    [Authorize(Policy = "AdminOnly")]
+    [HttpPost]
+    [Route("api/trips/{id:guid}/cargo")]
+    public async Task<IActionResult> AddCargoItem(
+        Guid id,
+        [FromBody] AddCargoItemRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(new AddCargoItemCommand(
+            id,
+            request.CargoType,
+            request.Description,
+            request.Quantity),
+            cancellationToken);
+        return Ok(result);
+    }
+
+    [Authorize(Policy = "AdminOnly")]
+    [HttpDelete]
+    [Route("api/trips/{id:guid}/cargo/{cargoItemId:guid}")]
+    public async Task<IActionResult> RemoveCargoItem(
+        Guid id,
+        Guid cargoItemId,
+        CancellationToken cancellationToken)
+    {
+        await Sender.Send(new RemoveCargoItemCommand(id, cargoItemId), cancellationToken);
+        return NoContent();
+    }
 }
 
 public sealed record CreateTripRequest(
@@ -270,3 +299,8 @@ public sealed record AddPassengerRequest(
     bool IsAddedAfterDeparture = false);
 
 public sealed record UpdatePassengerPaymentStatusRequest(PassengerPaymentStatus PaymentStatus);
+
+public sealed record AddCargoItemRequest(
+    CargoType CargoType,
+    string? Description,
+    int Quantity);

@@ -7,6 +7,7 @@ class RouteNames {
   static const String pendingApproval = '/pending-approval';
   static const String trips = '/trips';
   static const String tripDetail = '/trips/:id';
+  static const String tripView = '/trips/:id/view';
   static const String tripManifestNew = '/trips/new';
   static const String tripManifestEdit = '/trips/:id/edit';
   static const String driverTrip = '/driver/trips/:id';

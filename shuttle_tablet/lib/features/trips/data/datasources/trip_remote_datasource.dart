@@ -1,7 +1,9 @@
 import 'package:dio/dio.dart';
+import '../../../../core/debug/agent_log.dart';
 import '../../../../core/error/exceptions.dart';
 import '../../../../core/network/api_endpoints.dart';
 import '../../domain/entities/trip.dart';
+import '../../domain/entities/trip_cargo_item.dart';
 import '../../domain/entities/trip_passenger.dart';
 import '../../domain/entities/trip_post_report.dart';
 import '../../domain/repositories/i_trip_repository.dart';
@@ -44,6 +46,10 @@ abstract interface class ITripRemoteDataSource {
 
   Future<void> updatePassengerPaymentStatus(
       UpdatePassengerPaymentStatusParams params);
+
+  Future<String> addCargoItem(AddCargoItemParams params);
+
+  Future<void> removeCargoItem(String tripId, String cargoItemId);
 }
 
 class TripRemoteDataSource implements ITripRemoteDataSource {
@@ -77,6 +83,18 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
           .map((e) => TripModel.fromJson(e as Map<String, dynamic>))
           .toList();
     } on DioException catch (e) {
+      // #region agent log
+      agentLog(
+        location: 'trip_remote_datasource.dart:getTrips',
+        message: 'trips list failed',
+        hypothesisId: 'A',
+        data: {
+          'statusCode': e.response?.statusCode,
+          'error': e.message,
+          'body': e.response?.data?.toString(),
+        },
+      );
+      // #endregion
       if (e.response?.statusCode == 401) throw const UnauthorizedException();
       throw ServerException(
         message: e.message ?? 'Failed to load trips',
@@ -89,8 +107,36 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
   Future<TripModel> getTripById(String id) async {
     try {
       final response = await _dio.get(ApiEndpoints.tripById(id));
-      return TripModel.fromJson(response.data as Map<String, dynamic>);
+      // #region agent log
+      final data = response.data as Map<String, dynamic>;
+      agentLog(
+        location: 'trip_remote_datasource.dart:getTripById',
+        message: 'trip detail response',
+        hypothesisId: 'A',
+        data: {
+          'tripId': id,
+          'statusCode': response.statusCode,
+          'hasCargoItems': data.containsKey('cargoItems'),
+          'hasCargoItemsPascal': data.containsKey('CargoItems'),
+          'cargoItemsType': data['cargoItems']?.runtimeType.toString(),
+        },
+      );
+      // #endregion
+      return TripModel.fromJson(data);
     } on DioException catch (e) {
+      // #region agent log
+      agentLog(
+        location: 'trip_remote_datasource.dart:getTripById',
+        message: 'trip detail failed',
+        hypothesisId: 'A',
+        data: {
+          'tripId': id,
+          'statusCode': e.response?.statusCode,
+          'error': e.message,
+          'body': e.response?.data?.toString(),
+        },
+      );
+      // #endregion
       if (e.response?.statusCode == 401) throw const UnauthorizedException();
       if (e.response?.statusCode == 404) throw const NotFoundException();
       throw ServerException(
@@ -332,7 +378,52 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
     }
   }
 
+  @override
+  Future<String> addCargoItem(AddCargoItemParams params) async {
+    try {
+      final response = await _dio.post(
+        ApiEndpoints.tripCargo(params.tripId),
+        data: {
+          'cargoType': _cargoTypeToString(params.cargoType),
+          'description': params.description,
+          'quantity': params.quantity,
+        },
+      );
+      final data = response.data as Map<String, dynamic>;
+      return data['cargoItemId'] as String;
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 401) throw const UnauthorizedException();
+      if (e.response?.statusCode == 404) throw const NotFoundException();
+      throw ServerException(
+        message: e.message ?? 'Failed to add cargo',
+        statusCode: e.response?.statusCode,
+      );
+    }
+  }
+
+  @override
+  Future<void> removeCargoItem(String tripId, String cargoItemId) async {
+    try {
+      await _dio.delete(ApiEndpoints.tripCargoById(tripId, cargoItemId));
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 401) throw const UnauthorizedException();
+      if (e.response?.statusCode == 404) throw const NotFoundException();
+      throw ServerException(
+        message: e.message ?? 'Failed to remove cargo',
+        statusCode: e.response?.statusCode,
+      );
+    }
+  }
+
   // ── Helpers ───────────────────────────────────────────────────────────────
+
+  static String _cargoTypeToString(TripCargoType type) {
+    const map = {
+      TripCargoType.box: 'Box',
+      TripCargoType.pallet: 'Pallet',
+    };
+    return map[type]!;
+  }
 
   static String _statusToString(TripStatus status) {
     const map = {

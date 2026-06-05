@@ -7,6 +7,7 @@ public sealed class Trip : AggregateRoot<Guid>
 {
     private readonly List<TripStop> _stops = [];
     private readonly List<TripPassenger> _passengers = [];
+    private readonly List<TripCargoItem> _cargoItems = [];
 
     public Guid? ClientId { get; private set; }
     public Guid? VehicleId { get; private set; }
@@ -25,6 +26,7 @@ public sealed class Trip : AggregateRoot<Guid>
 
     public IReadOnlyList<TripStop> Stops => _stops.AsReadOnly();
     public IReadOnlyList<TripPassenger> Passengers => _passengers.AsReadOnly();
+    public IReadOnlyList<TripCargoItem> CargoItems => _cargoItems.AsReadOnly();
     public TripPreInspection? PreInspection { get; private set; }
     public TripPostReport? PostReport { get; private set; }
 
@@ -137,6 +139,20 @@ public sealed class Trip : AggregateRoot<Guid>
         var passenger = _passengers.FirstOrDefault(p => p.Id == passengerId)
             ?? throw new InvalidOperationException($"Passenger {passengerId} not found on this trip.");
         passenger.UpdatePaymentStatus(status);
+    }
+
+    public TripCargoItem AddCargoItem(CargoType cargoType, string? description, int quantity)
+    {
+        var item = TripCargoItem.Create(Id, cargoType, description, quantity);
+        _cargoItems.Add(item);
+        return item;
+    }
+
+    public void RemoveCargoItem(Guid cargoItemId)
+    {
+        var item = _cargoItems.FirstOrDefault(c => c.Id == cargoItemId)
+            ?? throw new InvalidOperationException($"Cargo item {cargoItemId} not found on this trip.");
+        _cargoItems.Remove(item);
     }
 
     public void AssignDriver(Guid driverId, string? vehicleType)

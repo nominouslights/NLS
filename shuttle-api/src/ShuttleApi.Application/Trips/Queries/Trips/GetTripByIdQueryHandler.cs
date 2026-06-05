@@ -66,6 +66,15 @@ internal sealed class GetTripByIdQueryHandler(ITripRepository tripRepository)
                 p.Fare))
             .ToList();
 
+        var cargoItems = trip.CargoItems
+            .Select(c => new CargoItemResult(
+                c.Id,
+                c.TripId,
+                c.CargoType.ToString(),
+                c.Description,
+                c.Quantity))
+            .ToList();
+
         return new TripDetailResult(
             trip.Id,
             trip.ClientId,
@@ -82,6 +91,7 @@ internal sealed class GetTripByIdQueryHandler(ITripRepository tripRepository)
             trip.PricePerSeat,
             stops,
             passengers,
+            cargoItems,
             preInspection,
             postReport);
     }

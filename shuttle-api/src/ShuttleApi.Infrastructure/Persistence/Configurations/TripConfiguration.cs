@@ -51,6 +51,11 @@ public sealed class TripConfiguration : IEntityTypeConfiguration<Trip>
             .HasForeignKey(p => p.TripId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        builder.HasMany(t => t.CargoItems)
+            .WithOne()
+            .HasForeignKey(c => c.TripId)
+            .OnDelete(DeleteBehavior.Cascade);
+
         builder.HasOne(t => t.PreInspection)
             .WithOne()
             .HasForeignKey<TripPreInspection>(p => p.TripId)
