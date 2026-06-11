@@ -16,6 +16,7 @@ public sealed record TripListItemResult(
     Guid? VehicleId,
     Guid? DriverId,
     string ServiceType,
+    Guid? PurchaseOrderId,
     string? PurchaseOrderNumber,
     string? VehicleType,
     DateTime ScheduledAt,

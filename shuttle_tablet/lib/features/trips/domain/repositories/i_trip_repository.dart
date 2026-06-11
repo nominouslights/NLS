@@ -89,6 +89,7 @@ class CreateTripParams {
   final TripServiceType serviceType;
   final String? clientId;
   final String? vehicleId;
+  final String? purchaseOrderId;
   final String? purchaseOrderNumber;
   final String? vehicleType;
   final DateTime scheduledAt;
@@ -101,6 +102,7 @@ class CreateTripParams {
     this.serviceType = TripServiceType.charter,
     this.clientId,
     this.vehicleId,
+    this.purchaseOrderId,
     this.purchaseOrderNumber,
     this.vehicleType,
     required this.scheduledAt,
@@ -113,6 +115,7 @@ class CreateTripParams {
 
 class UpdateTripParams {
   final String? vehicleId;
+  final String? purchaseOrderId;
   final String? purchaseOrderNumber;
   final String? vehicleType;
   final DateTime scheduledAt;
@@ -123,6 +126,7 @@ class UpdateTripParams {
 
   const UpdateTripParams({
     this.vehicleId,
+    this.purchaseOrderId,
     this.purchaseOrderNumber,
     this.vehicleType,
     required this.scheduledAt,

@@ -12,6 +12,7 @@ public sealed class Trip : AggregateRoot<Guid>
     public Guid? ClientId { get; private set; }
     public Guid? VehicleId { get; private set; }
     public Guid? DriverId { get; private set; }
+    public Guid? PurchaseOrderId { get; private set; }
     public TripServiceType ServiceType { get; private set; }
     public string? PurchaseOrderNumber { get; private set; }
     public string? VehicleType { get; private set; }
@@ -36,6 +37,7 @@ public sealed class Trip : AggregateRoot<Guid>
         TripServiceType serviceType,
         Guid? clientId,
         Guid? vehicleId,
+        Guid? purchaseOrderId,
         string? purchaseOrderNumber,
         string? vehicleType,
         DateTime scheduledAt,
@@ -50,12 +52,16 @@ public sealed class Trip : AggregateRoot<Guid>
         if (serviceType == TripServiceType.Charter && vehicleId is null)
             throw new InvalidOperationException("VehicleId is required for Charter trips.");
 
+        if (serviceType == TripServiceType.Community && (purchaseOrderId is not null || purchaseOrderNumber is not null))
+            throw new InvalidOperationException("Purchase orders are not supported for Community trips.");
+
         var trip = new Trip
         {
             Id = Guid.NewGuid(),
             ServiceType = serviceType,
             ClientId = clientId,
             VehicleId = vehicleId,
+            PurchaseOrderId = purchaseOrderId,
             PurchaseOrderNumber = purchaseOrderNumber,
             VehicleType = vehicleType,
             ScheduledAt = scheduledAt,
@@ -82,6 +88,7 @@ public sealed class Trip : AggregateRoot<Guid>
 
     public void Update(
         Guid? vehicleId,
+        Guid? purchaseOrderId,
         string? purchaseOrderNumber,
         string? vehicleType,
         DateTime scheduledAt,
@@ -92,7 +99,11 @@ public sealed class Trip : AggregateRoot<Guid>
     {
         Guard.Against(Status != TripStatus.Scheduled, "Only scheduled trips can be updated.");
 
+        if (ServiceType == TripServiceType.Community && (purchaseOrderId is not null || purchaseOrderNumber is not null))
+            throw new InvalidOperationException("Purchase orders are not supported for Community trips.");
+
         if (vehicleId.HasValue) VehicleId = vehicleId.Value;
+        PurchaseOrderId = purchaseOrderId;
         PurchaseOrderNumber = purchaseOrderNumber;
         VehicleType = vehicleType;
         ScheduledAt = scheduledAt;

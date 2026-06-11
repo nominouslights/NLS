@@ -25,6 +25,7 @@ internal sealed class GetTripsQueryHandler(ITripRepository tripRepository)
                 t.VehicleId,
                 t.DriverId,
                 t.ServiceType.ToString(),
+                t.PurchaseOrderId,
                 t.PurchaseOrderNumber,
                 t.VehicleType,
                 t.ScheduledAt,

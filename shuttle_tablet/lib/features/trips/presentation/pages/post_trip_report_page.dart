@@ -403,7 +403,7 @@ class _PostTripReportPageState extends ConsumerState<PostTripReportPage> {
         isReadyToInvoice: _isReadyToInvoice,
       );
       await ref
-          .read(tripFormProvider.notifier)
+          .read(tripFormProvider)
           .submitPostReport(widget.tripId, params);
 
       ref.invalidate(tripDetailProvider(widget.tripId));

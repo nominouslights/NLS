@@ -5,7 +5,7 @@ class Contract extends Equatable {
   final String id;
   final String clientId;
   final DateTime startDate;
-  final DateTime renewalDate;
+  final DateTime endDate;
   final bool isActive;
   final String? notes;
   final List<ContractRateLine> rateLines;
@@ -14,15 +14,15 @@ class Contract extends Equatable {
     required this.id,
     required this.clientId,
     required this.startDate,
-    required this.renewalDate,
+    required this.endDate,
     required this.isActive,
     this.notes,
     required this.rateLines,
   });
 
   bool get isExpiringSoon =>
-      renewalDate.difference(DateTime.now()).inDays <= 60;
+      endDate.difference(DateTime.now()).inDays <= 60;
 
   @override
-  List<Object?> get props => [id, clientId, startDate, renewalDate, isActive, notes, rateLines];
+  List<Object?> get props => [id, clientId, startDate, endDate, isActive, notes, rateLines];
 }

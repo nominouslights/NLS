@@ -22,6 +22,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ClientEmailTemplate> ClientEmailTemplates => Set<ClientEmailTemplate>();
     public DbSet<Contract> Contracts => Set<Contract>();
     public DbSet<ContractRateLine> ContractRateLines => Set<ContractRateLine>();
+    public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
+    public DbSet<PurchaseOrderLineItem> PurchaseOrderLineItems => Set<PurchaseOrderLineItem>();
+    public DbSet<ContractPurchaseOrder> ContractPurchaseOrders => Set<ContractPurchaseOrder>();
     public DbSet<Driver> Drivers => Set<Driver>();
     public DbSet<DriverDocument> DriverDocuments => Set<DriverDocument>();
     public DbSet<DriverRosterEntry> DriverRosterEntries => Set<DriverRosterEntry>();

@@ -19,7 +19,7 @@ internal sealed class GetClientByIdQueryHandler(
         ContractSummaryResult? contractSummary = activeContract is null ? null : new ContractSummaryResult(
             activeContract.Id,
             activeContract.StartDate,
-            activeContract.RenewalDate,
+            activeContract.EndDate,
             activeContract.IsExpiringSoon,
             activeContract.Notes,
             activeContract.RateLines.Select(r => new RateLineResult(

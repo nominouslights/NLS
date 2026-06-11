@@ -5,5 +5,5 @@ namespace ShuttleApi.Application.Clients;
 public sealed record UpdateContractCommand(
     Guid ContractId,
     DateTime StartDate,
-    DateTime RenewalDate,
+    DateTime EndDate,
     string? Notes) : ICommand;

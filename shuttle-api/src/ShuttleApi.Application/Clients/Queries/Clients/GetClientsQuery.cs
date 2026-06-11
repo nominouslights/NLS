@@ -13,5 +13,5 @@ public sealed record ClientListItemResult(
     string Phone,
     string Email,
     bool IsActive,
-    DateTime? ActiveContractRenewalDate,
+    DateTime? ActiveContractEndDate,
     bool IsExpiringSoon);

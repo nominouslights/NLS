@@ -15,14 +15,14 @@ abstract interface class IContractRepository {
 class CreateContractParams {
   final String clientId;
   final DateTime startDate;
-  final DateTime renewalDate;
+  final DateTime endDate;
   final String? notes;
   final List<RateLineParams> rateLines;
 
   const CreateContractParams({
     required this.clientId,
     required this.startDate,
-    required this.renewalDate,
+    required this.endDate,
     this.notes,
     required this.rateLines,
   });
@@ -30,12 +30,12 @@ class CreateContractParams {
 
 class UpdateContractParams {
   final DateTime startDate;
-  final DateTime renewalDate;
+  final DateTime endDate;
   final String? notes;
 
   const UpdateContractParams({
     required this.startDate,
-    required this.renewalDate,
+    required this.endDate,
     this.notes,
   });
 }

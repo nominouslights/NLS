@@ -6,23 +6,34 @@ class ContractModel extends Contract {
     required super.id,
     required super.clientId,
     required super.startDate,
-    required super.renewalDate,
+    required super.endDate,
     required super.isActive,
     super.notes,
     required List<ContractRateLineModel> rateLines,
   }) : super(rateLines: rateLines);
 
-  factory ContractModel.fromJson(Map<String, dynamic> json) {
+  /// Parses contract summary/detail JSON from the API.
+  /// [clientId] is required when the payload omits it (e.g. list/summary endpoints).
+  factory ContractModel.fromJson(
+    Map<String, dynamic> json, {
+    String? clientId,
+  }) {
+    final contractId = json['id'] as String;
     final rawLines = json['rateLines'] as List<dynamic>? ?? [];
     return ContractModel(
-      id: json['id'] as String,
-      clientId: json['clientId'] as String,
+      id: contractId,
+      clientId: clientId ?? json['clientId'] as String? ?? '',
       startDate: DateTime.parse(json['startDate'] as String),
-      renewalDate: DateTime.parse(json['renewalDate'] as String),
-      isActive: json['isActive'] as bool,
+      endDate: DateTime.parse(json['endDate'] as String),
+      isActive: json['isActive'] as bool? ?? true,
       notes: json['notes'] as String?,
       rateLines: rawLines
-          .map((e) => ContractRateLineModel.fromJson(e as Map<String, dynamic>))
+          .map(
+            (e) => ContractRateLineModel.fromJson(
+              e as Map<String, dynamic>,
+              contractId: contractId,
+            ),
+          )
           .toList(),
     );
   }
@@ -30,7 +41,7 @@ class ContractModel extends Contract {
   Map<String, dynamic> toJson() => {
         'clientId': clientId,
         'startDate': startDate.toIso8601String(),
-        'renewalDate': renewalDate.toIso8601String(),
+        'endDate': endDate.toIso8601String(),
         'notes': notes,
       };
 }

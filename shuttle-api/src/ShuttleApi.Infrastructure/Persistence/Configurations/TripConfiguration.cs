@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using ShuttleApi.Domain.Clients;
 using ShuttleApi.Domain.Trips;
 
 namespace ShuttleApi.Infrastructure.Persistence.Configurations;
@@ -22,7 +23,14 @@ public sealed class TripConfiguration : IEntityTypeConfiguration<Trip>
             .HasConversion<string>()
             .HasMaxLength(20)
             .IsRequired();
+        builder.Property(t => t.PurchaseOrderId);
         builder.Property(t => t.PurchaseOrderNumber).HasMaxLength(100);
+        builder.HasIndex(t => t.PurchaseOrderId);
+
+        builder.HasOne<PurchaseOrder>()
+            .WithMany()
+            .HasForeignKey(t => t.PurchaseOrderId)
+            .OnDelete(DeleteBehavior.SetNull);
         builder.Property(t => t.VehicleType).HasMaxLength(100);
         builder.Property(t => t.ScheduledAt).IsRequired();
         builder.Property(t => t.Status)

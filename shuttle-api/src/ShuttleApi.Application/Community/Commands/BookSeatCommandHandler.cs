@@ -64,6 +64,7 @@ internal sealed class BookSeatCommandHandler(
                 TripServiceType.Community,
                 clientId: null,
                 vehicleId: null,
+                purchaseOrderId: null,
                 purchaseOrderNumber: null,
                 vehicleType: null,
                 scheduledAt: departureTime,

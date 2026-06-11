@@ -15,6 +15,7 @@ class Trip extends Equatable {
   final String? vehicleId;
   final String? driverId;
   final TripServiceType serviceType;
+  final String? purchaseOrderId;
   final String? purchaseOrderNumber;
   final String? vehicleType;
   final DateTime scheduledAt;
@@ -35,6 +36,7 @@ class Trip extends Equatable {
     this.vehicleId,
     this.driverId,
     this.serviceType = TripServiceType.charter,
+    this.purchaseOrderId,
     this.purchaseOrderNumber,
     this.vehicleType,
     required this.scheduledAt,
@@ -63,6 +65,7 @@ class Trip extends Equatable {
         vehicleId,
         driverId,
         serviceType,
+        purchaseOrderId,
         purchaseOrderNumber,
         vehicleType,
         scheduledAt,

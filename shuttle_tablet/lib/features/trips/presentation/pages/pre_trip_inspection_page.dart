@@ -290,7 +290,7 @@ class _PreTripInspectionPageState
               ))
           .toList();
 
-      await ref.read(tripFormProvider.notifier).submitPreInspection(
+      await ref.read(tripFormProvider).submitPreInspection(
             widget.tripId,
             SubmitPreInspectionParams(
               odometerStart: int.parse(_odometerController.text),

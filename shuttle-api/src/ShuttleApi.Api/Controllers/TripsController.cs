@@ -42,6 +42,7 @@ public sealed class TripsController(ISender sender) : BaseApiController(sender)
             request.ServiceType,
             request.ClientId,
             request.VehicleId,
+            request.PurchaseOrderId,
             request.PurchaseOrderNumber,
             request.VehicleType,
             request.ScheduledAt,
@@ -64,6 +65,7 @@ public sealed class TripsController(ISender sender) : BaseApiController(sender)
         await Sender.Send(new UpdateTripCommand(
             id,
             request.VehicleId,
+            request.PurchaseOrderId,
             request.PurchaseOrderNumber,
             request.VehicleType,
             request.ScheduledAt,
@@ -278,6 +280,7 @@ public sealed record CreateTripRequest(
     TripServiceType ServiceType,
     Guid? ClientId,
     Guid? VehicleId,
+    Guid? PurchaseOrderId,
     string? PurchaseOrderNumber,
     string? VehicleType,
     DateTime ScheduledAt,
@@ -288,6 +291,7 @@ public sealed record CreateTripRequest(
 
 public sealed record UpdateTripRequest(
     Guid? VehicleId,
+    Guid? PurchaseOrderId,
     string? PurchaseOrderNumber,
     string? VehicleType,
     DateTime ScheduledAt,

@@ -24,7 +24,12 @@ class ContractRemoteDataSource implements IContractRemoteDataSource {
       final response = await _dio.get(ApiEndpoints.contractsByClient(clientId));
       final list = response.data as List<dynamic>;
       return list
-          .map((e) => ContractModel.fromJson(e as Map<String, dynamic>))
+          .map(
+            (e) => ContractModel.fromJson(
+              e as Map<String, dynamic>,
+              clientId: clientId,
+            ),
+          )
           .toList();
     } on DioException catch (e) {
       if (e.response?.statusCode == 401) throw const UnauthorizedException();
@@ -42,7 +47,7 @@ class ContractRemoteDataSource implements IContractRemoteDataSource {
         ApiEndpoints.contractsByClient(params.clientId),
         data: {
           'startDate': params.startDate.toUtc().toIso8601String(),
-          'renewalDate': params.renewalDate.toUtc().toIso8601String(),
+          'endDate': params.endDate.toUtc().toIso8601String(),
           'notes': params.notes,
           'rateLines': params.rateLines.map((r) => {
             'billingCode': r.billingCode,
@@ -73,7 +78,7 @@ class ContractRemoteDataSource implements IContractRemoteDataSource {
         ApiEndpoints.contractById(clientId, contractId),
         data: {
           'startDate': params.startDate.toUtc().toIso8601String(),
-          'renewalDate': params.renewalDate.toUtc().toIso8601String(),
+          'endDate': params.endDate.toUtc().toIso8601String(),
           'notes': params.notes,
         },
       );

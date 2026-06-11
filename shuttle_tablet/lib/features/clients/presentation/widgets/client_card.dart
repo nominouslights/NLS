@@ -18,7 +18,7 @@ class ClientCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final renewalDate = client.activeContractRenewalDate ?? client.activeContract?.renewalDate;
+    final endDate = client.activeContractEndDate ?? client.activeContract?.endDate;
     final isExpiring = client.listItemIsExpiringSoon || (client.activeContract?.isExpiringSoon ?? false);
 
     return Card(
@@ -85,9 +85,9 @@ class ClientCard extends StatelessWidget {
                       client.primaryContactName,
                       style: const TextStyle(fontSize: 13, color: AppColors.brandGray),
                     ),
-                    if (isExpiring && renewalDate != null) ...[
+                    if (isExpiring && endDate != null) ...[
                       const SizedBox(height: 4),
-                      _RenewalAlertChip(renewalDate: renewalDate),
+                      _EndDateAlertChip(endDate: endDate),
                     ],
                   ],
                 ),
@@ -149,13 +149,13 @@ class _ServiceTypePill extends StatelessWidget {
   }
 }
 
-class _RenewalAlertChip extends StatelessWidget {
-  final DateTime renewalDate;
-  const _RenewalAlertChip({required this.renewalDate});
+class _EndDateAlertChip extends StatelessWidget {
+  final DateTime endDate;
+  const _EndDateAlertChip({required this.endDate});
 
   @override
   Widget build(BuildContext context) {
-    final days = renewalDate.difference(DateTime.now()).inDays;
+    final days = endDate.difference(DateTime.now()).inDays;
     return Row(
       children: [
         const Icon(Icons.warning_amber_rounded, size: 14, color: AppColors.warning),

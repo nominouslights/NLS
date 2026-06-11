@@ -25,7 +25,7 @@ class Client extends Equatable {
   final DateTime createdAt;
   final Contract? activeContract;
   // Populated from list endpoint only (no full contract object in list response)
-  final DateTime? activeContractRenewalDate;
+  final DateTime? activeContractEndDate;
   final bool listItemIsExpiringSoon;
   final String? industry;
   final String? projectSite;
@@ -56,7 +56,7 @@ class Client extends Equatable {
     required this.isActive,
     required this.createdAt,
     this.activeContract,
-    this.activeContractRenewalDate,
+    this.activeContractEndDate,
     this.listItemIsExpiringSoon = false,
     this.industry,
     this.projectSite,
@@ -70,7 +70,7 @@ class Client extends Equatable {
   List<Object?> get props => [id, businessName, serviceType, primaryContactName, primaryContactTitle,
     phone, email, streetAddress, city, province, postalCode, gstHstNumber, preferredPaymentMethod,
     netPaymentTerms, outstandingBalance, complianceNotes, isMinesite, isActive, createdAt,
-    activeContract, activeContractRenewalDate, listItemIsExpiringSoon, industry, projectSite,
+    activeContract, activeContractEndDate, listItemIsExpiringSoon, industry, projectSite,
     notificationEmails, tripDepartureArrivalEmails, passengerBookingEmails,
     apiSupportsNotificationEmails];
 }

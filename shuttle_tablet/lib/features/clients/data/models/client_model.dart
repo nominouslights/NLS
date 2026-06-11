@@ -23,7 +23,7 @@ class ClientModel extends Client {
     required super.isActive,
     required super.createdAt,
     ContractModel? activeContract,
-    super.activeContractRenewalDate,
+    super.activeContractEndDate,
     super.listItemIsExpiringSoon = false,
     super.industry,
     super.projectSite,
@@ -35,7 +35,7 @@ class ClientModel extends Client {
 
   factory ClientModel.fromJson(Map<String, dynamic> json) {
     final contractJson = json['activeContract'] as Map<String, dynamic>?;
-    final renewalDateRaw = json['activeContractRenewalDate'] as String?;
+    final endDateRaw = json['activeContractEndDate'] as String?;
     final supportsNotificationEmails = json.containsKey('notificationEmails') ||
         json.containsKey('NotificationEmails');
     return ClientModel(
@@ -58,8 +58,13 @@ class ClientModel extends Client {
       isMinesite: json['isMinesite'] as bool? ?? false,
       isActive: json['isActive'] as bool? ?? true,
       createdAt: DateTime.tryParse(json['createdAt'] as String? ?? '') ?? DateTime.now(),
-      activeContract: contractJson != null ? ContractModel.fromJson(contractJson) : null,
-      activeContractRenewalDate: renewalDateRaw != null ? DateTime.tryParse(renewalDateRaw) : null,
+      activeContract: contractJson != null
+          ? ContractModel.fromJson(
+              contractJson,
+              clientId: json['id'] as String,
+            )
+          : null,
+      activeContractEndDate: endDateRaw != null ? DateTime.tryParse(endDateRaw) : null,
       listItemIsExpiringSoon: json['isExpiringSoon'] as bool? ?? false,
       industry: json['industry'] as String?,
       projectSite: json['projectSite'] as String?,

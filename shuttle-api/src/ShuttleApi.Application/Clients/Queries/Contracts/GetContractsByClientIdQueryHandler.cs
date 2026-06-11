@@ -13,7 +13,7 @@ internal sealed class GetContractsByClientIdQueryHandler(IContractRepository con
         return contracts.Select(c => new ContractSummaryResult(
             c.Id,
             c.StartDate,
-            c.RenewalDate,
+            c.EndDate,
             c.IsExpiringSoon,
             c.Notes,
             c.RateLines.Select(r => new RateLineResult(

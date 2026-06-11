@@ -12,10 +12,13 @@ class ContractRateLineModel extends ContractRateLine {
     required super.dayRate,
   });
 
-  factory ContractRateLineModel.fromJson(Map<String, dynamic> json) {
+  factory ContractRateLineModel.fromJson(
+    Map<String, dynamic> json, {
+    String? contractId,
+  }) {
     return ContractRateLineModel(
       id: json['id'] as String,
-      contractId: json['contractId'] as String,
+      contractId: contractId ?? json['contractId'] as String? ?? '',
       billingCode: json['billingCode'] as String,
       description: json['description'] as String,
       vehicleType: json['vehicleType'] as String,
