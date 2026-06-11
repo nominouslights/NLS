@@ -5,9 +5,9 @@ plugins {
 }
 
 android {
-    namespace = "com.shuttlesoftware.shuttle_tablet"
+    namespace = "com.example.flutter_template_check"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = "28.2.13676358"
+    ndkVersion = flutter.ndkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -16,7 +16,7 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.shuttlesoftware.shuttle_tablet"
+        applicationId = "com.example.flutter_template_check"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
@@ -42,8 +42,4 @@ kotlin {
 
 flutter {
     source = "../.."
-}
-
-dependencies {
-    implementation("androidx.appcompat:appcompat:1.7.0")
 }
