@@ -224,6 +224,44 @@ class TripRepositoryImpl implements ITripRepository {
   }
 
   @override
+  Future<Either<Failure, void>> sendPassengerConfirmation(
+      SendPassengerConfirmationParams params) async {
+    try {
+      await _remoteDataSource.sendPassengerConfirmation(
+        params.tripId,
+        params.passengerId,
+        params.directionValue,
+      );
+      return const Right(null);
+    } on UnauthorizedException {
+      return const Left(UnauthorizedFailure());
+    } on NotFoundException {
+      return const Left(NotFoundFailure());
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message));
+    }
+  }
+
+  @override
+  Future<Either<Failure, void>> sendStopUpdate(
+      SendStopUpdateParams params) async {
+    try {
+      await _remoteDataSource.sendStopUpdate(
+        params.tripId,
+        stopId: params.stopId,
+        status: params.status,
+      );
+      return const Right(null);
+    } on UnauthorizedException {
+      return const Left(UnauthorizedFailure());
+    } on NotFoundException {
+      return const Left(NotFoundFailure());
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message));
+    }
+  }
+
+  @override
   Future<Either<Failure, String>> addCargoItem(
       AddCargoItemParams params) async {
     try {

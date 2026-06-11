@@ -46,6 +46,11 @@ abstract interface class ITripRemoteDataSource {
   Future<void> updatePassengerPaymentStatus(
       UpdatePassengerPaymentStatusParams params);
 
+  Future<void> sendPassengerConfirmation(
+      String tripId, String passengerId, String direction);
+
+  Future<void> sendStopUpdate(String tripId, {String? stopId, String? status});
+
   Future<String> addCargoItem(AddCargoItemParams params);
 
   Future<void> removeCargoItem(String tripId, String cargoItemId);
@@ -338,6 +343,42 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
   }
 
   @override
+  Future<void> sendPassengerConfirmation(
+      String tripId, String passengerId, String direction) async {
+    try {
+      await _dio.post(
+        ApiEndpoints.tripPassengerSendConfirmation(tripId, passengerId),
+        data: {'direction': direction},
+      );
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 401) throw const UnauthorizedException();
+      if (e.response?.statusCode == 404) throw const NotFoundException();
+      throw ServerException(
+        message: _serverMessage(e, 'Failed to send confirmation email'),
+        statusCode: e.response?.statusCode,
+      );
+    }
+  }
+
+  @override
+  Future<void> sendStopUpdate(String tripId,
+      {String? stopId, String? status}) async {
+    try {
+      await _dio.post(
+        ApiEndpoints.tripSendStopUpdate(tripId),
+        data: {'stopId': stopId, 'status': status},
+      );
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 401) throw const UnauthorizedException();
+      if (e.response?.statusCode == 404) throw const NotFoundException();
+      throw ServerException(
+        message: _serverMessage(e, 'Failed to send stop update'),
+        statusCode: e.response?.statusCode,
+      );
+    }
+  }
+
+  @override
   Future<String> addCargoItem(AddCargoItemParams params) async {
     try {
       final response = await _dio.post(
@@ -375,6 +416,14 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
+
+  static String _serverMessage(DioException e, String fallback) {
+    final data = e.response?.data;
+    if (data is Map && data['error'] is String) {
+      return data['error'] as String;
+    }
+    return e.message ?? fallback;
+  }
 
   static String _cargoTypeToString(TripCargoType type) {
     const map = {

@@ -1,6 +1,7 @@
 import 'package:fpdart/fpdart.dart';
 import '../../../../core/error/failures.dart';
 import '../entities/client.dart';
+import '../entities/client_email_template.dart';
 
 abstract interface class IClientRepository {
   Future<Either<Failure, List<Client>>> getClients();
@@ -8,6 +9,24 @@ abstract interface class IClientRepository {
   Future<Either<Failure, String>> createClient(CreateClientParams params);
   Future<Either<Failure, void>> updateClient(String id, UpdateClientParams params);
   Future<Either<Failure, void>> deleteClient(String id);
+  Future<Either<Failure, List<ClientEmailTemplate>>> getEmailTemplates(
+      String clientId);
+  Future<Either<Failure, void>> upsertEmailTemplate(
+      UpsertEmailTemplateParams params);
+}
+
+class UpsertEmailTemplateParams {
+  final String clientId;
+  final ClientEmailTemplateType type;
+  final String subject;
+  final String body;
+
+  const UpsertEmailTemplateParams({
+    required this.clientId,
+    required this.type,
+    required this.subject,
+    required this.body,
+  });
 }
 
 class CreateClientParams {

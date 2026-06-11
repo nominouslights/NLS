@@ -29,5 +29,7 @@ public static class DevDataSeeder
             await db.SaveChangesAsync();
             logger.LogInformation("Dev seed: admin user created.");
         }
+
+        await AlamosEmailTemplateSeeder.SeedAsync(db, logger);
     }
 }

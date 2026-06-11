@@ -191,6 +191,35 @@ public sealed class TripsController(ISender sender) : BaseApiController(sender)
     }
 
     [Authorize(Policy = "AdminOnly")]
+    [HttpPost]
+    [Route("api/trips/{id:guid}/passengers/{passengerId:guid}/send-confirmation")]
+    public async Task<IActionResult> SendPassengerConfirmation(
+        Guid id,
+        Guid passengerId,
+        [FromBody] SendConfirmationRequest request,
+        CancellationToken cancellationToken)
+    {
+        await Sender.Send(
+            new SendPassengerConfirmationCommand(id, passengerId, request.Direction),
+            cancellationToken);
+        return NoContent();
+    }
+
+    [Authorize(Policy = "DriverOrAdmin")]
+    [HttpPost]
+    [Route("api/trips/{id:guid}/send-stop-update")]
+    public async Task<IActionResult> SendStopUpdate(
+        Guid id,
+        [FromBody] SendStopUpdateRequest request,
+        CancellationToken cancellationToken)
+    {
+        await Sender.Send(
+            new SendStopUpdateCommand(id, request.StopId, request.Status),
+            cancellationToken);
+        return NoContent();
+    }
+
+    [Authorize(Policy = "AdminOnly")]
     [HttpDelete]
     [Route("api/trips/{id:guid}/passengers/{passengerId:guid}")]
     public async Task<IActionResult> RemovePassenger(
@@ -304,3 +333,7 @@ public sealed record AddCargoItemRequest(
     CargoType CargoType,
     string? Description,
     int Quantity);
+
+public sealed record SendConfirmationRequest(string Direction);
+
+public sealed record SendStopUpdateRequest(Guid? StopId, string? Status);

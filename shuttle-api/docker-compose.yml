@@ -33,6 +33,9 @@ services:
       JwtSettings__Audience: ${JWT_AUDIENCE:-shuttle-tablet}
       JwtSettings__AccessTokenExpiryMinutes: ${JWT_ACCESS_EXPIRY_MINUTES:-15}
       JwtSettings__RefreshTokenExpiryDays: ${JWT_REFRESH_EXPIRY_DAYS:-7}
+      Postmark__ServerToken: ${POSTMARK_SERVER_TOKEN}
+      Postmark__FromAddress: ${POSTMARK_FROM_ADDRESS:-emelio.campbell@northernlinkshuttleandcargo.com}
+      Postmark__FromName: ${POSTMARK_FROM_NAME:-Northern Link Shuttle and Cargo}
     ports:
       - "5046:8080"
     depends_on:

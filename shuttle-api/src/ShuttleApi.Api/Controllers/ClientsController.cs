@@ -117,7 +117,29 @@ public sealed class ClientsController(ISender sender) : BaseApiController(sender
     [Route("api/clients/{clientId:guid}/rate-lines")]
     public async Task<IActionResult> GetRateLines(Guid clientId, CancellationToken cancellationToken) =>
         Ok(await Sender.Send(new GetRateLinesByClientQuery(clientId), cancellationToken));
+
+    [HttpGet]
+    [Route("api/clients/{clientId:guid}/email-templates")]
+    public async Task<IActionResult> GetEmailTemplates(Guid clientId, CancellationToken cancellationToken) =>
+        Ok(await Sender.Send(new GetClientEmailTemplatesQuery(clientId), cancellationToken));
+
+    [Authorize(Policy = "AdminOnly")]
+    [HttpPut]
+    [Route("api/clients/{clientId:guid}/email-templates/{type}")]
+    public async Task<IActionResult> UpsertEmailTemplate(
+        Guid clientId,
+        ShuttleApi.Domain.Clients.ClientEmailTemplateType type,
+        [FromBody] UpsertEmailTemplateRequest request,
+        CancellationToken cancellationToken)
+    {
+        await Sender.Send(
+            new UpsertClientEmailTemplateCommand(clientId, type, request.Subject, request.Body),
+            cancellationToken);
+        return NoContent();
+    }
 }
+
+public sealed record UpsertEmailTemplateRequest(string Subject, string Body);
 
 public sealed record UpdateClientRequest(
     string BusinessName,

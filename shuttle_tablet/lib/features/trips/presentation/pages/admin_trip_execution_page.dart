@@ -5,9 +5,12 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/di/injection_container.dart';
 import '../../domain/entities/trip.dart';
 import '../../domain/entities/trip_cargo_item.dart';
 import '../../domain/entities/trip_passenger.dart';
+import '../../domain/repositories/i_trip_repository.dart';
+import '../../domain/usecases/send_stop_update_usecase.dart';
 import '../providers/trips_provider.dart';
 import '../widgets/admin_trip_status_bar.dart';
 import '../widgets/trip_cargo_manifest.dart';
@@ -100,7 +103,18 @@ class _AdminTripBody extends ConsumerWidget {
                   _SectionCard(
                     title: 'Stop Progress',
                     icon: Icons.route_rounded,
-                    child: TripStopProgress(tripId: trip.id, stops: trip.stops),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        TripStopProgress(tripId: trip.id, stops: trip.stops),
+                        if (trip.serviceType == TripServiceType.charter &&
+                            trip.status != TripStatus.completed &&
+                            trip.status != TripStatus.cancelled) ...[
+                          const SizedBox(height: 12),
+                          _SendStopUpdateButton(trip: trip),
+                        ],
+                      ],
+                    ),
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -345,6 +359,116 @@ class _TripHeroCard extends StatelessWidget {
         TripStatus.completed => 'COMPLETED',
         TripStatus.cancelled => 'CANCELLED',
       };
+}
+
+class _SendStopUpdateButton extends StatelessWidget {
+  final Trip trip;
+  const _SendStopUpdateButton({required this.trip});
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: OutlinedButton.icon(
+        onPressed: () => _showDialog(context),
+        icon: const Icon(Icons.send_rounded, size: 16),
+        label: const Text('Send Stop Update'),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: const Color(0xFF0F766E),
+          side: const BorderSide(color: Color(0xFF0F766E)),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showDialog(BuildContext context) async {
+    final sortedStops = [...trip.stops]
+      ..sort((a, b) => a.sequenceOrder.compareTo(b.sequenceOrder));
+    String? selectedStopId =
+        sortedStops.isNotEmpty ? sortedStops.first.id : null;
+    final statusController = TextEditingController(text: 'On Time');
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          title: const Text('Send Stop Update'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Send a status update to this client\'s '
+                'Trip Departures & Arrivals recipients.',
+                style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                value: selectedStopId,
+                decoration: const InputDecoration(
+                  labelText: 'Current Stop',
+                  border: OutlineInputBorder(),
+                ),
+                items: sortedStops
+                    .map((s) => DropdownMenuItem(
+                          value: s.id,
+                          child: Text(s.locationName),
+                        ))
+                    .toList(),
+                onChanged: (v) => setState(() => selectedStopId = v),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: statusController,
+                decoration: const InputDecoration(
+                  labelText: 'Status',
+                  hintText: 'e.g. On Time, Delayed 15 min',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF0F766E)),
+              child: const Text('Send'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed != true || !context.mounted) return;
+
+    final result = await sl<SendStopUpdateUseCase>()(
+      SendStopUpdateParams(
+        tripId: trip.id,
+        stopId: selectedStopId,
+        status: statusController.text.trim().isEmpty
+            ? null
+            : statusController.text.trim(),
+      ),
+    );
+
+    if (!context.mounted) return;
+    result.fold(
+      (f) => ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(f.message), backgroundColor: AppColors.danger),
+      ),
+      (_) => ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Stop update sent.'),
+          backgroundColor: Color(0xFF059669),
+        ),
+      ),
+    );
+  }
 }
 
 class _MetaChip extends StatelessWidget {

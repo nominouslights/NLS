@@ -38,6 +38,7 @@ public static class DependencyInjection
         services.AddScoped<IJwtTokenService, JwtTokenService>();
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IClientRepository, ClientRepository>();
+        services.AddScoped<IClientEmailTemplateRepository, ClientEmailTemplateRepository>();
         services.AddScoped<IContractRepository, ContractRepository>();
         services.AddScoped<IDriverRepository, DriverRepository>();
         services.AddScoped<ITripRepository, TripRepository>();
@@ -47,7 +48,8 @@ public static class DependencyInjection
         services.Configure<SpacesSettings>(configuration.GetSection(SpacesSettings.SectionName));
         services.AddScoped<IFileStorageService, SpacesFileStorageService>();
         services.AddScoped<IPasswordHasher, BcryptPasswordHasher>();
-        services.AddScoped<INotificationService, NoOpNotificationService>();
+        services.Configure<PostmarkSettings>(configuration.GetSection(PostmarkSettings.SectionName));
+        services.AddScoped<INotificationService, PostmarkNotificationService>();
         services.AddHostedService<CutoffProcessorHostedService>();
 
         var jwtSettings = configuration.GetSection(JwtSettings.SectionName).Get<JwtSettings>()!;

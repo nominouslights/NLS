@@ -5,6 +5,7 @@ import '../../domain/entities/trip.dart';
 import '../../domain/entities/trip_passenger.dart';
 import '../../domain/repositories/i_trip_repository.dart';
 import '../../domain/usecases/remove_passenger_usecase.dart';
+import '../../domain/usecases/send_passenger_confirmation_usecase.dart';
 import '../../domain/usecases/update_passenger_payment_status_usecase.dart';
 import 'add_passenger_sheet.dart';
 
@@ -270,6 +271,18 @@ class _PassengerCard extends StatelessWidget {
               onSelected: (v) => _handleAction(context, v),
               itemBuilder: (_) => [
                 const PopupMenuItem(
+                  value: 'send',
+                  child: Row(
+                    children: [
+                      Icon(Icons.mail_outline_rounded,
+                          size: 16, color: Color(0xFF0F766E)),
+                      SizedBox(width: 8),
+                      Text('Send Confirmation'),
+                    ],
+                  ),
+                ),
+                const PopupMenuDivider(),
+                const PopupMenuItem(
                     value: 'pending', child: Text('Mark Pending')),
                 const PopupMenuItem(value: 'paid', child: Text('Mark Paid')),
                 const PopupMenuItem(
@@ -289,6 +302,11 @@ class _PassengerCard extends StatelessWidget {
   }
 
   Future<void> _handleAction(BuildContext context, String action) async {
+    if (action == 'send') {
+      await _sendConfirmation(context);
+      return;
+    }
+
     if (action == 'remove') {
       final confirmed = await showDialog<bool>(
         context: context,
@@ -356,6 +374,72 @@ class _PassengerCard extends StatelessWidget {
         }
       },
       (_) => onRefresh(),
+    );
+  }
+
+  Future<void> _sendConfirmation(BuildContext context) async {
+    final hasEmail = (passenger.email != null && passenger.email!.isNotEmpty) ||
+        (passenger.contactInfo != null && passenger.contactInfo!.isNotEmpty);
+    if (!hasEmail) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('This passenger has no email address on file.'),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+      return;
+    }
+
+    final direction = await showDialog<ConfirmationDirection>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Send Shuttle Confirmation'),
+        content: Text(
+          'Send a confirmation email to ${passenger.name}. '
+          'Choose which trip leg to confirm.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          OutlinedButton(
+            onPressed: () =>
+                Navigator.pop(ctx, ConfirmationDirection.inbound),
+            child: const Text('Inbound'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.pop(ctx, ConfirmationDirection.outbound),
+            style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF0F766E)),
+            child: const Text('Outbound'),
+          ),
+        ],
+      ),
+    );
+
+    if (direction == null || !context.mounted) return;
+
+    final result = await sl<SendPassengerConfirmationUseCase>()(
+      SendPassengerConfirmationParams(
+        tripId: tripId,
+        passengerId: passenger.id,
+        direction: direction,
+      ),
+    );
+
+    if (!context.mounted) return;
+    result.fold(
+      (f) => ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(f.message), backgroundColor: AppColors.danger),
+      ),
+      (_) => ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Confirmation email sent to ${passenger.name}.'),
+          backgroundColor: const Color(0xFF059669),
+        ),
+      ),
     );
   }
 

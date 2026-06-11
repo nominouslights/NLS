@@ -27,6 +27,8 @@ import '../../features/clients/domain/usecases/get_client_by_id_usecase.dart';
 import '../../features/clients/domain/usecases/get_clients_usecase.dart';
 import '../../features/clients/domain/usecases/get_contracts_by_client_usecase.dart';
 import '../../features/clients/domain/usecases/get_rate_lines_by_client_usecase.dart';
+import '../../features/clients/domain/usecases/get_client_email_templates_usecase.dart';
+import '../../features/clients/domain/usecases/upsert_client_email_template_usecase.dart';
 import '../../features/clients/domain/usecases/update_client_usecase.dart';
 import '../../features/users/domain/usecases/approve_user_usecase.dart';
 import '../../features/users/domain/usecases/get_pending_users_usecase.dart';
@@ -67,6 +69,8 @@ import '../../features/trips/domain/usecases/add_passenger_usecase.dart';
 import '../../features/trips/domain/usecases/remove_cargo_item_usecase.dart';
 import '../../features/trips/domain/usecases/remove_passenger_usecase.dart';
 import '../../features/trips/domain/usecases/update_passenger_payment_status_usecase.dart';
+import '../../features/trips/domain/usecases/send_passenger_confirmation_usecase.dart';
+import '../../features/trips/domain/usecases/send_stop_update_usecase.dart';
 import '../../features/vehicles/data/datasources/vehicle_remote_datasource.dart';
 import '../../features/vehicles/data/repositories/vehicle_repository_impl.dart';
 import '../../features/vehicles/domain/repositories/i_vehicle_repository.dart';
@@ -164,6 +168,8 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton(() => AddRateLineUseCase(sl()));
   sl.registerLazySingleton(() => DeleteRateLineUseCase(sl()));
   sl.registerLazySingleton(() => GetRateLinesByClientUseCase(sl()));
+  sl.registerLazySingleton(() => GetClientEmailTemplatesUseCase(sl()));
+  sl.registerLazySingleton(() => UpsertClientEmailTemplateUseCase(sl()));
 
   // Drivers feature
   sl.registerLazySingleton<IDriverRemoteDataSource>(
@@ -208,6 +214,8 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton(() => AddPassengerUseCase(sl()));
   sl.registerLazySingleton(() => RemovePassengerUseCase(sl()));
   sl.registerLazySingleton(() => UpdatePassengerPaymentStatusUseCase(sl()));
+  sl.registerLazySingleton(() => SendPassengerConfirmationUseCase(sl()));
+  sl.registerLazySingleton(() => SendStopUpdateUseCase(sl()));
   sl.registerLazySingleton(() => AddCargoItemUseCase(sl()));
   sl.registerLazySingleton(() => RemoveCargoItemUseCase(sl()));
 
