@@ -14,12 +14,24 @@ internal sealed class SpacesFileStorageService : IFileStorageService, IAsyncDisp
     public SpacesFileStorageService(IOptions<SpacesSettings> options)
     {
         var settings = options.Value;
+        if (!settings.IsConfigured)
+        {
+            throw new InvalidOperationException(
+                "DigitalOcean Spaces is not fully configured. Set these environment variables: " +
+                "Spaces__AccessKey, Spaces__SecretKey, Spaces__BucketName, Spaces__Endpoint " +
+                "(and optionally Spaces__Region, e.g. nyc3).");
+        }
+
         var credentials = new BasicAWSCredentials(settings.AccessKey, settings.SecretKey);
         var config = new AmazonS3Config
         {
-            ServiceURL = settings.Endpoint,
-            ForcePathStyle = true
+            ServiceURL = settings.Endpoint.TrimEnd('/'),
+            ForcePathStyle = false
         };
+
+        if (!string.IsNullOrWhiteSpace(settings.Region))
+            config.AuthenticationRegion = settings.Region;
+
         _client = new AmazonS3Client(credentials, config);
         _bucketName = settings.BucketName;
     }
