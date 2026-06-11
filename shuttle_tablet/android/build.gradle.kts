@@ -1,3 +1,5 @@
+import com.android.build.gradle.LibraryExtension
+
 allprojects {
     repositories {
         google()
@@ -12,6 +14,14 @@ subprojects {
     val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
     project.layout.buildDirectory.value(newSubprojectBuildDir)
 }
+
+// Register before evaluationDependsOn(":app") so afterEvaluate is still allowed.
+subprojects {
+    afterEvaluate {
+        extensions.findByType(LibraryExtension::class.java)?.compileSdk = 36
+    }
+}
+
 subprojects {
     project.evaluationDependsOn(":app")
 }
