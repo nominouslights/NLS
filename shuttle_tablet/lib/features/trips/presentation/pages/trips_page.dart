@@ -151,10 +151,23 @@ class _TripsPageState extends ConsumerState<TripsPage> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
+          String? initialClientId;
+          if (_selectedTripId != null) {
+            final trips = ref.read(tripsProvider).valueOrNull;
+            if (trips != null) {
+              for (final trip in trips) {
+                if (trip.id == _selectedTripId) {
+                  initialClientId = trip.clientId;
+                  break;
+                }
+              }
+            }
+          }
           final created = await Navigator.of(context).push<bool>(
             MaterialPageRoute(
               builder: (_) => TripManifestFormPage(
                 serviceType: widget.serviceType ?? TripServiceType.charter,
+                initialClientId: initialClientId,
               ),
             ),
           );

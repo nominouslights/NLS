@@ -2,12 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../clients/domain/entities/purchase_order.dart';
 import '../../../clients/presentation/providers/clients_provider.dart';
+import '../../../clients/presentation/providers/purchase_orders_provider.dart';
 import '../../../drivers/presentation/providers/drivers_provider.dart';
 import '../../../locations/domain/entities/saved_location.dart';
 import '../../../locations/presentation/providers/locations_provider.dart';
 import '../../../vehicles/presentation/providers/vehicles_provider.dart';
-import '../providers/trip_form_purchase_orders_provider.dart';
 import '../../domain/entities/trip.dart';
 import '../../domain/repositories/i_trip_repository.dart';
 import '../providers/trip_form_provider.dart';
@@ -16,10 +17,12 @@ import '../providers/trips_provider.dart';
 class TripManifestFormPage extends ConsumerStatefulWidget {
   final Trip? trip; // null = create, non-null = edit
   final TripServiceType serviceType;
+  final String? initialClientId;
   const TripManifestFormPage({
     super.key,
     this.trip,
     this.serviceType = TripServiceType.charter,
+    this.initialClientId,
   });
 
   @override
@@ -79,7 +82,16 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
       _seatCapacityController.text = t.seatCapacity?.toString() ?? '';
       _pricePerSeatController.text =
           t.pricePerSeat != null ? t.pricePerSeat!.toStringAsFixed(2) : '';
+    } else if (widget.initialClientId != null) {
+      _selectedClientId = widget.initialClientId;
     }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final clientId = _selectedClientId;
+      if (clientId != null) {
+        ref.invalidate(purchaseOrdersProvider(clientId));
+      }
+    });
   }
 
   @override
@@ -130,10 +142,16 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
             formKey: _formKey1,
             serviceType: widget.serviceType,
             selectedClientId: _selectedClientId,
-            onClientChanged: (v) => setState(() {
-              _selectedClientId = v;
-              _selectedPurchaseOrderId = null;
-            }),
+            onClientChanged: (v) {
+              setState(() {
+                _selectedClientId = v;
+                _selectedPurchaseOrderId = null;
+                _legacyPoNumber = null;
+              });
+              if (v != null) {
+                ref.invalidate(purchaseOrdersProvider(v));
+              }
+            },
             selectedVehicleId: _selectedVehicleId,
             onVehicleChanged: (v) => setState(() => _selectedVehicleId = v),
             selectedPurchaseOrderId: _selectedPurchaseOrderId,
@@ -397,6 +415,18 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
 
 // ── Step 1 ────────────────────────────────────────────────────────────────────
 
+String? _resolvePurchaseOrderDropdownValue(
+  List<PurchaseOrder> purchaseOrders,
+  String? selectedId,
+) {
+  if (selectedId == null) return null;
+  final normalized = selectedId.toLowerCase();
+  for (final po in purchaseOrders) {
+    if (po.id.toLowerCase() == normalized) return po.id;
+  }
+  return null;
+}
+
 class _Step1 extends ConsumerWidget {
   final GlobalKey<FormState> formKey;
   final TripServiceType serviceType;
@@ -472,21 +502,23 @@ class _Step1 extends ConsumerWidget {
               const SizedBox(height: 16),
               _Label('Purchase Order'),
               const SizedBox(height: 6),
-              if (legacyPoNumber != null && selectedPurchaseOrderId == null)
+              if (legacyPoNumber != null && selectedPurchaseOrderId == null) ...[
                 InputDecorator(
                   decoration: _inputDecoration('Legacy PO (not linked)'),
                   child: Text(
                     legacyPoNumber!,
                     style: const TextStyle(color: AppColors.brandGray),
                   ),
-                )
-              else if (selectedClientId == null)
+                ),
+                const SizedBox(height: 8),
+              ],
+              if (selectedClientId == null)
                 InputDecorator(
                   decoration: _inputDecoration('Select a client first'),
                   child: const Text('—', style: TextStyle(color: AppColors.brandGray)),
                 )
               else
-                ref.watch(tripFormPurchaseOrdersProvider(selectedClientId!)).when(
+                ref.watch(purchaseOrdersProvider(selectedClientId!)).when(
                       loading: () => const LinearProgressIndicator(),
                       error: (error, _) => InputDecorator(
                         decoration: _inputDecoration('Unable to load POs'),
@@ -502,11 +534,17 @@ class _Step1 extends ConsumerWidget {
                         final fmt = DateFormat('MMM d, yyyy');
                         final currency =
                             NumberFormat.currency(symbol: '\$', decimalDigits: 2);
-                        final validSelection = selectedPurchaseOrderId == null ||
-                            purchaseOrders.any((po) => po.id == selectedPurchaseOrderId);
+                        final dropdownValue = _resolvePurchaseOrderDropdownValue(
+                          purchaseOrders,
+                          selectedPurchaseOrderId,
+                        );
                         return DropdownButtonFormField<String?>(
-                          value: validSelection ? selectedPurchaseOrderId : null,
-                          decoration: _inputDecoration('None (optional)'),
+                          value: dropdownValue,
+                          decoration: _inputDecoration(
+                            purchaseOrders.isEmpty
+                                ? 'No POs for this client (optional)'
+                                : 'None (optional)',
+                          ),
                           isExpanded: true,
                           items: [
                             const DropdownMenuItem<String?>(

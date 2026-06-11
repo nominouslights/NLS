@@ -1,3 +1,4 @@
+import '../../../../core/utils/json_helpers.dart';
 import '../../domain/entities/trip.dart';
 import 'trip_cargo_item_model.dart';
 import 'trip_passenger_model.dart';
@@ -36,13 +37,15 @@ class TripModel extends Trip {
     final postReportJson = json['postReport'] as Map<String, dynamic>?;
 
     return TripModel(
-      id: json['id'] as String,
-      clientId: json['clientId'] as String?,
-      vehicleId: json['vehicleId'] as String?,
-      driverId: json['driverId'] as String?,
-      serviceType: _parseServiceType(json['serviceType'] as String? ?? ''),
-      purchaseOrderId: json['purchaseOrderId'] as String?,
-      purchaseOrderNumber: json['purchaseOrderNumber'] as String?,
+      id: jsonString(json, 'id'),
+      clientId: jsonStringOrNull(json, 'clientId'),
+      vehicleId: jsonStringOrNull(json, 'vehicleId'),
+      driverId: jsonStringOrNull(json, 'driverId'),
+      serviceType: _parseServiceType(
+        jsonStringOrNull(json, 'serviceType') ?? '',
+      ),
+      purchaseOrderId: jsonStringOrNull(json, 'purchaseOrderId'),
+      purchaseOrderNumber: jsonStringOrNull(json, 'purchaseOrderNumber'),
       vehicleType: json['vehicleType'] as String?,
       scheduledAt:
           DateTime.tryParse(json['scheduledAt'] as String? ?? '') ??
