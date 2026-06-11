@@ -47,7 +47,12 @@ public static class DependencyInjection
         services.AddScoped<ISavedLocationRepository, SavedLocationRepository>();
         services.AddScoped<ICommunityCalendarBlockRepository, CommunityCalendarBlockRepository>();
         services.Configure<SpacesSettings>(configuration.GetSection(SpacesSettings.SectionName));
-        services.AddScoped<IFileStorageService, SpacesFileStorageService>();
+        var spacesSettings = configuration.GetSection(SpacesSettings.SectionName).Get<SpacesSettings>()
+            ?? new SpacesSettings();
+        if (spacesSettings.IsConfigured)
+            services.AddScoped<IFileStorageService, SpacesFileStorageService>();
+        else
+            services.AddScoped<IFileStorageService, DatabaseFileStorageService>();
         services.AddScoped<IPasswordHasher, BcryptPasswordHasher>();
         services.Configure<PostmarkSettings>(configuration.GetSection(PostmarkSettings.SectionName));
         services.AddScoped<INotificationService, PostmarkNotificationService>();
