@@ -7,6 +7,7 @@ import '../../../drivers/presentation/providers/drivers_provider.dart';
 import '../../../locations/domain/entities/saved_location.dart';
 import '../../../locations/presentation/providers/locations_provider.dart';
 import '../../../vehicles/presentation/providers/vehicles_provider.dart';
+import '../providers/trip_form_purchase_orders_provider.dart';
 import '../../domain/entities/trip.dart';
 import '../../domain/repositories/i_trip_repository.dart';
 import '../providers/trip_form_provider.dart';
@@ -35,7 +36,8 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
   final _formKey1 = GlobalKey<FormState>();
   String? _selectedClientId;
   String? _selectedVehicleId;
-  final _poController = TextEditingController();
+  String? _selectedPurchaseOrderId;
+  String? _legacyPoNumber;
   final _notesController = TextEditingController();
   final _seatCapacityController = TextEditingController();
   final _pricePerSeatController = TextEditingController();
@@ -56,7 +58,8 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
       final t = widget.trip!;
       _selectedClientId = t.clientId;
       _selectedVehicleId = t.vehicleId;
-      _poController.text = t.purchaseOrderNumber ?? '';
+      _selectedPurchaseOrderId = t.purchaseOrderId;
+      _legacyPoNumber = t.purchaseOrderId == null ? t.purchaseOrderNumber : null;
       _notesController.text = t.notes ?? '';
       _scheduledAt = t.scheduledAt;
       _stops.clear();
@@ -82,7 +85,6 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
   @override
   void dispose() {
     _pageController.dispose();
-    _poController.dispose();
     _notesController.dispose();
     _seatCapacityController.dispose();
     _pricePerSeatController.dispose();
@@ -128,10 +130,15 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
             formKey: _formKey1,
             serviceType: widget.serviceType,
             selectedClientId: _selectedClientId,
-            onClientChanged: (v) => setState(() => _selectedClientId = v),
+            onClientChanged: (v) => setState(() {
+              _selectedClientId = v;
+              _selectedPurchaseOrderId = null;
+            }),
             selectedVehicleId: _selectedVehicleId,
             onVehicleChanged: (v) => setState(() => _selectedVehicleId = v),
-            poController: _poController,
+            selectedPurchaseOrderId: _selectedPurchaseOrderId,
+            legacyPoNumber: _legacyPoNumber,
+            onPurchaseOrderChanged: (v) => setState(() => _selectedPurchaseOrderId = v),
             seatCapacityController: _seatCapacityController,
             pricePerSeatController: _pricePerSeatController,
             notesController: _notesController,
@@ -249,6 +256,13 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
       .firstOrNull
       ?.vehicleType;
 
+  /// Preserves legacy free-text PO when no linked PO is selected (edit only).
+  String? _charterLegacyPurchaseOrderNumber() {
+    if (widget.serviceType != TripServiceType.charter) return null;
+    if (_selectedPurchaseOrderId != null) return null;
+    return _legacyPoNumber;
+  }
+
   Future<void> _saveDraft() async {
     setState(() => _isSaving = true);
     try {
@@ -259,9 +273,10 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
               ? _selectedClientId!
               : null,
           vehicleId: _selectedVehicleId!,
-          purchaseOrderNumber: _poController.text.trim().isEmpty
-              ? null
-              : _poController.text.trim(),
+          purchaseOrderId: widget.serviceType == TripServiceType.charter
+              ? _selectedPurchaseOrderId
+              : null,
+          purchaseOrderNumber: null,
           vehicleType: _vehicleType,
           scheduledAt: _scheduledAt,
           notes: _notesController.text.trim().isEmpty
@@ -275,9 +290,9 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
               ? double.tryParse(_pricePerSeatController.text.trim())
               : null,
         );
-        final id = await ref.read(tripFormProvider.notifier).createTrip(params);
+        final id = await ref.read(tripFormProvider).createTrip(params);
         if (_selectedDriverId != null) {
-          await ref.read(tripFormProvider.notifier).assignDriver(
+          await ref.read(tripFormProvider).assignDriver(
                 id,
                 AssignDriverParams(
                   driverId: _selectedDriverId!,
@@ -288,9 +303,10 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
       } else {
         final params = UpdateTripParams(
           vehicleId: _selectedVehicleId!,
-          purchaseOrderNumber: _poController.text.trim().isEmpty
-              ? null
-              : _poController.text.trim(),
+          purchaseOrderId: widget.serviceType == TripServiceType.charter
+              ? _selectedPurchaseOrderId
+              : null,
+          purchaseOrderNumber: _charterLegacyPurchaseOrderNumber(),
           vehicleType: _vehicleType,
           scheduledAt: _scheduledAt,
           notes: _notesController.text.trim().isEmpty
@@ -304,16 +320,15 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
               ? double.tryParse(_pricePerSeatController.text.trim())
               : null,
         );
-        await ref
-            .read(tripFormProvider.notifier)
-            .updateTrip(widget.trip!.id, params);
+        await ref.read(tripFormProvider).updateTrip(widget.trip!.id, params);
       }
       ref.invalidate(tripsProvider);
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       if (mounted) {
+        final message = e.toString().replaceFirst('Exception: ', '');
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: AppColors.danger),
+          SnackBar(content: Text(message), backgroundColor: AppColors.danger),
         );
       }
     } finally {
@@ -336,9 +351,10 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
             ? _selectedClientId!
             : null,
         vehicleId: _selectedVehicleId!,
-        purchaseOrderNumber: _poController.text.trim().isEmpty
-            ? null
-            : _poController.text.trim(),
+        purchaseOrderId: widget.serviceType == TripServiceType.charter
+            ? _selectedPurchaseOrderId
+            : null,
+        purchaseOrderNumber: null,
         vehicleType: _vehicleType,
         scheduledAt: _scheduledAt,
         notes: _notesController.text.trim().isEmpty
@@ -352,9 +368,9 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
             ? double.tryParse(_pricePerSeatController.text.trim())
             : null,
       );
-      final id = await ref.read(tripFormProvider.notifier).createTrip(params);
+      final id = await ref.read(tripFormProvider).createTrip(params);
 
-      await ref.read(tripFormProvider.notifier).assignDriver(
+      await ref.read(tripFormProvider).assignDriver(
             id,
             AssignDriverParams(
               driverId: _selectedDriverId!,
@@ -362,15 +378,15 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
             ),
           );
 
-      await ref.read(tripFormProvider.notifier).dispatchTrip(id);
+      await ref.read(tripFormProvider).dispatchTrip(id);
 
       ref.invalidate(tripsProvider);
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       if (mounted) {
+        final message = e.toString().replaceFirst('Exception: ', '');
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('Error: $e'), backgroundColor: AppColors.danger),
+          SnackBar(content: Text(message), backgroundColor: AppColors.danger),
         );
       }
     } finally {
@@ -388,7 +404,9 @@ class _Step1 extends ConsumerWidget {
   final ValueChanged<String?> onClientChanged;
   final String? selectedVehicleId;
   final ValueChanged<String?> onVehicleChanged;
-  final TextEditingController poController;
+  final String? selectedPurchaseOrderId;
+  final String? legacyPoNumber;
+  final ValueChanged<String?> onPurchaseOrderChanged;
   final TextEditingController seatCapacityController;
   final TextEditingController pricePerSeatController;
   final TextEditingController notesController;
@@ -405,7 +423,9 @@ class _Step1 extends ConsumerWidget {
     required this.onClientChanged,
     required this.selectedVehicleId,
     required this.onVehicleChanged,
-    required this.poController,
+    required this.selectedPurchaseOrderId,
+    required this.legacyPoNumber,
+    required this.onPurchaseOrderChanged,
     required this.seatCapacityController,
     required this.pricePerSeatController,
     required this.notesController,
@@ -450,12 +470,63 @@ class _Step1 extends ConsumerWidget {
                 ),
               ),
               const SizedBox(height: 16),
-              _Label('Purchase Order #'),
+              _Label('Purchase Order'),
               const SizedBox(height: 6),
-              TextFormField(
-                controller: poController,
-                decoration: _inputDecoration('e.g. PO-2024-001'),
-              ),
+              if (legacyPoNumber != null && selectedPurchaseOrderId == null)
+                InputDecorator(
+                  decoration: _inputDecoration('Legacy PO (not linked)'),
+                  child: Text(
+                    legacyPoNumber!,
+                    style: const TextStyle(color: AppColors.brandGray),
+                  ),
+                )
+              else if (selectedClientId == null)
+                InputDecorator(
+                  decoration: _inputDecoration('Select a client first'),
+                  child: const Text('—', style: TextStyle(color: AppColors.brandGray)),
+                )
+              else
+                ref.watch(tripFormPurchaseOrdersProvider(selectedClientId!)).when(
+                      loading: () => const LinearProgressIndicator(),
+                      error: (error, _) => InputDecorator(
+                        decoration: _inputDecoration('Unable to load POs'),
+                        child: Text(
+                          error.toString().replaceFirst('Exception: ', ''),
+                          style: const TextStyle(
+                            color: AppColors.danger,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                      data: (purchaseOrders) {
+                        final fmt = DateFormat('MMM d, yyyy');
+                        final currency =
+                            NumberFormat.currency(symbol: '\$', decimalDigits: 2);
+                        final validSelection = selectedPurchaseOrderId == null ||
+                            purchaseOrders.any((po) => po.id == selectedPurchaseOrderId);
+                        return DropdownButtonFormField<String?>(
+                          value: validSelection ? selectedPurchaseOrderId : null,
+                          decoration: _inputDecoration('None (optional)'),
+                          isExpanded: true,
+                          items: [
+                            const DropdownMenuItem<String?>(
+                              value: null,
+                              child: Text('None'),
+                            ),
+                            ...purchaseOrders.map(
+                              (po) => DropdownMenuItem<String?>(
+                                value: po.id,
+                                child: Text(
+                                  '${po.poNumber} — ${fmt.format(po.startDate)} — ${currency.format(po.totalValue)}',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ),
+                          ],
+                          onChanged: onPurchaseOrderChanged,
+                        );
+                      },
+                    ),
               const SizedBox(height: 16),
             ] else ...[
               Row(

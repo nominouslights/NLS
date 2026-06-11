@@ -24,6 +24,7 @@ internal sealed class GetArchivedTripsQueryHandler(ITripRepository tripRepositor
                 t.VehicleId,
                 t.DriverId,
                 t.ServiceType.ToString(),
+                t.PurchaseOrderId,
                 t.PurchaseOrderNumber,
                 t.VehicleType,
                 t.ScheduledAt,

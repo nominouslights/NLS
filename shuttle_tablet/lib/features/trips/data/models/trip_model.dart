@@ -12,6 +12,7 @@ class TripModel extends Trip {
     super.vehicleId,
     super.driverId,
     super.serviceType = TripServiceType.charter,
+    super.purchaseOrderId,
     super.purchaseOrderNumber,
     super.vehicleType,
     required super.scheduledAt,
@@ -40,6 +41,7 @@ class TripModel extends Trip {
       vehicleId: json['vehicleId'] as String?,
       driverId: json['driverId'] as String?,
       serviceType: _parseServiceType(json['serviceType'] as String? ?? ''),
+      purchaseOrderId: json['purchaseOrderId'] as String?,
       purchaseOrderNumber: json['purchaseOrderNumber'] as String?,
       vehicleType: json['vehicleType'] as String?,
       scheduledAt:
@@ -113,6 +115,7 @@ class TripModel extends Trip {
         'clientId': clientId,
         'vehicleId': vehicleId,
         'driverId': driverId,
+        'purchaseOrderId': purchaseOrderId,
         'purchaseOrderNumber': purchaseOrderNumber,
         'vehicleType': vehicleType,
         'scheduledAt': scheduledAt.toIso8601String(),

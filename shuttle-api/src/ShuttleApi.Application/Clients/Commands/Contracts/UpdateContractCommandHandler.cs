@@ -14,7 +14,7 @@ internal sealed class UpdateContractCommandHandler(IContractRepository contractR
 
         contract.Update(
             DateTime.SpecifyKind(request.StartDate, DateTimeKind.Utc),
-            DateTime.SpecifyKind(request.RenewalDate, DateTimeKind.Utc),
+            DateTime.SpecifyKind(request.EndDate, DateTimeKind.Utc),
             request.Notes);
         await contractRepository.UpdateAsync(contract, cancellationToken);
     }

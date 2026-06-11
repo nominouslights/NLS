@@ -12,6 +12,7 @@ import '../providers/client_form_provider.dart';
 import '../providers/clients_provider.dart';
 import '../providers/contracts_provider.dart';
 import '../widgets/client_email_templates_section.dart';
+import '../widgets/client_purchase_orders_section.dart';
 
 const _kAmber = Color(0xFFE8A020);
 const _kAmberLight = Color(0xFFFFF8EC);
@@ -412,6 +413,8 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
                 _buildBillingCard(client),
                 const SizedBox(height: 16),
                 _ContractSection(clientId: widget.clientId),
+                const SizedBox(height: 16),
+                ClientPurchaseOrdersSection(clientId: widget.clientId),
               ],
             ),
           ),
@@ -1023,7 +1026,7 @@ class _ContractSection extends ConsumerStatefulWidget {
 class _ContractSectionState extends ConsumerState<_ContractSection> {
   Future<void> _showAddContractDialog() async {
     DateTime startDate = DateTime.now();
-    DateTime renewalDate = DateTime.now().add(const Duration(days: 365));
+    DateTime endDate = DateTime.now().add(const Duration(days: 365));
     final notesCtrl = TextEditingController();
 
     final confirmed = await showDialog<bool>(
@@ -1055,18 +1058,18 @@ class _ContractSectionState extends ConsumerState<_ContractSection> {
                 const Divider(),
                 ListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('Renewal Date', style: TextStyle(fontSize: 13, color: AppColors.brandGray)),
-                  subtitle: Text(DateFormat('MMM d, yyyy').format(renewalDate),
+                  title: const Text('End Date', style: TextStyle(fontSize: 13, color: AppColors.brandGray)),
+                  subtitle: Text(DateFormat('MMM d, yyyy').format(endDate),
                       style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
                   trailing: const Icon(Icons.calendar_today_outlined, size: 18),
                   onTap: () async {
                     final picked = await showDatePicker(
                       context: ctx,
-                      initialDate: renewalDate,
+                      initialDate: endDate,
                       firstDate: DateTime(2020),
                       lastDate: DateTime(2040),
                     );
-                    if (picked != null) setDialogState(() => renewalDate = picked);
+                    if (picked != null) setDialogState(() => endDate = picked);
                   },
                 ),
                 const SizedBox(height: 12),
@@ -1100,7 +1103,7 @@ class _ContractSectionState extends ConsumerState<_ContractSection> {
           CreateContractParams(
             clientId: widget.clientId,
             startDate: startDate,
-            renewalDate: renewalDate,
+            endDate: endDate,
             notes: notesCtrl.text.trim().isEmpty ? null : notesCtrl.text.trim(),
             rateLines: const [],
           ),
@@ -1405,7 +1408,7 @@ class _ContractCardState extends State<_ContractCard> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          '${fmt.format(c.startDate)} → ${fmt.format(c.renewalDate)}',
+                          '${fmt.format(c.startDate)} → ${fmt.format(c.endDate)}',
                           style: const TextStyle(fontSize: 12, color: AppColors.brandGray),
                         ),
                         if (c.notes?.isNotEmpty ?? false)

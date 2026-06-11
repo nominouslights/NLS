@@ -17,7 +17,7 @@ namespace ShuttleApi.Infrastructure.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.8")
+                .HasAnnotation("ProductVersion", "10.0.9")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -119,6 +119,41 @@ namespace ShuttleApi.Infrastructure.Migrations
                     b.ToTable("clients", (string)null);
                 });
 
+            modelBuilder.Entity("ShuttleApi.Domain.Clients.ClientEmailTemplate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("ClientId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientId");
+
+                    b.HasIndex("ClientId", "Type")
+                        .IsUnique();
+
+                    b.ToTable("client_email_templates", (string)null);
+                });
+
             modelBuilder.Entity("ShuttleApi.Domain.Clients.ClientNotificationEmail", b =>
                 {
                     b.Property<Guid>("Id")
@@ -155,15 +190,15 @@ namespace ShuttleApi.Infrastructure.Migrations
                     b.Property<Guid>("ClientId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTime>("EndDate")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
 
                     b.Property<string>("Notes")
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
-
-                    b.Property<DateTime>("RenewalDate")
-                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime>("StartDate")
                         .HasColumnType("timestamp with time zone");
@@ -173,6 +208,21 @@ namespace ShuttleApi.Infrastructure.Migrations
                     b.HasIndex("ClientId", "IsActive");
 
                     b.ToTable("contracts", (string)null);
+                });
+
+            modelBuilder.Entity("ShuttleApi.Domain.Clients.ContractPurchaseOrder", b =>
+                {
+                    b.Property<Guid>("ContractId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PurchaseOrderId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("ContractId", "PurchaseOrderId");
+
+                    b.HasIndex("PurchaseOrderId");
+
+                    b.ToTable("contract_purchase_orders", (string)null);
                 });
 
             modelBuilder.Entity("ShuttleApi.Domain.Clients.ContractRateLine", b =>
@@ -214,6 +264,73 @@ namespace ShuttleApi.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("contract_rate_lines", (string)null);
+                });
+
+            modelBuilder.Entity("ShuttleApi.Domain.Clients.PurchaseOrder", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ClientId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Details")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("PoNumber")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime>("StartDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("TotalValue")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientId", "PoNumber")
+                        .IsUnique();
+
+                    b.ToTable("purchase_orders", (string)null);
+                });
+
+            modelBuilder.Entity("ShuttleApi.Domain.Clients.PurchaseOrderLineItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<decimal>("LineTotal")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<Guid>("PurchaseOrderId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("UnitRate")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PurchaseOrderId");
+
+                    b.ToTable("purchase_order_line_items", (string)null);
                 });
 
             modelBuilder.Entity("ShuttleApi.Domain.Common.DocumentFileBlob", b =>
@@ -527,6 +644,9 @@ namespace ShuttleApi.Infrastructure.Migrations
                         .HasPrecision(10, 2)
                         .HasColumnType("numeric(10,2)");
 
+                    b.Property<Guid?>("PurchaseOrderId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("PurchaseOrderNumber")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
@@ -557,6 +677,8 @@ namespace ShuttleApi.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ClientId");
+
+                    b.HasIndex("PurchaseOrderId");
 
                     b.HasIndex("ServiceType");
 
@@ -1154,11 +1276,44 @@ namespace ShuttleApi.Infrastructure.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("ShuttleApi.Domain.Clients.ContractPurchaseOrder", b =>
+                {
+                    b.HasOne("ShuttleApi.Domain.Clients.Contract", null)
+                        .WithMany()
+                        .HasForeignKey("ContractId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ShuttleApi.Domain.Clients.PurchaseOrder", null)
+                        .WithMany()
+                        .HasForeignKey("PurchaseOrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("ShuttleApi.Domain.Clients.ContractRateLine", b =>
                 {
                     b.HasOne("ShuttleApi.Domain.Clients.Contract", null)
                         .WithMany("RateLines")
                         .HasForeignKey("ContractId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ShuttleApi.Domain.Clients.PurchaseOrder", b =>
+                {
+                    b.HasOne("ShuttleApi.Domain.Clients.Client", null)
+                        .WithMany()
+                        .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ShuttleApi.Domain.Clients.PurchaseOrderLineItem", b =>
+                {
+                    b.HasOne("ShuttleApi.Domain.Clients.PurchaseOrder", null)
+                        .WithMany("LineItems")
+                        .HasForeignKey("PurchaseOrderId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
@@ -1179,6 +1334,14 @@ namespace ShuttleApi.Infrastructure.Migrations
                         .HasForeignKey("DriverId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("ShuttleApi.Domain.Trips.Trip", b =>
+                {
+                    b.HasOne("ShuttleApi.Domain.Clients.PurchaseOrder", null)
+                        .WithMany()
+                        .HasForeignKey("PurchaseOrderId")
+                        .OnDelete(DeleteBehavior.SetNull);
                 });
 
             modelBuilder.Entity("ShuttleApi.Domain.Trips.TripCargoItem", b =>
@@ -1261,6 +1424,11 @@ namespace ShuttleApi.Infrastructure.Migrations
             modelBuilder.Entity("ShuttleApi.Domain.Clients.Contract", b =>
                 {
                     b.Navigation("RateLines");
+                });
+
+            modelBuilder.Entity("ShuttleApi.Domain.Clients.PurchaseOrder", b =>
+                {
+                    b.Navigation("LineItems");
                 });
 
             modelBuilder.Entity("ShuttleApi.Domain.Drivers.Driver", b =>

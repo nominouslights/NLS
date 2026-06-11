@@ -13,6 +13,10 @@ import '../../features/users/data/datasources/users_remote_datasource.dart';
 import '../../features/users/data/repositories/users_repository_impl.dart';
 import '../../features/users/domain/repositories/i_users_repository.dart';
 import '../../features/clients/data/datasources/client_remote_datasource.dart';
+import '../../features/clients/data/datasources/purchase_order_remote_datasource.dart';
+import '../../features/clients/data/repositories/purchase_order_repository_impl.dart';
+import '../../features/clients/domain/repositories/i_purchase_order_repository.dart';
+import '../../features/clients/domain/usecases/purchase_order_usecases.dart';
 import '../../features/clients/data/datasources/contract_remote_datasource.dart';
 import '../../features/clients/data/repositories/client_repository_impl.dart';
 import '../../features/clients/data/repositories/contract_repository_impl.dart';
@@ -152,11 +156,17 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton<IContractRemoteDataSource>(
     () => ContractRemoteDataSource(sl()),
   );
+  sl.registerLazySingleton<IPurchaseOrderRemoteDataSource>(
+    () => PurchaseOrderRemoteDataSource(sl()),
+  );
   sl.registerLazySingleton<IClientRepository>(
     () => ClientRepositoryImpl(sl()),
   );
   sl.registerLazySingleton<IContractRepository>(
     () => ContractRepositoryImpl(sl()),
+  );
+  sl.registerLazySingleton<IPurchaseOrderRepository>(
+    () => PurchaseOrderRepositoryImpl(sl()),
   );
   sl.registerLazySingleton(() => GetClientsUseCase(sl()));
   sl.registerLazySingleton(() => GetClientByIdUseCase(sl()));
@@ -170,6 +180,10 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton(() => GetRateLinesByClientUseCase(sl()));
   sl.registerLazySingleton(() => GetClientEmailTemplatesUseCase(sl()));
   sl.registerLazySingleton(() => UpsertClientEmailTemplateUseCase(sl()));
+  sl.registerLazySingleton(() => GetPurchaseOrdersByClientUseCase(sl()));
+  sl.registerLazySingleton(() => GetPurchaseOrderByIdUseCase(sl()));
+  sl.registerLazySingleton(() => CreatePurchaseOrderUseCase(sl()));
+  sl.registerLazySingleton(() => UpdatePurchaseOrderUseCase(sl()));
 
   // Drivers feature
   sl.registerLazySingleton<IDriverRemoteDataSource>(

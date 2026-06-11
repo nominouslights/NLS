@@ -34,7 +34,7 @@ public sealed record ClientDetailResult(
 public sealed record ContractSummaryResult(
     Guid Id,
     DateTime StartDate,
-    DateTime RenewalDate,
+    DateTime EndDate,
     bool IsExpiringSoon,
     string? Notes,
     IReadOnlyList<RateLineResult> RateLines);

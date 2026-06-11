@@ -24,7 +24,7 @@ internal sealed class GetClientsQueryHandler(
                 client.Phone,
                 client.Email,
                 client.IsActive,
-                activeContract?.RenewalDate,
+                activeContract?.EndDate,
                 activeContract?.IsExpiringSoon ?? false));
         }
 

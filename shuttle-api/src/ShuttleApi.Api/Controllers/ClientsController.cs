@@ -80,7 +80,7 @@ public sealed class ClientsController(ISender sender) : BaseApiController(sender
         var result = await Sender.Send(new CreateContractCommand(
             clientId,
             request.StartDate,
-            request.RenewalDate,
+            request.EndDate,
             request.Notes,
             request.RateLines), cancellationToken);
         return Ok(result);
@@ -91,7 +91,7 @@ public sealed class ClientsController(ISender sender) : BaseApiController(sender
     [Route("api/clients/{clientId:guid}/contracts/{id:guid}")]
     public async Task<IActionResult> UpdateContract(Guid id, [FromBody] UpdateContractRequest request, CancellationToken cancellationToken)
     {
-        await Sender.Send(new UpdateContractCommand(id, request.StartDate, request.RenewalDate, request.Notes), cancellationToken);
+        await Sender.Send(new UpdateContractCommand(id, request.StartDate, request.EndDate, request.Notes), cancellationToken);
         return NoContent();
     }
 
@@ -137,6 +137,54 @@ public sealed class ClientsController(ISender sender) : BaseApiController(sender
             cancellationToken);
         return NoContent();
     }
+
+    [HttpGet]
+    [Route("api/clients/{clientId:guid}/purchase-orders")]
+    public async Task<IActionResult> GetPurchaseOrders(Guid clientId, CancellationToken cancellationToken) =>
+        Ok(await Sender.Send(new GetPurchaseOrdersByClientIdQuery(clientId), cancellationToken));
+
+    [HttpGet]
+    [Route("api/clients/{clientId:guid}/purchase-orders/{id:guid}")]
+    public async Task<IActionResult> GetPurchaseOrder(Guid clientId, Guid id, CancellationToken cancellationToken) =>
+        Ok(await Sender.Send(new GetPurchaseOrderByIdQuery(clientId, id), cancellationToken));
+
+    [Authorize(Policy = "AdminOnly")]
+    [HttpPost]
+    [Route("api/clients/{clientId:guid}/purchase-orders")]
+    public async Task<IActionResult> CreatePurchaseOrder(
+        Guid clientId,
+        [FromBody] UpsertPurchaseOrderRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(new CreatePurchaseOrderCommand(
+            clientId,
+            request.PoNumber,
+            request.StartDate,
+            request.Details,
+            request.LineItems,
+            request.ContractIds), cancellationToken);
+        return Ok(result);
+    }
+
+    [Authorize(Policy = "AdminOnly")]
+    [HttpPut]
+    [Route("api/clients/{clientId:guid}/purchase-orders/{id:guid}")]
+    public async Task<IActionResult> UpdatePurchaseOrder(
+        Guid clientId,
+        Guid id,
+        [FromBody] UpsertPurchaseOrderRequest request,
+        CancellationToken cancellationToken)
+    {
+        await Sender.Send(new UpdatePurchaseOrderCommand(
+            id,
+            clientId,
+            request.PoNumber,
+            request.StartDate,
+            request.Details,
+            request.LineItems,
+            request.ContractIds), cancellationToken);
+        return NoContent();
+    }
 }
 
 public sealed record UpsertEmailTemplateRequest(string Subject, string Body);
@@ -166,11 +214,18 @@ public sealed record UpdateClientRequest(
 
 public sealed record CreateContractRequest(
     DateTime StartDate,
-    DateTime RenewalDate,
+    DateTime EndDate,
     string? Notes,
     IReadOnlyList<RateLineDto> RateLines);
 
 public sealed record UpdateContractRequest(
     DateTime StartDate,
-    DateTime RenewalDate,
+    DateTime EndDate,
     string? Notes);
+
+public sealed record UpsertPurchaseOrderRequest(
+    string PoNumber,
+    DateTime StartDate,
+    string? Details,
+    IReadOnlyList<PurchaseOrderLineItemDto> LineItems,
+    IReadOnlyList<Guid>? ContractIds);

@@ -221,7 +221,7 @@ class _ActionsBar extends ConsumerWidget {
 
   Future<void> _dispatch(BuildContext context, WidgetRef ref) async {
     try {
-      await ref.read(tripFormProvider.notifier).dispatchTrip(trip.id);
+      await ref.read(tripFormProvider).dispatchTrip(trip.id);
       onRefresh();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -255,7 +255,7 @@ class _ActionsBar extends ConsumerWidget {
     );
     if (confirmed != true || !context.mounted) return;
     try {
-      await ref.read(tripFormProvider.notifier).assignDriver(
+      await ref.read(tripFormProvider).assignDriver(
         trip.id,
         const AssignDriverParams(driverId: ''),
       );

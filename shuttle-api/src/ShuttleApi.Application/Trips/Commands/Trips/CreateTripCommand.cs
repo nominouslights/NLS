@@ -7,6 +7,7 @@ public sealed record CreateTripCommand(
     TripServiceType ServiceType,
     Guid? ClientId,
     Guid? VehicleId,
+    Guid? PurchaseOrderId,
     string? PurchaseOrderNumber,
     string? VehicleType,
     DateTime ScheduledAt,

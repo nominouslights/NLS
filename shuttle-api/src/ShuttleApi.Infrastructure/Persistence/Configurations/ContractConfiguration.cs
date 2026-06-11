@@ -15,7 +15,7 @@ public sealed class ContractConfiguration : IEntityTypeConfiguration<Contract>
 
         builder.Property(c => c.ClientId).IsRequired();
         builder.Property(c => c.StartDate).IsRequired();
-        builder.Property(c => c.RenewalDate).IsRequired();
+        builder.Property(c => c.EndDate).IsRequired();
         builder.Property(c => c.IsActive).IsRequired();
         builder.Property(c => c.Notes).HasMaxLength(2000);
 

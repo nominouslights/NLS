@@ -85,7 +85,7 @@ class AdminTripStatusBar extends ConsumerWidget {
 
   Future<void> _dispatch(BuildContext context, WidgetRef ref) async {
     try {
-      await ref.read(tripFormProvider.notifier).dispatchTrip(trip.id);
+      await ref.read(tripFormProvider).dispatchTrip(trip.id);
       onRefresh();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

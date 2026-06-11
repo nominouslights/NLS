@@ -5,7 +5,7 @@ namespace ShuttleApi.Application.Clients;
 public sealed record CreateContractCommand(
     Guid ClientId,
     DateTime StartDate,
-    DateTime RenewalDate,
+    DateTime EndDate,
     string? Notes,
     IReadOnlyList<RateLineDto> RateLines) : ICommand<CreateContractResult>;
 

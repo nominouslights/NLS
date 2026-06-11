@@ -71,6 +71,9 @@ class ApiEndpoints {
   static String clientEmailTemplates(String clientId) => '/clients/$clientId/email-templates';
   static String clientEmailTemplateByType(String clientId, String type) =>
       '/clients/$clientId/email-templates/$type';
+  static String purchaseOrdersByClient(String clientId) => '/clients/$clientId/purchase-orders';
+  static String purchaseOrderById(String clientId, String id) =>
+      '/clients/$clientId/purchase-orders/$id';
 
   static const String pendingUsers = '/users/pending';
   static String approveUser(String id) => '/users/$id/approve';

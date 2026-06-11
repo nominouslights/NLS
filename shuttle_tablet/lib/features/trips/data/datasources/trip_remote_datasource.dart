@@ -118,11 +118,18 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
         data: _createTripToJson(params),
       );
       final data = response.data as Map<String, dynamic>;
-      return data['id'] as String;
+      final id = data['id'] ?? data['tripId'];
+      if (id == null) {
+        throw ServerException(
+          message: 'Create trip succeeded but no trip id was returned.',
+          statusCode: response.statusCode,
+        );
+      }
+      return id.toString();
     } on DioException catch (e) {
       if (e.response?.statusCode == 401) throw const UnauthorizedException();
       throw ServerException(
-        message: e.message ?? 'Failed to create trip',
+        message: _dioErrorMessage(e, 'Failed to create trip'),
         statusCode: e.response?.statusCode,
       );
     }
@@ -139,7 +146,7 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
       if (e.response?.statusCode == 401) throw const UnauthorizedException();
       if (e.response?.statusCode == 404) throw const NotFoundException();
       throw ServerException(
-        message: e.message ?? 'Failed to update trip',
+        message: _dioErrorMessage(e, 'Failed to update trip'),
         statusCode: e.response?.statusCode,
       );
     }
@@ -477,39 +484,71 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
     return map[status]!;
   }
 
-  static Map<String, dynamic> _createTripToJson(CreateTripParams p) => {
-        'serviceType': _serviceTypeToString(p.serviceType),
-        'clientId': p.clientId,
-        'vehicleId': p.vehicleId,
-        'purchaseOrderNumber': p.purchaseOrderNumber,
-        'vehicleType': p.vehicleType,
-        'scheduledAt': p.scheduledAt.toUtc().toIso8601String(),
-        'notes': p.notes,
-        'stops': p.stops
-            .map((s) => {
-                  'sequenceOrder': s.sequenceOrder,
-                  'locationName': s.locationName,
-                  'address': s.address,
-                })
-            .toList(),
-        'seatCapacity': p.seatCapacity,
-        'pricePerSeat': p.pricePerSeat,
-      };
+  static Map<String, dynamic> _createTripToJson(CreateTripParams p) {
+    final body = <String, dynamic>{
+      'serviceType': _serviceTypeToString(p.serviceType),
+      'clientId': p.clientId,
+      'vehicleId': p.vehicleId,
+      'vehicleType': p.vehicleType,
+      'scheduledAt': p.scheduledAt.toUtc().toIso8601String(),
+      'notes': p.notes,
+      'stops': p.stops
+          .map((s) => {
+                'sequenceOrder': s.sequenceOrder,
+                'locationName': s.locationName,
+                'address': s.address,
+              })
+          .toList(),
+      'seatCapacity': p.seatCapacity,
+      'pricePerSeat': p.pricePerSeat,
+    };
+    if (p.serviceType == TripServiceType.charter) {
+      if (p.purchaseOrderId != null) {
+        body['purchaseOrderId'] = p.purchaseOrderId;
+      }
+      if (p.purchaseOrderNumber != null) {
+        body['purchaseOrderNumber'] = p.purchaseOrderNumber;
+      }
+    }
+    return body;
+  }
 
-  static Map<String, dynamic> _updateTripToJson(UpdateTripParams p) => {
-        'vehicleId': p.vehicleId,
-        'purchaseOrderNumber': p.purchaseOrderNumber,
-        'vehicleType': p.vehicleType,
-        'scheduledAt': p.scheduledAt.toUtc().toIso8601String(),
-        'notes': p.notes,
-        'stops': p.stops
-            .map((s) => {
-                  'sequenceOrder': s.sequenceOrder,
-                  'locationName': s.locationName,
-                  'address': s.address,
-                })
-            .toList(),
-        'seatCapacity': p.seatCapacity,
-        'pricePerSeat': p.pricePerSeat,
-      };
+  static Map<String, dynamic> _updateTripToJson(UpdateTripParams p) {
+    final body = <String, dynamic>{
+      'vehicleId': p.vehicleId,
+      'vehicleType': p.vehicleType,
+      'scheduledAt': p.scheduledAt.toUtc().toIso8601String(),
+      'notes': p.notes,
+      'stops': p.stops
+          .map((s) => {
+                'sequenceOrder': s.sequenceOrder,
+                'locationName': s.locationName,
+                'address': s.address,
+              })
+          .toList(),
+      'seatCapacity': p.seatCapacity,
+      'pricePerSeat': p.pricePerSeat,
+    };
+    if (p.purchaseOrderId != null) {
+      body['purchaseOrderId'] = p.purchaseOrderId;
+    }
+    if (p.purchaseOrderNumber != null) {
+      body['purchaseOrderNumber'] = p.purchaseOrderNumber;
+    }
+    return body;
+  }
+
+  static String _dioErrorMessage(DioException e, String fallback) {
+    final data = e.response?.data;
+    if (data is Map<String, dynamic>) {
+      final error = data['error'] ?? data['title'] ?? data['message'];
+      if (error != null && error.toString().isNotEmpty) {
+        return error.toString();
+      }
+    }
+    if (e.response?.statusCode == 403) {
+      return 'Admin access required for this action.';
+    }
+    return e.message ?? fallback;
+  }
 }

@@ -67,8 +67,8 @@ class _ContractSummaryPanelState extends State<ContractSummaryPanel> {
                   _DateRow(label: 'Start Date', date: contract.startDate),
                   const SizedBox(height: 8),
                   _DateRow(
-                    label: 'Renewal Date',
-                    date: contract.renewalDate,
+                    label: 'End Date',
+                    date: contract.endDate,
                     alert: contract.isExpiringSoon,
                   ),
                   if (contract.notes != null) ...[
