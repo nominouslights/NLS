@@ -47,7 +47,9 @@ internal sealed class CreateTripCommandHandler(
             request.Notes,
             stops,
             request.SeatCapacity,
-            request.PricePerSeat);
+            request.PricePerSeat,
+            request.IsDeadhead,
+            request.IsDeadheadBillable);
 
         await tripRepository.AddAsync(trip, cancellationToken);
 

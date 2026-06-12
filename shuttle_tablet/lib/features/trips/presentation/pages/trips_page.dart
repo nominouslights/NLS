@@ -5,6 +5,7 @@ import '../../domain/entities/trip.dart';
 import '../providers/trips_provider.dart';
 import '../widgets/trip_card.dart';
 import '../widgets/trip_detail_workspace.dart';
+import 'trip_assign_driver_page.dart';
 import 'trip_manifest_form_page.dart';
 
 class TripsPage extends ConsumerStatefulWidget {
@@ -144,6 +145,8 @@ class _TripsPageState extends ConsumerState<TripsPage> {
                 ? TripDetailWorkspace(
                     tripId: _selectedTripId!,
                     onDeleted: () => setState(() => _selectedTripId = null),
+                    onAssignDriver: (trip) => _openAssignDriver(context, trip),
+                    onEditTrip: (trip) => _openManifestEdit(context, trip),
                   )
                 : const _EmptyDetailState(),
           ),
@@ -182,6 +185,34 @@ class _TripsPageState extends ConsumerState<TripsPage> {
         label: const Text('New Trip'),
       ),
     );
+  }
+
+  Future<void> _openAssignDriver(BuildContext context, Trip trip) async {
+    final updated = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => TripAssignDriverPage(trip: trip),
+      ),
+    );
+    if (updated == true && mounted) {
+      ref.invalidate(tripsProvider);
+      ref.invalidate(tripDetailProvider(trip.id));
+    }
+  }
+
+  Future<void> _openManifestEdit(BuildContext context, Trip trip) async {
+    final updated = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => TripManifestFormPage(
+          trip: trip,
+          serviceType: trip.serviceType,
+          initialStep: 1,
+        ),
+      ),
+    );
+    if (updated == true && mounted) {
+      ref.invalidate(tripsProvider);
+      ref.invalidate(tripDetailProvider(trip.id));
+    }
   }
 
   List<Trip> _filter(List<Trip> all) {

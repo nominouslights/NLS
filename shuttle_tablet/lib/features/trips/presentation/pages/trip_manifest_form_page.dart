@@ -18,11 +18,14 @@ class TripManifestFormPage extends ConsumerStatefulWidget {
   final Trip? trip; // null = create, non-null = edit
   final TripServiceType serviceType;
   final String? initialClientId;
+  /// 0 = manifest step 1, 1 = driver review step 2
+  final int initialStep;
   const TripManifestFormPage({
     super.key,
     this.trip,
     this.serviceType = TripServiceType.charter,
     this.initialClientId,
+    this.initialStep = 0,
   });
 
   @override
@@ -31,8 +34,8 @@ class TripManifestFormPage extends ConsumerStatefulWidget {
 }
 
 class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
-  final _pageController = PageController();
-  int _currentStep = 0;
+  late final PageController _pageController;
+  late int _currentStep;
   bool _isSaving = false;
 
   // Step 1 state
@@ -53,10 +56,14 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
   // Step 2 state
   final _formKey2 = GlobalKey<FormState>();
   String? _selectedDriverId;
+  bool _isDeadhead = false;
+  bool _isDeadheadBillable = false;
 
   @override
   void initState() {
     super.initState();
+    _currentStep = widget.initialStep.clamp(0, 1);
+    _pageController = PageController(initialPage: _currentStep);
     if (widget.trip != null) {
       final t = widget.trip!;
       _selectedClientId = t.clientId;
@@ -79,6 +86,8 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
         ));
       }
       _selectedDriverId = t.driverId;
+      _isDeadhead = t.isDeadhead;
+      _isDeadheadBillable = t.isDeadheadBillable;
       _seatCapacityController.text = t.seatCapacity?.toString() ?? '';
       _pricePerSeatController.text =
           t.pricePerSeat != null ? t.pricePerSeat!.toStringAsFixed(2) : '';
@@ -115,6 +124,8 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
     final vehicleLabel = selectedVehicle != null
         ? '${selectedVehicle.unitCode} — ${selectedVehicle.make} ${selectedVehicle.model}'
         : '';
+    final canDispatch = _isDeadhead ||
+        (widget.trip != null && widget.trip!.hasManifest);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -165,6 +176,14 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
             stops: _stops,
             onAddStop: _addStop,
             onRemoveStop: _removeStop,
+            isDeadhead: _isDeadhead,
+            isDeadheadBillable: _isDeadheadBillable,
+            onDeadheadChanged: (v) => setState(() {
+              _isDeadhead = v;
+              if (!v) _isDeadheadBillable = false;
+            }),
+            onDeadheadBillableChanged: (v) =>
+                setState(() => _isDeadheadBillable = v),
           ),
           _Step2(
             formKey: _formKey2,
@@ -173,17 +192,22 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
             vehicleLabel: vehicleLabel,
             selectedDriverId: _selectedDriverId,
             onDriverChanged: (v) => setState(() => _selectedDriverId = v),
+            isDeadhead: _isDeadhead,
+            isDeadheadBillable: _isDeadheadBillable,
+            canDispatch: canDispatch,
           ),
         ],
       ),
       bottomNavigationBar: _BottomBar(
         currentStep: _currentStep,
         isSaving: _isSaving,
+        isEditMode: widget.trip != null,
         onCancel: _currentStep == 0 ? () => Navigator.of(context).pop() : null,
         onBack: _currentStep > 0 ? _goBack : null,
         onNext: _currentStep == 0 ? _goNext : null,
         onSaveDraft: _currentStep == 1 ? _saveDraft : null,
-        onCreateDispatch: _currentStep == 1 ? _createAndDispatch : null,
+        onCreateDispatch:
+            _currentStep == 1 && canDispatch ? _createAndDispatch : null,
       ),
     );
   }
@@ -281,6 +305,39 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
     return _legacyPoNumber;
   }
 
+  UpdateTripParams get _updateTripParams => UpdateTripParams(
+        vehicleId: _selectedVehicleId!,
+        purchaseOrderId: widget.serviceType == TripServiceType.charter
+            ? _selectedPurchaseOrderId
+            : null,
+        purchaseOrderNumber: _charterLegacyPurchaseOrderNumber(),
+        vehicleType: _vehicleType,
+        scheduledAt: _scheduledAt,
+        notes: _notesController.text.trim().isEmpty
+            ? null
+            : _notesController.text.trim(),
+        stops: _stopParams,
+        seatCapacity: widget.serviceType == TripServiceType.community
+            ? int.tryParse(_seatCapacityController.text.trim())
+            : null,
+        pricePerSeat: widget.serviceType == TripServiceType.community
+            ? double.tryParse(_pricePerSeatController.text.trim())
+            : null,
+        isDeadhead: _isDeadhead,
+        isDeadheadBillable: _isDeadheadBillable,
+      );
+
+  Future<void> _assignDriverIfSelected(String tripId) async {
+    if (_selectedDriverId == null) return;
+    await ref.read(tripFormProvider).assignDriver(
+          tripId,
+          AssignDriverParams(
+            driverId: _selectedDriverId!,
+            vehicleType: _vehicleType,
+          ),
+        );
+  }
+
   Future<void> _saveDraft() async {
     setState(() => _isSaving = true);
     try {
@@ -307,38 +364,15 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
           pricePerSeat: widget.serviceType == TripServiceType.community
               ? double.tryParse(_pricePerSeatController.text.trim())
               : null,
+          isDeadhead: _isDeadhead,
+          isDeadheadBillable: _isDeadheadBillable,
         );
         final id = await ref.read(tripFormProvider).createTrip(params);
-        if (_selectedDriverId != null) {
-          await ref.read(tripFormProvider).assignDriver(
-                id,
-                AssignDriverParams(
-                  driverId: _selectedDriverId!,
-                  vehicleType: _vehicleType,
-                ),
-              );
-        }
+        await _assignDriverIfSelected(id);
       } else {
-        final params = UpdateTripParams(
-          vehicleId: _selectedVehicleId!,
-          purchaseOrderId: widget.serviceType == TripServiceType.charter
-              ? _selectedPurchaseOrderId
-              : null,
-          purchaseOrderNumber: _charterLegacyPurchaseOrderNumber(),
-          vehicleType: _vehicleType,
-          scheduledAt: _scheduledAt,
-          notes: _notesController.text.trim().isEmpty
-              ? null
-              : _notesController.text.trim(),
-          stops: _stopParams,
-          seatCapacity: widget.serviceType == TripServiceType.community
-              ? int.tryParse(_seatCapacityController.text.trim())
-              : null,
-          pricePerSeat: widget.serviceType == TripServiceType.community
-              ? double.tryParse(_pricePerSeatController.text.trim())
-              : null,
-        );
-        await ref.read(tripFormProvider).updateTrip(widget.trip!.id, params);
+        final tripId = widget.trip!.id;
+        await ref.read(tripFormProvider).updateTrip(tripId, _updateTripParams);
+        await _assignDriverIfSelected(tripId);
       }
       ref.invalidate(tripsProvider);
       if (mounted) Navigator.of(context).pop(true);
@@ -361,42 +395,58 @@ class _TripManifestFormPageState extends ConsumerState<TripManifestFormPage> {
       );
       return;
     }
+    final canDispatch = _isDeadhead ||
+        (widget.trip != null && widget.trip!.hasManifest);
+    if (!canDispatch) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text(Trip.dispatchManifestMessage)),
+      );
+      return;
+    }
     setState(() => _isSaving = true);
     try {
-      final params = CreateTripParams(
-        serviceType: widget.serviceType,
-        clientId: widget.serviceType == TripServiceType.charter
-            ? _selectedClientId!
-            : null,
-        vehicleId: _selectedVehicleId!,
-        purchaseOrderId: widget.serviceType == TripServiceType.charter
-            ? _selectedPurchaseOrderId
-            : null,
-        purchaseOrderNumber: null,
-        vehicleType: _vehicleType,
-        scheduledAt: _scheduledAt,
-        notes: _notesController.text.trim().isEmpty
-            ? null
-            : _notesController.text.trim(),
-        stops: _stopParams,
-        seatCapacity: widget.serviceType == TripServiceType.community
-            ? int.tryParse(_seatCapacityController.text.trim())
-            : null,
-        pricePerSeat: widget.serviceType == TripServiceType.community
-            ? double.tryParse(_pricePerSeatController.text.trim())
-            : null,
-      );
-      final id = await ref.read(tripFormProvider).createTrip(params);
+      final String tripId;
+      if (widget.trip == null) {
+        final params = CreateTripParams(
+          serviceType: widget.serviceType,
+          clientId: widget.serviceType == TripServiceType.charter
+              ? _selectedClientId!
+              : null,
+          vehicleId: _selectedVehicleId!,
+          purchaseOrderId: widget.serviceType == TripServiceType.charter
+              ? _selectedPurchaseOrderId
+              : null,
+          purchaseOrderNumber: null,
+          vehicleType: _vehicleType,
+          scheduledAt: _scheduledAt,
+          notes: _notesController.text.trim().isEmpty
+              ? null
+              : _notesController.text.trim(),
+          stops: _stopParams,
+          seatCapacity: widget.serviceType == TripServiceType.community
+              ? int.tryParse(_seatCapacityController.text.trim())
+              : null,
+          pricePerSeat: widget.serviceType == TripServiceType.community
+              ? double.tryParse(_pricePerSeatController.text.trim())
+              : null,
+          isDeadhead: _isDeadhead,
+          isDeadheadBillable: _isDeadheadBillable,
+        );
+        tripId = await ref.read(tripFormProvider).createTrip(params);
+      } else {
+        tripId = widget.trip!.id;
+        await ref.read(tripFormProvider).updateTrip(tripId, _updateTripParams);
+      }
 
       await ref.read(tripFormProvider).assignDriver(
-            id,
+            tripId,
             AssignDriverParams(
               driverId: _selectedDriverId!,
               vehicleType: _vehicleType,
             ),
           );
 
-      await ref.read(tripFormProvider).dispatchTrip(id);
+      await ref.read(tripFormProvider).dispatchTrip(tripId);
 
       ref.invalidate(tripsProvider);
       if (mounted) Navigator.of(context).pop(true);
@@ -445,6 +495,10 @@ class _Step1 extends ConsumerWidget {
   final List<_StopEntry> stops;
   final VoidCallback onAddStop;
   final void Function(int) onRemoveStop;
+  final bool isDeadhead;
+  final bool isDeadheadBillable;
+  final ValueChanged<bool> onDeadheadChanged;
+  final ValueChanged<bool> onDeadheadBillableChanged;
 
   const _Step1({
     required this.formKey,
@@ -464,6 +518,10 @@ class _Step1 extends ConsumerWidget {
     required this.stops,
     required this.onAddStop,
     required this.onRemoveStop,
+    required this.isDeadhead,
+    required this.isDeadheadBillable,
+    required this.onDeadheadChanged,
+    required this.onDeadheadBillableChanged,
   });
 
   @override
@@ -615,6 +673,51 @@ class _Step1 extends ConsumerWidget {
               ),
               const SizedBox(height: 16),
             ],
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFE5E7EB)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text(
+                      'Deadhead trip',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    subtitle: const Text(
+                      'No passengers or cargo — track unit mileage only',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                    value: isDeadhead,
+                    onChanged: onDeadheadChanged,
+                  ),
+                  if (isDeadhead)
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text(
+                        'Billable deadhead',
+                        style: TextStyle(fontSize: 14),
+                      ),
+                      subtitle: const Text(
+                        'Mileage can be invoiced to the client',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                      value: isDeadheadBillable,
+                      onChanged: (v) =>
+                          onDeadheadBillableChanged(v ?? false),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
             _Label('Vehicle *'),
             const SizedBox(height: 6),
             vehiclesAsync.when(
@@ -1086,6 +1189,9 @@ class _Step2 extends ConsumerWidget {
   final String vehicleLabel;
   final String? selectedDriverId;
   final ValueChanged<String?> onDriverChanged;
+  final bool isDeadhead;
+  final bool isDeadheadBillable;
+  final bool canDispatch;
 
   const _Step2({
     required this.formKey,
@@ -1094,6 +1200,9 @@ class _Step2 extends ConsumerWidget {
     required this.vehicleLabel,
     required this.selectedDriverId,
     required this.onDriverChanged,
+    required this.isDeadhead,
+    required this.isDeadheadBillable,
+    required this.canDispatch,
   });
 
   @override
@@ -1129,6 +1238,13 @@ class _Step2 extends ConsumerWidget {
                   _SummaryRow('Stops', '${stops.length}'),
                   if (vehicleLabel.isNotEmpty)
                     _SummaryRow('Vehicle', vehicleLabel),
+                  if (isDeadhead)
+                    _SummaryRow(
+                      'Type',
+                      isDeadheadBillable
+                          ? 'Deadhead (billable)'
+                          : 'Deadhead (non-billable)',
+                    ),
                   ...stops.map((s) => _SummaryRow(
                         s.label,
                         s.locationController.text.isEmpty
@@ -1160,9 +1276,14 @@ class _Step2 extends ConsumerWidget {
               ),
             ),
             const SizedBox(height: 8),
-            const Text(
-              'A driver must be assigned before dispatching.',
-              style: TextStyle(fontSize: 12, color: AppColors.brandGray),
+            Text(
+              canDispatch
+                  ? 'A driver must be assigned before dispatching.'
+                  : Trip.dispatchManifestMessage,
+              style: TextStyle(
+                fontSize: 12,
+                color: canDispatch ? AppColors.brandGray : AppColors.danger,
+              ),
             ),
           ],
         ),
@@ -1221,6 +1342,7 @@ class _SummaryRow extends StatelessWidget {
 class _BottomBar extends StatelessWidget {
   final int currentStep;
   final bool isSaving;
+  final bool isEditMode;
   final VoidCallback? onCancel;
   final VoidCallback? onBack;
   final VoidCallback? onNext;
@@ -1230,6 +1352,7 @@ class _BottomBar extends StatelessWidget {
   const _BottomBar({
     required this.currentStep,
     required this.isSaving,
+    this.isEditMode = false,
     this.onCancel,
     this.onBack,
     this.onNext,
@@ -1277,7 +1400,7 @@ class _BottomBar extends StatelessWidget {
                         height: 16,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Text('Save Draft'),
+                    : Text(isEditMode ? 'Save' : 'Save Draft'),
               ),
               const SizedBox(width: 10),
             ],
@@ -1285,7 +1408,7 @@ class _BottomBar extends StatelessWidget {
               FilledButton.icon(
                 onPressed: isSaving ? null : onCreateDispatch,
                 icon: const Icon(Icons.send_rounded, size: 16),
-                label: const Text('Create & Dispatch'),
+                label: Text(isEditMode ? 'Save & Dispatch' : 'Create & Dispatch'),
                 style:
                     FilledButton.styleFrom(backgroundColor: AppColors.primary),
               ),

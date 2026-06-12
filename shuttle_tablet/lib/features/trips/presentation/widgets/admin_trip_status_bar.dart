@@ -29,7 +29,7 @@ class AdminTripStatusBar extends ConsumerWidget {
         label: 'Dispatch',
         icon: Icons.send_rounded,
         color: AppColors.primary,
-        onPressed: () => _dispatch(context, ref),
+        onPressed: trip.canDispatch ? () => _dispatch(context, ref) : null,
       ));
     }
 
@@ -84,6 +84,15 @@ class AdminTripStatusBar extends ConsumerWidget {
   }
 
   Future<void> _dispatch(BuildContext context, WidgetRef ref) async {
+    if (!trip.canDispatch) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(Trip.dispatchManifestMessage),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+      return;
+    }
     try {
       await ref.read(tripFormProvider).dispatchTrip(trip.id);
       onRefresh();
@@ -155,7 +164,7 @@ class _ActionBtn extends StatelessWidget {
   final String label;
   final IconData icon;
   final Color color;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
   final bool outlined;
 
   const _ActionBtn({

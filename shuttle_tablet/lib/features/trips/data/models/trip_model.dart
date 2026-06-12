@@ -27,6 +27,8 @@ class TripModel extends Trip {
     super.cargoItems = const [],
     super.preInspection,
     super.postReport,
+    super.isDeadhead = false,
+    super.isDeadheadBillable = false,
   });
 
   factory TripModel.fromJson(Map<String, dynamic> json) {
@@ -72,6 +74,8 @@ class TripModel extends Trip {
       postReport: postReportJson != null
           ? TripPostReportModel.fromJson(postReportJson)
           : null,
+      isDeadhead: json['isDeadhead'] as bool? ?? false,
+      isDeadheadBillable: json['isDeadheadBillable'] as bool? ?? false,
     );
   }
 

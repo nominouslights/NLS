@@ -27,4 +27,7 @@ public sealed record TripListItemResult(
     string? FirstStopLocation,
     string? LastStopLocation,
     int? SeatCapacity,
-    int PassengerCount);
+    int PassengerCount,
+    int CargoItemCount,
+    bool IsDeadhead,
+    bool IsDeadheadBillable);

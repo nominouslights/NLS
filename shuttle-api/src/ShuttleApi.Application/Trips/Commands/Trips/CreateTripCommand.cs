@@ -14,6 +14,8 @@ public sealed record CreateTripCommand(
     string? Notes,
     IReadOnlyList<StopDto> Stops,
     int? SeatCapacity,
-    decimal? PricePerSeat) : ICommand<CreateTripResult>;
+    decimal? PricePerSeat,
+    bool IsDeadhead = false,
+    bool IsDeadheadBillable = false) : ICommand<CreateTripResult>;
 
 public sealed record CreateTripResult(Guid Id);

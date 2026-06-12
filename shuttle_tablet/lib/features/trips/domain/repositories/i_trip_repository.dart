@@ -97,6 +97,8 @@ class CreateTripParams {
   final List<StopParams> stops;
   final int? seatCapacity;
   final double? pricePerSeat;
+  final bool isDeadhead;
+  final bool isDeadheadBillable;
 
   const CreateTripParams({
     this.serviceType = TripServiceType.charter,
@@ -110,6 +112,8 @@ class CreateTripParams {
     required this.stops,
     this.seatCapacity,
     this.pricePerSeat,
+    this.isDeadhead = false,
+    this.isDeadheadBillable = false,
   });
 }
 
@@ -123,6 +127,8 @@ class UpdateTripParams {
   final List<StopParams> stops;
   final int? seatCapacity;
   final double? pricePerSeat;
+  final bool isDeadhead;
+  final bool isDeadheadBillable;
 
   const UpdateTripParams({
     this.vehicleId,
@@ -134,6 +140,8 @@ class UpdateTripParams {
     required this.stops,
     this.seatCapacity,
     this.pricePerSeat,
+    this.isDeadhead = false,
+    this.isDeadheadBillable = false,
   });
 }
 

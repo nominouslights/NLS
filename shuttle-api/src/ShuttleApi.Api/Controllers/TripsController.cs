@@ -49,7 +49,9 @@ public sealed class TripsController(ISender sender) : BaseApiController(sender)
             request.Notes,
             request.Stops.Select(s => new StopDto(s.SequenceOrder, s.LocationName, s.Address)).ToList(),
             request.SeatCapacity,
-            request.PricePerSeat),
+            request.PricePerSeat,
+            request.IsDeadhead,
+            request.IsDeadheadBillable),
             cancellationToken);
         return Ok(result);
     }
@@ -72,7 +74,9 @@ public sealed class TripsController(ISender sender) : BaseApiController(sender)
             request.Notes,
             request.Stops.Select(s => new StopDto(s.SequenceOrder, s.LocationName, s.Address)).ToList(),
             request.SeatCapacity,
-            request.PricePerSeat),
+            request.PricePerSeat,
+            request.IsDeadhead,
+            request.IsDeadheadBillable),
             cancellationToken);
         return NoContent();
     }
@@ -287,7 +291,9 @@ public sealed record CreateTripRequest(
     string? Notes,
     IReadOnlyList<StopRequestDto> Stops,
     int? SeatCapacity,
-    decimal? PricePerSeat);
+    decimal? PricePerSeat,
+    bool IsDeadhead = false,
+    bool IsDeadheadBillable = false);
 
 public sealed record UpdateTripRequest(
     Guid? VehicleId,
@@ -298,7 +304,9 @@ public sealed record UpdateTripRequest(
     string? Notes,
     IReadOnlyList<StopRequestDto> Stops,
     int? SeatCapacity,
-    decimal? PricePerSeat);
+    decimal? PricePerSeat,
+    bool IsDeadhead = false,
+    bool IsDeadheadBillable = false);
 
 public sealed record StopRequestDto(int SequenceOrder, string LocationName, string? Address);
 

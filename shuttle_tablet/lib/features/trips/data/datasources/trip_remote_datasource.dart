@@ -501,6 +501,8 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
           .toList(),
       'seatCapacity': p.seatCapacity,
       'pricePerSeat': p.pricePerSeat,
+      'isDeadhead': p.isDeadhead,
+      'isDeadheadBillable': p.isDeadheadBillable,
     };
     if (p.serviceType == TripServiceType.charter) {
       if (p.purchaseOrderId != null) {
@@ -528,6 +530,8 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
           .toList(),
       'seatCapacity': p.seatCapacity,
       'pricePerSeat': p.pricePerSeat,
+      'isDeadhead': p.isDeadhead,
+      'isDeadheadBillable': p.isDeadheadBillable,
     };
     if (p.purchaseOrderId != null) {
       body['purchaseOrderId'] = p.purchaseOrderId;

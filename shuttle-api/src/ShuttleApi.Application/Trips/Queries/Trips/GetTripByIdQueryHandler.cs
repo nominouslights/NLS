@@ -90,6 +90,8 @@ internal sealed class GetTripByIdQueryHandler(ITripRepository tripRepository)
             trip.CreatedAt,
             trip.SeatCapacity,
             trip.PricePerSeat,
+            trip.IsDeadhead,
+            trip.IsDeadheadBillable,
             stops,
             passengers,
             cargoItems,

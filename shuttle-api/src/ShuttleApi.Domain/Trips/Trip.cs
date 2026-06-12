@@ -24,6 +24,10 @@ public sealed class Trip : AggregateRoot<Guid>
     public decimal? PricePerSeat { get; private set; }
     public bool IsDeleted { get; private set; }
     public DateTime? DeletedAt { get; private set; }
+    public bool IsDeadhead { get; private set; }
+    public bool IsDeadheadBillable { get; private set; }
+
+    public bool HasManifest => _passengers.Count > 0 || _cargoItems.Count > 0;
 
     public IReadOnlyList<TripStop> Stops => _stops.AsReadOnly();
     public IReadOnlyList<TripPassenger> Passengers => _passengers.AsReadOnly();
@@ -44,8 +48,13 @@ public sealed class Trip : AggregateRoot<Guid>
         string? notes,
         IEnumerable<(int SequenceOrder, string LocationName, string? Address)> stops,
         int? seatCapacity = null,
-        decimal? pricePerSeat = null)
+        decimal? pricePerSeat = null,
+        bool isDeadhead = false,
+        bool isDeadheadBillable = false)
     {
+        if (isDeadheadBillable && !isDeadhead)
+            throw new InvalidOperationException("Billable flag only applies to deadhead trips.");
+
         if (serviceType == TripServiceType.Charter && clientId is null)
             throw new InvalidOperationException("ClientId is required for Charter trips.");
 
@@ -69,7 +78,9 @@ public sealed class Trip : AggregateRoot<Guid>
             Notes = notes,
             CreatedAt = DateTime.UtcNow,
             SeatCapacity = seatCapacity,
-            PricePerSeat = pricePerSeat
+            PricePerSeat = pricePerSeat,
+            IsDeadhead = isDeadhead,
+            IsDeadheadBillable = isDeadhead && isDeadheadBillable
         };
 
         foreach (var (seq, loc, addr) in stops)
@@ -95,9 +106,14 @@ public sealed class Trip : AggregateRoot<Guid>
         string? notes,
         IEnumerable<(int SequenceOrder, string LocationName, string? Address)> stops,
         int? seatCapacity = null,
-        decimal? pricePerSeat = null)
+        decimal? pricePerSeat = null,
+        bool isDeadhead = false,
+        bool isDeadheadBillable = false)
     {
         Guard.Against(Status != TripStatus.Scheduled, "Only scheduled trips can be updated.");
+
+        if (isDeadheadBillable && !isDeadhead)
+            throw new InvalidOperationException("Billable flag only applies to deadhead trips.");
 
         if (ServiceType == TripServiceType.Community && (purchaseOrderId is not null || purchaseOrderNumber is not null))
             throw new InvalidOperationException("Purchase orders are not supported for Community trips.");
@@ -110,6 +126,8 @@ public sealed class Trip : AggregateRoot<Guid>
         Notes = notes;
         SeatCapacity = seatCapacity;
         PricePerSeat = pricePerSeat;
+        IsDeadhead = isDeadhead;
+        IsDeadheadBillable = isDeadhead && isDeadheadBillable;
 
         _stops.Clear();
         foreach (var (seq, loc, addr) in stops)
@@ -178,6 +196,9 @@ public sealed class Trip : AggregateRoot<Guid>
         Guard.Against(DriverId is null, "A driver must be assigned before dispatching.");
         Guard.Against(VehicleId is null, "A vehicle must be assigned before dispatching.");
         Guard.Against(Status != TripStatus.Scheduled, "Only scheduled trips can be dispatched.");
+        Guard.Against(
+            !IsDeadhead && !HasManifest,
+            "A trip must have at least one passenger or cargo item before dispatching. Mark the trip as a deadhead trip to dispatch without a manifest.");
 
         Status = TripStatus.Dispatched;
         RaiseDomainEvent(new TripDispatchedEvent(Id, DriverId!.Value));

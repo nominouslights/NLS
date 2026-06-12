@@ -19,6 +19,8 @@ public sealed record TripDetailResult(
     DateTime CreatedAt,
     int? SeatCapacity,
     decimal? PricePerSeat,
+    bool IsDeadhead,
+    bool IsDeadheadBillable,
     IReadOnlyList<TripStopResult> Stops,
     IReadOnlyList<PassengerResult> Passengers,
     IReadOnlyList<CargoItemResult> CargoItems,
