@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../../core/di/injection_container.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../passengers/domain/entities/passenger_profile.dart';
+import '../../../passengers/domain/usecases/search_passenger_profiles_usecase.dart';
 import '../../domain/entities/trip_passenger.dart';
 import '../../domain/repositories/i_trip_repository.dart';
 import '../../domain/usecases/add_passenger_usecase.dart';
@@ -11,6 +13,7 @@ Future<void> showAddPassengerSheet(
   required String tripId,
   required VoidCallback onRefresh,
   bool isOverride = false,
+  String? clientId, // non-null = Charter trip with autocomplete
 }) {
   return showModalBottomSheet(
     context: context,
@@ -20,6 +23,7 @@ Future<void> showAddPassengerSheet(
       tripId: tripId,
       onRefresh: onRefresh,
       isOverride: isOverride,
+      clientId: clientId,
     ),
   );
 }
@@ -28,6 +32,7 @@ Future<void> showOverrideAddPassengerConfirm(
   BuildContext context, {
   required String tripId,
   required VoidCallback onRefresh,
+  String? clientId,
 }) async {
   final confirmed = await showDialog<bool>(
     context: context,
@@ -55,6 +60,7 @@ Future<void> showOverrideAddPassengerConfirm(
     tripId: tripId,
     onRefresh: onRefresh,
     isOverride: true,
+    clientId: clientId,
   );
 }
 
@@ -62,12 +68,14 @@ class AddPassengerSheet extends StatefulWidget {
   final String tripId;
   final VoidCallback onRefresh;
   final bool isOverride;
+  final String? clientId;
 
   const AddPassengerSheet({
     super.key,
     required this.tripId,
     required this.onRefresh,
     this.isOverride = false,
+    this.clientId,
   });
 
   @override
@@ -76,16 +84,19 @@ class AddPassengerSheet extends StatefulWidget {
 
 class _AddPassengerSheetState extends State<AddPassengerSheet> {
   final _formKey = GlobalKey<FormState>();
-  final _nameController = TextEditingController();
+  // For charter trips, _nameController is set inside Autocomplete.fieldViewBuilder
+  TextEditingController _nameController = TextEditingController();
   final _phoneController = TextEditingController();
   final _emailController = TextEditingController();
   final _seatController = TextEditingController();
   PassengerPaymentStatus _paymentStatus = PassengerPaymentStatus.tentative;
   bool _saving = false;
 
+  bool get _isCharter => widget.clientId != null;
+
   @override
   void dispose() {
-    _nameController.dispose();
+    if (!_isCharter) _nameController.dispose();
     _phoneController.dispose();
     _emailController.dispose();
     _seatController.dispose();
@@ -124,6 +135,12 @@ class _AddPassengerSheetState extends State<AddPassengerSheet> {
         Navigator.of(context).pop();
       },
     );
+  }
+
+  void _onProfileSelected(PassengerProfile profile) {
+    _nameController.text = profile.name;
+    _phoneController.text = profile.phone ?? '';
+    _emailController.text = profile.email ?? '';
   }
 
   Widget _label(String text) => Text(
@@ -222,13 +239,124 @@ class _AddPassengerSheetState extends State<AddPassengerSheet> {
               const SizedBox(height: 20),
               _label('Passenger Name *'),
               const SizedBox(height: 6),
-              TextFormField(
-                controller: _nameController,
-                textCapitalization: TextCapitalization.words,
-                decoration: _inputDec('e.g. Jane Smith'),
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? 'Name is required' : null,
-              ),
+              // Charter trips: autocomplete from saved profiles
+              // Community trips: plain text field (no profile system)
+              if (_isCharter)
+                Autocomplete<PassengerProfile>(
+                  optionsBuilder: (TextEditingValue value) async {
+                    final query = value.text.trim();
+                    if (query.length < 2) return const [];
+                    final result = await sl<SearchPassengerProfilesUseCase>()(
+                        widget.clientId!, query);
+                    return result.getOrElse((_) => []);
+                  },
+                  displayStringForOption: (p) => p.name,
+                  onSelected: _onProfileSelected,
+                  fieldViewBuilder:
+                      (context, controller, focusNode, onSubmitted) {
+                    _nameController = controller;
+                    return TextFormField(
+                      controller: controller,
+                      focusNode: focusNode,
+                      textCapitalization: TextCapitalization.words,
+                      decoration: _inputDec('Type to search known travellers…'),
+                      validator: (v) => (v == null || v.trim().isEmpty)
+                          ? 'Name is required'
+                          : null,
+                    );
+                  },
+                  optionsViewBuilder: (context, onSelected, options) =>
+                      Align(
+                    alignment: Alignment.topLeft,
+                    child: Material(
+                      elevation: 4,
+                      borderRadius: BorderRadius.circular(10),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 220),
+                        child: ListView.builder(
+                          shrinkWrap: true,
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          itemCount: options.length,
+                          itemBuilder: (_, i) {
+                            final profile = options.elementAt(i);
+                            return InkWell(
+                              onTap: () => onSelected(profile),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 16, vertical: 10),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 34,
+                                      height: 34,
+                                      decoration: BoxDecoration(
+                                        color: AppColors.primary
+                                            .withValues(alpha: 0.1),
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: Center(
+                                        child: Text(
+                                          profile.name.isNotEmpty
+                                              ? profile.name[0].toUpperCase()
+                                              : '?',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            color: AppColors.primary,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            profile.name,
+                                            style: const TextStyle(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                          if (profile.phone != null ||
+                                              profile.email != null)
+                                            Text(
+                                              [
+                                                if (profile.phone != null)
+                                                  profile.phone!,
+                                                if (profile.email != null)
+                                                  profile.email!,
+                                              ].join(' · '),
+                                              style: const TextStyle(
+                                                fontSize: 12,
+                                                color: AppColors.textSecondary,
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                    const Icon(Icons.person_add_rounded,
+                                        size: 16,
+                                        color: AppColors.textSecondary),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+                )
+              else
+                TextFormField(
+                  controller: _nameController,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: _inputDec('e.g. Jane Smith'),
+                  validator: (v) =>
+                      (v == null || v.trim().isEmpty) ? 'Name is required' : null,
+                ),
               const SizedBox(height: 14),
               _label('Phone'),
               const SizedBox(height: 6),

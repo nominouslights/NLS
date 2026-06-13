@@ -6,6 +6,7 @@ using ShuttleApi.Domain.Common;
 using ShuttleApi.Domain.CommunityCalendar;
 using ShuttleApi.Domain.Drivers;
 using ShuttleApi.Domain.Locations;
+using ShuttleApi.Domain.Passengers;
 using ShuttleApi.Domain.Trips;
 using ShuttleApi.Domain.Users;
 using ShuttleApi.Domain.Vehicles;
@@ -40,6 +41,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<VehicleServiceRecord> VehicleServiceRecords => Set<VehicleServiceRecord>();
     public DbSet<VehicleInspectionRecord> VehicleInspectionRecords => Set<VehicleInspectionRecord>();
     public DbSet<VehicleFuelEntry> VehicleFuelEntries => Set<VehicleFuelEntry>();
+    public DbSet<PassengerProfile> PassengerProfiles => Set<PassengerProfile>();
     public DbSet<SavedLocation> SavedLocations => Set<SavedLocation>();
     public DbSet<CommunityCalendarBlock> CommunityCalendarBlocks => Set<CommunityCalendarBlock>();
 

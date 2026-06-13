@@ -13,6 +13,7 @@ using ShuttleApi.Infrastructure.Persistence;
 using ShuttleApi.Domain.Clients;
 using ShuttleApi.Domain.Drivers;
 using ShuttleApi.Domain.Locations;
+using ShuttleApi.Domain.Passengers;
 using ShuttleApi.Domain.Trips;
 using ShuttleApi.Domain.Users;
 using ShuttleApi.Domain.Vehicles;
@@ -45,6 +46,7 @@ public static class DependencyInjection
         services.AddScoped<ITripRepository, TripRepository>();
         services.AddScoped<IVehicleRepository, VehicleRepository>();
         services.AddScoped<ISavedLocationRepository, SavedLocationRepository>();
+        services.AddScoped<IPassengerProfileRepository, PassengerProfileRepository>();
         services.AddScoped<ICommunityCalendarBlockRepository, CommunityCalendarBlockRepository>();
         services.Configure<SpacesSettings>(configuration.GetSection(SpacesSettings.SectionName));
         var spacesSettings = configuration.GetSection(SpacesSettings.SectionName).Get<SpacesSettings>()

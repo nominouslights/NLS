@@ -39,6 +39,8 @@ class ApiEndpoints {
 
   static const String passengers = '/passengers';
   static String passengerById(String id) => '/passengers/$id';
+  static String passengerSearch(String clientId, String query) =>
+      '/passengers?clientId=$clientId&search=${Uri.encodeQueryComponent(query)}';
 
   static const String vehicles = '/vehicles';
   static String vehicleById(String id) => '/vehicles/$id';
