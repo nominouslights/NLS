@@ -17,6 +17,14 @@ public sealed class TripPostReport : Entity<Guid>
     public DateTime SubmittedAt { get; private set; }
     public bool IsReadyToInvoice { get; private set; }
 
+    // Post-trip vehicle checklist (Section 9 of physical manifest)
+    public bool ExteriorNoNewDamage { get; private set; }
+    public bool InteriorCleanedAndChecked { get; private set; }
+    public bool PassengersDisembarkedSafely { get; private set; }
+    public bool AllCargoDeliveredAndAccounted { get; private set; }
+    public bool VehicleSecuredAndPluggedIn { get; private set; }
+    public bool KeysReturnedAndSecured { get; private set; }
+
     private TripPostReport() { }
 
     public static TripPostReport Create(
@@ -29,7 +37,13 @@ public sealed class TripPostReport : Entity<Guid>
         IncidentType? incidentType,
         string? incidentDescription,
         string? additionalNotes,
-        bool isReadyToInvoice)
+        bool isReadyToInvoice,
+        bool exteriorNoNewDamage = false,
+        bool interiorCleanedAndChecked = false,
+        bool passengersDisembarkedSafely = false,
+        bool allCargoDeliveredAndAccounted = false,
+        bool vehicleSecuredAndPluggedIn = false,
+        bool keysReturnedAndSecured = false)
     {
         return new TripPostReport
         {
@@ -44,7 +58,13 @@ public sealed class TripPostReport : Entity<Guid>
             IncidentDescription = incidentDescription,
             AdditionalNotes = additionalNotes,
             SubmittedAt = DateTime.UtcNow,
-            IsReadyToInvoice = isReadyToInvoice
+            IsReadyToInvoice = isReadyToInvoice,
+            ExteriorNoNewDamage = exteriorNoNewDamage,
+            InteriorCleanedAndChecked = interiorCleanedAndChecked,
+            PassengersDisembarkedSafely = passengersDisembarkedSafely,
+            AllCargoDeliveredAndAccounted = allCargoDeliveredAndAccounted,
+            VehicleSecuredAndPluggedIn = vehicleSecuredAndPluggedIn,
+            KeysReturnedAndSecured = keysReturnedAndSecured
         };
     }
 }

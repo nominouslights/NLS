@@ -21,6 +21,11 @@ public sealed class TripPassengerConfiguration : IEntityTypeConfiguration<TripPa
             .HasConversion<string>()
             .HasMaxLength(20)
             .IsRequired();
+        builder.Property(p => p.BoardingStatus)
+            .HasConversion<string>()
+            .HasMaxLength(20)
+            .IsRequired()
+            .HasDefaultValue(PassengerBoardingStatus.NotBoarded);
 
         builder.Property(p => p.BookingReference).HasMaxLength(10);
         builder.Property(p => p.Phone).HasMaxLength(20);

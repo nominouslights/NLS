@@ -72,5 +72,10 @@ public sealed class VehicleConfiguration : IEntityTypeConfiguration<Vehicle>
             .WithOne()
             .HasForeignKey(r => r.VehicleId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasMany(v => v.FuelEntries)
+            .WithOne()
+            .HasForeignKey(e => e.VehicleId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

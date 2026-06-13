@@ -20,6 +20,10 @@ public sealed class TripCargoItemConfiguration : IEntityTypeConfiguration<TripCa
             .IsRequired();
         builder.Property(c => c.Description).HasMaxLength(200);
         builder.Property(c => c.Quantity).IsRequired();
+        builder.Property(c => c.WeightKg).HasPrecision(10, 2);
+        builder.Property(c => c.Charge).HasPrecision(10, 2);
+        builder.Property(c => c.IsHazmat).IsRequired().HasDefaultValue(false);
+        builder.Property(c => c.IsSecured).IsRequired().HasDefaultValue(false);
 
         builder.HasIndex(c => c.TripId);
     }

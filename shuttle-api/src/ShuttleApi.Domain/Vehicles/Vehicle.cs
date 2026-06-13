@@ -6,6 +6,7 @@ public sealed class Vehicle : AggregateRoot<Guid>
 {
     private readonly List<VehicleServiceRecord> _serviceRecords = [];
     private readonly List<VehicleInspectionRecord> _inspectionRecords = [];
+    private readonly List<VehicleFuelEntry> _fuelEntries = [];
 
     /// <summary>
     /// Human-readable fleet identifier assigned by operations (e.g. NL-001, NL-002).
@@ -47,6 +48,7 @@ public sealed class Vehicle : AggregateRoot<Guid>
 
     public IReadOnlyList<VehicleServiceRecord> ServiceRecords => _serviceRecords.AsReadOnly();
     public IReadOnlyList<VehicleInspectionRecord> InspectionRecords => _inspectionRecords.AsReadOnly();
+    public IReadOnlyList<VehicleFuelEntry> FuelEntries => _fuelEntries.AsReadOnly();
 
     // ── Computed helpers (not persisted) ──────────────────────────────────────
     public bool IsRegistrationExpiringSoon =>
@@ -190,6 +192,16 @@ public sealed class Vehicle : AggregateRoot<Guid>
         var record = _inspectionRecords.FirstOrDefault(r => r.Id == recordId);
         if (record is not null)
             _inspectionRecords.Remove(record);
+    }
+
+    public void AddFuelEntry(VehicleFuelEntry entry) =>
+        _fuelEntries.Add(entry);
+
+    public void RemoveFuelEntry(Guid entryId)
+    {
+        var entry = _fuelEntries.FirstOrDefault(e => e.Id == entryId);
+        if (entry is not null)
+            _fuelEntries.Remove(entry);
     }
 
     public void SoftDelete()

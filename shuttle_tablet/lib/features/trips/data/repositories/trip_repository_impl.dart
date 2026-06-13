@@ -224,6 +224,21 @@ class TripRepositoryImpl implements ITripRepository {
   }
 
   @override
+  Future<Either<Failure, void>> updatePassengerBoardingStatus(
+      UpdatePassengerBoardingStatusParams params) async {
+    try {
+      await _remoteDataSource.updatePassengerBoardingStatus(params);
+      return const Right(null);
+    } on UnauthorizedException {
+      return const Left(UnauthorizedFailure());
+    } on NotFoundException {
+      return const Left(NotFoundFailure());
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message));
+    }
+  }
+
+  @override
   Future<Either<Failure, void>> sendPassengerConfirmation(
       SendPassengerConfirmationParams params) async {
     try {

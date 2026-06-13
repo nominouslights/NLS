@@ -16,6 +16,12 @@ class TripPostReport extends Equatable {
   final String? additionalNotes;
   final DateTime submittedAt;
   final bool isReadyToInvoice;
+  final bool exteriorNoNewDamage;
+  final bool interiorCleanedAndChecked;
+  final bool passengersDisembarkedSafely;
+  final bool allCargoDeliveredAndAccounted;
+  final bool vehicleSecuredAndPluggedIn;
+  final bool keysReturnedAndSecured;
 
   const TripPostReport({
     required this.id,
@@ -31,6 +37,12 @@ class TripPostReport extends Equatable {
     this.additionalNotes,
     required this.submittedAt,
     required this.isReadyToInvoice,
+    this.exteriorNoNewDamage = false,
+    this.interiorCleanedAndChecked = false,
+    this.passengersDisembarkedSafely = false,
+    this.allCargoDeliveredAndAccounted = false,
+    this.vehicleSecuredAndPluggedIn = false,
+    this.keysReturnedAndSecured = false,
   });
 
   @override
@@ -48,5 +60,11 @@ class TripPostReport extends Equatable {
         additionalNotes,
         submittedAt,
         isReadyToInvoice,
+        exteriorNoNewDamage,
+        interiorCleanedAndChecked,
+        passengersDisembarkedSafely,
+        allCargoDeliveredAndAccounted,
+        vehicleSecuredAndPluggedIn,
+        keysReturnedAndSecured,
       ];
 }

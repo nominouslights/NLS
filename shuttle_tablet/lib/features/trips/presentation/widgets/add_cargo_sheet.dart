@@ -37,13 +37,19 @@ class _AddCargoSheetState extends State<AddCargoSheet> {
   final _formKey = GlobalKey<FormState>();
   final _descriptionController = TextEditingController();
   final _quantityController = TextEditingController(text: '1');
+  final _weightController = TextEditingController();
+  final _chargeController = TextEditingController();
   TripCargoType _cargoType = TripCargoType.box;
+  bool _isHazmat = false;
+  bool _isSecured = false;
   bool _saving = false;
 
   @override
   void dispose() {
     _descriptionController.dispose();
     _quantityController.dispose();
+    _weightController.dispose();
+    _chargeController.dispose();
     super.dispose();
   }
 
@@ -52,6 +58,13 @@ class _AddCargoSheetState extends State<AddCargoSheet> {
     setState(() => _saving = true);
 
     final qty = int.parse(_quantityController.text.trim());
+    final weightKg = _weightController.text.trim().isNotEmpty
+        ? double.tryParse(_weightController.text.trim())
+        : null;
+    final charge = _chargeController.text.trim().isNotEmpty
+        ? double.tryParse(_chargeController.text.trim())
+        : null;
+
     final result = await sl<AddCargoItemUseCase>()(AddCargoItemParams(
       tripId: widget.tripId,
       cargoType: _cargoType,
@@ -59,6 +72,10 @@ class _AddCargoSheetState extends State<AddCargoSheet> {
           ? null
           : _descriptionController.text.trim(),
       quantity: qty,
+      weightKg: weightKg,
+      charge: charge,
+      isHazmat: _isHazmat,
+      isSecured: _isSecured,
     ));
 
     if (!mounted) return;
@@ -189,7 +206,98 @@ class _AddCargoSheetState extends State<AddCargoSheet> {
                   ),
                 ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Weight (kg)',
+                            style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF374151))),
+                        const SizedBox(height: 6),
+                        TextFormField(
+                          controller: _weightController,
+                          keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true),
+                          decoration: const InputDecoration(
+                            hintText: '0.0',
+                            suffixText: 'kg',
+                            isDense: true,
+                            filled: true,
+                            fillColor: Color(0xFFF9FAFB),
+                            border: OutlineInputBorder(
+                                borderRadius:
+                                    BorderRadius.all(Radius.circular(10))),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Charge (\$)',
+                            style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF374151))),
+                        const SizedBox(height: 6),
+                        TextFormField(
+                          controller: _chargeController,
+                          keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true),
+                          decoration: const InputDecoration(
+                            hintText: '0.00',
+                            prefixText: '\$',
+                            isDense: true,
+                            filled: true,
+                            fillColor: Color(0xFFF9FAFB),
+                            border: OutlineInputBorder(
+                                borderRadius:
+                                    BorderRadius.all(Radius.circular(10))),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Hazmat',
+                          style: TextStyle(fontSize: 13)),
+                      value: _isHazmat,
+                      onChanged: (v) =>
+                          setState(() => _isHazmat = v ?? false),
+                      activeColor: AppColors.danger,
+                      controlAffinity: ListTileControlAffinity.leading,
+                    ),
+                  ),
+                  Expanded(
+                    child: CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Secured',
+                          style: TextStyle(fontSize: 13)),
+                      value: _isSecured,
+                      onChanged: (v) =>
+                          setState(() => _isSecured = v ?? false),
+                      activeColor: AppColors.success,
+                      controlAffinity: ListTileControlAffinity.leading,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
               Row(
                 children: [
                   Expanded(

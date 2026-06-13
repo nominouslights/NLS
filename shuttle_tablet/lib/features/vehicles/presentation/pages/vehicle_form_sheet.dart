@@ -499,7 +499,8 @@ class _VehicleDetailsTab extends StatelessWidget {
             Expanded(
               child: _FormField(
                 controller: odometerCtrl,
-                label: 'Odometer (km)',
+                label: 'Starting Odometer (km)',
+                hintText: 'Current km reading',
                 required: true,
                 keyboardType: TextInputType.number,
                 validator: (v) {

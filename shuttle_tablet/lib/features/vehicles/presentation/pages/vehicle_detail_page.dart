@@ -1,13 +1,19 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import '../../../../core/di/injection_container.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../trips/domain/entities/trip.dart';
 import '../../../trips/domain/entities/trip_post_report.dart';
 import '../../domain/entities/vehicle.dart';
+import '../../domain/entities/vehicle_fuel_entry.dart';
 import '../../domain/entities/vehicle_inspection_record.dart';
+import '../../domain/entities/vehicle_odometer_entry.dart';
 import '../../domain/entities/vehicle_service_record.dart';
 import '../../domain/repositories/i_vehicle_repository.dart';
+import '../../domain/usecases/fuel_entry_usecases.dart';
 import '../providers/vehicle_detail_provider.dart';
 import '../providers/vehicle_records_provider.dart';
 import '../providers/vehicle_trips_provider.dart';
@@ -36,7 +42,7 @@ class _VehicleDetailPageState extends ConsumerState<VehicleDetailPage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 6, vsync: this);
   }
 
   @override
@@ -203,6 +209,8 @@ class _VehicleDetailPageState extends ConsumerState<VehicleDetailPage>
                   Tab(text: 'Overview'),
                   Tab(text: 'Service Records'),
                   Tab(text: 'Inspections'),
+                  Tab(text: 'Fuel Log'),
+                  Tab(text: 'Odometer'),
                   Tab(text: 'History'),
                 ],
               ),
@@ -219,6 +227,8 @@ class _VehicleDetailPageState extends ConsumerState<VehicleDetailPage>
                   vehicleId: widget.vehicleId, vehicle: vehicle),
               _InspectionsTab(
                   vehicleId: widget.vehicleId, vehicle: vehicle),
+              _FuelLogTab(vehicleId: widget.vehicleId),
+              _OdometerHistoryTab(vehicleId: widget.vehicleId),
               _HistoryTab(vehicle: vehicle),
             ],
           ),
@@ -1729,6 +1739,602 @@ class _LabeledValue extends StatelessWidget {
       ],
     );
   }
+}
+
+// ── Fuel Log Tab ─────────────────────────────────────────────────────────────
+
+class _FuelLogTab extends ConsumerStatefulWidget {
+  final String vehicleId;
+  const _FuelLogTab({required this.vehicleId});
+
+  @override
+  ConsumerState<_FuelLogTab> createState() => _FuelLogTabState();
+}
+
+class _FuelLogTabState extends ConsumerState<_FuelLogTab> {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: FutureBuilder(
+        future: sl<GetFuelEntriesUseCase>()(widget.vehicleId),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final result = snapshot.data;
+          if (result == null) return const SizedBox.shrink();
+          return result.fold(
+            (f) => Center(child: Text(f.message)),
+            (entries) => entries.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.local_gas_station_outlined,
+                            size: 48, color: AppColors.brandGray),
+                        const SizedBox(height: 12),
+                        const Text('No fuel entries yet',
+                            style: TextStyle(color: AppColors.brandGray)),
+                        const SizedBox(height: 16),
+                        OutlinedButton.icon(
+                          onPressed: () => _showAddSheet(context),
+                          icon: const Icon(Icons.add),
+                          label: const Text('Add Fuel Entry'),
+                        ),
+                      ],
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: entries.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (_, i) => _FuelEntryCard(
+                      entry: entries[i],
+                      onDelete: () => _deleteEntry(context, entries[i].id),
+                    ),
+                  ),
+          );
+        },
+      ),
+      floatingActionButton: FloatingActionButton.small(
+        onPressed: () => _showAddSheet(context),
+        backgroundColor: AppColors.primary,
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+
+  Future<void> _showAddSheet(BuildContext context) async {
+    await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _AddFuelEntrySheet(vehicleId: widget.vehicleId),
+    );
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _deleteEntry(BuildContext context, String entryId) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Fuel Entry'),
+        content: const Text('Remove this fuel entry?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final result = await sl<DeleteFuelEntryUseCase>()(widget.vehicleId, entryId);
+    result.fold(
+      (f) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(f.message), backgroundColor: AppColors.danger));
+        }
+      },
+      (_) {
+        if (mounted) setState(() {});
+      },
+    );
+  }
+}
+
+class _FuelEntryCard extends StatelessWidget {
+  final VehicleFuelEntry entry;
+  final VoidCallback onDelete;
+  const _FuelEntryCard({required this.entry, required this.onDelete});
+
+  @override
+  Widget build(BuildContext context) {
+    final fmt = DateFormat('MMM d, yyyy');
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.local_gas_station_rounded,
+                size: 20, color: AppColors.primary),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${entry.fuelLitres.toStringAsFixed(1)} L  ·  \$${entry.totalCostDollars.toStringAsFixed(2)}',
+                  style: const TextStyle(
+                      fontSize: 14, fontWeight: FontWeight.w700),
+                ),
+                Text(
+                  fmt.format(entry.fuelledAt.toLocal()),
+                  style: const TextStyle(
+                      fontSize: 12, color: AppColors.textSecondary),
+                ),
+                if (entry.odometerAtFuelling != null)
+                  Text(
+                    '${_fmt(entry.odometerAtFuelling!)} km',
+                    style: const TextStyle(
+                        fontSize: 12, color: AppColors.textSecondary),
+                  ),
+              ],
+            ),
+          ),
+          if (entry.hasReceipt)
+            const Padding(
+              padding: EdgeInsets.only(right: 8),
+              child: Icon(Icons.receipt_long_rounded,
+                  size: 18, color: AppColors.success),
+            ),
+          if (entry.notes != null)
+            const Padding(
+              padding: EdgeInsets.only(right: 8),
+              child: Icon(Icons.notes_rounded,
+                  size: 16, color: AppColors.brandGray),
+            ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline_rounded,
+                size: 18, color: AppColors.danger),
+            onPressed: onDelete,
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _fmt(int n) => n
+      .toString()
+      .replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+          (m) => '${m[1]},');
+}
+
+class _AddFuelEntrySheet extends StatefulWidget {
+  final String vehicleId;
+  const _AddFuelEntrySheet({required this.vehicleId});
+
+  @override
+  State<_AddFuelEntrySheet> createState() => _AddFuelEntrySheetState();
+}
+
+class _AddFuelEntrySheetState extends State<_AddFuelEntrySheet> {
+  final _formKey = GlobalKey<FormState>();
+  final _litresCtrl = TextEditingController();
+  final _costCtrl = TextEditingController();
+  final _odoCtrl = TextEditingController();
+  final _notesCtrl = TextEditingController();
+  DateTime _date = DateTime.now();
+  Uint8List? _receiptBytes;
+  String? _receiptFileName;
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _litresCtrl.dispose();
+    _costCtrl.dispose();
+    _odoCtrl.dispose();
+    _notesCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final inset = MediaQuery.viewInsetsOf(context).bottom;
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(24, 20, 24, 24 + inset),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40, height: 4,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE5E7EB),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text('Add Fuel Entry',
+                  style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF111827))),
+              const SizedBox(height: 20),
+              // Date
+              InkWell(
+                onTap: () async {
+                  final d = await showDatePicker(
+                    context: context,
+                    initialDate: _date,
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime.now(),
+                  );
+                  if (d != null) setState(() => _date = d);
+                },
+                child: InputDecorator(
+                  decoration: const InputDecoration(
+                    labelText: 'Date',
+                    isDense: true,
+                    filled: true,
+                    fillColor: Color(0xFFF9FAFB),
+                    border: OutlineInputBorder(),
+                    suffixIcon: Icon(Icons.calendar_today_rounded, size: 16),
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  ),
+                  child: Text(DateFormat('MMM d, yyyy').format(_date)),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: _litresCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(
+                        labelText: 'Litres *',
+                        suffixText: 'L',
+                        isDense: true,
+                        filled: true,
+                        fillColor: Color(0xFFF9FAFB),
+                        border: OutlineInputBorder(),
+                        contentPadding:
+                            EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      ),
+                      validator: (v) =>
+                          v == null || v.isEmpty ? 'Required' : null,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _costCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(
+                        labelText: 'Total Cost *',
+                        prefixText: '\$',
+                        isDense: true,
+                        filled: true,
+                        fillColor: Color(0xFFF9FAFB),
+                        border: OutlineInputBorder(),
+                        contentPadding:
+                            EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      ),
+                      validator: (v) =>
+                          v == null || v.isEmpty ? 'Required' : null,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _odoCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Odometer at Fuelling',
+                  suffixText: 'km',
+                  isDense: true,
+                  filled: true,
+                  fillColor: Color(0xFFF9FAFB),
+                  border: OutlineInputBorder(),
+                  contentPadding:
+                      EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                ),
+              ),
+              const SizedBox(height: 12),
+              // Receipt photo
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF9FAFB),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFE5E7EB)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Receipt Photo',
+                        style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF374151))),
+                    const SizedBox(height: 8),
+                    if (_receiptBytes != null)
+                      Row(
+                        children: [
+                          const Icon(Icons.check_circle_rounded,
+                              size: 16, color: AppColors.success),
+                          const SizedBox(width: 6),
+                          Text(
+                            _receiptFileName ?? 'Receipt attached',
+                            style: const TextStyle(
+                                fontSize: 12, color: AppColors.success),
+                          ),
+                          const Spacer(),
+                          TextButton(
+                            onPressed: () =>
+                                setState(() => _receiptBytes = null),
+                            child: const Text('Remove'),
+                          ),
+                        ],
+                      )
+                    else
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              icon: const Icon(Icons.camera_alt_outlined,
+                                  size: 16),
+                              label: const Text('Camera'),
+                              onPressed: () => _pickReceipt(ImageSource.camera),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              icon: const Icon(Icons.photo_library_outlined,
+                                  size: 16),
+                              label: const Text('Gallery'),
+                              onPressed: () => _pickReceipt(ImageSource.gallery),
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _notesCtrl,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Notes',
+                  isDense: true,
+                  filled: true,
+                  fillColor: Color(0xFFF9FAFB),
+                  border: OutlineInputBorder(),
+                  contentPadding:
+                      EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _saving ? null : () => Navigator.pop(context),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _saving ? null : _save,
+                      style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.primary),
+                      child: _saving
+                          ? const SizedBox(
+                              width: 16, height: 16,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white))
+                          : const Text('Save'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickReceipt(ImageSource source) async {
+    final image = await ImagePicker().pickImage(
+        source: source, imageQuality: 80);
+    if (image == null) return;
+    final bytes = await image.readAsBytes();
+    setState(() {
+      _receiptBytes = bytes;
+      _receiptFileName = image.name;
+    });
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _saving = true);
+    final result = await sl<AddFuelEntryUseCase>()(
+      widget.vehicleId,
+      AddFuelEntryParams(
+        fuelledAt: _date,
+        fuelLitres: double.parse(_litresCtrl.text),
+        totalCostDollars: double.parse(_costCtrl.text),
+        odometerAtFuelling: _odoCtrl.text.isNotEmpty
+            ? int.tryParse(_odoCtrl.text)
+            : null,
+        notes: _notesCtrl.text.trim().isNotEmpty
+            ? _notesCtrl.text.trim()
+            : null,
+        receiptPhotoBytes: _receiptBytes,
+        receiptPhotoFileName: _receiptFileName,
+        receiptPhotoContentType:
+            _receiptBytes != null ? 'image/jpeg' : null,
+      ),
+    );
+    if (!mounted) return;
+    setState(() => _saving = false);
+    result.fold(
+      (f) => ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(f.message), backgroundColor: AppColors.danger),
+      ),
+      (_) => Navigator.pop(context, true),
+    );
+  }
+}
+
+// ── Odometer History Tab ──────────────────────────────────────────────────────
+
+class _OdometerHistoryTab extends StatefulWidget {
+  final String vehicleId;
+  const _OdometerHistoryTab({required this.vehicleId});
+
+  @override
+  State<_OdometerHistoryTab> createState() => _OdometerHistoryTabState();
+}
+
+class _OdometerHistoryTabState extends State<_OdometerHistoryTab> {
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder(
+      future: sl<GetOdometerHistoryUseCase>()(widget.vehicleId),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final result = snapshot.data;
+        if (result == null) return const SizedBox.shrink();
+        return result.fold(
+          (f) => Center(child: Text(f.message)),
+          (entries) => entries.isEmpty
+              ? const Center(
+                  child: Text('No odometer history yet',
+                      style: TextStyle(color: AppColors.brandGray)))
+              : ListView.separated(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: entries.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  itemBuilder: (_, i) =>
+                      _OdometerEntryCard(entry: entries[i]),
+                ),
+        );
+      },
+    );
+  }
+}
+
+class _OdometerEntryCard extends StatelessWidget {
+  final VehicleOdometerEntry entry;
+  const _OdometerEntryCard({required this.entry});
+
+  @override
+  Widget build(BuildContext context) {
+    final fmt = DateFormat('MMM d, yyyy');
+    final (icon, color) = switch (entry.source) {
+      'Trip' => (Icons.route_rounded, AppColors.primary),
+      'Service' => (Icons.build_outlined, AppColors.warning),
+      'Fuel' => (Icons.local_gas_station_rounded, const Color(0xFF0F766E)),
+      _ => (Icons.speed_rounded, AppColors.brandGray),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, size: 18, color: color),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${_fmt(entry.odometerKm)} km',
+                  style: const TextStyle(
+                      fontSize: 14, fontWeight: FontWeight.w700),
+                ),
+                Text(
+                  '${fmt.format(entry.date.toLocal())}  ·  ${entry.source}',
+                  style: const TextStyle(
+                      fontSize: 12, color: AppColors.textSecondary),
+                ),
+                if (entry.notes != null)
+                  Text(entry.notes!,
+                      style: const TextStyle(
+                          fontSize: 11, color: AppColors.brandGray)),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              entry.source,
+              style: TextStyle(
+                  fontSize: 11, fontWeight: FontWeight.w600, color: color),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _fmt(int n) => n
+      .toString()
+      .replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+          (m) => '${m[1]},');
 }
 
 class _ExpiryRow extends StatelessWidget {

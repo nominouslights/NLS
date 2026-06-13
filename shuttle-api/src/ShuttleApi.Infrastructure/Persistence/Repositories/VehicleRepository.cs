@@ -48,6 +48,7 @@ internal sealed class VehicleRepository(AppDbContext dbContext) : IVehicleReposi
         await dbContext.Vehicles
             .Include(v => v.ServiceRecords)
             .Include(v => v.InspectionRecords)
+            .Include(v => v.FuelEntries)
             .FirstOrDefaultAsync(v => v.Id == id && !v.IsDeleted, cancellationToken);
 
     public async Task<bool> ExistsByVinAsync(string vin, CancellationToken cancellationToken = default) =>

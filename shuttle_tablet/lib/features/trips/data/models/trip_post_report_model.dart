@@ -15,6 +15,12 @@ class TripPostReportModel extends TripPostReport {
     super.additionalNotes,
     required super.submittedAt,
     required super.isReadyToInvoice,
+    super.exteriorNoNewDamage = false,
+    super.interiorCleanedAndChecked = false,
+    super.passengersDisembarkedSafely = false,
+    super.allCargoDeliveredAndAccounted = false,
+    super.vehicleSecuredAndPluggedIn = false,
+    super.keysReturnedAndSecured = false,
   });
 
   factory TripPostReportModel.fromJson(Map<String, dynamic> json) =>
@@ -33,6 +39,17 @@ class TripPostReportModel extends TripPostReport {
         submittedAt: DateTime.tryParse(json['submittedAt'] as String? ?? '') ??
             DateTime.now(),
         isReadyToInvoice: json['isReadyToInvoice'] as bool? ?? false,
+        exteriorNoNewDamage: json['exteriorNoNewDamage'] as bool? ?? false,
+        interiorCleanedAndChecked:
+            json['interiorCleanedAndChecked'] as bool? ?? false,
+        passengersDisembarkedSafely:
+            json['passengersDisembarkedSafely'] as bool? ?? false,
+        allCargoDeliveredAndAccounted:
+            json['allCargoDeliveredAndAccounted'] as bool? ?? false,
+        vehicleSecuredAndPluggedIn:
+            json['vehicleSecuredAndPluggedIn'] as bool? ?? false,
+        keysReturnedAndSecured:
+            json['keysReturnedAndSecured'] as bool? ?? false,
       );
 
   static IncidentType? _parseIncidentType(String? value) {
@@ -68,5 +85,11 @@ class TripPostReportModel extends TripPostReport {
         'incidentDescription': incidentDescription,
         'additionalNotes': additionalNotes,
         'isReadyToInvoice': isReadyToInvoice,
+        'exteriorNoNewDamage': exteriorNoNewDamage,
+        'interiorCleanedAndChecked': interiorCleanedAndChecked,
+        'passengersDisembarkedSafely': passengersDisembarkedSafely,
+        'allCargoDeliveredAndAccounted': allCargoDeliveredAndAccounted,
+        'vehicleSecuredAndPluggedIn': vehicleSecuredAndPluggedIn,
+        'keysReturnedAndSecured': keysReturnedAndSecured,
       };
 }

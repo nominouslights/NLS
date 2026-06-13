@@ -15,6 +15,10 @@ public sealed class TripInspectionItemConfiguration : IEntityTypeConfiguration<T
 
         builder.Property(i => i.PreInspectionId).IsRequired();
         builder.Property(i => i.ItemName).HasMaxLength(200).IsRequired();
+        builder.Property(i => i.Category)
+            .HasConversion<string>()
+            .HasMaxLength(40)
+            .IsRequired();
         builder.Property(i => i.Passed).IsRequired();
         builder.Property(i => i.Notes).HasMaxLength(1000);
 

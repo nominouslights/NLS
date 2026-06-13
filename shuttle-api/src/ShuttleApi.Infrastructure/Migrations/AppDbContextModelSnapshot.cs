@@ -709,15 +709,33 @@ namespace ShuttleApi.Infrastructure.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
+                    b.Property<decimal?>("Charge")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
+
                     b.Property<string>("Description")
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
+
+                    b.Property<bool>("IsHazmat")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("IsSecured")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.Property<int>("Quantity")
                         .HasColumnType("integer");
 
                     b.Property<Guid>("TripId")
                         .HasColumnType("uuid");
+
+                    b.Property<decimal?>("WeightKg")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
 
                     b.HasKey("Id");
 
@@ -730,6 +748,11 @@ namespace ShuttleApi.Infrastructure.Migrations
                 {
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
 
                     b.Property<string>("ItemName")
                         .IsRequired()
@@ -757,6 +780,13 @@ namespace ShuttleApi.Infrastructure.Migrations
                 {
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("BoardingStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("NotBoarded");
 
                     b.Property<DateTime>("BookedAt")
                         .HasColumnType("timestamp with time zone");
@@ -828,6 +858,16 @@ namespace ShuttleApi.Infrastructure.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
 
+                    b.Property<bool>("AllCargoDeliveredAndAccounted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("ExteriorNoNewDamage")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<decimal?>("FuelAddedLitres")
                         .HasPrecision(8, 2)
                         .HasColumnType("numeric(8,2)");
@@ -847,8 +887,18 @@ namespace ShuttleApi.Infrastructure.Migrations
                         .HasMaxLength(30)
                         .HasColumnType("character varying(30)");
 
+                    b.Property<bool>("InteriorCleanedAndChecked")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<bool>("IsReadyToInvoice")
                         .HasColumnType("boolean");
+
+                    b.Property<bool>("KeysReturnedAndSecured")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.Property<int>("OdometerEnd")
                         .HasColumnType("integer");
@@ -856,11 +906,21 @@ namespace ShuttleApi.Infrastructure.Migrations
                     b.Property<int>("OdometerStart")
                         .HasColumnType("integer");
 
+                    b.Property<bool>("PassengersDisembarkedSafely")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<DateTime>("SubmittedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid>("TripId")
                         .HasColumnType("uuid");
+
+                    b.Property<bool>("VehicleSecuredAndPluggedIn")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.HasKey("Id");
 
@@ -875,14 +935,42 @@ namespace ShuttleApi.Infrastructure.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("FuelLevel")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
                     b.Property<int>("OdometerStart")
                         .HasColumnType("integer");
+
+                    b.Property<string>("RoadAdvisories")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("RoadConditions")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
 
                     b.Property<DateTime>("SubmittedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("Temperature")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
                     b.Property<Guid>("TripId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("Visibility")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime?>("WeatherPulledAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("WeatherType")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
 
                     b.HasKey("Id");
 
@@ -1074,6 +1162,48 @@ namespace ShuttleApi.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("vehicles", (string)null);
+                });
+
+            modelBuilder.Entity("ShuttleApi.Domain.Vehicles.VehicleFuelEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("FuelLitres")
+                        .HasPrecision(8, 2)
+                        .HasColumnType("numeric(8,2)");
+
+                    b.Property<DateTime>("FuelledAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<int?>("OdometerAtFuelling")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ReceiptPhotoUrl")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<decimal>("TotalCostDollars")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<Guid>("VehicleId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FuelledAt");
+
+                    b.HasIndex("VehicleId");
+
+                    b.ToTable("vehicle_fuel_entries", (string)null);
                 });
 
             modelBuilder.Entity("ShuttleApi.Domain.Vehicles.VehicleInspectionRecord", b =>
@@ -1408,6 +1538,15 @@ namespace ShuttleApi.Infrastructure.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("ShuttleApi.Domain.Vehicles.VehicleFuelEntry", b =>
+                {
+                    b.HasOne("ShuttleApi.Domain.Vehicles.Vehicle", null)
+                        .WithMany("FuelEntries")
+                        .HasForeignKey("VehicleId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("ShuttleApi.Domain.Vehicles.VehicleInspectionRecord", b =>
                 {
                     b.HasOne("ShuttleApi.Domain.Vehicles.Vehicle", null)
@@ -1468,6 +1607,8 @@ namespace ShuttleApi.Infrastructure.Migrations
 
             modelBuilder.Entity("ShuttleApi.Domain.Vehicles.Vehicle", b =>
                 {
+                    b.Navigation("FuelEntries");
+
                     b.Navigation("InspectionRecords");
 
                     b.Navigation("ServiceRecords");

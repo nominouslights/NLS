@@ -170,9 +170,23 @@ public sealed class Trip : AggregateRoot<Guid>
         passenger.UpdatePaymentStatus(status);
     }
 
-    public TripCargoItem AddCargoItem(CargoType cargoType, string? description, int quantity)
+    public void UpdatePassengerBoardingStatus(Guid passengerId, PassengerBoardingStatus status)
     {
-        var item = TripCargoItem.Create(Id, cargoType, description, quantity);
+        var passenger = _passengers.FirstOrDefault(p => p.Id == passengerId)
+            ?? throw new InvalidOperationException($"Passenger {passengerId} not found on this trip.");
+        passenger.UpdateBoardingStatus(status);
+    }
+
+    public TripCargoItem AddCargoItem(
+        CargoType cargoType,
+        string? description,
+        int quantity,
+        decimal? weightKg = null,
+        decimal? charge = null,
+        bool isHazmat = false,
+        bool isSecured = false)
+    {
+        var item = TripCargoItem.Create(Id, cargoType, description, quantity, weightKg, charge, isHazmat, isSecured);
         _cargoItems.Add(item);
         return item;
     }
@@ -211,7 +225,10 @@ public sealed class Trip : AggregateRoot<Guid>
             "Status can only be updated to EnRoute or Cancelled via this method.");
 
         if (newStatus == TripStatus.EnRoute)
+        {
             Guard.Against(Status != TripStatus.Dispatched, "Trip must be dispatched before going en route.");
+            Guard.Against(PreInspection is null, "Pre-trip inspection must be completed before the trip can go en route.");
+        }
 
         if (newStatus == TripStatus.Cancelled)
             Guard.Against(
@@ -223,12 +240,22 @@ public sealed class Trip : AggregateRoot<Guid>
 
     public void SubmitPreInspection(
         int odometerStart,
-        IEnumerable<(string ItemName, bool Passed, string? Notes)> items)
+        FuelLevel fuelLevel,
+        string? weatherType,
+        string? temperature,
+        string? roadConditions,
+        string? visibility,
+        string? roadAdvisories,
+        DateTime? weatherPulledAt,
+        IEnumerable<(string ItemName, InspectionCategory Category, bool Passed, string? Notes)> items)
     {
         Guard.Against(Status != TripStatus.Dispatched, "Pre-trip inspection can only be submitted for dispatched trips.");
         Guard.Against(PreInspection is not null, "A pre-trip inspection has already been submitted for this trip.");
 
-        PreInspection = TripPreInspection.Create(Id, odometerStart, items);
+        PreInspection = TripPreInspection.Create(
+            Id, odometerStart, fuelLevel,
+            weatherType, temperature, roadConditions, visibility, roadAdvisories, weatherPulledAt,
+            items);
     }
 
     public void SubmitPostReport(
@@ -239,7 +266,13 @@ public sealed class Trip : AggregateRoot<Guid>
         IncidentType? incidentType,
         string? incidentDescription,
         string? additionalNotes,
-        bool isReadyToInvoice)
+        bool isReadyToInvoice,
+        bool exteriorNoNewDamage = false,
+        bool interiorCleanedAndChecked = false,
+        bool passengersDisembarkedSafely = false,
+        bool allCargoDeliveredAndAccounted = false,
+        bool vehicleSecuredAndPluggedIn = false,
+        bool keysReturnedAndSecured = false)
     {
         Guard.Against(Status != TripStatus.EnRoute, "Post-trip report can only be submitted for trips en route.");
         Guard.Against(PostReport is not null, "A post-trip report has already been submitted for this trip.");
@@ -255,7 +288,13 @@ public sealed class Trip : AggregateRoot<Guid>
             incidentType,
             incidentDescription,
             additionalNotes,
-            isReadyToInvoice);
+            isReadyToInvoice,
+            exteriorNoNewDamage,
+            interiorCleanedAndChecked,
+            passengersDisembarkedSafely,
+            allCargoDeliveredAndAccounted,
+            vehicleSecuredAndPluggedIn,
+            keysReturnedAndSecured);
 
         Status = TripStatus.Completed;
         RaiseDomainEvent(new TripCompletedEvent(Id));

@@ -1,8 +1,11 @@
+import 'dart:typed_data';
 import 'package:fpdart/fpdart.dart';
 
 import '../../../../core/error/exceptions.dart';
 import '../../../../core/error/failures.dart';
 import '../../domain/entities/vehicle.dart';
+import '../../domain/entities/vehicle_fuel_entry.dart';
+import '../../domain/entities/vehicle_odometer_entry.dart';
 import '../../domain/repositories/i_vehicle_repository.dart';
 import '../datasources/vehicle_remote_datasource.dart';
 
@@ -217,6 +220,76 @@ class VehicleRepositoryImpl implements IVehicleRepository {
     try {
       await _remote.deleteInspectionRecord(vehicleId, recordId);
       return const Right(null);
+    } on UnauthorizedException {
+      return const Left(UnauthorizedFailure());
+    } on NotFoundException {
+      return const Left(NotFoundFailure());
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message));
+    }
+  }
+
+  @override
+  Future<Either<Failure, List<VehicleFuelEntry>>> getFuelEntries(String vehicleId) async {
+    try {
+      final models = await _remote.getFuelEntries(vehicleId);
+      return Right(models);
+    } on UnauthorizedException {
+      return const Left(UnauthorizedFailure());
+    } on NotFoundException {
+      return const Left(NotFoundFailure());
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message));
+    }
+  }
+
+  @override
+  Future<Either<Failure, String>> addFuelEntry(String vehicleId, AddFuelEntryParams params) async {
+    try {
+      final id = await _remote.addFuelEntry(vehicleId, params);
+      return Right(id);
+    } on UnauthorizedException {
+      return const Left(UnauthorizedFailure());
+    } on NotFoundException {
+      return const Left(NotFoundFailure());
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message));
+    }
+  }
+
+  @override
+  Future<Either<Failure, void>> deleteFuelEntry(String vehicleId, String entryId) async {
+    try {
+      await _remote.deleteFuelEntry(vehicleId, entryId);
+      return const Right(null);
+    } on UnauthorizedException {
+      return const Left(UnauthorizedFailure());
+    } on NotFoundException {
+      return const Left(NotFoundFailure());
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message));
+    }
+  }
+
+  @override
+  Future<Either<Failure, Uint8List>> getFuelReceipt(String vehicleId, String entryId) async {
+    try {
+      final bytes = await _remote.getFuelReceipt(vehicleId, entryId);
+      return Right(bytes);
+    } on UnauthorizedException {
+      return const Left(UnauthorizedFailure());
+    } on NotFoundException {
+      return const Left(NotFoundFailure());
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message));
+    }
+  }
+
+  @override
+  Future<Either<Failure, List<VehicleOdometerEntry>>> getOdometerHistory(String vehicleId) async {
+    try {
+      final models = await _remote.getOdometerHistory(vehicleId);
+      return Right(models);
     } on UnauthorizedException {
       return const Left(UnauthorizedFailure());
     } on NotFoundException {

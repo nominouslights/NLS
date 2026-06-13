@@ -3,8 +3,10 @@ import '../../../../core/error/exceptions.dart';
 import '../../../../core/network/api_endpoints.dart';
 import '../../domain/entities/trip.dart';
 import '../../domain/entities/trip_cargo_item.dart';
+import '../../domain/entities/trip_inspection_item.dart';
 import '../../domain/entities/trip_passenger.dart';
 import '../../domain/entities/trip_post_report.dart';
+import '../../domain/entities/trip_pre_inspection.dart';
 import '../../domain/repositories/i_trip_repository.dart';
 import '../models/trip_model.dart';
 import '../models/trip_passenger_model.dart';
@@ -45,6 +47,9 @@ abstract interface class ITripRemoteDataSource {
 
   Future<void> updatePassengerPaymentStatus(
       UpdatePassengerPaymentStatusParams params);
+
+  Future<void> updatePassengerBoardingStatus(
+      UpdatePassengerBoardingStatusParams params);
 
   Future<void> sendPassengerConfirmation(
       String tripId, String passengerId, String direction);
@@ -225,9 +230,17 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
         ApiEndpoints.tripPreInspection(tripId),
         data: {
           'odometerStart': params.odometerStart,
+          'fuelLevel': _fuelLevelToString(params.fuelLevel),
+          'weatherType': params.weatherType,
+          'temperature': params.temperature,
+          'roadConditions': params.roadConditions,
+          'visibility': params.visibility,
+          'roadAdvisories': params.roadAdvisories,
+          'weatherPulledAt': params.weatherPulledAt?.toIso8601String(),
           'items': params.items
               .map((i) => {
                     'itemName': i.itemName,
+                    'category': _inspectionCategoryToString(i.category),
                     'passed': i.passed,
                     'notes': i.notes,
                   })
@@ -259,6 +272,12 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
           'incidentDescription': params.incidentDescription,
           'additionalNotes': params.additionalNotes,
           'isReadyToInvoice': params.isReadyToInvoice,
+          'exteriorNoNewDamage': params.exteriorNoNewDamage,
+          'interiorCleanedAndChecked': params.interiorCleanedAndChecked,
+          'passengersDisembarkedSafely': params.passengersDisembarkedSafely,
+          'allCargoDeliveredAndAccounted': params.allCargoDeliveredAndAccounted,
+          'vehicleSecuredAndPluggedIn': params.vehicleSecuredAndPluggedIn,
+          'keysReturnedAndSecured': params.keysReturnedAndSecured,
         },
       );
     } on DioException catch (e) {
@@ -350,6 +369,25 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
   }
 
   @override
+  Future<void> updatePassengerBoardingStatus(
+      UpdatePassengerBoardingStatusParams params) async {
+    try {
+      await _dio.patch(
+        ApiEndpoints.tripPassengerBoardingStatus(
+            params.tripId, params.passengerId),
+        data: {'boardingStatus': _boardingStatusToString(params.boardingStatus)},
+      );
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 401) throw const UnauthorizedException();
+      if (e.response?.statusCode == 404) throw const NotFoundException();
+      throw ServerException(
+        message: e.message ?? 'Failed to update boarding status',
+        statusCode: e.response?.statusCode,
+      );
+    }
+  }
+
+  @override
   Future<void> sendPassengerConfirmation(
       String tripId, String passengerId, String direction) async {
     try {
@@ -394,6 +432,10 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
           'cargoType': _cargoTypeToString(params.cargoType),
           'description': params.description,
           'quantity': params.quantity,
+          'weightKg': params.weightKg,
+          'charge': params.charge,
+          'isHazmat': params.isHazmat,
+          'isSecured': params.isSecured,
         },
       );
       final data = response.data as Map<String, dynamic>;
@@ -482,6 +524,43 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
       PassengerPaymentStatus.paid: 'Confirmed',
     };
     return map[status]!;
+  }
+
+  static String _boardingStatusToString(PassengerBoardingStatus status) {
+    switch (status) {
+      case PassengerBoardingStatus.boarded:
+        return 'Boarded';
+      case PassengerBoardingStatus.noShow:
+        return 'NoShow';
+      case PassengerBoardingStatus.notBoarded:
+        return 'NotBoarded';
+    }
+  }
+
+  static String _fuelLevelToString(FuelLevel level) {
+    switch (level) {
+      case FuelLevel.full:
+        return 'Full';
+      case FuelLevel.threeQuarters:
+        return 'ThreeQuarters';
+      case FuelLevel.half:
+        return 'Half';
+      case FuelLevel.quarter:
+        return 'Quarter';
+    }
+  }
+
+  static String _inspectionCategoryToString(InspectionCategory cat) {
+    switch (cat) {
+      case InspectionCategory.exteriorMechanical:
+        return 'ExteriorMechanical';
+      case InspectionCategory.safetyEquipment:
+        return 'SafetyEquipment';
+      case InspectionCategory.interiorComfort:
+        return 'InteriorComfort';
+      case InspectionCategory.communicationsNavigation:
+        return 'CommunicationsNavigation';
+    }
   }
 
   static Map<String, dynamic> _createTripToJson(CreateTripParams p) {

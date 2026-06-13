@@ -143,7 +143,14 @@ public sealed class TripsController(ISender sender) : BaseApiController(sender)
         await Sender.Send(new SubmitPreInspectionCommand(
             id,
             request.OdometerStart,
-            request.Items.Select(i => new InspectionItemDto(i.ItemName, i.Passed, i.Notes)).ToList()),
+            request.FuelLevel,
+            request.WeatherType,
+            request.Temperature,
+            request.RoadConditions,
+            request.Visibility,
+            request.RoadAdvisories,
+            request.WeatherPulledAt,
+            request.Items.Select(i => new InspectionItemDto(i.ItemName, i.Category, i.Passed, i.Notes)).ToList()),
             cancellationToken);
         return NoContent();
     }
@@ -165,7 +172,13 @@ public sealed class TripsController(ISender sender) : BaseApiController(sender)
             request.IncidentType,
             request.IncidentDescription,
             request.AdditionalNotes,
-            request.IsReadyToInvoice),
+            request.IsReadyToInvoice,
+            request.ExteriorNoNewDamage,
+            request.InteriorCleanedAndChecked,
+            request.PassengersDisembarkedSafely,
+            request.AllCargoDeliveredAndAccounted,
+            request.VehicleSecuredAndPluggedIn,
+            request.KeysReturnedAndSecured),
             cancellationToken);
         return NoContent();
     }
@@ -250,6 +263,19 @@ public sealed class TripsController(ISender sender) : BaseApiController(sender)
         return NoContent();
     }
 
+    [Authorize(Policy = "DriverOrAdmin")]
+    [HttpPatch]
+    [Route("api/trips/{id:guid}/passengers/{passengerId:guid}/boarding")]
+    public async Task<IActionResult> UpdatePassengerBoardingStatus(
+        Guid id,
+        Guid passengerId,
+        [FromBody] UpdatePassengerBoardingStatusRequest request,
+        CancellationToken cancellationToken)
+    {
+        await Sender.Send(new UpdatePassengerBoardingStatusCommand(id, passengerId, request.BoardingStatus), cancellationToken);
+        return NoContent();
+    }
+
     [Authorize(Policy = "AdminOnly")]
     [HttpPost]
     [Route("api/trips/{id:guid}/cargo")]
@@ -262,7 +288,11 @@ public sealed class TripsController(ISender sender) : BaseApiController(sender)
             id,
             request.CargoType,
             request.Description,
-            request.Quantity),
+            request.Quantity,
+            request.WeightKg,
+            request.Charge,
+            request.IsHazmat,
+            request.IsSecured),
             cancellationToken);
         return Ok(result);
     }
@@ -316,9 +346,16 @@ public sealed record UpdateStatusRequest(TripStatus Status);
 
 public sealed record SubmitPreInspectionRequest(
     int OdometerStart,
+    FuelLevel FuelLevel,
+    string? WeatherType,
+    string? Temperature,
+    string? RoadConditions,
+    string? Visibility,
+    string? RoadAdvisories,
+    DateTime? WeatherPulledAt,
     IReadOnlyList<InspectionItemRequestDto> Items);
 
-public sealed record InspectionItemRequestDto(string ItemName, bool Passed, string? Notes);
+public sealed record InspectionItemRequestDto(string ItemName, InspectionCategory Category, bool Passed, string? Notes);
 
 public sealed record SubmitPostReportRequest(
     int OdometerEnd,
@@ -328,7 +365,13 @@ public sealed record SubmitPostReportRequest(
     IncidentType? IncidentType,
     string? IncidentDescription,
     string? AdditionalNotes,
-    bool IsReadyToInvoice);
+    bool IsReadyToInvoice,
+    bool ExteriorNoNewDamage = false,
+    bool InteriorCleanedAndChecked = false,
+    bool PassengersDisembarkedSafely = false,
+    bool AllCargoDeliveredAndAccounted = false,
+    bool VehicleSecuredAndPluggedIn = false,
+    bool KeysReturnedAndSecured = false);
 
 public sealed record AddPassengerRequest(
     string Name,
@@ -341,10 +384,16 @@ public sealed record AddPassengerRequest(
 
 public sealed record UpdatePassengerPaymentStatusRequest(PassengerPaymentStatus PaymentStatus);
 
+public sealed record UpdatePassengerBoardingStatusRequest(PassengerBoardingStatus BoardingStatus);
+
 public sealed record AddCargoItemRequest(
     CargoType CargoType,
     string? Description,
-    int Quantity);
+    int Quantity,
+    decimal? WeightKg = null,
+    decimal? Charge = null,
+    bool IsHazmat = false,
+    bool IsSecured = false);
 
 public sealed record SendConfirmationRequest(string Direction);
 

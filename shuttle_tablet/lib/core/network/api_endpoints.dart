@@ -19,6 +19,8 @@ class ApiEndpoints {
   static String tripPassengerById(String id, String pid) => '/trips/$id/passengers/$pid';
   static String tripPassengerPaymentStatus(String id, String pid) =>
       '/trips/$id/passengers/$pid/payment-status';
+  static String tripPassengerBoardingStatus(String id, String pid) =>
+      '/trips/$id/passengers/$pid/boarding';
   static String tripPassengerSendConfirmation(String id, String pid) =>
       '/trips/$id/passengers/$pid/send-confirmation';
   static String tripSendStopUpdate(String id) => '/trips/$id/send-stop-update';
@@ -51,6 +53,11 @@ class ApiEndpoints {
   static String vehicleInspectionRecords(String id) => '/vehicles/$id/inspection-records';
   static String vehicleInspectionRecordById(String vId, String rId) =>
       '/vehicles/$vId/inspection-records/$rId';
+  static String vehicleFuelEntries(String id) => '/vehicles/$id/fuel-entries';
+  static String vehicleFuelEntryById(String vId, String eId) =>
+      '/vehicles/$vId/fuel-entries/$eId';
+  static String vehicleOdometerHistory(String id) =>
+      '/vehicles/$id/odometer-history';
 
   static const String communityCalendar = '/community/calendar';
   static const String communityAdminCalendar = '/community/calendar/admin';
