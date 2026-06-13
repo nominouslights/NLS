@@ -1,9 +1,12 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ShuttleApi.Application.Common.Mediator;
+using ShuttleApi.Application.Vehicles.Commands.FuelEntries;
 using ShuttleApi.Application.Vehicles.Commands.InspectionRecords;
 using ShuttleApi.Application.Vehicles.Commands.ServiceRecords;
 using ShuttleApi.Application.Vehicles.Commands.Vehicles;
+using ShuttleApi.Application.Vehicles.Queries.FuelEntries;
+using ShuttleApi.Application.Vehicles.Queries.OdometerHistory;
 using ShuttleApi.Application.Vehicles.Queries.Vehicles;
 using ShuttleApi.Domain.Vehicles;
 
@@ -188,6 +191,75 @@ public sealed class VehiclesController(ISender sender) : BaseApiController(sende
         return NoContent();
     }
 
+    // ── Fuel Entries ──────────────────────────────────────────────────────────
+
+    [Authorize(Policy = "DriverOrAdmin")]
+    [HttpGet]
+    [Route("api/vehicles/{id:guid}/fuel-entries")]
+    public async Task<IActionResult> GetFuelEntries(Guid id, CancellationToken cancellationToken) =>
+        Ok(await Sender.Send(new GetVehicleFuelEntriesQuery(id), cancellationToken));
+
+    [Authorize(Policy = "DriverOrAdmin")]
+    [HttpPost]
+    [Route("api/vehicles/{id:guid}/fuel-entries")]
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> AddFuelEntry(
+        Guid id,
+        [FromForm] AddFuelEntryRequest request,
+        IFormFile? receiptPhoto,
+        CancellationToken cancellationToken)
+    {
+        byte[]? photoBytes = null;
+        string? photoFileName = null;
+        string? photoContentType = null;
+        if (receiptPhoto is { Length: > 0 })
+        {
+            using var ms = new MemoryStream();
+            await receiptPhoto.CopyToAsync(ms, cancellationToken);
+            photoBytes = ms.ToArray();
+            photoFileName = receiptPhoto.FileName;
+            photoContentType = receiptPhoto.ContentType;
+        }
+
+        var result = await Sender.Send(new AddFuelEntryCommand(
+            id,
+            request.FuelledAt,
+            request.FuelLitres,
+            request.TotalCostDollars,
+            request.OdometerAtFuelling,
+            request.Notes,
+            photoBytes,
+            photoFileName,
+            photoContentType), cancellationToken);
+        return Ok(result);
+    }
+
+    [Authorize(Policy = "AdminOnly")]
+    [HttpDelete]
+    [Route("api/vehicles/{id:guid}/fuel-entries/{entryId:guid}")]
+    public async Task<IActionResult> DeleteFuelEntry(Guid id, Guid entryId, CancellationToken cancellationToken)
+    {
+        await Sender.Send(new DeleteFuelEntryCommand(id, entryId), cancellationToken);
+        return NoContent();
+    }
+
+    [Authorize(Policy = "DriverOrAdmin")]
+    [HttpGet]
+    [Route("api/vehicles/{id:guid}/fuel-entries/{entryId:guid}/receipt")]
+    public async Task<IActionResult> GetFuelReceipt(Guid id, Guid entryId, CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(new GetFuelReceiptQuery(id, entryId), cancellationToken);
+        if (result is null) return NotFound();
+        return File(result.Bytes, result.ContentType, result.FileName);
+    }
+
+    // ── Odometer History ──────────────────────────────────────────────────────
+
+    [HttpGet]
+    [Route("api/vehicles/{id:guid}/odometer-history")]
+    public async Task<IActionResult> GetOdometerHistory(Guid id, CancellationToken cancellationToken) =>
+        Ok(await Sender.Send(new GetVehicleOdometerHistoryQuery(id), cancellationToken));
+
     // ── Inspection Records ────────────────────────────────────────────────────
 
     [Authorize(Policy = "AdminOnly")]
@@ -293,6 +365,13 @@ public sealed record CompleteServiceRecordRequest(
     DateTime CompletedDate,
     decimal? ActualCostDollars,
     int? OdometerAtService);
+
+public sealed record AddFuelEntryRequest(
+    DateTime FuelledAt,
+    decimal FuelLitres,
+    decimal TotalCostDollars,
+    int? OdometerAtFuelling,
+    string? Notes);
 
 public sealed record AddInspectionRecordRequest(
     InspectionType InspectionType,

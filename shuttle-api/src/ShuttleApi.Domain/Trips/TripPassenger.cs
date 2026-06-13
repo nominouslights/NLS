@@ -2,6 +2,8 @@ using ShuttleApi.Domain.Common;
 
 namespace ShuttleApi.Domain.Trips;
 
+public enum PassengerBoardingStatus { NotBoarded, Boarded, NoShow }
+
 public sealed class TripPassenger : Entity<Guid>
 {
     public Guid TripId { get; private set; }
@@ -9,6 +11,7 @@ public sealed class TripPassenger : Entity<Guid>
     public string? ContactInfo { get; private set; }
     public int? SeatNumber { get; private set; }
     public PassengerPaymentStatus PaymentStatus { get; private set; }
+    public PassengerBoardingStatus BoardingStatus { get; private set; } = PassengerBoardingStatus.NotBoarded;
 
     // Booking-specific fields (populated for community bookings)
     public string? BookingReference { get; private set; }
@@ -54,6 +57,11 @@ public sealed class TripPassenger : Entity<Guid>
             Fare = fare,
             IsAddedAfterDeparture = isAddedAfterDeparture
         };
+    }
+
+    public void UpdateBoardingStatus(PassengerBoardingStatus status)
+    {
+        BoardingStatus = status;
     }
 
     public void UpdatePaymentStatus(PassengerPaymentStatus newStatus)

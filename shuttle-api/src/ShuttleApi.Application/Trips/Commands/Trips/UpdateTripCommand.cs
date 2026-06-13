@@ -12,4 +12,6 @@ public sealed record UpdateTripCommand(
     string? Notes,
     IReadOnlyList<StopDto> Stops,
     int? SeatCapacity,
-    decimal? PricePerSeat) : ICommand;
+    decimal? PricePerSeat,
+    bool IsDeadhead = false,
+    bool IsDeadheadBillable = false) : ICommand;

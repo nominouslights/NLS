@@ -82,7 +82,17 @@ class PurchaseOrderRemoteDataSource implements IPurchaseOrderRemoteDataSource {
         ),
       );
       final data = response.data as Map<String, dynamic>;
-      return data['purchaseOrderId'] as String;
+      final id = data['purchaseOrderId'] ??
+          data['PurchaseOrderId'] ??
+          data['id'] ??
+          data['Id'];
+      if (id == null) {
+        throw ServerException(
+          message: 'Create purchase order succeeded but no id was returned.',
+          statusCode: response.statusCode,
+        );
+      }
+      return id.toString();
     } on DioException catch (e) {
       if (e.response?.statusCode == 401) throw const UnauthorizedException();
       if (e.response?.statusCode == 404) throw const NotFoundException();

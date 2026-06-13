@@ -27,6 +27,13 @@ public sealed class TripPostReportConfiguration : IEntityTypeConfiguration<TripP
         builder.Property(r => r.SubmittedAt).IsRequired();
         builder.Property(r => r.IsReadyToInvoice).IsRequired();
 
+        builder.Property(r => r.ExteriorNoNewDamage).IsRequired().HasDefaultValue(false);
+        builder.Property(r => r.InteriorCleanedAndChecked).IsRequired().HasDefaultValue(false);
+        builder.Property(r => r.PassengersDisembarkedSafely).IsRequired().HasDefaultValue(false);
+        builder.Property(r => r.AllCargoDeliveredAndAccounted).IsRequired().HasDefaultValue(false);
+        builder.Property(r => r.VehicleSecuredAndPluggedIn).IsRequired().HasDefaultValue(false);
+        builder.Property(r => r.KeysReturnedAndSecured).IsRequired().HasDefaultValue(false);
+
         // Computed property — not persisted
         builder.Ignore(r => r.DistanceKm);
     }

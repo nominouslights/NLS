@@ -36,7 +36,10 @@ internal sealed class GetTripsQueryHandler(ITripRepository tripRepository)
                 orderedStops.FirstOrDefault()?.LocationName,
                 orderedStops.LastOrDefault()?.LocationName,
                 t.SeatCapacity,
-                t.Passengers.Count);
+                t.Passengers.Count,
+                t.CargoItems.Count,
+                t.IsDeadhead,
+                t.IsDeadheadBillable);
         }).ToList();
     }
 }

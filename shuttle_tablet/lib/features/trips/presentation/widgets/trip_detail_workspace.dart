@@ -17,7 +17,15 @@ import 'trip_stop_list.dart';
 class TripDetailWorkspace extends ConsumerWidget {
   final String tripId;
   final VoidCallback? onDeleted;
-  const TripDetailWorkspace({super.key, required this.tripId, this.onDeleted});
+  final void Function(Trip trip)? onAssignDriver;
+  final void Function(Trip trip)? onEditTrip;
+  const TripDetailWorkspace({
+    super.key,
+    required this.tripId,
+    this.onDeleted,
+    this.onAssignDriver,
+    this.onEditTrip,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -41,10 +49,16 @@ class TripDetailWorkspace extends ConsumerWidget {
           ],
         ),
       ),
-      data: (trip) => _TripDetail(trip: trip, onDeleted: onDeleted, onRefresh: () {
-        ref.invalidate(tripDetailProvider(tripId));
-        ref.invalidate(tripsProvider);
-      }),
+      data: (trip) => _TripDetail(
+        trip: trip,
+        onDeleted: onDeleted,
+        onAssignDriver: onAssignDriver,
+        onEditTrip: onEditTrip,
+        onRefresh: () {
+          ref.invalidate(tripDetailProvider(tripId));
+          ref.invalidate(tripsProvider);
+        },
+      ),
     );
   }
 }
@@ -53,8 +67,16 @@ class _TripDetail extends ConsumerWidget {
   final Trip trip;
   final VoidCallback onRefresh;
   final VoidCallback? onDeleted;
+  final void Function(Trip trip)? onAssignDriver;
+  final void Function(Trip trip)? onEditTrip;
 
-  const _TripDetail({required this.trip, required this.onRefresh, this.onDeleted});
+  const _TripDetail({
+    required this.trip,
+    required this.onRefresh,
+    this.onDeleted,
+    this.onAssignDriver,
+    this.onEditTrip,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -145,7 +167,13 @@ class _TripDetail extends ConsumerWidget {
           if (_showActions(trip.status)) ...[
             _SectionHeader('Actions', Icons.bolt_rounded),
             const SizedBox(height: 12),
-            _ActionsBar(trip: trip, onRefresh: onRefresh, onDeleted: onDeleted),
+            _ActionsBar(
+              trip: trip,
+              onRefresh: onRefresh,
+              onDeleted: onDeleted,
+              onAssignDriver: onAssignDriver,
+              onEditTrip: onEditTrip,
+            ),
             const SizedBox(height: 20),
             const Divider(),
             const SizedBox(height: 16),
@@ -187,7 +215,15 @@ class _ActionsBar extends ConsumerWidget {
   final Trip trip;
   final VoidCallback onRefresh;
   final VoidCallback? onDeleted;
-  const _ActionsBar({required this.trip, required this.onRefresh, this.onDeleted});
+  final void Function(Trip trip)? onAssignDriver;
+  final void Function(Trip trip)? onEditTrip;
+  const _ActionsBar({
+    required this.trip,
+    required this.onRefresh,
+    this.onDeleted,
+    this.onAssignDriver,
+    this.onEditTrip,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -195,9 +231,24 @@ class _ActionsBar extends ConsumerWidget {
       spacing: 10,
       runSpacing: 8,
       children: [
+        if (trip.status == TripStatus.scheduled && trip.driverId == null) ...[
+          if (onAssignDriver != null)
+            FilledButton.icon(
+              onPressed: () => onAssignDriver!(trip),
+              icon: const Icon(Icons.person_add_rounded, size: 16),
+              label: const Text('Assign Driver'),
+              style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
+            ),
+          if (onEditTrip != null)
+            OutlinedButton.icon(
+              onPressed: () => onEditTrip!(trip),
+              icon: const Icon(Icons.edit_rounded, size: 16),
+              label: const Text('Edit Trip'),
+            ),
+        ],
         if (trip.status == TripStatus.scheduled && trip.driverId != null)
           FilledButton.icon(
-            onPressed: () => _dispatch(context, ref),
+            onPressed: trip.canDispatch ? () => _dispatch(context, ref) : null,
             icon: const Icon(Icons.send_rounded, size: 16),
             label: const Text('Dispatch'),
             style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
@@ -220,6 +271,15 @@ class _ActionsBar extends ConsumerWidget {
   }
 
   Future<void> _dispatch(BuildContext context, WidgetRef ref) async {
+    if (!trip.canDispatch) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(Trip.dispatchManifestMessage),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+      return;
+    }
     try {
       await ref.read(tripFormProvider).dispatchTrip(trip.id);
       onRefresh();

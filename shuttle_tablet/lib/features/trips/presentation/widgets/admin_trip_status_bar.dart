@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../domain/entities/trip.dart';
 import '../providers/trip_form_provider.dart';
@@ -29,7 +30,7 @@ class AdminTripStatusBar extends ConsumerWidget {
         label: 'Dispatch',
         icon: Icons.send_rounded,
         color: AppColors.primary,
-        onPressed: () => _dispatch(context, ref),
+        onPressed: trip.canDispatch ? () => _dispatch(context, ref) : null,
       ));
     }
 
@@ -38,7 +39,7 @@ class AdminTripStatusBar extends ConsumerWidget {
         label: 'Set En Route',
         icon: Icons.play_arrow_rounded,
         color: AppColors.primary,
-        onPressed: () => _setStatus(context, ref, TripStatus.enRoute),
+        onPressed: () => _onSetEnRoute(context, ref),
       ));
     }
 
@@ -83,7 +84,47 @@ class AdminTripStatusBar extends ConsumerWidget {
     );
   }
 
+  Future<void> _onSetEnRoute(BuildContext context, WidgetRef ref) async {
+    if (trip.preInspection == null) {
+      final goToInspection = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Pre-Trip Inspection Required'),
+          content: const Text(
+            'The pre-trip inspection must be completed before setting this trip as En Route.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(ctx, true),
+              icon: const Icon(Icons.checklist_rounded, size: 16),
+              label: const Text('Go to Inspection'),
+              style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
+            ),
+          ],
+        ),
+      );
+      if (goToInspection == true && context.mounted) {
+        context.push('/driver/trips/${trip.id}/pre-inspection');
+      }
+      return;
+    }
+    await _setStatus(context, ref, TripStatus.enRoute);
+  }
+
   Future<void> _dispatch(BuildContext context, WidgetRef ref) async {
+    if (!trip.canDispatch) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(Trip.dispatchManifestMessage),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+      return;
+    }
     try {
       await ref.read(tripFormProvider).dispatchTrip(trip.id);
       onRefresh();
@@ -155,7 +196,7 @@ class _ActionBtn extends StatelessWidget {
   final String label;
   final IconData icon;
   final Color color;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
   final bool outlined;
 
   const _ActionBtn({

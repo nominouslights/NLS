@@ -1,6 +1,9 @@
+import 'dart:typed_data';
 import 'package:fpdart/fpdart.dart';
 import '../../../../core/error/failures.dart';
 import '../entities/vehicle.dart';
+import '../entities/vehicle_fuel_entry.dart';
+import '../entities/vehicle_odometer_entry.dart';
 
 // ── Repository Interface ───────────────────────────────────────────────────────
 
@@ -20,6 +23,11 @@ abstract interface class IVehicleRepository {
   Future<Either<Failure, String>> addInspectionRecord(String vehicleId, AddInspectionRecordParams params);
   Future<Either<Failure, void>> updateInspectionRecord(String vehicleId, String recordId, AddInspectionRecordParams params);
   Future<Either<Failure, void>> deleteInspectionRecord(String vehicleId, String recordId);
+  Future<Either<Failure, List<VehicleFuelEntry>>> getFuelEntries(String vehicleId);
+  Future<Either<Failure, String>> addFuelEntry(String vehicleId, AddFuelEntryParams params);
+  Future<Either<Failure, void>> deleteFuelEntry(String vehicleId, String entryId);
+  Future<Either<Failure, Uint8List>> getFuelReceipt(String vehicleId, String entryId);
+  Future<Either<Failure, List<VehicleOdometerEntry>>> getOdometerHistory(String vehicleId);
 }
 
 // ── Params ────────────────────────────────────────────────────────────────────
@@ -162,5 +170,27 @@ class AddInspectionRecordParams {
     this.deficienciesNotes,
     this.correctiveActionNotes,
     this.costDollars,
+  });
+}
+
+class AddFuelEntryParams {
+  final DateTime fuelledAt;
+  final double fuelLitres;
+  final double totalCostDollars;
+  final int? odometerAtFuelling;
+  final String? notes;
+  final Uint8List? receiptPhotoBytes;
+  final String? receiptPhotoFileName;
+  final String? receiptPhotoContentType;
+
+  const AddFuelEntryParams({
+    required this.fuelledAt,
+    required this.fuelLitres,
+    required this.totalCostDollars,
+    this.odometerAtFuelling,
+    this.notes,
+    this.receiptPhotoBytes,
+    this.receiptPhotoFileName,
+    this.receiptPhotoContentType,
   });
 }

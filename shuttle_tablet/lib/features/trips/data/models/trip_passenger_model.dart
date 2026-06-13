@@ -8,6 +8,7 @@ class TripPassengerModel extends TripPassenger {
     super.contactInfo,
     super.seatNumber,
     required super.paymentStatus,
+    super.boardingStatus = PassengerBoardingStatus.notBoarded,
     super.bookingReference,
     super.phone,
     super.email,
@@ -26,6 +27,7 @@ class TripPassengerModel extends TripPassenger {
       contactInfo: json['contactInfo'] as String?,
       seatNumber: json['seatNumber'] as int?,
       paymentStatus: _parsePaymentStatus(json['paymentStatus'] as String? ?? ''),
+      boardingStatus: _parseBoardingStatus(json['boardingStatus'] as String?),
       bookingReference: json['bookingReference'] as String?,
       phone: json['phone'] as String?,
       email: json['email'] as String?,
@@ -39,6 +41,17 @@ class TripPassengerModel extends TripPassenger {
       fare: (json['fare'] as num?)?.toDouble(),
       isAddedAfterDeparture: json['isAddedAfterDeparture'] as bool? ?? false,
     );
+  }
+
+  static PassengerBoardingStatus _parseBoardingStatus(String? value) {
+    switch (value) {
+      case 'Boarded':
+        return PassengerBoardingStatus.boarded;
+      case 'NoShow':
+        return PassengerBoardingStatus.noShow;
+      default:
+        return PassengerBoardingStatus.notBoarded;
+    }
   }
 
   static PassengerPaymentStatus _parsePaymentStatus(String value) {

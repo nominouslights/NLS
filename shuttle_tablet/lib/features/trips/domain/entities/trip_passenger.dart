@@ -11,6 +11,8 @@ enum PassengerPaymentStatus {
   paid,
 }
 
+enum PassengerBoardingStatus { notBoarded, boarded, noShow }
+
 class TripPassenger extends Equatable {
   final String id;
   final String tripId;
@@ -18,6 +20,7 @@ class TripPassenger extends Equatable {
   final String? contactInfo;
   final int? seatNumber;
   final PassengerPaymentStatus paymentStatus;
+  final PassengerBoardingStatus boardingStatus;
   final String? bookingReference;
   final String? phone;
   final String? email;
@@ -34,6 +37,7 @@ class TripPassenger extends Equatable {
     this.contactInfo,
     this.seatNumber,
     required this.paymentStatus,
+    this.boardingStatus = PassengerBoardingStatus.notBoarded,
     this.bookingReference,
     this.phone,
     this.email,
@@ -52,6 +56,7 @@ class TripPassenger extends Equatable {
         contactInfo,
         seatNumber,
         paymentStatus,
+        boardingStatus,
         bookingReference,
         phone,
         email,

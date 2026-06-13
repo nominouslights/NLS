@@ -32,6 +32,14 @@ class _PostTripReportPageState extends ConsumerState<PostTripReportPage> {
   bool _isReadyToInvoice = false;
   bool _isSaving = false;
 
+  // Post-trip vehicle checklist (Section 9)
+  bool _exteriorNoNewDamage = false;
+  bool _interiorCleanedAndChecked = false;
+  bool _passengersDisembarkedSafely = false;
+  bool _allCargoDeliveredAndAccounted = false;
+  bool _vehicleSecuredAndPluggedIn = false;
+  bool _keysReturnedAndSecured = false;
+
   @override
   void initState() {
     super.initState();
@@ -324,6 +332,55 @@ class _PostTripReportPageState extends ConsumerState<PostTripReportPage> {
                 const SizedBox(height: 16),
               ],
 
+              // Post-trip vehicle checklist
+              _Card(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const _CardTitle(
+                        'Post-Trip Vehicle Check', Icons.fact_check_rounded),
+                    const SizedBox(height: 8),
+                    _CheckItem(
+                      label: 'Vehicle exterior — no new damage',
+                      value: _exteriorNoNewDamage,
+                      onChanged: (v) =>
+                          setState(() => _exteriorNoNewDamage = v),
+                    ),
+                    _CheckItem(
+                      label: 'Interior cleaned & checked',
+                      value: _interiorCleanedAndChecked,
+                      onChanged: (v) =>
+                          setState(() => _interiorCleanedAndChecked = v),
+                    ),
+                    _CheckItem(
+                      label: 'All passengers disembarked safely',
+                      value: _passengersDisembarkedSafely,
+                      onChanged: (v) =>
+                          setState(() => _passengersDisembarkedSafely = v),
+                    ),
+                    _CheckItem(
+                      label: 'All cargo delivered / accounted for',
+                      value: _allCargoDeliveredAndAccounted,
+                      onChanged: (v) =>
+                          setState(() => _allCargoDeliveredAndAccounted = v),
+                    ),
+                    _CheckItem(
+                      label: 'Vehicle secured / plugged in',
+                      value: _vehicleSecuredAndPluggedIn,
+                      onChanged: (v) =>
+                          setState(() => _vehicleSecuredAndPluggedIn = v),
+                    ),
+                    _CheckItem(
+                      label: 'Keys returned / secured',
+                      value: _keysReturnedAndSecured,
+                      onChanged: (v) =>
+                          setState(() => _keysReturnedAndSecured = v),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+
               // Billing / Ready to Invoice
               _Card(
                 child: SwitchListTile(
@@ -401,6 +458,12 @@ class _PostTripReportPageState extends ConsumerState<PostTripReportPage> {
             ? _additionalNotesController.text.trim()
             : null,
         isReadyToInvoice: _isReadyToInvoice,
+        exteriorNoNewDamage: _exteriorNoNewDamage,
+        interiorCleanedAndChecked: _interiorCleanedAndChecked,
+        passengersDisembarkedSafely: _passengersDisembarkedSafely,
+        allCargoDeliveredAndAccounted: _allCargoDeliveredAndAccounted,
+        vehicleSecuredAndPluggedIn: _vehicleSecuredAndPluggedIn,
+        keysReturnedAndSecured: _keysReturnedAndSecured,
       );
       await ref
           .read(tripFormProvider)
@@ -516,6 +579,31 @@ class _CardTitle extends StatelessWidget {
             ),
           ),
         ],
+      );
+}
+
+class _CheckItem extends StatelessWidget {
+  final String label;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+  const _CheckItem(
+      {required this.label, required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) => CheckboxListTile(
+        contentPadding: EdgeInsets.zero,
+        dense: true,
+        title: Text(label,
+            style: TextStyle(
+              fontSize: 13,
+              color: value
+                  ? AppColors.textPrimary
+                  : AppColors.textSecondary,
+            )),
+        value: value,
+        onChanged: (v) => onChanged(v ?? false),
+        activeColor: AppColors.success,
+        controlAffinity: ListTileControlAffinity.leading,
       );
 }
 

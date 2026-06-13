@@ -6,6 +6,7 @@ import '../../domain/entities/trip_passenger.dart';
 import '../../domain/repositories/i_trip_repository.dart';
 import '../../domain/usecases/remove_passenger_usecase.dart';
 import '../../domain/usecases/send_passenger_confirmation_usecase.dart';
+import '../../domain/usecases/update_passenger_boarding_status_usecase.dart';
 import '../../domain/usecases/update_passenger_payment_status_usecase.dart';
 import 'add_passenger_sheet.dart';
 
@@ -262,6 +263,24 @@ class _PassengerCard extends StatelessWidget {
                     fontSize: 11, fontWeight: FontWeight.w600),
               ),
             ),
+          if (!readOnly) ...[
+            _BoardingButton(
+              icon: Icons.check_rounded,
+              label: 'On',
+              active: passenger.boardingStatus == PassengerBoardingStatus.boarded,
+              activeColor: AppColors.success,
+              onTap: () => _updateBoarding(context, PassengerBoardingStatus.boarded),
+            ),
+            const SizedBox(width: 4),
+            _BoardingButton(
+              icon: Icons.close_rounded,
+              label: 'NS',
+              active: passenger.boardingStatus == PassengerBoardingStatus.noShow,
+              activeColor: AppColors.danger,
+              onTap: () => _updateBoarding(context, PassengerBoardingStatus.noShow),
+            ),
+            const SizedBox(width: 6),
+          ],
           _StatusBadge(passenger.paymentStatus),
           if (!readOnly) ...[
             const SizedBox(width: 4),
@@ -443,6 +462,32 @@ class _PassengerCard extends StatelessWidget {
     );
   }
 
+  Future<void> _updateBoarding(
+      BuildContext context, PassengerBoardingStatus status) async {
+    final newStatus = passenger.boardingStatus == status
+        ? PassengerBoardingStatus.notBoarded
+        : status;
+    final result = await sl<UpdatePassengerBoardingStatusUseCase>()(
+      UpdatePassengerBoardingStatusParams(
+        tripId: tripId,
+        passengerId: passenger.id,
+        boardingStatus: newStatus,
+      ),
+    );
+    result.fold(
+      (f) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content: Text(f.message),
+                backgroundColor: AppColors.danger),
+          );
+        }
+      },
+      (_) => onRefresh(),
+    );
+  }
+
   Color _statusColor(PassengerPaymentStatus status) {
     return switch (status) {
       PassengerPaymentStatus.confirmed || PassengerPaymentStatus.paid =>
@@ -452,6 +497,53 @@ class _PassengerCard extends StatelessWidget {
       _ => const Color(0xFFD97706),
     };
   }
+}
+
+class _BoardingButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool active;
+  final Color activeColor;
+  final VoidCallback onTap;
+
+  const _BoardingButton({
+    required this.icon,
+    required this.label,
+    required this.active,
+    required this.activeColor,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: active ? activeColor.withValues(alpha: 0.12) : Colors.white,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: active ? activeColor : const Color(0xFFD1D5DB),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 12, color: active ? activeColor : AppColors.brandGray),
+              const SizedBox(width: 3),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: active ? activeColor : AppColors.brandGray,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
 }
 
 class _StatusBadge extends StatelessWidget {

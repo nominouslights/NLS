@@ -29,6 +29,8 @@ class Trip extends Equatable {
   final List<TripCargoItem> cargoItems;
   final TripPreInspection? preInspection;
   final TripPostReport? postReport;
+  final bool isDeadhead;
+  final bool isDeadheadBillable;
 
   const Trip({
     required this.id,
@@ -50,7 +52,17 @@ class Trip extends Equatable {
     this.cargoItems = const [],
     this.preInspection,
     this.postReport,
+    this.isDeadhead = false,
+    this.isDeadheadBillable = false,
   });
+
+  bool get hasManifest =>
+      passengers.isNotEmpty || cargoItems.isNotEmpty;
+
+  bool get canDispatch => isDeadhead || hasManifest;
+
+  static const dispatchManifestMessage =
+      'Add at least one passenger or cargo item, or mark the trip as a deadhead trip before dispatching.';
 
   String? get firstStopLocation =>
       stops.isNotEmpty ? stops.first.locationName : null;
@@ -79,5 +91,7 @@ class Trip extends Equatable {
         cargoItems,
         preInspection,
         postReport,
+        isDeadhead,
+        isDeadheadBillable,
       ];
 }

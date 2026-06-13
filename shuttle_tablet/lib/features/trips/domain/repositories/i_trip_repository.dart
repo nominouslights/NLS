@@ -2,7 +2,9 @@ import 'package:fpdart/fpdart.dart';
 import '../../../../core/error/failures.dart';
 import '../entities/trip.dart';
 import '../entities/trip_cargo_item.dart';
+import '../entities/trip_inspection_item.dart';
 import '../entities/trip_passenger.dart';
+import '../entities/trip_pre_inspection.dart';
 import '../entities/trip_post_report.dart';
 
 abstract interface class ITripRepository {
@@ -46,6 +48,9 @@ abstract interface class ITripRepository {
   Future<Either<Failure, void>> updatePassengerPaymentStatus(
       UpdatePassengerPaymentStatusParams params);
 
+  Future<Either<Failure, void>> updatePassengerBoardingStatus(
+      UpdatePassengerBoardingStatusParams params);
+
   Future<Either<Failure, void>> sendPassengerConfirmation(
       SendPassengerConfirmationParams params);
 
@@ -73,11 +78,13 @@ class StopParams {
 
 class InspectionItemParams {
   final String itemName;
+  final InspectionCategory category;
   final bool passed;
   final String? notes;
 
   const InspectionItemParams({
     required this.itemName,
+    required this.category,
     required this.passed,
     this.notes,
   });
@@ -97,6 +104,8 @@ class CreateTripParams {
   final List<StopParams> stops;
   final int? seatCapacity;
   final double? pricePerSeat;
+  final bool isDeadhead;
+  final bool isDeadheadBillable;
 
   const CreateTripParams({
     this.serviceType = TripServiceType.charter,
@@ -110,6 +119,8 @@ class CreateTripParams {
     required this.stops,
     this.seatCapacity,
     this.pricePerSeat,
+    this.isDeadhead = false,
+    this.isDeadheadBillable = false,
   });
 }
 
@@ -123,6 +134,8 @@ class UpdateTripParams {
   final List<StopParams> stops;
   final int? seatCapacity;
   final double? pricePerSeat;
+  final bool isDeadhead;
+  final bool isDeadheadBillable;
 
   const UpdateTripParams({
     this.vehicleId,
@@ -134,6 +147,8 @@ class UpdateTripParams {
     required this.stops,
     this.seatCapacity,
     this.pricePerSeat,
+    this.isDeadhead = false,
+    this.isDeadheadBillable = false,
   });
 }
 
@@ -171,6 +186,18 @@ class UpdatePassengerPaymentStatusParams {
   });
 }
 
+class UpdatePassengerBoardingStatusParams {
+  final String tripId;
+  final String passengerId;
+  final PassengerBoardingStatus boardingStatus;
+
+  const UpdatePassengerBoardingStatusParams({
+    required this.tripId,
+    required this.passengerId,
+    required this.boardingStatus,
+  });
+}
+
 enum ConfirmationDirection { outbound, inbound }
 
 class SendPassengerConfirmationParams {
@@ -205,12 +232,20 @@ class AddCargoItemParams {
   final TripCargoType cargoType;
   final String? description;
   final int quantity;
+  final double? weightKg;
+  final double? charge;
+  final bool isHazmat;
+  final bool isSecured;
 
   const AddCargoItemParams({
     required this.tripId,
     required this.cargoType,
     this.description,
     this.quantity = 1,
+    this.weightKg,
+    this.charge,
+    this.isHazmat = false,
+    this.isSecured = false,
   });
 }
 
@@ -235,10 +270,24 @@ class AssignDriverParams {
 
 class SubmitPreInspectionParams {
   final int odometerStart;
+  final FuelLevel fuelLevel;
+  final String? weatherType;
+  final String? temperature;
+  final String? roadConditions;
+  final String? visibility;
+  final String? roadAdvisories;
+  final DateTime? weatherPulledAt;
   final List<InspectionItemParams> items;
 
   const SubmitPreInspectionParams({
     required this.odometerStart,
+    this.fuelLevel = FuelLevel.full,
+    this.weatherType,
+    this.temperature,
+    this.roadConditions,
+    this.visibility,
+    this.roadAdvisories,
+    this.weatherPulledAt,
     required this.items,
   });
 }
@@ -252,6 +301,12 @@ class SubmitPostReportParams {
   final String? incidentDescription;
   final String? additionalNotes;
   final bool isReadyToInvoice;
+  final bool exteriorNoNewDamage;
+  final bool interiorCleanedAndChecked;
+  final bool passengersDisembarkedSafely;
+  final bool allCargoDeliveredAndAccounted;
+  final bool vehicleSecuredAndPluggedIn;
+  final bool keysReturnedAndSecured;
 
   const SubmitPostReportParams({
     required this.odometerEnd,
@@ -262,5 +317,11 @@ class SubmitPostReportParams {
     this.incidentDescription,
     this.additionalNotes,
     required this.isReadyToInvoice,
+    this.exteriorNoNewDamage = false,
+    this.interiorCleanedAndChecked = false,
+    this.passengersDisembarkedSafely = false,
+    this.allCargoDeliveredAndAccounted = false,
+    this.vehicleSecuredAndPluggedIn = false,
+    this.keysReturnedAndSecured = false,
   });
 }

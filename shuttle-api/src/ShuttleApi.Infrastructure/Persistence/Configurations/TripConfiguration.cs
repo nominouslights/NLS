@@ -43,6 +43,8 @@ public sealed class TripConfiguration : IEntityTypeConfiguration<Trip>
         builder.Property(t => t.PricePerSeat).HasPrecision(10, 2);
         builder.Property(t => t.IsDeleted).IsRequired().HasDefaultValue(false);
         builder.Property(t => t.DeletedAt);
+        builder.Property(t => t.IsDeadhead).IsRequired().HasDefaultValue(false);
+        builder.Property(t => t.IsDeadheadBillable).IsRequired().HasDefaultValue(false);
 
         builder.HasIndex(t => t.Status);
         builder.HasIndex(t => t.ClientId);

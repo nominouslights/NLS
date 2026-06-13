@@ -15,6 +15,16 @@ public sealed class TripPreInspectionConfiguration : IEntityTypeConfiguration<Tr
 
         builder.Property(p => p.TripId).IsRequired();
         builder.Property(p => p.OdometerStart).IsRequired();
+        builder.Property(p => p.FuelLevel)
+            .HasConversion<string>()
+            .HasMaxLength(20)
+            .IsRequired();
+        builder.Property(p => p.WeatherType).HasMaxLength(30);
+        builder.Property(p => p.Temperature).HasMaxLength(20);
+        builder.Property(p => p.RoadConditions).HasMaxLength(30);
+        builder.Property(p => p.Visibility).HasMaxLength(20);
+        builder.Property(p => p.RoadAdvisories).HasMaxLength(500);
+        builder.Property(p => p.WeatherPulledAt);
         builder.Property(p => p.SubmittedAt).IsRequired();
 
         builder.HasMany(p => p.Items)

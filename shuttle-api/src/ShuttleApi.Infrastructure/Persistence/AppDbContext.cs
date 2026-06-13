@@ -39,6 +39,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Vehicle> Vehicles => Set<Vehicle>();
     public DbSet<VehicleServiceRecord> VehicleServiceRecords => Set<VehicleServiceRecord>();
     public DbSet<VehicleInspectionRecord> VehicleInspectionRecords => Set<VehicleInspectionRecord>();
+    public DbSet<VehicleFuelEntry> VehicleFuelEntries => Set<VehicleFuelEntry>();
     public DbSet<SavedLocation> SavedLocations => Set<SavedLocation>();
     public DbSet<CommunityCalendarBlock> CommunityCalendarBlocks => Set<CommunityCalendarBlock>();
 

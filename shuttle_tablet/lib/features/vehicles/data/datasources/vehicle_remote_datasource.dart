@@ -1,9 +1,12 @@
+import 'dart:typed_data';
 import 'package:dio/dio.dart';
 
 import '../../../../core/error/exceptions.dart';
 import '../../../../core/network/api_endpoints.dart';
 import '../../domain/repositories/i_vehicle_repository.dart';
+import '../models/vehicle_fuel_entry_model.dart';
 import '../models/vehicle_model.dart';
+import '../models/vehicle_odometer_entry_model.dart';
 
 abstract interface class IVehicleRemoteDataSource {
   Future<List<VehicleModel>> getVehicles();
@@ -21,6 +24,11 @@ abstract interface class IVehicleRemoteDataSource {
   Future<String> addInspectionRecord(String vehicleId, AddInspectionRecordParams params);
   Future<void> updateInspectionRecord(String vehicleId, String recordId, AddInspectionRecordParams params);
   Future<void> deleteInspectionRecord(String vehicleId, String recordId);
+  Future<List<VehicleFuelEntryModel>> getFuelEntries(String vehicleId);
+  Future<String> addFuelEntry(String vehicleId, AddFuelEntryParams params);
+  Future<void> deleteFuelEntry(String vehicleId, String entryId);
+  Future<Uint8List> getFuelReceipt(String vehicleId, String entryId);
+  Future<List<VehicleOdometerEntryModel>> getOdometerHistory(String vehicleId);
 }
 
 class VehicleRemoteDataSource implements IVehicleRemoteDataSource {
@@ -218,6 +226,103 @@ class VehicleRemoteDataSource implements IVehicleRemoteDataSource {
       await _dio.delete(ApiEndpoints.vehicleInspectionRecordById(vehicleId, recordId));
     } on DioException catch (e) {
       _handleDioException(e, 'Failed to delete inspection record');
+    }
+  }
+
+  // ── Fuel Entries ──────────────────────────────────────────────────────────
+
+  @override
+  Future<List<VehicleFuelEntryModel>> getFuelEntries(String vehicleId) async {
+    try {
+      final response =
+          await _dio.get(ApiEndpoints.vehicleFuelEntries(vehicleId));
+      final list = response.data as List<dynamic>;
+      return list
+          .map((e) => VehicleFuelEntryModel.fromJson(
+              e as Map<String, dynamic>, vehicleId))
+          .toList();
+    } on DioException catch (e) {
+      _handleDioException(e, 'Failed to load fuel entries');
+    }
+  }
+
+  @override
+  Future<String> addFuelEntry(
+      String vehicleId, AddFuelEntryParams params) async {
+    try {
+      final fields = <String, dynamic>{
+        'fuelledAt': params.fuelledAt.toUtc().toIso8601String(),
+        'fuelLitres': params.fuelLitres.toString(),
+        'totalCostDollars': params.totalCostDollars.toString(),
+        if (params.odometerAtFuelling != null)
+          'odometerAtFuelling': params.odometerAtFuelling.toString(),
+        if (params.notes != null) 'notes': params.notes,
+      };
+
+      if (params.receiptPhotoBytes != null) {
+        fields['receiptPhoto'] = MultipartFile.fromBytes(
+          params.receiptPhotoBytes!,
+          filename: params.receiptPhotoFileName ?? 'receipt.jpg',
+          contentType:
+              DioMediaType.parse(params.receiptPhotoContentType ?? 'image/jpeg'),
+        );
+        final formData = FormData.fromMap(fields);
+        final response = await _dio.post(
+          ApiEndpoints.vehicleFuelEntries(vehicleId),
+          data: formData,
+          options: Options(headers: {'Content-Type': 'multipart/form-data'}),
+        );
+        return (response.data as Map<String, dynamic>)['entryId'] as String;
+      } else {
+        final formData = FormData.fromMap(fields);
+        final response = await _dio.post(
+          ApiEndpoints.vehicleFuelEntries(vehicleId),
+          data: formData,
+          options: Options(headers: {'Content-Type': 'multipart/form-data'}),
+        );
+        return (response.data as Map<String, dynamic>)['entryId'] as String;
+      }
+    } on DioException catch (e) {
+      _handleDioException(e, 'Failed to add fuel entry');
+    }
+  }
+
+  @override
+  Future<void> deleteFuelEntry(String vehicleId, String entryId) async {
+    try {
+      await _dio
+          .delete(ApiEndpoints.vehicleFuelEntryById(vehicleId, entryId));
+    } on DioException catch (e) {
+      _handleDioException(e, 'Failed to delete fuel entry');
+    }
+  }
+
+  @override
+  Future<Uint8List> getFuelReceipt(String vehicleId, String entryId) async {
+    try {
+      final response = await _dio.get(
+        '${ApiEndpoints.vehicleFuelEntryById(vehicleId, entryId)}/receipt',
+        options: Options(responseType: ResponseType.bytes),
+      );
+      return Uint8List.fromList(response.data as List<int>);
+    } on DioException catch (e) {
+      _handleDioException(e, 'Failed to download fuel receipt');
+    }
+  }
+
+  @override
+  Future<List<VehicleOdometerEntryModel>> getOdometerHistory(
+      String vehicleId) async {
+    try {
+      final response =
+          await _dio.get(ApiEndpoints.vehicleOdometerHistory(vehicleId));
+      final list = response.data as List<dynamic>;
+      return list
+          .map((e) =>
+              VehicleOdometerEntryModel.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } on DioException catch (e) {
+      _handleDioException(e, 'Failed to load odometer history');
     }
   }
 

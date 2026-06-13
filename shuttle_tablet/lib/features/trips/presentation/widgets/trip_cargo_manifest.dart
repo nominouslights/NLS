@@ -147,13 +147,50 @@ class _CargoRow extends StatelessWidget {
                     color: Color(0xFF111827),
                   ),
                 ),
-                Text(
-                  '${item.typeLabel} · Qty ${item.quantity}',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: AppColors.textSecondary,
-                  ),
+                Row(
+                  children: [
+                    Text(
+                      '${item.typeLabel} · Qty ${item.quantity}',
+                      style: const TextStyle(
+                          fontSize: 12, color: AppColors.textSecondary),
+                    ),
+                    if (item.weightKg != null) ...[
+                      const Text(' · ',
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: AppColors.textSecondary)),
+                      Text('${item.weightKg!.toStringAsFixed(1)} kg',
+                          style: const TextStyle(
+                              fontSize: 12,
+                              color: AppColors.textSecondary)),
+                    ],
+                    if (item.charge != null) ...[
+                      const Text(' · ',
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: AppColors.textSecondary)),
+                      Text('\$${item.charge!.toStringAsFixed(2)}',
+                          style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.primary)),
+                    ],
+                  ],
                 ),
+                if (item.isHazmat || item.isSecured)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Row(
+                      children: [
+                        if (item.isHazmat)
+                          _CargoBadge(
+                              label: 'HAZMAT', color: AppColors.danger),
+                        if (item.isSecured)
+                          _CargoBadge(
+                              label: 'SECURED', color: AppColors.success),
+                      ],
+                    ),
+                  ),
               ],
             ),
           ),
@@ -206,4 +243,30 @@ class _CargoRow extends StatelessWidget {
       (_) => onRefresh(),
     );
   }
+}
+
+class _CargoBadge extends StatelessWidget {
+  final String label;
+  final Color color;
+  const _CargoBadge({required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        margin: const EdgeInsets.only(right: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: color.withValues(alpha: 0.35)),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 9,
+            fontWeight: FontWeight.w800,
+            color: color,
+            letterSpacing: 0.5,
+          ),
+        ),
+      );
 }

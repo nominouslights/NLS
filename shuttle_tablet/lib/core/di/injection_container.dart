@@ -73,6 +73,7 @@ import '../../features/trips/domain/usecases/add_passenger_usecase.dart';
 import '../../features/trips/domain/usecases/remove_cargo_item_usecase.dart';
 import '../../features/trips/domain/usecases/remove_passenger_usecase.dart';
 import '../../features/trips/domain/usecases/update_passenger_payment_status_usecase.dart';
+import '../../features/trips/domain/usecases/update_passenger_boarding_status_usecase.dart';
 import '../../features/trips/domain/usecases/send_passenger_confirmation_usecase.dart';
 import '../../features/trips/domain/usecases/send_stop_update_usecase.dart';
 import '../../features/vehicles/data/datasources/vehicle_remote_datasource.dart';
@@ -93,6 +94,7 @@ import '../../features/vehicles/domain/usecases/delete_service_record_usecase.da
 import '../../features/vehicles/domain/usecases/add_inspection_record_usecase.dart';
 import '../../features/vehicles/domain/usecases/update_inspection_record_usecase.dart';
 import '../../features/vehicles/domain/usecases/delete_inspection_record_usecase.dart';
+import '../../features/vehicles/domain/usecases/fuel_entry_usecases.dart';
 import '../../features/locations/data/datasources/location_remote_datasource.dart';
 import '../../features/locations/data/repositories/location_repository_impl.dart';
 import '../../features/locations/domain/repositories/i_location_repository.dart';
@@ -228,6 +230,7 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton(() => AddPassengerUseCase(sl()));
   sl.registerLazySingleton(() => RemovePassengerUseCase(sl()));
   sl.registerLazySingleton(() => UpdatePassengerPaymentStatusUseCase(sl()));
+  sl.registerLazySingleton(() => UpdatePassengerBoardingStatusUseCase(sl()));
   sl.registerLazySingleton(() => SendPassengerConfirmationUseCase(sl()));
   sl.registerLazySingleton(() => SendStopUpdateUseCase(sl()));
   sl.registerLazySingleton(() => AddCargoItemUseCase(sl()));
@@ -255,6 +258,11 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton(() => AddInspectionRecordUseCase(sl()));
   sl.registerLazySingleton(() => UpdateInspectionRecordUseCase(sl()));
   sl.registerLazySingleton(() => DeleteInspectionRecordUseCase(sl()));
+  sl.registerLazySingleton(() => GetFuelEntriesUseCase(sl()));
+  sl.registerLazySingleton(() => AddFuelEntryUseCase(sl()));
+  sl.registerLazySingleton(() => DeleteFuelEntryUseCase(sl()));
+  sl.registerLazySingleton(() => GetFuelReceiptUseCase(sl()));
+  sl.registerLazySingleton(() => GetOdometerHistoryUseCase(sl()));
 
   // Locations feature
   sl.registerLazySingleton<ILocationRemoteDataSource>(

@@ -8,6 +8,10 @@ class TripCargoItem extends Equatable {
   final TripCargoType cargoType;
   final String? description;
   final int quantity;
+  final double? weightKg;
+  final double? charge;
+  final bool isHazmat;
+  final bool isSecured;
 
   const TripCargoItem({
     required this.id,
@@ -15,6 +19,10 @@ class TripCargoItem extends Equatable {
     required this.cargoType,
     this.description,
     required this.quantity,
+    this.weightKg,
+    this.charge,
+    this.isHazmat = false,
+    this.isSecured = false,
   });
 
   String get typeLabel => switch (cargoType) {
@@ -23,5 +31,6 @@ class TripCargoItem extends Equatable {
       };
 
   @override
-  List<Object?> get props => [id, tripId, cargoType, description, quantity];
+  List<Object?> get props =>
+      [id, tripId, cargoType, description, quantity, weightKg, charge, isHazmat, isSecured];
 }

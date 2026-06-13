@@ -503,11 +503,15 @@ class _RequiredActionsPanel extends StatelessWidget {
       icon: Icons.bolt_rounded,
       child: Column(
         children: [
-          _ActionTile(
-            title: 'Pre-Trip Inspection',
-            subtitle: preDone ? 'Completed' : 'Required before departure',
-            urgent: !preDone && trip.status == TripStatus.dispatched,
-            done: preDone,
+          GestureDetector(
+            onTap: () => context.push(
+                '/driver/trips/${trip.id}/pre-inspection'),
+            child: _ActionTile(
+              title: 'Pre-Trip Inspection',
+              subtitle: preDone ? 'Completed — tap to view' : 'Tap to complete',
+              urgent: !preDone && trip.status == TripStatus.dispatched,
+              done: preDone,
+            ),
           ),
           const SizedBox(height: 8),
           _ActionTile(

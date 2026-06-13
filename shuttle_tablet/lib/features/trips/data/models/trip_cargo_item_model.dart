@@ -7,6 +7,10 @@ class TripCargoItemModel extends TripCargoItem {
     required super.cargoType,
     super.description,
     required super.quantity,
+    super.weightKg,
+    super.charge,
+    super.isHazmat = false,
+    super.isSecured = false,
   });
 
   factory TripCargoItemModel.fromJson(Map<String, dynamic> json) {
@@ -16,6 +20,10 @@ class TripCargoItemModel extends TripCargoItem {
       cargoType: _parseCargoType(json['cargoType'] as String? ?? ''),
       description: json['description'] as String?,
       quantity: json['quantity'] as int? ?? 1,
+      weightKg: (json['weightKg'] as num?)?.toDouble(),
+      charge: (json['charge'] as num?)?.toDouble(),
+      isHazmat: json['isHazmat'] as bool? ?? false,
+      isSecured: json['isSecured'] as bool? ?? false,
     );
   }
 
@@ -39,5 +47,9 @@ class TripCargoItemModel extends TripCargoItem {
         'cargoType': _cargoTypeToString(cargoType),
         'description': description,
         'quantity': quantity,
+        'weightKg': weightKg,
+        'charge': charge,
+        'isHazmat': isHazmat,
+        'isSecured': isSecured,
       };
 }

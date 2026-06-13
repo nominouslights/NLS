@@ -12,4 +12,10 @@ public sealed record SubmitPostReportCommand(
     IncidentType? IncidentType,
     string? IncidentDescription,
     string? AdditionalNotes,
-    bool IsReadyToInvoice) : ICommand;
+    bool IsReadyToInvoice,
+    bool ExteriorNoNewDamage = false,
+    bool InteriorCleanedAndChecked = false,
+    bool PassengersDisembarkedSafely = false,
+    bool AllCargoDeliveredAndAccounted = false,
+    bool VehicleSecuredAndPluggedIn = false,
+    bool KeysReturnedAndSecured = false) : ICommand;
