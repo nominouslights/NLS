@@ -95,6 +95,10 @@ import '../../features/vehicles/domain/usecases/add_inspection_record_usecase.da
 import '../../features/vehicles/domain/usecases/update_inspection_record_usecase.dart';
 import '../../features/vehicles/domain/usecases/delete_inspection_record_usecase.dart';
 import '../../features/vehicles/domain/usecases/fuel_entry_usecases.dart';
+import '../../features/passengers/data/datasources/passenger_profile_remote_datasource.dart';
+import '../../features/passengers/data/repositories/passenger_profile_repository_impl.dart';
+import '../../features/passengers/domain/repositories/i_passenger_profile_repository.dart';
+import '../../features/passengers/domain/usecases/search_passenger_profiles_usecase.dart';
 import '../../features/locations/data/datasources/location_remote_datasource.dart';
 import '../../features/locations/data/repositories/location_repository_impl.dart';
 import '../../features/locations/domain/repositories/i_location_repository.dart';
@@ -263,6 +267,15 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton(() => DeleteFuelEntryUseCase(sl()));
   sl.registerLazySingleton(() => GetFuelReceiptUseCase(sl()));
   sl.registerLazySingleton(() => GetOdometerHistoryUseCase(sl()));
+
+  // Passengers feature (charter repeat traveller profiles)
+  sl.registerLazySingleton<IPassengerProfileRemoteDataSource>(
+    () => PassengerProfileRemoteDataSource(sl()),
+  );
+  sl.registerLazySingleton<IPassengerProfileRepository>(
+    () => PassengerProfileRepositoryImpl(sl()),
+  );
+  sl.registerLazySingleton(() => SearchPassengerProfilesUseCase(sl()));
 
   // Locations feature
   sl.registerLazySingleton<ILocationRemoteDataSource>(
