@@ -7,6 +7,7 @@ internal sealed class ContractRepository(AppDbContext dbContext) : IContractRepo
 {
     public async Task<IReadOnlyList<Contract>> GetByClientIdAsync(Guid clientId, CancellationToken cancellationToken = default) =>
         await dbContext.Contracts
+            .AsNoTracking()
             .Include(c => c.RateLines)
             .Where(c => c.ClientId == clientId)
             .OrderByDescending(c => c.StartDate)
@@ -16,6 +17,13 @@ internal sealed class ContractRepository(AppDbContext dbContext) : IContractRepo
         await dbContext.Contracts
             .Include(c => c.RateLines)
             .FirstOrDefaultAsync(c => c.ClientId == clientId && c.IsActive, cancellationToken);
+
+    public async Task<Dictionary<Guid, Contract>> GetActiveBatchByClientIdsAsync(
+        IEnumerable<Guid> clientIds, CancellationToken cancellationToken = default) =>
+        await dbContext.Contracts
+            .AsNoTracking()
+            .Where(c => clientIds.Contains(c.ClientId) && c.IsActive)
+            .ToDictionaryAsync(c => c.ClientId, cancellationToken);
 
     public async Task<Contract?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         await dbContext.Contracts

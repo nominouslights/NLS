@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using ShuttleApi.Application.Common.Mediator;
 using ShuttleApi.Application.Common.Interfaces;
-using ShuttleApi.Domain.Common;
+using ShuttleApi.Domain.CommunityCalendar;
 using ShuttleApi.Domain.Trips;
 
 namespace ShuttleApi.Application.Community.Commands;
@@ -13,37 +13,14 @@ internal sealed class BookSeatCommandHandler(
 {
     private const int MinimumThreshold = 2;
 
-    // Fares per destination (one-way)
-    private static decimal GetOneWayFare(string destination) =>
-        destination.Equals("LeafRapids", StringComparison.OrdinalIgnoreCase) ? 100m : 120m;
-
-    private static decimal GetReturnFare(string destination) =>
-        GetOneWayFare(destination) * 2;
-
-    // Stops by destination + direction
-    private static readonly Dictionary<string, (int Order, string Name, string? Address)[]> OutboundStops = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["LynnLake"] = [(1, "Thompson", "Thompson, MB"), (2, "Lynn Lake", "Lynn Lake, MB")],
-        ["LeafRapids"] = [(1, "Thompson", "Thompson, MB"), (2, "Leaf Rapids", "Leaf Rapids, MB")],
-    };
-
-    private static readonly Dictionary<string, (int Order, string Name, string? Address)[]> InboundStops = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["LynnLake"] = [(1, "Lynn Lake", "Lynn Lake, MB"), (2, "Thompson", "Thompson, MB")],
-        ["LeafRapids"] = [(1, "Leaf Rapids", "Leaf Rapids, MB"), (2, "Thompson", "Thompson, MB")],
-    };
-
-    private static string DestinationDisplayName(string destination) =>
-        destination.Equals("LeafRapids", StringComparison.OrdinalIgnoreCase) ? "Leaf Rapids" : "Lynn Lake";
-
     public async Task<BookSeatResult> Handle(BookSeatCommand request, CancellationToken cancellationToken)
     {
-        var oneWayFare = GetOneWayFare(request.Destination);
+        var oneWayFare = CommunityRouteFares.OneWay(request.Destination);
         var fare = request.TripType.Equals("Return", StringComparison.OrdinalIgnoreCase)
-            ? GetReturnFare(request.Destination)
+            ? CommunityRouteFares.Return(request.Destination)
             : oneWayFare;
 
-        var destinationName = DestinationDisplayName(request.Destination);
+        var destinationName = CommunityRouteStops.DisplayName(request.Destination);
 
         var departureTime = new DateTime(
             request.Date.Year, request.Date.Month, request.Date.Day,
@@ -55,8 +32,8 @@ internal sealed class BookSeatCommandHandler(
         if (trip is null)
         {
             var stopsDict = request.Direction.Equals("Outbound", StringComparison.OrdinalIgnoreCase)
-                ? OutboundStops
-                : InboundStops;
+                ? CommunityRouteStops.Outbound
+                : CommunityRouteStops.Inbound;
 
             var stops = stopsDict.TryGetValue(request.Destination, out var s) ? s : stopsDict["LynnLake"];
 

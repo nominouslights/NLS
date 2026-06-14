@@ -77,5 +77,7 @@ public sealed class VehicleConfiguration : IEntityTypeConfiguration<Vehicle>
             .WithOne()
             .HasForeignKey(e => e.VehicleId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasQueryFilter(v => !v.IsDeleted);
     }
 }

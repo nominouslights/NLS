@@ -7,24 +7,27 @@ internal sealed class VehicleRepository(AppDbContext dbContext) : IVehicleReposi
 {
     public async Task<IReadOnlyList<Vehicle>> GetAllAsync(CancellationToken cancellationToken = default) =>
         await dbContext.Vehicles
+            .AsNoTracking()
             .Include(v => v.ServiceRecords)
             .Include(v => v.InspectionRecords)
-            .Where(v => !v.IsDeleted)
             .OrderBy(v => v.UnitCode)
             .ToListAsync(cancellationToken);
 
     public async Task<Vehicle?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         await dbContext.Vehicles
-            .FirstOrDefaultAsync(v => v.Id == id && !v.IsDeleted, cancellationToken);
+            .FirstOrDefaultAsync(v => v.Id == id, cancellationToken);
 
     public async Task<Vehicle?> GetDeletedByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         await dbContext.Vehicles
+            .IgnoreQueryFilters()
             .Include(v => v.ServiceRecords)
             .Include(v => v.InspectionRecords)
             .FirstOrDefaultAsync(v => v.Id == id && v.IsDeleted, cancellationToken);
 
     public async Task<IReadOnlyList<Vehicle>> GetAllArchivedAsync(CancellationToken cancellationToken = default) =>
         await dbContext.Vehicles
+            .AsNoTracking()
+            .IgnoreQueryFilters()
             .Include(v => v.ServiceRecords)
             .Include(v => v.InspectionRecords)
             .Where(v => v.IsDeleted)
@@ -34,6 +37,7 @@ internal sealed class VehicleRepository(AppDbContext dbContext) : IVehicleReposi
     public async Task PurgeExpiredAsync(DateTime cutoffUtc, CancellationToken cancellationToken = default)
     {
         var expired = await dbContext.Vehicles
+            .IgnoreQueryFilters()
             .Where(v => v.IsDeleted && v.DeletedAt < cutoffUtc)
             .ToListAsync(cancellationToken);
 
@@ -49,19 +53,19 @@ internal sealed class VehicleRepository(AppDbContext dbContext) : IVehicleReposi
             .Include(v => v.ServiceRecords)
             .Include(v => v.InspectionRecords)
             .Include(v => v.FuelEntries)
-            .FirstOrDefaultAsync(v => v.Id == id && !v.IsDeleted, cancellationToken);
+            .FirstOrDefaultAsync(v => v.Id == id, cancellationToken);
 
     public async Task<bool> ExistsByVinAsync(string vin, CancellationToken cancellationToken = default) =>
         await dbContext.Vehicles
-            .AnyAsync(v => v.VIN == vin && !v.IsDeleted, cancellationToken);
+            .AnyAsync(v => v.VIN == vin, cancellationToken);
 
     public async Task<bool> ExistsByLicensePlateAsync(string licensePlate, CancellationToken cancellationToken = default) =>
         await dbContext.Vehicles
-            .AnyAsync(v => v.LicensePlate == licensePlate && !v.IsDeleted, cancellationToken);
+            .AnyAsync(v => v.LicensePlate == licensePlate, cancellationToken);
 
     public async Task<bool> ExistsByUnitCodeAsync(string unitCode, CancellationToken cancellationToken = default) =>
         await dbContext.Vehicles
-            .AnyAsync(v => v.UnitCode == unitCode && !v.IsDeleted, cancellationToken);
+            .AnyAsync(v => v.UnitCode == unitCode, cancellationToken);
 
     public async Task AddAsync(Vehicle vehicle, CancellationToken cancellationToken = default)
     {

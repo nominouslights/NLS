@@ -19,6 +19,7 @@ internal sealed class UserRepository(AppDbContext dbContext) : IUserRepository
 
     public async Task<IReadOnlyList<User>> GetPendingUsersAsync(CancellationToken cancellationToken = default) =>
         await dbContext.Users
+            .AsNoTracking()
             .Where(u => !u.IsActive)
             .OrderBy(u => u.CreatedAt)
             .ToListAsync(cancellationToken);

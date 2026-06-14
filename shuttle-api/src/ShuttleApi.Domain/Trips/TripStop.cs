@@ -22,4 +22,6 @@ public sealed class TripStop : Entity<Guid>
             Address = address
         };
     }
+
+    internal void UpdateSequenceOrder(int newOrder) => SequenceOrder = newOrder;
 }

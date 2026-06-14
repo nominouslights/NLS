@@ -6,6 +6,7 @@ import '../../domain/entities/trip_passenger.dart';
 import '../../domain/repositories/i_trip_repository.dart';
 import '../../domain/usecases/remove_passenger_usecase.dart';
 import '../../domain/usecases/send_passenger_confirmation_usecase.dart';
+import '../../domain/usecases/send_test_confirmation_usecase.dart';
 import '../../domain/usecases/update_passenger_boarding_status_usecase.dart';
 import '../../domain/usecases/update_passenger_payment_status_usecase.dart';
 import 'add_passenger_sheet.dart';
@@ -248,6 +249,34 @@ class _PassengerCard extends StatelessWidget {
                       color: AppColors.textSecondary,
                     ),
                   ),
+                Builder(builder: (_) {
+                  final realLogs = passenger.emailLogs
+                      .where((l) => !l.isTest)
+                      .toList()
+                    ..sort((a, b) => b.sentAt.compareTo(a.sentAt));
+                  final String logText;
+                  if (realLogs.isEmpty) {
+                    logText = 'Confirmation not sent';
+                  } else {
+                    final count = realLogs.length;
+                    final last = realLogs.first.sentAt.toLocal();
+                    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                    final dateStr = '${months[last.month - 1]} ${last.day}';
+                    logText = count == 1
+                        ? 'Confirmation sent · $dateStr'
+                        : 'Confirmation sent ${count}x · $dateStr';
+                  }
+                  return Text(
+                    logText,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: realLogs.isEmpty
+                          ? AppColors.textSecondary.withValues(alpha: 0.5)
+                          : const Color(0xFF059669),
+                      fontStyle: realLogs.isEmpty ? FontStyle.italic : FontStyle.normal,
+                    ),
+                  );
+                }),
               ],
             ),
           ),
@@ -302,6 +331,17 @@ class _PassengerCard extends StatelessWidget {
                     ],
                   ),
                 ),
+                const PopupMenuItem(
+                  value: 'send_test',
+                  child: Row(
+                    children: [
+                      Icon(Icons.science_outlined,
+                          size: 16, color: Color(0xFF7C3AED)),
+                      SizedBox(width: 8),
+                      Text('Send Test Email'),
+                    ],
+                  ),
+                ),
                 const PopupMenuDivider(),
                 const PopupMenuItem(
                     value: 'pending', child: Text('Mark Pending')),
@@ -325,6 +365,11 @@ class _PassengerCard extends StatelessWidget {
   Future<void> _handleAction(BuildContext context, String action) async {
     if (action == 'send') {
       await _sendConfirmation(context);
+      return;
+    }
+
+    if (action == 'send_test') {
+      await _sendTestConfirmation(context);
       return;
     }
 
@@ -464,6 +509,46 @@ class _PassengerCard extends StatelessWidget {
     );
   }
 
+  Future<void> _sendTestConfirmation(BuildContext context) async {
+    final emailController = TextEditingController();
+
+    final result = await showDialog<(String, ConfirmationDirection)?>(
+      context: context,
+      builder: (ctx) => _TestConfirmationDialog(
+        passengerName: passenger.name,
+        emailController: emailController,
+      ),
+    );
+
+    if (result == null || !context.mounted) return;
+    final (testEmail, direction) = result;
+
+    final either = await sl<SendTestConfirmationUseCase>()(
+      SendTestConfirmationParams(
+        tripId: tripId,
+        passengerId: passenger.id,
+        direction: direction == ConfirmationDirection.inbound ? 'Inbound' : 'Outbound',
+        testEmail: testEmail,
+      ),
+    );
+
+    if (!context.mounted) return;
+    either.fold(
+      (f) => ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(f.message), backgroundColor: AppColors.danger),
+      ),
+      (_) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('[TEST] Confirmation sent to $testEmail'),
+            backgroundColor: const Color(0xFF7C3AED),
+          ),
+        );
+        onRefresh();
+      },
+    );
+  }
+
   Future<void> _updateBoarding(
       BuildContext context, PassengerBoardingStatus status) async {
     final newStatus = passenger.boardingStatus == status
@@ -579,6 +664,73 @@ class _StatusBadge extends StatelessWidget {
           color: color,
         ),
       ),
+    );
+  }
+}
+
+class _TestConfirmationDialog extends StatefulWidget {
+  final String passengerName;
+  final TextEditingController emailController;
+
+  const _TestConfirmationDialog({
+    required this.passengerName,
+    required this.emailController,
+  });
+
+  @override
+  State<_TestConfirmationDialog> createState() =>
+      _TestConfirmationDialogState();
+}
+
+class _TestConfirmationDialogState extends State<_TestConfirmationDialog> {
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Send Test Confirmation'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Send a test confirmation for ${widget.passengerName} to a test address.',
+            style: const TextStyle(fontSize: 13),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: widget.emailController,
+            keyboardType: TextInputType.emailAddress,
+            decoration: const InputDecoration(
+              labelText: 'Test email address',
+              border: OutlineInputBorder(),
+            ),
+            autofocus: true,
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        OutlinedButton(
+          onPressed: () {
+            final email = widget.emailController.text.trim();
+            if (email.isEmpty) return;
+            Navigator.pop(context, (email, ConfirmationDirection.inbound));
+          },
+          child: const Text('Inbound'),
+        ),
+        FilledButton(
+          onPressed: () {
+            final email = widget.emailController.text.trim();
+            if (email.isEmpty) return;
+            Navigator.pop(context, (email, ConfirmationDirection.outbound));
+          },
+          style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF7C3AED)),
+          child: const Text('Outbound'),
+        ),
+      ],
     );
   }
 }

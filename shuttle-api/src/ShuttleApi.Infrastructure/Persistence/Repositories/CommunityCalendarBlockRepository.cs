@@ -9,6 +9,7 @@ internal sealed class CommunityCalendarBlockRepository(AppDbContext dbContext)
     public async Task<IReadOnlyList<CommunityCalendarBlock>> GetBlocksInRangeAsync(
         DateOnly from, DateOnly to, CancellationToken cancellationToken = default) =>
         await dbContext.CommunityCalendarBlocks
+            .AsNoTracking()
             .Where(b => b.BlockedDate >= from && b.BlockedDate <= to)
             .ToListAsync(cancellationToken);
 

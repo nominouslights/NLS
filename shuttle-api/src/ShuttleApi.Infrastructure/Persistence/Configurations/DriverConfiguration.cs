@@ -40,5 +40,7 @@ public sealed class DriverConfiguration : IEntityTypeConfiguration<Driver>
             .WithOne()
             .HasForeignKey(r => r.DriverId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasQueryFilter(d => !d.IsDeleted);
     }
 }

@@ -24,5 +24,7 @@ public sealed class SavedLocationConfiguration : IEntityTypeConfiguration<SavedL
         builder.Property(l => l.DeletedAt);
 
         builder.HasIndex(l => l.Name);
+
+        builder.HasQueryFilter(l => !l.IsDeleted);
     }
 }

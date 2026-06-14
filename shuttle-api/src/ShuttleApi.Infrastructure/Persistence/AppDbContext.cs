@@ -37,6 +37,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<TripPreInspection> TripPreInspections => Set<TripPreInspection>();
     public DbSet<TripInspectionItem> TripInspectionItems => Set<TripInspectionItem>();
     public DbSet<TripPostReport> TripPostReports => Set<TripPostReport>();
+    public DbSet<TripPassengerEmailLog> TripPassengerEmailLogs => Set<TripPassengerEmailLog>();
     public DbSet<Vehicle> Vehicles => Set<Vehicle>();
     public DbSet<VehicleServiceRecord> VehicleServiceRecords => Set<VehicleServiceRecord>();
     public DbSet<VehicleInspectionRecord> VehicleInspectionRecords => Set<VehicleInspectionRecord>();

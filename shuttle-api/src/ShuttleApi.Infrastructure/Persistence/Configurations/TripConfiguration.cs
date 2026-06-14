@@ -75,5 +75,7 @@ public sealed class TripConfiguration : IEntityTypeConfiguration<Trip>
             .WithOne()
             .HasForeignKey<TripPostReport>(r => r.TripId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasQueryFilter(t => !t.IsDeleted);
     }
 }

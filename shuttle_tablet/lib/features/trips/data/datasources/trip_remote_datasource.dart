@@ -54,7 +54,12 @@ abstract interface class ITripRemoteDataSource {
   Future<void> sendPassengerConfirmation(
       String tripId, String passengerId, String direction);
 
+  Future<void> sendTestConfirmation(
+      String tripId, String passengerId, String direction, String testEmail);
+
   Future<void> sendStopUpdate(String tripId, {String? stopId, String? status});
+
+  Future<void> addStop(AddStopParams params);
 
   Future<String> addCargoItem(AddCargoItemParams params);
 
@@ -406,6 +411,24 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
   }
 
   @override
+  Future<void> sendTestConfirmation(
+      String tripId, String passengerId, String direction, String testEmail) async {
+    try {
+      await _dio.post(
+        '/api/trips/$tripId/passengers/$passengerId/send-test-confirmation',
+        data: {'direction': direction, 'testEmailAddress': testEmail},
+      );
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 401) throw const UnauthorizedException();
+      if (e.response?.statusCode == 404) throw const NotFoundException();
+      throw ServerException(
+        message: _serverMessage(e, 'Failed to send test confirmation email'),
+        statusCode: e.response?.statusCode,
+      );
+    }
+  }
+
+  @override
   Future<void> sendStopUpdate(String tripId,
       {String? stopId, String? status}) async {
     try {
@@ -418,6 +441,27 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
       if (e.response?.statusCode == 404) throw const NotFoundException();
       throw ServerException(
         message: _serverMessage(e, 'Failed to send stop update'),
+        statusCode: e.response?.statusCode,
+      );
+    }
+  }
+
+  @override
+  Future<void> addStop(AddStopParams params) async {
+    try {
+      await _dio.post(
+        ApiEndpoints.tripStops(params.tripId),
+        data: {
+          'insertAtSequenceOrder': params.insertAtSequenceOrder,
+          'locationName': params.locationName,
+          if (params.address != null) 'address': params.address,
+        },
+      );
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 401) throw const UnauthorizedException();
+      if (e.response?.statusCode == 404) throw const NotFoundException();
+      throw ServerException(
+        message: _serverMessage(e, 'Failed to add stop'),
         statusCode: e.response?.statusCode,
       );
     }

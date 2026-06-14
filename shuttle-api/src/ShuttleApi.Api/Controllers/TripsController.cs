@@ -224,6 +224,35 @@ public sealed class TripsController(ISender sender) : BaseApiController(sender)
         return NoContent();
     }
 
+    [Authorize(Policy = "AdminOnly")]
+    [HttpPost]
+    [Route("api/trips/{id:guid}/passengers/{passengerId:guid}/send-test-confirmation")]
+    public async Task<IActionResult> SendTestConfirmation(
+        Guid id,
+        Guid passengerId,
+        [FromBody] SendTestConfirmationRequest request,
+        CancellationToken cancellationToken)
+    {
+        await Sender.Send(
+            new SendTestConfirmationCommand(id, passengerId, request.Direction, request.TestEmailAddress),
+            cancellationToken);
+        return Ok();
+    }
+
+    [Authorize(Policy = "AdminOnly")]
+    [HttpPost]
+    [Route("api/trips/{id:guid}/stops")]
+    public async Task<IActionResult> AddStop(
+        Guid id,
+        [FromBody] AddTripStopRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(
+            new AddTripStopCommand(id, request.InsertAtSequenceOrder, request.LocationName, request.Address),
+            cancellationToken);
+        return Ok(result);
+    }
+
     [Authorize(Policy = "DriverOrAdmin")]
     [HttpPost]
     [Route("api/trips/{id:guid}/send-stop-update")]
@@ -397,4 +426,11 @@ public sealed record AddCargoItemRequest(
 
 public sealed record SendConfirmationRequest(string Direction);
 
+public sealed record SendTestConfirmationRequest(string Direction, string TestEmailAddress);
+
 public sealed record SendStopUpdateRequest(Guid? StopId, string? Status);
+
+public sealed record AddTripStopRequest(
+    int InsertAtSequenceOrder,
+    string LocationName,
+    string? Address);

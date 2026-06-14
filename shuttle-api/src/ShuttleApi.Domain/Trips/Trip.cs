@@ -91,6 +91,25 @@ public sealed class Trip : AggregateRoot<Guid>
         return trip;
     }
 
+    public TripStop AddStop(int insertAtSequenceOrder, string locationName, string? address)
+    {
+        Guard.Against(Status != TripStatus.Dispatched, "Stops can only be added to a dispatched trip.");
+        Guard.AgainstNullOrEmpty(locationName, nameof(locationName));
+        Guard.Against(insertAtSequenceOrder < 1, "Sequence order must be at least 1.");
+
+        var maxSeq = _stops.Count > 0 ? _stops.Max(s => s.SequenceOrder) : 0;
+        var insertAt = Math.Min(insertAtSequenceOrder, maxSeq + 1);
+
+        foreach (var stop in _stops.Where(s => s.SequenceOrder >= insertAt)
+                                    .OrderByDescending(s => s.SequenceOrder))
+            stop.UpdateSequenceOrder(stop.SequenceOrder + 1);
+
+        var newStop = TripStop.Create(Id, insertAt, locationName, address);
+        _stops.Add(newStop);
+        RaiseDomainEvent(new TripStopAddedEvent(Id, newStop.Id));
+        return newStop;
+    }
+
     public void AssignVehicle(Guid vehicleId)
     {
         Guard.Against(ServiceType != TripServiceType.Community, "AssignVehicle is only for community trips.");

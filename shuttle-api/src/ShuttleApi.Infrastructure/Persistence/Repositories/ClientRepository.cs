@@ -6,7 +6,7 @@ namespace ShuttleApi.Infrastructure.Persistence.Repositories;
 internal sealed class ClientRepository(AppDbContext dbContext) : IClientRepository
 {
     public async Task<IReadOnlyList<Client>> GetAllAsync(CancellationToken cancellationToken = default) =>
-        await dbContext.Clients.OrderBy(c => c.BusinessName).ToListAsync(cancellationToken);
+        await dbContext.Clients.AsNoTracking().OrderBy(c => c.BusinessName).ToListAsync(cancellationToken);
 
     public async Task<Client?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         await dbContext.Clients

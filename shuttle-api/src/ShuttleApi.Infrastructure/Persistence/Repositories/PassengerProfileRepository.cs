@@ -11,6 +11,7 @@ internal sealed class PassengerProfileRepository(AppDbContext dbContext)
     {
         var q = query.Trim().ToLowerInvariant();
         return await dbContext.PassengerProfiles
+            .AsNoTracking()
             .Where(p => p.ClientId == clientId &&
                         (q == string.Empty || p.NormalizedName.Contains(q)))
             .OrderByDescending(p => p.LastBookedAt)

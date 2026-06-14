@@ -8,22 +8,25 @@ internal sealed class DriverRepository(AppDbContext dbContext, IFileStorageServi
 {
     public async Task<IReadOnlyList<Driver>> GetAllAsync(CancellationToken cancellationToken = default) =>
         await dbContext.Drivers
+            .AsNoTracking()
             .Include(d => d.Documents)
-            .Where(d => !d.IsDeleted)
             .OrderBy(d => d.LastName)
             .ThenBy(d => d.FirstName)
             .ToListAsync(cancellationToken);
 
     public async Task<Driver?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
-        await dbContext.Drivers.FirstOrDefaultAsync(d => d.Id == id && !d.IsDeleted, cancellationToken);
+        await dbContext.Drivers.FirstOrDefaultAsync(d => d.Id == id, cancellationToken);
 
     public async Task<Driver?> GetDeletedByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         await dbContext.Drivers
+            .IgnoreQueryFilters()
             .Include(d => d.Documents)
             .FirstOrDefaultAsync(d => d.Id == id && d.IsDeleted, cancellationToken);
 
     public async Task<IReadOnlyList<Driver>> GetAllArchivedAsync(CancellationToken cancellationToken = default) =>
         await dbContext.Drivers
+            .AsNoTracking()
+            .IgnoreQueryFilters()
             .Include(d => d.Documents)
             .Where(d => d.IsDeleted)
             .OrderByDescending(d => d.DeletedAt)
@@ -32,6 +35,7 @@ internal sealed class DriverRepository(AppDbContext dbContext, IFileStorageServi
     public async Task PurgeExpiredAsync(DateTime cutoffUtc, CancellationToken cancellationToken = default)
     {
         var expired = await dbContext.Drivers
+            .IgnoreQueryFilters()
             .Include(d => d.Documents)
             .Where(d => d.IsDeleted && d.DeletedAt < cutoffUtc)
             .ToListAsync(cancellationToken);
@@ -52,7 +56,7 @@ internal sealed class DriverRepository(AppDbContext dbContext, IFileStorageServi
     public async Task<Driver?> GetByIdWithDocumentsAsync(Guid id, CancellationToken cancellationToken = default) =>
         await dbContext.Drivers
             .Include(d => d.Documents)
-            .FirstOrDefaultAsync(d => d.Id == id && !d.IsDeleted, cancellationToken);
+            .FirstOrDefaultAsync(d => d.Id == id, cancellationToken);
 
     public async Task<Driver?> GetByIdWithRosterAsync(
         Guid id,
@@ -61,7 +65,7 @@ internal sealed class DriverRepository(AppDbContext dbContext, IFileStorageServi
         CancellationToken cancellationToken = default) =>
         await dbContext.Drivers
             .Include(d => d.RosterEntries.Where(r => r.EntryDate >= rangeStart && r.EntryDate <= rangeEnd))
-            .FirstOrDefaultAsync(d => d.Id == id && !d.IsDeleted, cancellationToken);
+            .FirstOrDefaultAsync(d => d.Id == id, cancellationToken);
 
     public async Task<IReadOnlyList<(Driver Driver, List<DriverRosterEntry> Entries)>> GetAllWithRosterAsync(
         DateOnly rangeStart,
@@ -69,8 +73,8 @@ internal sealed class DriverRepository(AppDbContext dbContext, IFileStorageServi
         CancellationToken cancellationToken = default)
     {
         var drivers = await dbContext.Drivers
+            .AsNoTracking()
             .Include(d => d.RosterEntries.Where(r => r.EntryDate >= rangeStart && r.EntryDate <= rangeEnd))
-            .Where(d => !d.IsDeleted)
             .OrderBy(d => d.LastName)
             .ThenBy(d => d.FirstName)
             .ToListAsync(cancellationToken);
