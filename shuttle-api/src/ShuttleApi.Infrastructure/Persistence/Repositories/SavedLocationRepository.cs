@@ -7,18 +7,22 @@ internal sealed class SavedLocationRepository(AppDbContext dbContext) : ISavedLo
 {
     public async Task<IReadOnlyList<SavedLocation>> GetAllAsync(CancellationToken cancellationToken = default) =>
         await dbContext.SavedLocations
-            .Where(l => !l.IsDeleted)
+            .AsNoTracking()
             .OrderBy(l => l.Name)
             .ToListAsync(cancellationToken);
 
     public async Task<SavedLocation?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
-        await dbContext.SavedLocations.FirstOrDefaultAsync(l => l.Id == id && !l.IsDeleted, cancellationToken);
+        await dbContext.SavedLocations.FirstOrDefaultAsync(l => l.Id == id, cancellationToken);
 
     public async Task<SavedLocation?> GetDeletedByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
-        await dbContext.SavedLocations.FirstOrDefaultAsync(l => l.Id == id && l.IsDeleted, cancellationToken);
+        await dbContext.SavedLocations
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(l => l.Id == id && l.IsDeleted, cancellationToken);
 
     public async Task<IReadOnlyList<SavedLocation>> GetAllArchivedAsync(CancellationToken cancellationToken = default) =>
         await dbContext.SavedLocations
+            .AsNoTracking()
+            .IgnoreQueryFilters()
             .Where(l => l.IsDeleted)
             .OrderByDescending(l => l.DeletedAt)
             .ToListAsync(cancellationToken);
@@ -26,6 +30,7 @@ internal sealed class SavedLocationRepository(AppDbContext dbContext) : ISavedLo
     public async Task PurgeExpiredAsync(DateTime cutoffUtc, CancellationToken cancellationToken = default)
     {
         var expired = await dbContext.SavedLocations
+            .IgnoreQueryFilters()
             .Where(l => l.IsDeleted && l.DeletedAt < cutoffUtc)
             .ToListAsync(cancellationToken);
 

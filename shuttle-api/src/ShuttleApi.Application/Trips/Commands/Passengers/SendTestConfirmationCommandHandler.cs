@@ -6,28 +6,21 @@ using ShuttleApi.Domain.Trips;
 
 namespace ShuttleApi.Application.Trips;
 
-internal sealed class SendPassengerConfirmationCommandHandler(
+internal sealed class SendTestConfirmationCommandHandler(
     ITripRepository tripRepository,
     IClientRepository clientRepository,
     IClientEmailTemplateRepository templateRepository,
     IEmailTemplateRenderer renderer,
     INotificationService notificationService)
-    : IRequestHandler<SendPassengerConfirmationCommand>
+    : IRequestHandler<SendTestConfirmationCommand>
 {
-    public async Task Handle(SendPassengerConfirmationCommand request, CancellationToken cancellationToken)
+    public async Task Handle(SendTestConfirmationCommand request, CancellationToken cancellationToken)
     {
         var trip = await tripRepository.GetByIdAsync(request.TripId, cancellationToken)
             ?? throw new NotFoundException($"Trip {request.TripId} not found.");
 
         var passenger = trip.Passengers.FirstOrDefault(p => p.Id == request.PassengerId)
             ?? throw new NotFoundException($"Passenger {request.PassengerId} not found on this trip.");
-
-        var recipient = !string.IsNullOrWhiteSpace(passenger.Email)
-            ? passenger.Email
-            : passenger.ContactInfo;
-
-        if (string.IsNullOrWhiteSpace(recipient))
-            throw new ArgumentException("This passenger has no email address on file.");
 
         if (trip.ClientId is null)
             throw new ArgumentException("Confirmation emails are only available for charter trips with a client.");
@@ -48,12 +41,12 @@ internal sealed class SendPassengerConfirmationCommandHandler(
             Passenger = passenger
         };
 
-        var subject = renderer.Render(template.Subject, context);
+        var subject = "[TEST] " + renderer.Render(template.Subject, context);
         var body = renderer.Render(template.Body, context);
 
-        await notificationService.SendEmailAsync(recipient!, subject, body, cancellationToken);
+        await notificationService.SendEmailAsync(request.TestEmailAddress, subject, body, cancellationToken);
 
-        passenger.RecordEmailSent(recipient!, request.Direction, isTest: false);
+        passenger.RecordEmailSent(request.TestEmailAddress, request.Direction, isTest: true);
         await tripRepository.SaveChangesAsync(cancellationToken);
     }
 }

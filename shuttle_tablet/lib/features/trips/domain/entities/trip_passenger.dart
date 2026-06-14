@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import 'trip_passenger_email_log.dart';
 
 enum PassengerPaymentStatus {
   tentative,
@@ -29,6 +30,7 @@ class TripPassenger extends Equatable {
   final DateTime? bookedAt;
   final double? fare;
   final bool isAddedAfterDeparture;
+  final List<TripPassengerEmailLog> emailLogs;
 
   const TripPassenger({
     required this.id,
@@ -46,6 +48,7 @@ class TripPassenger extends Equatable {
     this.bookedAt,
     this.fare,
     this.isAddedAfterDeparture = false,
+    this.emailLogs = const [],
   });
 
   @override
@@ -65,5 +68,6 @@ class TripPassenger extends Equatable {
         bookedAt,
         fare,
         isAddedAfterDeparture,
+        emailLogs,
       ];
 }

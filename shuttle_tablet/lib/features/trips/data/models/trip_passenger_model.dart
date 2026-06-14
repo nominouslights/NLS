@@ -1,4 +1,5 @@
 import '../../domain/entities/trip_passenger.dart';
+import 'trip_passenger_email_log_model.dart';
 
 class TripPassengerModel extends TripPassenger {
   const TripPassengerModel({
@@ -17,6 +18,7 @@ class TripPassengerModel extends TripPassenger {
     super.bookedAt,
     super.fare,
     super.isAddedAfterDeparture = false,
+    super.emailLogs = const [],
   });
 
   factory TripPassengerModel.fromJson(Map<String, dynamic> json) {
@@ -40,6 +42,10 @@ class TripPassengerModel extends TripPassenger {
           : null,
       fare: (json['fare'] as num?)?.toDouble(),
       isAddedAfterDeparture: json['isAddedAfterDeparture'] as bool? ?? false,
+      emailLogs: (json['emailLogs'] as List<dynamic>? ?? [])
+          .map((e) => TripPassengerEmailLogModel.fromJson(e as Map<String, dynamic>))
+          .map((m) => m.toEntity())
+          .toList(),
     );
   }
 

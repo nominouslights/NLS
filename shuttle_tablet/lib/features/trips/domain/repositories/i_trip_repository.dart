@@ -54,7 +54,12 @@ abstract interface class ITripRepository {
   Future<Either<Failure, void>> sendPassengerConfirmation(
       SendPassengerConfirmationParams params);
 
+  Future<Either<Failure, void>> sendTestConfirmation(
+      String tripId, String passengerId, String direction, String testEmail);
+
   Future<Either<Failure, void>> sendStopUpdate(SendStopUpdateParams params);
+
+  Future<Either<Failure, void>> addStop(AddStopParams params);
 
   Future<Either<Failure, String>> addCargoItem(AddCargoItemParams params);
 
@@ -213,6 +218,20 @@ class SendPassengerConfirmationParams {
 
   String get directionValue =>
       direction == ConfirmationDirection.inbound ? 'Inbound' : 'Outbound';
+}
+
+class AddStopParams {
+  final String tripId;
+  final int insertAtSequenceOrder;
+  final String locationName;
+  final String? address;
+
+  const AddStopParams({
+    required this.tripId,
+    required this.insertAtSequenceOrder,
+    required this.locationName,
+    this.address,
+  });
 }
 
 class SendStopUpdateParams {

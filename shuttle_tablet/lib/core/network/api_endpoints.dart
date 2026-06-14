@@ -24,6 +24,7 @@ class ApiEndpoints {
   static String tripPassengerSendConfirmation(String id, String pid) =>
       '/trips/$id/passengers/$pid/send-confirmation';
   static String tripSendStopUpdate(String id) => '/trips/$id/send-stop-update';
+  static String tripStops(String id) => '/trips/$id/stops';
   static String tripCargo(String id) => '/trips/$id/cargo';
   static String tripCargoById(String id, String cid) => '/trips/$id/cargo/$cid';
 

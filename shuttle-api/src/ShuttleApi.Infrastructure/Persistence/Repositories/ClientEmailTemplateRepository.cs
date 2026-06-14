@@ -8,6 +8,7 @@ internal sealed class ClientEmailTemplateRepository(AppDbContext dbContext) : IC
     public async Task<IReadOnlyList<ClientEmailTemplate>> GetByClientIdAsync(
         Guid clientId, CancellationToken cancellationToken = default) =>
         await dbContext.ClientEmailTemplates
+            .AsNoTracking()
             .Where(t => t.ClientId == clientId)
             .OrderBy(t => t.Type)
             .ToListAsync(cancellationToken);

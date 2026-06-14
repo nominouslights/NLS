@@ -23,6 +23,9 @@ public sealed class TripPassenger : Entity<Guid>
     public decimal? Fare { get; private set; }
     public bool IsAddedAfterDeparture { get; private set; }
 
+    private readonly List<TripPassengerEmailLog> _emailLogs = [];
+    public IReadOnlyList<TripPassengerEmailLog> EmailLogs => _emailLogs.AsReadOnly();
+
     private TripPassenger() { }
 
     public static TripPassenger Create(
@@ -57,6 +60,13 @@ public sealed class TripPassenger : Entity<Guid>
             Fare = fare,
             IsAddedAfterDeparture = isAddedAfterDeparture
         };
+    }
+
+    public TripPassengerEmailLog RecordEmailSent(string recipientEmail, string direction, bool isTest)
+    {
+        var log = TripPassengerEmailLog.Record(Id, recipientEmail, direction, isTest);
+        _emailLogs.Add(log);
+        return log;
     }
 
     public void UpdateBoardingStatus(PassengerBoardingStatus status)

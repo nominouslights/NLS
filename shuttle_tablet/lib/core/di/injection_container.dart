@@ -75,6 +75,8 @@ import '../../features/trips/domain/usecases/remove_passenger_usecase.dart';
 import '../../features/trips/domain/usecases/update_passenger_payment_status_usecase.dart';
 import '../../features/trips/domain/usecases/update_passenger_boarding_status_usecase.dart';
 import '../../features/trips/domain/usecases/send_passenger_confirmation_usecase.dart';
+import '../../features/trips/domain/usecases/send_test_confirmation_usecase.dart';
+import '../../features/trips/domain/usecases/add_stop_usecase.dart';
 import '../../features/trips/domain/usecases/send_stop_update_usecase.dart';
 import '../../features/vehicles/data/datasources/vehicle_remote_datasource.dart';
 import '../../features/vehicles/data/repositories/vehicle_repository_impl.dart';
@@ -236,6 +238,8 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton(() => UpdatePassengerPaymentStatusUseCase(sl()));
   sl.registerLazySingleton(() => UpdatePassengerBoardingStatusUseCase(sl()));
   sl.registerLazySingleton(() => SendPassengerConfirmationUseCase(sl()));
+  sl.registerLazySingleton(() => SendTestConfirmationUseCase(sl()));
+  sl.registerLazySingleton(() => AddStopUseCase(sl()));
   sl.registerLazySingleton(() => SendStopUpdateUseCase(sl()));
   sl.registerLazySingleton(() => AddCargoItemUseCase(sl()));
   sl.registerLazySingleton(() => RemoveCargoItemUseCase(sl()));

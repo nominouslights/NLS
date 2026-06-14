@@ -11,12 +11,13 @@ internal sealed class GetClientsQueryHandler(
     public async Task<IReadOnlyList<ClientListItemResult>> Handle(GetClientsQuery request, CancellationToken cancellationToken)
     {
         var clients = await clientRepository.GetAllAsync(cancellationToken);
-        var results = new List<ClientListItemResult>(clients.Count);
+        var contractMap = await contractRepository.GetActiveBatchByClientIdsAsync(
+            clients.Select(c => c.Id), cancellationToken);
 
-        foreach (var client in clients)
+        return clients.Select(client =>
         {
-            var activeContract = await contractRepository.GetActiveByClientIdAsync(client.Id, cancellationToken);
-            results.Add(new ClientListItemResult(
+            contractMap.TryGetValue(client.Id, out var contract);
+            return new ClientListItemResult(
                 client.Id,
                 client.BusinessName,
                 client.ServiceType.ToString(),
@@ -24,10 +25,8 @@ internal sealed class GetClientsQueryHandler(
                 client.Phone,
                 client.Email,
                 client.IsActive,
-                activeContract?.EndDate,
-                activeContract?.IsExpiringSoon ?? false));
-        }
-
-        return results;
+                contract?.EndDate,
+                contract?.IsExpiringSoon ?? false);
+        }).ToList();
     }
 }

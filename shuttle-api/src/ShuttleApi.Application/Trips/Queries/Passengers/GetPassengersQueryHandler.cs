@@ -26,7 +26,9 @@ internal sealed class GetPassengersQueryHandler(ITripRepository tripRepository)
                 p.Direction,
                 p.CutoffDeadline,
                 p.BookedAt,
-                p.Fare))
+                p.Fare,
+                p.EmailLogs.Select(l => new PassengerEmailLogResult(
+                    l.Id, l.Direction, l.RecipientEmail, l.SentAt, l.IsTest)).ToList()))
             .ToList();
     }
 }

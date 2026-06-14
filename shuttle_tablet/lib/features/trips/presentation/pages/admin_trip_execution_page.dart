@@ -16,6 +16,7 @@ import '../widgets/admin_trip_status_bar.dart';
 import '../widgets/trip_cargo_manifest.dart';
 import '../widgets/trip_passenger_manifest.dart';
 import '../widgets/trip_status_badge.dart';
+import '../widgets/add_stop_sheet.dart';
 import '../widgets/trip_stop_progress.dart';
 
 class AdminTripExecutionPage extends ConsumerWidget {
@@ -107,11 +108,39 @@ class _AdminTripBody extends ConsumerWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         TripStopProgress(tripId: trip.id, stops: trip.stops),
-                        if (trip.serviceType == TripServiceType.charter &&
-                            trip.status != TripStatus.completed &&
-                            trip.status != TripStatus.cancelled) ...[
+                        if (trip.status == TripStatus.dispatched ||
+                            (trip.serviceType == TripServiceType.charter &&
+                                trip.status != TripStatus.completed &&
+                                trip.status != TripStatus.cancelled)) ...[
                           const SizedBox(height: 12),
-                          _SendStopUpdateButton(trip: trip),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              if (trip.status == TripStatus.dispatched)
+                                OutlinedButton.icon(
+                                  onPressed: () => showAddStopSheet(
+                                    context,
+                                    tripId: trip.id,
+                                    stops: trip.stops,
+                                    onRefresh: onRefresh,
+                                  ),
+                                  icon: const Icon(
+                                      Icons.add_location_alt_outlined,
+                                      size: 16),
+                                  label: const Text('Add Stop'),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: AppColors.primary,
+                                    side:
+                                        BorderSide(color: AppColors.primary),
+                                  ),
+                                ),
+                              if (trip.serviceType == TripServiceType.charter &&
+                                  trip.status != TripStatus.completed &&
+                                  trip.status != TripStatus.cancelled)
+                                _SendStopUpdateButton(trip: trip),
+                            ],
+                          ),
                         ],
                       ],
                     ),

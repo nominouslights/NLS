@@ -9,6 +9,7 @@ internal sealed class PurchaseOrderRepository(AppDbContext dbContext) : IPurchas
         Guid clientId,
         CancellationToken cancellationToken = default) =>
         await dbContext.PurchaseOrders
+            .AsNoTracking()
             .Include(p => p.LineItems)
             .Where(p => p.ClientId == clientId)
             .OrderByDescending(p => p.StartDate)
@@ -59,6 +60,7 @@ internal sealed class PurchaseOrderRepository(AppDbContext dbContext) : IPurchas
         Guid purchaseOrderId,
         CancellationToken cancellationToken = default) =>
         await dbContext.ContractPurchaseOrders
+            .AsNoTracking()
             .Where(x => x.PurchaseOrderId == purchaseOrderId)
             .Select(x => x.ContractId)
             .ToListAsync(cancellationToken);

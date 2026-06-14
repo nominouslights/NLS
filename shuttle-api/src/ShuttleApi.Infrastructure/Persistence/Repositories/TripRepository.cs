@@ -14,10 +14,10 @@ internal sealed class TripRepository(AppDbContext dbContext) : ITripRepository
         CancellationToken cancellationToken = default)
     {
         var query = dbContext.Trips
+            .AsNoTracking()
             .Include(t => t.Stops)
             .Include(t => t.Passengers)
             .Include(t => t.CargoItems)
-            .Where(t => !t.IsDeleted)
             .AsQueryable();
 
         if (status.HasValue)
@@ -44,20 +44,24 @@ internal sealed class TripRepository(AppDbContext dbContext) : ITripRepository
         await dbContext.Trips
             .Include(t => t.Stops)
             .Include(t => t.Passengers)
+                .ThenInclude(p => p.EmailLogs)
             .Include(t => t.CargoItems)
             .Include(t => t.PreInspection)
                 .ThenInclude(p => p!.Items)
             .Include(t => t.PostReport)
-            .FirstOrDefaultAsync(t => t.Id == id && !t.IsDeleted, cancellationToken);
+            .FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
 
     public async Task<Trip?> GetDeletedByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         await dbContext.Trips
+            .IgnoreQueryFilters()
             .Include(t => t.Stops)
             .Include(t => t.Passengers)
             .FirstOrDefaultAsync(t => t.Id == id && t.IsDeleted, cancellationToken);
 
     public async Task<IReadOnlyList<Trip>> GetAllArchivedAsync(CancellationToken cancellationToken = default) =>
         await dbContext.Trips
+            .AsNoTracking()
+            .IgnoreQueryFilters()
             .Include(t => t.Stops)
             .Include(t => t.Passengers)
             .Where(t => t.IsDeleted)
@@ -67,6 +71,7 @@ internal sealed class TripRepository(AppDbContext dbContext) : ITripRepository
     public async Task PurgeExpiredAsync(DateTime cutoffUtc, CancellationToken cancellationToken = default)
     {
         var expired = await dbContext.Trips
+            .IgnoreQueryFilters()
             .Where(t => t.IsDeleted && t.DeletedAt < cutoffUtc)
             .ToListAsync(cancellationToken);
 
@@ -81,10 +86,10 @@ internal sealed class TripRepository(AppDbContext dbContext) : ITripRepository
         DateOnly from, DateOnly to, TripServiceType serviceType,
         CancellationToken cancellationToken = default) =>
         await dbContext.Trips
+            .AsNoTracking()
             .Include(t => t.Stops)
             .Include(t => t.Passengers)
-            .Where(t => !t.IsDeleted
-                && t.ServiceType == serviceType
+            .Where(t => t.ServiceType == serviceType
                 && DateOnly.FromDateTime(t.ScheduledAt) >= from
                 && DateOnly.FromDateTime(t.ScheduledAt) <= to)
             .OrderBy(t => t.ScheduledAt)
@@ -100,8 +105,7 @@ internal sealed class TripRepository(AppDbContext dbContext) : ITripRepository
         return await dbContext.Trips
             .Include(t => t.Stops)
             .Include(t => t.Passengers)
-            .Where(t => !t.IsDeleted
-                && t.ServiceType == TripServiceType.Community
+            .Where(t => t.ServiceType == TripServiceType.Community
                 && DateOnly.FromDateTime(t.ScheduledAt) == date
                 && t.Stops.Any(s => s.LocationName == destinationStopName)
                 && (t.Passengers.Any(p => p.Direction == direction) || !t.Passengers.Any()))
@@ -135,4 +139,7 @@ internal sealed class TripRepository(AppDbContext dbContext) : ITripRepository
         dbContext.Trips.Remove(trip);
         await dbContext.SaveChangesAsync(cancellationToken);
     }
+
+    public async Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
+        await dbContext.SaveChangesAsync(cancellationToken);
 }

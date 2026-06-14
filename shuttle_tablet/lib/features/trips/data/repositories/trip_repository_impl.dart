@@ -258,6 +258,22 @@ class TripRepositoryImpl implements ITripRepository {
   }
 
   @override
+  Future<Either<Failure, void>> sendTestConfirmation(
+      String tripId, String passengerId, String direction, String testEmail) async {
+    try {
+      await _remoteDataSource.sendTestConfirmation(
+          tripId, passengerId, direction, testEmail);
+      return const Right(null);
+    } on UnauthorizedException {
+      return const Left(UnauthorizedFailure());
+    } on NotFoundException {
+      return const Left(NotFoundFailure());
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message));
+    }
+  }
+
+  @override
   Future<Either<Failure, void>> sendStopUpdate(
       SendStopUpdateParams params) async {
     try {
@@ -266,6 +282,20 @@ class TripRepositoryImpl implements ITripRepository {
         stopId: params.stopId,
         status: params.status,
       );
+      return const Right(null);
+    } on UnauthorizedException {
+      return const Left(UnauthorizedFailure());
+    } on NotFoundException {
+      return const Left(NotFoundFailure());
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message));
+    }
+  }
+
+  @override
+  Future<Either<Failure, void>> addStop(AddStopParams params) async {
+    try {
+      await _remoteDataSource.addStop(params);
       return const Right(null);
     } on UnauthorizedException {
       return const Left(UnauthorizedFailure());

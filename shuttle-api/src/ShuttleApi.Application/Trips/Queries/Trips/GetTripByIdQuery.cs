@@ -47,7 +47,15 @@ public sealed record PassengerResult(
     string? Direction,
     DateTime? CutoffDeadline,
     DateTime BookedAt,
-    decimal? Fare);
+    decimal? Fare,
+    IReadOnlyList<PassengerEmailLogResult> EmailLogs);
+
+public sealed record PassengerEmailLogResult(
+    Guid Id,
+    string Direction,
+    string RecipientEmail,
+    DateTime SentAt,
+    bool IsTest);
 
 public sealed record TripStopResult(
     Guid Id,
