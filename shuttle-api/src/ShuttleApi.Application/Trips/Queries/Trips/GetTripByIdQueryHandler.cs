@@ -14,7 +14,7 @@ internal sealed class GetTripByIdQueryHandler(ITripRepository tripRepository)
 
         var stops = trip.Stops
             .OrderBy(s => s.SequenceOrder)
-            .Select(s => new TripStopResult(s.Id, s.SequenceOrder, s.LocationName, s.Address))
+            .Select(s => new TripStopResult(s.Id, s.SequenceOrder, s.LocationName, s.Address, s.ArrivedAt, s.DepartedAt))
             .ToList();
 
         TripPreInspectionResult? preInspection = null;

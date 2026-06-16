@@ -62,7 +62,9 @@ public sealed record TripStopResult(
     Guid Id,
     int SequenceOrder,
     string LocationName,
-    string? Address);
+    string? Address,
+    DateTime? ArrivedAt,
+    DateTime? DepartedAt);
 
 public sealed record TripPreInspectionResult(
     Guid Id,

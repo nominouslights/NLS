@@ -335,4 +335,48 @@ class TripRepositoryImpl implements ITripRepository {
       return Left(ServerFailure(e.message));
     }
   }
+
+  @override
+  Future<Either<Failure, void>> markStopArrived(
+      String tripId, String stopId) async {
+    try {
+      await _remoteDataSource.markStopArrived(tripId, stopId);
+      return const Right(null);
+    } on UnauthorizedException {
+      return const Left(UnauthorizedFailure());
+    } on NotFoundException {
+      return const Left(NotFoundFailure());
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message));
+    }
+  }
+
+  @override
+  Future<Either<Failure, void>> markStopDeparted(
+      String tripId, String stopId) async {
+    try {
+      await _remoteDataSource.markStopDeparted(tripId, stopId);
+      return const Right(null);
+    } on UnauthorizedException {
+      return const Left(UnauthorizedFailure());
+    } on NotFoundException {
+      return const Left(NotFoundFailure());
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message));
+    }
+  }
+
+  @override
+  Future<Either<Failure, void>> sendArrivalNotification(String tripId) async {
+    try {
+      await _remoteDataSource.sendArrivalNotification(tripId);
+      return const Right(null);
+    } on UnauthorizedException {
+      return const Left(UnauthorizedFailure());
+    } on NotFoundException {
+      return const Left(NotFoundFailure());
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message));
+    }
+  }
 }

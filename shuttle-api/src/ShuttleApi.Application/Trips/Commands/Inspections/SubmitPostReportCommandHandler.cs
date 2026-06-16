@@ -1,6 +1,4 @@
-using ShuttleApi.Application.Common.Interfaces;
 using ShuttleApi.Application.Common.Mediator;
-using ShuttleApi.Domain.Clients;
 using ShuttleApi.Domain.Common;
 using ShuttleApi.Domain.Trips;
 using ShuttleApi.Domain.Vehicles;
@@ -9,8 +7,7 @@ namespace ShuttleApi.Application.Trips;
 
 internal sealed class SubmitPostReportCommandHandler(
     ITripRepository tripRepository,
-    IVehicleRepository vehicleRepository,
-    IClientTripNotifier notifier)
+    IVehicleRepository vehicleRepository)
     : IRequestHandler<SubmitPostReportCommand>
 {
     public async Task Handle(SubmitPostReportCommand request, CancellationToken cancellationToken)
@@ -47,11 +44,5 @@ internal sealed class SubmitPostReportCommandHandler(
             }
         }
 
-        // Trip is now Completed -> notify the client's departures & arrivals list.
-        await notifier.NotifyDepartureArrivalAsync(
-            trip,
-            ClientEmailTemplateType.ArrivalNotification,
-            status: "Arrived",
-            cancellationToken: cancellationToken);
     }
 }

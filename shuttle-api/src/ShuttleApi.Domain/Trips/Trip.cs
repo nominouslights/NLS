@@ -257,6 +257,24 @@ public sealed class Trip : AggregateRoot<Guid>
         Status = newStatus;
     }
 
+    public void MarkStopArrived(Guid stopId)
+    {
+        Guard.Against(Status != TripStatus.EnRoute, "Trip must be en route to mark a stop as arrived.");
+        var stop = _stops.FirstOrDefault(s => s.Id == stopId)
+            ?? throw new InvalidOperationException($"Stop {stopId} not found on this trip.");
+        stop.SetArrived(DateTime.UtcNow);
+    }
+
+    public void MarkStopDeparted(Guid stopId)
+    {
+        Guard.Against(Status != TripStatus.EnRoute, "Trip must be en route to mark a stop as departed.");
+        var stop = _stops.FirstOrDefault(s => s.Id == stopId)
+            ?? throw new InvalidOperationException($"Stop {stopId} not found on this trip.");
+        var lastStop = _stops.MaxBy(s => s.SequenceOrder);
+        Guard.Against(lastStop?.Id == stopId, "Cannot depart from the final stop.");
+        stop.SetDeparted(DateTime.UtcNow);
+    }
+
     public void SubmitPreInspection(
         int odometerStart,
         FuelLevel fuelLevel,

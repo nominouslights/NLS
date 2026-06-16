@@ -64,6 +64,12 @@ abstract interface class ITripRemoteDataSource {
   Future<String> addCargoItem(AddCargoItemParams params);
 
   Future<void> removeCargoItem(String tripId, String cargoItemId);
+
+  Future<void> markStopArrived(String tripId, String stopId);
+
+  Future<void> markStopDeparted(String tripId, String stopId);
+
+  Future<void> sendArrivalNotification(String tripId);
 }
 
 class TripRemoteDataSource implements ITripRemoteDataSource {
@@ -503,6 +509,48 @@ class TripRemoteDataSource implements ITripRemoteDataSource {
       if (e.response?.statusCode == 404) throw const NotFoundException();
       throw ServerException(
         message: e.message ?? 'Failed to remove cargo',
+        statusCode: e.response?.statusCode,
+      );
+    }
+  }
+
+  @override
+  Future<void> markStopArrived(String tripId, String stopId) async {
+    try {
+      await _dio.post(ApiEndpoints.tripStopArrive(tripId, stopId));
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 401) throw const UnauthorizedException();
+      if (e.response?.statusCode == 404) throw const NotFoundException();
+      throw ServerException(
+        message: _serverMessage(e, 'Failed to mark stop as arrived'),
+        statusCode: e.response?.statusCode,
+      );
+    }
+  }
+
+  @override
+  Future<void> markStopDeparted(String tripId, String stopId) async {
+    try {
+      await _dio.post(ApiEndpoints.tripStopDepart(tripId, stopId));
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 401) throw const UnauthorizedException();
+      if (e.response?.statusCode == 404) throw const NotFoundException();
+      throw ServerException(
+        message: _serverMessage(e, 'Failed to mark stop as departed'),
+        statusCode: e.response?.statusCode,
+      );
+    }
+  }
+
+  @override
+  Future<void> sendArrivalNotification(String tripId) async {
+    try {
+      await _dio.post(ApiEndpoints.tripSendArrivalNotification(tripId));
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 401) throw const UnauthorizedException();
+      if (e.response?.statusCode == 404) throw const NotFoundException();
+      throw ServerException(
+        message: _serverMessage(e, 'Failed to send arrival notification'),
         statusCode: e.response?.statusCode,
       );
     }

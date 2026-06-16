@@ -18,6 +18,12 @@ internal sealed class UpdateTripStatusCommandHandler(
 
         trip.UpdateStatus(request.Status);
 
+        if (request.Status == TripStatus.EnRoute && trip.Stops.Count > 0)
+        {
+            var firstStop = trip.Stops.MinBy(s => s.SequenceOrder)!;
+            trip.MarkStopArrived(firstStop.Id);
+        }
+
         await tripRepository.UpdateAsync(trip, cancellationToken);
 
         if (request.Status == TripStatus.EnRoute)

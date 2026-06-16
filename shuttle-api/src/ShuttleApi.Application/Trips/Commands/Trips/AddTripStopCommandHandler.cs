@@ -16,6 +16,6 @@ internal sealed class AddTripStopCommandHandler(ITripRepository tripRepository)
 
         await tripRepository.UpdateAsync(trip, cancellationToken);
 
-        return new TripStopResult(stop.Id, stop.SequenceOrder, stop.LocationName, stop.Address);
+        return new TripStopResult(stop.Id, stop.SequenceOrder, stop.LocationName, stop.Address, null, null);
     }
 }
