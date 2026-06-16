@@ -133,7 +133,7 @@ class TripPassengerManifest extends StatelessWidget {
   }
 }
 
-class _PassengerCard extends StatelessWidget {
+class _PassengerCard extends StatefulWidget {
   final TripPassenger passenger;
   final String tripId;
   final VoidCallback onRefresh;
@@ -145,6 +145,29 @@ class _PassengerCard extends StatelessWidget {
     required this.onRefresh,
     this.readOnly = false,
   });
+
+  @override
+  State<_PassengerCard> createState() => _PassengerCardState();
+}
+
+class _PassengerCardState extends State<_PassengerCard> {
+  PassengerBoardingStatus? _optimisticStatus;
+
+  TripPassenger get passenger => widget.passenger;
+  String get tripId => widget.tripId;
+  VoidCallback get onRefresh => widget.onRefresh;
+  bool get readOnly => widget.readOnly;
+
+  PassengerBoardingStatus get _effectiveStatus =>
+      _optimisticStatus ?? passenger.boardingStatus;
+
+  @override
+  void didUpdateWidget(_PassengerCard old) {
+    super.didUpdateWidget(old);
+    if (old.passenger.boardingStatus != widget.passenger.boardingStatus) {
+      _optimisticStatus = null;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -298,7 +321,7 @@ class _PassengerCard extends StatelessWidget {
             _BoardingButton(
               icon: Icons.check_rounded,
               label: 'On',
-              active: passenger.boardingStatus == PassengerBoardingStatus.boarded,
+              active: _effectiveStatus == PassengerBoardingStatus.boarded,
               activeColor: AppColors.success,
               onTap: () => _updateBoarding(context, PassengerBoardingStatus.boarded),
             ),
@@ -306,7 +329,7 @@ class _PassengerCard extends StatelessWidget {
             _BoardingButton(
               icon: Icons.close_rounded,
               label: 'NS',
-              active: passenger.boardingStatus == PassengerBoardingStatus.noShow,
+              active: _effectiveStatus == PassengerBoardingStatus.noShow,
               activeColor: AppColors.danger,
               onTap: () => _updateBoarding(context, PassengerBoardingStatus.noShow),
             ),
@@ -551,9 +574,10 @@ class _PassengerCard extends StatelessWidget {
 
   Future<void> _updateBoarding(
       BuildContext context, PassengerBoardingStatus status) async {
-    final newStatus = passenger.boardingStatus == status
+    final newStatus = _effectiveStatus == status
         ? PassengerBoardingStatus.notBoarded
         : status;
+    setState(() => _optimisticStatus = newStatus);
     final result = await sl<UpdatePassengerBoardingStatusUseCase>()(
       UpdatePassengerBoardingStatusParams(
         tripId: tripId,
@@ -564,6 +588,7 @@ class _PassengerCard extends StatelessWidget {
     result.fold(
       (f) {
         if (context.mounted) {
+          setState(() => _optimisticStatus = null);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
                 content: Text(f.message),

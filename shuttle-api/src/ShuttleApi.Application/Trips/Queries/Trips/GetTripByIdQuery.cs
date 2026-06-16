@@ -41,6 +41,7 @@ public sealed record PassengerResult(
     string? ContactInfo,
     int? SeatNumber,
     string PaymentStatus,
+    string BoardingStatus,
     string? BookingReference,
     string? Phone,
     string? Email,
