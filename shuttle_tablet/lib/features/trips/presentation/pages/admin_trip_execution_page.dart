@@ -107,7 +107,11 @@ class _AdminTripBody extends ConsumerWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        TripStopProgress(tripId: trip.id, stops: trip.stops),
+                        TripStopProgress(
+                          tripId: trip.id,
+                          stops: trip.stops,
+                          isEnRoute: trip.status == TripStatus.enRoute,
+                        ),
                         if (trip.status == TripStatus.dispatched ||
                             (trip.serviceType == TripServiceType.charter &&
                                 trip.status != TripStatus.completed &&

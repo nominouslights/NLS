@@ -71,7 +71,7 @@ class TripStopProgress extends ConsumerWidget {
                     onArrived: isActive
                         ? () => _handleArrived(context, ref, stop)
                         : null,
-                    onDeparted: isAtStop
+                    onDeparted: isAtStop && isEnRoute
                         ? () => _handleDeparted(context, ref, stop)
                         : null,
                   ),

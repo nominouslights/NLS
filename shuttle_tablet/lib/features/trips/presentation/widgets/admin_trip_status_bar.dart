@@ -18,10 +18,7 @@ class AdminTripStatusBar extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    if (trip.status == TripStatus.completed ||
-        trip.status == TripStatus.cancelled) {
-      return const SizedBox.shrink();
-    }
+    if (trip.status == TripStatus.cancelled) return const SizedBox.shrink();
 
     final buttons = <Widget>[];
 
@@ -40,6 +37,33 @@ class AdminTripStatusBar extends ConsumerWidget {
         icon: Icons.play_arrow_rounded,
         color: AppColors.primary,
         onPressed: () => _onSetEnRoute(context, ref),
+      ));
+    }
+
+    if (trip.status == TripStatus.enRoute) {
+      final lastStop = trip.stops.isEmpty
+          ? null
+          : trip.stops.reduce(
+              (a, b) => a.sequenceOrder > b.sequenceOrder ? a : b);
+      final canComplete =
+          trip.stops.isEmpty || lastStop?.arrivedAt != null;
+      buttons.add(_ActionBtn(
+        label: 'Mark Complete',
+        icon: Icons.flag_rounded,
+        color: AppColors.success,
+        onPressed: canComplete
+            ? () => context.push('/driver/trips/${trip.id}/post-report')
+            : null,
+      ));
+    }
+
+    if (trip.status == TripStatus.completed) {
+      buttons.add(_ActionBtn(
+        label: 'Send Arrival Email',
+        icon: Icons.email_rounded,
+        color: AppColors.success,
+        outlined: true,
+        onPressed: () => _sendArrivalNotification(context, ref),
       ));
     }
 
@@ -150,6 +174,25 @@ class AdminTripStatusBar extends ConsumerWidget {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Status updated to ${_label(status)}')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$e'), backgroundColor: AppColors.danger),
+        );
+      }
+    }
+  }
+
+  Future<void> _sendArrivalNotification(
+      BuildContext context, WidgetRef ref) async {
+    try {
+      await ref.read(tripsProvider.notifier).sendArrivalNotification(trip.id);
+      onRefresh();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Arrival notification sent')),
         );
       }
     } catch (e) {
