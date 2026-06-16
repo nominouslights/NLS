@@ -7,6 +7,8 @@ class TripStopModel extends TripStop {
     required super.sequenceOrder,
     required super.locationName,
     super.address,
+    super.arrivedAt,
+    super.departedAt,
   });
 
   factory TripStopModel.fromJson(Map<String, dynamic> json) => TripStopModel(
@@ -15,6 +17,12 @@ class TripStopModel extends TripStop {
         sequenceOrder: json['sequenceOrder'] as int,
         locationName: json['locationName'] as String,
         address: json['address'] as String?,
+        arrivedAt: json['arrivedAt'] != null
+            ? DateTime.parse(json['arrivedAt'] as String)
+            : null,
+        departedAt: json['departedAt'] != null
+            ? DateTime.parse(json['departedAt'] as String)
+            : null,
       );
 
   Map<String, dynamic> toJson() => {

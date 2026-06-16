@@ -6,6 +6,9 @@ import '../../domain/usecases/delete_trip_usecase.dart';
 import '../../domain/usecases/dispatch_trip_usecase.dart';
 import '../../domain/usecases/get_trip_by_id_usecase.dart';
 import '../../domain/usecases/get_trips_usecase.dart';
+import '../../domain/usecases/mark_stop_arrived_usecase.dart';
+import '../../domain/usecases/mark_stop_departed_usecase.dart';
+import '../../domain/usecases/send_arrival_notification_usecase.dart';
 import '../../domain/usecases/update_trip_status_usecase.dart';
 
 final tripsProvider =
@@ -72,6 +75,34 @@ class TripsNotifier extends AsyncNotifier<List<Trip>> {
     );
   }
 
+  Future<void> markStopArrived(String tripId, String stopId) async {
+    final result = await sl<MarkStopArrivedUseCase>()(
+      MarkStopArrivedParams(tripId: tripId, stopId: stopId),
+    );
+    result.fold(
+      (failure) => throw Exception(failure.message),
+      (_) {},
+    );
+  }
+
+  Future<void> markStopDeparted(String tripId, String stopId) async {
+    final result = await sl<MarkStopDepartedUseCase>()(
+      MarkStopDepartedParams(tripId: tripId, stopId: stopId),
+    );
+    result.fold(
+      (failure) => throw Exception(failure.message),
+      (_) {},
+    );
+  }
+
+  Future<void> sendArrivalNotification(String tripId) async {
+    final result = await sl<SendArrivalNotificationUseCase>()(tripId);
+    result.fold(
+      (failure) => throw Exception(failure.message),
+      (_) {},
+    );
+  }
+
   Future<void> refresh() async {
     ref.invalidateSelf();
     await future;
@@ -86,10 +117,6 @@ final tripDetailProvider =
     (trip) => trip,
   );
 });
-
-// Tracks which stop index the driver is currently at during execution (client-side only).
-final currentStopIndexProvider =
-    StateProvider.family<int, String>((ref, tripId) => 0);
 
 // Accumulates delay entries logged mid-trip (client-side only, passed to post-trip report).
 final tripDelayLogsProvider =

@@ -8,6 +8,8 @@ public sealed class TripStop : Entity<Guid>
     public int SequenceOrder { get; private set; }
     public string LocationName { get; private set; } = string.Empty;
     public string? Address { get; private set; }
+    public DateTime? ArrivedAt { get; private set; }
+    public DateTime? DepartedAt { get; private set; }
 
     private TripStop() { }
 
@@ -21,6 +23,19 @@ public sealed class TripStop : Entity<Guid>
             LocationName = locationName,
             Address = address
         };
+    }
+
+    public void SetArrived(DateTime at)
+    {
+        Guard.Against(ArrivedAt is not null, "Stop has already been marked as arrived.");
+        ArrivedAt = at;
+    }
+
+    public void SetDeparted(DateTime at)
+    {
+        Guard.Against(ArrivedAt is null, "Stop must be marked as arrived before departing.");
+        Guard.Against(DepartedAt is not null, "Stop has already been marked as departed.");
+        DepartedAt = at;
     }
 
     internal void UpdateSequenceOrder(int newOrder) => SequenceOrder = newOrder;

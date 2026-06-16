@@ -78,6 +78,9 @@ import '../../features/trips/domain/usecases/send_passenger_confirmation_usecase
 import '../../features/trips/domain/usecases/send_test_confirmation_usecase.dart';
 import '../../features/trips/domain/usecases/add_stop_usecase.dart';
 import '../../features/trips/domain/usecases/send_stop_update_usecase.dart';
+import '../../features/trips/domain/usecases/mark_stop_arrived_usecase.dart';
+import '../../features/trips/domain/usecases/mark_stop_departed_usecase.dart';
+import '../../features/trips/domain/usecases/send_arrival_notification_usecase.dart';
 import '../../features/vehicles/data/datasources/vehicle_remote_datasource.dart';
 import '../../features/vehicles/data/repositories/vehicle_repository_impl.dart';
 import '../../features/vehicles/domain/repositories/i_vehicle_repository.dart';
@@ -243,6 +246,9 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton(() => SendStopUpdateUseCase(sl()));
   sl.registerLazySingleton(() => AddCargoItemUseCase(sl()));
   sl.registerLazySingleton(() => RemoveCargoItemUseCase(sl()));
+  sl.registerLazySingleton(() => MarkStopArrivedUseCase(sl()));
+  sl.registerLazySingleton(() => MarkStopDepartedUseCase(sl()));
+  sl.registerLazySingleton(() => SendArrivalNotificationUseCase(sl()));
 
   // Vehicles feature
   sl.registerLazySingleton<IVehicleRemoteDataSource>(

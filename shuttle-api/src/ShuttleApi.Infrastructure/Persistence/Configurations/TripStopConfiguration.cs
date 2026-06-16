@@ -18,6 +18,9 @@ public sealed class TripStopConfiguration : IEntityTypeConfiguration<TripStop>
         builder.Property(s => s.LocationName).HasMaxLength(300).IsRequired();
         builder.Property(s => s.Address).HasMaxLength(500);
 
+        builder.Property(s => s.ArrivedAt).IsRequired(false);
+        builder.Property(s => s.DepartedAt).IsRequired(false);
+
         builder.HasIndex(s => new { s.TripId, s.SequenceOrder }).IsUnique();
     }
 }

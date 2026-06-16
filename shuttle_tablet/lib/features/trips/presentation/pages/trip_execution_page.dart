@@ -326,9 +326,11 @@ class _StatusActionBar extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final stopIndex = ref.watch(currentStopIndexProvider(trip.id));
-    final totalStops = trip.stops.length;
-    final isLastStop = stopIndex >= totalStops - 1;
+    final lastStop = trip.stops.isEmpty
+        ? null
+        : trip.stops.reduce(
+            (a, b) => a.sequenceOrder > b.sequenceOrder ? a : b);
+    final lastStopArrived = lastStop?.arrivedAt != null;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -355,7 +357,7 @@ class _StatusActionBar extends ConsumerWidget {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: _buildButtons(context, ref, stopIndex, isLastStop),
+            children: _buildButtons(context, ref, lastStopArrived),
           ),
         ],
       ),
@@ -363,7 +365,7 @@ class _StatusActionBar extends ConsumerWidget {
   }
 
   List<Widget> _buildButtons(
-      BuildContext context, WidgetRef ref, int stopIndex, bool isLastStop) {
+      BuildContext context, WidgetRef ref, bool lastStopArrived) {
     final buttons = <Widget>[];
 
     switch (trip.status) {
@@ -400,17 +402,7 @@ class _StatusActionBar extends ConsumerWidget {
         }
 
       case TripStatus.enRoute:
-        if (!isLastStop) {
-          buttons.add(_ActionBtn(
-            label: 'Departed Stop',
-            icon: Icons.play_arrow_rounded,
-            color: AppColors.primary,
-            onPressed: () {
-              ref.read(currentStopIndexProvider(trip.id).notifier).state =
-                  stopIndex + 1;
-            },
-          ));
-        } else {
+        if (lastStopArrived) {
           buttons.add(_ActionBtn(
             label: 'Mark Complete',
             icon: Icons.flag_rounded,
@@ -435,6 +427,32 @@ class _StatusActionBar extends ConsumerWidget {
           icon: Icons.file_present_rounded,
           color: AppColors.primary,
           onPressed: () => context.push('/driver/trips/${trip.id}/post-report'),
+        ));
+        buttons.add(_ActionBtn(
+          label: 'Send Arrival Email',
+          icon: Icons.email_rounded,
+          color: AppColors.success,
+          outlined: true,
+          onPressed: () async {
+            try {
+              await ref
+                  .read(tripsProvider.notifier)
+                  .sendArrivalNotification(trip.id);
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Arrival notification sent')),
+                );
+              }
+            } catch (e) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                      content: Text('Failed: $e'),
+                      backgroundColor: AppColors.danger),
+                );
+              }
+            }
+          },
         ));
 
       case TripStatus.scheduled:
@@ -543,7 +561,11 @@ class _StopProgressSection extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
-          TripStopProgress(tripId: trip.id, stops: trip.stops),
+          TripStopProgress(
+            tripId: trip.id,
+            stops: trip.stops,
+            isEnRoute: trip.status == TripStatus.enRoute,
+          ),
         ],
       ),
     );

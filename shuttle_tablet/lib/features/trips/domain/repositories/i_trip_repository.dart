@@ -65,6 +65,12 @@ abstract interface class ITripRepository {
 
   Future<Either<Failure, void>> removeCargoItem(
       String tripId, String cargoItemId);
+
+  Future<Either<Failure, void>> markStopArrived(String tripId, String stopId);
+
+  Future<Either<Failure, void>> markStopDeparted(String tripId, String stopId);
+
+  Future<Either<Failure, void>> sendArrivalNotification(String tripId);
 }
 
 // ── Shared ──────────────────────────────────────────────────────────────────

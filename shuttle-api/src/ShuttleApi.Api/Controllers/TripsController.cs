@@ -337,6 +337,33 @@ public sealed class TripsController(ISender sender) : BaseApiController(sender)
         await Sender.Send(new RemoveCargoItemCommand(id, cargoItemId), cancellationToken);
         return NoContent();
     }
+
+    [Authorize(Policy = "DriverOrAdmin")]
+    [HttpPost]
+    [Route("api/trips/{id:guid}/stops/{stopId:guid}/arrive")]
+    public async Task<IActionResult> MarkStopArrived(Guid id, Guid stopId, CancellationToken cancellationToken)
+    {
+        await Sender.Send(new MarkStopArrivedCommand(id, stopId), cancellationToken);
+        return NoContent();
+    }
+
+    [Authorize(Policy = "DriverOrAdmin")]
+    [HttpPost]
+    [Route("api/trips/{id:guid}/stops/{stopId:guid}/depart")]
+    public async Task<IActionResult> MarkStopDeparted(Guid id, Guid stopId, CancellationToken cancellationToken)
+    {
+        await Sender.Send(new MarkStopDepartedCommand(id, stopId), cancellationToken);
+        return NoContent();
+    }
+
+    [Authorize(Policy = "DriverOrAdmin")]
+    [HttpPost]
+    [Route("api/trips/{id:guid}/send-arrival-notification")]
+    public async Task<IActionResult> SendArrivalNotification(Guid id, CancellationToken cancellationToken)
+    {
+        await Sender.Send(new SendArrivalNotificationCommand(id), cancellationToken);
+        return NoContent();
+    }
 }
 
 public sealed record CreateTripRequest(

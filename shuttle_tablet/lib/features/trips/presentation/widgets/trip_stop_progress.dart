@@ -7,36 +7,48 @@ import '../providers/trips_provider.dart';
 class TripStopProgress extends ConsumerWidget {
   final String tripId;
   final List<TripStop> stops;
+  final bool isEnRoute;
 
   const TripStopProgress({
     super.key,
     required this.tripId,
     required this.stops,
+    this.isEnRoute = false,
   });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final currentIndex = ref.watch(currentStopIndexProvider(tripId));
     final sorted = [...stops]..sort((a, b) => a.sequenceOrder.compareTo(b.sequenceOrder));
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: List.generate(sorted.length, (i) {
         final stop = sorted[i];
-        final isDone = i < currentIndex;
-        final isCurrent = i == currentIndex;
         final isLast = i == sorted.length - 1;
+
+        final bool isDone;
+        final bool isAtStop;
+        final bool isActive;
+
+        if (isLast) {
+          isDone = stop.arrivedAt != null;
+          isAtStop = false;
+          isActive = !isDone && isEnRoute && _allPriorDone(sorted, i);
+        } else {
+          isDone = stop.departedAt != null;
+          isAtStop = stop.arrivedAt != null && stop.departedAt == null;
+          isActive = stop.arrivedAt == null && isEnRoute && _allPriorDone(sorted, i);
+        }
 
         return IntrinsicHeight(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Timeline column
               SizedBox(
                 width: 32,
                 child: Column(
                   children: [
-                    _StopDot(isDone: isDone, isCurrent: isCurrent, isLast: isLast),
+                    _StopDot(isDone: isDone, isCurrent: isAtStop || isActive, isLast: isLast),
                     if (!isLast)
                       Expanded(
                         child: Container(
@@ -48,18 +60,19 @@ class TripStopProgress extends ConsumerWidget {
                 ),
               ),
               const SizedBox(width: 12),
-              // Stop details
               Expanded(
                 child: Padding(
                   padding: EdgeInsets.only(bottom: isLast ? 0 : 16),
                   child: _StopCard(
                     stop: stop,
                     isDone: isDone,
-                    isCurrent: isCurrent,
-                    onArrived: isCurrent
-                        ? () => ref
-                            .read(currentStopIndexProvider(tripId).notifier)
-                            .state = currentIndex + 1
+                    isAtStop: isAtStop,
+                    isActive: isActive,
+                    onArrived: isActive
+                        ? () => _handleArrived(context, ref, stop)
+                        : null,
+                    onDeparted: isAtStop
+                        ? () => _handleDeparted(context, ref, stop)
                         : null,
                   ),
                 ),
@@ -69,6 +82,51 @@ class TripStopProgress extends ConsumerWidget {
         );
       }),
     );
+  }
+
+  static bool _allPriorDone(List<TripStop> sorted, int i) {
+    if (i == 0) return true;
+    for (int j = 0; j < i; j++) {
+      final prior = sorted[j];
+      final priorIsLast = j == sorted.length - 1;
+      final done = priorIsLast ? prior.arrivedAt != null : prior.departedAt != null;
+      if (!done) return false;
+    }
+    return true;
+  }
+
+  Future<void> _handleArrived(
+      BuildContext context, WidgetRef ref, TripStop stop) async {
+    try {
+      await ref.read(tripsProvider.notifier).markStopArrived(tripId, stop.id);
+      ref.invalidate(tripDetailProvider(tripId));
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to mark arrived: $e'),
+            backgroundColor: AppColors.danger,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _handleDeparted(
+      BuildContext context, WidgetRef ref, TripStop stop) async {
+    try {
+      await ref.read(tripsProvider.notifier).markStopDeparted(tripId, stop.id);
+      ref.invalidate(tripDetailProvider(tripId));
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to mark departed: $e'),
+            backgroundColor: AppColors.danger,
+          ),
+        );
+      }
+    }
   }
 }
 
@@ -125,18 +183,23 @@ class _StopDot extends StatelessWidget {
 class _StopCard extends StatelessWidget {
   final TripStop stop;
   final bool isDone;
-  final bool isCurrent;
+  final bool isAtStop;
+  final bool isActive;
   final VoidCallback? onArrived;
+  final VoidCallback? onDeparted;
 
   const _StopCard({
     required this.stop,
     required this.isDone,
-    required this.isCurrent,
+    required this.isAtStop,
+    required this.isActive,
     this.onArrived,
+    this.onDeparted,
   });
 
   @override
   Widget build(BuildContext context) {
+    final isCurrent = isAtStop || isActive;
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -189,20 +252,30 @@ class _StopCard extends StatelessWidget {
               ],
             ),
           ),
-          if (isCurrent && onArrived != null)
+          if (isActive && onArrived != null)
             FilledButton.icon(
               onPressed: onArrived,
-              icon: const Icon(Icons.check_rounded, size: 14),
+              icon: const Icon(Icons.location_on_rounded, size: 14),
               label: const Text('Arrived'),
               style: FilledButton.styleFrom(
-                backgroundColor: AppColors.success,
+                backgroundColor: AppColors.primary,
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+              ),
+            ),
+          if (isAtStop && onDeparted != null)
+            FilledButton.icon(
+              onPressed: onDeparted,
+              icon: const Icon(Icons.play_arrow_rounded, size: 14),
+              label: const Text('Departed'),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.warning,
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
               ),
             ),
           if (isDone)
-            const Icon(Icons.check_circle_rounded,
-                color: AppColors.success, size: 20),
+            const Icon(Icons.check_circle_rounded, color: AppColors.success, size: 20),
         ],
       ),
     );
