@@ -1,9 +1,11 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.OpenApi.Models;
 using Serilog;
 using ShuttleApi.Api.Middleware;
 using ShuttleApi.Application;
 using ShuttleApi.Infrastructure;
+using ShuttleApi.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -49,6 +51,13 @@ builder.Services.AddHealthChecks()
 var app = builder.Build();
 
 var startupLogger = app.Services.GetRequiredService<ILogger<Program>>();
+
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    await db.Database.MigrateAsync();
+}
+
 await ShuttleApi.Infrastructure.Persistence.Seeder.DevDataSeeder.SeedAsync(app.Services, startupLogger);
 
 app.UseMiddleware<ExceptionHandlingMiddleware>();

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../domain/entities/trip.dart';
+import '../../domain/entities/trip_stop.dart';
 import '../providers/trip_form_provider.dart';
 import '../providers/trips_provider.dart';
 
@@ -41,10 +42,11 @@ class AdminTripStatusBar extends ConsumerWidget {
     }
 
     if (trip.status == TripStatus.enRoute) {
-      final lastStop = trip.stops.isEmpty
-          ? null
-          : trip.stops.reduce(
-              (a, b) => a.sequenceOrder > b.sequenceOrder ? a : b);
+      final lastStop = trip.stops.fold<TripStop?>(
+        null,
+        (prev, s) =>
+            prev == null || s.sequenceOrder > prev.sequenceOrder ? s : prev,
+      );
       final canComplete =
           trip.stops.isEmpty || lastStop?.arrivedAt != null;
       buttons.add(_ActionBtn(

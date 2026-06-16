@@ -125,6 +125,7 @@ class _SavedLocationsPageState extends ConsumerState<SavedLocationsPage> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'locations_fab',
         onPressed: () => _openForm(context, null),
         backgroundColor: AppColors.primary,
         icon: const Icon(Icons.add_rounded),
