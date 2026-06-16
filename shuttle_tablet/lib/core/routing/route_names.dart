@@ -10,7 +10,6 @@ class RouteNames {
   static const String tripView = '/trips/:id/view';
   static const String tripManifestNew = '/trips/new';
   static const String tripManifestEdit = '/trips/:id/edit';
-  static const String driverTrip = '/driver/trips/:id';
   static const String preTripInspection = '/driver/trips/:id/pre-inspection';
   static const String postTripReport = '/driver/trips/:id/post-report';
   static const String drivers = '/drivers';
