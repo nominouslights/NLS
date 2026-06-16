@@ -20,6 +20,7 @@ internal sealed class GetPassengersQueryHandler(ITripRepository tripRepository)
                 p.ContactInfo,
                 p.SeatNumber,
                 p.PaymentStatus.ToString(),
+                p.BoardingStatus.ToString(),
                 p.BookingReference,
                 p.Phone,
                 p.Email,

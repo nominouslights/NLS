@@ -18,7 +18,7 @@ import '../../features/trips/presentation/pages/trips_page.dart';
 import '../../features/trips/presentation/pages/trip_manifest_form_page.dart';
 import '../../features/trips/presentation/pages/trip_manifest_edit_page.dart';
 import '../../features/trips/presentation/pages/admin_trip_execution_page.dart';
-import '../../features/trips/presentation/pages/driver_trip_page.dart';
+import '../../features/trips/presentation/pages/trip_execution_page.dart';
 import '../../features/trips/presentation/pages/pre_trip_inspection_page.dart';
 import '../../features/trips/presentation/pages/post_trip_report_page.dart';
 import '../../features/trips/domain/entities/delay_entry.dart';
@@ -95,7 +95,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: RouteNames.driverTrip,
         builder: (_, state) {
           final id = state.pathParameters['id']!;
-          return DriverTripPage(tripId: id);
+          return TripExecutionPage(tripId: id);
         },
       ),
       GoRoute(

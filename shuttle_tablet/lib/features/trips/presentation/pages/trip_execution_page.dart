@@ -13,9 +13,9 @@ import '../widgets/trip_status_badge.dart';
 import '../widgets/trip_stop_progress.dart';
 import '../widgets/trip_delay_dialog.dart';
 
-class DriverTripPage extends ConsumerWidget {
+class TripExecutionPage extends ConsumerWidget {
   final String tripId;
-  const DriverTripPage({super.key, required this.tripId});
+  const TripExecutionPage({super.key, required this.tripId});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -632,7 +632,44 @@ class _PassengerRow extends StatelessWidget {
               ],
             ),
           ),
+          if (passenger.boardingStatus != PassengerBoardingStatus.notBoarded) ...[
+            _BoardingBadge(passenger.boardingStatus),
+            const SizedBox(width: 6),
+          ],
           _PayBadge(passenger.paymentStatus),
+        ],
+      ),
+    );
+  }
+}
+
+class _BoardingBadge extends StatelessWidget {
+  final PassengerBoardingStatus status;
+  const _BoardingBadge(this.status);
+
+  @override
+  Widget build(BuildContext context) {
+    final isBoarded = status == PassengerBoardingStatus.boarded;
+    final color = isBoarded ? AppColors.success : AppColors.danger;
+    final icon = isBoarded ? Icons.check_rounded : Icons.close_rounded;
+    final label = isBoarded ? 'On' : 'NS';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 3),
+          Text(
+            label,
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: color),
+          ),
         ],
       ),
     );
