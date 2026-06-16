@@ -113,6 +113,7 @@ class _DriversListPageState extends ConsumerState<DriversListPage> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'drivers_fab',
         onPressed: () => _openForm(context, null),
         backgroundColor: AppColors.primary,
         icon: const Icon(Icons.add_rounded),

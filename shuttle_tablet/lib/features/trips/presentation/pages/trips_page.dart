@@ -153,6 +153,7 @@ class _TripsPageState extends ConsumerState<TripsPage> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'trips_fab',
         onPressed: () async {
           String? initialClientId;
           if (_selectedTripId != null) {

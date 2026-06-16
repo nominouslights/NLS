@@ -1798,6 +1798,7 @@ class _FuelLogTabState extends ConsumerState<_FuelLogTab> {
         },
       ),
       floatingActionButton: FloatingActionButton.small(
+        heroTag: 'vehicle_detail_fab',
         onPressed: () => _showAddSheet(context),
         backgroundColor: AppColors.primary,
         child: const Icon(Icons.add),

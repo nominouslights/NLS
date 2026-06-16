@@ -129,6 +129,7 @@ class _VehiclesListPageState extends ConsumerState<VehiclesListPage> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'vehicles_fab',
         onPressed: () => _openForm(context, null),
         backgroundColor: AppColors.primary,
         icon: const Icon(Icons.add_rounded),
