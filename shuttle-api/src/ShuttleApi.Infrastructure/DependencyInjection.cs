@@ -3,9 +3,11 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using ShuttleApi.Application.Common.Interfaces;
 using ShuttleApi.Application.Services;
+using ShuttleApi.Domain.Billing;
 using ShuttleApi.Domain.CommunityCalendar;
 using ShuttleApi.Infrastructure.Auth;
 using ShuttleApi.Infrastructure.Notifications;
@@ -48,6 +50,7 @@ public static class DependencyInjection
         services.AddScoped<ISavedLocationRepository, SavedLocationRepository>();
         services.AddScoped<IPassengerProfileRepository, PassengerProfileRepository>();
         services.AddScoped<ICommunityCalendarBlockRepository, CommunityCalendarBlockRepository>();
+        services.AddScoped<IInvoiceRepository, InvoiceRepository>();
         services.Configure<SpacesSettings>(configuration.GetSection(SpacesSettings.SectionName));
         var spacesSettings = configuration.GetSection(SpacesSettings.SectionName).Get<SpacesSettings>()
             ?? new SpacesSettings();
@@ -60,20 +63,22 @@ public static class DependencyInjection
         services.AddScoped<INotificationService, PostmarkNotificationService>();
         services.AddHostedService<CutoffProcessorHostedService>();
 
-        var jwtSettings = configuration.GetSection(JwtSettings.SectionName).Get<JwtSettings>()!;
-
         services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-            .AddJwtBearer(opts =>
+            .AddJwtBearer();
+
+        services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
+            .Configure<IOptions<JwtSettings>>((bearerOpts, jwtOptionsAccessor) =>
             {
-                opts.TokenValidationParameters = new TokenValidationParameters
+                var s = jwtOptionsAccessor.Value;
+                bearerOpts.TokenValidationParameters = new TokenValidationParameters
                 {
                     ValidateIssuer = true,
                     ValidateAudience = true,
                     ValidateLifetime = true,
                     ValidateIssuerSigningKey = true,
-                    ValidIssuer = jwtSettings.Issuer,
-                    ValidAudience = jwtSettings.Audience,
-                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings.Secret)),
+                    ValidIssuer = s.Issuer,
+                    ValidAudience = s.Audience,
+                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(s.Secret)),
                     ClockSkew = TimeSpan.Zero
                 };
             });

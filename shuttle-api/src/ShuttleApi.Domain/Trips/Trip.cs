@@ -230,8 +230,8 @@ public sealed class Trip : AggregateRoot<Guid>
         Guard.Against(VehicleId is null, "A vehicle must be assigned before dispatching.");
         Guard.Against(Status != TripStatus.Scheduled, "Only scheduled trips can be dispatched.");
         Guard.Against(
-            !IsDeadhead && !HasManifest,
-            "A trip must have at least one passenger or cargo item before dispatching. Mark the trip as a deadhead trip to dispatch without a manifest.");
+            !IsDeadhead && Passengers.Count == 0,
+            "A trip must have at least one passenger on the manifest before dispatching, or be marked as a deadhead trip.");
 
         Status = TripStatus.Dispatched;
         RaiseDomainEvent(new TripDispatchedEvent(Id, DriverId!.Value));

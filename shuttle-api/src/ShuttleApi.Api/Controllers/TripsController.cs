@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ShuttleApi.Application.Billing;
 using ShuttleApi.Application.Common.Mediator;
 using ShuttleApi.Application.Trips;
 using ShuttleApi.Domain.Trips;
@@ -9,6 +10,14 @@ namespace ShuttleApi.Api.Controllers;
 [Authorize]
 public sealed class TripsController(ISender sender) : BaseApiController(sender)
 {
+    [Authorize(Policy = "AdminOnly")]
+    [HttpGet]
+    [Route("api/trips/billing-ready")]
+    public async Task<IActionResult> GetBillingReadyTrips(
+        [FromQuery] Guid clientId,
+        CancellationToken cancellationToken) =>
+        Ok(await Sender.Send(new ListBillingReadyTripsQuery(clientId), cancellationToken));
+
     [Authorize(Policy = "AdminOnly")]
     [HttpGet]
     [Route("api/trips/archived")]

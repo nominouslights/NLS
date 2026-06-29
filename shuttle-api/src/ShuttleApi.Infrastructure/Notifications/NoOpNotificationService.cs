@@ -3,7 +3,7 @@ using ShuttleApi.Application.Common.Interfaces;
 
 namespace ShuttleApi.Infrastructure.Notifications;
 
-internal sealed class NoOpNotificationService(ILogger<NoOpNotificationService> logger)
+public sealed class NoOpNotificationService(ILogger<NoOpNotificationService> logger)
     : INotificationService
 {
     public Task SendSmsAsync(string phone, string message, CancellationToken cancellationToken = default)

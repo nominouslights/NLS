@@ -46,6 +46,12 @@ public sealed class ExceptionHandlingMiddleware(RequestDelegate next, ILogger<Ex
                 error = "A record with the same unique value already exists."
             }));
         }
+        catch (InvalidOperationException ex)
+        {
+            context.Response.StatusCode = StatusCodes.Status409Conflict;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(JsonSerializer.Serialize(new { error = ex.Message }));
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "Unhandled exception");

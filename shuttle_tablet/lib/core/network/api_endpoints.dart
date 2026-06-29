@@ -88,6 +88,19 @@ class ApiEndpoints {
   static String purchaseOrderById(String clientId, String id) =>
       '/clients/$clientId/purchase-orders/$id';
 
+  static String clientBillingRates(String clientId) => '/clients/$clientId/billing-rates';
+
+  static const String invoices = '/invoices';
+  static String invoiceById(String id) => '/invoices/$id';
+  static String invoiceSend(String id) => '/invoices/$id/send';
+  static String invoicePaid(String id) => '/invoices/$id/paid';
+  static String invoiceVoid(String id) => '/invoices/$id/void';
+  static String billingReadyTrips(String clientId) =>
+      '/trips/billing-ready?clientId=$clientId';
+  static String invoicesByClient(String clientId) => '/invoices?clientId=$clientId';
+  static String invoicesByClientFiltered(String clientId, String status) =>
+      '/invoices?clientId=$clientId&status=$status';
+
   static const String pendingUsers = '/users/pending';
   static String approveUser(String id) => '/users/$id/approve';
   static String rejectUser(String id) => '/users/$id/reject';

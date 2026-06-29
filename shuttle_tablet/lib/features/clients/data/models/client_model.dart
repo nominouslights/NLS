@@ -31,6 +31,9 @@ class ClientModel extends Client {
     super.tripDepartureArrivalEmails = const [],
     super.passengerBookingEmails = const [],
     super.apiSupportsNotificationEmails = false,
+    super.runRateOneWay,
+    super.runRateRoundTrip,
+    super.cargoRatePerKg,
   }) : super(activeContract: activeContract);
 
   factory ClientModel.fromJson(Map<String, dynamic> json) {
@@ -76,6 +79,9 @@ class ClientModel extends Client {
       passengerBookingEmails: _parseEmailList(json['passengerBookingEmails'] ??
           json['PassengerBookingEmails']),
       apiSupportsNotificationEmails: supportsNotificationEmails,
+      runRateOneWay: (json['runRateOneWay'] as num?)?.toDouble(),
+      runRateRoundTrip: (json['runRateRoundTrip'] as num?)?.toDouble(),
+      cargoRatePerKg: (json['cargoRatePerKg'] as num?)?.toDouble(),
     );
   }
 

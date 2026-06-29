@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using ShuttleApi.Application.Common.Interfaces;
+using ShuttleApi.Domain.Billing;
 using ShuttleApi.Domain.Clients;
 using ShuttleApi.Domain.Common;
 using ShuttleApi.Domain.CommunityCalendar;
@@ -45,6 +46,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<PassengerProfile> PassengerProfiles => Set<PassengerProfile>();
     public DbSet<SavedLocation> SavedLocations => Set<SavedLocation>();
     public DbSet<CommunityCalendarBlock> CommunityCalendarBlocks => Set<CommunityCalendarBlock>();
+    public DbSet<Invoice> Invoices => Set<Invoice>();
+    public DbSet<InvoiceLineItem> InvoiceLineItems => Set<InvoiceLineItem>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

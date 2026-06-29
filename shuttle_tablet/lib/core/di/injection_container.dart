@@ -34,6 +34,17 @@ import '../../features/clients/domain/usecases/get_rate_lines_by_client_usecase.
 import '../../features/clients/domain/usecases/get_client_email_templates_usecase.dart';
 import '../../features/clients/domain/usecases/upsert_client_email_template_usecase.dart';
 import '../../features/clients/domain/usecases/update_client_usecase.dart';
+import '../../features/clients/data/datasources/invoice_remote_datasource.dart';
+import '../../features/clients/data/repositories/invoice_repository_impl.dart';
+import '../../features/clients/domain/repositories/i_invoice_repository.dart';
+import '../../features/clients/domain/usecases/get_invoices_by_client_usecase.dart';
+import '../../features/clients/domain/usecases/get_invoice_by_id_usecase.dart';
+import '../../features/clients/domain/usecases/create_invoice_usecase.dart';
+import '../../features/clients/domain/usecases/mark_invoice_sent_usecase.dart';
+import '../../features/clients/domain/usecases/mark_invoice_paid_usecase.dart';
+import '../../features/clients/domain/usecases/void_invoice_usecase.dart';
+import '../../features/clients/domain/usecases/get_billing_ready_trips_usecase.dart';
+import '../../features/clients/domain/usecases/update_client_billing_rates_usecase.dart';
 import '../../features/users/domain/usecases/approve_user_usecase.dart';
 import '../../features/users/domain/usecases/get_pending_users_usecase.dart';
 import '../../features/users/domain/usecases/reject_user_usecase.dart';
@@ -195,6 +206,20 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton(() => GetPurchaseOrderByIdUseCase(sl()));
   sl.registerLazySingleton(() => CreatePurchaseOrderUseCase(sl()));
   sl.registerLazySingleton(() => UpdatePurchaseOrderUseCase(sl()));
+  sl.registerLazySingleton<IInvoiceRemoteDataSource>(
+    () => InvoiceRemoteDataSource(sl()),
+  );
+  sl.registerLazySingleton<IInvoiceRepository>(
+    () => InvoiceRepositoryImpl(sl()),
+  );
+  sl.registerLazySingleton(() => GetInvoicesByClientUseCase(sl()));
+  sl.registerLazySingleton(() => GetInvoiceByIdUseCase(sl()));
+  sl.registerLazySingleton(() => CreateInvoiceUseCase(sl()));
+  sl.registerLazySingleton(() => MarkInvoiceSentUseCase(sl()));
+  sl.registerLazySingleton(() => MarkInvoicePaidUseCase(sl()));
+  sl.registerLazySingleton(() => VoidInvoiceUseCase(sl()));
+  sl.registerLazySingleton(() => GetBillingReadyTripsUseCase(sl()));
+  sl.registerLazySingleton(() => UpdateClientBillingRatesUseCase(sl()));
 
   // Drivers feature
   sl.registerLazySingleton<IDriverRemoteDataSource>(

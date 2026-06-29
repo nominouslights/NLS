@@ -35,6 +35,9 @@ public sealed class ClientConfiguration : IEntityTypeConfiguration<Client>
         builder.Property(c => c.CreatedAt).IsRequired();
         builder.Property(c => c.Industry).HasMaxLength(200);
         builder.Property(c => c.ProjectSite).HasMaxLength(200);
+        builder.Property(c => c.RunRateOneWay).HasPrecision(18, 2);
+        builder.Property(c => c.RunRateRoundTrip).HasPrecision(18, 2);
+        builder.Property(c => c.CargoRatePerKg).HasPrecision(18, 4);
 
         builder.HasMany(c => c.NotificationEmails)
             .WithOne()

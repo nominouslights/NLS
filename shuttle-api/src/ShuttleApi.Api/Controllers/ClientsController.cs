@@ -138,6 +138,20 @@ public sealed class ClientsController(ISender sender) : BaseApiController(sender
         return NoContent();
     }
 
+    [Authorize(Policy = "AdminOnly")]
+    [HttpPut]
+    [Route("api/clients/{id:guid}/billing-rates")]
+    public async Task<IActionResult> UpdateBillingRates(
+        Guid id,
+        [FromBody] UpdateBillingRatesRequest request,
+        CancellationToken cancellationToken)
+    {
+        await Sender.Send(
+            new UpdateClientBillingRatesCommand(id, request.RunRateOneWay, request.RunRateRoundTrip, request.CargoRatePerKg),
+            cancellationToken);
+        return NoContent();
+    }
+
     [HttpGet]
     [Route("api/clients/{clientId:guid}/purchase-orders")]
     public async Task<IActionResult> GetPurchaseOrders(Guid clientId, CancellationToken cancellationToken) =>
@@ -229,3 +243,8 @@ public sealed record UpsertPurchaseOrderRequest(
     string? Details,
     IReadOnlyList<PurchaseOrderLineItemDto> LineItems,
     IReadOnlyList<Guid>? ContractIds);
+
+public sealed record UpdateBillingRatesRequest(
+    decimal? RunRateOneWay,
+    decimal? RunRateRoundTrip,
+    decimal? CargoRatePerKg);

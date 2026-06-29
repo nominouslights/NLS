@@ -5,4 +5,7 @@
     <Project Path="src/ShuttleApi.Domain/ShuttleApi.Domain.csproj" />
     <Project Path="src/ShuttleApi.Infrastructure/ShuttleApi.Infrastructure.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ShuttleApi.IntegrationTests/ShuttleApi.IntegrationTests.csproj" />
+  </Folder>
 </Solution>

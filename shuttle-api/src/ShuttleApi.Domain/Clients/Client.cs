@@ -26,6 +26,9 @@ public sealed class Client : AggregateRoot<Guid>
     public DateTime CreatedAt { get; private set; }
     public string? Industry { get; private set; }
     public string? ProjectSite { get; private set; }
+    public decimal? RunRateOneWay { get; private set; }
+    public decimal? RunRateRoundTrip { get; private set; }
+    public decimal? CargoRatePerKg { get; private set; }
     public IReadOnlyList<ClientNotificationEmail> NotificationEmails => _notificationEmails.AsReadOnly();
 
     private Client() { }
@@ -111,6 +114,13 @@ public sealed class Client : AggregateRoot<Guid>
         IsMinesite = isMinesite;
         Industry = industry;
         ProjectSite = projectSite;
+    }
+
+    public void UpdateBillingRates(decimal? oneWay, decimal? roundTrip, decimal? cargoPerKg)
+    {
+        RunRateOneWay = oneWay;
+        RunRateRoundTrip = roundTrip;
+        CargoRatePerKg = cargoPerKg;
     }
 
     public void Deactivate() => IsActive = false;

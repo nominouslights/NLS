@@ -3,6 +3,7 @@ using ShuttleApi.Application.Common.Behaviors;
 using ShuttleApi.Application.Common.Interfaces;
 using ShuttleApi.Application.Common.Mediator;
 using ShuttleApi.Application.Common.Services;
+using ShuttleApi.Application.Trips.Services;
 
 namespace ShuttleApi.Application;
 
@@ -18,6 +19,7 @@ public static class DependencyInjection
 
         services.AddScoped<IEmailTemplateRenderer, EmailTemplateRenderer>();
         services.AddScoped<IClientTripNotifier, ClientTripNotifier>();
+        services.AddScoped<IDispatchConfirmationSender, DispatchConfirmationSender>();
 
         return services;
     }

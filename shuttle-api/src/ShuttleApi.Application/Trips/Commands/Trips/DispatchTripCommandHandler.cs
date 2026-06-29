@@ -1,10 +1,13 @@
+using ShuttleApi.Application.Common.Interfaces;
 using ShuttleApi.Application.Common.Mediator;
 using ShuttleApi.Domain.Common;
 using ShuttleApi.Domain.Trips;
 
 namespace ShuttleApi.Application.Trips;
 
-internal sealed class DispatchTripCommandHandler(ITripRepository tripRepository)
+internal sealed class DispatchTripCommandHandler(
+    ITripRepository tripRepository,
+    IDispatchConfirmationSender confirmationSender)
     : IRequestHandler<DispatchTripCommand>
 {
     public async Task Handle(DispatchTripCommand request, CancellationToken cancellationToken)
@@ -15,5 +18,7 @@ internal sealed class DispatchTripCommandHandler(ITripRepository tripRepository)
         trip.Dispatch();
 
         await tripRepository.UpdateAsync(trip, cancellationToken);
+
+        await confirmationSender.SendAllAsync(trip, cancellationToken);
     }
 }

@@ -35,6 +35,11 @@ class Client extends Equatable {
   /// True when GET /api/clients/{id} includes notification email fields.
   final bool apiSupportsNotificationEmails;
 
+  /// Billing rates — populated from GET /api/clients/{id}.
+  final double? runRateOneWay;
+  final double? runRateRoundTrip;
+  final double? cargoRatePerKg;
+
   const Client({
     required this.id,
     required this.businessName,
@@ -64,6 +69,9 @@ class Client extends Equatable {
     this.tripDepartureArrivalEmails = const [],
     this.passengerBookingEmails = const [],
     this.apiSupportsNotificationEmails = false,
+    this.runRateOneWay,
+    this.runRateRoundTrip,
+    this.cargoRatePerKg,
   });
 
   @override
@@ -72,5 +80,5 @@ class Client extends Equatable {
     netPaymentTerms, outstandingBalance, complianceNotes, isMinesite, isActive, createdAt,
     activeContract, activeContractEndDate, listItemIsExpiringSoon, industry, projectSite,
     notificationEmails, tripDepartureArrivalEmails, passengerBookingEmails,
-    apiSupportsNotificationEmails];
+    apiSupportsNotificationEmails, runRateOneWay, runRateRoundTrip, cargoRatePerKg];
 }

@@ -12,6 +12,7 @@ import '../providers/client_form_provider.dart';
 import '../providers/clients_provider.dart';
 import '../providers/contracts_provider.dart';
 import '../widgets/client_email_templates_section.dart';
+import '../widgets/client_invoices_section.dart';
 import '../widgets/client_purchase_orders_section.dart';
 
 const _kAmber = Color(0xFFE8A020);
@@ -81,9 +82,17 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
   void dispose() {
     _tabController.dispose();
     for (final c in [
-      _gstHstCtrl, _contactNameCtrl, _contactTitleCtrl, _phoneCtrl,
-      _emailCtrl, _streetCtrl, _cityCtrl, _postalCtrl,
-      _industryCtrl, _projectSiteCtrl, _complianceCtrl,
+      _gstHstCtrl,
+      _contactNameCtrl,
+      _contactTitleCtrl,
+      _phoneCtrl,
+      _emailCtrl,
+      _streetCtrl,
+      _cityCtrl,
+      _postalCtrl,
+      _industryCtrl,
+      _projectSiteCtrl,
+      _complianceCtrl,
     ]) {
       c.dispose();
     }
@@ -108,9 +117,10 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
     _preferredPaymentMethod = client.preferredPaymentMethod;
     _isMinesite = client.isMinesite;
     _isActive = client.isActive;
-    _province = ['MB', 'SK', 'ON', 'AB', 'BC', 'QC'].contains(client.province)
-        ? client.province
-        : 'MB';
+    _province =
+        ['MB', 'SK', 'ON', 'AB', 'BC', 'QC'].contains(client.province)
+            ? client.province
+            : 'MB';
     _notificationEmails = List.from(client.notificationEmails);
     _tripDepartureArrivalEmails = List.from(client.tripDepartureArrivalEmails);
     _passengerBookingEmails = List.from(client.passengerBookingEmails);
@@ -121,50 +131,57 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
     if (_original == null) return;
 
     final apiUnsupported = !_original!.apiSupportsNotificationEmails;
-    final hasNotificationEmails = _notificationEmails.isNotEmpty ||
+    final hasNotificationEmails =
+        _notificationEmails.isNotEmpty ||
         _tripDepartureArrivalEmails.isNotEmpty ||
         _passengerBookingEmails.isNotEmpty;
     final omitNotificationEmails = apiUnsupported && hasNotificationEmails;
 
     setState(() => _isSaving = true);
     try {
-      await ref.read(clientFormProvider.notifier).updateClient(
-        widget.clientId,
-        UpdateClientParams(
-          businessName: _original!.businessName,
-          serviceType: _serviceType,
-          primaryContactName: _contactNameCtrl.text.trim(),
-          primaryContactTitle: _contactTitleCtrl.text.trim(),
-          phone: _phoneCtrl.text.trim(),
-          email: _emailCtrl.text.trim(),
-          streetAddress: _streetCtrl.text.trim(),
-          city: _cityCtrl.text.trim(),
-          province: _province,
-          postalCode: _postalCtrl.text.trim().toUpperCase(),
-          gstHstNumber:
-              _gstHstCtrl.text.trim().isEmpty ? null : _gstHstCtrl.text.trim(),
-          preferredPaymentMethod: _preferredPaymentMethod,
-          netPaymentTerms: _netPaymentTerms,
-          complianceNotes: _complianceCtrl.text.trim().isEmpty
-              ? null
-              : _complianceCtrl.text.trim(),
-          isMinesite: _isMinesite,
-          isActive: _isActive,
-          industry: _industryCtrl.text.trim().isEmpty
-              ? null
-              : _industryCtrl.text.trim(),
-          projectSite: _projectSiteCtrl.text.trim().isEmpty
-              ? null
-              : _projectSiteCtrl.text.trim(),
-          notificationEmails:
-              omitNotificationEmails ? null : _notificationEmails,
-          tripDepartureArrivalEmails: omitNotificationEmails
-              ? null
-              : _tripDepartureArrivalEmails,
-          passengerBookingEmails:
-              omitNotificationEmails ? null : _passengerBookingEmails,
-        ),
-      );
+      await ref
+          .read(clientFormProvider.notifier)
+          .updateClient(
+            widget.clientId,
+            UpdateClientParams(
+              businessName: _original!.businessName,
+              serviceType: _serviceType,
+              primaryContactName: _contactNameCtrl.text.trim(),
+              primaryContactTitle: _contactTitleCtrl.text.trim(),
+              phone: _phoneCtrl.text.trim(),
+              email: _emailCtrl.text.trim(),
+              streetAddress: _streetCtrl.text.trim(),
+              city: _cityCtrl.text.trim(),
+              province: _province,
+              postalCode: _postalCtrl.text.trim().toUpperCase(),
+              gstHstNumber:
+                  _gstHstCtrl.text.trim().isEmpty
+                      ? null
+                      : _gstHstCtrl.text.trim(),
+              preferredPaymentMethod: _preferredPaymentMethod,
+              netPaymentTerms: _netPaymentTerms,
+              complianceNotes:
+                  _complianceCtrl.text.trim().isEmpty
+                      ? null
+                      : _complianceCtrl.text.trim(),
+              isMinesite: _isMinesite,
+              isActive: _isActive,
+              industry:
+                  _industryCtrl.text.trim().isEmpty
+                      ? null
+                      : _industryCtrl.text.trim(),
+              projectSite:
+                  _projectSiteCtrl.text.trim().isEmpty
+                      ? null
+                      : _projectSiteCtrl.text.trim(),
+              notificationEmails:
+                  omitNotificationEmails ? null : _notificationEmails,
+              tripDepartureArrivalEmails:
+                  omitNotificationEmails ? null : _tripDepartureArrivalEmails,
+              passengerBookingEmails:
+                  omitNotificationEmails ? null : _passengerBookingEmails,
+            ),
+          );
       ref.invalidate(clientDetailProvider(widget.clientId));
       ref.invalidate(clientsProvider);
       if (mounted) {
@@ -191,7 +208,10 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
       if (mounted) {
         setState(() => _isSaving = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to save: $e'), backgroundColor: AppColors.danger),
+          SnackBar(
+            content: Text('Failed to save: $e'),
+            backgroundColor: AppColors.danger,
+          ),
         );
       }
     }
@@ -210,21 +230,32 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
           Expanded(
             child: clientAsync.when(
               loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.error_outline_rounded, size: 48, color: AppColors.brandGray),
-                    const SizedBox(height: 12),
-                    Text('Error: $e', style: const TextStyle(color: AppColors.brandGray)),
-                    const SizedBox(height: 12),
-                    FilledButton(
-                      onPressed: () => ref.invalidate(clientDetailProvider(widget.clientId)),
-                      child: const Text('Retry'),
+              error:
+                  (e, _) => Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.error_outline_rounded,
+                          size: 48,
+                          color: AppColors.brandGray,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Error: $e',
+                          style: const TextStyle(color: AppColors.brandGray),
+                        ),
+                        const SizedBox(height: 12),
+                        FilledButton(
+                          onPressed:
+                              () => ref.invalidate(
+                                clientDetailProvider(widget.clientId),
+                              ),
+                          child: const Text('Retry'),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-              ),
+                  ),
               data: (client) {
                 if (!_populated) {
                   WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -240,7 +271,11 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
                       industryCtrl: _industryCtrl,
                       projectSiteCtrl: _projectSiteCtrl,
                     ),
-                    const VerticalDivider(width: 1, thickness: 1, color: Color(0xFFE5E7EB)),
+                    const VerticalDivider(
+                      width: 1,
+                      thickness: 1,
+                      color: Color(0xFFE5E7EB),
+                    ),
                     Expanded(child: _buildDetailPane(client)),
                   ],
                 );
@@ -276,53 +311,63 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
                 const Text(
                   'Client Profile',
                   style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF111827)),
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF111827),
+                  ),
                 ),
                 if (client != null)
                   Text(
                     client.businessName,
-                    style: const TextStyle(fontSize: 12, color: AppColors.brandGray),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.brandGray,
+                    ),
                   ),
               ],
             ),
           ),
           if (_isEditing) ...[
             TextButton(
-              onPressed: _isSaving
-                  ? null
-                  : () {
-                      if (client != null) {
-                        _populateFromClient(client);
-                        setState(() => _isEditing = false);
-                      }
-                    },
+              onPressed:
+                  _isSaving
+                      ? null
+                      : () {
+                        if (client != null) {
+                          _populateFromClient(client);
+                          setState(() => _isEditing = false);
+                        }
+                      },
               child: const Text('Cancel'),
             ),
             const SizedBox(width: 8),
             FilledButton(
               onPressed: _isSaving ? null : _saveEdit,
               style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
-              child: _isSaving
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                    )
-                  : const Text('Save Changes'),
+              child:
+                  _isSaving
+                      ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                      : const Text('Save Changes'),
             ),
           ] else ...[
             IconButton(
               icon: const Icon(Icons.edit_rounded),
               color: AppColors.primary,
               tooltip: 'Edit client',
-              onPressed: client != null
-                  ? () {
-                      _populateFromClient(client);
-                      setState(() => _isEditing = true);
-                    }
-                  : null,
+              onPressed:
+                  client != null
+                      ? () {
+                        _populateFromClient(client);
+                        setState(() => _isEditing = true);
+                      }
+                      : null,
             ),
           ],
         ],
@@ -342,7 +387,11 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
             children: [
               const Text(
                 'Client Operations Profile',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Color(0xFF111827)),
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF111827),
+                ),
               ),
               const SizedBox(height: 2),
               const Text(
@@ -376,10 +425,19 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
             children: [
               _buildOverviewTab(client),
               ClientEmailTemplatesSection(clientId: widget.clientId),
-              _buildPlaceholderTab(Icons.folder_open_outlined, 'Documents coming soon',
-                  subtitle: '7-year retention per CRA requirements'),
-              _buildPlaceholderTab(Icons.chat_bubble_outline_rounded, 'Communication log coming soon'),
-              _buildPlaceholderTab(Icons.route_outlined, 'Trip history coming soon'),
+              _buildPlaceholderTab(
+                Icons.folder_open_outlined,
+                'Documents coming soon',
+                subtitle: '7-year retention per CRA requirements',
+              ),
+              _buildPlaceholderTab(
+                Icons.chat_bubble_outline_rounded,
+                'Communication log coming soon',
+              ),
+              _buildPlaceholderTab(
+                Icons.route_outlined,
+                'Trip history coming soon',
+              ),
             ],
           ),
         ),
@@ -415,6 +473,8 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
                 _ContractSection(clientId: widget.clientId),
                 const SizedBox(height: 16),
                 ClientPurchaseOrdersSection(clientId: widget.clientId),
+                const SizedBox(height: 16),
+                ClientInvoicesSection(clientId: widget.clientId),
               ],
             ),
           ),
@@ -430,7 +490,10 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
         children: [
           _buildInfoOrField(
             label: 'GST/HST Number',
-            value: client.gstHstNumber?.isEmpty ?? true ? '—' : (client.gstHstNumber ?? '—'),
+            value:
+                client.gstHstNumber?.isEmpty ?? true
+                    ? '—'
+                    : (client.gstHstNumber ?? '—'),
             isEditing: _isEditing,
             editWidget: TextField(
               controller: _gstHstCtrl,
@@ -444,15 +507,23 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
             value: client.preferredPaymentMethod,
             isEditing: _isEditing,
             editWidget: DropdownButtonFormField<String>(
-              value: _preferredPaymentMethod,
+              initialValue: _preferredPaymentMethod,
               decoration: _inputDec('Payment Method'),
               items: const [
                 DropdownMenuItem(value: 'EFT', child: Text('EFT')),
                 DropdownMenuItem(value: 'Cheque', child: Text('Cheque')),
-                DropdownMenuItem(value: 'Credit Card', child: Text('Credit Card')),
-                DropdownMenuItem(value: 'Wire Transfer', child: Text('Wire Transfer')),
+                DropdownMenuItem(
+                  value: 'Credit Card',
+                  child: Text('Credit Card'),
+                ),
+                DropdownMenuItem(
+                  value: 'Wire Transfer',
+                  child: Text('Wire Transfer'),
+                ),
               ],
-              onChanged: (v) { if (v != null) setState(() => _preferredPaymentMethod = v); },
+              onChanged: (v) {
+                if (v != null) setState(() => _preferredPaymentMethod = v);
+              },
             ),
           ),
           const SizedBox(height: 12),
@@ -461,7 +532,7 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
             value: 'Net ${client.netPaymentTerms}',
             isEditing: _isEditing,
             editWidget: DropdownButtonFormField<int>(
-              value: _netPaymentTerms,
+              initialValue: _netPaymentTerms,
               decoration: _inputDec('Net Payment Terms'),
               items: const [
                 DropdownMenuItem(value: 15, child: Text('Net 15')),
@@ -469,21 +540,70 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
                 DropdownMenuItem(value: 45, child: Text('Net 45')),
                 DropdownMenuItem(value: 60, child: Text('Net 60')),
               ],
-              onChanged: (v) { if (v != null) setState(() => _netPaymentTerms = v); },
+              onChanged: (v) {
+                if (v != null) setState(() => _netPaymentTerms = v);
+              },
             ),
           ),
           if (_isEditing) ...[
             const SizedBox(height: 12),
             Row(
               children: [
-                const Text('Active', style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+                const Text(
+                  'Active',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
                 const Spacer(),
                 Switch(
                   value: _isActive,
                   onChanged: (v) => setState(() => _isActive = v),
-                  activeColor: AppColors.primary,
+                  activeThumbColor: AppColors.primary,
                 ),
               ],
+            ),
+          ],
+          if (!_isEditing) ...[
+            const SizedBox(height: 16),
+            const Divider(height: 1, color: Color(0xFFF3F4F6)),
+            const SizedBox(height: 12),
+            const Text(
+              'BILLING RATES',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: AppColors.brandGray,
+                letterSpacing: 0.6,
+              ),
+            ),
+            const SizedBox(height: 10),
+            _buildInfoOrField(
+              label: 'One-Way Rate',
+              value: client.runRateOneWay != null
+                  ? '\$${client.runRateOneWay!.toStringAsFixed(2)}'
+                  : '—',
+              isEditing: false,
+              editWidget: const SizedBox.shrink(),
+            ),
+            const SizedBox(height: 8),
+            _buildInfoOrField(
+              label: 'Round-Trip Rate',
+              value: client.runRateRoundTrip != null
+                  ? '\$${client.runRateRoundTrip!.toStringAsFixed(2)}'
+                  : '—',
+              isEditing: false,
+              editWidget: const SizedBox.shrink(),
+            ),
+            const SizedBox(height: 8),
+            _buildInfoOrField(
+              label: 'Cargo Rate (per kg)',
+              value: client.cargoRatePerKg != null
+                  ? '\$${client.cargoRatePerKg!.toStringAsFixed(2)}'
+                  : '—',
+              isEditing: false,
+              editWidget: const SizedBox.shrink(),
             ),
           ],
         ],
@@ -492,9 +612,15 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
   }
 
   Widget _buildContactCard(Client client) {
-    final initials = client.primaryContactName.isNotEmpty
-        ? client.primaryContactName.trim().split(' ').take(2).map((w) => w[0].toUpperCase()).join()
-        : '?';
+    final initials =
+        client.primaryContactName.isNotEmpty
+            ? client.primaryContactName
+                .trim()
+                .split(' ')
+                .take(2)
+                .map((w) => w[0].toUpperCase())
+                .join()
+            : '?';
 
     return _SectionCard(
       title: 'Primary Contact',
@@ -506,40 +632,59 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
                 CircleAvatar(
                   radius: 24,
                   backgroundColor: AppColors.primary.withValues(alpha: 0.12),
-                  child: Text(initials,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.primary,
-                          fontSize: 16)),
+                  child: Text(
+                    initials,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.primary,
+                      fontSize: 16,
+                    ),
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(client.primaryContactName,
-                          style: const TextStyle(
-                              fontWeight: FontWeight.w700,
-                              fontSize: 14,
-                              color: Color(0xFF111827))),
+                      Text(
+                        client.primaryContactName,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                          color: Color(0xFF111827),
+                        ),
+                      ),
                       if (client.primaryContactTitle.isNotEmpty)
-                        Text(client.primaryContactTitle,
-                            style: const TextStyle(
-                                fontSize: 12, color: AppColors.brandGray)),
+                        Text(
+                          client.primaryContactTitle,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.brandGray,
+                          ),
+                        ),
                     ],
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 14),
-            _ContactRow(icon: Icons.phone_outlined, label: 'Phone', value: client.phone),
+            _ContactRow(
+              icon: Icons.phone_outlined,
+              label: 'Phone',
+              value: client.phone,
+            ),
             const SizedBox(height: 8),
-            _ContactRow(icon: Icons.email_outlined, label: 'Email', value: client.email),
+            _ContactRow(
+              icon: Icons.email_outlined,
+              label: 'Email',
+              value: client.email,
+            ),
             const SizedBox(height: 8),
             _ContactRow(
               icon: Icons.location_on_outlined,
               label: 'Address',
-              value: '${client.streetAddress}, ${client.city}, ${client.province} ${client.postalCode}',
+              value:
+                  '${client.streetAddress}, ${client.city}, ${client.province} ${client.postalCode}',
             ),
           ] else ...[
             TextField(
@@ -581,7 +726,7 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
                 SizedBox(
                   width: 120,
                   child: DropdownButtonFormField<String>(
-                    value: _province,
+                    initialValue: _province,
                     decoration: _inputDec('Province'),
                     items: const [
                       DropdownMenuItem(value: 'MB', child: Text('MB')),
@@ -591,7 +736,9 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
                       DropdownMenuItem(value: 'BC', child: Text('BC')),
                       DropdownMenuItem(value: 'QC', child: Text('QC')),
                     ],
-                    onChanged: (v) { if (v != null) setState(() => _province = v); },
+                    onChanged: (v) {
+                      if (v != null) setState(() => _province = v);
+                    },
                   ),
                 ),
               ],
@@ -632,18 +779,18 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
               child: const Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.cloud_off_outlined,
-                      size: 16, color: AppColors.danger),
+                  Icon(
+                    Icons.cloud_off_outlined,
+                    size: 16,
+                    color: AppColors.danger,
+                  ),
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'The server has not been updated yet — notification '
                       'emails cannot be saved until the latest shuttle-api is '
                       'deployed.',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: AppColors.danger,
-                      ),
+                      style: TextStyle(fontSize: 12, color: AppColors.danger),
                     ),
                   ),
                 ],
@@ -654,7 +801,8 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
           _NotificationEmailGroup(
             title: 'General Notifications',
             subtitle: 'Operational alerts and account updates',
-            emails: _isEditing ? _notificationEmails : client.notificationEmails,
+            emails:
+                _isEditing ? _notificationEmails : client.notificationEmails,
             isEditing: _isEditing,
             onChanged: (emails) => setState(() => _notificationEmails = emails),
           ),
@@ -662,23 +810,26 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
           _NotificationEmailGroup(
             title: 'Trip Departures & Arrivals',
             subtitle: 'Updates when trips depart or arrive',
-            emails: _isEditing
-                ? _tripDepartureArrivalEmails
-                : client.tripDepartureArrivalEmails,
+            emails:
+                _isEditing
+                    ? _tripDepartureArrivalEmails
+                    : client.tripDepartureArrivalEmails,
             isEditing: _isEditing,
-            onChanged: (emails) =>
-                setState(() => _tripDepartureArrivalEmails = emails),
+            onChanged:
+                (emails) =>
+                    setState(() => _tripDepartureArrivalEmails = emails),
           ),
           const SizedBox(height: 14),
           _NotificationEmailGroup(
             title: 'Passenger Booking Alerts',
             subtitle: 'Notified when passengers are booked on trips',
-            emails: _isEditing
-                ? _passengerBookingEmails
-                : client.passengerBookingEmails,
+            emails:
+                _isEditing
+                    ? _passengerBookingEmails
+                    : client.passengerBookingEmails,
             isEditing: _isEditing,
-            onChanged: (emails) =>
-                setState(() => _passengerBookingEmails = emails),
+            onChanged:
+                (emails) => setState(() => _passengerBookingEmails = emails),
           ),
         ],
       ),
@@ -686,11 +837,12 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
   }
 
   Widget _buildConstraintsCard(Client client) {
-    final lines = (client.complianceNotes ?? '')
-        .split('\n')
-        .map((l) => l.trim())
-        .where((l) => l.isNotEmpty)
-        .toList();
+    final lines =
+        (client.complianceNotes ?? '')
+            .split('\n')
+            .map((l) => l.trim())
+            .where((l) => l.isNotEmpty)
+            .toList();
 
     if (!_isEditing && !client.isMinesite && lines.isEmpty) {
       return const SizedBox.shrink();
@@ -713,10 +865,11 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
               const Text(
                 'OPERATIONAL CONSTRAINTS',
                 style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: _kAmber,
-                    letterSpacing: 0.8),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: _kAmber,
+                  letterSpacing: 0.8,
+                ),
               ),
             ],
           ),
@@ -725,13 +878,18 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
             Row(
               children: [
                 const Expanded(
-                  child: Text('Mine Site Rules Apply',
-                      style: TextStyle(fontSize: 13, color: AppColors.textPrimary)),
+                  child: Text(
+                    'Mine Site Rules Apply',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
                 ),
                 Switch(
                   value: _isMinesite,
                   onChanged: (v) => setState(() => _isMinesite = v),
-                  activeColor: _kAmber,
+                  activeThumbColor: _kAmber,
                 ),
               ],
             ),
@@ -749,32 +907,49 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
                 borderRadius: BorderRadius.circular(10),
               ),
               padding: const EdgeInsets.all(12),
-              child: lines.isEmpty
-                  ? const Text('No constraints recorded.',
-                      style: TextStyle(fontSize: 13, color: AppColors.brandGray))
-                  : Column(
-                      children: lines
-                          .map((line) => Padding(
-                                padding: const EdgeInsets.only(bottom: 6),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Padding(
-                                      padding: EdgeInsets.only(top: 3),
-                                      child: Icon(Icons.check, color: _kAmber, size: 13),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(line,
-                                          style: const TextStyle(
+              child:
+                  lines.isEmpty
+                      ? const Text(
+                        'No constraints recorded.',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: AppColors.brandGray,
+                        ),
+                      )
+                      : Column(
+                        children:
+                            lines
+                                .map(
+                                  (line) => Padding(
+                                    padding: const EdgeInsets.only(bottom: 6),
+                                    child: Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        const Padding(
+                                          padding: EdgeInsets.only(top: 3),
+                                          child: Icon(
+                                            Icons.check,
+                                            color: _kAmber,
+                                            size: 13,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            line,
+                                            style: const TextStyle(
                                               fontSize: 13,
-                                              color: Color(0xFF374151))),
+                                              color: Color(0xFF374151),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
                                     ),
-                                  ],
-                                ),
-                              ))
-                          .toList(),
-                    ),
+                                  ),
+                                )
+                                .toList(),
+                      ),
             ),
           ],
         ],
@@ -782,7 +957,11 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
     );
   }
 
-  Widget _buildPlaceholderTab(IconData icon, String message, {String? subtitle}) {
+  Widget _buildPlaceholderTab(
+    IconData icon,
+    String message, {
+    String? subtitle,
+  }) {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -792,8 +971,10 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
           Text(message, style: const TextStyle(color: AppColors.brandGray)),
           if (subtitle != null) ...[
             const SizedBox(height: 6),
-            Text(subtitle,
-                style: const TextStyle(fontSize: 11, color: AppColors.brandGray)),
+            Text(
+              subtitle,
+              style: const TextStyle(fontSize: 11, color: AppColors.brandGray),
+            ),
           ],
         ],
       ),
@@ -810,25 +991,30 @@ class _ClientDetailPageState extends ConsumerState<ClientDetailPage>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label.toUpperCase(),
-            style: const TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
-                color: AppColors.brandGray,
-                letterSpacing: 0.6)),
+        Text(
+          label.toUpperCase(),
+          style: const TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            color: AppColors.brandGray,
+            letterSpacing: 0.6,
+          ),
+        ),
         const SizedBox(height: 2),
-        Text(value,
-            style: const TextStyle(fontSize: 14, color: Color(0xFF111827))),
+        Text(
+          value,
+          style: const TextStyle(fontSize: 14, color: Color(0xFF111827)),
+        ),
       ],
     );
   }
 
   InputDecoration _inputDec(String label) => InputDecoration(
-        labelText: label,
-        isDense: true,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      );
+    labelText: label,
+    isDense: true,
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+  );
 }
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
@@ -848,13 +1034,20 @@ class _ClientSidebar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final initials = client.businessName.isNotEmpty
-        ? client.businessName.trim().split(' ').take(2).map((w) => w[0].toUpperCase()).join()
-        : '?';
+    final initials =
+        client.businessName.isNotEmpty
+            ? client.businessName
+                .trim()
+                .split(' ')
+                .take(2)
+                .map((w) => w[0].toUpperCase())
+                .join()
+            : '?';
 
     final isCorporate = client.serviceType == ServiceType.corporate;
     final badgeColor = isCorporate ? _kAmber : AppColors.secondary;
-    final badgeBg = isCorporate ? _kAmberLight : AppColors.secondary.withValues(alpha: 0.1);
+    final badgeBg =
+        isCorporate ? _kAmberLight : AppColors.secondary.withValues(alpha: 0.1);
 
     return Container(
       width: 260,
@@ -868,18 +1061,20 @@ class _ClientSidebar extends StatelessWidget {
             child: Text(
               initials,
               style: const TextStyle(
-                  fontSize: 26,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.primary),
+                fontSize: 26,
+                fontWeight: FontWeight.w700,
+                color: AppColors.primary,
+              ),
             ),
           ),
           const SizedBox(height: 14),
           Text(
             client.businessName,
             style: const TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w700,
-                color: Color(0xFF111827)),
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF111827),
+            ),
             textAlign: TextAlign.center,
           ),
           if (!isEditing && (client.projectSite?.isNotEmpty ?? false)) ...[
@@ -899,8 +1094,13 @@ class _ClientSidebar extends StatelessWidget {
               decoration: InputDecoration(
                 hintText: 'Project / Site (optional)',
                 isDense: true,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
               ),
             ),
           ],
@@ -915,10 +1115,11 @@ class _ClientSidebar extends StatelessWidget {
             child: Text(
               isCorporate ? 'Corporate' : 'Community',
               style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: badgeColor,
-                  letterSpacing: 0.5),
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: badgeColor,
+                letterSpacing: 0.5,
+              ),
             ),
           ),
           const SizedBox(height: 20),
@@ -926,15 +1127,23 @@ class _ClientSidebar extends StatelessWidget {
           const SizedBox(height: 12),
           _SidebarInfoRow(
             label: 'Industry',
-            value: client.industry?.isEmpty ?? true ? '—' : (client.industry ?? '—'),
+            value:
+                client.industry?.isEmpty ?? true
+                    ? '—'
+                    : (client.industry ?? '—'),
             isEditing: isEditing,
             editWidget: TextField(
               controller: industryCtrl,
               decoration: InputDecoration(
                 hintText: 'e.g. Mining & Resources',
                 isDense: true,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
               ),
             ),
           ),
@@ -953,13 +1162,17 @@ class _ClientSidebar extends StatelessWidget {
                   height: 8,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: client.isActive ? AppColors.success : AppColors.danger,
+                    color:
+                        client.isActive ? AppColors.success : AppColors.danger,
                   ),
                 ),
                 const SizedBox(width: 6),
                 Text(
                   client.isActive ? 'Active' : 'Inactive',
-                  style: const TextStyle(fontSize: 14, color: Color(0xFF111827)),
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: Color(0xFF111827),
+                  ),
                 ),
               ],
             ),
@@ -993,10 +1206,11 @@ class _SidebarInfoRow extends StatelessWidget {
         Text(
           label.toUpperCase(),
           style: const TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
-              color: AppColors.brandGray,
-              letterSpacing: 0.6),
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            color: AppColors.brandGray,
+            letterSpacing: 0.6,
+          ),
         ),
         const SizedBox(height: 4),
         if (isEditing && editWidget != null)
@@ -1031,87 +1245,139 @@ class _ContractSectionState extends ConsumerState<_ContractSection> {
 
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          title: const Text('Add Contract', style: TextStyle(fontWeight: FontWeight.w700)),
-          content: SizedBox(
-            width: 400,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Start Date', style: TextStyle(fontSize: 13, color: AppColors.brandGray)),
-                  subtitle: Text(DateFormat('MMM d, yyyy').format(startDate),
-                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                  trailing: const Icon(Icons.calendar_today_outlined, size: 18),
-                  onTap: () async {
-                    final picked = await showDatePicker(
-                      context: ctx,
-                      initialDate: startDate,
-                      firstDate: DateTime(2020),
-                      lastDate: DateTime(2040),
-                    );
-                    if (picked != null) setDialogState(() => startDate = picked);
-                  },
-                ),
-                const Divider(),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('End Date', style: TextStyle(fontSize: 13, color: AppColors.brandGray)),
-                  subtitle: Text(DateFormat('MMM d, yyyy').format(endDate),
-                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                  trailing: const Icon(Icons.calendar_today_outlined, size: 18),
-                  onTap: () async {
-                    final picked = await showDatePicker(
-                      context: ctx,
-                      initialDate: endDate,
-                      firstDate: DateTime(2020),
-                      lastDate: DateTime(2040),
-                    );
-                    if (picked != null) setDialogState(() => endDate = picked);
-                  },
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: notesCtrl,
-                  maxLines: 3,
-                  decoration: InputDecoration(
-                    labelText: 'Notes (optional)',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                    isDense: true,
+      builder:
+          (ctx) => StatefulBuilder(
+            builder:
+                (ctx, setDialogState) => AlertDialog(
+                  title: const Text(
+                    'Add Contract',
+                    style: TextStyle(fontWeight: FontWeight.w700),
                   ),
+                  content: SizedBox(
+                    width: 400,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text(
+                            'Start Date',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: AppColors.brandGray,
+                            ),
+                          ),
+                          subtitle: Text(
+                            DateFormat('MMM d, yyyy').format(startDate),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 14,
+                            ),
+                          ),
+                          trailing: const Icon(
+                            Icons.calendar_today_outlined,
+                            size: 18,
+                          ),
+                          onTap: () async {
+                            final picked = await showDatePicker(
+                              context: ctx,
+                              initialDate: startDate,
+                              firstDate: DateTime(2020),
+                              lastDate: DateTime(2040),
+                            );
+                            if (picked != null) {
+                              setDialogState(() => startDate = picked);
+                            }
+                          },
+                        ),
+                        const Divider(),
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text(
+                            'End Date',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: AppColors.brandGray,
+                            ),
+                          ),
+                          subtitle: Text(
+                            DateFormat('MMM d, yyyy').format(endDate),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 14,
+                            ),
+                          ),
+                          trailing: const Icon(
+                            Icons.calendar_today_outlined,
+                            size: 18,
+                          ),
+                          onTap: () async {
+                            final picked = await showDatePicker(
+                              context: ctx,
+                              initialDate: endDate,
+                              firstDate: DateTime(2020),
+                              lastDate: DateTime(2040),
+                            );
+                            if (picked != null) {
+                              setDialogState(() => endDate = picked);
+                            }
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: notesCtrl,
+                          maxLines: 3,
+                          decoration: InputDecoration(
+                            labelText: 'Notes (optional)',
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            isDense: true,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: const Text('Cancel'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(ctx, true),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                      ),
+                      child: const Text('Add Contract'),
+                    ),
+                  ],
                 ),
-              ],
-            ),
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
-              child: const Text('Add Contract'),
-            ),
-          ],
-        ),
-      ),
     );
 
     if (confirmed == true && mounted) {
       try {
-        await ref.read(contractsProvider(widget.clientId).notifier).createContract(
-          CreateContractParams(
-            clientId: widget.clientId,
-            startDate: startDate,
-            endDate: endDate,
-            notes: notesCtrl.text.trim().isEmpty ? null : notesCtrl.text.trim(),
-            rateLines: const [],
-          ),
-        );
+        await ref
+            .read(contractsProvider(widget.clientId).notifier)
+            .createContract(
+              CreateContractParams(
+                clientId: widget.clientId,
+                startDate: startDate,
+                endDate: endDate,
+                notes:
+                    notesCtrl.text.trim().isEmpty
+                        ? null
+                        : notesCtrl.text.trim(),
+                rateLines: const [],
+              ),
+            );
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to add contract: $e'), backgroundColor: AppColors.danger),
+            SnackBar(
+              content: Text('Failed to add contract: $e'),
+              backgroundColor: AppColors.danger,
+            ),
           );
         }
       }
@@ -1129,91 +1395,127 @@ class _ContractSectionState extends ConsumerState<_ContractSection> {
 
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          title: const Text('Add Rate Line', style: TextStyle(fontWeight: FontWeight.w700)),
-          content: SizedBox(
-            width: 400,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: billingCodeCtrl,
-                    decoration: InputDecoration(
-                        labelText: 'Billing Code *',
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                        isDense: true),
+      builder:
+          (ctx) => StatefulBuilder(
+            builder:
+                (ctx, setDialogState) => AlertDialog(
+                  title: const Text(
+                    'Add Rate Line',
+                    style: TextStyle(fontWeight: FontWeight.w700),
                   ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: descriptionCtrl,
-                    decoration: InputDecoration(
-                        labelText: 'Description *',
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                        isDense: true),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: vehicleTypeCtrl,
-                    decoration: InputDecoration(
-                        labelText: 'Vehicle Type *',
-                        hintText: 'e.g. Van, Truck',
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                        isDense: true),
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: maxDistCtrl,
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                          decoration: InputDecoration(
-                              labelText: 'Max Dist (km)',
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                              isDense: true),
-                        ),
+                  content: SizedBox(
+                    width: 400,
+                    child: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          TextField(
+                            controller: billingCodeCtrl,
+                            decoration: InputDecoration(
+                              labelText: 'Billing Code *',
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              isDense: true,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          TextField(
+                            controller: descriptionCtrl,
+                            decoration: InputDecoration(
+                              labelText: 'Description *',
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              isDense: true,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          TextField(
+                            controller: vehicleTypeCtrl,
+                            decoration: InputDecoration(
+                              labelText: 'Vehicle Type *',
+                              hintText: 'e.g. Van, Truck',
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              isDense: true,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: maxDistCtrl,
+                                  keyboardType: TextInputType.number,
+                                  inputFormatters: [
+                                    FilteringTextInputFormatter.digitsOnly,
+                                  ],
+                                  decoration: InputDecoration(
+                                    labelText: 'Max Dist (km)',
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    isDense: true,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: TextField(
+                                  controller: dayRateCtrl,
+                                  keyboardType:
+                                      const TextInputType.numberWithOptions(
+                                        decimal: true,
+                                      ),
+                                  decoration: InputDecoration(
+                                    labelText: 'Day Rate (\$) *',
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    isDense: true,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Checkbox(
+                                value: cargoIncluded,
+                                onChanged:
+                                    (v) => setDialogState(
+                                      () => cargoIncluded = v ?? false,
+                                    ),
+                                activeColor: AppColors.primary,
+                              ),
+                              const Text(
+                                'Cargo Included',
+                                style: TextStyle(fontSize: 14),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: TextField(
-                          controller: dayRateCtrl,
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          decoration: InputDecoration(
-                              labelText: 'Day Rate (\$) *',
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                              isDense: true),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Checkbox(
-                        value: cargoIncluded,
-                        onChanged: (v) => setDialogState(() => cargoIncluded = v ?? false),
-                        activeColor: AppColors.primary,
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: const Text('Cancel'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(ctx, true),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.primary,
                       ),
-                      const Text('Cargo Included', style: TextStyle(fontSize: 14)),
-                    ],
-                  ),
-                ],
-              ),
-            ),
+                      child: const Text('Add Rate Line'),
+                    ),
+                  ],
+                ),
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
-              child: const Text('Add Rate Line'),
-            ),
-          ],
-        ),
-      ),
     );
 
     if (confirmed == true && mounted) {
@@ -1222,30 +1524,42 @@ class _ContractSectionState extends ConsumerState<_ContractSection> {
       final vehicleType = vehicleTypeCtrl.text.trim();
       final dayRate = double.tryParse(dayRateCtrl.text.trim()) ?? 0;
 
-      if (billingCode.isEmpty || description.isEmpty || vehicleType.isEmpty || dayRate <= 0) {
+      if (billingCode.isEmpty ||
+          description.isEmpty ||
+          vehicleType.isEmpty ||
+          dayRate <= 0) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please fill all required fields.'), backgroundColor: AppColors.danger),
+          const SnackBar(
+            content: Text('Please fill all required fields.'),
+            backgroundColor: AppColors.danger,
+          ),
         );
       } else {
         try {
-          await ref.read(contractsProvider(widget.clientId).notifier).addRateLine(
-            AddRateLineParams(
-              contractId: contractId,
-              clientId: widget.clientId,
-              billingCode: billingCode,
-              description: description,
-              vehicleType: vehicleType,
-              maxDistanceKm: maxDistCtrl.text.trim().isEmpty
-                  ? null
-                  : int.tryParse(maxDistCtrl.text.trim()),
-              cargoIncluded: cargoIncluded,
-              dayRate: dayRate,
-            ),
-          );
+          await ref
+              .read(contractsProvider(widget.clientId).notifier)
+              .addRateLine(
+                AddRateLineParams(
+                  contractId: contractId,
+                  clientId: widget.clientId,
+                  billingCode: billingCode,
+                  description: description,
+                  vehicleType: vehicleType,
+                  maxDistanceKm:
+                      maxDistCtrl.text.trim().isEmpty
+                          ? null
+                          : int.tryParse(maxDistCtrl.text.trim()),
+                  cargoIncluded: cargoIncluded,
+                  dayRate: dayRate,
+                ),
+              );
         } catch (e) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Failed to add rate line: $e'), backgroundColor: AppColors.danger),
+              SnackBar(
+                content: Text('Failed to add rate line: $e'),
+                backgroundColor: AppColors.danger,
+              ),
             );
           }
         }
@@ -1269,51 +1583,67 @@ class _ContractSectionState extends ConsumerState<_ContractSection> {
         onPressed: _showAddContractDialog,
         icon: const Icon(Icons.add_rounded, size: 16),
         label: const Text('Add Contract'),
-        style: TextButton.styleFrom(foregroundColor: AppColors.primary, padding: EdgeInsets.zero),
+        style: TextButton.styleFrom(
+          foregroundColor: AppColors.primary,
+          padding: EdgeInsets.zero,
+        ),
       ),
       child: contractsAsync.when(
-        loading: () => const Padding(
-          padding: EdgeInsets.all(16),
-          child: Center(child: CircularProgressIndicator()),
-        ),
-        error: (e, _) => Padding(
-          padding: const EdgeInsets.all(8),
-          child: Text('Error loading contracts: $e',
-              style: const TextStyle(color: AppColors.danger, fontSize: 13)),
-        ),
+        loading:
+            () => const Padding(
+              padding: EdgeInsets.all(16),
+              child: Center(child: CircularProgressIndicator()),
+            ),
+        error:
+            (e, _) => Padding(
+              padding: const EdgeInsets.all(8),
+              child: Text(
+                'Error loading contracts: $e',
+                style: const TextStyle(color: AppColors.danger, fontSize: 13),
+              ),
+            ),
         data: (contracts) {
           if (contracts.isEmpty) {
             return const Padding(
               padding: EdgeInsets.symmetric(vertical: 12),
               child: Center(
-                child: Text('No contracts on file.',
-                    style: TextStyle(color: AppColors.brandGray, fontSize: 13)),
+                child: Text(
+                  'No contracts on file.',
+                  style: TextStyle(color: AppColors.brandGray, fontSize: 13),
+                ),
               ),
             );
           }
           return Column(
-            children: contracts
-                .map((contract) => _ContractCard(
-                      contract: contract,
-                      clientId: widget.clientId,
-                      onAddRateLine: () => _showAddRateLineDialog(contract.id),
-                      onDeleteRateLine: (rateLineId) async {
-                        try {
-                          await ref
-                              .read(contractsProvider(widget.clientId).notifier)
-                              .deleteRateLine(rateLineId, widget.clientId);
-                        } catch (e) {
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
+            children:
+                contracts
+                    .map(
+                      (contract) => _ContractCard(
+                        contract: contract,
+                        clientId: widget.clientId,
+                        onAddRateLine:
+                            () => _showAddRateLineDialog(contract.id),
+                        onDeleteRateLine: (rateLineId) async {
+                          try {
+                            await ref
+                                .read(
+                                  contractsProvider(widget.clientId).notifier,
+                                )
+                                .deleteRateLine(rateLineId, widget.clientId);
+                          } catch (e) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
                                   content: Text('Failed to delete: $e'),
-                                  backgroundColor: AppColors.danger),
-                            );
+                                  backgroundColor: AppColors.danger,
+                                ),
+                              );
+                            }
                           }
-                        }
-                      },
-                    ))
-                .toList(),
+                        },
+                      ),
+                    )
+                    .toList(),
           );
         },
       ),
@@ -1350,7 +1680,8 @@ class _ContractCardState extends State<_ContractCard> {
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         border: Border.all(
-            color: c.isExpiringSoon ? _kAmberBorder : const Color(0xFFE5E7EB)),
+          color: c.isExpiringSoon ? _kAmberBorder : const Color(0xFFE5E7EB),
+        ),
         borderRadius: BorderRadius.circular(12),
         color: c.isExpiringSoon ? _kAmberLight : const Color(0xFFF9FAFB),
       ),
@@ -1371,25 +1702,40 @@ class _ContractCardState extends State<_ContractCard> {
                         Row(
                           children: [
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
                               decoration: BoxDecoration(
-                                color: c.isActive
-                                    ? AppColors.success.withValues(alpha: 0.12)
-                                    : AppColors.brandGray.withValues(alpha: 0.12),
+                                color:
+                                    c.isActive
+                                        ? AppColors.success.withValues(
+                                          alpha: 0.12,
+                                        )
+                                        : AppColors.brandGray.withValues(
+                                          alpha: 0.12,
+                                        ),
                                 borderRadius: BorderRadius.circular(12),
                               ),
                               child: Text(
                                 c.isActive ? 'Active' : 'Inactive',
                                 style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                    color: c.isActive ? AppColors.success : AppColors.brandGray),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color:
+                                      c.isActive
+                                          ? AppColors.success
+                                          : AppColors.brandGray,
+                                ),
                               ),
                             ),
                             if (c.isExpiringSoon) ...[
                               const SizedBox(width: 6),
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 3,
+                                ),
                                 decoration: BoxDecoration(
                                   color: _kAmberLight,
                                   border: Border.all(color: _kAmberBorder),
@@ -1398,9 +1744,10 @@ class _ContractCardState extends State<_ContractCard> {
                                 child: const Text(
                                   'Expiring Soon',
                                   style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                      color: _kAmber),
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: _kAmber,
+                                  ),
                                 ),
                               ),
                             ],
@@ -1409,21 +1756,31 @@ class _ContractCardState extends State<_ContractCard> {
                         const SizedBox(height: 4),
                         Text(
                           '${fmt.format(c.startDate)} → ${fmt.format(c.endDate)}',
-                          style: const TextStyle(fontSize: 12, color: AppColors.brandGray),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.brandGray,
+                          ),
                         ),
                         if (c.notes?.isNotEmpty ?? false)
                           Padding(
                             padding: const EdgeInsets.only(top: 4),
-                            child: Text(c.notes!,
-                                style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis),
+                            child: Text(
+                              c.notes!,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppColors.textSecondary,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                       ],
                     ),
                   ),
                   Icon(
-                    _expanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                    _expanded
+                        ? Icons.expand_less_rounded
+                        : Icons.expand_more_rounded,
                     color: AppColors.brandGray,
                   ),
                 ],
@@ -1439,16 +1796,25 @@ class _ContractCardState extends State<_ContractCard> {
                 child: Row(
                   children: [
                     const Expanded(
-                      child: Text('No rate lines.',
-                          style: TextStyle(fontSize: 12, color: AppColors.brandGray)),
+                      child: Text(
+                        'No rate lines.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppColors.brandGray,
+                        ),
+                      ),
                     ),
                     TextButton.icon(
                       onPressed: widget.onAddRateLine,
                       icon: const Icon(Icons.add_rounded, size: 14),
-                      label: const Text('Add Rate Line', style: TextStyle(fontSize: 12)),
+                      label: const Text(
+                        'Add Rate Line',
+                        style: TextStyle(fontSize: 12),
+                      ),
                       style: TextButton.styleFrom(
-                          foregroundColor: AppColors.primary,
-                          padding: const EdgeInsets.symmetric(horizontal: 8)),
+                        foregroundColor: AppColors.primary,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                      ),
                     ),
                   ],
                 ),
@@ -1456,7 +1822,10 @@ class _ContractCardState extends State<_ContractCard> {
             else ...[
               // Table header
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 8,
+                ),
                 child: Row(
                   children: const [
                     Expanded(flex: 2, child: _TableHeader('Code')),
@@ -1470,68 +1839,85 @@ class _ContractCardState extends State<_ContractCard> {
                 ),
               ),
               const Divider(height: 1, color: Color(0xFFE5E7EB)),
-              ...c.rateLines.map((rl) => Column(
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                        child: Row(
-                          children: [
-                            Expanded(flex: 2, child: _TableCell(rl.billingCode)),
-                            Expanded(flex: 3, child: _TableCell(rl.description)),
-                            Expanded(flex: 2, child: _TableCell(rl.vehicleType)),
-                            Expanded(
-                                flex: 2,
-                                child: _TableCell(rl.maxDistanceKm != null
-                                    ? '${rl.maxDistanceKm} km'
-                                    : '—')),
-                            Expanded(
-                                flex: 2,
-                                child: _TableCell(rl.cargoIncluded ? 'Yes' : 'No')),
-                            Expanded(
-                                flex: 2,
-                                child: _TableCell(
-                                    '\$${rl.dayRate.toStringAsFixed(0)}')),
-                            SizedBox(
-                              width: 36,
-                              child: IconButton(
-                                icon: const Icon(Icons.delete_outline_rounded,
-                                    size: 18),
-                                color: AppColors.danger,
-                                padding: EdgeInsets.zero,
-                                onPressed: () async {
-                                  final confirmed = await showDialog<bool>(
-                                    context: context,
-                                    builder: (ctx) => AlertDialog(
-                                      title: const Text('Delete Rate Line'),
-                                      content: Text(
-                                          'Remove "${rl.billingCode} — ${rl.description}"?'),
-                                      actions: [
-                                        TextButton(
-                                            onPressed: () =>
-                                                Navigator.pop(ctx, false),
-                                            child: const Text('Cancel')),
-                                        FilledButton(
-                                          onPressed: () =>
-                                              Navigator.pop(ctx, true),
-                                          style: FilledButton.styleFrom(
-                                              backgroundColor: AppColors.danger),
-                                          child: const Text('Delete'),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                  if (confirmed == true) {
-                                    await widget.onDeleteRateLine(rl.id);
-                                  }
-                                },
-                              ),
-                            ),
-                          ],
-                        ),
+              ...c.rateLines.map(
+                (rl) => Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 8,
                       ),
-                      const Divider(height: 1, color: Color(0xFFE5E7EB)),
-                    ],
-                  )),
+                      child: Row(
+                        children: [
+                          Expanded(flex: 2, child: _TableCell(rl.billingCode)),
+                          Expanded(flex: 3, child: _TableCell(rl.description)),
+                          Expanded(flex: 2, child: _TableCell(rl.vehicleType)),
+                          Expanded(
+                            flex: 2,
+                            child: _TableCell(
+                              rl.maxDistanceKm != null
+                                  ? '${rl.maxDistanceKm} km'
+                                  : '—',
+                            ),
+                          ),
+                          Expanded(
+                            flex: 2,
+                            child: _TableCell(rl.cargoIncluded ? 'Yes' : 'No'),
+                          ),
+                          Expanded(
+                            flex: 2,
+                            child: _TableCell(
+                              '\$${rl.dayRate.toStringAsFixed(0)}',
+                            ),
+                          ),
+                          SizedBox(
+                            width: 36,
+                            child: IconButton(
+                              icon: const Icon(
+                                Icons.delete_outline_rounded,
+                                size: 18,
+                              ),
+                              color: AppColors.danger,
+                              padding: EdgeInsets.zero,
+                              onPressed: () async {
+                                final confirmed = await showDialog<bool>(
+                                  context: context,
+                                  builder:
+                                      (ctx) => AlertDialog(
+                                        title: const Text('Delete Rate Line'),
+                                        content: Text(
+                                          'Remove "${rl.billingCode} — ${rl.description}"?',
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed:
+                                                () => Navigator.pop(ctx, false),
+                                            child: const Text('Cancel'),
+                                          ),
+                                          FilledButton(
+                                            onPressed:
+                                                () => Navigator.pop(ctx, true),
+                                            style: FilledButton.styleFrom(
+                                              backgroundColor: AppColors.danger,
+                                            ),
+                                            child: const Text('Delete'),
+                                          ),
+                                        ],
+                                      ),
+                                );
+                                if (confirmed == true) {
+                                  await widget.onDeleteRateLine(rl.id);
+                                }
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1, color: Color(0xFFE5E7EB)),
+                  ],
+                ),
+              ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
                 child: Align(
@@ -1539,10 +1925,14 @@ class _ContractCardState extends State<_ContractCard> {
                   child: TextButton.icon(
                     onPressed: widget.onAddRateLine,
                     icon: const Icon(Icons.add_rounded, size: 14),
-                    label: const Text('Add Rate Line', style: TextStyle(fontSize: 12)),
+                    label: const Text(
+                      'Add Rate Line',
+                      style: TextStyle(fontSize: 12),
+                    ),
                     style: TextButton.styleFrom(
-                        foregroundColor: AppColors.primary,
-                        padding: const EdgeInsets.symmetric(horizontal: 8)),
+                      foregroundColor: AppColors.primary,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                    ),
                   ),
                 ),
               ),
@@ -1570,7 +1960,8 @@ class _NotificationEmailGroup extends StatefulWidget {
   });
 
   @override
-  State<_NotificationEmailGroup> createState() => _NotificationEmailGroupState();
+  State<_NotificationEmailGroup> createState() =>
+      _NotificationEmailGroupState();
 }
 
 class _NotificationEmailGroupState extends State<_NotificationEmailGroup> {
@@ -1639,20 +2030,22 @@ class _NotificationEmailGroupState extends State<_NotificationEmailGroup> {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: widget.emails
-                .map(
-                  (email) => InputChip(
-                    label: Text(email),
-                    deleteIcon: widget.isEditing
-                        ? const Icon(Icons.close_rounded, size: 16)
-                        : null,
-                    onDeleted:
-                        widget.isEditing ? () => _removeEmail(email) : null,
-                    backgroundColor: const Color(0xFFF3F4F6),
-                    side: const BorderSide(color: Color(0xFFE5E7EB)),
-                  ),
-                )
-                .toList(),
+            children:
+                widget.emails
+                    .map(
+                      (email) => InputChip(
+                        label: Text(email),
+                        deleteIcon:
+                            widget.isEditing
+                                ? const Icon(Icons.close_rounded, size: 16)
+                                : null,
+                        onDeleted:
+                            widget.isEditing ? () => _removeEmail(email) : null,
+                        backgroundColor: const Color(0xFFF3F4F6),
+                        side: const BorderSide(color: Color(0xFFE5E7EB)),
+                      ),
+                    )
+                    .toList(),
           ),
         if (widget.isEditing) ...[
           if (widget.emails.isNotEmpty) const SizedBox(height: 8),
@@ -1710,7 +2103,11 @@ class _SectionCard extends StatelessWidget {
         border: Border.all(color: const Color(0xFFE5E7EB)),
         borderRadius: BorderRadius.circular(16),
         boxShadow: const [
-          BoxShadow(color: Color(0x06000000), blurRadius: 12, offset: Offset(0, 4)),
+          BoxShadow(
+            color: Color(0x06000000),
+            blurRadius: 12,
+            offset: Offset(0, 4),
+          ),
         ],
       ),
       child: Column(
@@ -1724,9 +2121,10 @@ class _SectionCard extends StatelessWidget {
                   child: Text(
                     title,
                     style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF111827)),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF111827),
+                    ),
                   ),
                 ),
                 if (trailing != null) trailing!,
@@ -1746,7 +2144,11 @@ class _ContactRow extends StatelessWidget {
   final String label;
   final String value;
 
-  const _ContactRow({required this.icon, required this.label, required this.value});
+  const _ContactRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1768,10 +2170,17 @@ class _ContactRow extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(label,
-                  style: const TextStyle(fontSize: 11, color: AppColors.brandGray)),
-              Text(value,
-                  style: const TextStyle(fontSize: 13, color: Color(0xFF111827))),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: AppColors.brandGray,
+                ),
+              ),
+              Text(
+                value,
+                style: const TextStyle(fontSize: 13, color: Color(0xFF111827)),
+              ),
             ],
           ),
         ),
@@ -1786,13 +2195,14 @@ class _TableHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Text(
-        text.toUpperCase(),
-        style: const TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w700,
-            color: AppColors.brandGray,
-            letterSpacing: 0.4),
-      );
+    text.toUpperCase(),
+    style: const TextStyle(
+      fontSize: 10,
+      fontWeight: FontWeight.w700,
+      color: AppColors.brandGray,
+      letterSpacing: 0.4,
+    ),
+  );
 }
 
 class _TableCell extends StatelessWidget {
@@ -1801,8 +2211,8 @@ class _TableCell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Text(
-        text,
-        style: const TextStyle(fontSize: 13, color: Color(0xFF374151)),
-        overflow: TextOverflow.ellipsis,
-      );
+    text,
+    style: const TextStyle(fontSize: 13, color: Color(0xFF374151)),
+    overflow: TextOverflow.ellipsis,
+  );
 }

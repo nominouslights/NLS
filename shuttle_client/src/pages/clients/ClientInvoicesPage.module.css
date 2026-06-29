@@ -1,0 +1,18 @@
+.container { max-width: 900px; margin: 0 auto; padding: 24px; }
+.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.title { font-size: 1.5rem; font-weight: 600; margin: 0; }
+.filter { padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.875rem; }
+.table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.table th { text-align: left; padding: 10px 12px; border-bottom: 2px solid #e5e7eb; color: #6b7280; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; }
+.table td { padding: 12px; border-bottom: 1px solid #f3f4f6; }
+.amount { font-weight: 600; }
+.state { padding: 40px; text-align: center; color: #6b7280; }
+.stateError { padding: 40px; text-align: center; color: #ef4444; }
+.viewLink { color: #3b82f6; text-decoration: none; font-size: 0.875rem; }
+.viewLink:hover { text-decoration: underline; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
+.badgeDraft { background: #f3f4f6; color: #6b7280; }
+.badgeSent { background: #dbeafe; color: #1d4ed8; }
+.badgePaid { background: #dcfce7; color: #16a34a; }
+.badgeOverdue { background: #fee2e2; color: #dc2626; }
+.badgeVoid { background: #f3f4f6; color: #9ca3af; }
