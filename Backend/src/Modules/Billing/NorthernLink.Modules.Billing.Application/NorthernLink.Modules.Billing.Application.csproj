@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Application layer: commands, queries, handlers.
+       May reference: own Domain, own Contracts, BuildingBlocks.Application,
+       and OTHER modules' Contracts projects only (never their internals). -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\NorthernLink.Modules.Billing.Domain\NorthernLink.Modules.Billing.Domain.csproj" />
+    <ProjectReference Include="..\NorthernLink.Modules.Billing.Contracts\NorthernLink.Modules.Billing.Contracts.csproj" />
+    <ProjectReference Include="..\..\..\BuildingBlocks\NorthernLink.BuildingBlocks.Application\NorthernLink.BuildingBlocks.Application.csproj" />
+  </ItemGroup>
+
+</Project>

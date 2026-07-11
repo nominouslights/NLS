@@ -1,0 +1,20 @@
+# OS
+.DS_Store
+
+# Node (Dispatcher)
+node_modules/
+.next/
+next-env.d.ts
+
+# .NET (Backend)
+bin/
+obj/
+TestResults/
+
+# Local-only Claude settings
+.claude/settings.local.json
+**/.claude/settings.local.json
+
+# Env / secrets
+.env
+.env.*

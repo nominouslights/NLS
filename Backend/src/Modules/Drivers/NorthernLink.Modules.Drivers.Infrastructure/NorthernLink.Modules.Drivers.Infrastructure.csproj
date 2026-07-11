@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Infrastructure layer: EF Core DbContext (schema "drivers"), repositories,
+       external service adapters, and the module's DI registration entry point.
+       May reference: own Application + BuildingBlocks.Infrastructure. -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\NorthernLink.Modules.Drivers.Application\NorthernLink.Modules.Drivers.Application.csproj" />
+    <ProjectReference Include="..\..\..\BuildingBlocks\NorthernLink.BuildingBlocks.Infrastructure\NorthernLink.BuildingBlocks.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>
