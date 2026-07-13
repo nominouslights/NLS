@@ -10,6 +10,7 @@ namespace NorthernLink.Fleet.Domain.Vehicles;
 /// </summary>
 public sealed class Vehicle : AggregateRoot, ITenantScoped
 {
+    public const string EndOfLifeRetirementReason = "End of service life reached";
 
     private Vehicle()
     {
@@ -180,7 +181,7 @@ public sealed class Vehicle : AggregateRoot, ITenantScoped
         Status = newStatus;
         StatusReason = newStatus switch
         {
-            VehicleStatus.Retired => string.IsNullOrWhiteSpace(reason) ? "End of service life reached" : reason!.Trim(),
+            VehicleStatus.Retired => string.IsNullOrWhiteSpace(reason) ? EndOfLifeRetirementReason : reason!.Trim(),
             _ => string.IsNullOrWhiteSpace(reason) ? null : reason!.Trim(),
         };
         UpdatedAtUtc = DateTimeOffset.UtcNow;
@@ -212,7 +213,7 @@ public sealed class Vehicle : AggregateRoot, ITenantScoped
         {
             var previous = Status;
             Status = VehicleStatus.Retired;
-            StatusReason = "End of service life reached";
+            StatusReason = EndOfLifeRetirementReason;
 
             Raise(new VehicleStatusChangedDomainEvent(Id, previous, VehicleStatus.Retired, StatusReason));
             Raise(new VehicleReachedEndOfLifeDomainEvent(Id, odometerKm, EndOfLifeKm));
