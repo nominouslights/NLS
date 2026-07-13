@@ -1,9 +1,13 @@
 import type {
   Client,
   Driver,
+  DtcAlert,
   FleetVehicle,
+  FuelRouteStat,
   Incident,
   Invoice,
+  PartItem,
+  PmReminder,
   Rider,
   Trip,
 } from "./types";
@@ -368,6 +372,50 @@ export const fleet: FleetVehicle[] = [
     licReq: "Class 4",
     periodic: true,
   },
+];
+
+// ---------------------------------------------------------------------------
+// Maintenance & Asset Management previews — MOCK ONLY (no backend domain yet).
+// Keyed by unit number so per-vehicle tabs in Fleet can slice them.
+// ---------------------------------------------------------------------------
+
+export const pmReminders: PmReminder[] = [
+  { unit: "U-01", task: "Steering linkage inspection", basis: "time", due: "OVERDUE 6d", k: "over" },
+  { unit: "U-01", task: "Engine oil & filter", basis: "mileage", due: "in 1,900 km", k: "ontime" },
+  { unit: "U-02", task: "Engine oil & filter", basis: "mileage", due: "in 800 km", k: "soon" },
+  { unit: "U-02", task: "Air brake adjustment check", basis: "time", due: "in 41d", k: "ontime" },
+  { unit: "U-03", task: "Coolant flush", basis: "time", due: "in 34d", k: "ontime" },
+  { unit: "U-03", task: "Differential fluid change", basis: "mileage", due: "in 6,200 km", k: "ontime" },
+  { unit: "U-04", task: "Tire rotation", basis: "mileage", due: "in 2,400 km", k: "ontime" },
+  { unit: "U-05", task: "Transmission service", basis: "hours", due: "in 40 engine-h", k: "soon" },
+  { unit: "U-05", task: "Serpentine belt replacement", basis: "time", due: "in 12d", k: "soon" },
+  { unit: "U-06", task: "Brake pads & rotors", basis: "mileage", due: "OVERDUE 350 km", k: "over" },
+];
+
+export const dtcAlerts: DtcAlert[] = [
+  { unit: "U-01", code: "C0051", desc: "Steering wheel position sensor fault", severity: "Critical", k: "over", raised: "2d ago" },
+  { unit: "U-06", code: "P0301", desc: "Cylinder 1 misfire detected", severity: "Major", k: "over", raised: "5h ago" },
+  { unit: "U-05", code: "P0128", desc: "Coolant thermostat below regulating temp", severity: "Minor", k: "soon", raised: "1d ago" },
+  { unit: "U-03", code: "P0456", desc: "EVAP system small leak detected", severity: "Minor", k: "soon", raised: "3d ago" },
+  { unit: "U-02", code: "P1000", desc: "OBD readiness monitors incomplete", severity: "Info", k: "ontime", raised: "6d ago" },
+];
+
+export const partsInventory: PartItem[] = [
+  { sku: "FLT-OIL-15W40", name: "Engine oil 15W-40 (20 L)", onHand: 6, min: 4, k: "ontime", loc: "Thompson shop · A2" },
+  { sku: "BRK-PAD-INT30", name: "Brake pad set — International 3000", onHand: 1, min: 2, k: "over", loc: "Thompson shop · B1" },
+  { sku: "FLT-AIR-T150", name: "Air filter — Transit T-150", onHand: 3, min: 3, k: "soon", loc: "Thompson shop · A4" },
+  { sku: "BLB-HDL-H11", name: "Headlamp bulb H11 (pair)", onHand: 8, min: 4, k: "ontime", loc: "Thompson shop · C3" },
+  { sku: "WPR-BLD-26", name: "Wiper blade 26\" winter", onHand: 2, min: 6, k: "over", loc: "Thompson shop · C1" },
+  { sku: "COOL-ELC-50", name: "ELC coolant 50/50 (10 L)", onHand: 4, min: 3, k: "ontime", loc: "Thompson shop · A3" },
+];
+
+export const fuelStats: FuelRouteStat[] = [
+  { unit: "U-01", l100: "38.9 L/100km", idlePct: "21%", routeAdherence: "—", k: "over" },
+  { unit: "U-02", l100: "36.2 L/100km", idlePct: "11%", routeAdherence: "97%", k: "ontime" },
+  { unit: "U-03", l100: "37.0 L/100km", idlePct: "14%", routeAdherence: "95%", k: "ontime" },
+  { unit: "U-04", l100: "14.1 L/100km", idlePct: "9%", routeAdherence: "98%", k: "ontime" },
+  { unit: "U-05", l100: "16.8 L/100km", idlePct: "19%", routeAdherence: "91%", k: "soon" },
+  { unit: "U-06", l100: "15.2 L/100km", idlePct: "12%", routeAdherence: "96%", k: "ontime" },
 ];
 
 export const clients: Client[] = [

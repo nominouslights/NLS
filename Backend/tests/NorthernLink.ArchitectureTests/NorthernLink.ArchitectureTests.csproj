@@ -12,15 +12,15 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Modules\Identity\NorthernLink.Modules.Identity.Infrastructure\NorthernLink.Modules.Identity.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\src\Modules\Trips\NorthernLink.Modules.Trips.Infrastructure\NorthernLink.Modules.Trips.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\src\Modules\Drivers\NorthernLink.Modules.Drivers.Infrastructure\NorthernLink.Modules.Drivers.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\src\Modules\Fleet\NorthernLink.Modules.Fleet.Infrastructure\NorthernLink.Modules.Fleet.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\src\Modules\Clients\NorthernLink.Modules.Clients.Infrastructure\NorthernLink.Modules.Clients.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\src\Modules\Billing\NorthernLink.Modules.Billing.Infrastructure\NorthernLink.Modules.Billing.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\src\Modules\Incidents\NorthernLink.Modules.Incidents.Infrastructure\NorthernLink.Modules.Incidents.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\src\Modules\Notifications\NorthernLink.Modules.Notifications.Infrastructure\NorthernLink.Modules.Notifications.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\src\Modules\Grocery\NorthernLink.Modules.Grocery.Infrastructure\NorthernLink.Modules.Grocery.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Identity\NorthernLink.Identity.csproj" />
+    <ProjectReference Include="..\..\src\Trips\NorthernLink.Trips.csproj" />
+    <ProjectReference Include="..\..\src\Drivers\NorthernLink.Drivers.csproj" />
+    <ProjectReference Include="..\..\src\Fleet\NorthernLink.Fleet.csproj" />
+    <ProjectReference Include="..\..\src\Clients\NorthernLink.Clients.csproj" />
+    <ProjectReference Include="..\..\src\Billing\NorthernLink.Billing.csproj" />
+    <ProjectReference Include="..\..\src\Incidents\NorthernLink.Incidents.csproj" />
+    <ProjectReference Include="..\..\src\Notifications\NorthernLink.Notifications.csproj" />
+    <ProjectReference Include="..\..\src\Grocery\NorthernLink.Grocery.csproj" />
   </ItemGroup>
 
 </Project>

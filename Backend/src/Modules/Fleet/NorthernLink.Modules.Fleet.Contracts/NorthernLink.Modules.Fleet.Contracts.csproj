@@ -1,7 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-
-  <!-- Contracts are this module's public API surface: integration events + DTOs only.
-       Deliberately dependency-free — other modules may reference THIS project and
-       nothing else from the Fleet module. Enforced by architecture tests. -->
-
-</Project>

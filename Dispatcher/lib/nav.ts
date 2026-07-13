@@ -4,6 +4,7 @@ export type ScreenId =
   | "trips"
   | "drivers"
   | "fleet"
+  | "maintenance"
   | "routes"
   | "manifests"
   | "grocery"
@@ -37,6 +38,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "trips", label: "Trips", code: "TR" },
       { id: "drivers", label: "Drivers & Compliance", code: "DR", badge: "2" },
       { id: "fleet", label: "Fleet", code: "FL", badge: "1" },
+      { id: "maintenance", label: "Maintenance", code: "MX" },
       { id: "routes", label: "Routes & Schedules", code: "RT" },
       { id: "manifests", label: "Manifests & Demand", code: "MF" },
       { id: "grocery", label: "Grocery & Parcel", code: "GP" },

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The Trips domain library: Domain/, Application/, and Infrastructure/ layers in one
+       assembly, composed by the API gateway. References NorthernLink.Shared and nothing
+       else internal — never another domain library; cross-domain communication is
+       integration-events-only. Structure-only scaffold until real features land. -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\Shared\NorthernLink.Shared.csproj" />
+  </ItemGroup>
+
+</Project>

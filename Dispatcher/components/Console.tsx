@@ -11,6 +11,7 @@ import LiveMap from "@/components/screens/LiveMap";
 import Trips from "@/components/screens/Trips";
 import Drivers from "@/components/screens/Drivers";
 import Fleet from "@/components/screens/Fleet";
+import Maintenance from "@/components/screens/Maintenance";
 import Clients from "@/components/screens/Clients";
 import Riders from "@/components/screens/Riders";
 import Billing from "@/components/screens/Billing";
@@ -28,7 +29,7 @@ export default function Console() {
 
   const [tripSel, setTripSel] = useState(0);
   const [driverSel, setDriverSel] = useState(0);
-  const [fleetSel, setFleetSel] = useState(0);
+  const [fleetSelId, setFleetSelId] = useState<string | null>(null);
   const [clientSel, setClientSel] = useState(0);
   const [invoiceSel, setInvoiceSel] = useState(0);
   const [riderSel, setRiderSel] = useState(0);
@@ -71,7 +72,15 @@ export default function Console() {
             <Trips tripSel={tripSel} setTripSel={setTripSel} onNewTrip={() => setWizardOpen(true)} />
           )}
           {screen === "drivers" && <Drivers driverSel={driverSel} setDriverSel={setDriverSel} />}
-          {screen === "fleet" && <Fleet fleetSel={fleetSel} setFleetSel={setFleetSel} />}
+          {screen === "fleet" && <Fleet fleetSelId={fleetSelId} setFleetSelId={setFleetSelId} />}
+          {screen === "maintenance" && (
+            <Maintenance
+              onOpenVehicle={(id) => {
+                setFleetSelId(id);
+                setScreen("fleet");
+              }}
+            />
+          )}
           {screen === "routes" && <RoutesSchedules />}
           {screen === "manifests" && <Manifests />}
           {screen === "grocery" && <Grocery />}
