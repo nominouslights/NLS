@@ -1,19 +1,24 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
-  <!-- Composition root. References every module's Infrastructure project — for DI
-       registration ONLY. Endpoint code lives in the modules, never here. -->
+  <!-- The gateway: composition root for every domain library. References Shared plus one
+       library per domain — for DI registration and endpoint composition ONLY. Endpoint
+       code lives in the domain libraries, never here. -->
 
   <ItemGroup>
-    <ProjectReference Include="..\..\BuildingBlocks\NorthernLink.BuildingBlocks.Infrastructure\NorthernLink.BuildingBlocks.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\Modules\Identity\NorthernLink.Modules.Identity.Infrastructure\NorthernLink.Modules.Identity.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\Modules\Trips\NorthernLink.Modules.Trips.Infrastructure\NorthernLink.Modules.Trips.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\Modules\Drivers\NorthernLink.Modules.Drivers.Infrastructure\NorthernLink.Modules.Drivers.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\Modules\Fleet\NorthernLink.Modules.Fleet.Infrastructure\NorthernLink.Modules.Fleet.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\Modules\Clients\NorthernLink.Modules.Clients.Infrastructure\NorthernLink.Modules.Clients.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\Modules\Billing\NorthernLink.Modules.Billing.Infrastructure\NorthernLink.Modules.Billing.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\Modules\Incidents\NorthernLink.Modules.Incidents.Infrastructure\NorthernLink.Modules.Incidents.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\Modules\Notifications\NorthernLink.Modules.Notifications.Infrastructure\NorthernLink.Modules.Notifications.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\Modules\Grocery\NorthernLink.Modules.Grocery.Infrastructure\NorthernLink.Modules.Grocery.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\Shared\NorthernLink.Shared.csproj" />
+    <ProjectReference Include="..\..\Identity\NorthernLink.Identity.csproj" />
+    <ProjectReference Include="..\..\Trips\NorthernLink.Trips.csproj" />
+    <ProjectReference Include="..\..\Drivers\NorthernLink.Drivers.csproj" />
+    <ProjectReference Include="..\..\Fleet\NorthernLink.Fleet.csproj" />
+    <ProjectReference Include="..\..\Clients\NorthernLink.Clients.csproj" />
+    <ProjectReference Include="..\..\Billing\NorthernLink.Billing.csproj" />
+    <ProjectReference Include="..\..\Incidents\NorthernLink.Incidents.csproj" />
+    <ProjectReference Include="..\..\Notifications\NorthernLink.Notifications.csproj" />
+    <ProjectReference Include="..\..\Grocery\NorthernLink.Grocery.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.ServiceDiscovery" />
   </ItemGroup>
 
 </Project>

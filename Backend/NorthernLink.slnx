@@ -2,67 +2,24 @@
   <Folder Name="/Api/">
     <Project Path="src/Api/NorthernLink.Api/NorthernLink.Api.csproj" />
   </Folder>
-  <Folder Name="/BuildingBlocks/">
-    <Project Path="src/BuildingBlocks/NorthernLink.BuildingBlocks.Application/NorthernLink.BuildingBlocks.Application.csproj" />
-    <Project Path="src/BuildingBlocks/NorthernLink.BuildingBlocks.Infrastructure/NorthernLink.BuildingBlocks.Infrastructure.csproj" />
-    <Project Path="src/BuildingBlocks/NorthernLink.SharedKernel/NorthernLink.SharedKernel.csproj" />
+  <Folder Name="/Shared/">
+    <Project Path="src/Shared/NorthernLink.Shared.csproj" />
   </Folder>
-  <Folder Name="/Modules/" />
-  <Folder Name="/Modules/Billing/">
-    <Project Path="src/Modules/Billing/NorthernLink.Modules.Billing.Application/NorthernLink.Modules.Billing.Application.csproj" />
-    <Project Path="src/Modules/Billing/NorthernLink.Modules.Billing.Contracts/NorthernLink.Modules.Billing.Contracts.csproj" />
-    <Project Path="src/Modules/Billing/NorthernLink.Modules.Billing.Domain/NorthernLink.Modules.Billing.Domain.csproj" />
-    <Project Path="src/Modules/Billing/NorthernLink.Modules.Billing.Infrastructure/NorthernLink.Modules.Billing.Infrastructure.csproj" />
-  </Folder>
-  <Folder Name="/Modules/Clients/">
-    <Project Path="src/Modules/Clients/NorthernLink.Modules.Clients.Application/NorthernLink.Modules.Clients.Application.csproj" />
-    <Project Path="src/Modules/Clients/NorthernLink.Modules.Clients.Contracts/NorthernLink.Modules.Clients.Contracts.csproj" />
-    <Project Path="src/Modules/Clients/NorthernLink.Modules.Clients.Domain/NorthernLink.Modules.Clients.Domain.csproj" />
-    <Project Path="src/Modules/Clients/NorthernLink.Modules.Clients.Infrastructure/NorthernLink.Modules.Clients.Infrastructure.csproj" />
-  </Folder>
-  <Folder Name="/Modules/Drivers/">
-    <Project Path="src/Modules/Drivers/NorthernLink.Modules.Drivers.Application/NorthernLink.Modules.Drivers.Application.csproj" />
-    <Project Path="src/Modules/Drivers/NorthernLink.Modules.Drivers.Contracts/NorthernLink.Modules.Drivers.Contracts.csproj" />
-    <Project Path="src/Modules/Drivers/NorthernLink.Modules.Drivers.Domain/NorthernLink.Modules.Drivers.Domain.csproj" />
-    <Project Path="src/Modules/Drivers/NorthernLink.Modules.Drivers.Infrastructure/NorthernLink.Modules.Drivers.Infrastructure.csproj" />
-  </Folder>
-  <Folder Name="/Modules/Fleet/">
-    <Project Path="src/Modules/Fleet/NorthernLink.Modules.Fleet.Application/NorthernLink.Modules.Fleet.Application.csproj" />
-    <Project Path="src/Modules/Fleet/NorthernLink.Modules.Fleet.Contracts/NorthernLink.Modules.Fleet.Contracts.csproj" />
-    <Project Path="src/Modules/Fleet/NorthernLink.Modules.Fleet.Domain/NorthernLink.Modules.Fleet.Domain.csproj" />
-    <Project Path="src/Modules/Fleet/NorthernLink.Modules.Fleet.Infrastructure/NorthernLink.Modules.Fleet.Infrastructure.csproj" />
-  </Folder>
-  <Folder Name="/Modules/Grocery/">
-    <Project Path="src/Modules/Grocery/NorthernLink.Modules.Grocery.Application/NorthernLink.Modules.Grocery.Application.csproj" />
-    <Project Path="src/Modules/Grocery/NorthernLink.Modules.Grocery.Contracts/NorthernLink.Modules.Grocery.Contracts.csproj" />
-    <Project Path="src/Modules/Grocery/NorthernLink.Modules.Grocery.Domain/NorthernLink.Modules.Grocery.Domain.csproj" />
-    <Project Path="src/Modules/Grocery/NorthernLink.Modules.Grocery.Infrastructure/NorthernLink.Modules.Grocery.Infrastructure.csproj" />
-  </Folder>
-  <Folder Name="/Modules/Identity/">
-    <Project Path="src/Modules/Identity/NorthernLink.Modules.Identity.Application/NorthernLink.Modules.Identity.Application.csproj" />
-    <Project Path="src/Modules/Identity/NorthernLink.Modules.Identity.Contracts/NorthernLink.Modules.Identity.Contracts.csproj" />
-    <Project Path="src/Modules/Identity/NorthernLink.Modules.Identity.Domain/NorthernLink.Modules.Identity.Domain.csproj" />
-    <Project Path="src/Modules/Identity/NorthernLink.Modules.Identity.Infrastructure/NorthernLink.Modules.Identity.Infrastructure.csproj" />
-  </Folder>
-  <Folder Name="/Modules/Incidents/">
-    <Project Path="src/Modules/Incidents/NorthernLink.Modules.Incidents.Application/NorthernLink.Modules.Incidents.Application.csproj" />
-    <Project Path="src/Modules/Incidents/NorthernLink.Modules.Incidents.Contracts/NorthernLink.Modules.Incidents.Contracts.csproj" />
-    <Project Path="src/Modules/Incidents/NorthernLink.Modules.Incidents.Domain/NorthernLink.Modules.Incidents.Domain.csproj" />
-    <Project Path="src/Modules/Incidents/NorthernLink.Modules.Incidents.Infrastructure/NorthernLink.Modules.Incidents.Infrastructure.csproj" />
-  </Folder>
-  <Folder Name="/Modules/Notifications/">
-    <Project Path="src/Modules/Notifications/NorthernLink.Modules.Notifications.Application/NorthernLink.Modules.Notifications.Application.csproj" />
-    <Project Path="src/Modules/Notifications/NorthernLink.Modules.Notifications.Contracts/NorthernLink.Modules.Notifications.Contracts.csproj" />
-    <Project Path="src/Modules/Notifications/NorthernLink.Modules.Notifications.Domain/NorthernLink.Modules.Notifications.Domain.csproj" />
-    <Project Path="src/Modules/Notifications/NorthernLink.Modules.Notifications.Infrastructure/NorthernLink.Modules.Notifications.Infrastructure.csproj" />
-  </Folder>
-  <Folder Name="/Modules/Trips/">
-    <Project Path="src/Modules/Trips/NorthernLink.Modules.Trips.Application/NorthernLink.Modules.Trips.Application.csproj" />
-    <Project Path="src/Modules/Trips/NorthernLink.Modules.Trips.Contracts/NorthernLink.Modules.Trips.Contracts.csproj" />
-    <Project Path="src/Modules/Trips/NorthernLink.Modules.Trips.Domain/NorthernLink.Modules.Trips.Domain.csproj" />
-    <Project Path="src/Modules/Trips/NorthernLink.Modules.Trips.Infrastructure/NorthernLink.Modules.Trips.Infrastructure.csproj" />
+  <Folder Name="/Domains/">
+    <Project Path="src/Billing/NorthernLink.Billing.csproj" />
+    <Project Path="src/Clients/NorthernLink.Clients.csproj" />
+    <Project Path="src/Drivers/NorthernLink.Drivers.csproj" />
+    <Project Path="src/Fleet/NorthernLink.Fleet.csproj" />
+    <Project Path="src/Grocery/NorthernLink.Grocery.csproj" />
+    <Project Path="src/Identity/NorthernLink.Identity.csproj" />
+    <Project Path="src/Incidents/NorthernLink.Incidents.csproj" />
+    <Project Path="src/Notifications/NorthernLink.Notifications.csproj" />
+    <Project Path="src/Trips/NorthernLink.Trips.csproj" />
   </Folder>
   <Folder Name="/Tests/">
     <Project Path="tests/NorthernLink.ArchitectureTests/NorthernLink.ArchitectureTests.csproj" />
+    <Project Path="tests/NorthernLink.Fleet.Tests/NorthernLink.Fleet.Tests.csproj" />
+    <Project Path="tests/NorthernLink.Shared.Tests/NorthernLink.Shared.Tests.csproj" />
+    <Project Path="tests/NorthernLink.Fleet.IntegrationTests/NorthernLink.Fleet.IntegrationTests.csproj" />
   </Folder>
 </Solution>

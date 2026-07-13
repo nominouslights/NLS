@@ -5,113 +5,70 @@ namespace NorthernLink.ArchitectureTests;
 /// <summary>
 /// The microservice-mimicry rules, enforced on the .csproj reference graph:
 ///
-///   Contracts      → nothing
-///   Domain         → SharedKernel only
-///   Application    → own Domain, own Contracts, BuildingBlocks.Application, other modules' CONTRACTS only
-///   Infrastructure → own Application, own Contracts, BuildingBlocks.Infrastructure
-///   Api host       → BuildingBlocks.Infrastructure + module INFRASTRUCTURE projects only
+///   Shared          → nothing (internal)
+///   Domain library  → NorthernLink.Shared only — never another domain library
+///   Api gateway     → NorthernLink.Shared + domain libraries only
+///
+/// Cross-domain communication is integration-events-only over the bus; there is no
+/// compile-time path from one domain library to another, so extracting a library into
+/// its own microservice is a copy-out of that library plus Shared.
 /// </summary>
 public class ProjectReferenceRulesTests
 {
-    public static TheoryData<string> Modules()
+    public static TheoryData<string> Domains()
     {
         var data = new TheoryData<string>();
-        foreach (var module in ModuleGraph.ModuleNames)
+        foreach (var domain in ModuleGraph.DomainNames)
         {
-            data.Add(module);
+            data.Add(domain);
         }
 
         return data;
     }
 
     [Fact]
-    public void Every_module_on_disk_is_covered_by_these_tests()
+    public void Every_domain_library_on_disk_is_covered_by_these_tests()
     {
-        var onDisk = ModuleGraph.ModulesOnDisk();
-        var known = ModuleGraph.ModuleNames.OrderBy(name => name).ToList();
+        var onDisk = ModuleGraph.DomainsOnDisk();
+        var known = ModuleGraph.DomainNames.OrderBy(name => name).ToList();
 
         Assert.Equal(known, onDisk);
     }
 
-    [Theory]
-    [MemberData(nameof(Modules))]
-    public void Contracts_projects_reference_nothing(string module)
+    [Fact]
+    public void Shared_references_no_projects()
     {
-        var references = ModuleGraph.ProjectReferences(ModuleGraph.ModuleProjectPath(module, "Contracts"));
+        var references = ModuleGraph.ProjectReferences(ModuleGraph.SharedProjectPath);
 
         Assert.Empty(references);
     }
 
     [Theory]
-    [MemberData(nameof(Modules))]
-    public void Domain_projects_reference_shared_kernel_only(string module)
+    [MemberData(nameof(Domains))]
+    public void Domain_libraries_reference_shared_only(string domain)
     {
-        var references = ModuleGraph.ProjectReferences(ModuleGraph.ModuleProjectPath(module, "Domain"));
+        var references = ModuleGraph.ProjectReferences(ModuleGraph.DomainProjectPath(domain));
 
-        var illegal = references.Where(r => r != "NorthernLink.SharedKernel").ToList();
+        var illegal = references.Where(r => r != "NorthernLink.Shared").ToList();
         Assert.True(illegal.Count == 0,
-            $"{module}.Domain has illegal references: {string.Join(", ", illegal)}. Domain may reference SharedKernel only.");
-    }
-
-    [Theory]
-    [MemberData(nameof(Modules))]
-    public void Application_projects_reference_own_layers_and_other_contracts_only(string module)
-    {
-        var references = ModuleGraph.ProjectReferences(ModuleGraph.ModuleProjectPath(module, "Application"));
-
-        var illegal = references.Where(r => !IsAllowedForApplication(module, r)).ToList();
-        Assert.True(illegal.Count == 0,
-            $"{module}.Application has illegal references: {string.Join(", ", illegal)}. " +
-            "Another module may only be referenced through its Contracts project.");
-    }
-
-    [Theory]
-    [MemberData(nameof(Modules))]
-    public void Infrastructure_projects_reference_own_application_and_building_blocks_only(string module)
-    {
-        var references = ModuleGraph.ProjectReferences(ModuleGraph.ModuleProjectPath(module, "Infrastructure"));
-
-        var allowed = new[]
-        {
-            $"NorthernLink.Modules.{module}.Application",
-            $"NorthernLink.Modules.{module}.Contracts",
-            "NorthernLink.BuildingBlocks.Infrastructure",
-        };
-
-        var illegal = references.Where(r => !allowed.Contains(r)).ToList();
-        Assert.True(illegal.Count == 0,
-            $"{module}.Infrastructure has illegal references: {string.Join(", ", illegal)}.");
+            $"NorthernLink.{domain} has illegal references: {string.Join(", ", illegal)}. " +
+            "A domain library may reference NorthernLink.Shared only — cross-domain " +
+            "communication is integration-events-only.");
     }
 
     [Fact]
-    public void Api_host_references_module_infrastructure_and_building_blocks_only()
+    public void Api_gateway_references_shared_and_domain_libraries_only()
     {
-        var apiProject = Path.Combine(
-            ModuleGraph.BackendRoot, "src", "Api", "NorthernLink.Api", "NorthernLink.Api.csproj");
-        var references = ModuleGraph.ProjectReferences(apiProject);
+        var references = ModuleGraph.ProjectReferences(ModuleGraph.ApiProjectPath);
 
-        var illegal = references.Where(r =>
-                r != "NorthernLink.BuildingBlocks.Infrastructure" &&
-                !(r.StartsWith("NorthernLink.Modules.", StringComparison.Ordinal) &&
-                  r.EndsWith(".Infrastructure", StringComparison.Ordinal)))
-            .ToList();
+        var allowed = ModuleGraph.DomainNames
+            .Select(domain => $"NorthernLink.{domain}")
+            .Append("NorthernLink.Shared")
+            .ToHashSet();
 
+        var illegal = references.Where(r => !allowed.Contains(r)).ToList();
         Assert.True(illegal.Count == 0,
-            $"The API host has illegal references: {string.Join(", ", illegal)}. " +
-            "It may only reference BuildingBlocks.Infrastructure and module Infrastructure projects.");
-    }
-
-    private static bool IsAllowedForApplication(string module, string reference)
-    {
-        if (reference == $"NorthernLink.Modules.{module}.Domain" ||
-            reference == $"NorthernLink.Modules.{module}.Contracts" ||
-            reference == "NorthernLink.BuildingBlocks.Application")
-        {
-            return true;
-        }
-
-        // Other modules: Contracts only.
-        return reference.StartsWith("NorthernLink.Modules.", StringComparison.Ordinal) &&
-               reference.EndsWith(".Contracts", StringComparison.Ordinal);
+            $"The API gateway has illegal references: {string.Join(", ", illegal)}. " +
+            "It may only reference NorthernLink.Shared and the domain libraries.");
     }
 }

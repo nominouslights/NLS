@@ -48,11 +48,11 @@ export interface StatusMeta {
 
 const STATUS_META: Record<StatusKind, StatusMeta> = {
   ontime: {
-    c: "#14B88A",
+    c: "#009E73",
     t: "#38d3a6",
     g: "✓",
-    bg: "rgba(20,184,138,.13)",
-    bd: "rgba(20,184,138,.35)",
+    bg: "rgba(0,158,115,.13)",
+    bd: "rgba(0,158,115,.35)",
   },
   soon: {
     c: "#E1B000",

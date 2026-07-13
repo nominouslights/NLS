@@ -25,7 +25,7 @@ function variantStyle(variant: Variant): CSSProperties {
     case "amber":
       return { background: colors.amber, color: colors.navy };
     case "success":
-      return { background: "#14B88A", color: "#04231a" };
+      return { background: "#009E73", color: "#04231a" };
     case "destructive":
       return {
         background: "transparent",

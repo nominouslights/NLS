@@ -55,7 +55,7 @@ from an admin tool to a field app.
                          ┌─────────────────────────────┐
                          │     Northern Link API        │
                          │   (.NET 10 · CQRS/DDD)       │
-                         │  Modular Monolith, one DB     │
+                         │  Domain libraries, one DB     │
                          └───────────────┬───────────────┘
                                          │
         ┌───────────────┬───────────────┼───────────────┬───────────────┐
@@ -145,9 +145,17 @@ Authorization is enforced two ways, deliberately redundant:
 
 ## 5. API Domain Boundaries
 
-Built as a **modular monolith** (not microservices) to start — same CQRS/DDD approach already
-scoped for the TMS, organized into clearly separated modules that *could* be split into services
-later if scale demands it, without paying microservices operational overhead now.
+Built as a **single deployable API composed of one class library per domain** (not microservices)
+to start — same CQRS/DDD approach already scoped for the TMS. Each domain library contains its
+own `Domain/`, `Application/`, and `Infrastructure/` layers, references only `NorthernLink.Shared`,
+and communicates with other domains exclusively through RabbitMQ integration events. That makes
+each library extractable into its own microservice later (copy the library + Shared out) if scale
+demands it, without paying microservices operational overhead now.
+
+**Domain modeling convention: value objects are `sealed record`.** No `ValueObject` base class —
+C# records already give structural equality (component-wise `Equals`/`GetHashCode`) for free.
+Standard shape: private constructor, static `Create(...)` factory returning `Result<T>` for
+validation failures. Example: `Backend/src/Fleet/Domain/Vehicles/Vin.cs`.
 
 | Domain | Responsibility |
 |---|---|
@@ -494,6 +502,31 @@ This is a heavier lift to stand up than clicking "connect" on a SaaS dashboard, 
 with everything else in this document, and at your current scale the operational overhead is
 manageable — a small number of Docker containers alongside the main application stack.
 
+### 11.2 Local Development
+
+The canonical local dev entry point is the **.NET Aspire AppHost** (`AppHost/NorthernLink.AppHost/`
+at the workspace root — a platform-level orchestrator, deliberately not nested inside `Backend/`,
+since it starts Postgres, RabbitMQ, the API, *and* the Dispatcher dev server together with a live
+dashboard). Run `aspire run` from anywhere in the repo, or `dotnet run --project
+AppHost/NorthernLink.AppHost` — this replaced what used to be three separate manual steps
+(docker-compose + `dotnet run` + `npm run dev`). `Directory.Build.props`/`Directory.Packages.props`
+live at the workspace root too, for the same reason — shared build settings and central package
+versions available to every .NET project regardless of folder.
+
+Postgres/RabbitMQ and the API's own config stay **orchestration only** — fixed environment-variable
+values matching what a standalone `dotnet run` on the API also uses, not dynamically injected.
+The one deliberate exception is the API→Dispatcher relationship: the AppHost wires
+`.WithReference()` so Aspire injects the API's resolved URL into the Dispatcher process, which
+`Dispatcher/next.config.ts` uses to proxy `/api/*` requests server-side. That's what lets the
+browser only ever talk to the Dispatcher's own origin — **no CORS configuration exists anywhere
+in the stack**, by design, not by omission.
+
+Local Postgres runs as a plain superuser, so **Row-Level Security is unenforced in local dev by
+design**; RLS is only actually verified against the live server (see
+`Backend/docker/initdb/01-app-role.sql`, which provisions the non-superuser role there).
+`ConnectionStrings:Postgres` lives entirely in environment variables — never
+`appsettings.Development.json`.
+
 ---
 
 ## 12. Technology Stack Summary
@@ -501,7 +534,7 @@ manageable — a small number of Docker containers alongside the main applicatio
 | Layer | Choice |
 |---|---|
 | Frontend (web apps) | Next.js 15 |
-| Backend API | .NET 10, CQRS/DDD, modular monolith |
+| Backend API | .NET 10, CQRS/DDD — one class library per domain, composed by the API gateway |
 | Database | PostgreSQL (+ RLS for tenant isolation) |
 | Object storage | OVHcloud Object Storage (S3-compatible) |
 | Mobile — Community App | **Flutter — decided.** Personal device (passenger's own phone), iOS/Android |

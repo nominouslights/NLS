@@ -52,6 +52,42 @@ export interface FleetVehicle {
   periodic: boolean;
 }
 
+// --- Maintenance & Asset Management previews (mock only — no backend yet) ---
+
+export interface PmReminder {
+  unit: string;
+  task: string;
+  basis: "mileage" | "hours" | "time";
+  due: string;
+  k: StatusKind;
+}
+
+export interface DtcAlert {
+  unit: string;
+  code: string;
+  desc: string;
+  severity: string;
+  k: StatusKind;
+  raised: string;
+}
+
+export interface PartItem {
+  sku: string;
+  name: string;
+  onHand: number;
+  min: number;
+  k: StatusKind;
+  loc: string;
+}
+
+export interface FuelRouteStat {
+  unit: string;
+  l100: string;
+  idlePct: string;
+  routeAdherence: string;
+  k: StatusKind;
+}
+
 export interface ClientContact {
   name: string;
   role: string;

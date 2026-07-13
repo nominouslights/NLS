@@ -6,66 +6,90 @@ namespace NorthernLink.ArchitectureTests;
 
 /// <summary>
 /// IL-level dependency rules via NetArchTest. These complement the csproj-graph tests:
-/// while modules are empty scaffolds they pass vacuously, but as real code lands they
-/// catch type-level leaks the reference graph can't see (e.g. a type smuggled through
-/// a transitive dependency).
+/// with each domain now a single assembly, the layer boundaries (Domain / Application /
+/// Infrastructure) live in namespaces, so only IL rules can enforce them. They also catch
+/// cross-domain type leaks smuggled through transitive dependencies.
 /// </summary>
 public class TypeDependencyRulesTests
 {
-    public static TheoryData<string> Modules()
+    public static TheoryData<string> Domains()
     {
         var data = new TheoryData<string>();
-        foreach (var module in ModuleGraph.ModuleNames)
+        foreach (var domain in ModuleGraph.DomainNames)
         {
-            data.Add(module);
+            data.Add(domain);
         }
 
         return data;
     }
 
     [Theory]
-    [MemberData(nameof(Modules))]
-    public void Module_types_do_not_depend_on_other_modules_internals(string module)
+    [MemberData(nameof(Domains))]
+    public void Domain_libraries_do_not_depend_on_other_domain_libraries(string domain)
     {
-        var internalLayers = new[] { "Domain", "Application", "Infrastructure" };
-
-        var forbiddenNamespaces = ModuleGraph.ModuleNames
-            .Where(other => other != module)
-            .SelectMany(other => internalLayers.Select(layer => $"NorthernLink.Modules.{other}.{layer}"))
+        var forbiddenNamespaces = ModuleGraph.DomainNames
+            .Where(other => other != domain)
+            .Select(other => $"NorthernLink.{other}")
             .ToArray();
 
-        foreach (var layer in internalLayers)
-        {
-            var assembly = LoadModuleAssembly(module, layer);
-            var result = Types.InAssembly(assembly)
-                .ShouldNot().HaveDependencyOnAny(forbiddenNamespaces)
-                .GetResult();
-
-            Assert.True(result.IsSuccessful,
-                $"{module}.{layer} has types depending on another module's internals: " +
-                $"{string.Join(", ", result.FailingTypeNames ?? [])}");
-        }
-    }
-
-    [Theory]
-    [MemberData(nameof(Modules))]
-    public void Domain_types_stay_free_of_infrastructure_concerns(string module)
-    {
-        var assembly = LoadModuleAssembly(module, "Domain");
-
+        var assembly = LoadDomainAssembly(domain);
         var result = Types.InAssembly(assembly)
-            .ShouldNot().HaveDependencyOnAny(
-                "Microsoft.EntityFrameworkCore",
-                "Npgsql",
-                "RabbitMQ.Client",
-                "NorthernLink.BuildingBlocks.Infrastructure")
+            .ShouldNot().HaveDependencyOnAny(forbiddenNamespaces)
             .GetResult();
 
         Assert.True(result.IsSuccessful,
-            $"{module}.Domain has types depending on infrastructure: " +
+            $"NorthernLink.{domain} has types depending on another domain library: " +
+            $"{string.Join(", ", result.FailingTypeNames ?? [])}. " +
+            "Cross-domain communication is integration-events-only.");
+    }
+
+    [Theory]
+    [MemberData(nameof(Domains))]
+    public void Domain_layer_stays_free_of_upper_layers_and_infrastructure(string domain)
+    {
+        var assembly = LoadDomainAssembly(domain);
+
+        var result = Types.InAssembly(assembly)
+            .That().ResideInNamespaceStartingWith($"NorthernLink.{domain}.Domain")
+            .ShouldNot().HaveDependencyOnAny(
+                $"NorthernLink.{domain}.Application",
+                $"NorthernLink.{domain}.Infrastructure",
+                "Microsoft.EntityFrameworkCore",
+                "Npgsql",
+                "RabbitMQ.Client",
+                // Domain may use NorthernLink.Shared.Kernel only.
+                "NorthernLink.Shared.Messaging",
+                "NorthernLink.Shared.Events",
+                "NorthernLink.Shared.EventBus",
+                "NorthernLink.Shared.Persistence",
+                "NorthernLink.Shared.Tenancy")
+            .GetResult();
+
+        Assert.True(result.IsSuccessful,
+            $"NorthernLink.{domain}'s Domain layer has illegal dependencies: " +
             $"{string.Join(", ", result.FailingTypeNames ?? [])}");
     }
 
-    private static Assembly LoadModuleAssembly(string module, string layer) =>
-        Assembly.Load($"NorthernLink.Modules.{module}.{layer}");
+    [Theory]
+    [MemberData(nameof(Domains))]
+    public void Application_layer_does_not_depend_on_infrastructure(string domain)
+    {
+        var assembly = LoadDomainAssembly(domain);
+
+        var result = Types.InAssembly(assembly)
+            .That().ResideInNamespaceStartingWith($"NorthernLink.{domain}.Application")
+            .ShouldNot().HaveDependencyOnAny(
+                $"NorthernLink.{domain}.Infrastructure",
+                "Microsoft.EntityFrameworkCore",
+                "Npgsql",
+                "RabbitMQ.Client")
+            .GetResult();
+
+        Assert.True(result.IsSuccessful,
+            $"NorthernLink.{domain}'s Application layer has illegal dependencies: " +
+            $"{string.Join(", ", result.FailingTypeNames ?? [])}");
+    }
+
+    private static Assembly LoadDomainAssembly(string domain) =>
+        Assembly.Load($"NorthernLink.{domain}");
 }

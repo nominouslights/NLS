@@ -19,9 +19,12 @@ reference file rather than guessing from this summary.
 
 ## Non-Negotiable Rules — Always Apply These
 
-1. **Modular monolith, not microservices.** One .NET 10 API, CQRS/DDD, organized into clearly
-   separated domain modules (see domain list below). Do not introduce a new service/deployment
-   unit for a new feature — add a new module instead.
+1. **One deployable API composed of one class library per domain — not microservices.** One
+   .NET 10 gateway API, CQRS/DDD, with each domain a self-contained class library (`Domain/`,
+   `Application/`, `Infrastructure/` layers inside; references `NorthernLink.Shared` only;
+   cross-domain communication is integration-events-only over RabbitMQ). Do not introduce a new
+   service/deployment unit for a new feature — extend an existing library (or add a new one for a
+   genuinely new domain). A future microservice = copy the library + Shared out.
 2. **Multi-tenant, three tenant categories, enforced twice.** Internal (Admin), Client, and
    Vendor/Partner tenants, plus a non-tenant Consumer identity pool. Every tenant-scoped table
    needs a `tenant_id` and **both** an API-level authorization check **and** a Postgres Row-Level
@@ -52,7 +55,7 @@ reference file rather than guessing from this summary.
 
 ## Quick Reference: API Domains
 
-Modular monolith, one database, organized into these domains (full detail in the reference file,
+One API, one database, one class library per domain (full detail in the reference file,
 Section 5):
 
 Identity & Access · Client & Contract Management · Vendor/Partner Management ·
@@ -95,3 +98,6 @@ QC) · Identity: self-hosted OIDC (OpenIddict) · Monitoring: self-hosted Sentry
 - If unsure whether something is already decided vs. still open, check reference file Section 13
   ("Open Decisions") before assuming it's undecided — many items there are already resolved and
   marked as such.
+- **Domain value objects are `sealed record`**, not a hand-rolled class with a base `ValueObject`
+  type — records give structural equality for free. Private constructor + static `Create` factory
+  returning `Result<T>` is the standard shape (see `Backend/src/Fleet/Domain/Vehicles/Vin.cs`).
