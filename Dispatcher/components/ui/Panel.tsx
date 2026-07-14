@@ -15,8 +15,9 @@ export function Panel({
       style={{
         padding: "15px 16px",
         background: colors.cardBg,
-        border: `1px solid ${borderColor ?? colors.border}`,
-        borderRadius: 10,
+        border: `1px solid ${borderColor ?? colors.borderSubtle}`,
+        borderRadius: 12,
+        boxShadow: colors.shadowCard,
         ...style,
       }}
     >

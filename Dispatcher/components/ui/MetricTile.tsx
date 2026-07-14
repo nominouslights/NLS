@@ -1,4 +1,4 @@
-import { fonts } from "@/lib/theme";
+import { colors, fonts } from "@/lib/theme";
 
 export function MetricTile({
   icon,
@@ -25,8 +25,9 @@ export function MetricTile({
       style={{
         padding: "14px 15px",
         borderRadius: 11,
-        background: "#0F1E33",
-        border: `1px solid ${borderColor ?? "#152941"}`,
+        background: colors.cardBg,
+        border: `1px solid ${borderColor ?? colors.borderSubtle}`,
+        boxShadow: colors.shadowCard,
         cursor: "pointer",
       }}
     >
@@ -53,7 +54,7 @@ export function MetricTile({
             fontSize: 10,
             letterSpacing: ".1em",
             textTransform: "uppercase",
-            color: "#8fa6c0",
+            color: colors.textLabel,
           }}
         >
           {label}

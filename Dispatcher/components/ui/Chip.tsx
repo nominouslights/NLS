@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { chipStyle, fonts, statusMeta, svcMeta, type ServiceType, type StatusKind } from "@/lib/theme";
+import { chipStyle, colors, fonts, statusMeta, svcMeta, type ServiceType, type StatusKind } from "@/lib/theme";
 
 export function ServiceChip({
   svc,
@@ -35,7 +35,7 @@ export function StatusChip({ kind, label }: { kind: StatusKind; label: string })
           fontSize: 10,
           fontWeight: 800,
           background: m.c,
-          color: "#04121f",
+          color: m.bt,
         }}
       >
         {m.g}
@@ -64,7 +64,7 @@ export function StatusBadge({
     fontSize: size <= 15 ? 9 : 10,
     fontWeight: 800,
     background: m.c,
-    color: m.c === "#7A8899" ? "#0B1626" : "#04121f",
+    color: m.bt,
   };
   return <span style={style}>{m.g}</span>;
 }
@@ -76,9 +76,9 @@ export function MonoTag({ children, color }: { children: React.ReactNode; color?
         fontFamily: fonts.mono,
         fontSize: 10,
         padding: "2px 6px",
-        border: `1px solid #24405f`,
+        border: `1px solid ${colors.borderStrong}`,
         borderRadius: 4,
-        color: color ?? "#6f8aab",
+        color: color ?? colors.textDim,
       }}
     >
       {children}

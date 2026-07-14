@@ -70,6 +70,7 @@ export function TextField({
       <FieldLabel hint={hint}>{label}</FieldLabel>
       <input
         type="text"
+        className="nl-input"
         value={value}
         maxLength={maxLength}
         placeholder={placeholder}
@@ -111,6 +112,7 @@ export function NumberField({
       <FieldLabel hint={hint}>{label}</FieldLabel>
       <input
         type="number"
+        className="nl-input"
         value={value}
         min={min}
         step={step}
@@ -149,6 +151,7 @@ export function SelectField({
     <div>
       <FieldLabel hint={hint}>{label}</FieldLabel>
       <select
+        className="nl-input"
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
@@ -159,7 +162,7 @@ export function SelectField({
           cursor: disabled ? "not-allowed" : "pointer",
           opacity: disabled ? 0.55 : 1,
           backgroundImage:
-            "url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%239fb2c8'/%3E%3C/svg%3E\")",
+            "url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23486581'/%3E%3C/svg%3E\")",
           backgroundRepeat: "no-repeat",
           backgroundPosition: "right 13px center",
           paddingRight: 32,
