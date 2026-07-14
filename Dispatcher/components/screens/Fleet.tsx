@@ -34,7 +34,7 @@ type PromptKind = "oos" | "odometer" | "retire" | "sell" | "recycle" | null;
 function PreviewCaption({ children }: { children?: string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-      <MonoTag color="#E1B000">MOCK</MonoTag>
+      <MonoTag color={statusMeta("soon").t}>MOCK</MonoTag>
       <span style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim }}>
         {children ?? "Preview — not yet wired to backend."}
       </span>
@@ -153,7 +153,7 @@ export default function Fleet({
               >
                 ▲
               </span>
-              <span style={{ fontFamily: fonts.body, fontSize: 13.5, fontWeight: 600, color: "#f0803f" }}>
+              <span style={{ fontFamily: fonts.body, fontSize: 13.5, fontWeight: 600, color: statusMeta("over").t }}>
                 Fleet registry unavailable
               </span>
             </div>
@@ -404,7 +404,7 @@ export default function Fleet({
                     >
                       ▲
                     </span>
-                    <div style={{ fontFamily: fonts.body, fontSize: 13, color: "#f0803f", fontWeight: 600 }}>
+                    <div style={{ fontFamily: fonts.body, fontSize: 13, color: statusMeta("over").t, fontWeight: 600 }}>
                       End of service life reached — vehicle retired. A retirement certificate has been issued.
                     </div>
                   </div>
@@ -440,7 +440,7 @@ export default function Fleet({
                     >
                       ▲
                     </span>
-                    <div style={{ fontFamily: fonts.body, fontSize: 13, color: "#f0803f", fontWeight: 600 }}>
+                    <div style={{ fontFamily: fonts.body, fontSize: 13, color: statusMeta("over").t, fontWeight: 600 }}>
                       Out of service — removed from dispatch eligibility until cleared.
                       {f.statusReason ? ` Reason: ${f.statusReason}.` : ""}
                     </div>
@@ -457,7 +457,7 @@ export default function Fleet({
                       marginBottom: 14,
                       fontFamily: fonts.body,
                       fontSize: 12.5,
-                      color: "#f0803f",
+                      color: statusMeta("over").t,
                       fontWeight: 600,
                     }}
                   >
@@ -567,7 +567,7 @@ export default function Fleet({
                   <Panel>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                       <SectionLabel>Trip inspection · DVIR</SectionLabel>
-                      <MonoTag color="#E1B000">MOCK</MonoTag>
+                      <MonoTag color={statusMeta("soon").t}>MOCK</MonoTag>
                     </div>
                     {mock ? (
                       <StatusChip kind={mock.dk} label={mock.dvir} />
@@ -583,7 +583,7 @@ export default function Fleet({
                   <Panel>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                       <SectionLabel>Periodic inspection</SectionLabel>
-                      <MonoTag color="#E1B000">MOCK</MonoTag>
+                      <MonoTag color={statusMeta("soon").t}>MOCK</MonoTag>
                     </div>
                     {mock ? (
                       <StatusChip kind={mock.ik} label={mock.insp} />

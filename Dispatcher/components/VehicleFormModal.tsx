@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { colors, fonts } from "@/lib/theme";
+import { colors, fonts, statusMeta } from "@/lib/theme";
 import {
   ApiError,
   registerVehicle,
@@ -90,7 +90,7 @@ export default function VehicleFormModal({
         position: "fixed",
         inset: 0,
         zIndex: 100,
-        background: "rgba(4,10,20,.7)",
+        background: colors.scrim,
         backdropFilter: "blur(3px)",
         display: "flex",
         alignItems: "center",
@@ -110,7 +110,7 @@ export default function VehicleFormModal({
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
-          boxShadow: "0 24px 64px rgba(0,0,0,.5)",
+          boxShadow: colors.shadowPop,
         }}
       >
         {/* header */}
@@ -200,7 +200,7 @@ export default function VehicleFormModal({
               >
                 ▲
               </span>
-              <span style={{ fontFamily: fonts.body, fontSize: 12.5, color: "#f0803f", fontWeight: 600 }}>
+              <span style={{ fontFamily: fonts.body, fontSize: 12.5, color: statusMeta("over").t, fontWeight: 600 }}>
                 {error}
               </span>
             </div>

@@ -26,7 +26,7 @@ import { ActionButton } from "@/components/ui/Button";
 function SectionCaption({ mock }: { mock: boolean }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-      <MonoTag color={mock ? "#E1B000" : "#38d3a6"}>{mock ? "MOCK" : "LIVE"}</MonoTag>
+      <MonoTag color={mock ? statusMeta("soon").t : statusMeta("ontime").t}>{mock ? "MOCK" : "LIVE"}</MonoTag>
       <span style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim }}>
         {mock ? "Preview — not yet wired to backend." : "Fleet API · vehicle registry"}
       </span>
@@ -73,24 +73,24 @@ export default function Maintenance({ onOpenVehicle }: { onOpenVehicle: (id: str
           <MetricTile
             icon="◐"
             iconBg="rgba(225,176,0,.16)"
-            iconColor="#ecc94b"
+            iconColor={statusMeta("soon").t}
             label="PM due soon"
             value={pmSoon}
-            valueColor="#ecc94b"
+            valueColor={statusMeta("soon").t}
           />
           <MetricTile
             icon="▲"
             iconBg="rgba(213,94,0,.16)"
-            iconColor="#f0803f"
+            iconColor={statusMeta("over").t}
             label="PM overdue"
             value={pmOverdue}
-            valueColor="#f0803f"
+            valueColor={statusMeta("over").t}
             borderColor="rgba(213,94,0,.35)"
           />
           <MetricTile
             icon="▲"
             iconBg="rgba(213,94,0,.16)"
-            iconColor="#f0803f"
+            iconColor={statusMeta("over").t}
             label="Open DTC alerts"
             value={openDtc}
             valueColor={colors.headingBright}
@@ -98,14 +98,14 @@ export default function Maintenance({ onOpenVehicle }: { onOpenVehicle: (id: str
           <MetricTile
             icon="▪"
             iconBg="rgba(225,176,0,.16)"
-            iconColor="#ecc94b"
+            iconColor={statusMeta("soon").t}
             label="Low-stock parts"
             value={lowStock.length}
             valueColor={colors.headingBright}
           />
           <MetricTile
             icon="●"
-            iconBg="rgba(59,141,212,.16)"
+            iconBg="rgba(31,111,178,.16)"
             iconColor={colors.skyBlue}
             label="Nearing end-of-life"
             value={vehicles === null ? "—" : nearingEol}
@@ -235,7 +235,7 @@ export default function Maintenance({ onOpenVehicle }: { onOpenVehicle: (id: str
           <SectionCaption mock={false} />
           {eolError ? (
             <div>
-              <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: "#f0803f", fontWeight: 600, marginBottom: 12 }}>
+              <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: statusMeta("over").t, fontWeight: 600, marginBottom: 12 }}>
                 ▲ {eolError}
               </div>
               <ActionButton variant="primary" onClick={load}>

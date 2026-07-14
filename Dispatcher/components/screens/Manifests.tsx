@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { fonts, rowSurface } from "@/lib/theme";
+import { colors, fonts, rowSurface, statusMeta } from "@/lib/theme";
 import { PageHeader } from "@/components/ui/Panel";
 import { ServiceChip } from "@/components/ui/Chip";
 
@@ -33,7 +33,7 @@ const manifestRecords: ManifestRecord[] = [
     win: "Fri Jul 7 · 11:00 → 14:20",
     km: 174,
     vehicle: "Transit T-150 (7-seat)",
-    listBadge: { label: "Not yet viable · 2 / 4", bg: "rgba(225,176,0,.12)", bd: "rgba(225,176,0,.35)", tx: "#ecc94b", glyph: "◐" },
+    listBadge: { label: "Not yet viable · 2 / 4", bg: "rgba(225,176,0,.12)", bd: "rgba(225,176,0,.35)", tx: statusMeta("soon").t, glyph: "◐" },
     capacitySeats: 7,
     passengers: [
       { name: "Marcel Dumas · Leaf Rapids", status: "Confirmed" },
@@ -49,7 +49,7 @@ const manifestRecords: ManifestRecord[] = [
     win: "Fri Jul 7 · 07:15 → 09:40",
     km: 220,
     vehicle: "Transit T-150 (7-seat)",
-    listBadge: { label: "Confirmed · voucher", bg: "rgba(20,184,138,.13)", bd: "rgba(20,184,138,.35)", tx: "#38d3a6", glyph: "✓" },
+    listBadge: { label: "Confirmed · voucher", bg: "rgba(0,158,115,.13)", bd: "rgba(0,158,115,.35)", tx: statusMeta("ontime").t, glyph: "✓" },
     capacitySeats: 7,
     passengers: [
       { name: "Eleanor Bighetty · South Indian Lake", status: "Confirmed" },
@@ -65,7 +65,7 @@ const manifestRecords: ManifestRecord[] = [
     win: "Tue Jul 7 · 06:30 → 09:55",
     km: 198,
     vehicle: "International 3000 (24-seat)",
-    listBadge: { label: "Crew · 18 / 24", bg: "rgba(59,141,212,.12)", bd: "rgba(59,141,212,.4)", tx: "#7EC8F0", glyph: "●" },
+    listBadge: { label: "Crew · 18 / 24", bg: "rgba(31,111,178,.12)", bd: "rgba(31,111,178,.4)", tx: colors.skyBlue, glyph: "●" },
     capacitySeats: 24,
     passengers: [],
     demand: null,
@@ -87,22 +87,22 @@ export default function Manifests() {
       <div style={{ flex: "none", padding: "20px 26px 12px" }}>
         <PageHeader eyebrow="Operations · Manifests, demand activation & run economics" title="Manifests & Demand" />
       </div>
-      <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "32% 1fr", borderTop: "1px solid #1E3350" }}>
+      <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "32% 1fr", borderTop: `1px solid ${colors.border}` }}>
         {/* master */}
-        <div style={{ minHeight: 0, overflowY: "auto", padding: "16px 18px", borderRight: "1px solid #1E3350" }}>
+        <div style={{ minHeight: 0, overflowY: "auto", padding: "16px 18px", borderRight: `1px solid ${colors.border}` }}>
           {manifestRecords.map((rec, i) => {
             const active = i === sel;
             return (
               <div
                 key={rec.id}
                 onClick={() => select(i)}
-                style={{ padding: "12px 14px", marginBottom: 5, ...rowSurface(active, "#3B8DD4") }}
+                style={{ padding: "12px 14px", marginBottom: 5, ...rowSurface(active, colors.blue) }}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                   <ServiceChip svc={rec.svc} label={rec.svcLabel} />
-                  <span style={{ fontFamily: fonts.mono, fontSize: 11, color: "#7EC8F0" }}>{rec.id}</span>
+                  <span style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.skyBlue }}>{rec.id}</span>
                 </div>
-                <div style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: 600, color: "#E8EEF5" }}>{rec.corridor}</div>
+                <div style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: 600, color: colors.textPrimary }}>{rec.corridor}</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
                   <span
                     style={{
@@ -128,22 +128,22 @@ export default function Manifests() {
         </div>
 
         {/* detail */}
-        <div style={{ minHeight: 0, overflowY: "auto", padding: "22px 26px", background: "#0C1A2C" }}>
+        <div style={{ minHeight: 0, overflowY: "auto", padding: "22px 26px", background: colors.detailBg }}>
           <div className="detailfade" key={m.id}>
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
               <ServiceChip svc={m.svc} label={m.svcLabel} />
-              <span style={{ fontFamily: fonts.mono, fontSize: 13, color: "#7EC8F0", marginLeft: "auto" }}>{m.id}</span>
+              <span style={{ fontFamily: fonts.mono, fontSize: 13, color: colors.skyBlue, marginLeft: "auto" }}>{m.id}</span>
             </div>
-            <h2 style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 26, lineHeight: 1.05, color: "#F2F6FB", margin: "6px 0 4px" }}>
+            <h2 style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 26, lineHeight: 1.05, color: colors.headingBright, margin: "6px 0 4px" }}>
               {m.corridor}
             </h2>
-            <div style={{ fontFamily: fonts.mono, fontSize: 12, color: "#9fb2c8", marginBottom: 16 }}>
+            <div style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.textMuted, marginBottom: 16 }}>
               {m.win} · {m.km} km · {m.vehicle}
             </div>
 
             {/* demand meter — community runs only */}
             {m.demand && (
-              <div style={{ padding: "16px 18px", background: "#0F1E33", border: "1px solid rgba(225,176,0,.3)", borderRadius: 12, marginBottom: 14 }}>
+              <div style={{ padding: "16px 18px", background: colors.cardBg, border: "1px solid rgba(225,176,0,.3)", borderRadius: 12, marginBottom: 14, boxShadow: colors.shadowCard }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 11 }}>
                   <div
                     style={{
@@ -151,7 +151,7 @@ export default function Manifests() {
                       fontSize: 9.5,
                       letterSpacing: ".14em",
                       textTransform: "uppercase",
-                      color: "#8fa6c0",
+                      color: colors.textLabel,
                     }}
                   >
                     Demand meter · {m.demand.needed}-passenger minimum
@@ -168,7 +168,7 @@ export default function Manifests() {
                       fontSize: 12,
                       background: "rgba(225,176,0,.13)",
                       border: "1px solid rgba(225,176,0,.35)",
-                      color: "#ecc94b",
+                      color: statusMeta("soon").t,
                     }}
                   >
                     <span
@@ -177,7 +177,7 @@ export default function Manifests() {
                         height: 16,
                         borderRadius: 4,
                         background: "#E1B000",
-                        color: "#2e2400",
+                        color: colors.navy,
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
@@ -198,14 +198,14 @@ export default function Manifests() {
                         flex: 1,
                         height: 14,
                         borderRadius: 4,
-                        background: i < m.demand!.confirmed ? "#14B88A" : "#0A1729",
-                        border: i < m.demand!.confirmed ? undefined : "1px dashed #3B5573",
+                        background: i < m.demand!.confirmed ? "#009E73" : colors.inputBg,
+                        border: i < m.demand!.confirmed ? undefined : `1px dashed ${colors.textFaint}`,
                       }}
                     />
                   ))}
                 </div>
-                <div style={{ fontFamily: fonts.body, fontSize: 12, color: "#9fb2c8" }}>
-                  <strong style={{ color: "#E8EEF5" }}>{m.demand.confirmed} confirmed</strong> · {m.demand.needed - m.demand.confirmed}{" "}
+                <div style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textMuted }}>
+                  <strong style={{ color: colors.textPrimary }}>{m.demand.confirmed} confirmed</strong> · {m.demand.needed - m.demand.confirmed}{" "}
                   more needed to activate this run
                 </div>
               </div>
@@ -213,14 +213,14 @@ export default function Manifests() {
 
             {/* passenger list */}
             {m.passengers.length > 0 && (
-              <div style={{ padding: "15px 16px", background: "#0F1E33", border: "1px solid #1E3350", borderRadius: 11, marginBottom: 14 }}>
+              <div style={{ padding: "15px 16px", background: colors.cardBg, border: `1px solid ${colors.border}`, borderRadius: 11, marginBottom: 14, boxShadow: colors.shadowCard }}>
                 <div
                   style={{
                     fontFamily: fonts.semiCondensed,
                     fontSize: 9.5,
                     letterSpacing: ".14em",
                     textTransform: "uppercase",
-                    color: "#8fa6c0",
+                    color: colors.textLabel,
                     marginBottom: 11,
                   }}
                 >
@@ -234,10 +234,10 @@ export default function Manifests() {
                       justifyContent: "space-between",
                       alignItems: "center",
                       padding: "9px 0",
-                      borderBottom: i < m.passengers.length - 1 ? "1px solid #152941" : undefined,
+                      borderBottom: i < m.passengers.length - 1 ? `1px solid ${colors.borderSubtle}` : undefined,
                     }}
                   >
-                    <span style={{ fontFamily: fonts.body, fontSize: 13, color: "#E8EEF5" }}>{p.name}</span>
+                    <span style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textPrimary }}>{p.name}</span>
                     <span
                       style={{
                         display: "inline-flex",
@@ -246,7 +246,7 @@ export default function Manifests() {
                         fontFamily: fonts.body,
                         fontWeight: 600,
                         fontSize: 11,
-                        color: p.status === "Confirmed" ? "#38d3a6" : "#ecc94b",
+                        color: p.status === "Confirmed" ? statusMeta("ontime").t : statusMeta("soon").t,
                       }}
                     >
                       <span
@@ -254,8 +254,8 @@ export default function Manifests() {
                           width: 14,
                           height: 14,
                           borderRadius: 4,
-                          background: p.status === "Confirmed" ? "#14B88A" : "#E1B000",
-                          color: p.status === "Confirmed" ? "#04231a" : "#2e2400",
+                          background: p.status === "Confirmed" ? "#009E73" : "#E1B000",
+                          color: p.status === "Confirmed" ? "#FFFFFF" : colors.navy,
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
@@ -277,8 +277,8 @@ export default function Manifests() {
               <div
                 style={{
                   padding: "16px 18px",
-                  background: "linear-gradient(180deg,rgba(59,141,212,.08),transparent)",
-                  border: "1px solid #2f557d",
+                  background: "linear-gradient(180deg,rgba(31,111,178,.08),transparent)",
+                  border: `1px solid ${colors.borderActive}`,
                   borderRadius: 12,
                   marginBottom: 14,
                 }}
@@ -289,8 +289,8 @@ export default function Manifests() {
                       width: 22,
                       height: 22,
                       borderRadius: 6,
-                      background: "#3B8DD4",
-                      color: "#04121f",
+                      background: colors.blue,
+                      color: "#FFFFFF",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
@@ -300,11 +300,11 @@ export default function Manifests() {
                   >
                     ◆
                   </span>
-                  <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 17, color: "#7EC8F0" }}>Gift-a-Seat guarantee</div>
+                  <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 17, color: colors.skyBlue }}>Gift-a-Seat guarantee</div>
                 </div>
-                <div style={{ fontFamily: fonts.body, fontSize: 12.5, lineHeight: 1.55, color: "#9fb2c8", marginBottom: 13 }}>
+                <div style={{ fontFamily: fonts.body, fontSize: 12.5, lineHeight: 1.55, color: colors.textMuted, marginBottom: 13 }}>
                   A passenger can cover the remaining seats to guarantee this run departs. The{" "}
-                  <strong style={{ color: "#E8EEF5" }}>exact total is shown before any commitment</strong>.
+                  <strong style={{ color: colors.textPrimary }}>exact total is shown before any commitment</strong>.
                 </div>
                 {giftShown ? (
                   <>
@@ -314,17 +314,17 @@ export default function Manifests() {
                         alignItems: "center",
                         justifyContent: "space-between",
                         padding: "13px 16px",
-                        background: "#0A1729",
-                        border: "1px solid #2f557d",
+                        background: colors.inputBg,
+                        border: `1px solid ${colors.borderActive}`,
                         borderRadius: 10,
                         marginBottom: 12,
                       }}
                     >
                       <div>
-                        <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: "#6B8099", marginBottom: 3 }}>
+                        <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim, marginBottom: 3 }}>
                           2 seats × $67.00 community fare (CAD)
                         </div>
-                        <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 30, lineHeight: 1, color: "#38d3a6", fontVariantNumeric: "tabular-nums" }}>
+                        <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 30, lineHeight: 1, color: statusMeta("ontime").t, fontVariantNumeric: "tabular-nums" }}>
                           $134.00
                         </div>
                       </div>
@@ -336,15 +336,15 @@ export default function Manifests() {
                           letterSpacing: ".03em",
                           padding: "10px 18px",
                           borderRadius: 9,
-                          background: "#14B88A",
-                          color: "#04231a",
+                          background: "#009E73",
+                          color: "#FFFFFF",
                           cursor: "pointer",
                         }}
                       >
                         CONFIRM GUARANTEE
                       </span>
                     </div>
-                    <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: "#6B8099" }}>
+                    <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim }}>
                       Total shown above — guarantee cannot be confirmed until this figure is displayed.
                     </div>
                   </>
@@ -359,8 +359,8 @@ export default function Manifests() {
                       letterSpacing: ".03em",
                       padding: "10px 18px",
                       borderRadius: 9,
-                      background: "#3B8DD4",
-                      color: "#04121f",
+                      background: colors.blue,
+                      color: "#FFFFFF",
                       cursor: "pointer",
                     }}
                   >
@@ -372,22 +372,22 @@ export default function Manifests() {
 
             {/* NIHB + mixing */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <div style={{ padding: "14px 16px", background: "#0F1E33", border: "1px solid rgba(126,200,240,.28)", borderRadius: 11 }}>
+              <div style={{ padding: "14px 16px", background: colors.cardBg, border: "1px solid rgba(23,119,158,.28)", borderRadius: 11, boxShadow: colors.shadowCard }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}>
-                  <span style={{ color: "#7EC8F0", fontWeight: 800 }}>✚</span>
-                  <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 15, color: "#7EC8F0" }}>NIHB voucher</div>
+                  <span style={{ color: colors.skyBlue, fontWeight: 800 }}>✚</span>
+                  <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 15, color: colors.skyBlue }}>NIHB voucher</div>
                 </div>
-                <div style={{ fontFamily: fonts.body, fontSize: 12, lineHeight: 1.55, color: "#9fb2c8" }}>
+                <div style={{ fontFamily: fonts.body, fontSize: 12, lineHeight: 1.55, color: colors.textMuted }}>
                   A prior-approved voucher = confirmed demand. Suppresses the minimum,{" "}
-                  <strong style={{ color: "#38d3a6" }}>$0 to patient</strong>, authorized escorts free.
+                  <strong style={{ color: statusMeta("ontime").t }}>$0 to patient</strong>, authorized escorts free.
                 </div>
               </div>
-              <div style={{ padding: "14px 16px", background: "#0F1E33", border: "1px solid #1E3350", borderRadius: 11 }}>
+              <div style={{ padding: "14px 16px", background: colors.cardBg, border: `1px solid ${colors.border}`, borderRadius: 11, boxShadow: colors.shadowCard }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}>
-                  <span style={{ color: "#38d3a6", fontWeight: 800 }}>✓</span>
-                  <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 15, color: "#E8EEF5" }}>Mixing rule</div>
+                  <span style={{ color: statusMeta("ontime").t, fontWeight: 800 }}>✓</span>
+                  <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 15, color: colors.textPrimary }}>Mixing rule</div>
                 </div>
-                <div style={{ fontFamily: fonts.body, fontSize: 12, lineHeight: 1.55, color: "#9fb2c8" }}>
+                <div style={{ fontFamily: fonts.body, fontSize: 12, lineHeight: 1.55, color: colors.textMuted }}>
                   Community passengers blocked while mine crew aboard. Empty legs surfaced as available.
                 </div>
               </div>

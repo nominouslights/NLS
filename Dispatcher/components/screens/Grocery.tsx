@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { fonts } from "@/lib/theme";
+import { colors, fonts, statusMeta } from "@/lib/theme";
 import { PageHeader } from "@/components/ui/Panel";
 
 const groceryOrders = [
@@ -61,16 +61,16 @@ const parcelOrders = [
 ];
 
 const statusColor: Record<string, string> = {
-  ontime: "#38d3a6",
-  soon: "#ecc94b",
-  off: "#9fb2c8",
-  info: "#7EC8F0",
+  ontime: statusMeta("ontime").t,
+  soon: statusMeta("soon").t,
+  off: statusMeta("off").t,
+  info: statusMeta("info").t,
 };
 const statusBg: Record<string, string> = {
-  ontime: "#14B88A",
+  ontime: "#009E73",
   soon: "#E1B000",
   off: "transparent",
-  info: "#3B8DD4",
+  info: colors.blue,
 };
 const statusGlyph: Record<string, string> = { ontime: "✓", soon: "◐", off: "—", info: "●" };
 
@@ -82,7 +82,7 @@ export default function Grocery() {
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }} className="detailfade">
       <div style={{ flex: "none", padding: "20px 26px 6px" }}>
         <PageHeader eyebrow="Operations · Diversified-revenue logistics on spare capacity" title="Grocery & Parcel" />
-        <div style={{ display: "flex", gap: 2, borderBottom: "1px solid #1E3350", marginTop: 12 }}>
+        <div style={{ display: "flex", gap: 2, borderBottom: `1px solid ${colors.border}`, marginTop: 12 }}>
           {["Grocery Run", "Parcel / Cargo"].map((label, i) => (
             <span
               key={label}
@@ -92,8 +92,8 @@ export default function Grocery() {
                 fontWeight: tab === i ? 600 : 500,
                 fontSize: 13,
                 padding: "9px 16px",
-                color: tab === i ? "#F2F6FB" : "#6B8099",
-                borderBottom: tab === i ? "2px solid #3B8DD4" : undefined,
+                color: tab === i ? colors.headingBright : colors.textDim,
+                borderBottom: tab === i ? `2px solid ${colors.blue}` : undefined,
                 marginBottom: -1,
                 cursor: "pointer",
               }}
@@ -113,7 +113,7 @@ export default function Grocery() {
                   height: 16,
                   borderRadius: 4,
                   background: "#E1B000",
-                  color: "#2e2400",
+                  color: colors.navy,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -123,22 +123,22 @@ export default function Grocery() {
               >
                 ◐
               </span>
-              <span style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 16, color: "#ecc94b" }}>Order window — accepting</span>
+              <span style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 16, color: statusMeta("soon").t }}>Order window — accepting</span>
             </div>
-            <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: "#9fb2c8" }}>
-              Wednesday noon cutoff · <strong style={{ color: "#E8EEF5" }}>1d 4h remaining</strong>. Orders after cutoff roll to next
+            <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textMuted }}>
+              Wednesday noon cutoff · <strong style={{ color: colors.textPrimary }}>1d 4h remaining</strong>. Orders after cutoff roll to next
               week&rsquo;s Friday delivery.
             </div>
           </div>
-          <div style={{ flex: 1, padding: "14px 16px", borderRadius: 11, background: "rgba(59,141,212,.08)", border: "1px solid rgba(59,141,212,.3)" }}>
+          <div style={{ flex: 1, padding: "14px 16px", borderRadius: 11, background: "rgba(31,111,178,.08)", border: "1px solid rgba(31,111,178,.3)" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
               <span
                 style={{
                   width: 16,
                   height: 16,
                   borderRadius: 4,
-                  background: "#3B8DD4",
-                  color: "#04121f",
+                  background: colors.blue,
+                  color: "#FFFFFF",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -148,15 +148,15 @@ export default function Grocery() {
               >
                 ◗
               </span>
-              <span style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 16, color: "#7EC8F0" }}>Friday delivery run</span>
+              <span style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 16, color: colors.skyBlue }}>Friday delivery run</span>
             </div>
-            <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: "#9fb2c8" }}>
+            <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textMuted }}>
               Batched onto existing shuttle capacity · empty-leg fill suggested for TR-4824.
             </div>
           </div>
         </div>
 
-        <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 16, letterSpacing: ".06em", color: "#c2d0e0", marginBottom: 11 }}>
+        <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 16, letterSpacing: ".06em", color: colors.textSecondary, marginBottom: 11 }}>
           {tab === 0 ? "THIS WEEK’S ORDERS" : "THIS WEEK’S SHIPMENTS"}
         </div>
         <div
@@ -169,7 +169,7 @@ export default function Grocery() {
             fontSize: 9.5,
             letterSpacing: ".12em",
             textTransform: "uppercase",
-            color: "#4d688a",
+            color: colors.textFaint,
           }}
         >
           <div>{tab === 0 ? "Order" : "Parcel"}</div>
@@ -189,18 +189,19 @@ export default function Grocery() {
               padding: "12px 14px",
               marginBottom: 5,
               borderRadius: 9,
-              background: "#0F1E33",
-              border: "1px solid #152941",
+              background: colors.cardBg,
+              border: `1px solid ${colors.borderSubtle}`,
+              boxShadow: colors.shadowCard,
               opacity: "faded" in o && o.faded ? 0.7 : 1,
             }}
           >
-            <span style={{ fontFamily: fonts.mono, fontSize: 11.5, color: "#7EC8F0" }}>{o.id}</span>
-            <span style={{ fontFamily: fonts.body, fontSize: 12.5, color: "#E8EEF5" }}>
+            <span style={{ fontFamily: fonts.mono, fontSize: 11.5, color: colors.skyBlue }}>{o.id}</span>
+            <span style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textPrimary }}>
               {o.where}
-              {"surcharge" in o && o.surcharge && <span style={{ color: "#E8A020", fontSize: 11 }}> + surcharge</span>}
+              {"surcharge" in o && o.surcharge && <span style={{ color: colors.amberText, fontSize: 11 }}> + surcharge</span>}
             </span>
-            <span style={{ fontFamily: fonts.body, fontSize: 12, color: "#9fb2c8" }}>{o.items}</span>
-            <span style={{ fontFamily: fonts.body, fontSize: 12, color: "#9fb2c8" }}>{o.batch}</span>
+            <span style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textMuted }}>{o.items}</span>
+            <span style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textMuted }}>{o.batch}</span>
             <span
               style={{
                 display: "inline-flex",
@@ -219,7 +220,7 @@ export default function Grocery() {
                   borderRadius: 4,
                   background: o.kind === "off" ? "transparent" : statusBg[o.kind],
                   border: o.kind === "off" ? "1.5px solid #7A8899" : undefined,
-                  color: o.kind === "off" ? "#7A8899" : o.kind === "soon" ? "#2e2400" : o.kind === "ontime" ? "#04231a" : "#04121f",
+                  color: o.kind === "off" ? statusMeta("off").t : o.kind === "soon" ? colors.navy : "#FFFFFF",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
