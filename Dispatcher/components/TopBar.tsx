@@ -1,6 +1,6 @@
 "use client";
 
-import { fonts } from "@/lib/theme";
+import { colors, fonts } from "@/lib/theme";
 
 export default function TopBar({
   onToggleRail,
@@ -18,8 +18,9 @@ export default function TopBar({
         height: 56,
         flex: "none",
         padding: "0 16px",
-        background: "#0F1E33",
-        borderBottom: "1px solid #1E3350",
+        background: colors.topbarBg,
+        borderBottom: `1px solid ${colors.border}`,
+        boxShadow: colors.shadowCard,
         zIndex: 20,
       }}
     >
@@ -32,10 +33,10 @@ export default function TopBar({
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          border: "1px solid #24405f",
+          border: `1px solid ${colors.borderStrong}`,
           borderRadius: 6,
           cursor: "pointer",
-          color: "#8fa6c0",
+          color: colors.textLabel,
         }}
         title="Collapse rail"
       >
@@ -46,10 +47,10 @@ export default function TopBar({
         </div>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 2, flex: "none" }}>
-        <span style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 19, letterSpacing: ".02em", color: "#E8EEF5" }}>
+        <span style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 19, letterSpacing: ".02em", color: colors.headingBright }}>
           NORTHERN
         </span>
-        <span style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 19, letterSpacing: ".02em", color: "#E8A020" }}>
+        <span style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 19, letterSpacing: ".02em", color: colors.amberText }}>
           LINK
         </span>
       </div>
@@ -63,9 +64,9 @@ export default function TopBar({
           height: 34,
           padding: "0 12px",
           borderRadius: 8,
-          background: "#0A1729",
-          border: "1px solid #24405f",
-          color: "#5f7c9c",
+          background: colors.inputBg,
+          border: `1px solid ${colors.borderStrong}`,
+          color: colors.textDim,
           cursor: "text",
           minWidth: 0,
         }}
@@ -89,9 +90,9 @@ export default function TopBar({
             fontFamily: fonts.mono,
             fontSize: 10,
             padding: "2px 6px",
-            border: "1px solid #24405f",
+            border: `1px solid ${colors.borderStrong}`,
             borderRadius: 4,
-            color: "#6f8aab",
+            color: colors.textDim,
             flex: "none",
           }}
         >
@@ -106,16 +107,16 @@ export default function TopBar({
           gap: 7,
           flex: "none",
           padding: "5px 12px",
-          border: "1px solid #24405f",
+          border: `1px solid ${colors.borderStrong}`,
           borderRadius: 8,
           cursor: "pointer",
-          color: "#c2d0e0",
+          color: colors.textSecondary,
           fontFamily: fonts.semiCondensed,
           fontSize: 12,
           letterSpacing: ".06em",
         }}
       >
-        <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#3B8DD4" }} />
+        <span style={{ width: 6, height: 6, borderRadius: "50%", background: colors.blue }} />
         TODAY · TUE JUL 7
       </div>
       <div
@@ -127,10 +128,10 @@ export default function TopBar({
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          border: "1px solid #24405f",
+          border: `1px solid ${colors.borderStrong}`,
           borderRadius: 8,
           cursor: "pointer",
-          color: "#9fb2c8",
+          color: colors.textMuted,
         }}
       >
         <span style={{ fontSize: 16 }}>◔</span>
@@ -151,7 +152,7 @@ export default function TopBar({
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            border: "1.5px solid #0F1E33",
+            border: `1.5px solid ${colors.topbarBg}`,
           }}
         >
           5
@@ -166,8 +167,8 @@ export default function TopBar({
           flex: "none",
           padding: "8px 15px",
           borderRadius: 8,
-          background: "#3B8DD4",
-          color: "#04121f",
+          background: colors.blue,
+          color: "#FFFFFF",
           fontFamily: fonts.condensed,
           fontWeight: 700,
           fontSize: 14,
@@ -184,7 +185,7 @@ export default function TopBar({
           gap: 9,
           flex: "none",
           paddingLeft: 6,
-          borderLeft: "1px solid #1E3350",
+          borderLeft: `1px solid ${colors.border}`,
           cursor: "pointer",
         }}
       >
@@ -193,26 +194,26 @@ export default function TopBar({
             width: 34,
             height: 34,
             borderRadius: 8,
-            background: "linear-gradient(135deg,#1E3350,#24405f)",
+            background: "linear-gradient(135deg,#E3EEF9,#CFE2F3)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             fontFamily: fonts.condensed,
             fontWeight: 700,
             fontSize: 14,
-            color: "#7EC8F0",
+            color: colors.blue,
           }}
         >
           RK
         </div>
         <div style={{ lineHeight: 1.15 }}>
-          <div style={{ fontFamily: fonts.body, fontWeight: 600, fontSize: 12.5, color: "#E8EEF5" }}>R. Kelsey</div>
+          <div style={{ fontFamily: fonts.body, fontWeight: 600, fontSize: 12.5, color: colors.textPrimary }}>R. Kelsey</div>
           <div
             style={{
               fontFamily: fonts.semiCondensed,
               fontSize: 10,
               letterSpacing: ".08em",
-              color: "#6B8099",
+              color: colors.textDim,
               textTransform: "uppercase",
             }}
           >
