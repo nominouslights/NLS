@@ -7,34 +7,39 @@ body {
   height: 100%;
 }
 body {
-  background: #070e19;
+  background: #eef2f6;
   font-family: "Barlow", sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-  color: #e8eef5;
+  color: #1c2b3a;
 }
 a {
-  color: #3b8dd4;
+  color: #1f6fb2;
   text-decoration: none;
 }
 a:hover {
-  color: #7ec8f0;
+  color: #175a8e;
 }
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #1e3350;
+  background: #c3d0de;
   border-radius: 6px;
-  border: 2px solid #0b1626;
+  border: 2px solid #eef2f6;
 }
 ::-webkit-scrollbar-track {
-  background: #0b1626;
+  background: #eef2f6;
+}
+.nl-input:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(31, 111, 178, 0.25);
+  border-color: #1f6fb2 !important;
 }
 @keyframes rowPulse {
   0% {
-    background: rgba(59, 141, 212, 0.22);
+    background: rgba(31, 111, 178, 0.16);
   }
   100% {
     background: transparent;
