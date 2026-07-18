@@ -4,6 +4,7 @@ using NorthernLink.Shared.EventBus;
 using NorthernLink.Shared.Events;
 using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Persistence.Auditing;
+using NorthernLink.Shared.Persistence.Projections;
 using NorthernLink.Shared.Tenancy;
 
 namespace NorthernLink.Shared.Persistence;
@@ -63,6 +64,10 @@ public abstract class ModuleDbContext : DbContext
         modelBuilder.ApplyConfiguration(new EventJournalEntryConfiguration());
         modelBuilder.ApplyConfiguration(new AggregateSnapshotConfiguration());
         modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration());
+
+        // Read-side projection checkpoint — system-owned, spans tenants (no query filter),
+        // one row per module's projection worker. Applied here so every module schema gets it.
+        modelBuilder.ApplyConfiguration(new ProjectionCheckpointConfiguration());
 
         // Tenant isolation, API half — same dual-enforcement rule as module tables.
         // The outbox dispatcher deliberately bypasses this with IgnoreQueryFilters.

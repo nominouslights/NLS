@@ -4,6 +4,7 @@ using NorthernLink.Shared.Events;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Shared.EventBus;
 using NorthernLink.Shared.Persistence.Auditing;
+using NorthernLink.Shared.Persistence.Projections;
 
 namespace NorthernLink.Shared;
 
@@ -31,6 +32,10 @@ public static class SharedServiceCollectionExtensions
         var outboxOptions = configuration.GetSection(OutboxOptions.SectionName).Get<OutboxOptions>()
             ?? new OutboxOptions();
         services.AddSingleton(outboxOptions);
+
+        var projectionOptions = configuration.GetSection(ProjectionOptions.SectionName).Get<ProjectionOptions>()
+            ?? new ProjectionOptions();
+        services.AddSingleton(projectionOptions);
 
         return services;
     }

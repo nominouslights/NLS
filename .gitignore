@@ -18,3 +18,4 @@ TestResults/
 # Env / secrets
 .env
 .env.*
+CREDENTIALS.local.md

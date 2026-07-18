@@ -8,7 +8,8 @@
       "applicationUrl": "http://localhost:5215",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development",
-        "ConnectionStrings__Postgres": "Host=localhost;Port=5432;Database=northernlink;Username=northernlink;Password=northernlink_dev"
+        "ConnectionStrings__Postgres": "Host=localhost;Port=5432;Database=northernlink;Username=northernlink;Password=northernlink_dev",
+        "Identity__JwtSigningKey": "cklvnQlGsMohCZ8Gd6fCj9ce5DcNk5sE-eEr24UsK7Z5WbdClSY0gxJ5OL92NWQB-dev-only"
       }
     },
     "https": {
@@ -18,7 +19,8 @@
       "applicationUrl": "https://localhost:7283;http://localhost:5215",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development",
-        "ConnectionStrings__Postgres": "Host=localhost;Port=5432;Database=northernlink;Username=northernlink;Password=northernlink_dev"
+        "ConnectionStrings__Postgres": "Host=localhost;Port=5432;Database=northernlink;Username=northernlink;Password=northernlink_dev",
+        "Identity__JwtSigningKey": "cklvnQlGsMohCZ8Gd6fCj9ce5DcNk5sE-eEr24UsK7Z5WbdClSY0gxJ5OL92NWQB-dev-only"
       }
     }
   }

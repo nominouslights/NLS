@@ -31,6 +31,9 @@ var api = builder.AddProject<Projects.NorthernLink_Api>("api")
     .WithEnvironment(
         "ConnectionStrings__Postgres",
         "Host=localhost;Port=5432;Database=northernlink;Username=northernlink;Password=northernlink_dev")
+    .WithEnvironment(
+        "Identity__JwtSigningKey",
+        "cklvnQlGsMohCZ8Gd6fCj9ce5DcNk5sE-eEr24UsK7Z5WbdClSY0gxJ5OL92NWQB-dev-only")
     .WaitFor(postgres)
     .WaitFor(rabbitmq);
 

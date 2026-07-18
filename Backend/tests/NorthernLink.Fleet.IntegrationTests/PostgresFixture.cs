@@ -1,8 +1,15 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Npgsql;
 using NorthernLink.Shared.Kernel;
+using NorthernLink.Shared.Messaging;
+using NorthernLink.Shared.Persistence.Projections;
 using NorthernLink.Shared.Tenancy;
+using NorthernLink.Fleet.Application.Abstractions;
 using NorthernLink.Fleet.Application.Vehicles;
+using NorthernLink.Fleet.Application.Vehicles.EnsureRetirementCertificate;
+using NorthernLink.Fleet.Domain.Vehicles.Events;
 using NorthernLink.Fleet.Infrastructure;
 using NorthernLink.Fleet.Infrastructure.Persistence;
 using Testcontainers.PostgreSql;
@@ -43,6 +50,14 @@ public sealed class PostgresFixture : IAsyncLifetime
                 CREATE ROLE {AppRole} LOGIN PASSWORD '{AppPassword}';
                 GRANT CONNECT ON DATABASE northernlink TO {AppRole};
                 GRANT CREATE ON DATABASE northernlink TO {AppRole};
+
+                -- Read-side projection owner, mirroring docker/initdb/01-app-role.sql: the
+                -- matviews and their tenant wrapper views are owned by projector; the app is
+                -- a granted member so it can ALTER … OWNER TO projector (migrations) and
+                -- SET ROLE projector (worker REFRESH). Provisioned here so the RLS/refresh
+                -- backstop runs under the same non-superuser arrangement as the live server.
+                CREATE ROLE northernlink_projector NOLOGIN;
+                GRANT northernlink_projector TO {AppRole} WITH INHERIT FALSE;
                 """, admin);
             await provision.ExecuteNonQueryAsync();
         }
@@ -90,6 +105,74 @@ public sealed class PostgresFixture : IAsyncLifetime
         }
 
         return connection;
+    }
+
+    /// <summary>
+    /// Refreshes Fleet matviews exactly as the projection worker does — a pinned system
+    /// session (<c>app.is_system</c>) under <c>SET ROLE northernlink_projector</c>. Used by the
+    /// parity and RLS tests, which only need the matviews populated, not the checkpoint logic.
+    /// Non-concurrent refresh (always valid regardless of populated state).
+    /// </summary>
+    public async Task RefreshFleetMatviewsAsync(params string[] matviews)
+    {
+        await using var connection = new NpgsqlConnection(AppConnectionString);
+        await connection.OpenAsync();
+        await ExecAsync(connection, "SELECT set_config('app.is_system', 'true', false);");
+        await ExecAsync(connection, "SET ROLE northernlink_projector;");
+        foreach (var matview in matviews)
+        {
+            await ExecAsync(connection, $"REFRESH MATERIALIZED VIEW fleet.{matview};");
+        }
+
+        await ExecAsync(connection, "RESET ROLE;");
+    }
+
+    /// <summary>
+    /// Builds a real <see cref="ProjectionWorker{FleetDbContext}"/> over this fixture's app
+    /// connection (system session: no tenant), wired with the Fleet registry and the
+    /// secondary-command handler, so tests can drive <c>ProcessOnceAsync</c> directly.
+    /// </summary>
+    public ProjectionWorker<FleetDbContext> BuildFleetProjectionWorker()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddScoped<ITenantContext>(_ => new TestTenantContext(null));
+        services.AddScoped<TenantSessionInterceptor>();
+        services.AddDbContext<FleetDbContext>((sp, options) => options
+            .UseNpgsql(
+                AppConnectionString,
+                npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", FleetServiceCollectionExtensions.SchemaName))
+            .AddInterceptors(sp.GetRequiredService<TenantSessionInterceptor>()));
+        services.AddScoped<ISender, Sender>();
+        services.AddScoped<IVehicleRepository, VehicleRepository>();
+        services.AddScoped<ICommandHandler<EnsureRetirementCertificateCommand>, EnsureRetirementCertificateCommandHandler>();
+
+        var provider = services.BuildServiceProvider();
+
+        var registry = new ProjectionRegistryBuilder(FleetServiceCollectionExtensions.SchemaName)
+            .OnAggregate("vehicle", "mv_vehicles", "mv_retirement_certificates")
+            .OnAggregate("shop", "mv_shops")
+            .OnAggregate("vehicle-document", "mv_vehicle_documents")
+            .OnAggregate("service-record", "mv_service_records")
+            .OnAggregate("work-order", "mv_work_orders")
+            .OnAggregate("vehicle-inspection", "mv_vehicle_inspections")
+            .OnEvent<VehicleReachedEndOfLifeDomainEvent>(entry =>
+                new EnsureRetirementCertificateCommand(entry.AggregateId))
+            .Build();
+
+        var options = new ProjectionOptions { PollInterval = TimeSpan.FromMilliseconds(1), BatchSize = 500 };
+
+        return new ProjectionWorker<FleetDbContext>(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            registry,
+            options,
+            provider.GetRequiredService<ILogger<ProjectionWorker<FleetDbContext>>>());
+    }
+
+    private static async Task ExecAsync(NpgsqlConnection connection, string sql)
+    {
+        await using var command = new NpgsqlCommand(sql, connection);
+        await command.ExecuteNonQueryAsync();
     }
 
     public sealed class TestTenantContext(Guid? tenantId) : ITenantContext

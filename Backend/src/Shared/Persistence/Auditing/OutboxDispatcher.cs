@@ -31,6 +31,21 @@ public sealed class OutboxDispatcher<TDbContext>(
     {
         while (!stoppingToken.IsCancellationRequested)
         {
+            // Delay BEFORE the first poll, not after. All hosted services (this dispatcher
+            // and every module's RabbitMqIntegrationEventConsumer) start together; against
+            // a cold broker an immediate first poll can publish before consumers have
+            // declared and bound their durable queues, and a topic exchange silently drops
+            // unroutable messages. One interval of head start closes that boot race for
+            // the price of PollInterval of extra latency on the first event after startup.
+            try
+            {
+                await Task.Delay(options.PollInterval, stoppingToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+
             try
             {
                 await DispatchPendingAsync(stoppingToken);
@@ -42,15 +57,6 @@ public sealed class OutboxDispatcher<TDbContext>(
             catch (Exception exception)
             {
                 logger.LogError(exception, "Outbox poll for {DbContext} failed; retrying next interval", typeof(TDbContext).Name);
-            }
-
-            try
-            {
-                await Task.Delay(options.PollInterval, stoppingToken);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
             }
         }
     }

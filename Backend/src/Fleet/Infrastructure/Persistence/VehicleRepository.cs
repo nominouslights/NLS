@@ -31,6 +31,9 @@ internal sealed class VehicleRepository(FleetDbContext context) : IVehicleReposi
     public void AddCertificate(RetirementCertificate certificate) =>
         context.RetirementCertificates.Add(certificate);
 
+    public Task<bool> HasCertificateAsync(Guid vehicleId, CancellationToken cancellationToken = default) =>
+        context.RetirementCertificates.AnyAsync(c => c.VehicleId == vehicleId, cancellationToken);
+
     public async Task<int> NextCertificateSequenceAsync(
         Guid tenantId,
         int year,

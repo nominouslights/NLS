@@ -1,7 +1,11 @@
+using System.Text;
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
 using NorthernLink.Api.Tenancy;
 using NorthernLink.Shared;
 using NorthernLink.Api.HostDefaults;
+using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Tenancy;
 using NorthernLink.Billing.Infrastructure;
 using NorthernLink.Clients.Infrastructure;
@@ -10,9 +14,12 @@ using NorthernLink.Fleet.Infrastructure;
 using NorthernLink.Fleet.Infrastructure.Endpoints;
 using NorthernLink.Grocery.Infrastructure;
 using NorthernLink.Identity.Infrastructure;
+using NorthernLink.Identity.Infrastructure.Auth;
+using NorthernLink.Identity.Infrastructure.Endpoints;
 using NorthernLink.Incidents.Infrastructure;
 using NorthernLink.Notifications.Infrastructure;
 using NorthernLink.Trips.Infrastructure;
+using NorthernLink.Trips.Infrastructure.Endpoints;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -26,13 +33,39 @@ builder.AddHostDefaults();
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
-if (builder.Environment.IsDevelopment())
-{
-    // TEMPORARY: dev-only tenant from the X-Tenant-Id header until Identity/OpenIddict
-    // issues real token claims. See DevHeaderTenantContext.
-    builder.Services.AddHttpContextAccessor();
-    builder.Services.AddScoped<ITenantContext, DevHeaderTenantContext>();
-}
+// Real tenant resolution from JWT claims — replaces the old dev-only X-Tenant-Id header
+// (DevHeaderTenantContext) now that Identity issues real tokens. Unconditional: this is the
+// real mechanism, not a dev hack.
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ITenantContext, JwtTenantContext>();
+
+var jwtSigningKey = builder.Configuration["Identity:JwtSigningKey"]
+    ?? throw new InvalidOperationException(
+        "Identity:JwtSigningKey is not configured. Set the Identity__JwtSigningKey environment variable.");
+
+builder.Services
+    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        // Keep claim types literal ("role", "sub", "tenant_id") — the default legacy inbound
+        // mapping would rename "role" to ClaimTypes.Role's URI before RoleClaimType below is
+        // consulted, silently breaking RequireRole("Admin") with a 403.
+        options.MapInboundClaims = false;
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = false,
+            ValidateAudience = false,
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSigningKey)),
+            ValidateLifetime = true,
+            // Must match the literal claim type JwtAccessTokenIssuer stamps ("role"), not
+            // the ClaimTypes.Role URI default — see that class's doc comment for why.
+            RoleClaimType = JwtAccessTokenIssuer.RoleClaimType,
+        };
+    });
+
+builder.Services.AddAuthorization(options =>
+    options.AddPolicy("AdminOnly", policy => policy.RequireRole("Admin")));
 
 // Domain libraries — one registration call per library, nothing else.
 builder.Services
@@ -52,13 +85,23 @@ var app = builder.Build();
 // (see Dispatcher/next.config.ts) so the browser only ever talks to its own origin.
 app.MapDefaultHostEndpoints();
 
+app.UseAuthentication();
+app.UseAuthorization();
+
 // Domain libraries map their own endpoint groups; the gateway only composes them.
+app.MapIdentityEndpoints();
 app.MapFleetEndpoints();
+app.MapTripsEndpoints();
 
 if (app.Environment.IsDevelopment())
 {
-    // Dev-only: apply Fleet migrations and seed the demo vehicles on boot.
-    await app.Services.InitializeFleetDatabaseAsync();
+    // Dev-only: apply Fleet/Trips migrations and seed the demo vehicles + manifest on boot.
+    await app.Services.InitializeFleetDatabaseAsync(SeedTenant.Id);
+    await app.Services.InitializeTripsDatabaseAsync(SeedTenant.Id);
 }
+
+// Identity's seed (one admin account) runs in every environment — a platform with no way to
+// log in isn't usable anywhere, dev or otherwise.
+await app.Services.InitializeIdentityDatabaseAsync(SeedTenant.Id);
 
 await app.RunAsync();

@@ -13,6 +13,9 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="NorthernLink.Shared.Tests" />
+    <!-- Drives ProjectionWorker.ProcessOnceAsync / ProjectionRegistryBuilder.Build directly
+         (the projection worker's process-once entry point is internal by design). -->
+    <InternalsVisibleTo Include="NorthernLink.Fleet.IntegrationTests" />
   </ItemGroup>
 
   <ItemGroup>
