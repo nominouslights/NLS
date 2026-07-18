@@ -1,9 +1,11 @@
 import type {
   Client,
   Driver,
+  DriverCredential,
   DtcAlert,
   FleetVehicle,
   FuelRouteStat,
+  HosLogEntry,
   Incident,
   Invoice,
   PartItem,
@@ -174,6 +176,7 @@ export const drivers: Driver[] = [
     src: "Northern Link",
     duty: "On duty",
     dk: "info",
+    dutyStatus: "On Duty",
     hos: "4h 20m",
     hk: "soon",
     lic: "Class 4 · exp 2027-03",
@@ -189,6 +192,7 @@ export const drivers: Driver[] = [
     src: "Northern Link",
     duty: "On duty",
     dk: "info",
+    dutyStatus: "On Duty",
     hos: "6h 05m",
     hk: "ontime",
     lic: "Class 4 · exp 2026-11",
@@ -204,6 +208,7 @@ export const drivers: Driver[] = [
     src: "Northern Link",
     duty: "On duty",
     dk: "info",
+    dutyStatus: "Driving",
     hos: "9h 40m",
     hk: "ontime",
     lic: "Class 4 · exp 2028-01",
@@ -219,6 +224,7 @@ export const drivers: Driver[] = [
     src: "Northern Link",
     duty: "Off duty",
     dk: "off",
+    dutyStatus: "Off Duty",
     hos: "0h 00m",
     hk: "off",
     lic: "Class 4 · exp 2026-08",
@@ -234,6 +240,8 @@ export const drivers: Driver[] = [
     src: "Miller the Mover",
     duty: "On duty",
     dk: "info",
+    dutyStatus: "On Duty",
+    workPermit: true,
     hos: "2h 15m",
     hk: "soon",
     lic: "Class 4 · exp 2027-06",
@@ -249,6 +257,7 @@ export const drivers: Driver[] = [
     src: "Northern Link",
     duty: "On duty",
     dk: "info",
+    dutyStatus: "On Duty",
     hos: "7h 30m",
     hk: "ontime",
     lic: "Class 4 · exp 2026-07",
@@ -264,6 +273,8 @@ export const drivers: Driver[] = [
     src: "Miller the Mover",
     duty: "Deactivated",
     dk: "over",
+    dutyStatus: "Off Duty",
+    workPermit: true,
     hos: "—",
     hk: "off",
     lic: "Class 4 · exp 2027-09",
@@ -273,6 +284,70 @@ export const drivers: Driver[] = [
     phone: "(204) 555-0166",
     trips: 72,
   },
+];
+
+// Driver credentials — MOCK ONLY, keyed by driverId (mirrors documents/insp by
+// unit). Today ≈ 2026-07-17: `k` is hand-seeded from expiry (over = expired,
+// soon = within ~60d, ontime = valid) so roster + detail alerts light up.
+export const driverCredentials: DriverCredential[] = [
+  // 1 — D. Chartrand
+  { id: "CRD-1001", driverId: 1, type: "Licence Class", label: "Class 4", issued: "2023-03-01", expiry: "2027-03-15", k: "ontime" },
+  { id: "CRD-1002", driverId: 1, type: "Police Record Check", label: "Criminal Record + Vulnerable Sector", issued: "2025-08-01", expiry: "2026-08-20", k: "soon" },
+  { id: "CRD-1003", driverId: 1, type: "Drug & Alcohol", label: "Pre-employment + random pool", issued: "2025-11-01", expiry: "2026-11-30", k: "ontime" },
+  { id: "CRD-1004", driverId: 1, type: "First Aid", label: "Standard First Aid + CPR-C", issued: "2024-05-01", expiry: "2027-05-01", k: "ontime", optional: true },
+  // 2 — M. Okimaw
+  { id: "CRD-1010", driverId: 2, type: "Licence Class", label: "Class 4", issued: "2022-11-01", expiry: "2026-11-30", k: "ontime" },
+  { id: "CRD-1011", driverId: 2, type: "Police Record Check", label: "Criminal Record + Vulnerable Sector", issued: "2026-01-01", expiry: "2027-01-15", k: "ontime" },
+  { id: "CRD-1012", driverId: 2, type: "Drug & Alcohol", label: "Random pool", issued: "2025-09-01", expiry: "2026-09-10", k: "soon" },
+  // 3 — K. Beardy
+  { id: "CRD-1020", driverId: 3, type: "Licence Class", label: "Class 2", issued: "2024-01-01", expiry: "2028-01-10", k: "ontime" },
+  { id: "CRD-1021", driverId: 3, type: "Police Record Check", label: "Criminal Record + Vulnerable Sector", issued: "2025-06-01", expiry: "2027-06-01", k: "ontime" },
+  { id: "CRD-1022", driverId: 3, type: "Drug & Alcohol", label: "Random pool", issued: "2025-02-01", expiry: "2027-02-01", k: "ontime" },
+  { id: "CRD-1023", driverId: 3, type: "First Aid", label: "Standard First Aid + CPR-C", issued: "2023-09-01", expiry: "2026-09-05", k: "soon", optional: true },
+  // 4 — J. Spence
+  { id: "CRD-1030", driverId: 4, type: "Licence Class", label: "Class 4", issued: "2022-08-01", expiry: "2026-08-31", k: "soon" },
+  { id: "CRD-1031", driverId: 4, type: "Police Record Check", label: "Criminal Record + Vulnerable Sector", issued: "2025-03-01", expiry: "2027-03-01", k: "ontime" },
+  { id: "CRD-1032", driverId: 4, type: "Drug & Alcohol", label: "Random pool", issued: "2025-12-01", expiry: "2026-12-15", k: "ontime" },
+  // 5 — T. Miller (work permit)
+  { id: "CRD-1040", driverId: 5, type: "Licence Class", label: "Class 1", issued: "2024-06-01", expiry: "2027-06-15", k: "ontime" },
+  { id: "CRD-1041", driverId: 5, type: "Police Record Check", label: "Criminal Record + Vulnerable Sector", issued: "2026-01-01", expiry: "2027-01-01", k: "ontime" },
+  { id: "CRD-1042", driverId: 5, type: "Drug & Alcohol", label: "Random pool", issued: "2025-08-01", expiry: "2026-08-05", k: "soon" },
+  { id: "CRD-1043", driverId: 5, type: "Work Permit", label: "LMIA work permit", issued: "2025-04-30", expiry: "2027-04-30", k: "ontime", optional: true, note: "Sponsor: Miller the Mover" },
+  // 6 — R. Flett (expired licence)
+  { id: "CRD-1050", driverId: 6, type: "Licence Class", label: "Class 4", issued: "2021-07-01", expiry: "2026-07-05", k: "over" },
+  { id: "CRD-1051", driverId: 6, type: "Police Record Check", label: "Criminal Record + Vulnerable Sector", issued: "2025-02-01", expiry: "2027-02-01", k: "ontime" },
+  { id: "CRD-1052", driverId: 6, type: "Drug & Alcohol", label: "Random pool", issued: "2025-09-01", expiry: "2026-09-01", k: "soon" },
+  // 7 — A. Nepinak (deactivated — lapsed permit + checks)
+  { id: "CRD-1060", driverId: 7, type: "Licence Class", label: "Class 4", issued: "2023-09-01", expiry: "2027-09-01", k: "ontime" },
+  { id: "CRD-1061", driverId: 7, type: "Police Record Check", label: "Criminal Record + Vulnerable Sector", issued: "2024-05-01", expiry: "2026-05-15", k: "over" },
+  { id: "CRD-1062", driverId: 7, type: "Drug & Alcohol", label: "Random pool", issued: "2024-06-01", expiry: "2026-06-20", k: "over" },
+  { id: "CRD-1063", driverId: 7, type: "Work Permit", label: "LMIA work permit", issued: "2024-07-01", expiry: "2026-07-01", k: "over", optional: true, note: "Permit lapsed — driver deactivated" },
+];
+
+// Hours-of-Service logs — MOCK ONLY, keyed by driverId. Mixes Driver-App
+// (electronic) and Manual (paper backup) entries, per the same source split the
+// Fleet DVIR prototype uses. Manual rows carry an enteredBy dispatcher name.
+export const hosLogs: HosLogEntry[] = [
+  // 1 — D. Chartrand
+  { id: "HOS-2001", driverId: 1, date: "2026-07-16", duty: "Driving", onDutyH: 9.5, drivingH: 8, offDutyH: 10, source: "Driver App" },
+  { id: "HOS-2002", driverId: 1, date: "2026-07-15", duty: "On Duty", onDutyH: 6, drivingH: 4.5, offDutyH: 12, source: "Driver App" },
+  { id: "HOS-2003", driverId: 1, date: "2026-07-14", duty: "On Duty", onDutyH: 8, drivingH: 6, offDutyH: 10, source: "Manual (paper backup)", enteredBy: "Dispatch — L. Moose", note: "App offline in Leaf Rapids — logged on paper" },
+  // 2 — M. Okimaw
+  { id: "HOS-2010", driverId: 2, date: "2026-07-16", duty: "On Duty", onDutyH: 6, drivingH: 4.5, offDutyH: 12, source: "Driver App" },
+  // 3 — K. Beardy
+  { id: "HOS-2020", driverId: 3, date: "2026-07-17", duty: "Driving", onDutyH: 10, drivingH: 8.5, offDutyH: 9.5, source: "Driver App" },
+  { id: "HOS-2021", driverId: 3, date: "2026-07-16", duty: "Driving", onDutyH: 9, drivingH: 7, offDutyH: 11, source: "Driver App" },
+  { id: "HOS-2022", driverId: 3, date: "2026-07-15", duty: "On Duty", onDutyH: 5, drivingH: 3, offDutyH: 13, source: "Manual (paper backup)", enteredBy: "Dispatch — L. Moose" },
+  // 4 — J. Spence
+  { id: "HOS-2030", driverId: 4, date: "2026-07-16", duty: "Off Duty", onDutyH: 0, drivingH: 0, offDutyH: 24, source: "Driver App" },
+  { id: "HOS-2031", driverId: 4, date: "2026-07-14", duty: "On Duty", onDutyH: 7, drivingH: 5, offDutyH: 11, source: "Driver App" },
+  { id: "HOS-2032", driverId: 4, date: "2026-07-13", duty: "Driving", onDutyH: 9, drivingH: 7.5, offDutyH: 10, source: "Manual (paper backup)", enteredBy: "Dispatch — R. Sinclair" },
+  // 5 — T. Miller
+  { id: "HOS-2040", driverId: 5, date: "2026-07-16", duty: "On Duty", onDutyH: 8, drivingH: 6, offDutyH: 11, source: "Driver App" },
+  { id: "HOS-2041", driverId: 5, date: "2026-07-15", duty: "Driving", onDutyH: 9.5, drivingH: 8, offDutyH: 10, source: "Manual (paper backup)", enteredBy: "Dispatch — R. Sinclair", note: "Contractor paper log submitted" },
+  // 6 — R. Flett
+  { id: "HOS-2050", driverId: 6, date: "2026-07-16", duty: "On Duty", onDutyH: 8.5, drivingH: 6.5, offDutyH: 10, source: "Driver App" },
+  { id: "HOS-2051", driverId: 6, date: "2026-07-15", duty: "Driving", onDutyH: 9, drivingH: 7, offDutyH: 10.5, source: "Driver App" },
 ];
 
 export const fleet: FleetVehicle[] = [
@@ -430,13 +505,6 @@ export const clients: Client[] = [
     rate: "Contract · crew shuttle",
     po: "PO-AG-2261 structure",
     gst: "GST 5% · no PST",
-    contacts: [
-      ["Quinton Falk", "Site operations"],
-      ["Brendan D'Allaire", "Contract renewal"],
-      ["Daniel Lavallée", "Compliance"],
-      ["LL-ContractorClearances", "Clearance desk"],
-      ["Accounts Payable", "Invoice routing"],
-    ],
     notes: "Contractor clearance required per driver (June 2026 incident).",
   },
   {
@@ -450,10 +518,6 @@ export const clients: Client[] = [
     rate: "NIHB tier schedule",
     po: "Voucher-based",
     gst: "Direct-billed · patient $0",
-    contacts: [
-      ["NIHB Regional Office", "Voucher authorization"],
-      ["Patient Travel Desk", "Booking coordination"],
-    ],
     notes: "Prior-approved voucher = confirmed demand. Escorts travel free.",
   },
   {
@@ -467,7 +531,6 @@ export const clients: Client[] = [
     rate: "Charter · per-run",
     po: "CH series",
     gst: "GST 5%",
-    contacts: [["Council Transport Lead", "Charter requests"]],
     notes: "Occasional multi-community charters.",
   },
   {
@@ -481,7 +544,6 @@ export const clients: Client[] = [
     rate: "Community fare · demand-activated",
     po: "—",
     gst: "GST 5%",
-    contacts: [["—", "Individual bookings"]],
     notes: "4-passenger minimum unless guaranteed or NIHB voucher.",
   },
   {
@@ -495,7 +557,6 @@ export const clients: Client[] = [
     rate: "Driver-supply partner",
     po: "—",
     gst: "—",
-    contacts: [["Dispatch Liaison", "Driver supply"]],
     notes: "Supplies drivers into the roster (tagged by source tenant).",
   },
 ];

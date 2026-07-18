@@ -6,39 +6,6 @@ import { statusShort } from "@/lib/format";
 import { MetricTile } from "@/components/ui/MetricTile";
 import { ServiceChip, StatusChip } from "@/components/ui/Chip";
 
-const exceptions = [
-  {
-    kind: "over" as const,
-    title: "Open trip · no eligible driver",
-    body: "TR-4827 Cargo → Leaf Rapids. All eligible drivers at HOS limit.",
-  },
-  {
-    kind: "over" as const,
-    title: "DVIR failed · U-01",
-    body: "International 3000 out of service — steering fault. Removed from eligibility.",
-  },
-  {
-    kind: "soon" as const,
-    title: "HOS at limit · D. Chartrand",
-    body: "4h 20m remaining. Not eligible for a second corridor run today.",
-  },
-  {
-    kind: "soon" as const,
-    title: "Clearance expiring · R. Flett",
-    body: "Class 4 medical lapses in 12 days. Renewal reminder queued.",
-  },
-  {
-    kind: "soon" as const,
-    title: "Contract renewal · Alamos Gold",
-    body: "Term ends in 21 days. Brendan D'Allaire flagged for discussion.",
-  },
-  {
-    kind: "info" as const,
-    title: "Empty leg available",
-    body: "TR-4824 Alamos return leg Lynn Lake → Thompson open for community / grocery fill.",
-  },
-];
-
 export default function DispatchBoard({ onOpenTrip }: { onOpenTrip: (i: number) => void }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }} className="detailfade">
@@ -111,8 +78,8 @@ export default function DispatchBoard({ onOpenTrip }: { onOpenTrip: (i: number) 
           />
         </div>
 
-        {/* BOARD + EXCEPTIONS */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 16 }}>
+        {/* BOARD */}
+        <div>
           {/* trip board */}
           <div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 11 }}>
@@ -211,52 +178,6 @@ export default function DispatchBoard({ onOpenTrip }: { onOpenTrip: (i: number) 
                 </div>
               );
             })}
-          </div>
-
-          {/* exceptions rail */}
-          <div>
-            <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 16, letterSpacing: ".06em", color: colors.textSecondary, marginBottom: 11 }}>
-              EXCEPTIONS
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-              {exceptions.map((ex, i) => {
-                const m = statusMeta(ex.kind);
-                return (
-                  <div
-                    key={i}
-                    style={{
-                      padding: "12px 14px",
-                      borderRadius: 10,
-                      background: colors.cardBg,
-                      border: `1px solid ${m.bd}`,
-                      borderLeft: `3px solid ${m.c}`,
-                      boxShadow: colors.shadowCard,
-                    }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
-                      <span
-                        style={{
-                          width: 15,
-                          height: 15,
-                          borderRadius: 4,
-                          background: m.c,
-                          color: m.bt,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: 9,
-                          fontWeight: 800,
-                        }}
-                      >
-                        {m.g}
-                      </span>
-                      <span style={{ fontFamily: fonts.body, fontWeight: 700, fontSize: 12.5, color: m.t }}>{ex.title}</span>
-                    </div>
-                    <div style={{ fontFamily: fonts.body, fontSize: 11.5, lineHeight: 1.45, color: colors.textMuted }}>{ex.body}</div>
-                  </div>
-                );
-              })}
-            </div>
           </div>
         </div>
       </div>

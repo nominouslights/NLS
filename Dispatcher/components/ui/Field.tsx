@@ -55,6 +55,8 @@ export function TextField({
   hint,
   maxLength,
   disabled = false,
+  type = "text",
+  autoComplete,
 }: {
   label: string;
   value: string;
@@ -64,12 +66,15 @@ export function TextField({
   hint?: ReactNode;
   maxLength?: number;
   disabled?: boolean;
+  type?: "text" | "email" | "password";
+  autoComplete?: string;
 }) {
   return (
     <div>
       <FieldLabel hint={hint}>{label}</FieldLabel>
       <input
-        type="text"
+        type={type}
+        autoComplete={autoComplete}
         className="nl-input"
         value={value}
         maxLength={maxLength}
@@ -124,6 +129,83 @@ export function NumberField({
           fontFamily: fonts.mono,
           fontSize: 13,
           fontVariantNumeric: "tabular-nums",
+          opacity: disabled ? 0.55 : 1,
+          cursor: disabled ? "not-allowed" : undefined,
+        }}
+      />
+    </div>
+  );
+}
+
+export function DateField({
+  label,
+  value,
+  onChange,
+  hint,
+  disabled = false,
+}: {
+  label: string;
+  value: string; // ISO YYYY-MM-DD
+  onChange: (v: string) => void;
+  hint?: ReactNode;
+  disabled?: boolean;
+}) {
+  return (
+    <div>
+      <FieldLabel hint={hint}>{label}</FieldLabel>
+      <input
+        type="date"
+        className="nl-input"
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        style={{
+          ...inputBase,
+          fontFamily: fonts.mono,
+          fontSize: 13,
+          colorScheme: "light",
+          opacity: disabled ? 0.55 : 1,
+          cursor: disabled ? "not-allowed" : undefined,
+        }}
+      />
+    </div>
+  );
+}
+
+export function TextAreaField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  hint,
+  rows = 3,
+  disabled = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  hint?: ReactNode;
+  rows?: number;
+  disabled?: boolean;
+}) {
+  return (
+    <div>
+      <FieldLabel hint={hint}>{label}</FieldLabel>
+      <textarea
+        className="nl-input"
+        value={value}
+        rows={rows}
+        placeholder={placeholder}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        style={{
+          ...inputBase,
+          height: undefined,
+          minHeight: 40,
+          padding: "9px 13px",
+          lineHeight: 1.5,
+          resize: "vertical",
           opacity: disabled ? 0.55 : 1,
           cursor: disabled ? "not-allowed" : undefined,
         }}

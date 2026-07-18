@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { colors, fonts, rowSurface, statusMeta, svcMeta } from "@/lib/theme";
 import { trips } from "@/lib/data";
+import { listTripManifests, type TripManifest } from "@/lib/api";
+import { printTripManifest } from "@/lib/documents/tripManifestPdf";
 import { ServiceChip, StatusChip } from "@/components/ui/Chip";
 import { CorridorStepper } from "@/components/ui/CorridorStepper";
 import { Panel, SectionLabel, DetailRow } from "@/components/ui/Panel";
@@ -35,7 +37,28 @@ export default function Trips({
   onNewTrip: () => void;
 }) {
   const [filter, setFilter] = useState(0);
+  const [manifests, setManifests] = useState<TripManifest[]>([]);
   const t = trips[tripSel];
+
+  useEffect(() => {
+    // Backend trip manifests (Trips API). The screen is mock-driven otherwise,
+    // so an unreachable API just means no PRINT TRIP MANIFEST buttons.
+    let active = true;
+    listTripManifests().then(
+      (rows) => {
+        if (active) setManifests(rows);
+      },
+      (e) => {
+        console.error("Trip manifests unavailable:", e);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // A completed NL-TM-01 exists for this trip when its trip number matches.
+  const manifest = manifests.find((m) => m.tripNumber === t.id) ?? null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }} className="detailfade">
@@ -306,6 +329,11 @@ export default function Trips({
               <ActionButton variant="primary">EDIT TRIP</ActionButton>
               <ActionButton>REASSIGN</ActionButton>
               <ActionButton>GENERATE MANIFEST</ActionButton>
+              {manifest && (
+                <ActionButton onClick={() => printTripManifest(manifest)}>
+                  PRINT TRIP MANIFEST
+                </ActionButton>
+              )}
               <ActionButton>MESSAGE DRIVER</ActionButton>
               <ActionButton variant="destructive">CANCEL</ActionButton>
             </div>

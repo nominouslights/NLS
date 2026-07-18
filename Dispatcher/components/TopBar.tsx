@@ -1,6 +1,7 @@
 "use client";
 
 import { colors, fonts } from "@/lib/theme";
+import { logout } from "@/lib/auth";
 
 export default function TopBar({
   onToggleRail,
@@ -219,6 +220,27 @@ export default function TopBar({
           >
             Owner · Dispatcher
           </div>
+        </div>
+        <div
+          onClick={() => void logout()}
+          title="Sign out"
+          aria-label="Sign out"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            flex: "none",
+            padding: "5px 11px",
+            border: `1px solid ${colors.borderStrong}`,
+            borderRadius: 8,
+            cursor: "pointer",
+            color: colors.textSecondary,
+            fontFamily: fonts.semiCondensed,
+            fontSize: 11,
+            letterSpacing: ".08em",
+          }}
+        >
+          SIGN OUT
         </div>
       </div>
     </div>

@@ -11,11 +11,11 @@ import LiveMap from "@/components/screens/LiveMap";
 import Trips from "@/components/screens/Trips";
 import Drivers from "@/components/screens/Drivers";
 import Fleet from "@/components/screens/Fleet";
-import Maintenance from "@/components/screens/Maintenance";
 import Clients from "@/components/screens/Clients";
 import Riders from "@/components/screens/Riders";
 import Billing from "@/components/screens/Billing";
 import Manifests from "@/components/screens/Manifests";
+import ManualTripEntry from "@/components/screens/manualtrip/ManualTripEntry";
 import RoutesSchedules from "@/components/screens/RoutesSchedules";
 import Grocery from "@/components/screens/Grocery";
 import Incidents from "@/components/screens/Incidents";
@@ -30,7 +30,7 @@ export default function Console() {
   const [tripSel, setTripSel] = useState(0);
   const [driverSel, setDriverSel] = useState(0);
   const [fleetSelId, setFleetSelId] = useState<string | null>(null);
-  const [clientSel, setClientSel] = useState(0);
+  const [clientSel, setClientSel] = useState<number | null>(null);
   const [invoiceSel, setInvoiceSel] = useState(0);
   const [riderSel, setRiderSel] = useState(0);
   const [incidentSel, setIncidentSel] = useState(0);
@@ -73,16 +73,9 @@ export default function Console() {
           )}
           {screen === "drivers" && <Drivers driverSel={driverSel} setDriverSel={setDriverSel} />}
           {screen === "fleet" && <Fleet fleetSelId={fleetSelId} setFleetSelId={setFleetSelId} />}
-          {screen === "maintenance" && (
-            <Maintenance
-              onOpenVehicle={(id) => {
-                setFleetSelId(id);
-                setScreen("fleet");
-              }}
-            />
-          )}
           {screen === "routes" && <RoutesSchedules />}
           {screen === "manifests" && <Manifests />}
+          {screen === "manualtrip" && <ManualTripEntry />}
           {screen === "grocery" && <Grocery />}
           {screen === "clients" && (
             <Clients clientSel={clientSel} setClientSel={setClientSel} onCreateTrip={() => setWizardOpen(true)} />

@@ -173,6 +173,47 @@ export function svcMeta(svc: ServiceType): ServiceMeta {
   return SERVICE_META[svc] ?? SERVICE_META.community;
 }
 
+export type DutyStatus = "Off Duty" | "On Duty" | "Driving";
+
+export interface DutyMeta {
+  glyph: string;
+  color: string; // solid accent (badge bg)
+  text: string; // AA text colour on white surfaces
+  bg: string; // chip bg
+  bd: string; // chip border
+}
+
+// Duty status is color + icon + label (accessible-status-colors rule): the
+// colour never stands alone. Reuses the protected status hexes — Off Duty grey,
+// On Duty blue, Driving teal (an active/"go" semantic).
+const DUTY_META: Record<DutyStatus, DutyMeta> = {
+  "Off Duty": {
+    glyph: "—",
+    color: "#7A8899",
+    text: "#5A6B7D",
+    bg: "rgba(122,136,153,.10)",
+    bd: "rgba(122,136,153,.38)",
+  },
+  "On Duty": {
+    glyph: "●",
+    color: "#1F6FB2",
+    text: "#1F6FB2",
+    bg: "rgba(31,111,178,.08)",
+    bd: "rgba(31,111,178,.32)",
+  },
+  Driving: {
+    glyph: "▸",
+    color: "#009E73",
+    text: "#007A59",
+    bg: "rgba(0,158,115,.10)",
+    bd: "rgba(0,158,115,.38)",
+  },
+};
+
+export function dutyMeta(status: DutyStatus): DutyMeta {
+  return DUTY_META[status] ?? DUTY_META["Off Duty"];
+}
+
 export const fonts = {
   condensed: "'Barlow Condensed', sans-serif",
   semiCondensed: "'Barlow Semi Condensed', sans-serif",

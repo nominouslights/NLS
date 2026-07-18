@@ -4,6 +4,8 @@ import { useState } from "react";
 import { colors, fonts, rowSurface, statusMeta } from "@/lib/theme";
 import { PageHeader } from "@/components/ui/Panel";
 import { ServiceChip } from "@/components/ui/Chip";
+import { ActionButton } from "@/components/ui/Button";
+import { printTripManifest } from "@/lib/documents/tripManifestPdf";
 
 interface ManifestPassenger {
   name: string;
@@ -84,8 +86,11 @@ export default function Manifests() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }} className="detailfade">
-      <div style={{ flex: "none", padding: "20px 26px 12px" }}>
+      <div style={{ flex: "none", padding: "20px 26px 12px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
         <PageHeader eyebrow="Operations · Manifests, demand activation & run economics" title="Manifests & Demand" />
+        <ActionButton variant="secondary" onClick={() => printTripManifest(null)} style={{ marginTop: 6 }}>
+          PRINT BLANK NL-TM-01
+        </ActionButton>
       </div>
       <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "32% 1fr", borderTop: `1px solid ${colors.border}` }}>
         {/* master */}

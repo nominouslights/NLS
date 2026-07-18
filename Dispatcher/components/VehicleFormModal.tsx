@@ -22,7 +22,7 @@ export default function VehicleFormModal({
 }: {
   vehicle: Vehicle | null; // null → register mode; set → edit mode
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (newVehicleId?: string) => void; // register mode passes the new id
 }) {
   const editing = vehicle !== null;
 
@@ -73,10 +73,11 @@ export default function VehicleFormModal({
     try {
       if (editing && vehicle) {
         await updateVehicle(vehicle.id, input);
+        onSaved();
       } else {
-        await registerVehicle(input);
+        const newId = await registerVehicle(input);
+        onSaved(newId || undefined);
       }
-      onSaved();
       onClose();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Unexpected error — please try again.");

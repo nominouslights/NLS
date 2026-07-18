@@ -13,11 +13,6 @@ import type { StatusKind } from "./theme";
 // the rewrite proxy isn't available.
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
-// TEMPORARY: dev tenant header until Identity/OpenIddict lands — the backend's
-// Development-only ITenantContext reads X-Tenant-Id. Replaced by token claims
-// once real auth ships.
-const DEV_TENANT_ID = "00000000-0000-0000-0000-000000000001";
-
 export type VehicleStatus =
   | "Active"
   | "InMaintenance"
@@ -95,38 +90,79 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  let res: Response;
+/** Low-level fetch: JSON headers + optional bearer token. Throws only on network failure. */
+async function send(path: string, init: RequestInit | undefined, token: string | null): Promise<Response> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(init?.headers as Record<string, string> | undefined),
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
   try {
-    res = await fetch(`${API_BASE}${path}`, {
-      ...init,
-      headers: {
-        "Content-Type": "application/json",
-        "X-Tenant-Id": DEV_TENANT_ID, // TEMPORARY — see note above
-        ...init?.headers,
-      },
-    });
+    return await fetch(`${API_BASE}${path}`, { ...init, headers });
   } catch {
     throw new ApiError(
       "Network.Unreachable",
-      `Cannot reach the Fleet API at ${API_BASE}. Is the backend running?`,
+      `Cannot reach the API at ${API_BASE}. Is the backend running?`,
       0,
     );
   }
+}
 
-  if (!res.ok) {
-    let code = `Http.${res.status}`;
-    let message = res.statusText || `Request failed with status ${res.status}`;
-    try {
-      const body = (await res.json()) as { code?: string; message?: string };
-      if (body?.code) code = body.code;
-      if (body?.message) message = body.message;
-    } catch {
-      // no structured error body — keep the HTTP fallback
+/** Parses the backend's { code, message } error body, with an HTTP fallback. */
+async function parseError(res: Response): Promise<ApiError> {
+  let code = `Http.${res.status}`;
+  let message = res.statusText || `Request failed with status ${res.status}`;
+  try {
+    const body = (await res.json()) as { code?: string; message?: string };
+    if (body?.code) code = body.code;
+    if (body?.message) message = body.message;
+  } catch {
+    // no structured error body — keep the HTTP fallback
+  }
+  return new ApiError(code, message, res.status);
+}
+
+/**
+ * Unauthenticated POST for the Identity auth endpoints (login/refresh/logout).
+ * Used by lib/auth.ts — no bearer header, no 401 retry.
+ */
+export async function identityRequest<T>(path: string, body: unknown): Promise<T> {
+  const res = await send(path, { method: "POST", body: JSON.stringify(body) }, null);
+  if (!res.ok) throw await parseError(res);
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+/**
+ * Authenticated request. Attaches `Authorization: Bearer <accessToken>`
+ * (refreshing proactively when the token is near expiry). On a 401, refreshes
+ * once and retries the original request once with the new token; if the
+ * refresh fails, lib/auth.ts clears the session (surfacing the login screen)
+ * and the original 401 is thrown. Never loops.
+ */
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const { getAccessToken, getValidAccessToken, refreshAccessToken } = await import("./auth");
+
+  const token = await getValidAccessToken();
+  let res = await send(path, init, token);
+
+  if (res.status === 401) {
+    let retryToken: string | null = null;
+    const current = getAccessToken();
+    if (current && current !== token) {
+      // Another caller already rotated the tokens — reuse the fresh one.
+      retryToken = current;
+    } else {
+      try {
+        retryToken = await refreshAccessToken();
+      } catch {
+        retryToken = null; // session cleared by auth module — fall through to the 401
+      }
     }
-    throw new ApiError(code, message, res.status);
+    if (retryToken) res = await send(path, init, retryToken);
   }
 
+  if (!res.ok) throw await parseError(res);
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
@@ -280,4 +316,430 @@ export function formatUtcDate(iso: string | null | undefined): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleDateString("en-CA", { year: "numeric", month: "short", day: "numeric" });
+}
+
+// ---------------------------------------------------------------------------
+// Trip Manifest contract (Backend Trips module — TripManifestResponse /
+// CreateTripManifestRequest, TripsEndpoints.cs). Shapes mirror the backend
+// wire contract exactly (JSON camelCase, enums as PascalCase strings) — do
+// not invent fields.
+// ---------------------------------------------------------------------------
+
+export type ManifestSource = "App" | "Paper";
+export type ManifestFuelLevel = "Full" | "ThreeQuarters" | "Half" | "Quarter";
+export type ManifestDirection = "Inbound" | "Outbound";
+export type ManifestWeather = "Clear" | "Cloudy" | "Rain" | "Snow" | "Fog" | "ExtremeCold";
+export type ManifestRoadCondition = "Dry" | "Wet" | "Icy" | "SnowCovered" | "Muddy";
+export type ManifestVisibility = "Good" | "Reduced" | "Poor";
+export type ManifestSeverity = "Minor" | "Major" | "OutOfService";
+export type ManifestCargoSecured = "Yes" | "NotApplicable";
+
+export interface ManifestPreTripItem {
+  /** Backend group label, e.g. "Exterior & Mechanical" (tripManifestChecklist key). */
+  group: string;
+  /** Backend item string, e.g. "Tires" (tripManifestChecklist key). */
+  item: string;
+  status: "Ok" | "Fail";
+  severity: ManifestSeverity | null;
+  note: string | null;
+}
+
+export interface ManifestPassenger {
+  name: string;
+  contact: string | null;
+  pickup: string | null;
+  dropoff: string | null;
+  idVerified: boolean;
+  boardedOn: boolean;
+  boardedOff: boolean;
+}
+
+export interface ManifestCargo {
+  description: string;
+  ownerRecipient: string | null;
+  weightKg: number | null;
+  chargeCad: number | null;
+  hazmat: boolean;
+  secured: boolean;
+}
+
+export interface ManifestPostTripItem {
+  item: string;
+  ok: boolean;
+}
+
+export interface TripManifest {
+  id: string;
+  tripDate: string; // DateOnly, "2026-07-15"
+  tripNumber: string;
+  route: string;
+  direction: ManifestDirection | null;
+  client: string | null;
+  unit: string;
+  driverName: string;
+  driverLicenceNo: string | null;
+  licencePlate: string | null;
+  odometerStartKm: number | null;
+  fuelLevel: ManifestFuelLevel | null;
+  preTrip: ManifestPreTripItem[];
+  weather: ManifestWeather[];
+  temperatureC: string | null;
+  roadConditions: ManifestRoadCondition[];
+  visibility: ManifestVisibility | null;
+  roadAdvisories: string | null;
+  passengers: ManifestPassenger[];
+  allSeatbeltsVerified: boolean;
+  cargo: ManifestCargo[];
+  allCargoSecured: ManifestCargoSecured | null;
+  issues: string[];
+  noIssues: boolean;
+  departureTime: string | null;
+  arrivalTime: string | null;
+  odometerEndKm: number | null;
+  totalKm: number | null;
+  fuelAdded: boolean;
+  fuelLitres: number | null;
+  fuelCostCad: number | null;
+  postTrip: ManifestPostTripItem[];
+  attestations: boolean[];
+  driverSignatureName: string;
+  certifiedAt: string;
+  source: ManifestSource;
+  enteredBy: string | null;
+  enteredAt: string | null;
+  createdAtUtc: string;
+}
+
+/**
+ * POST /api/trips/manifests body — the response shape minus id / enteredAt /
+ * createdAtUtc; certifiedAt is optional (backend stamps "now" when omitted).
+ * PreTrip rows REQUIRE group + item (400 otherwise).
+ */
+export interface TripManifestInput {
+  tripDate: string;
+  tripNumber: string;
+  route: string;
+  direction: ManifestDirection | null;
+  client: string | null;
+  unit: string;
+  driverName: string;
+  driverLicenceNo: string | null;
+  licencePlate: string | null;
+  odometerStartKm: number | null;
+  fuelLevel: ManifestFuelLevel | null;
+  preTrip: ManifestPreTripItem[];
+  weather: ManifestWeather[];
+  temperatureC: string | null;
+  roadConditions: ManifestRoadCondition[];
+  visibility: ManifestVisibility | null;
+  roadAdvisories: string | null;
+  passengers: ManifestPassenger[];
+  allSeatbeltsVerified: boolean;
+  cargo: ManifestCargo[];
+  allCargoSecured: ManifestCargoSecured | null;
+  issues: string[];
+  noIssues: boolean;
+  departureTime: string | null;
+  arrivalTime: string | null;
+  odometerEndKm: number | null;
+  totalKm: number | null;
+  fuelAdded: boolean;
+  fuelLitres: number | null;
+  fuelCostCad: number | null;
+  postTrip: ManifestPostTripItem[];
+  attestations: boolean[];
+  driverSignatureName: string;
+  certifiedAt?: string;
+  source: ManifestSource;
+  enteredBy: string | null;
+}
+
+/** POST → 201 { id } (Trips module — ManifestCreatedResponse). */
+export function createTripManifest(input: TripManifestInput): Promise<{ id: string }> {
+  return request<{ id: string }>("/api/trips/manifests", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function listTripManifests(params?: {
+  tripNumber?: string;
+  unit?: string;
+}): Promise<TripManifest[]> {
+  const q = new URLSearchParams();
+  if (params?.tripNumber) q.set("tripNumber", params.tripNumber);
+  if (params?.unit) q.set("unit", params.unit);
+  const qs = q.toString();
+  return request<TripManifest[]>(`/api/trips/manifests${qs ? `?${qs}` : ""}`);
+}
+
+export function getTripManifest(id: string): Promise<TripManifest> {
+  return request<TripManifest>(`/api/trips/manifests/${id}`);
+}
+
+// ---------------------------------------------------------------------------
+// Vehicle Inspection contract (Backend Fleet module — VehicleInspectionResponse).
+// Backend-owned inspections derived from submitted manifests (via RabbitMQ),
+// distinct from the mock DVIR store in lib/maintenanceStore.ts.
+// ---------------------------------------------------------------------------
+
+export type InspectionResultWire = "Pass" | "PassWithDefects" | "Fail";
+
+export interface VehicleInspection {
+  id: string;
+  unit: string;
+  type: "PreTrip" | "PostTrip";
+  driverName: string;
+  source: "DriverApp" | "PaperTranscription";
+  enteredBy: string | null;
+  tripNumber: string;
+  manifestId: string;
+  performedAt: string;
+  odometerKm: number | null;
+  result: InspectionResultWire;
+  checklist: { group: string | null; item: string; passed: boolean }[];
+  defects: { item: string; severity: ManifestSeverity; note: string | null }[];
+  createdAtUtc: string;
+}
+
+export function listInspections(unit?: string): Promise<VehicleInspection[]> {
+  const qs = unit ? `?unit=${encodeURIComponent(unit)}` : "";
+  return request<VehicleInspection[]>(`/api/fleet/inspections${qs}`);
+}
+
+/** Dispatcher paper-backup DVIR entry (POST /api/fleet/inspections). Returns the new id. */
+export async function createInspection(input: {
+  unit: string;
+  type: "PreTrip" | "PostTrip";
+  driverName: string;
+  enteredBy?: string;
+  performedAt?: string;
+  odometerKm?: number | null;
+  checklist: { group?: string | null; item: string; passed: boolean }[];
+  defects: { item: string; severity: "Minor" | "Major" | "OutOfService"; note?: string | null }[];
+}): Promise<string> {
+  const res = await request<{ id: string }>("/api/fleet/inspections", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return res.id;
+}
+
+// ---------------------------------------------------------------------------
+// Maintenance contract (Backend Fleet module) — Shops, Documents, Service
+// records, Work orders. Wire enums travel as their backend enum names (e.g.
+// "InsuranceMpi", "InProgress"); the UI maps them to display labels and derives
+// the status chip from the underlying dates/priority. Named with a "Wire" suffix
+// to avoid colliding with the mock types in lib/types.ts during the migration.
+// ---------------------------------------------------------------------------
+
+export type DocumentTypeWire =
+  | "Registration" | "InsuranceMpi" | "NscSafetyCertificate"
+  | "Emissions" | "BillOfSale" | "Warranty" | "Other";
+export type ServiceCategoryWire = "Preventive" | "Repair" | "InspectionFix" | "Recall";
+export type WorkOrderStatusWire = "Open" | "InProgress" | "AwaitingParts" | "Completed" | "Cancelled";
+export type WorkOrderPriorityWire = "Low" | "Medium" | "High" | "Critical";
+export type WorkOrderSourceWire =
+  | "Manual" | "PreTripInspection" | "PostTripInspection" | "DtcAlert" | "PmReminder";
+
+export interface ShopWire {
+  id: string;
+  number: string;
+  name: string;
+  contactName: string | null;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  gstBusinessNo: string | null;
+  mpiAccredited: boolean;
+  inspectionStationNo: string | null;
+  suppliesParts: boolean;
+  notes: string | null;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+}
+
+export interface ShopInput {
+  name: string;
+  contactName?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  gstBusinessNo?: string | null;
+  mpiAccredited: boolean;
+  inspectionStationNo?: string | null;
+  suppliesParts: boolean;
+  notes?: string | null;
+}
+
+export function listShops(): Promise<ShopWire[]> {
+  return request<ShopWire[]>("/api/fleet/shops");
+}
+
+export async function createShop(input: ShopInput): Promise<string> {
+  const res = await request<{ id: string }>("/api/fleet/shops", { method: "POST", body: JSON.stringify(input) });
+  return res.id;
+}
+
+export function updateShop(id: string, input: ShopInput): Promise<void> {
+  return request<void>(`/api/fleet/shops/${id}`, { method: "PUT", body: JSON.stringify(input) });
+}
+
+export interface VehicleDocumentWire {
+  id: string;
+  vehicleId: string;
+  number: string;
+  type: DocumentTypeWire;
+  fileName: string;
+  fileSizeKb: number;
+  uploadedBy: string;
+  uploadedAt: string;
+  expiry: string | null;
+  note: string | null;
+}
+
+export function listVehicleDocuments(vehicleId: string): Promise<VehicleDocumentWire[]> {
+  return request<VehicleDocumentWire[]>(`/api/fleet/vehicles/${vehicleId}/documents`);
+}
+
+export function listAllDocuments(): Promise<VehicleDocumentWire[]> {
+  return request<VehicleDocumentWire[]>("/api/fleet/documents");
+}
+
+export async function addVehicleDocument(vehicleId: string, input: {
+  type: DocumentTypeWire;
+  fileName: string;
+  fileSizeKb: number;
+  uploadedBy?: string;
+  expiry?: string | null;
+  note?: string | null;
+}): Promise<string> {
+  const res = await request<{ id: string }>(`/api/fleet/vehicles/${vehicleId}/documents`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return res.id;
+}
+
+export function removeVehicleDocument(vehicleId: string, documentId: string): Promise<void> {
+  return request<void>(`/api/fleet/vehicles/${vehicleId}/documents/${documentId}`, { method: "DELETE" });
+}
+
+export interface ServicePartWire { sku: string; qty: number; }
+
+export interface ServiceRecordWire {
+  id: string;
+  vehicleId: string;
+  number: string;
+  date: string;
+  performedBy: string;
+  category: ServiceCategoryWire;
+  odometerKm: number;
+  itemsChanged: string[];
+  reason: string;
+  partsUsed: ServicePartWire[];
+  laborHours: number | null;
+  costCad: number | null;
+  workOrderId: string | null;
+  notes: string | null;
+  createdAtUtc: string;
+}
+
+export function listVehicleServiceRecords(vehicleId: string): Promise<ServiceRecordWire[]> {
+  return request<ServiceRecordWire[]>(`/api/fleet/vehicles/${vehicleId}/service-records`);
+}
+
+export async function addServiceRecord(vehicleId: string, input: {
+  date?: string;
+  performedBy: string;
+  category: ServiceCategoryWire;
+  odometerKm: number;
+  itemsChanged: string[];
+  reason: string;
+  partsUsed: ServicePartWire[];
+  laborHours?: number | null;
+  costCad?: number | null;
+  workOrderId?: string | null;
+  notes?: string | null;
+}): Promise<string> {
+  const res = await request<{ id: string }>(`/api/fleet/vehicles/${vehicleId}/service-records`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return res.id;
+}
+
+export interface WorkOrderWire {
+  id: string;
+  vehicleId: string;
+  number: string;
+  title: string;
+  description: string;
+  status: WorkOrderStatusWire;
+  priority: WorkOrderPriorityWire;
+  source: WorkOrderSourceWire;
+  sourceRef: string | null;
+  createdBy: string;
+  createdAt: string;
+  assignedTo: string | null;
+  dueDate: string | null;
+  lineItems: string[];
+  completedAt: string | null;
+  resolvingServiceId: string | null;
+  shopId: string | null;
+  authorizedLimitCad: number | null;
+  budgetCode: string | null;
+  dateRequiredOrOos: string | null;
+}
+
+export function listVehicleWorkOrders(vehicleId: string): Promise<WorkOrderWire[]> {
+  return request<WorkOrderWire[]>(`/api/fleet/vehicles/${vehicleId}/work-orders`);
+}
+
+export function listAllWorkOrders(): Promise<WorkOrderWire[]> {
+  return request<WorkOrderWire[]>("/api/fleet/work-orders");
+}
+
+export async function createWorkOrder(input: {
+  vehicleId: string;
+  title: string;
+  description?: string | null;
+  priority: WorkOrderPriorityWire;
+  source: WorkOrderSourceWire;
+  sourceRef?: string | null;
+  assignedTo?: string | null;
+  dueDate?: string | null;
+  lineItems: string[];
+  shopId?: string | null;
+  authorizedLimitCad?: number | null;
+  budgetCode?: string | null;
+  dateRequiredOrOos?: string | null;
+  inspectionId?: string | null;
+}): Promise<string> {
+  const res = await request<{ id: string }>("/api/fleet/work-orders", { method: "POST", body: JSON.stringify(input) });
+  return res.id;
+}
+
+export function changeWorkOrderStatus(id: string, status: WorkOrderStatusWire): Promise<void> {
+  return request<void>(`/api/fleet/work-orders/${id}/status`, { method: "POST", body: JSON.stringify({ status }) });
+}
+
+/** Completes a work order by logging the resolving service record. Returns the service id. */
+export async function completeWorkOrder(id: string, input: {
+  date?: string;
+  performedBy: string;
+  category: ServiceCategoryWire;
+  odometerKm: number;
+  itemsChanged: string[];
+  reason: string;
+  partsUsed: ServicePartWire[];
+  laborHours?: number | null;
+  costCad?: number | null;
+  notes?: string | null;
+}): Promise<string> {
+  const res = await request<{ id: string }>(`/api/fleet/work-orders/${id}/complete`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return res.id;
 }
