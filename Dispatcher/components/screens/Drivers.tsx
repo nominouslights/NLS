@@ -756,7 +756,6 @@ export default function Drivers({
                     {creds.map((c) => (
                       <CredentialRow
                         key={c.id}
-                        driverId={d.id}
                         c={c}
                         busy={busy}
                         onRemove={() => onRemoveCredential(d.id, c.id)}

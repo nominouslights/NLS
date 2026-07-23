@@ -5,19 +5,19 @@ import { credentialKindFor, type DriverCredentialRecord } from "@/lib/api/driver
 import { StatusChip } from "@/components/ui/Chip";
 import { credExpiryLabel, RemoveButton } from "./chips";
 
-// One credential row on the Licence & certs tab — extracted verbatim from
-// Drivers.tsx. The thumbnail opens the lightbox when a photo exists, or the
-// photo-upload modal when it doesn't.
+// One credential row on the Licence & certs tab. The photo tile is an icon, not
+// a real thumbnail — image bytes are only fetched (authenticated, via the
+// lightbox) when the dispatcher actually asks to view them. Solid tile = photo
+// on file, opens the lightbox; dashed tile = no photo yet, opens the upload
+// modal.
 
 export function CredentialRow({
-  driverId,
   c,
   busy,
   onRemove,
   onViewImage,
   onAddPhoto,
 }: {
-  driverId: string;
   c: DriverCredentialRecord;
   busy: boolean;
   onRemove: () => void;
@@ -40,26 +40,28 @@ export function CredentialRow({
         {c.hasImage ? (
           <div
             onClick={onViewImage}
+            title="View photo"
             style={{
               width: 36,
               height: 36,
               flex: "none",
               borderRadius: 5,
-              background: colors.inputBg,
-              border: `1px solid ${colors.borderStrong}`,
+              background: "rgba(31,111,178,.08)",
+              border: `1px solid ${colors.borderActive}`,
               cursor: "pointer",
-              overflow: "hidden",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 16,
+              color: colors.blue,
             }}
           >
-            <img
-              src={`/api/drivers/${driverId}/credentials/${c.id}/image`}
-              alt="Credential"
-              style={{ width: "100%", height: "100%", objectFit: "cover" }}
-            />
+            🖼
           </div>
         ) : (
           <div
             onClick={onAddPhoto}
+            title="Add photo"
             style={{
               width: 36,
               height: 36,
