@@ -128,7 +128,8 @@ export default function ClientPoDashboard({ clientId, clientName }: { clientId: 
           <SectionLabel>Purchase orders</SectionLabel>
           <ActionButton
             variant="primary"
-            style={{ marginLeft: "auto", ...(busy ? { opacity: 0.6, cursor: "wait" } : {}) }}
+            style={{ marginLeft: "auto" }}
+            disabled={busy}
             onClick={() => setEditor({ mode: "new" })}
           >
             + ADD PO

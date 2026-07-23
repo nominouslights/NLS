@@ -1,3 +1,4 @@
+using NorthernLink.Fleet.Domain.Inspections.Events;
 using NorthernLink.Shared.Kernel;
 
 namespace NorthernLink.Fleet.Domain.Inspections;
@@ -55,23 +56,29 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
         DateTimeOffset performedAt,
         int? odometerKm,
         IReadOnlyList<InspectionChecklistItem> checklistItems,
-        IReadOnlyList<InspectionDefect> defects) => new()
+        IReadOnlyList<InspectionDefect> defects)
     {
-        TenantId = tenantId,
-        Unit = unit.Trim(),
-        Type = type,
-        DriverName = driverName.Trim(),
-        Source = source,
-        EnteredBy = string.IsNullOrWhiteSpace(enteredBy) ? null : enteredBy.Trim(),
-        TripNumber = tripNumber.Trim(),
-        ManifestId = manifestId,
-        PerformedAt = performedAt,
-        OdometerKm = odometerKm,
-        Result = DeriveResult(defects),
-        ChecklistItems = [.. checklistItems],
-        Defects = [.. defects],
-        CreatedAtUtc = DateTimeOffset.UtcNow,
-    };
+        var inspection = new VehicleInspection
+        {
+            TenantId = tenantId,
+            Unit = unit.Trim(),
+            Type = type,
+            DriverName = driverName.Trim(),
+            Source = source,
+            EnteredBy = string.IsNullOrWhiteSpace(enteredBy) ? null : enteredBy.Trim(),
+            TripNumber = tripNumber.Trim(),
+            ManifestId = manifestId,
+            PerformedAt = performedAt,
+            OdometerKm = odometerKm,
+            Result = DeriveResult(defects),
+            ChecklistItems = [.. checklistItems],
+            Defects = [.. defects],
+            CreatedAtUtc = DateTimeOffset.UtcNow,
+        };
+
+        inspection.Raise(new VehicleInspectionCreatedDomainEvent(inspection.Id, tenantId));
+        return inspection;
+    }
 
     /// <summary>
     /// Dispatcher paper-backup entry — the office fallback when the Driver App failed in the
@@ -116,11 +123,17 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
             CreatedAtUtc = DateTimeOffset.UtcNow,
         };
 
+        inspection.Raise(new VehicleInspectionCreatedDomainEvent(inspection.Id, tenantId));
         return NorthernLink.Shared.Kernel.Result.Success(inspection);
     }
 
     /// <summary>Links the work order generated from this inspection's defects.</summary>
-    public void LinkWorkOrder(Guid workOrderId) => GeneratedWorkOrderId = workOrderId;
+    public void LinkWorkOrder(Guid workOrderId)
+    {
+        GeneratedWorkOrderId = workOrderId;
+
+        Raise(new VehicleInspectionWorkOrderLinkedDomainEvent(Id, workOrderId));
+    }
 
     /// <summary>The derivation rule: Pass / PassWithDefects (all Minor) / Fail (any Major or OutOfService).</summary>
     public static InspectionResult DeriveResult(IReadOnlyList<InspectionDefect> defects)

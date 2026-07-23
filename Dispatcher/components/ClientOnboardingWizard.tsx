@@ -159,7 +159,7 @@ export default function ClientOnboardingWizard({
         footer={
           <>
             <ActionButton onClick={onClose}>CANCEL</ActionButton>
-            <ActionButton variant="primary" onClick={submitStep1} style={busy ? { opacity: 0.6, cursor: "wait" } : undefined}>
+            <ActionButton variant="primary" onClick={submitStep1} disabled={busy}>
               {busy ? "CREATING…" : "NEXT"}
             </ActionButton>
           </>
@@ -221,7 +221,7 @@ export default function ClientOnboardingWizard({
             <ActionButton onClick={onClose} disabled={busy}>
               CANCEL
             </ActionButton>
-            <ActionButton variant="primary" onClick={submitStep2} style={busy ? { opacity: 0.6, cursor: "wait" } : undefined}>
+            <ActionButton variant="primary" onClick={submitStep2} disabled={busy}>
               {busy ? "SAVING…" : type === "VendorPartner" ? "FINISH" : "NEXT"}
             </ActionButton>
           </>
@@ -300,7 +300,6 @@ export default function ClientOnboardingWizard({
         <ContractFormModal
           clientId={newClientId!}
           clientName={name}
-          contract={null}
           onClose={() => setShowContractForm(false)}
           onSaved={handleContractSaved}
         />

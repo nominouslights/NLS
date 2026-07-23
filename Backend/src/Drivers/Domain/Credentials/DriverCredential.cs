@@ -1,3 +1,4 @@
+using NorthernLink.Drivers.Domain.Credentials.Events;
 using NorthernLink.Shared.Kernel;
 
 namespace NorthernLink.Drivers.Domain.Credentials;
@@ -74,6 +75,8 @@ public sealed class DriverCredential : AggregateRoot, ITenantScoped
             CreatedAtUtc = DateTimeOffset.UtcNow,
         };
 
+        credential.Raise(new DriverCredentialAddedDomainEvent(credential.Id, driverId, tenantId));
+
         return Result.Success(credential);
     }
 
@@ -81,5 +84,7 @@ public sealed class DriverCredential : AggregateRoot, ITenantScoped
     {
         ImageKey = imageKey;
         ImageContentType = imageContentType;
+
+        Raise(new DriverCredentialImageSetDomainEvent(Id, DriverId, TenantId));
     }
 }

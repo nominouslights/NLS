@@ -243,12 +243,12 @@ export default function ClientDetail({
                 </div>
               )}
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
-                <ActionButton variant="primary" onClick={() => setModal("new-contract")} style={busy ? { opacity: 0.6, cursor: "wait" } : undefined}>
+                <ActionButton variant="primary" onClick={() => setModal("new-contract")} disabled={busy}>
                   + NEW CONTRACT
                 </ActionButton>
                 {contract && (
                   <>
-                    <ActionButton onClick={() => setModal("edit-contract")} style={busy ? { opacity: 0.6, cursor: "wait" } : undefined}>
+                    <ActionButton onClick={() => setModal("edit-contract")} disabled={busy}>
                       EDIT
                     </ActionButton>
                     {confirmTerminate ? (
@@ -256,7 +256,7 @@ export default function ClientDetail({
                         <ActionButton
                           variant="destructive"
                           onClick={() => onTerminate(contract.activeContractId)}
-                          style={busy ? { opacity: 0.6, cursor: "wait" } : undefined}
+                          disabled={busy}
                         >
                           {busy ? "WORKING…" : "CONFIRM TERMINATE"}
                         </ActionButton>
@@ -266,7 +266,7 @@ export default function ClientDetail({
                       <ActionButton
                         variant="destructive"
                         onClick={() => setConfirmTerminate(true)}
-                        style={busy ? { opacity: 0.6, cursor: "wait" } : undefined}
+                        disabled={busy}
                       >
                         TERMINATE
                       </ActionButton>
@@ -385,8 +385,8 @@ export default function ClientDetail({
         </div>
       )}
 
-      {/* Contacts (client-type only — prototype-CRM mock store) */}
-      {clientType && activeTab === 1 && <ContactRoster clientId={mockCrmId} clientName={client.name} />}
+      {/* Contacts (client-type only — real Clients API, keyed by the real client id) */}
+      {clientType && activeTab === 1 && <ContactRoster clientId={client.id} clientName={client.name} />}
 
       {/* Interactions (client-type only — prototype-CRM mock store) */}
       {clientType && activeTab === 2 && <InteractionTimeline clientId={mockCrmId} clientName={client.name} />}

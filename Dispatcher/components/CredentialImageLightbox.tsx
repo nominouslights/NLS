@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { colors } from "@/lib/theme";
+import { colors, statusMeta } from "@/lib/theme";
 import { driverCredentialImageBlob } from "@/lib/api/drivers";
 
 // Minimal full-screen image viewer for credential photos. Closes on scrim-click or ✕.
 // Fetches the image via the proxied API endpoint (no direct bucket access from browser).
 
-export function CredentialImageLightbox({
+export default function CredentialImageLightbox({
   driverId,
   credentialId,
   onClose,
@@ -59,7 +59,7 @@ export function CredentialImageLightbox({
         onClick={(e) => e.stopPropagation()}
       >
         {error ? (
-          <div style={{ color: colors.errorRed, fontFamily: "monospace", fontSize: 13 }}>
+          <div style={{ color: statusMeta("over").t, fontFamily: "monospace", fontSize: 13 }}>
             {error}
           </div>
         ) : imageUrl ? (

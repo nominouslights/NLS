@@ -143,6 +143,19 @@ public abstract class ModuleDbContext : DbContext
         {
             var aggregate = entry.Entity;
 
+            // Guard: every insert/update of an aggregate must raise at least one domain
+            // event. An eventless write produces no event_journal row, so the projection
+            // worker never sees it and the read model silently goes stale — this converts
+            // that silent-staleness bug class into an immediate, loud failure. Deletes are
+            // exempt: the synthetic aggregate-deleted journal row below covers them.
+            if (entry.State is EntityState.Added or EntityState.Modified && aggregate.DomainEvents.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    $"{aggregate.GetType().Name} (id {aggregate.Id}) was saved as {entry.State} without raising a " +
+                    "domain event. An eventless write produces no event_journal row, so the projection worker never " +
+                    "sees it and the read model silently goes stale — raise a domain event from the mutating method.");
+            }
+
             // Deleted aggregates still get a final version + snapshot of their pre-delete
             // state, so hard deletes don't vanish from history.
             aggregate.IncrementVersion();

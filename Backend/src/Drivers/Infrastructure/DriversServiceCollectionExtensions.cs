@@ -11,6 +11,7 @@ using NorthernLink.Drivers.Application.Credentials;
 using NorthernLink.Drivers.Application.Credentials.Add;
 using NorthernLink.Drivers.Application.Credentials.GetForDriver;
 using NorthernLink.Drivers.Application.Credentials.Remove;
+using NorthernLink.Drivers.Application.Credentials.SetImage;
 using NorthernLink.Drivers.Application.Drivers;
 using NorthernLink.Drivers.Application.Drivers.ChangeStatus;
 using NorthernLink.Drivers.Application.Drivers.GetDriverById;
@@ -77,6 +78,7 @@ public static class DriversServiceCollectionExtensions
         services.AddScoped<IQueryHandler<GetDriverByIdQuery, DriverResponse>, GetDriverByIdQueryHandler>();
         services.AddScoped<ICommandHandler<AddDriverCredentialCommand, Guid>, AddDriverCredentialCommandHandler>();
         services.AddScoped<ICommandHandler<RemoveDriverCredentialCommand>, RemoveDriverCredentialCommandHandler>();
+        services.AddScoped<ICommandHandler<SetDriverCredentialImageCommand>, SetDriverCredentialImageCommandHandler>();
         services.AddScoped<IQueryHandler<GetDriverCredentialsQuery, IReadOnlyList<DriverCredentialResponse>>, GetDriverCredentialsQueryHandler>();
         services.AddScoped<ICommandHandler<GrantDriverClearanceCommand, Guid>, GrantDriverClearanceCommandHandler>();
         services.AddScoped<ICommandHandler<RevokeDriverClearanceCommand>, RevokeDriverClearanceCommandHandler>();

@@ -7,6 +7,12 @@
        library (endpoints included) plus Shared. -->
 
   <ItemGroup>
+    <!-- The integration tests drive the internal projections and repositories directly,
+         mirroring the registry composed in DriversServiceCollectionExtensions. -->
+    <InternalsVisibleTo Include="NorthernLink.Drivers.IntegrationTests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Shared\NorthernLink.Shared.csproj" />
   </ItemGroup>
 

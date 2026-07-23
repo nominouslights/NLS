@@ -323,7 +323,7 @@ export default function Manifests() {
                       <ActionButton
                         variant="success"
                         onClick={() => submitDemand(m, m.seatsConfirmed + 1, m.demandGuaranteed)}
-                        style={busy ? { opacity: 0.6, cursor: "wait" } : undefined}
+                        disabled={busy}
                       >
                         {busy ? "SAVING…" : "+ CONFIRM SEAT"}
                       </ActionButton>
@@ -350,7 +350,7 @@ export default function Manifests() {
                       <ActionButton
                         variant="success"
                         onClick={() => submitDemand(m, m.seatsConfirmed + 1, m.demandGuaranteed)}
-                        style={busy ? { opacity: 0.6, cursor: "wait" } : undefined}
+                        disabled={busy}
                       >
                         {busy ? "SAVING…" : "+ CONFIRM SEAT"}
                       </ActionButton>
@@ -441,7 +441,7 @@ export default function Manifests() {
                         <ActionButton
                           variant="success"
                           onClick={() => submitDemand(m, m.seatsConfirmed, true)}
-                          style={busy ? { opacity: 0.6, cursor: "wait" } : undefined}
+                          disabled={busy}
                         >
                           {busy ? "SAVING…" : "CONFIRM GUARANTEE"}
                         </ActionButton>

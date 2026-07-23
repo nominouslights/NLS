@@ -1,3 +1,4 @@
+using NorthernLink.Fleet.Domain.WorkOrders.Events;
 using NorthernLink.Shared.Kernel;
 
 namespace NorthernLink.Fleet.Domain.WorkOrders;
@@ -87,6 +88,7 @@ public sealed class WorkOrder : AggregateRoot, ITenantScoped
             DateRequiredOrOos = dateRequiredOrOos,
         };
 
+        workOrder.Raise(new WorkOrderCreatedDomainEvent(workOrder.Id, vehicleId, tenantId));
         return Result.Success(workOrder);
     }
 
@@ -103,7 +105,10 @@ public sealed class WorkOrder : AggregateRoot, ITenantScoped
             return Result.Failure(WorkOrderErrors.UseCompleteEndpoint);
         }
 
+        var previous = Status;
         Status = newStatus;
+
+        Raise(new WorkOrderStatusChangedDomainEvent(Id, previous, newStatus));
         return Result.Success();
     }
 
@@ -118,6 +123,8 @@ public sealed class WorkOrder : AggregateRoot, ITenantScoped
         Status = WorkOrderStatus.Completed;
         CompletedAt = DateTimeOffset.UtcNow;
         ResolvingServiceId = resolvingServiceId;
+
+        Raise(new WorkOrderCompletedDomainEvent(Id, resolvingServiceId));
         return Result.Success();
     }
 }

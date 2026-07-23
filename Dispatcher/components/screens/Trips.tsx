@@ -197,7 +197,7 @@ function AssignModal({
       footer={
         <>
           <ActionButton onClick={onClose}>CANCEL</ActionButton>
-          <ActionButton variant="primary" onClick={submit} style={busy ? { opacity: 0.6, cursor: "wait" } : undefined}>
+          <ActionButton variant="primary" onClick={submit} disabled={busy}>
             {busy ? "SAVING…" : "SAVE ASSIGNMENT"}
           </ActionButton>
         </>
@@ -351,7 +351,7 @@ function EditTripModal({
       footer={
         <>
           <ActionButton onClick={onClose}>CANCEL</ActionButton>
-          <ActionButton variant="primary" onClick={submit} style={busy ? { opacity: 0.6, cursor: "wait" } : undefined}>
+          <ActionButton variant="primary" onClick={submit} disabled={busy}>
             {busy ? "SAVING…" : "SAVE TRIP"}
           </ActionButton>
         </>
@@ -415,7 +415,7 @@ function CancelTripModal({
       footer={
         <>
           <ActionButton onClick={onClose}>KEEP TRIP</ActionButton>
-          <ActionButton variant="destructive" onClick={submit} style={busy ? { opacity: 0.6, cursor: "wait" } : undefined}>
+          <ActionButton variant="destructive" onClick={submit} disabled={busy}>
             {busy ? "CANCELLING…" : "CANCEL TRIP"}
           </ActionButton>
         </>
@@ -995,7 +995,7 @@ export default function Trips({
                   <ActionButton
                     variant="success"
                     onClick={() => onChangeStatus(t.id, "InProgress")}
-                    style={busy ? { opacity: 0.6, cursor: "wait" } : undefined}
+                    disabled={busy}
                   >
                     {busy ? "WORKING…" : "START TRIP"}
                   </ActionButton>
@@ -1004,7 +1004,7 @@ export default function Trips({
                   <ActionButton
                     variant="success"
                     onClick={() => onChangeStatus(t.id, "Completed")}
-                    style={busy ? { opacity: 0.6, cursor: "wait" } : undefined}
+                    disabled={busy}
                   >
                     {busy ? "WORKING…" : "COMPLETE TRIP"}
                   </ActionButton>

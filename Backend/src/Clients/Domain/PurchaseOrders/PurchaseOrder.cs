@@ -1,3 +1,4 @@
+using NorthernLink.Clients.Domain.PurchaseOrders.Events;
 using NorthernLink.Shared.Kernel;
 
 namespace NorthernLink.Clients.Domain.PurchaseOrders;
@@ -5,9 +6,10 @@ namespace NorthernLink.Clients.Domain.PurchaseOrders;
 /// <summary>
 /// A purchase order a client issued against their account, referenced when invoicing
 /// (invoices snapshot the PO number as a string, so hard-deleting a PO never dangles).
-/// Client-scoped reference data with no lifecycle of its own: create/update/hard-delete,
-/// no domain events — the audit pipeline's snapshots and the synthetic aggregate-deleted
-/// journal row are the record.
+/// Client-scoped reference data with no lifecycle of its own: create/update/hard-delete.
+/// Create and Update raise module-internal domain events (never mapped to integration
+/// events) so the write lands in <c>event_journal</c> for the audit trail and any future
+/// read-model projection.
 /// </summary>
 public sealed class PurchaseOrder : AggregateRoot, ITenantScoped
 {
@@ -55,6 +57,7 @@ public sealed class PurchaseOrder : AggregateRoot, ITenantScoped
             UpdatedAtUtc = now,
         };
 
+        purchaseOrder.Raise(new PurchaseOrderCreatedDomainEvent(purchaseOrder.Id, clientId, tenantId));
         return Result.Success(purchaseOrder);
     }
 
@@ -77,6 +80,7 @@ public sealed class PurchaseOrder : AggregateRoot, ITenantScoped
         Note = Clean(note);
         UpdatedAtUtc = DateTimeOffset.UtcNow;
 
+        Raise(new PurchaseOrderUpdatedDomainEvent(Id, ClientId, TenantId));
         return Result.Success();
     }
 

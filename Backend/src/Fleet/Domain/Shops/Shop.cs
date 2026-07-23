@@ -1,3 +1,4 @@
+using NorthernLink.Fleet.Domain.Shops.Events;
 using NorthernLink.Shared.Kernel;
 
 namespace NorthernLink.Fleet.Domain.Shops;
@@ -69,6 +70,7 @@ public sealed class Shop : AggregateRoot, ITenantScoped
             UpdatedAtUtc = now,
         };
 
+        shop.Raise(new ShopRegisteredDomainEvent(shop.Id, tenantId));
         return Result.Success(shop);
     }
 
@@ -101,6 +103,7 @@ public sealed class Shop : AggregateRoot, ITenantScoped
         Notes = Clean(notes);
         UpdatedAtUtc = DateTimeOffset.UtcNow;
 
+        Raise(new ShopDetailsUpdatedDomainEvent(Id, TenantId));
         return Result.Success();
     }
 

@@ -102,7 +102,7 @@ function ConfirmModal({
           <ActionButton
             variant={destructive ? "destructive" : "primary"}
             onClick={onConfirm}
-            style={busy ? { opacity: 0.6, cursor: "wait" } : undefined}
+            disabled={busy}
           >
             {busy ? "WORKING…" : confirmLabel}
           </ActionButton>
@@ -233,7 +233,7 @@ function GenerateDraftModal({
       footer={
         <>
           <ActionButton onClick={onClose}>CANCEL</ActionButton>
-          <ActionButton variant="primary" onClick={submit} style={busy ? { opacity: 0.6, cursor: "wait" } : undefined}>
+          <ActionButton variant="primary" onClick={submit} disabled={busy}>
             {busy ? "GENERATING…" : "GENERATE DRAFT"}
           </ActionButton>
         </>
@@ -623,7 +623,7 @@ function LineEditor({
       </div>
 
       <div style={{ display: "flex", gap: 9, marginTop: 16 }}>
-        <ActionButton variant="primary" onClick={save} style={busy ? { opacity: 0.6, cursor: "wait" } : undefined}>
+        <ActionButton variant="primary" onClick={save} disabled={busy}>
           {busy ? "SAVING…" : "SAVE LINES"}
         </ActionButton>
         <ActionButton onClick={onClose}>CANCEL</ActionButton>
@@ -996,7 +996,7 @@ function InvoiceDetail({
               onChange={(v) => setQboStatus(v as QboSyncStatus)}
               options={(Object.keys(QBO_LABELS) as QboSyncStatus[]).map((s) => ({ value: s, label: QBO_LABELS[s] }))}
             />
-            <ActionButton variant="primary" onClick={applyQbo} style={busy ? { opacity: 0.6, cursor: "wait" } : undefined}>
+            <ActionButton variant="primary" onClick={applyQbo} disabled={busy}>
               {busy ? "SAVING…" : "APPLY"}
             </ActionButton>
             <ActionButton onClick={() => setQboOpen(false)}>CANCEL</ActionButton>

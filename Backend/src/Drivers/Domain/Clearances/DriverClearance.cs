@@ -1,3 +1,4 @@
+using NorthernLink.Drivers.Domain.Clearances.Events;
 using NorthernLink.Shared.Kernel;
 
 namespace NorthernLink.Drivers.Domain.Clearances;
@@ -51,6 +52,8 @@ public sealed class DriverClearance : AggregateRoot, ITenantScoped
             Expiry = expiry,
             GrantedAtUtc = DateTimeOffset.UtcNow,
         };
+
+        clearance.Raise(new DriverClearanceGrantedDomainEvent(clearance.Id, driverId, tenantId));
 
         return Result.Success(clearance);
     }

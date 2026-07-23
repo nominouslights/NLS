@@ -1,3 +1,4 @@
+using NorthernLink.Clients.Domain.ClientContacts.Events;
 using NorthernLink.Shared.Kernel;
 
 namespace NorthernLink.Clients.Domain.ClientContacts;
@@ -6,8 +7,9 @@ namespace NorthernLink.Clients.Domain.ClientContacts;
 /// A contact person at a client organization — a CRM record of a person with a role, email,
 /// and phone. Not a platform user account (that's Identity's concern) — a contact may or may
 /// not correspond to a user who can log in. ClientContact is reference data with no lifecycle
-/// of its own: create only (no update/delete in this scope), no domain events — the audit
-/// pipeline's snapshots are the record.
+/// of its own: create only (no update/delete in this scope). Create raises a module-internal
+/// domain event (never mapped to an integration event) so the write lands in
+/// <c>event_journal</c> for the audit trail and any future read-model projection.
 /// </summary>
 public sealed class ClientContact : AggregateRoot, ITenantScoped
 {
@@ -64,6 +66,7 @@ public sealed class ClientContact : AggregateRoot, ITenantScoped
             UpdatedAtUtc = now,
         };
 
+        contact.Raise(new ClientContactCreatedDomainEvent(contact.Id, clientId, tenantId));
         return Result.Success(contact);
     }
 

@@ -1,3 +1,4 @@
+using NorthernLink.Fleet.Domain.Documents.Events;
 using NorthernLink.Shared.Kernel;
 
 namespace NorthernLink.Fleet.Domain.Documents;
@@ -67,6 +68,7 @@ public sealed class VehicleDocument : AggregateRoot, ITenantScoped
             CreatedAtUtc = DateTimeOffset.UtcNow,
         };
 
+        document.Raise(new VehicleDocumentAddedDomainEvent(document.Id, vehicleId, tenantId));
         return Result.Success(document);
     }
 }

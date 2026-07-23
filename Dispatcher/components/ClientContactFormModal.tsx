@@ -69,7 +69,7 @@ export default function ClientContactFormModal({
       footer={
         <>
           <ActionButton onClick={onClose}>CANCEL</ActionButton>
-          <ActionButton variant="primary" onClick={submit} style={busy ? { opacity: 0.6, cursor: "wait" } : undefined}>
+          <ActionButton variant="primary" onClick={submit} disabled={busy}>
             {busy ? "SAVING…" : "ADD CONTACT"}
           </ActionButton>
         </>

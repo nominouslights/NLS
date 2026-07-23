@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { chipStyle, colors, dutyMeta, fonts, rowSurface, statusMeta, type StatusKind } from "@/lib/theme";
+import { colors, fonts, rowSurface, statusMeta, type StatusKind } from "@/lib/theme";
 import { ApiError, formatUtcDate } from "@/lib/api";
 import {
   changeDriverStatus,
@@ -12,7 +12,6 @@ import {
   listDrivers,
   refetchUntil,
   removeDriverCredential,
-  uploadDriverCredentialImage,
   revokeDriverClearance,
   sortClearances,
   sortCredentials,
@@ -32,8 +31,13 @@ import { PageHeader, Panel, SectionLabel } from "@/components/ui/Panel";
 import { StatusChip } from "@/components/ui/Chip";
 import { ActionButton } from "@/components/ui/Button";
 import { MonthGrid } from "@/components/ui/MonthGrid";
+import { DutyChip, ExpiryFlag, PermitTag } from "./drivers/chips";
+import { CredentialRow } from "./drivers/CredentialRow";
+import { ClearanceRow } from "./drivers/ClearanceRow";
+import { HosLogRow } from "./drivers/HosLogRow";
 import CredentialFormModal from "@/components/CredentialFormModal";
-import { CredentialImageLightbox } from "@/components/CredentialImageLightbox";
+import CredentialImageLightbox from "@/components/CredentialImageLightbox";
+import CredentialPhotoModal from "@/components/CredentialPhotoModal";
 import DriverFormModal from "@/components/DriverFormModal";
 import HosLogEntryModal from "@/components/HosLogEntryModal";
 import ClearanceFormModal from "@/components/ClearanceFormModal";
@@ -66,301 +70,6 @@ const LEAVE_KIND: Record<LeaveType, StatusKind> = {
   Sick: "soon",
   "Leave Without Pay": "over",
 };
-
-// Duty status as color + icon + label (never colour alone).
-function DutyChip({ status }: { status: DutyStatus }) {
-  const m = dutyMeta(status);
-  return (
-    <span style={chipStyle(m.bg, m.bd, m.text)}>
-      <span style={{ fontSize: 10, lineHeight: 1, color: m.color }}>{m.glyph}</span>
-      {status}
-    </span>
-  );
-}
-
-// Small "credential expiring / expired" flag for a roster row, derived from
-// the API's soonestCredentialExpiry rollup.
-function ExpiryFlag({ soonestExpiry }: { soonestExpiry: string | null }) {
-  const kind = credentialKindFor(soonestExpiry);
-  if (kind !== "soon" && kind !== "over") return null;
-  const m = statusMeta(kind);
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 4,
-        fontFamily: fonts.body,
-        fontWeight: 600,
-        fontSize: 10,
-        padding: "1px 6px",
-        borderRadius: 6,
-        background: m.bg,
-        border: `1px solid ${m.bd}`,
-        color: m.t,
-      }}
-    >
-      <span style={{ fontSize: 9, lineHeight: 1 }}>{m.g}</span>
-      {kind === "over" ? "Credential expired" : "Credential expiring"}
-    </span>
-  );
-}
-
-function PermitTag() {
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        fontFamily: fonts.semiCondensed,
-        fontWeight: 600,
-        fontSize: 9.5,
-        letterSpacing: ".06em",
-        textTransform: "uppercase",
-        padding: "1px 6px",
-        borderRadius: 6,
-        background: "rgba(232,160,32,.13)",
-        border: "1px solid rgba(232,160,32,.5)",
-        color: colors.amberText,
-      }}
-    >
-      Work permit
-    </span>
-  );
-}
-
-function credExpiryLabel(kind: StatusKind, expiry: string | null): string {
-  if (!expiry) return "No expiry";
-  if (kind === "over") return `Expired ${expiry}`;
-  if (kind === "soon") return `Expires ${expiry}`;
-  return `Valid to ${expiry}`;
-}
-
-function RemoveButton({ onClick, disabled }: { onClick: () => void; disabled: boolean }) {
-  return (
-    <span
-      onClick={disabled ? undefined : onClick}
-      style={{
-        fontFamily: fonts.semiCondensed,
-        fontWeight: 600,
-        fontSize: 10,
-        letterSpacing: ".08em",
-        textTransform: "uppercase",
-        color: disabled ? colors.textFaint : statusMeta("over").t,
-        cursor: disabled ? "wait" : "pointer",
-        marginTop: 5,
-        display: "inline-block",
-      }}
-    >
-      Remove
-    </span>
-  );
-}
-
-function CredentialRow({
-  driverId,
-  c,
-  busy,
-  onRemove,
-  onViewImage,
-  onAddPhoto,
-}: {
-  driverId: string;
-  c: DriverCredentialRecord;
-  busy: boolean;
-  onRemove: () => void;
-  onViewImage: () => void;
-  onAddPhoto: () => void;
-}) {
-  const kind = credentialKindFor(c.expiry);
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: 12,
-        padding: "11px 0",
-        borderTop: `1px solid ${colors.borderSubtle}`,
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0, flex: 1 }}>
-        {c.hasImage ? (
-          <div
-            onClick={onViewImage}
-            style={{
-              width: 36,
-              height: 36,
-              flex: "none",
-              borderRadius: 5,
-              background: colors.inputBg,
-              border: `1px solid ${colors.borderStrong}`,
-              cursor: "pointer",
-              overflow: "hidden",
-            }}
-          >
-            <img
-              src={`/api/drivers/${driverId}/credentials/${c.id}/image`}
-              alt="Credential"
-              style={{ width: "100%", height: "100%", objectFit: "cover" }}
-            />
-          </div>
-        ) : (
-          <div
-            onClick={onAddPhoto}
-            style={{
-              width: 36,
-              height: 36,
-              flex: "none",
-              borderRadius: 5,
-              background: colors.inputBg,
-              border: `1px dashed ${colors.borderStrong}`,
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 16,
-              color: colors.textMuted,
-            }}
-          >
-            📷
-          </div>
-        )}
-        <div style={{ minWidth: 0 }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 7,
-              fontFamily: fonts.semiCondensed,
-              fontSize: 9.5,
-              letterSpacing: ".1em",
-              textTransform: "uppercase",
-              color: colors.textLabel,
-              marginBottom: 3,
-            }}
-          >
-            {c.type}
-            {c.optional && (
-              <span style={{ color: colors.textFaint, letterSpacing: ".04em" }}>· optional</span>
-            )}
-          </div>
-          <div style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: 600, color: colors.textPrimary }}>
-            {c.label}
-          </div>
-          {(c.issued || c.note) && (
-            <div style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim, marginTop: 2 }}>
-              {c.issued && <span>Issued {c.issued}</span>}
-              {c.issued && c.note && <span style={{ color: colors.textFaint }}> · </span>}
-              {c.note && <span>{c.note}</span>}
-            </div>
-          )}
-        </div>
-      </div>
-      <div style={{ flex: "none", textAlign: "right" }}>
-        <StatusChip kind={kind} label={credExpiryLabel(kind, c.expiry)} />
-        <div>
-          <RemoveButton onClick={onRemove} disabled={busy} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ClearanceRow({
-  c,
-  busy,
-  onRemove,
-}: {
-  c: DriverClearanceRecord;
-  busy: boolean;
-  onRemove: () => void;
-}) {
-  const kind = credentialKindFor(c.expiry);
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: 12,
-        padding: "11px 0",
-        borderTop: `1px solid ${colors.borderSubtle}`,
-      }}
-    >
-      <div style={{ minWidth: 0 }}>
-        <div
-          style={{
-            fontFamily: fonts.semiCondensed,
-            fontSize: 9.5,
-            letterSpacing: ".1em",
-            textTransform: "uppercase",
-            color: colors.textLabel,
-            marginBottom: 3,
-          }}
-        >
-          {c.clientName}
-        </div>
-        <div style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: 600, color: colors.textPrimary }}>
-          {c.title}
-        </div>
-        <div style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim, marginTop: 2 }}>
-          Granted {formatUtcDate(c.grantedAtUtc)}
-        </div>
-      </div>
-      <div style={{ flex: "none", textAlign: "right" }}>
-        <StatusChip kind={kind} label={credExpiryLabel(kind, c.expiry)} />
-        <div>
-          <RemoveButton onClick={onRemove} disabled={busy} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function SourceChip({ entry }: { entry: HosEntryRecord }) {
-  const manual = entry.source === "Manual (paper backup)";
-  const style = manual
-    ? chipStyle("rgba(232,160,32,.13)", "rgba(232,160,32,.5)", colors.amberText)
-    : chipStyle(statusMeta("info").bg, statusMeta("info").bd, statusMeta("info").t);
-  return (
-    <span style={{ ...style, fontSize: 10.5, padding: "2px 8px" }}>
-      <span style={{ fontSize: 9, lineHeight: 1 }}>{manual ? "✎" : "◈"}</span>
-      {manual ? "Paper backup" : "Driver App"}
-    </span>
-  );
-}
-
-function HosLogRow({ entry }: { entry: HosEntryRecord }) {
-  const m = dutyMeta(entry.duty as DutyStatus);
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "78px 92px 1fr auto",
-        gap: 10,
-        alignItems: "center",
-        padding: "10px 0",
-        borderTop: `1px solid ${colors.borderSubtle}`,
-      }}
-    >
-      <div style={{ fontFamily: fonts.mono, fontSize: 11.5, color: colors.textSecondary }}>{entry.date}</div>
-      <div style={{ display: "flex", alignItems: "center", gap: 5, fontFamily: fonts.body, fontSize: 12, fontWeight: 600, color: m.text }}>
-        <span style={{ fontSize: 9, color: m.color }}>{m.glyph}</span>
-        {entry.duty}
-      </div>
-      <div style={{ fontFamily: fonts.mono, fontSize: 11.5, color: colors.textDim }}>
-        On {entry.onDutyH}h · Drv {entry.drivingH}h · Off {entry.offDutyH}h
-      </div>
-      <div style={{ textAlign: "right" }}>
-        <SourceChip entry={entry} />
-        {entry.enteredBy && (
-          <div style={{ fontFamily: fonts.body, fontSize: 10, color: colors.textDim, marginTop: 2 }}>{entry.enteredBy}</div>
-        )}
-      </div>
-    </div>
-  );
-}
 
 // Shared frame for the pre-data states so the header stays consistent.
 function ScreenFrame({ children, right }: { children: React.ReactNode; right?: React.ReactNode }) {
@@ -467,9 +176,6 @@ export default function Drivers({
   // Image lightbox — when not null, shows the credential photo for the identified credential
   const [imageLightbox, setImageLightbox] = useState<{ driverId: string; credentialId: string } | null>(null);
   const [photoUploadModal, setPhotoUploadModal] = useState<{ driverId: string; credentialId: string } | null>(null);
-  const [photoUploadFile, setPhotoUploadFile] = useState<File | null>(null);
-  const [photoUploadBusy, setPhotoUploadBusy] = useState(false);
-  const [photoUploadError, setPhotoUploadError] = useState<string | null>(null);
 
   const loadRoster = useCallback(async () => {
     try {
@@ -1256,19 +962,11 @@ export default function Drivers({
               <ActionButton>MESSAGE</ActionButton>
               <ActionButton onClick={() => setModal("edit")}>EDIT DRIVER</ActionButton>
               {deactivated ? (
-                <ActionButton
-                  variant="success"
-                  onClick={() => onChangeStatus(d.id, "Active")}
-                  style={busy ? { opacity: 0.6, cursor: "wait" } : undefined}
-                >
+                <ActionButton variant="success" onClick={() => onChangeStatus(d.id, "Active")} disabled={busy}>
                   {busy ? "WORKING…" : "REACTIVATE DRIVER"}
                 </ActionButton>
               ) : (
-                <ActionButton
-                  variant="destructive"
-                  onClick={() => onChangeStatus(d.id, "Deactivated")}
-                  style={busy ? { opacity: 0.6, cursor: "wait" } : undefined}
-                >
+                <ActionButton variant="destructive" onClick={() => onChangeStatus(d.id, "Deactivated")} disabled={busy}>
                   {busy ? "WORKING…" : "DEACTIVATE DRIVER"}
                 </ActionButton>
               )}
@@ -1323,143 +1021,27 @@ export default function Drivers({
 
       {/* Photo upload modal — add/replace credential image */}
       {photoUploadModal && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            backgroundColor: "rgba(0, 0, 0, 0.5)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 999,
-          }}
-          onClick={() => {
-            if (!photoUploadBusy) {
-              setPhotoUploadModal(null);
-              setPhotoUploadFile(null);
-              setPhotoUploadError(null);
+        <CredentialPhotoModal
+          driverId={photoUploadModal.driverId}
+          credentialId={photoUploadModal.credentialId}
+          driverName={d.name}
+          onClose={() => setPhotoUploadModal(null)}
+          onUploaded={async () => {
+            const { driverId, credentialId } = photoUploadModal;
+            try {
+              // Refetch credentials until the eventually-consistent read model
+              // reflects the new image (hasImage flag flips true).
+              const fresh = await refetchUntil(
+                () => listDriverCredentials(driverId),
+                (rows) => rows.find((r) => r.id === credentialId)?.hasImage === true,
+              );
+              setCredsState({ driverId, rows: sortCredentials(fresh) });
+            } catch {
+              // The upload itself succeeded — a failed refresh just leaves the
+              // list stale until the next visit.
             }
           }}
-        >
-          <div
-            style={{
-              background: colors.surface,
-              borderRadius: 12,
-              padding: 24,
-              maxWidth: 400,
-              boxShadow: colors.shadowCard,
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ fontFamily: fonts.body, fontSize: 14, fontWeight: 600, marginBottom: 16 }}>
-              Add Credential Photo
-            </div>
-            {photoUploadError && (
-              <div
-                style={{
-                  fontFamily: fonts.body,
-                  fontSize: 12,
-                  color: statusMeta("over").t,
-                  background: "rgba(213,94,0,.1)",
-                  border: `1px solid rgba(213,94,0,.3)`,
-                  borderRadius: 6,
-                  padding: 8,
-                  marginBottom: 12,
-                }}
-              >
-                {photoUploadError}
-              </div>
-            )}
-            <div style={{ marginBottom: 16 }}>
-              <input
-                type="file"
-                accept="image/jpeg,image/png,image/heic"
-                disabled={photoUploadBusy}
-                onChange={(e) => {
-                  setPhotoUploadFile(e.target.files?.[0] || null);
-                  setPhotoUploadError(null);
-                }}
-                style={{
-                  display: "block",
-                  width: "100%",
-                  padding: "8px 12px",
-                  borderRadius: 6,
-                  border: `1px solid ${colors.borderStrong}`,
-                  fontFamily: fonts.body,
-                  fontSize: 12,
-                  cursor: photoUploadBusy ? "wait" : "pointer",
-                  opacity: photoUploadBusy ? 0.6 : 1,
-                }}
-              />
-            </div>
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button
-                onClick={() => {
-                  setPhotoUploadModal(null);
-                  setPhotoUploadFile(null);
-                  setPhotoUploadError(null);
-                }}
-                disabled={photoUploadBusy}
-                style={{
-                  padding: "8px 16px",
-                  borderRadius: 6,
-                  border: `1px solid ${colors.borderStrong}`,
-                  background: colors.inputBg,
-                  fontFamily: fonts.body,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: photoUploadBusy ? "wait" : "pointer",
-                  opacity: photoUploadBusy ? 0.6 : 1,
-                }}
-              >
-                CANCEL
-              </button>
-              <button
-                onClick={async () => {
-                  if (!photoUploadFile || !photoUploadModal) return;
-                  setPhotoUploadBusy(true);
-                  setPhotoUploadError(null);
-                  try {
-                    await uploadDriverCredentialImage(
-                      photoUploadModal.driverId,
-                      photoUploadModal.credentialId,
-                      photoUploadFile,
-                    );
-                    setPhotoUploadModal(null);
-                    setPhotoUploadFile(null);
-                    // Refetch credentials to update hasImage flag
-                    const fresh = await refetchUntil(
-                      () => listDriverCredentials(photoUploadModal.driverId),
-                      (rows) => rows.find((r) => r.id === photoUploadModal.credentialId)?.hasImage === true,
-                    );
-                    setCredsState({ driverId: photoUploadModal.driverId, rows: sortCredentials(fresh) });
-                  } catch (e) {
-                    setPhotoUploadError(
-                      e instanceof ApiError ? e.message : "Failed to upload photo — please try again.",
-                    );
-                  } finally {
-                    setPhotoUploadBusy(false);
-                  }
-                }}
-                disabled={!photoUploadFile || photoUploadBusy}
-                style={{
-                  padding: "8px 16px",
-                  borderRadius: 6,
-                  background: colors.blue,
-                  color: "#fff",
-                  border: "none",
-                  fontFamily: fonts.body,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: !photoUploadFile || photoUploadBusy ? "wait" : "pointer",
-                  opacity: !photoUploadFile || photoUploadBusy ? 0.6 : 1,
-                }}
-              >
-                {photoUploadBusy ? "UPLOADING…" : "UPLOAD"}
-              </button>
-            </div>
-          </div>
-        </div>
+        />
       )}
     </div>
   );

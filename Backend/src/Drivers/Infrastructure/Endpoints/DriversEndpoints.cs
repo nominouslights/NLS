@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using NorthernLink.Drivers.Application.Abstractions;
 using NorthernLink.Drivers.Application.Clearances.GetForDriver;
 using NorthernLink.Drivers.Application.Clearances.Grant;
 using NorthernLink.Drivers.Application.Clearances.Revoke;
@@ -17,6 +18,7 @@ using NorthernLink.Drivers.Application.Hos;
 using NorthernLink.Drivers.Application.Hos.GetForDriver;
 using NorthernLink.Drivers.Application.Hos.Record;
 using NorthernLink.Drivers.Domain.Drivers;
+using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Shared.Storage;
 using NorthernLink.Shared.Tenancy;
@@ -249,7 +251,7 @@ public static class DriversEndpoints
     }
 
     private static async Task<IResult> SetCredentialImage(
-        Guid driverId, Guid credentialId, IFormFile image, ITenantContext tenantContext, ISender sender, IObjectStorage objectStorage, CancellationToken cancellationToken)
+        Guid driverId, Guid credentialId, IFormFile image, ITenantContext tenantContext, ISender sender, IDriverCredentialRepository credentialRepo, IObjectStorage objectStorage, CancellationToken cancellationToken)
     {
         if (tenantContext.TenantId is not { } tenantId)
         {
@@ -259,23 +261,23 @@ public static class DriversEndpoints
         const long MaxSizeBytes = 8 * 1024 * 1024; // 8 MB
         if (image.Length > MaxSizeBytes)
         {
-            return Results.BadRequest(new { code = "Drivers.Credential.ImageTooLarge", message = $"Image must be smaller than 8 MB (was {image.Length / 1024 / 1024} MB)." });
+            return EndpointResults.Problem(Error.Validation(
+                "Drivers.Credential.ImageTooLarge",
+                $"Image must be smaller than 8 MB (was {image.Length / 1024 / 1024} MB)."));
         }
 
         var allowedContentTypes = new[] { "image/jpeg", "image/png", "image/heic" };
         if (!allowedContentTypes.Contains(image.ContentType))
         {
-            return Results.BadRequest(new { code = "Drivers.Credential.ImageInvalidType", message = $"Only JPEG, PNG, and HEIC images are allowed (was {image.ContentType})." });
+            return EndpointResults.Problem(Error.Validation(
+                "Drivers.Credential.ImageInvalidType",
+                $"Only JPEG, PNG, and HEIC images are allowed (was {image.ContentType})."));
         }
 
-        var credential = await sender.Query(new GetDriverCredentialsQuery(tenantId, driverId), cancellationToken);
-        if (credential.IsFailure)
-        {
-            return EndpointResults.Problem(credential.Error);
-        }
-
-        var found = credential.Value.FirstOrDefault(c => c.Id == credentialId);
-        if (found is null)
+        // Query the write model (repository) directly instead of the read model to avoid
+        // eventual-consistency lags. The credential was just created and exists immediately.
+        var credential = await credentialRepo.GetByIdAsync(credentialId, cancellationToken);
+        if (credential is null || credential.DriverId != driverId)
         {
             return Results.NotFound();
         }
@@ -291,7 +293,9 @@ public static class DriversEndpoints
         }
         catch (Exception ex)
         {
-            return Results.BadRequest(new { code = "Drivers.Credential.ImageUploadFailed", message = $"Failed to upload image: {ex.Message}" });
+            return EndpointResults.Problem(Error.Validation(
+                "Drivers.Credential.ImageUploadFailed",
+                $"Failed to upload image: {ex.Message}"));
         }
 
         var setImageResult = await sender.Send(
@@ -302,29 +306,25 @@ public static class DriversEndpoints
     }
 
     private static async Task<IResult> GetCredentialImage(
-        Guid driverId, Guid credentialId, ITenantContext tenantContext, ISender sender, IObjectStorage objectStorage, CancellationToken cancellationToken)
+        Guid driverId, Guid credentialId, ITenantContext tenantContext, IDriverCredentialRepository credentialRepo, IObjectStorage objectStorage, CancellationToken cancellationToken)
     {
         if (tenantContext.TenantId is not { } tenantId)
         {
             return Results.Unauthorized();
         }
 
-        var credential = await sender.Query(new GetDriverCredentialsQuery(tenantId, driverId), cancellationToken);
-        if (credential.IsFailure)
-        {
-            return EndpointResults.Problem(credential.Error);
-        }
-
-        var found = credential.Value.FirstOrDefault(c => c.Id == credentialId);
-        if (found is null || !found.HasImage)
+        // Same write-model lookup as SetCredentialImage — an image attached moments ago must be
+        // fetchable immediately, without waiting on the read-model projection.
+        var credential = await credentialRepo.GetByIdAsync(credentialId, cancellationToken);
+        if (credential is null || credential.DriverId != driverId || credential.ImageKey is null)
         {
             return Results.NotFound();
         }
 
         try
         {
-            var stream = await objectStorage.GetAsync(found.ImageKey!, cancellationToken);
-            return Results.File(stream, found.ImageContentType, enableRangeProcessing: true);
+            var stream = await objectStorage.GetAsync(credential.ImageKey, cancellationToken);
+            return Results.File(stream, credential.ImageContentType, enableRangeProcessing: true);
         }
         catch (KeyNotFoundException)
         {
@@ -332,7 +332,9 @@ public static class DriversEndpoints
         }
         catch (Exception ex)
         {
-            return Results.BadRequest(new { code = "Drivers.Credential.ImageFetchFailed", message = $"Failed to fetch image: {ex.Message}" });
+            return EndpointResults.Problem(Error.Validation(
+                "Drivers.Credential.ImageFetchFailed",
+                $"Failed to fetch image: {ex.Message}"));
         }
     }
 

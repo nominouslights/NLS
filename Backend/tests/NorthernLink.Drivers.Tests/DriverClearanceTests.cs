@@ -1,6 +1,7 @@
 using NorthernLink.Drivers.Application.Abstractions;
 using NorthernLink.Drivers.Application.Clearances.Grant;
 using NorthernLink.Drivers.Domain.Clearances;
+using NorthernLink.Drivers.Domain.Clearances.Events;
 using NorthernLink.Drivers.Domain.Drivers;
 using NorthernLink.Shared.Kernel;
 using Xunit;
@@ -29,7 +30,13 @@ public class DriverClearanceTests
         Assert.Equal("Alamos Gold — Lynn Lake", clearance.ClientName);
         Assert.Equal(new DateOnly(2027, 5, 1), clearance.Expiry);
         Assert.NotEqual(default, clearance.GrantedAtUtc);
-        Assert.Empty(clearance.DomainEvents);
+
+        // Every aggregate write must raise an event — an eventless write would produce no
+        // event_journal row and leave rm_driver_clearances silently stale.
+        var domainEvent = Assert.IsType<DriverClearanceGrantedDomainEvent>(Assert.Single(clearance.DomainEvents));
+        Assert.Equal(clearance.Id, domainEvent.ClearanceId);
+        Assert.Equal(DriverId, domainEvent.DriverId);
+        Assert.Equal(TestDrivers.TenantId, domainEvent.TenantId);
     }
 
     [Fact]

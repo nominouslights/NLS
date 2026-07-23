@@ -1,4 +1,4 @@
-import { request } from "../api";
+import { request } from "./transport";
 import type { StatusKind } from "../theme";
 import type { BillingFrequency } from "./clients";
 

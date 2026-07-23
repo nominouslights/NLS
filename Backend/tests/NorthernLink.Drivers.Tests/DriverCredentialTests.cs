@@ -1,6 +1,7 @@
 using NorthernLink.Drivers.Application.Abstractions;
 using NorthernLink.Drivers.Application.Credentials.Add;
 using NorthernLink.Drivers.Domain.Credentials;
+using NorthernLink.Drivers.Domain.Credentials.Events;
 using NorthernLink.Drivers.Domain.Drivers;
 using NorthernLink.Shared.Kernel;
 using Xunit;
@@ -43,7 +44,13 @@ public class DriverCredentialTests
         Assert.Equal(new DateOnly(2029, 1, 15), credential.Expiry);
         Assert.False(credential.Optional);
         Assert.Equal("Card on file", credential.Note);
-        Assert.Empty(credential.DomainEvents);
+
+        // Every aggregate write must raise an event — an eventless write would produce no
+        // event_journal row and leave rm_driver_credentials silently stale.
+        var domainEvent = Assert.IsType<DriverCredentialAddedDomainEvent>(Assert.Single(credential.DomainEvents));
+        Assert.Equal(credential.Id, domainEvent.CredentialId);
+        Assert.Equal(DriverId, domainEvent.DriverId);
+        Assert.Equal(TestDrivers.TenantId, domainEvent.TenantId);
     }
 
     [Fact]

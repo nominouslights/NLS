@@ -1,4 +1,4 @@
-import { request } from "../api";
+import { request } from "./transport";
 import type { ServiceType, StatusKind } from "../theme";
 import { svcForServiceType, type ClientServiceType } from "./clients";
 import type { DriverClearanceRecord } from "./drivers";
@@ -10,8 +10,8 @@ import type { DriverClearanceRecord } from "./drivers";
 // (JSON camelCase, enums as PascalCase strings, TimeOnly as "HH:mm:ss",
 // DateOnly as "yyyy-MM-dd"). Do not invent fields — extend only when the
 // backend contract changes.
-// The trip-manifest surface (listTripManifests, createTripManifest, …) stays
-// in lib/api.ts.
+// The trip-manifest surface (listTripManifests, createTripManifest, …) lives
+// at the end of this file; lib/api.ts re-exports it for legacy import sites.
 // ---------------------------------------------------------------------------
 
 /** Same enum as the Clients module's ServiceType (declared per-module backend-side). */
@@ -452,4 +452,163 @@ export function sortTrips(rows: TripRecord[]): TripRecord[] {
     if (a.windowStart !== b.windowStart) return a.windowStart < b.windowStart ? -1 : 1;
     return a.tripNumber.localeCompare(b.tripNumber);
   });
+}
+
+// ---------------------------------------------------------------------------
+// Trip Manifest contract (Backend Trips module — TripManifestResponse /
+// CreateTripManifestRequest, TripsEndpoints.cs). Shapes mirror the backend
+// wire contract exactly (JSON camelCase, enums as PascalCase strings) — do
+// not invent fields.
+// ---------------------------------------------------------------------------
+
+export type ManifestSource = "App" | "Paper";
+export type ManifestFuelLevel = "Full" | "ThreeQuarters" | "Half" | "Quarter";
+export type ManifestDirection = "Inbound" | "Outbound";
+export type ManifestWeather = "Clear" | "Cloudy" | "Rain" | "Snow" | "Fog" | "ExtremeCold";
+export type ManifestRoadCondition = "Dry" | "Wet" | "Icy" | "SnowCovered" | "Muddy";
+export type ManifestVisibility = "Good" | "Reduced" | "Poor";
+export type ManifestSeverity = "Minor" | "Major" | "OutOfService";
+export type ManifestCargoSecured = "Yes" | "NotApplicable";
+
+export interface ManifestPreTripItem {
+  /** Backend group label, e.g. "Exterior & Mechanical" (tripManifestChecklist key). */
+  group: string;
+  /** Backend item string, e.g. "Tires" (tripManifestChecklist key). */
+  item: string;
+  status: "Ok" | "Fail";
+  severity: ManifestSeverity | null;
+  note: string | null;
+}
+
+export interface ManifestPassenger {
+  name: string;
+  contact: string | null;
+  pickup: string | null;
+  dropoff: string | null;
+  idVerified: boolean;
+  boardedOn: boolean;
+  boardedOff: boolean;
+}
+
+export interface ManifestCargo {
+  description: string;
+  ownerRecipient: string | null;
+  weightKg: number | null;
+  chargeCad: number | null;
+  hazmat: boolean;
+  secured: boolean;
+}
+
+export interface ManifestPostTripItem {
+  item: string;
+  ok: boolean;
+}
+
+export interface TripManifest {
+  id: string;
+  tripDate: string; // DateOnly, "2026-07-15"
+  tripNumber: string;
+  route: string;
+  direction: ManifestDirection | null;
+  client: string | null;
+  unit: string;
+  driverName: string;
+  driverLicenceNo: string | null;
+  licencePlate: string | null;
+  odometerStartKm: number | null;
+  fuelLevel: ManifestFuelLevel | null;
+  preTrip: ManifestPreTripItem[];
+  weather: ManifestWeather[];
+  temperatureC: string | null;
+  roadConditions: ManifestRoadCondition[];
+  visibility: ManifestVisibility | null;
+  roadAdvisories: string | null;
+  passengers: ManifestPassenger[];
+  allSeatbeltsVerified: boolean;
+  cargo: ManifestCargo[];
+  allCargoSecured: ManifestCargoSecured | null;
+  issues: string[];
+  noIssues: boolean;
+  departureTime: string | null;
+  arrivalTime: string | null;
+  odometerEndKm: number | null;
+  totalKm: number | null;
+  fuelAdded: boolean;
+  fuelLitres: number | null;
+  fuelCostCad: number | null;
+  postTrip: ManifestPostTripItem[];
+  attestations: boolean[];
+  driverSignatureName: string;
+  certifiedAt: string;
+  source: ManifestSource;
+  enteredBy: string | null;
+  enteredAt: string | null;
+  createdAtUtc: string;
+}
+
+/**
+ * POST /api/trips/manifests body — the response shape minus id / enteredAt /
+ * createdAtUtc; certifiedAt is optional (backend stamps "now" when omitted).
+ * PreTrip rows REQUIRE group + item (400 otherwise).
+ */
+export interface TripManifestInput {
+  tripDate: string;
+  tripNumber: string;
+  route: string;
+  direction: ManifestDirection | null;
+  client: string | null;
+  unit: string;
+  driverName: string;
+  driverLicenceNo: string | null;
+  licencePlate: string | null;
+  odometerStartKm: number | null;
+  fuelLevel: ManifestFuelLevel | null;
+  preTrip: ManifestPreTripItem[];
+  weather: ManifestWeather[];
+  temperatureC: string | null;
+  roadConditions: ManifestRoadCondition[];
+  visibility: ManifestVisibility | null;
+  roadAdvisories: string | null;
+  passengers: ManifestPassenger[];
+  allSeatbeltsVerified: boolean;
+  cargo: ManifestCargo[];
+  allCargoSecured: ManifestCargoSecured | null;
+  issues: string[];
+  noIssues: boolean;
+  departureTime: string | null;
+  arrivalTime: string | null;
+  odometerEndKm: number | null;
+  totalKm: number | null;
+  fuelAdded: boolean;
+  fuelLitres: number | null;
+  fuelCostCad: number | null;
+  postTrip: ManifestPostTripItem[];
+  attestations: boolean[];
+  driverSignatureName: string;
+  certifiedAt?: string;
+  source: ManifestSource;
+  enteredBy: string | null;
+}
+
+/** POST → 201 { id } (Trips module — ManifestCreatedResponse). */
+export function createTripManifest(input: TripManifestInput): Promise<{ id: string }> {
+  return request<{ id: string }>("/api/trips/manifests", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function listTripManifests(params?: {
+  tripNumber?: string;
+  unit?: string;
+}): Promise<TripManifest[]> {
+  const q = new URLSearchParams();
+  if (params?.tripNumber) q.set("tripNumber", params.tripNumber);
+  if (params?.unit) q.set("unit", params.unit);
+  const qs = q.toString();
+  return request<TripManifest[]>(`/api/trips/manifests${qs ? `?${qs}` : ""}`);
+}
+
+export function getTripManifest(id: string): Promise<TripManifest> {
+  return request<TripManifest>(`/api/trips/manifests/${id}`);
 }

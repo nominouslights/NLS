@@ -5,7 +5,7 @@ using NorthernLink.Shared.Messaging;
 
 namespace NorthernLink.Drivers.Application.Credentials.SetImage;
 
-internal sealed class SetDriverCredentialImageCommandHandler(
+public sealed class SetDriverCredentialImageCommandHandler(
     IDriverCredentialRepository repository) : ICommandHandler<SetDriverCredentialImageCommand>
 {
     public async Task<Result> Handle(SetDriverCredentialImageCommand command, CancellationToken cancellationToken)

@@ -115,7 +115,7 @@ function RouteFormModal({
       footer={
         <>
           <ActionButton onClick={onClose}>CANCEL</ActionButton>
-          <ActionButton variant="primary" onClick={submit} style={busy ? { opacity: 0.6, cursor: "wait" } : undefined}>
+          <ActionButton variant="primary" onClick={submit} disabled={busy}>
             {busy ? "SAVING…" : editing ? "SAVE ROUTE" : "CREATE ROUTE"}
           </ActionButton>
         </>
@@ -272,7 +272,7 @@ function TemplateFormModal({
       footer={
         <>
           <ActionButton onClick={onClose}>CANCEL</ActionButton>
-          <ActionButton variant="primary" onClick={submit} style={busy ? { opacity: 0.6, cursor: "wait" } : undefined}>
+          <ActionButton variant="primary" onClick={submit} disabled={busy}>
             {busy ? "SAVING…" : editing ? "SAVE TEMPLATE" : "CREATE TEMPLATE"}
           </ActionButton>
         </>
@@ -855,7 +855,7 @@ export default function RoutesSchedules() {
               <ActionButton
                 variant={template.active ? "destructive" : "success"}
                 onClick={() => toggleTemplateActive(template)}
-                style={busy ? { opacity: 0.6, cursor: "wait" } : undefined}
+                disabled={busy}
               >
                 {busy ? "WORKING…" : template.active ? "DEACTIVATE" : "ACTIVATE"}
               </ActionButton>

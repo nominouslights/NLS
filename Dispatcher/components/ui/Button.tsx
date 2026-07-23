@@ -47,15 +47,28 @@ export function ActionButton({
   children,
   variant = "secondary",
   onClick,
+  disabled,
   style,
 }: {
   children: ReactNode;
   variant?: Variant;
   onClick?: () => void;
+  disabled?: boolean;
   style?: CSSProperties;
 }) {
+  // Rendered as a span, so "disabled" is hand-implemented: the click handler is dropped
+  // entirely (blocking double-submits), and the dimmed style sits under any caller style.
   return (
-    <span onClick={onClick} style={{ ...base, ...variantStyle(variant), ...style }}>
+    <span
+      onClick={disabled ? undefined : onClick}
+      aria-disabled={disabled || undefined}
+      style={{
+        ...base,
+        ...variantStyle(variant),
+        ...(disabled ? { opacity: 0.6, cursor: "not-allowed" } : undefined),
+        ...style,
+      }}
+    >
       {children}
     </span>
   );

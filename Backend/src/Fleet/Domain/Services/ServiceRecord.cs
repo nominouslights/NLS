@@ -1,3 +1,4 @@
+using NorthernLink.Fleet.Domain.Services.Events;
 using NorthernLink.Shared.Kernel;
 
 namespace NorthernLink.Fleet.Domain.Services;
@@ -90,6 +91,7 @@ public sealed class ServiceRecord : AggregateRoot, ITenantScoped
             CreatedAtUtc = DateTimeOffset.UtcNow,
         };
 
+        record.Raise(new ServiceRecordLoggedDomainEvent(record.Id, vehicleId, tenantId));
         return Result.Success(record);
     }
 }

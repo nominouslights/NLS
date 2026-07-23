@@ -1,4 +1,4 @@
-import { request } from "../api";
+import { request } from "./transport";
 import { docStatusFor } from "../maintenanceStore";
 import type { ServiceType, StatusKind } from "../theme";
 
