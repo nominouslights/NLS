@@ -2,6 +2,7 @@
 
 import { colors, fonts } from "@/lib/theme";
 import { logout } from "@/lib/auth";
+import HeaderClock from "@/components/HeaderClock";
 
 export default function TopBar({
   onToggleRail,
@@ -101,25 +102,7 @@ export default function TopBar({
         </span>
       </div>
       <div style={{ flex: 1 }} />
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 7,
-          flex: "none",
-          padding: "5px 12px",
-          border: `1px solid ${colors.borderStrong}`,
-          borderRadius: 8,
-          cursor: "pointer",
-          color: colors.textSecondary,
-          fontFamily: fonts.semiCondensed,
-          fontSize: 12,
-          letterSpacing: ".06em",
-        }}
-      >
-        <span style={{ width: 6, height: 6, borderRadius: "50%", background: colors.blue }} />
-        TODAY · TUE JUL 7
-      </div>
+      <HeaderClock />
       <div
         style={{
           position: "relative",

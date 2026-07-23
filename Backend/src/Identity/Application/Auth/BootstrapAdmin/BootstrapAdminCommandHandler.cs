@@ -31,10 +31,11 @@ public sealed class BootstrapAdminCommandHandler(
             return Result.Failure<Guid>(UserErrors.InvalidBootstrapToken);
         }
 
-        var consumeResult = activeToken.Consume();
-        if (consumeResult.IsFailure)
+        // Belt; Consume() below re-checks as suspenders. Same generic error as an unknown
+        // token — this endpoint is anonymous, so expiry must not be distinguishable.
+        if (activeToken.IsExpired)
         {
-            return Result.Failure<Guid>(consumeResult.Error);
+            return Result.Failure<Guid>(UserErrors.InvalidBootstrapToken);
         }
 
         var userResult = User.Create(SeedTenant.Id, command.Email, passwordHasher.Hash(command.Password), "Admin");
@@ -43,11 +44,27 @@ public sealed class BootstrapAdminCommandHandler(
             return Result.Failure<Guid>(userResult.Error);
         }
 
-        userRepository.Add(userResult.Value);
+        // Friendly pre-check before touching the token: a known-duplicate email fails fast
+        // with the token untouched, so the holder can retry with a different address.
+        if (await userRepository.GetByEmailAsync(userResult.Value.Email, cancellationToken) is not null)
+        {
+            return Result.Failure<Guid>(UserErrors.DuplicateEmail);
+        }
 
-        // Same DbContext backs both repositories (scoped DI) — one SaveChangesAsync call
-        // commits the new user and the token's consumption atomically.
-        await userRepository.SaveChangesAsync(cancellationToken);
+        var consumeResult = activeToken.Consume();
+        if (consumeResult.IsFailure)
+        {
+            return Result.Failure<Guid>(consumeResult.Error);
+        }
+
+        // Same DbContext backs both repositories (scoped DI) — the single commit inside
+        // TryAddNewUserAsync persists the new user and the token's consumption atomically.
+        // On a duplicate email (the pre-check→insert race), that one commit fails as a
+        // whole, so Consume() is never persisted and the token stays redeemable.
+        if (!await userRepository.TryAddNewUserAsync(userResult.Value, cancellationToken))
+        {
+            return Result.Failure<Guid>(UserErrors.DuplicateEmail);
+        }
 
         return Result.Success(userResult.Value.Id);
     }

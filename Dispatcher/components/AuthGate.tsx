@@ -4,28 +4,49 @@ import { useEffect, useState } from "react";
 import { colors, fonts } from "@/lib/theme";
 import Console from "@/components/Console";
 import LoginScreen from "@/components/LoginScreen";
-import { hasStoredSession, onAuthChange, restoreSession } from "@/lib/auth";
+import SetupScreen from "@/components/SetupScreen";
+import { checkSetupRequired, hasStoredSession, onAuthChange, restoreSession } from "@/lib/auth";
 
-// Root auth gate: restores a persisted session silently on mount (brief splash,
-// no login-form flash), then renders the Console when authenticated or the
-// LoginScreen otherwise. Reacts to lib/auth state changes — login, logout, and
-// forced sign-out when a token refresh definitively fails.
+// Root auth gate: on mount it first asks the backend whether first-run setup is
+// still open (no users exist at all) and, if so, shows the create-administrator
+// screen. Otherwise it restores a persisted session silently (brief splash, no
+// login-form flash), then renders the Console when authenticated or the
+// LoginScreen otherwise. Reacts to lib/auth state changes — login, setup, logout,
+// and forced sign-out when a token refresh definitively fails.
 
-type Phase = "restoring" | "signedOut" | "signedIn";
+type Phase = "restoring" | "setupRequired" | "signedOut" | "signedIn";
 
 export default function AuthGate() {
   const [phase, setPhase] = useState<Phase>("restoring");
 
   useEffect(() => {
+    let cancelled = false;
     const unsubscribe = onAuthChange((authenticated) =>
       setPhase(authenticated ? "signedIn" : "signedOut"),
     );
-    if (hasStoredSession()) {
-      restoreSession().then((ok) => setPhase(ok ? "signedIn" : "signedOut"));
-    } else {
-      setPhase("signedOut");
+
+    async function resolvePhase(): Promise<Phase> {
+      // A stored session means setup is long done — skip the probe entirely.
+      if (hasStoredSession()) {
+        return (await restoreSession()) ? "signedIn" : "signedOut";
+      }
+      try {
+        if (await checkSetupRequired()) return "setupRequired";
+      } catch {
+        // Fail safe: never surface the setup screen on an errored/unreachable
+        // check — fall through to the normal login form.
+      }
+      return "signedOut";
     }
-    return unsubscribe;
+
+    resolvePhase().then((next) => {
+      if (!cancelled) setPhase(next);
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, []);
 
   if (phase === "restoring") {
@@ -81,6 +102,7 @@ export default function AuthGate() {
     );
   }
 
+  if (phase === "setupRequired") return <SetupScreen />;
   if (phase === "signedOut") return <LoginScreen />;
   return <Console />;
 }

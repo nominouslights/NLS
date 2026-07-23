@@ -17,6 +17,7 @@ public sealed class AdminBootstrapTokenConfiguration : IEntityTypeConfiguration<
         builder.Property(t => t.TenantId).HasColumnName("tenant_id");
         builder.Property(t => t.TokenHash).HasColumnName("token_hash").HasMaxLength(256);
         builder.Property(t => t.CreatedAtUtc).HasColumnName("created_at_utc");
+        builder.Property(t => t.ExpiresAtUtc).HasColumnName("expires_at_utc");
         builder.Property(t => t.ConsumedAtUtc).HasColumnName("consumed_at_utc");
 
         builder.HasIndex(t => t.TokenHash).IsUnique();

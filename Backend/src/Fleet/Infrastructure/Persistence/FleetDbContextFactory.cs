@@ -7,9 +7,10 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence;
 
 /// <summary>
 /// Design-time factory for `dotnet ef` (migrations only — never used at runtime).
-/// Hardcodes the local superuser connection string (same credentials the Aspire AppHost's
-/// Postgres resource uses) because design-time commands run outside the host's configuration
-/// pipeline; migrations at runtime use the host's connection string instead.
+/// Design-time commands run outside the host's configuration pipeline, so this reads
+/// ConnectionStrings__Postgres from the environment directly — same as the runtime
+/// registration in FleetServiceCollectionExtensions — rather than hardcoding a value.
+/// Export it in your shell before running `dotnet ef` (see CLAUDE.md).
 /// </summary>
 public sealed class FleetDbContextFactory : IDesignTimeDbContextFactory<FleetDbContext>
 {
@@ -17,7 +18,7 @@ public sealed class FleetDbContextFactory : IDesignTimeDbContextFactory<FleetDbC
     {
         var options = new DbContextOptionsBuilder<FleetDbContext>()
             .UseNpgsql(
-                "Host=localhost;Port=5432;Database=northernlink;Username=northernlink;Password=northernlink_dev",
+                RequiredEnvironmentVariable.Get("ConnectionStrings__Postgres"),
                 npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", FleetServiceCollectionExtensions.SchemaName))
             .Options;
 

@@ -38,11 +38,12 @@ using NorthernLink.Fleet.Application.WorkOrders.Complete;
 using NorthernLink.Fleet.Application.WorkOrders.Create;
 using NorthernLink.Fleet.Application.WorkOrders.GetAll;
 using NorthernLink.Fleet.Application.WorkOrders.GetForVehicle;
+using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Persistence.Auditing;
 using NorthernLink.Shared.Persistence.Projections;
 using NorthernLink.Fleet.Domain.Vehicles.Events;
-using NorthernLink.Fleet.Infrastructure.DevSeed;
 using NorthernLink.Fleet.Infrastructure.Persistence;
+using NorthernLink.Fleet.Infrastructure.Persistence.Projections;
 
 namespace NorthernLink.Fleet.Infrastructure;
 
@@ -67,7 +68,7 @@ public static class FleetServiceCollectionExtensions
         services.AddDbContext<FleetDbContext>((serviceProvider, options) =>
             options
                 .UseNpgsql(
-                    configuration.GetConnectionString("Postgres"),
+                    RequiredEnvironmentVariable.Get("ConnectionStrings__Postgres"),
                     npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", SchemaName))
                 .AddInterceptors(serviceProvider.GetRequiredService<TenantSessionInterceptor>()));
 
@@ -121,41 +122,23 @@ public static class FleetServiceCollectionExtensions
         services.AddIntegrationEventConsumer(SchemaName, subscriptions => subscriptions
             .On<TripManifestCompletedIntegrationEvent, TripManifestCompletedIntegrationEventHandler>());
 
-        // 5. Read-side projections — one worker polls fleet.event_journal, refreshes the
-        //    matviews the batch touched, and dispatches same-module secondary commands.
-        //    Retirement certificates are driven by vehicle events (they're created inline
-        //    during a vehicle's retirement, so they share the "vehicle" aggregate's journal).
+        // 5. Read-side projections — one worker polls fleet.event_journal, upserts the read-model
+        //    rows for the aggregates the batch touched, and dispatches same-module secondary
+        //    commands. Retirement certificates are driven by vehicle events (they're created
+        //    inline during a vehicle's retirement, so they share the "vehicle" aggregate's
+        //    journal) — hence two projections keyed on the same aggregate type.
         services.AddProjections<FleetDbContext>(SchemaName, registry => registry
-            .OnAggregate("vehicle", "mv_vehicles", "mv_retirement_certificates")
-            .OnAggregate("shop", "mv_shops")
-            .OnAggregate("vehicle-document", "mv_vehicle_documents")
-            .OnAggregate("service-record", "mv_service_records")
-            .OnAggregate("work-order", "mv_work_orders")
-            .OnAggregate("vehicle-inspection", "mv_vehicle_inspections")
+            .Project(new VehicleProjection())
+            .Project(new RetirementCertificateProjection())
+            .Project(new ShopProjection())
+            .Project(new VehicleDocumentProjection())
+            .Project(new ServiceRecordProjection())
+            .Project(new WorkOrderProjection())
+            .Project(new VehicleInspectionProjection())
             .OnEvent<VehicleReachedEndOfLifeDomainEvent>(entry =>
                 new EnsureRetirementCertificateCommand(entry.AggregateId)));
 
         return services;
     }
 
-    /// <summary>
-    /// Applies pending Fleet migrations and, unless <c>DevSeed:IncludeDemoData</c> is set to
-    /// false, seeds the demo vehicles for <paramref name="tenantId"/>. The API host calls
-    /// this in Development only. <paramref name="tenantId"/> is passed explicitly rather than
-    /// resolved via <see cref="ITenantContext"/> — that interface now reflects the caller's
-    /// JWT, which doesn't exist yet at startup.
-    /// </summary>
-    public static async Task InitializeFleetDatabaseAsync(this IServiceProvider serviceProvider, Guid tenantId)
-    {
-        using var scope = serviceProvider.CreateScope();
-
-        var context = scope.ServiceProvider.GetRequiredService<FleetDbContext>();
-        await context.Database.MigrateAsync();
-
-        var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
-        if (configuration.GetValue("DevSeed:IncludeDemoData", true))
-        {
-            await FleetDevSeeder.SeedAsync(context, tenantId);
-        }
-    }
 }

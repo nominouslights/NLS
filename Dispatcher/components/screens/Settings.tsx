@@ -3,6 +3,9 @@
 import { useState } from "react";
 import { colors, fonts, statusMeta } from "@/lib/theme";
 import { PageHeader, Panel, SectionLabel } from "@/components/ui/Panel";
+import { ActionButton } from "@/components/ui/Button";
+import { generateAdminInvite, type AdminInvite } from "@/lib/auth";
+import { ApiError } from "@/lib/api";
 
 const TABS = ["Organization", "Users & Roles", "Budget Codes", "Rate Schedules", "Connectors", "Audit Log"];
 
@@ -32,8 +35,50 @@ const auditLog = [
   { who: "S. Okimaw", what: "Edited rate schedule · Community fare", when: "Jul 4 · 10:20" },
 ];
 
+function formatInviteExpiry(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit" });
+}
+
 export default function Settings() {
   const [tab, setTab] = useState(0);
+
+  // --- admin invite (Users & Roles tab) — real backend call, not mock data ---
+  const [invite, setInvite] = useState<AdminInvite | null>(null);
+  const [invitePending, setInvitePending] = useState(false);
+  const [inviteError, setInviteError] = useState<{ code: string; message: string } | null>(null);
+  const [inviteCopied, setInviteCopied] = useState(false);
+
+  async function handleGenerateInvite() {
+    if (invitePending) return;
+    setInvitePending(true);
+    setInviteError(null);
+    setInviteCopied(false);
+    try {
+      setInvite(await generateAdminInvite());
+    } catch (err) {
+      setInvite(null);
+      setInviteError(
+        err instanceof ApiError
+          ? { code: err.code, message: err.message }
+          : { code: "Unknown", message: "Something went wrong. Please try again." },
+      );
+    } finally {
+      setInvitePending(false);
+    }
+  }
+
+  async function handleCopyInvite() {
+    if (!invite) return;
+    try {
+      await navigator.clipboard.writeText(invite.token);
+      setInviteCopied(true);
+    } catch {
+      // Clipboard unavailable (permissions/insecure context) — the token text
+      // below stays selectable for manual copying.
+    }
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }} className="detailfade">
@@ -152,6 +197,116 @@ export default function Settings() {
                   </div>
                 ))}
               </div>
+              <Panel style={{ marginTop: 14, borderRadius: 11 }}>
+                <SectionLabel>Invite administrator</SectionLabel>
+                <div
+                  style={{
+                    fontFamily: fonts.body,
+                    fontSize: 12,
+                    color: colors.textMuted,
+                    lineHeight: 1.55,
+                    marginBottom: 12,
+                  }}
+                >
+                  Mints a one-time invite token. Hand it to the new administrator — they redeem it on the
+                  sign-in screen (&ldquo;Have an admin invite token?&rdquo;) with their own email and password.
+                </div>
+                <ActionButton
+                  variant="primary"
+                  onClick={handleGenerateInvite}
+                  style={{ opacity: invitePending ? 0.65 : 1, cursor: invitePending ? "default" : "pointer" }}
+                >
+                  {invitePending ? "Generating…" : "Generate invite token"}
+                </ActionButton>
+
+                {invite && (
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          fontFamily: fonts.mono,
+                          fontSize: 12.5,
+                          color: colors.textPrimary,
+                          background: colors.inputBg,
+                          border: `1px solid ${colors.borderStrong}`,
+                          borderRadius: 9,
+                          padding: "9px 12px",
+                          overflowWrap: "anywhere",
+                          userSelect: "all",
+                        }}
+                      >
+                        {invite.token}
+                      </div>
+                      <ActionButton
+                        variant="secondary"
+                        onClick={handleCopyInvite}
+                        style={
+                          inviteCopied
+                            ? { borderColor: statusMeta("ontime").bd, color: statusMeta("ontime").t }
+                            : undefined
+                        }
+                      >
+                        {inviteCopied ? `${statusMeta("ontime").g} Copied` : "Copy"}
+                      </ActionButton>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 9 }}>
+                      <span style={{ color: statusMeta("soon").t, fontSize: 11, fontWeight: 800 }} aria-hidden>
+                        {statusMeta("soon").g}
+                      </span>
+                      <span style={{ fontFamily: fonts.body, fontSize: 12, fontWeight: 600, color: statusMeta("soon").t }}>
+                        Expires at {formatInviteExpiry(invite.expiresAtUtc)}
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: fonts.body,
+                        fontSize: 11.5,
+                        color: colors.textMuted,
+                        marginTop: 4,
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      This token is shown exactly once and is single-use — copy it now; it can&apos;t be retrieved again.
+                    </div>
+                  </div>
+                )}
+
+                {inviteError && (
+                  <div
+                    role="alert"
+                    style={{
+                      display: "flex",
+                      gap: 9,
+                      marginTop: 12,
+                      padding: "9px 12px",
+                      borderRadius: 8,
+                      background: statusMeta("over").bg,
+                      border: `1px solid ${statusMeta("over").bd}`,
+                    }}
+                  >
+                    <span
+                      style={{ color: statusMeta("over").t, fontSize: 12, fontWeight: 800, lineHeight: "17px" }}
+                      aria-hidden
+                    >
+                      {statusMeta("over").g}
+                    </span>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontFamily: fonts.body, fontWeight: 600, fontSize: 12.5, color: statusMeta("over").t }}>
+                        Couldn&apos;t generate an invite token
+                      </div>
+                      <div style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textSecondary, marginTop: 1 }}>
+                        {inviteError.message}
+                      </div>
+                      <div style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.textDim, marginTop: 3 }}>
+                        {inviteError.code}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </Panel>
+
               <div
                 style={{
                   marginTop: 14,

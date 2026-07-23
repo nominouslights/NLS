@@ -30,7 +30,8 @@ public sealed class RetirementCertificateReadModelConfiguration : IEntityTypeCon
 {
     public void Configure(EntityTypeBuilder<RetirementCertificateReadModel> builder)
     {
-        builder.HasNoKey().ToView("v_retirement_certificates", FleetServiceCollectionExtensions.SchemaName);
+        builder.HasKey(c => c.Id);
+        builder.ToTable("rm_retirement_certificates", FleetServiceCollectionExtensions.SchemaName);
 
         builder.Property(c => c.Id).HasColumnName("id");
         builder.Property(c => c.TenantId).HasColumnName("tenant_id");

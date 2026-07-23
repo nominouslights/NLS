@@ -37,6 +37,10 @@ namespace NorthernLink.Identity.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at_utc");
 
+                    b.Property<DateTimeOffset>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at_utc");
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");
@@ -324,6 +328,26 @@ namespace NorthernLink.Identity.Infrastructure.Persistence.Migrations
                         .HasFilter("dispatched_at_utc IS NULL");
 
                     b.ToTable("outbox_messages", "identity");
+                });
+
+            modelBuilder.Entity("NorthernLink.Shared.Persistence.Projections.ProjectionCheckpoint", b =>
+                {
+                    b.Property<string>("ProjectionName")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("projection_name");
+
+                    b.Property<long>("LastPosition")
+                        .HasColumnType("bigint")
+                        .HasColumnName("last_position");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.HasKey("ProjectionName");
+
+                    b.ToTable("projection_checkpoints", "identity");
                 });
 #pragma warning restore 612, 618
         }

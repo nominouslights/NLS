@@ -25,6 +25,13 @@ namespace NorthernLink.Shared.Persistence;
 /// </summary>
 public abstract class ModuleDbContext : DbContext
 {
+    /// <summary>
+    /// Journal event type recorded when an aggregate is hard-deleted. Synthetic — there is no
+    /// domain event for a delete — but projections need a journal row to react to, otherwise the
+    /// read side keeps a row for an aggregate that no longer exists.
+    /// </summary>
+    public const string AggregateDeletedEventType = "aggregate-deleted";
+
     private readonly IIntegrationEventMapper? _integrationEventMapper;
 
     protected ModuleDbContext(
@@ -154,6 +161,28 @@ public abstract class ModuleDbContext : DbContext
                 CreatedAtUtc = now,
                 CorrelationId = correlationId,
             });
+
+            // A hard delete raises no domain event, so without this the journal would record
+            // nothing and every read-side projection would strand a row for an aggregate that no
+            // longer exists. (The old materialized-view read side hid this: a REFRESH recomputed
+            // from the base tables, so deleted rows vanished implicitly.) Projections poll the
+            // journal, so a deletion has to appear there like any other change.
+            if (entry.State == EntityState.Deleted)
+            {
+                Set<EventJournalEntry>().Add(new EventJournalEntry
+                {
+                    EventId = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    AggregateType = aggregateType,
+                    AggregateId = aggregate.Id,
+                    AggregateVersion = aggregate.Version,
+                    EventType = AggregateDeletedEventType,
+                    Payload = AuditJson.Serialize(aggregate),
+                    OccurredAtUtc = now,
+                    RecordedAtUtc = now,
+                    CorrelationId = correlationId,
+                });
+            }
 
             foreach (var domainEvent in aggregate.DomainEvents)
             {

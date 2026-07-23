@@ -19,3 +19,12 @@ TestResults/
 .env
 .env.*
 CREDENTIALS.local.md
+
+# AppHost.cs carries local-dev/orchestration secrets (DB connection string, JWT signing key,
+# RabbitMQ credentials) as literal WithEnvironment(...) values — never commit it. A fresh
+# clone needs a local copy recreated by hand; see CLAUDE.md.
+AppHost/NorthernLink.AppHost/AppHost.cs
+
+# launchSettings.json now also carries the DigitalOcean Postgres connection string (there's no
+# local Postgres to fall back to) — same reasoning as AppHost.cs above.
+Backend/src/Api/NorthernLink.Api/Properties/launchSettings.json

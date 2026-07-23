@@ -99,10 +99,13 @@ public class RowLevelSecurityTests(PostgresFixture fixture)
         Assert.True(await ExecuteAsync(system, touchSql, vehicle.Id) >= 1);
     }
 
-    // ---- Read-side materialized views: the two-role tenant backstop ----
+    // ---- Read-side projection tables: native RLS, same policy idiom as the write tables ----
+    // The old two-role backstop (projector-owned matview + security-barrier wrapper view) is
+    // gone; fleet.rm_* are ordinary tables the app role owns, isolated by a row policy that
+    // FORCE ROW LEVEL SECURITY binds even for the owner.
 
     [Fact]
-    public async Task Matview_refresh_captures_all_tenants_but_the_wrapper_view_isolates_them()
+    public async Task Projection_rebuild_captures_all_tenants_but_rls_isolates_reads()
     {
         var vehicleA = TestVehicleFactory.Create(PostgresFixture.TenantA);
         var vehicleB = TestVehicleFactory.Create(PostgresFixture.TenantB);
@@ -118,50 +121,52 @@ public class RowLevelSecurityTests(PostgresFixture fixture)
             await contextB.SaveChangesAsync();
         }
 
-        // A refresh under app.is_system + SET ROLE projector sees BOTH tenants' base rows.
-        await fixture.RefreshFleetMatviewsAsync("mv_vehicles");
+        // The rebuild runs on a system session (app.is_system), so it writes BOTH tenants' rows.
+        await fixture.RebuildFleetProjectionsAsync();
 
-        // But the app role, through the wrapper view, only ever sees its own tenant's rows.
+        // A tenant-scoped session only ever sees its own rows — enforced by the row policy now,
+        // not by a wrapper view.
         await using (var tenantA = await fixture.OpenRawConnectionAsync(PostgresFixture.TenantA))
         {
             Assert.Equal(1, await CountAsync(tenantA,
-                "SELECT count(*) FROM fleet.v_vehicles WHERE id = @id", vehicleA.Id));
+                "SELECT count(*) FROM fleet.rm_vehicles WHERE id = @id", vehicleA.Id));
             Assert.Equal(0, await CountAsync(tenantA,
-                "SELECT count(*) FROM fleet.v_vehicles WHERE id = @id", vehicleB.Id));
+                "SELECT count(*) FROM fleet.rm_vehicles WHERE id = @id", vehicleB.Id));
         }
 
         await using var tenantB = await fixture.OpenRawConnectionAsync(PostgresFixture.TenantB);
         Assert.Equal(1, await CountAsync(tenantB,
-            "SELECT count(*) FROM fleet.v_vehicles WHERE id = @id", vehicleB.Id));
+            "SELECT count(*) FROM fleet.rm_vehicles WHERE id = @id", vehicleB.Id));
         Assert.Equal(0, await CountAsync(tenantB,
-            "SELECT count(*) FROM fleet.v_vehicles WHERE id = @id", vehicleA.Id));
+            "SELECT count(*) FROM fleet.rm_vehicles WHERE id = @id", vehicleA.Id));
     }
 
     [Fact]
-    public async Task Direct_select_on_the_matview_is_denied_to_the_app_role()
-    {
-        // The matview is owned by northernlink_projector with ALL revoked from the app; the
-        // backstop is a table privilege, not a row policy. A raw read is denied outright.
-        await using var tenantA = await fixture.OpenRawConnectionAsync(PostgresFixture.TenantA);
-        await using var command = new NpgsqlCommand("SELECT count(*) FROM fleet.mv_vehicles", tenantA);
-
-        var exception = await Assert.ThrowsAsync<PostgresException>(() => command.ExecuteScalarAsync());
-        Assert.Equal("42501", exception.SqlState); // insufficient_privilege
-    }
-
-    [Fact]
-    public async Task Anonymous_session_sees_zero_wrapper_rows_without_a_22P02()
+    public async Task Anonymous_session_sees_zero_projection_rows_without_a_22P02()
     {
         var vehicle = await SeedTenantAVehicleAsync();
-        await fixture.RefreshFleetMatviewsAsync("mv_vehicles");
+        await fixture.RebuildFleetProjectionsAsync();
 
         // No tenant set: the NULLIF guard turns the (possibly empty-string) GUC into NULL, so
-        // the filter cleanly matches no rows instead of throwing 22P02 on an empty-string cast.
+        // the policy cleanly matches no rows instead of throwing 22P02 on an empty-string cast.
         await using var anonymous = await fixture.OpenRawConnectionAsync();
         Assert.Equal(0, await CountAsync(anonymous,
-            "SELECT count(*) FROM fleet.v_vehicles WHERE id = @id", vehicle.Id));
+            "SELECT count(*) FROM fleet.rm_vehicles WHERE id = @id", vehicle.Id));
 
-        await using var all = new NpgsqlCommand("SELECT count(*) FROM fleet.v_vehicles", anonymous);
+        await using var all = new NpgsqlCommand("SELECT count(*) FROM fleet.rm_vehicles", anonymous);
         Assert.Equal(0L, (long)(await all.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
+    public async Task Projector_role_is_no_longer_required_by_any_migration()
+    {
+        // The fixture provisions northernlink_app only. If any migration still granted to or
+        // set role to northernlink_projector, migrating this database would have failed with
+        // 42704 during fixture startup — so reaching this assertion at all is the real proof.
+        await using var connection = await fixture.OpenRawConnectionAsync();
+        await using var command = new NpgsqlCommand(
+            "SELECT count(*) FROM pg_roles WHERE rolname = 'northernlink_projector'", connection);
+
+        Assert.Equal(0L, (long)(await command.ExecuteScalarAsync())!);
     }
 }

@@ -1,22 +1,54 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { colors, fonts } from "@/lib/theme";
-import type { ClientContact } from "@/lib/types";
-import { contactsFor, setPrimaryContact, useClientStore } from "@/lib/clientStore";
+import { ApiError } from "@/lib/api";
+import { listContacts, type ClientContactRecord } from "@/lib/api/clients";
 import { SectionLabel } from "@/components/ui/Panel";
 import { ActionButton } from "@/components/ui/Button";
-import ContactFormModal from "@/components/ContactFormModal";
+import ClientContactFormModal from "@/components/ClientContactFormModal";
 
-// Contact roster for a client — multiple contacts, one primary, each with a
-// role/title, email, phone, and notes. Read/write; writes go to lib/clientStore.
+// Contact roster for a client — read-only display with add-contact flow.
+// Fetches real contacts from the API (real backend CRM data, not the mock shim).
 
-type Editor = { mode: "new" } | { mode: "edit"; contact: ClientContact } | null;
+export default function ContactRoster({ clientId, clientName }: { clientId: string; clientName: string }) {
+  const [contacts, setContacts] = useState<ClientContactRecord[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
 
-export default function ContactRoster({ clientId, clientName }: { clientId: number; clientName: string }) {
-  useClientStore();
-  const [editor, setEditor] = useState<Editor>(null);
-  const roster = contactsFor(clientId);
+  useEffect(() => {
+    let active = true;
+    listContacts(clientId).then(
+      (fresh) => {
+        if (active) {
+          setContacts(fresh);
+          setLoadError(null);
+        }
+      },
+      (e) => {
+        if (active) {
+          setLoadError(e instanceof ApiError ? e.message : "Failed to load contacts.");
+          setContacts([]);
+        }
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [clientId]);
+
+  async function onContactSaved() {
+    setShowAddForm(false);
+    // Refetch the roster after adding a contact.
+    try {
+      const fresh = await listContacts(clientId);
+      setContacts(fresh);
+    } catch (e) {
+      setLoadError(e instanceof ApiError ? e.message : "Failed to reload contacts.");
+    }
+  }
+
+  const roster = contacts ?? [];
 
   return (
     <div>
@@ -24,12 +56,18 @@ export default function ContactRoster({ clientId, clientName }: { clientId: numb
         <SectionLabel>
           Contact roster · {roster.length} contact{roster.length === 1 ? "" : "s"}
         </SectionLabel>
-        <ActionButton variant="primary" style={{ marginLeft: "auto" }} onClick={() => setEditor({ mode: "new" })}>
+        <ActionButton variant="primary" style={{ marginLeft: "auto" }} onClick={() => setShowAddForm(true)}>
           + ADD CONTACT
         </ActionButton>
       </div>
 
-      {roster.length === 0 ? (
+      {loadError && (
+        <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: "#D55E00", padding: "6px 2px", marginBottom: 12 }}>
+          {loadError}
+        </div>
+      )}
+
+      {roster.length === 0 && !loadError ? (
         <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textDim, padding: "6px 2px" }}>
           No contacts on the roster yet.
         </div>
@@ -44,7 +82,7 @@ export default function ContactRoster({ clientId, clientName }: { clientId: numb
                 gap: 12,
                 padding: "12px 14px",
                 background: colors.cardBg,
-                border: `1px solid ${c.primary ? colors.borderActive : colors.borderSubtle}`,
+                border: `1px solid ${c.isPrimary ? colors.borderActive : colors.borderSubtle}`,
                 borderRadius: 10,
                 boxShadow: colors.shadowCard,
               }}
@@ -73,7 +111,7 @@ export default function ContactRoster({ clientId, clientName }: { clientId: numb
                   <span style={{ fontFamily: fonts.body, fontSize: 13.5, fontWeight: 600, color: colors.textPrimary }}>
                     {c.name}
                   </span>
-                  {c.primary && (
+                  {c.isPrimary && (
                     <span
                       style={{
                         fontFamily: fonts.semiCondensed,
@@ -114,26 +152,17 @@ export default function ContactRoster({ clientId, clientName }: { clientId: numb
                   </div>
                 )}
               </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: "none" }}>
-                <ActionButton onClick={() => setEditor({ mode: "edit", contact: c })}>EDIT</ActionButton>
-                {!c.primary && (
-                  <ActionButton onClick={() => setPrimaryContact(clientId, c.id)}>MAKE PRIMARY</ActionButton>
-                )}
-              </div>
             </div>
           ))}
         </div>
       )}
 
-      {editor && (
-        <ContactFormModal
+      {showAddForm && (
+        <ClientContactFormModal
           clientId={clientId}
           clientName={clientName}
-          contact={editor.mode === "edit" ? editor.contact : null}
-          isOnlyContact={roster.length === 0}
-          onClose={() => setEditor(null)}
-          onSaved={() => undefined}
+          onClose={() => setShowAddForm(false)}
+          onSaved={onContactSaved}
         />
       )}
     </div>

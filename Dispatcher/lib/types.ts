@@ -1,64 +1,23 @@
-import type { ServiceType, StatusKind } from "./theme";
+import type { StatusKind } from "./theme";
 
-export interface Trip {
-  id: string;
-  date: string;
-  win: string;
-  svc: ServiceType;
-  from: string;
-  to: string;
-  stops: string[];
-  km: number;
-  driver: string | null;
-  vehicle: string;
-  cap: string;
-  status: string;
-  sk: StatusKind;
-  client: string;
-  po: string;
-  open: boolean;
-}
+// Trip and Driver records now come from the real APIs (lib/api/trips.ts,
+// lib/api/drivers.ts) — the old mock interfaces are gone.
 
 export type DutyStatus = "Off Duty" | "On Duty" | "Driving";
 
-export interface Driver {
-  id: number;
-  name: string;
-  src: string;
-  duty: string;
-  dk: StatusKind;
-  dutyStatus: DutyStatus;
-  workPermit?: boolean; // true when the driver works under a foreign-worker permit
-  hos: string;
-  hk: StatusKind;
-  lic: string;
-  lk: StatusKind;
-  dvir: string;
-  clr: string[];
-  phone: string;
-  trips: number;
-}
+// Driver compliance mocks — HOS and leave only. Driver records, credentials,
+// and clearances moved to the real Drivers API (lib/api/drivers.ts); HOS/leave
+// has no backend domain and stays keyed by the numeric mock `driverId`.
 
-// Driver compliance prototype — MOCK ONLY (no backend Roster/Compliance domain
-// yet). Credentials and HOS logs are keyed by `driverId`, mirroring how
-// VehicleDocument / Inspection are keyed by `unit` in the Fleet prototype.
+export type LeaveType = "Vacation" | "Sick" | "Leave Without Pay";
 
-export type CredentialType =
-  | "Licence Class" // Class 1 / 2 / 4
-  | "Police Record Check"
-  | "Drug & Alcohol"
-  | "First Aid" // optional
-  | "Work Permit"; // optional — foreign-worker permit
-
-export interface DriverCredential {
+export interface DriverLeave {
   id: string;
   driverId: number;
-  type: CredentialType;
-  label: string; // "Class 4", "Criminal Record + Vulnerable Sector", "Standard First Aid + CPR-C"
-  issued?: string; // ISO date
-  expiry: string | null; // ISO date; null = no fixed expiry
-  k: StatusKind; // hand-seeded, expiry-derived (ontime / soon / over)
-  optional?: boolean; // First Aid / Work Permit are optional credentials
+  type: LeaveType;
+  startDate: string; // ISO date, inclusive
+  endDate: string; // ISO date, inclusive
+  hours?: number;
   note?: string;
 }
 
@@ -282,12 +241,16 @@ export interface Inspection {
 }
 
 // Client CRM — contact roster + interaction (touchpoint) log. Prototype/mock
-// only (no backend Client domain yet); the mutable records live in a module
+// only (no backend CRM domain yet); the mutable records live in a module
 // store (lib/clientStore.ts), mirroring the Fleet & Maintenance store pattern.
+// The client roster, contracts, and purchase orders now come from the real
+// Clients API (lib/api/clients.ts); these CRM rows are still keyed by the old
+// numeric prototype client ids (see the shim in
+// components/screens/clients/shared.tsx).
 // NOTE: deliberately NO relationship health / happiness / satisfaction field —
 // relationship quality is a written business methodology at Northern Link, not
-// a tracked signal. The Client.rk / renew fields below are contract-expiry
-// status (a date-derived signal), not a relationship sentiment.
+// a tracked signal. Contract renewal chips are contract-expiry status (a
+// date-derived signal), not a relationship sentiment.
 
 export interface ClientContact {
   id: string;
@@ -313,42 +276,7 @@ export interface ClientInteraction {
   followUpNote?: string;
 }
 
-export interface PurchaseOrder {
-  id: string;
-  clientId: number;
-  poNumber: string;
-  description?: string;
-  issued?: string; // ISO date
-  expiry: string; // ISO date — drives expiry status via docStatusFor
-  amountCad?: number;
-  k: StatusKind; // derived from expiry (valid / expiring soon / expired)
-}
-
-export interface Client {
-  id: number;
-  name: string;
-  svc: ServiceType;
-  tag: string;
-  renew: string;
-  rk: StatusKind;
-  term: string;
-  rate: string;
-  po: string;
-  gst: string;
-  notes: string;
-}
-
-export interface Invoice {
-  id: string;
-  client: string;
-  po: string;
-  amt: string;
-  code: string;
-  status: string;
-  sk: StatusKind;
-  qbo: string;
-  age: string;
-}
+// Invoice records now come from the real Billing API (lib/api/billing.ts).
 
 export interface Rider {
   id: number;

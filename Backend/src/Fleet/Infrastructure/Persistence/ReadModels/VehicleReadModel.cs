@@ -53,7 +53,8 @@ public sealed class VehicleReadModelConfiguration : IEntityTypeConfiguration<Veh
 {
     public void Configure(EntityTypeBuilder<VehicleReadModel> builder)
     {
-        builder.HasNoKey().ToView("v_vehicles", FleetServiceCollectionExtensions.SchemaName);
+        builder.HasKey(v => v.Id);
+        builder.ToTable("rm_vehicles", FleetServiceCollectionExtensions.SchemaName);
 
         builder.Property(v => v.Id).HasColumnName("id");
         builder.Property(v => v.TenantId).HasColumnName("tenant_id");

@@ -37,7 +37,7 @@ public sealed class VehicleInspectionReadModelConfiguration : IEntityTypeConfigu
     public void Configure(EntityTypeBuilder<VehicleInspectionReadModel> builder)
     {
         builder.HasKey(i => i.Id);
-        builder.ToView("v_vehicle_inspections", FleetServiceCollectionExtensions.SchemaName);
+        builder.ToTable("rm_vehicle_inspections", FleetServiceCollectionExtensions.SchemaName);
 
         builder.Property(i => i.Id).HasColumnName("id");
         builder.Property(i => i.TenantId).HasColumnName("tenant_id");

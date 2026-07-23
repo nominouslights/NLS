@@ -2,7 +2,6 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
-using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
 using NorthernLink.Identity.Application.Abstractions;
 using NorthernLink.Identity.Domain.Users;
@@ -34,17 +33,9 @@ public sealed class JwtAccessTokenIssuer : IAccessTokenIssuer
 
     private readonly SigningCredentials _signingCredentials;
 
-    public JwtAccessTokenIssuer(IConfiguration configuration)
+    public JwtAccessTokenIssuer()
     {
-        var signingKey = configuration["Identity:JwtSigningKey"];
-        if (string.IsNullOrWhiteSpace(signingKey))
-        {
-            throw new InvalidOperationException(
-                "Identity:JwtSigningKey is not configured. Set the Identity__JwtSigningKey " +
-                "environment variable — never appsettings.Development.json (see CLAUDE.md's " +
-                "ConnectionStrings:Postgres convention, which this follows).");
-        }
-
+        var signingKey = RequiredEnvironmentVariable.Get("Identity__JwtSigningKey");
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(signingKey));
         _signingCredentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
     }

@@ -28,7 +28,8 @@ public sealed class ShopReadModelConfiguration : IEntityTypeConfiguration<ShopRe
 {
     public void Configure(EntityTypeBuilder<ShopReadModel> builder)
     {
-        builder.HasNoKey().ToView("v_shops", FleetServiceCollectionExtensions.SchemaName);
+        builder.HasKey(s => s.Id);
+        builder.ToTable("rm_shops", FleetServiceCollectionExtensions.SchemaName);
 
         builder.Property(s => s.Id).HasColumnName("id");
         builder.Property(s => s.TenantId).HasColumnName("tenant_id");

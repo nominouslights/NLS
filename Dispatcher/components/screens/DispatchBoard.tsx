@@ -1,12 +1,102 @@
 "use client";
 
+import { useCallback, useEffect, useState } from "react";
 import { colors, fonts, rowSurface, svcMeta, SERVICE_SHORT, statusMeta } from "@/lib/theme";
-import { trips } from "@/lib/data";
+import { ApiError } from "@/lib/api";
+import {
+  corridorLabel,
+  isOpenTrip,
+  listTrips,
+  sortTrips,
+  svcForTrip,
+  todayIso,
+  tripChip,
+  tripWindowLabel,
+  type TripRecord,
+} from "@/lib/api/trips";
+import { listInvoices } from "@/lib/api/billing";
 import { statusShort } from "@/lib/format";
 import { MetricTile } from "@/components/ui/MetricTile";
 import { ServiceChip, StatusChip } from "@/components/ui/Chip";
+import { Panel, SectionLabel } from "@/components/ui/Panel";
+import { ActionButton } from "@/components/ui/Button";
 
-export default function DispatchBoard({ onOpenTrip }: { onOpenTrip: (i: number) => void }) {
+// Dispatch Board — today's trips from the real Trips API (GET /api/trips?date=today)
+// with the metric tiles derived from the same rows.
+
+function todayHeading(): string {
+  return new Date().toLocaleDateString("en-CA", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+export default function DispatchBoard({ onOpenTrip }: { onOpenTrip: (id: string) => void }) {
+  const [rows, setRows] = useState<TripRecord[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Overdue invoices tile — real count from the Billing API (isOverdue is the
+  // backend's read-time derivation of Sent + netTerms; never a stored status).
+  // A billing fetch failure only greys the tile — it never blocks the board.
+  const [overdueInvoices, setOverdueInvoices] = useState<number | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    listInvoices().then(
+      (invs) => {
+        if (active) setOverdueInvoices(invs.filter((i) => i.isOverdue).length);
+      },
+      () => {
+        if (active) setOverdueInvoices(null);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const load = useCallback(async () => {
+    try {
+      const fresh = await listTrips({ date: todayIso() });
+      setRows(sortTrips(fresh));
+      setLoadError(null);
+    } catch (e) {
+      setRows(null);
+      setLoadError(e instanceof ApiError ? e.message : "Failed to load today's trips.");
+    }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    listTrips({ date: todayIso() }).then(
+      (fresh) => {
+        if (active) {
+          setRows(sortTrips(fresh));
+          setLoadError(null);
+        }
+      },
+      (e) => {
+        if (active) {
+          setRows(null);
+          setLoadError(e instanceof ApiError ? e.message : "Failed to load today's trips.");
+        }
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // ---- derived metrics (from today's rows) ----
+  const total = rows?.length ?? null;
+  const inProgress = rows?.filter((t) => t.status === "InProgress").length ?? null;
+  const openUnclaimed = rows?.filter(isOpenTrip).length ?? null;
+  const driversOnDuty =
+    rows === null
+      ? null
+      : new Set(rows.filter((t) => t.status !== "Cancelled" && t.driverId !== null).map((t) => t.driverId)).size;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }} className="detailfade">
       {/* header */}
@@ -30,7 +120,7 @@ export default function DispatchBoard({ onOpenTrip }: { onOpenTrip: (i: number) 
               marginBottom: 3,
             }}
           >
-            Operations · Tuesday, July 7 2026
+            Operations · {todayHeading()}
           </div>
           <h1 style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 30, lineHeight: 1, color: colors.headingBright, margin: 0 }}>
             Dispatch Board
@@ -38,7 +128,7 @@ export default function DispatchBoard({ onOpenTrip }: { onOpenTrip: (i: number) 
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 9, fontFamily: fonts.body, fontSize: 12, color: colors.textDim }}>
           <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#009E73", boxShadow: "0 0 0 3px rgba(0,158,115,.16)" }} />
-          Live · updated 8s ago
+          Live · Trips API
         </div>
       </div>
 
@@ -46,139 +136,195 @@ export default function DispatchBoard({ onOpenTrip }: { onOpenTrip: (i: number) 
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 26px 26px" }}>
         {/* STATUS STRIP */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 12, marginBottom: 18 }}>
-          <MetricTile icon="●" iconBg={colors.blue} iconColor="#FFFFFF" label="Trips today" value={8} valueColor={colors.textPrimary} />
-          <MetricTile icon="●" iconBg={colors.blue} iconColor="#FFFFFF" label="In progress" value={2} valueColor={colors.skyBlue} />
+          <MetricTile icon="●" iconBg={colors.blue} iconColor="#FFFFFF" label="Trips today" value={total ?? "—"} valueColor={colors.textPrimary} />
+          <MetricTile icon="●" iconBg={colors.blue} iconColor="#FFFFFF" label="In progress" value={inProgress ?? "—"} valueColor={colors.skyBlue} />
           <MetricTile
             icon="◐"
             iconBg="#E1B000"
             iconColor={colors.navy}
             label="Open · unclaimed"
-            value={3}
+            value={openUnclaimed ?? "—"}
             valueColor={statusMeta("soon").t}
-            borderColor="rgba(225,176,0,.4)"
+            borderColor={openUnclaimed ? "rgba(225,176,0,.4)" : undefined}
           />
-          <MetricTile icon="✓" iconBg="#009E73" iconColor="#FFFFFF" label="Drivers on duty" value={5} valueColor={statusMeta("ontime").t} />
           <MetricTile
-            icon="▲"
-            iconBg="#D55E00"
-            iconColor="#fff"
-            label="Compliance alerts"
-            value={2}
-            valueColor={statusMeta("over").t}
-            borderColor="rgba(213,94,0,.3)"
+            icon="✓"
+            iconBg="#009E73"
+            iconColor="#FFFFFF"
+            label="Drivers on duty"
+            value={driversOnDuty ?? "—"}
+            valueColor={statusMeta("ontime").t}
           />
+          {/* Compliance alerts were a pure mock figure — "—" until a real
+              compliance rollup exists (HOS has no backend domain yet). */}
+          <MetricTile icon="▲" iconBg="#D55E00" iconColor="#fff" label="Compliance alerts" value="—" valueColor={colors.textDim} />
           <MetricTile
             icon="▲"
             iconBg="#D55E00"
             iconColor="#fff"
             label="Overdue invoices"
-            value={1}
-            valueColor={statusMeta("over").t}
-            borderColor="rgba(213,94,0,.3)"
+            value={overdueInvoices ?? "—"}
+            valueColor={
+              overdueInvoices === null
+                ? colors.textDim
+                : overdueInvoices > 0
+                  ? statusMeta("over").t
+                  : statusMeta("ontime").t
+            }
+            borderColor={overdueInvoices ? "rgba(213,94,0,.4)" : undefined}
           />
         </div>
 
         {/* BOARD */}
         <div>
-          {/* trip board */}
-          <div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 11 }}>
-              <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 16, letterSpacing: ".06em", color: colors.textSecondary }}>
-                TODAY&rsquo;S TRIPS
-              </div>
-              <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim }}>
-                Thompson · Leaf Rapids · Lynn Lake · South Indian Lake · Black Sturgeon Falls
-              </div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 11 }}>
+            <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 16, letterSpacing: ".06em", color: colors.textSecondary }}>
+              TODAY&rsquo;S TRIPS
             </div>
-            {/* column head */}
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "74px 112px minmax(0,1fr) 116px 120px",
-                gap: 10,
-                padding: "0 14px 8px",
-                fontFamily: fonts.semiCondensed,
-                fontSize: 9.5,
-                letterSpacing: ".12em",
-                textTransform: "uppercase",
-                color: colors.textFaint,
-              }}
-            >
-              <div>Trip</div>
-              <div>Service</div>
-              <div>Corridor</div>
-              <div>Driver</div>
-              <div>Status</div>
+            <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim }}>
+              Thompson · Leaf Rapids · Lynn Lake · South Indian Lake · Black Sturgeon Falls
             </div>
-            {trips.map((t, i) => {
-              const sc = svcMeta(t.svc);
-              return (
+          </div>
+
+          {loadError && (
+            <Panel borderColor="rgba(213,94,0,.4)">
+              <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <StatusChip kind="over" label={`Trips unavailable — ${loadError}`} />
+                <ActionButton variant="primary" onClick={load}>
+                  RETRY
+                </ActionButton>
+              </div>
+            </Panel>
+          )}
+
+          {rows === null && !loadError && (
+            <div>
+              {[0, 1, 2, 3].map((i) => (
                 <div
-                  key={t.id}
-                  onClick={() => onOpenTrip(i)}
+                  key={i}
                   style={{
-                    display: "grid",
-                    gridTemplateColumns: "74px 112px minmax(0,1fr) 116px 120px",
-                    gap: 10,
-                    alignItems: "center",
-                    padding: "11px 14px",
+                    height: 58,
+                    borderRadius: 9,
+                    border: `1px solid ${colors.borderSubtle}`,
+                    background: colors.cardBg,
                     marginBottom: 5,
-                    ...rowSurface(false, sc.accent),
+                    opacity: 0.55 - i * 0.1,
                   }}
-                >
-                  <div>
-                    <div style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.skyBlue }}>{t.id}</div>
-                    <div style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.textDim, marginTop: 2 }}>{t.win}</div>
-                  </div>
-                  <div style={{ minWidth: 0 }}>
-                    <ServiceChip svc={t.svc} label={SERVICE_SHORT[t.svc]} />
-                  </div>
-                  <div style={{ minWidth: 0 }}>
+                />
+              ))}
+              <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textDim, marginTop: 10 }}>
+                Loading today&rsquo;s trips from API…
+              </div>
+            </div>
+          )}
+
+          {rows !== null && rows.length === 0 && (
+            <Panel>
+              <SectionLabel>No trips scheduled today</SectionLabel>
+              <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textMuted, lineHeight: 1.6 }}>
+                Nothing on the board for today. Trips come from the Create Trip wizard or are generated from active
+                schedule templates (Routes &amp; Schedules).
+              </div>
+            </Panel>
+          )}
+
+          {rows !== null && rows.length > 0 && (
+            <>
+              {/* column head */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "74px 112px minmax(0,1fr) 116px 140px",
+                  gap: 10,
+                  padding: "0 14px 8px",
+                  fontFamily: fonts.semiCondensed,
+                  fontSize: 9.5,
+                  letterSpacing: ".12em",
+                  textTransform: "uppercase",
+                  color: colors.textFaint,
+                }}
+              >
+                <div>Trip</div>
+                <div>Service</div>
+                <div>Corridor</div>
+                <div>Driver</div>
+                <div>Status</div>
+              </div>
+              {rows.map((t) => {
+                const svc = svcForTrip(t.serviceType);
+                const sc = svcMeta(svc);
+                const chip = tripChip(t);
+                const open = isOpenTrip(t);
+                return (
+                  <div
+                    key={t.id}
+                    onClick={() => onOpenTrip(t.id)}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "74px 112px minmax(0,1fr) 116px 140px",
+                      gap: 10,
+                      alignItems: "center",
+                      padding: "11px 14px",
+                      marginBottom: 5,
+                      ...rowSurface(false, sc.accent),
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.skyBlue }}>{t.tripNumber}</div>
+                      <div style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.textDim, marginTop: 2 }}>
+                        {tripWindowLabel(t)}
+                      </div>
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <ServiceChip svc={svc} label={SERVICE_SHORT[svc]} />
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontFamily: fonts.body,
+                          fontSize: 12.5,
+                          color: colors.textSecondary,
+                          fontWeight: 500,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {corridorLabel(t)}
+                      </div>
+                      <div
+                        style={{
+                          fontFamily: fonts.mono,
+                          fontSize: 10,
+                          color: colors.textDim,
+                          marginTop: 2,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {t.distanceKm} km · {t.vehicleUnit ?? "unassigned"}
+                      </div>
+                    </div>
                     <div
                       style={{
                         fontFamily: fonts.body,
                         fontSize: 12.5,
-                        color: colors.textSecondary,
-                        fontWeight: 500,
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
+                        lineHeight: 1.3,
+                        fontWeight: open ? 600 : 500,
+                        color: open ? colors.amberText : colors.textSecondary,
                       }}
                     >
-                      {t.stops.join("  →  ")}
+                      {t.driverName ?? "OPEN — needs coverage"}
                     </div>
-                    <div
-                      style={{
-                        fontFamily: fonts.mono,
-                        fontSize: 10,
-                        color: colors.textDim,
-                        marginTop: 2,
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                      }}
-                    >
-                      {t.km} km · {t.vehicle}
+                    <div style={{ minWidth: 0 }}>
+                      <StatusChip kind={chip.kind} label={statusShort(chip.label)} />
                     </div>
                   </div>
-                  <div
-                    style={{
-                      fontFamily: fonts.body,
-                      fontSize: 12.5,
-                      lineHeight: 1.3,
-                      fontWeight: t.open ? 600 : 500,
-                      color: t.open ? colors.amberText : colors.textSecondary,
-                    }}
-                  >
-                    {t.driver ?? "OPEN — needs coverage"}
-                  </div>
-                  <div style={{ minWidth: 0 }}>
-                    <StatusChip kind={t.sk} label={statusShort(t.status)} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </>
+          )}
         </div>
       </div>
     </div>

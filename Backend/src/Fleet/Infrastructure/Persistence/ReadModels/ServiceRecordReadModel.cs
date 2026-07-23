@@ -38,7 +38,7 @@ public sealed class ServiceRecordReadModelConfiguration : IEntityTypeConfigurati
     public void Configure(EntityTypeBuilder<ServiceRecordReadModel> builder)
     {
         builder.HasKey(s => s.Id);
-        builder.ToView("v_service_records", FleetServiceCollectionExtensions.SchemaName);
+        builder.ToTable("rm_service_records", FleetServiceCollectionExtensions.SchemaName);
 
         builder.Property(s => s.Id).HasColumnName("id");
         builder.Property(s => s.TenantId).HasColumnName("tenant_id");

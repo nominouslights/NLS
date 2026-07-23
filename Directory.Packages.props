@@ -29,6 +29,10 @@
     <PackageVersion Include="Aspire.Hosting.JavaScript" Version="13.4.6" />
   </ItemGroup>
 
+  <ItemGroup Label="Object Storage">
+    <PackageVersion Include="AWSSDK.S3" Version="3.7.400" />
+  </ItemGroup>
+
   <ItemGroup Label="Testing">
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />

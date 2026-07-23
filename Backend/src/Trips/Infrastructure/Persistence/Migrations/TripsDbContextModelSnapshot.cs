@@ -230,6 +230,89 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                     b.ToTable("projection_checkpoints", "trips");
                 });
 
+            modelBuilder.Entity("NorthernLink.Trips.Application.Integration.ClientLookup", b =>
+                {
+                    b.Property<Guid>("ClientId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("client_id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("ServiceType")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("service_type");
+
+                    b.Property<string>("Tag")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("tag");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("type");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.HasKey("ClientId");
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("client_lookup", "trips");
+                });
+
+            modelBuilder.Entity("NorthernLink.Trips.Application.Integration.DriverLookup", b =>
+                {
+                    b.Property<Guid>("DriverId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("driver_id");
+
+                    b.Property<string>("LicenceClass")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("licence_class");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.HasKey("DriverId");
+
+                    b.HasIndex("TenantId", "Status");
+
+                    b.ToTable("driver_lookup", "trips");
+                });
+
             modelBuilder.Entity("NorthernLink.Trips.Domain.Manifests.TripManifest", b =>
                 {
                     b.Property<Guid>("Id")
@@ -418,9 +501,488 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                     b.ToTable("trip_manifests", "trips");
                 });
 
+            modelBuilder.Entity("NorthernLink.Trips.Domain.Routes.Route", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<int>("DistanceKm")
+                        .HasColumnType("integer")
+                        .HasColumnName("distance_km");
+
+                    b.Property<TimeSpan>("EstimatedDuration")
+                        .HasColumnType("interval")
+                        .HasColumnName("estimated_duration");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("RequiredLicenceClass")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("required_licence_class");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Name");
+
+                    b.ToTable("routes", "trips");
+                });
+
+            modelBuilder.Entity("NorthernLink.Trips.Domain.Schedules.ScheduleTemplate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<Guid?>("ClientId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("client_id");
+
+                    b.Property<string>("ClientName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("client_name");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("CutoffNote")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("cutoff_note");
+
+                    b.Property<string>("DaysOfWeek")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("days_of_week");
+
+                    b.Property<Guid?>("DefaultDriverId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("default_driver_id");
+
+                    b.Property<string>("DefaultVehicleUnit")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("default_vehicle_unit");
+
+                    b.Property<TimeOnly>("DepartureTime")
+                        .HasColumnType("time without time zone")
+                        .HasColumnName("departure_time");
+
+                    b.Property<int>("GenerationHorizonDays")
+                        .HasColumnType("integer")
+                        .HasColumnName("generation_horizon_days");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<TimeOnly?>("ReturnDepartureTime")
+                        .HasColumnType("time without time zone")
+                        .HasColumnName("return_departure_time");
+
+                    b.Property<Guid>("RouteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("route_id");
+
+                    b.Property<int>("SeatsCapacity")
+                        .HasColumnType("integer")
+                        .HasColumnName("seats_capacity");
+
+                    b.Property<int?>("SeatsMinimum")
+                        .HasColumnType("integer")
+                        .HasColumnName("seats_minimum");
+
+                    b.Property<string>("ServiceType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("service_type");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Active");
+
+                    b.HasIndex("TenantId", "RouteId");
+
+                    b.ToTable("schedule_templates", "trips");
+                });
+
+            modelBuilder.Entity("NorthernLink.Trips.Domain.Trips.Trip", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("CancelledReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("cancelled_reason");
+
+                    b.Property<Guid?>("ClientId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("client_id");
+
+                    b.Property<string>("ClientName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("client_name");
+
+                    b.Property<DateTimeOffset?>("CompletedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at_utc");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<bool>("DemandGuaranteed")
+                        .HasColumnType("boolean")
+                        .HasColumnName("demand_guaranteed");
+
+                    b.Property<string>("Destination")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("destination");
+
+                    b.Property<string>("Direction")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("direction");
+
+                    b.Property<int>("DistanceKm")
+                        .HasColumnType("integer")
+                        .HasColumnName("distance_km");
+
+                    b.Property<Guid?>("DriverId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("driver_id");
+
+                    b.Property<string>("DriverName")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("driver_name");
+
+                    b.Property<bool>("IsEmptyLeg")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_empty_leg");
+
+                    b.Property<Guid?>("ManifestId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("manifest_id");
+
+                    b.Property<string>("Origin")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("origin");
+
+                    b.Property<string>("PoNumber")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("po_number");
+
+                    b.Property<string>("RoundTripKey")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("round_trip_key");
+
+                    b.Property<Guid?>("RouteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("route_id");
+
+                    b.Property<string>("RouteName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("route_name");
+
+                    b.Property<Guid?>("ScheduleTemplateId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("schedule_template_id");
+
+                    b.Property<int?>("SeatsCapacity")
+                        .HasColumnType("integer")
+                        .HasColumnName("seats_capacity");
+
+                    b.Property<int>("SeatsConfirmed")
+                        .HasColumnType("integer")
+                        .HasColumnName("seats_confirmed");
+
+                    b.Property<int?>("SeatsMinimum")
+                        .HasColumnType("integer")
+                        .HasColumnName("seats_minimum");
+
+                    b.Property<DateOnly>("ServiceDate")
+                        .HasColumnType("date")
+                        .HasColumnName("service_date");
+
+                    b.Property<string>("ServiceType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("service_type");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("TripNumber")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("trip_number");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<string>("VehicleUnit")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("vehicle_unit");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.Property<TimeOnly?>("WindowEnd")
+                        .HasColumnType("time without time zone")
+                        .HasColumnName("window_end");
+
+                    b.Property<TimeOnly>("WindowStart")
+                        .HasColumnType("time without time zone")
+                        .HasColumnName("window_start");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "ClientId");
+
+                    b.HasIndex("TenantId", "DriverId");
+
+                    b.HasIndex("TenantId", "ServiceDate");
+
+                    b.HasIndex("TenantId", "TripNumber")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "ScheduleTemplateId", "ServiceDate", "Direction")
+                        .IsUnique();
+
+                    b.ToTable("trips", "trips");
+                });
+
+            modelBuilder.Entity("NorthernLink.Trips.Infrastructure.Persistence.ReadModels.RouteReadModel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("Destination")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("destination");
+
+                    b.Property<int>("DistanceKm")
+                        .HasColumnType("integer")
+                        .HasColumnName("distance_km");
+
+                    b.Property<int>("EstimatedDurationMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("estimated_duration_minutes");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Origin")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("origin");
+
+                    b.Property<string>("RequiredLicenceClass")
+                        .HasColumnType("text")
+                        .HasColumnName("required_licence_class");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("rm_routes", "trips");
+                });
+
+            modelBuilder.Entity("NorthernLink.Trips.Infrastructure.Persistence.ReadModels.ScheduleTemplateReadModel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<Guid?>("ClientId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("client_id");
+
+                    b.Property<string>("ClientName")
+                        .HasColumnType("text")
+                        .HasColumnName("client_name");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("CutoffNote")
+                        .HasColumnType("text")
+                        .HasColumnName("cutoff_note");
+
+                    b.PrimitiveCollection<List<string>>("DaysOfWeek")
+                        .IsRequired()
+                        .HasColumnType("text[]")
+                        .HasColumnName("days_of_week");
+
+                    b.Property<Guid?>("DefaultDriverId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("default_driver_id");
+
+                    b.Property<string>("DefaultVehicleUnit")
+                        .HasColumnType("text")
+                        .HasColumnName("default_vehicle_unit");
+
+                    b.Property<TimeOnly>("DepartureTime")
+                        .HasColumnType("time without time zone")
+                        .HasColumnName("departure_time");
+
+                    b.Property<int>("GenerationHorizonDays")
+                        .HasColumnType("integer")
+                        .HasColumnName("generation_horizon_days");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("name");
+
+                    b.Property<TimeOnly?>("ReturnDepartureTime")
+                        .HasColumnType("time without time zone")
+                        .HasColumnName("return_departure_time");
+
+                    b.Property<Guid>("RouteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("route_id");
+
+                    b.Property<string>("RouteName")
+                        .HasColumnType("text")
+                        .HasColumnName("route_name");
+
+                    b.Property<int>("SeatsCapacity")
+                        .HasColumnType("integer")
+                        .HasColumnName("seats_capacity");
+
+                    b.Property<int?>("SeatsMinimum")
+                        .HasColumnType("integer")
+                        .HasColumnName("seats_minimum");
+
+                    b.Property<string>("ServiceType")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("service_type");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("rm_schedule_templates", "trips");
+                });
+
             modelBuilder.Entity("NorthernLink.Trips.Infrastructure.Persistence.ReadModels.TripManifestReadModel", b =>
                 {
                     b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
@@ -580,9 +1142,170 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable((string)null);
+                    b.ToTable("rm_trip_manifests", "trips");
+                });
 
-                    b.ToView("v_trip_manifests", "trips");
+            modelBuilder.Entity("NorthernLink.Trips.Infrastructure.Persistence.ReadModels.TripReadModel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("CancelledReason")
+                        .HasColumnType("text")
+                        .HasColumnName("cancelled_reason");
+
+                    b.Property<Guid?>("ClientId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("client_id");
+
+                    b.Property<string>("ClientName")
+                        .HasColumnType("text")
+                        .HasColumnName("client_name");
+
+                    b.Property<DateTimeOffset?>("CompletedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at_utc");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<bool>("DemandGuaranteed")
+                        .HasColumnType("boolean")
+                        .HasColumnName("demand_guaranteed");
+
+                    b.Property<string>("Destination")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("destination");
+
+                    b.Property<string>("Direction")
+                        .HasColumnType("text")
+                        .HasColumnName("direction");
+
+                    b.Property<int>("DistanceKm")
+                        .HasColumnType("integer")
+                        .HasColumnName("distance_km");
+
+                    b.Property<Guid?>("DriverId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("driver_id");
+
+                    b.Property<string>("DriverName")
+                        .HasColumnType("text")
+                        .HasColumnName("driver_name");
+
+                    b.Property<bool>("IsEmptyLeg")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_empty_leg");
+
+                    b.Property<Guid?>("ManifestId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("manifest_id");
+
+                    b.Property<string>("Origin")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("origin");
+
+                    b.Property<string>("PoNumber")
+                        .HasColumnType("text")
+                        .HasColumnName("po_number");
+
+                    b.Property<string>("RoundTripKey")
+                        .HasColumnType("text")
+                        .HasColumnName("round_trip_key");
+
+                    b.Property<Guid?>("RouteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("route_id");
+
+                    b.Property<string>("RouteName")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("route_name");
+
+                    b.Property<Guid?>("ScheduleTemplateId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("schedule_template_id");
+
+                    b.Property<int?>("SeatsCapacity")
+                        .HasColumnType("integer")
+                        .HasColumnName("seats_capacity");
+
+                    b.Property<int>("SeatsConfirmed")
+                        .HasColumnType("integer")
+                        .HasColumnName("seats_confirmed");
+
+                    b.Property<int?>("SeatsMinimum")
+                        .HasColumnType("integer")
+                        .HasColumnName("seats_minimum");
+
+                    b.Property<DateOnly>("ServiceDate")
+                        .HasColumnType("date")
+                        .HasColumnName("service_date");
+
+                    b.Property<string>("ServiceType")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("service_type");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("TripNumber")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("trip_number");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<string>("VehicleUnit")
+                        .HasColumnType("text")
+                        .HasColumnName("vehicle_unit");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.Property<TimeOnly?>("WindowEnd")
+                        .HasColumnType("time without time zone")
+                        .HasColumnName("window_end");
+
+                    b.Property<TimeOnly>("WindowStart")
+                        .HasColumnType("time without time zone")
+                        .HasColumnName("window_start");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "ServiceDate");
+
+                    b.ToTable("rm_trips", "trips");
+                });
+
+            modelBuilder.Entity("NorthernLink.Trips.Infrastructure.Persistence.TripNumberCounter", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<long>("NextValue")
+                        .HasColumnType("bigint")
+                        .HasColumnName("next_value");
+
+                    b.HasKey("TenantId");
+
+                    b.ToTable("trip_number_counters", "trips");
                 });
 
             modelBuilder.Entity("NorthernLink.Trips.Domain.Manifests.TripManifest", b =>
@@ -712,6 +1435,87 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                     b.Navigation("PreTripItems");
                 });
 
+            modelBuilder.Entity("NorthernLink.Trips.Domain.Routes.Route", b =>
+                {
+                    b.OwnsMany("NorthernLink.Trips.Domain.Routes.RouteStop", "Stops", b1 =>
+                        {
+                            b1.Property<Guid>("RouteId");
+
+                            b1.Property<int>("__synthesizedOrdinal")
+                                .ValueGeneratedOnAdd();
+
+                            b1.Property<string>("Name")
+                                .IsRequired();
+
+                            b1.Property<int>("Order");
+
+                            b1.HasKey("RouteId", "__synthesizedOrdinal");
+
+                            b1.ToTable("routes", "trips");
+
+                            b1.ToJson("stops");
+
+                            b1.WithOwner()
+                                .HasForeignKey("RouteId");
+                        });
+
+                    b.Navigation("Stops");
+                });
+
+            modelBuilder.Entity("NorthernLink.Trips.Domain.Trips.Trip", b =>
+                {
+                    b.OwnsMany("NorthernLink.Trips.Domain.Routes.RouteStop", "Stops", b1 =>
+                        {
+                            b1.Property<Guid>("TripId");
+
+                            b1.Property<int>("__synthesizedOrdinal")
+                                .ValueGeneratedOnAdd();
+
+                            b1.Property<string>("Name")
+                                .IsRequired();
+
+                            b1.Property<int>("Order");
+
+                            b1.HasKey("TripId", "__synthesizedOrdinal");
+
+                            b1.ToTable("trips", "trips");
+
+                            b1.ToJson("stops");
+
+                            b1.WithOwner()
+                                .HasForeignKey("TripId");
+                        });
+
+                    b.Navigation("Stops");
+                });
+
+            modelBuilder.Entity("NorthernLink.Trips.Infrastructure.Persistence.ReadModels.RouteReadModel", b =>
+                {
+                    b.OwnsMany("NorthernLink.Trips.Domain.Routes.RouteStop", "Stops", b1 =>
+                        {
+                            b1.Property<Guid>("RouteReadModelId");
+
+                            b1.Property<int>("__synthesizedOrdinal")
+                                .ValueGeneratedOnAdd();
+
+                            b1.Property<string>("Name")
+                                .IsRequired();
+
+                            b1.Property<int>("Order");
+
+                            b1.HasKey("RouteReadModelId", "__synthesizedOrdinal");
+
+                            b1.ToTable("rm_routes", "trips");
+
+                            b1.ToJson("stops");
+
+                            b1.WithOwner()
+                                .HasForeignKey("RouteReadModelId");
+                        });
+
+                    b.Navigation("Stops");
+                });
+
             modelBuilder.Entity("NorthernLink.Trips.Infrastructure.Persistence.ReadModels.TripManifestReadModel", b =>
                 {
                     b.OwnsMany("NorthernLink.Trips.Domain.Manifests.ManifestCargoItem", "Cargo", b1 =>
@@ -738,9 +1542,7 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
 
                             b1.HasKey("TripManifestReadModelId", "__synthesizedOrdinal");
 
-                            b1.ToTable((string)null);
-
-                            b1.ToView("v_trip_manifests", "trips");
+                            b1.ToTable("rm_trip_manifests", "trips");
 
                             b1.ToJson("cargo");
 
@@ -772,9 +1574,7 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
 
                             b1.HasKey("TripManifestReadModelId", "__synthesizedOrdinal");
 
-                            b1.ToTable((string)null);
-
-                            b1.ToView("v_trip_manifests", "trips");
+                            b1.ToTable("rm_trip_manifests", "trips");
 
                             b1.ToJson("passengers");
 
@@ -796,9 +1596,7 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
 
                             b1.HasKey("TripManifestReadModelId", "__synthesizedOrdinal");
 
-                            b1.ToTable((string)null);
-
-                            b1.ToView("v_trip_manifests", "trips");
+                            b1.ToTable("rm_trip_manifests", "trips");
 
                             b1.ToJson("post_trip_items");
 
@@ -828,9 +1626,7 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
 
                             b1.HasKey("TripManifestReadModelId", "__synthesizedOrdinal");
 
-                            b1.ToTable((string)null);
-
-                            b1.ToView("v_trip_manifests", "trips");
+                            b1.ToTable("rm_trip_manifests", "trips");
 
                             b1.ToJson("pre_trip_items");
 
@@ -845,6 +1641,33 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                     b.Navigation("PostTripItems");
 
                     b.Navigation("PreTripItems");
+                });
+
+            modelBuilder.Entity("NorthernLink.Trips.Infrastructure.Persistence.ReadModels.TripReadModel", b =>
+                {
+                    b.OwnsMany("NorthernLink.Trips.Domain.Routes.RouteStop", "Stops", b1 =>
+                        {
+                            b1.Property<Guid>("TripReadModelId");
+
+                            b1.Property<int>("__synthesizedOrdinal")
+                                .ValueGeneratedOnAdd();
+
+                            b1.Property<string>("Name")
+                                .IsRequired();
+
+                            b1.Property<int>("Order");
+
+                            b1.HasKey("TripReadModelId", "__synthesizedOrdinal");
+
+                            b1.ToTable("rm_trips", "trips");
+
+                            b1.ToJson("stops");
+
+                            b1.WithOwner()
+                                .HasForeignKey("TripReadModelId");
+                        });
+
+                    b.Navigation("Stops");
                 });
 #pragma warning restore 612, 618
         }

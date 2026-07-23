@@ -25,10 +25,20 @@ reference file rather than guessing from this summary.
    cross-domain communication is integration-events-only over RabbitMQ). Do not introduce a new
    service/deployment unit for a new feature — extend an existing library (or add a new one for a
    genuinely new domain). A future microservice = copy the library + Shared out.
+   *The integration-events part is an **adopted default**, not an original requirement — see
+   reference Section 13.11. Follow it, but say so plainly if a design fights it, rather than
+   treating it as settled.*
 2. **Multi-tenant, three tenant categories, enforced twice.** Internal (Admin), Client, and
    Vendor/Partner tenants, plus a non-tenant Consumer identity pool. Every tenant-scoped table
    needs a `tenant_id` and **both** an API-level authorization check **and** a Postgres Row-Level
    Security policy — never rely on API-level checks alone.
+   **RLS has exactly one shape (reference Section 7.1):** `ENABLE` + `FORCE ROW LEVEL SECURITY` +
+   a native policy `USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid)`,
+   on a **plain table**, with the API connecting as a non-superuser role. **Never** isolate
+   tenants with security-barrier views over an unprotected base table, and never add a second
+   role to own the read side — that pattern caused a real isolation bug and breaks fresh-database
+   provisioning. Read models are ordinary projector-maintained `rm_*` tables, not materialized
+   views, specifically so they carry the same policy as everything else.
 3. **Self-hosted OIDC identity** (OpenIddict), not a third-party IdP — this is a deliberate,
    confirmed choice tied to Canadian data residency, not an open question.
 4. **Canadian data residency is non-negotiable.** All infrastructure on OVHcloud Canada
@@ -93,6 +103,10 @@ QC) · Identity: self-hosted OIDC (OpenIddict) · Monitoring: self-hosted Sentry
 - If a feature touches money (pricing, invoicing, any cost or revenue), check whether it needs a
   **Budget Code** tag (Section 5.3) — the platform's convention is tag-at-creation, not
   tag-after-the-fact.
+- If a change **adds a tenant-scoped table** (write-side or `rm_*` read model), copy the RLS block
+  from reference Section 7.1 into the same migration — `ENABLE` + `FORCE` + a native policy on the
+  table. Never a view, never a second role. Working example to follow:
+  `Backend/src/Clients/Infrastructure/Persistence/Migrations/20260719093056_InitialClientsSchema.cs`.
 - If a feature involves showing status to a user, apply the colorblind-safe palette from
   Non-Negotiable Rule 6 — don't introduce a new ad hoc color scheme.
 - If unsure whether something is already decided vs. still open, check reference file Section 13

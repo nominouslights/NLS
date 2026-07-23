@@ -40,8 +40,9 @@ public sealed class FleetDbContext(
 
     public DbSet<WorkOrder> WorkOrders => Set<WorkOrder>();
 
-    // Read-side projections — mapped to the tenant wrapper views (v_*) over the matviews.
-    // Read-only; the projection worker keeps the underlying matviews fresh.
+    // Read-side projections — ordinary rm_* tables the projection worker upserts into, secured
+    // by the same native RLS policy as every other table (a matview can't carry one, which is
+    // what the previous projector-role/wrapper-view design existed to work around).
     public DbSet<VehicleReadModel> VehicleReadModels => Set<VehicleReadModel>();
 
     public DbSet<RetirementCertificateReadModel> RetirementCertificateReadModels => Set<RetirementCertificateReadModel>();

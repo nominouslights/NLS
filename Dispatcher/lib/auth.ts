@@ -5,6 +5,8 @@
 //   POST /api/identity/auth/login    { email, password }   → { accessToken, refreshToken, expiresAtUtc }
 //   POST /api/identity/auth/refresh  { refreshToken }      → same shape; BOTH tokens rotate (old refresh revoked)
 //   POST /api/identity/auth/logout   { refreshToken }      → 204 (revokes the refresh token)
+//   POST /api/identity/admin/bootstrap-token  (Bearer, Admin role; no body) → { token, expiresAtUtc }
+//   POST /api/identity/admin/bootstrap  { token, email, password } → new user id (NOT tokens)
 //
 // Storage model: the access token (15 min JWT) lives in memory only; the
 // refresh token (30 days, single-use) persists in localStorage so a page
@@ -18,7 +20,7 @@
 // import each other, but only inside function bodies — safe under ESM.
 // ---------------------------------------------------------------------------
 
-import { ApiError, identityRequest } from "./api";
+import { ApiError, identityGet, identityRequest, request } from "./api";
 
 export interface AuthTokens {
   accessToken: string;
@@ -106,6 +108,68 @@ export async function login(email: string, password: string): Promise<void> {
   });
   storeTokens(tokens);
   notify(true);
+}
+
+/**
+ * First-run check: true only while the backend has no users at all, meaning the
+ * console should show the create-administrator screen instead of the login form.
+ * Callers treat a thrown error as "not required" (fail safe — never surface the
+ * setup screen on an errored check).
+ */
+export async function checkSetupRequired(): Promise<boolean> {
+  const status = await identityGet<{ setupRequired: boolean }>("/api/identity/auth/setup-status");
+  return status.setupRequired === true;
+}
+
+/**
+ * Creates the very first Admin account and signs straight in with the token pair
+ * the backend returns. Only succeeds while no user exists; afterwards the
+ * endpoint is permanently closed (409 Identity.User.SetupAlreadyCompleted).
+ */
+export async function createFirstAdmin(email: string, password: string): Promise<void> {
+  const tokens = await identityRequest<AuthTokens>("/api/identity/auth/setup", {
+    email,
+    password,
+  });
+  storeTokens(tokens);
+  notify(true);
+}
+
+// --- admin invites ---------------------------------------------------------
+
+export interface AdminInvite {
+  token: string;
+  expiresAtUtc: string;
+}
+
+/**
+ * Mints a one-time admin invite token (authenticated — requires the Admin
+ * role). The backend stores only a hash, so the raw token in the response is
+ * visible exactly once: single-use, expires 15 minutes after issue.
+ */
+export function generateAdminInvite(): Promise<AdminInvite> {
+  return request<AdminInvite>("/api/identity/admin/bootstrap-token", { method: "POST" });
+}
+
+/**
+ * Redeems an admin invite token, creating a new Admin account (anonymous —
+ * this is how a brand-new admin gets in). The endpoint returns the new user
+ * id, not tokens, so on success we sign straight in with the fresh
+ * credentials (mirrors createFirstAdmin landing the user in the console).
+ * Failures surface as ApiError — 401 invalid/expired/used token,
+ * 409 duplicate email.
+ */
+export async function redeemAdminInvite(
+  token: string,
+  email: string,
+  password: string,
+): Promise<void> {
+  await identityRequest<unknown>("/api/identity/admin/bootstrap", {
+    token,
+    email,
+    password,
+  });
+  await login(email, password);
 }
 
 /**

@@ -9,9 +9,9 @@ namespace NorthernLink.Fleet.IntegrationTests;
 /// <summary>
 /// Drives the real <see cref="Shared.Persistence.Projections.ProjectionWorker{T}"/> one poll
 /// at a time (no timer) against a real Postgres as the non-superuser app role: a command
-/// appends a journal row, one poll refreshes the matview and advances the checkpoint, a second
-/// poll is a no-op, and the version-based staleness predicate flips on an un-projected mutation
-/// and clears after the next poll.
+/// appends a journal row, one poll upserts the read-model row and advances the checkpoint, a
+/// second poll is a no-op, a deleted aggregate takes its read row with it, and the version-based
+/// staleness predicate flips on an un-projected mutation and clears after the next poll.
 /// </summary>
 [Collection("postgres")]
 public class ProjectionWorkerTests(PostgresFixture fixture)
@@ -64,7 +64,7 @@ public class ProjectionWorkerTests(PostgresFixture fixture)
         Assert.False(await IsStaleAsync(vehicle.Id));
 
         // Mutate the aggregate WITHOUT running the worker: a new journal row is appended at a
-        // higher aggregate_version than the matview captured, so the predicate reports stale.
+        // higher aggregate_version than the read row captured, so the predicate reports stale.
         await using (var writer = fixture.CreateContext(PostgresFixture.TenantA))
         {
             var tracked = await writer.Vehicles.SingleAsync(v => v.Id == vehicle.Id);
@@ -78,11 +78,47 @@ public class ProjectionWorkerTests(PostgresFixture fixture)
         Assert.False(await IsStaleAsync(vehicle.Id));
     }
 
+    [Fact]
+    public async Task Deleting_the_aggregate_removes_its_read_row_on_the_next_poll()
+    {
+        var worker = fixture.BuildFleetProjectionWorker();
+
+        var vehicle = TestVehicleFactory.Create(PostgresFixture.TenantA);
+        await using (var writer = fixture.CreateContext(PostgresFixture.TenantA))
+        {
+            writer.Vehicles.Add(vehicle);
+            await writer.SaveChangesAsync();
+        }
+
+        await worker.ProcessOnceAsync(CancellationToken.None);
+
+        await using (var reader = fixture.CreateContext(PostgresFixture.TenantA))
+        {
+            Assert.True(await reader.VehicleReadModels.AnyAsync(v => v.Id == vehicle.Id));
+        }
+
+        // Hard-delete the aggregate. The audit pipeline still journals the delete, so the next
+        // poll finds no source row and drops the projection — something a REFRESH got for free
+        // and targeted upserts have to handle explicitly.
+        await using (var writer = fixture.CreateContext(PostgresFixture.TenantA))
+        {
+            var tracked = await writer.Vehicles.SingleAsync(v => v.Id == vehicle.Id);
+            writer.Vehicles.Remove(tracked);
+            await writer.SaveChangesAsync();
+        }
+
+        await worker.ProcessOnceAsync(CancellationToken.None);
+
+        await using (var reader = fixture.CreateContext(PostgresFixture.TenantA))
+        {
+            Assert.False(await reader.VehicleReadModels.AnyAsync(v => v.Id == vehicle.Id));
+        }
+    }
+
     /// <summary>
-    /// The staleness predicate from the plan: a matview row is stale when the journal holds a
-    /// higher aggregate_version than the matview captured. Computed as two tenant reads (the
-    /// version via v_vehicles, the journal max via event_journal) since the app role cannot
-    /// read mv_vehicles directly.
+    /// A read row is stale when the journal holds a higher aggregate_version than the row
+    /// captured. Computed as two tenant reads (the version via rm_vehicles, the journal max via
+    /// event_journal) — both now readable by the app role under its own tenant's row policy.
     /// </summary>
     private async Task<bool> IsStaleAsync(Guid vehicleId)
     {

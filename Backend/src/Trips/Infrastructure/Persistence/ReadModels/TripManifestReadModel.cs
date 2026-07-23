@@ -85,7 +85,7 @@ public sealed class TripManifestReadModelConfiguration : IEntityTypeConfiguratio
     public void Configure(EntityTypeBuilder<TripManifestReadModel> builder)
     {
         builder.HasKey(m => m.Id);
-        builder.ToView("v_trip_manifests", TripsServiceCollectionExtensions.SchemaName);
+        builder.ToTable("rm_trip_manifests", TripsServiceCollectionExtensions.SchemaName);
 
         builder.Property(m => m.Id).HasColumnName("id");
         builder.Property(m => m.TenantId).HasColumnName("tenant_id");

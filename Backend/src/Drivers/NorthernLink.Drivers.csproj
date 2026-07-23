@@ -3,10 +3,24 @@
   <!-- The Drivers domain library: Domain/, Application/, and Infrastructure/ layers in one
        assembly, composed by the API gateway. References NorthernLink.Shared and nothing
        else internal — never another domain library; cross-domain communication is
-       integration-events-only. Structure-only scaffold until real features land. -->
+       integration-events-only. Extracting this into its own microservice = copy this
+       library (endpoints included) plus Shared. -->
 
   <ItemGroup>
     <ProjectReference Include="..\Shared\NorthernLink.Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Minimal-API endpoint mapping lives in the library, not the host. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
   </ItemGroup>
 
 </Project>

@@ -40,7 +40,7 @@ const vehicleMarkers = [
   { left: "76%", top: "60%", size: 18, color: "#7A8899" },
 ];
 
-export default function LiveMap({ onOpenTrip }: { onOpenTrip: (i: number) => void }) {
+export default function LiveMap({ onOpenTrip }: { onOpenTrip: () => void }) {
   return (
     <div style={{ display: "flex", height: "100%" }} className="detailfade">
       {/* vehicle rail */}
@@ -256,7 +256,7 @@ export default function LiveMap({ onOpenTrip }: { onOpenTrip: (i: number) => voi
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <span
-              onClick={() => onOpenTrip(0)}
+              onClick={() => onOpenTrip()}
               style={{
                 flex: 1,
                 textAlign: "center",

@@ -172,6 +172,41 @@ export function DateField({
   );
 }
 
+export function TimeField({
+  label,
+  value,
+  onChange,
+  hint,
+  disabled = false,
+}: {
+  label: string;
+  value: string; // 24h "HH:MM"
+  onChange: (v: string) => void;
+  hint?: ReactNode;
+  disabled?: boolean;
+}) {
+  return (
+    <div>
+      <FieldLabel hint={hint}>{label}</FieldLabel>
+      <input
+        type="time"
+        className="nl-input"
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        style={{
+          ...inputBase,
+          fontFamily: fonts.mono,
+          fontSize: 13,
+          colorScheme: "light",
+          opacity: disabled ? 0.55 : 1,
+          cursor: disabled ? "not-allowed" : undefined,
+        }}
+      />
+    </div>
+  );
+}
+
 export function TextAreaField({
   label,
   value,

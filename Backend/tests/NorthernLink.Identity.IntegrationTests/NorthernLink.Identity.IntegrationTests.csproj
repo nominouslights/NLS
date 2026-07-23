@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- End-to-end tests for the Identity module's first-admin gate and bootstrap-token
+       redemption against a real Postgres in a Testcontainers container, connecting as a
+       NON-superuser role so Row-Level Security is actually enforced — and so the advisory
+       lock and the real IX_users_email unique index are exercised for real. Requires Docker. -->
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Identity\NorthernLink.Identity.csproj" />
+  </ItemGroup>
+
+</Project>

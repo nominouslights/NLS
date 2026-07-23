@@ -35,4 +35,11 @@ public static class UserErrors
 
     public static readonly Error BootstrapTokenAlreadyConsumed = Error.Conflict(
         "Identity.User.BootstrapTokenAlreadyConsumed", "This bootstrap token has already been used.");
+
+    /// <summary>
+    /// First-run setup is a one-time window: once any user exists, the anonymous
+    /// create-first-admin endpoint is permanently closed.
+    /// </summary>
+    public static readonly Error SetupAlreadyCompleted = Error.Conflict(
+        "Identity.User.SetupAlreadyCompleted", "Initial setup has already been completed — sign in instead.");
 }

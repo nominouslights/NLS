@@ -9,5 +9,8 @@ namespace NorthernLink.Identity.Application.Auth.GenerateBootstrapToken;
 /// </summary>
 public sealed record GenerateBootstrapTokenCommand(Guid TenantId) : ICommand<GenerateBootstrapTokenResponse>;
 
-/// <summary>The raw bootstrap token — visible in plaintext exactly this once.</summary>
-public sealed record GenerateBootstrapTokenResponse(string Token);
+/// <summary>
+/// The raw bootstrap token — visible in plaintext exactly this once — and when it stops
+/// being redeemable (<see cref="BootstrapTokenPolicy.Lifetime"/> after issuance).
+/// </summary>
+public sealed record GenerateBootstrapTokenResponse(string Token, DateTimeOffset ExpiresAtUtc);

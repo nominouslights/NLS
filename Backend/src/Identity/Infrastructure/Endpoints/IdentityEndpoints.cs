@@ -6,6 +6,7 @@ using NorthernLink.Identity.Application.Auth.GenerateBootstrapToken;
 using NorthernLink.Identity.Application.Auth.Login;
 using NorthernLink.Identity.Application.Auth.Logout;
 using NorthernLink.Identity.Application.Auth.Refresh;
+using NorthernLink.Identity.Application.Auth.Setup;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Shared.Tenancy;
 
@@ -25,6 +26,11 @@ public static class IdentityEndpoints
         auth.MapPost("login", Login);
         auth.MapPost("refresh", Refresh);
         auth.MapPost("logout", Logout);
+
+        // First-run setup — anonymous, and self-closing once any user exists. The status check
+        // drives whether the console shows the create-admin screen; setup creates the first admin.
+        auth.MapGet("setup-status", SetupStatus);
+        auth.MapPost("setup", CreateFirstAdmin);
 
         var admin = app.MapGroup("/api/identity/admin");
         admin.MapPost("bootstrap", BootstrapAdminAccount);
@@ -60,6 +66,21 @@ public static class IdentityEndpoints
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
+    private static async Task<IResult> SetupStatus(ISender sender, CancellationToken cancellationToken)
+    {
+        var result = await sender.Query(new GetSetupStatusQuery(), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> CreateFirstAdmin(SetupRequest request, ISender sender, CancellationToken cancellationToken)
+    {
+        var result = await sender.Send(
+            new CreateFirstAdminCommand(request.Email ?? string.Empty, request.Password ?? string.Empty),
+            cancellationToken);
+
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
     private static async Task<IResult> BootstrapAdminAccount(
         BootstrapAdminRequest request, ISender sender, CancellationToken cancellationToken)
     {
@@ -93,6 +114,9 @@ public sealed record LoginRequest(string? Email, string? Password);
 
 /// <summary>Request body for POST /api/identity/auth/refresh and /api/identity/auth/logout.</summary>
 public sealed record RefreshRequest(string? RefreshToken);
+
+/// <summary>Request body for POST /api/identity/auth/setup (first-run create-admin).</summary>
+public sealed record SetupRequest(string? Email, string? Password);
 
 /// <summary>Request body for POST /api/identity/admin/bootstrap.</summary>
 public sealed record BootstrapAdminRequest(string? Token, string? Email, string? Password);

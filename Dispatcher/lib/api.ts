@@ -93,9 +93,12 @@ export class ApiError extends Error {
 /** Low-level fetch: JSON headers + optional bearer token. Throws only on network failure. */
 async function send(path: string, init: RequestInit | undefined, token: string | null): Promise<Response> {
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
     ...(init?.headers as Record<string, string> | undefined),
   };
+  // Only default to JSON content-type if body is not FormData (FormData needs browser-set multipart boundary)
+  if (!(init?.body instanceof FormData)) {
+    headers["Content-Type"] = "application/json";
+  }
   if (token) headers.Authorization = `Bearer ${token}`;
   try {
     return await fetch(`${API_BASE}${path}`, { ...init, headers });
@@ -122,8 +125,33 @@ async function parseError(res: Response): Promise<ApiError> {
   return new ApiError(code, message, res.status);
 }
 
+/** Authenticated fetch with token refresh + 401 retry logic (returns raw Response). */
+async function authenticatedFetch(path: string, init?: RequestInit): Promise<Response> {
+  const { getAccessToken, getValidAccessToken, refreshAccessToken } = await import("./auth");
+
+  const token = await getValidAccessToken();
+  let res = await send(path, init, token);
+
+  if (res.status === 401) {
+    let retryToken: string | null = null;
+    const current = getAccessToken();
+    if (current && current !== token) {
+      retryToken = current;
+    } else {
+      try {
+        retryToken = await refreshAccessToken();
+      } catch {
+        retryToken = null;
+      }
+    }
+    if (retryToken) res = await send(path, init, retryToken);
+  }
+
+  return res;
+}
+
 /**
- * Unauthenticated POST for the Identity auth endpoints (login/refresh/logout).
+ * Unauthenticated POST for the Identity auth endpoints (login/refresh/logout/setup).
  * Used by lib/auth.ts — no bearer header, no 401 retry.
  */
 export async function identityRequest<T>(path: string, body: unknown): Promise<T> {
@@ -134,37 +162,43 @@ export async function identityRequest<T>(path: string, body: unknown): Promise<T
 }
 
 /**
+ * Unauthenticated GET for the Identity first-run setup check. Separate from
+ * `identityRequest` (which is POST-only) and from `request` (which attaches a
+ * bearer token) — this one runs before any session can exist.
+ */
+export async function identityGet<T>(path: string): Promise<T> {
+  const res = await send(path, { method: "GET" }, null);
+  if (!res.ok) throw await parseError(res);
+  return (await res.json()) as T;
+}
+
+/**
  * Authenticated request. Attaches `Authorization: Bearer <accessToken>`
  * (refreshing proactively when the token is near expiry). On a 401, refreshes
  * once and retries the original request once with the new token; if the
  * refresh fails, lib/auth.ts clears the session (surfacing the login screen)
  * and the original 401 is thrown. Never loops.
+ *
+ * Exported for lib/auth.ts (admin invite minting needs an authenticated call);
+ * endpoint wrappers below remain the preferred surface for feature code.
  */
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const { getAccessToken, getValidAccessToken, refreshAccessToken } = await import("./auth");
-
-  const token = await getValidAccessToken();
-  let res = await send(path, init, token);
-
-  if (res.status === 401) {
-    let retryToken: string | null = null;
-    const current = getAccessToken();
-    if (current && current !== token) {
-      // Another caller already rotated the tokens — reuse the fresh one.
-      retryToken = current;
-    } else {
-      try {
-        retryToken = await refreshAccessToken();
-      } catch {
-        retryToken = null; // session cleared by auth module — fall through to the 401
-      }
-    }
-    if (retryToken) res = await send(path, init, retryToken);
-  }
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await authenticatedFetch(path, init);
 
   if (!res.ok) throw await parseError(res);
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
+}
+
+/**
+ * Authenticated blob fetch (e.g. image download). Returns raw bytes without parsing.
+ * Handles 401 refresh/retry like `request<T>`.
+ */
+export async function requestBlob(path: string, init?: RequestInit): Promise<Blob> {
+  const res = await authenticatedFetch(path, init);
+
+  if (!res.ok) throw await parseError(res);
+  return await res.blob();
 }
 
 // ---------------------------------------------------------------------------

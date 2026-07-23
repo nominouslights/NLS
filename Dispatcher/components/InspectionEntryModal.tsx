@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { colors, fonts, rowSurface, statusMeta } from "@/lib/theme";
 import type {
   DefectSeverity,
@@ -9,7 +9,7 @@ import type {
   InspectionType,
 } from "@/lib/types";
 import { addInspection, DVIR_CHECKLIST, resultForDefects } from "@/lib/maintenanceStore";
-import { drivers } from "@/lib/data";
+import { listDrivers } from "@/lib/api/drivers";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { NumberField, SelectField, TextField } from "@/components/ui/Field";
 import { ActionButton } from "@/components/ui/Button";
@@ -39,8 +39,29 @@ export default function InspectionEntryModal({
   onClose: () => void;
   onSaved: (inspection: Inspection) => void;
 }) {
-  const driverNames = drivers.map((d) => d.name);
-  const [driver, setDriver] = useState(driverNames[0] ?? "");
+  // Driver roster from the real Drivers API (Active drivers only).
+  const [driverNames, setDriverNames] = useState<string[]>([]);
+  const [driver, setDriver] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    listDrivers().then(
+      (rows) => {
+        if (active) {
+          const names = rows.filter((d) => d.status === "Active").map((d) => d.name);
+          setDriverNames(names);
+          setDriver((cur) => cur || names[0] || "");
+        }
+      },
+      () => {
+        // Roster unavailable — the driver select stays empty and submit's
+        // "select the driver" validation surfaces the problem.
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
   const [odo, setOdo] = useState(String(odometerKm));
   const [rows, setRows] = useState<Row[]>(
     DVIR_CHECKLIST.map((item) => ({ item, defect: false, severity: "Minor", note: "" })),

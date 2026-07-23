@@ -11,9 +11,11 @@ using NorthernLink.Trips.Domain.Manifests;
 namespace NorthernLink.Trips.Infrastructure.Endpoints;
 
 /// <summary>
-/// The Trips module's minimal-API surface under <c>/api/trips/manifests</c>. Every
-/// endpoint resolves the ambient tenant (401 when absent — the API half of dual tenant
-/// enforcement), stamps it onto the command/query, and dispatches via <see cref="ISender"/>.
+/// The Trips module's minimal-API surface: manifests under <c>/api/trips/manifests</c>
+/// (below), plus the trip-planning endpoints (trips, routes, schedule templates) mapped
+/// by <see cref="TripPlanningEndpoints"/>. Every endpoint resolves the ambient tenant
+/// (401 when absent — the API half of dual tenant enforcement), stamps it onto the
+/// command/query, and dispatches via <see cref="ISender"/>.
 /// </summary>
 public static class TripsEndpoints
 {
@@ -24,6 +26,8 @@ public static class TripsEndpoints
         manifests.MapGet("", GetManifests);
         manifests.MapGet("{id:guid}", GetManifestById);
         manifests.MapPost("", CreateManifest);
+
+        app.MapTripPlanningEndpoints();
 
         return app;
     }

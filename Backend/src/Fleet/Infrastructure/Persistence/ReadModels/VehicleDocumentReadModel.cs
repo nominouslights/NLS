@@ -25,7 +25,8 @@ public sealed class VehicleDocumentReadModelConfiguration : IEntityTypeConfigura
 {
     public void Configure(EntityTypeBuilder<VehicleDocumentReadModel> builder)
     {
-        builder.HasNoKey().ToView("v_vehicle_documents", FleetServiceCollectionExtensions.SchemaName);
+        builder.HasKey(d => d.Id);
+        builder.ToTable("rm_vehicle_documents", FleetServiceCollectionExtensions.SchemaName);
 
         builder.Property(d => d.Id).HasColumnName("id");
         builder.Property(d => d.TenantId).HasColumnName("tenant_id");

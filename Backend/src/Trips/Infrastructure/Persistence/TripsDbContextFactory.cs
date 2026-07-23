@@ -7,9 +7,10 @@ namespace NorthernLink.Trips.Infrastructure.Persistence;
 
 /// <summary>
 /// Design-time factory for `dotnet ef` (migrations only — never used at runtime).
-/// Hardcodes the local superuser connection string (same credentials the Aspire AppHost's
-/// Postgres resource uses) because design-time commands run outside the host's configuration
-/// pipeline; migrations at runtime use the host's connection string instead.
+/// Design-time commands run outside the host's configuration pipeline, so this reads
+/// ConnectionStrings__Postgres from the environment directly — same as the runtime
+/// registration in TripsServiceCollectionExtensions — rather than hardcoding a value.
+/// Export it in your shell before running `dotnet ef` (see CLAUDE.md).
 /// </summary>
 public sealed class TripsDbContextFactory : IDesignTimeDbContextFactory<TripsDbContext>
 {
@@ -17,7 +18,7 @@ public sealed class TripsDbContextFactory : IDesignTimeDbContextFactory<TripsDbC
     {
         var options = new DbContextOptionsBuilder<TripsDbContext>()
             .UseNpgsql(
-                "Host=localhost;Port=5432;Database=northernlink;Username=northernlink;Password=northernlink_dev",
+                RequiredEnvironmentVariable.Get("ConnectionStrings__Postgres"),
                 npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", TripsServiceCollectionExtensions.SchemaName))
             .Options;
 

@@ -2,7 +2,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Logging;
 using NorthernLink.Identity.Application.Abstractions;
 using NorthernLink.Identity.Application.Auth;
 using NorthernLink.Identity.Application.Auth.BootstrapAdmin;
@@ -10,9 +9,10 @@ using NorthernLink.Identity.Application.Auth.GenerateBootstrapToken;
 using NorthernLink.Identity.Application.Auth.Login;
 using NorthernLink.Identity.Application.Auth.Logout;
 using NorthernLink.Identity.Application.Auth.Refresh;
+using NorthernLink.Identity.Application.Auth.Setup;
 using NorthernLink.Identity.Infrastructure.Auth;
-using NorthernLink.Identity.Infrastructure.DevSeed;
 using NorthernLink.Identity.Infrastructure.Persistence;
+using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Shared.Persistence.Auditing;
 using NorthernLink.Shared.Tenancy;
@@ -40,7 +40,7 @@ public static class IdentityServiceCollectionExtensions
         services.AddDbContext<IdentityDbContext>((serviceProvider, options) =>
             options
                 .UseNpgsql(
-                    configuration.GetConnectionString("Postgres"),
+                    RequiredEnvironmentVariable.Get("ConnectionStrings__Postgres"),
                     npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", SchemaName))
                 .AddInterceptors(serviceProvider.GetRequiredService<TenantSessionInterceptor>()));
 
@@ -60,23 +60,11 @@ public static class IdentityServiceCollectionExtensions
         services.AddScoped<ICommandHandler<LogoutCommand>, LogoutCommandHandler>();
         services.AddScoped<ICommandHandler<BootstrapAdminCommand, Guid>, BootstrapAdminCommandHandler>();
         services.AddScoped<ICommandHandler<GenerateBootstrapTokenCommand, GenerateBootstrapTokenResponse>, GenerateBootstrapTokenCommandHandler>();
+        services.AddScoped<ICommandHandler<CreateFirstAdminCommand, LoginResponse>, CreateFirstAdminCommandHandler>();
+
+        // 4. Query handlers.
+        services.AddScoped<IQueryHandler<GetSetupStatusQuery, SetupStatusResponse>, GetSetupStatusQueryHandler>();
 
         return services;
-    }
-
-    /// <summary>
-    /// Applies pending Identity migrations and seeds the one initial admin account. Unlike
-    /// Fleet/Trips' dev-only demo seeding, this runs in every environment — a platform with
-    /// no way to log in isn't usable anywhere, dev or otherwise.
-    /// </summary>
-    public static async Task InitializeIdentityDatabaseAsync(this IServiceProvider serviceProvider, Guid tenantId)
-    {
-        using var scope = serviceProvider.CreateScope();
-
-        var context = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
-        await context.Database.MigrateAsync();
-
-        var logger = scope.ServiceProvider.GetService<ILogger<IdentityDbContext>>();
-        await IdentityDevSeeder.SeedAsync(context, tenantId, logger);
     }
 }

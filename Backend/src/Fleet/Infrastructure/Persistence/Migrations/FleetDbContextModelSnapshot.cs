@@ -660,6 +660,11 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("NorthernLink.Fleet.Infrastructure.Persistence.ReadModels.RetirementCertificateReadModel", b =>
                 {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
                     b.Property<string>("CertificateNumber")
                         .IsRequired()
                         .HasColumnType("text")
@@ -668,10 +673,6 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                     b.Property<int>("FinalOdometerKm")
                         .HasColumnType("integer")
                         .HasColumnName("final_odometer_km");
-
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
 
                     b.Property<DateTimeOffset>("IssuedAtUtc")
                         .HasColumnType("timestamp with time zone")
@@ -718,14 +719,15 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("year");
 
-                    b.ToTable((string)null);
+                    b.HasKey("Id");
 
-                    b.ToView("v_retirement_certificates", "fleet");
+                    b.ToTable("rm_retirement_certificates", "fleet");
                 });
 
             modelBuilder.Entity("NorthernLink.Fleet.Infrastructure.Persistence.ReadModels.ServiceRecordReadModel", b =>
                 {
                     b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
@@ -796,13 +798,16 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable((string)null);
-
-                    b.ToView("v_service_records", "fleet");
+                    b.ToTable("rm_service_records", "fleet");
                 });
 
             modelBuilder.Entity("NorthernLink.Fleet.Infrastructure.Persistence.ReadModels.ShopReadModel", b =>
                 {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
                     b.Property<string>("Address")
                         .HasColumnType("text")
                         .HasColumnName("address");
@@ -822,10 +827,6 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                     b.Property<string>("GstBusinessNo")
                         .HasColumnType("text")
                         .HasColumnName("gst_business_no");
-
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
 
                     b.Property<string>("InspectionStationNo")
                         .HasColumnType("text")
@@ -869,13 +870,18 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("version");
 
-                    b.ToTable((string)null);
+                    b.HasKey("Id");
 
-                    b.ToView("v_shops", "fleet");
+                    b.ToTable("rm_shops", "fleet");
                 });
 
             modelBuilder.Entity("NorthernLink.Fleet.Infrastructure.Persistence.ReadModels.VehicleDocumentReadModel", b =>
                 {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at_utc");
@@ -892,10 +898,6 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                     b.Property<int>("FileSizeKb")
                         .HasColumnType("integer")
                         .HasColumnName("file_size_kb");
-
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
 
                     b.Property<string>("Note")
                         .HasColumnType("text")
@@ -932,14 +934,15 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("version");
 
-                    b.ToTable((string)null);
+                    b.HasKey("Id");
 
-                    b.ToView("v_vehicle_documents", "fleet");
+                    b.ToTable("rm_vehicle_documents", "fleet");
                 });
 
             modelBuilder.Entity("NorthernLink.Fleet.Infrastructure.Persistence.ReadModels.VehicleInspectionReadModel", b =>
                 {
                     b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
@@ -1006,13 +1009,16 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable((string)null);
-
-                    b.ToView("v_vehicle_inspections", "fleet");
+                    b.ToTable("rm_vehicle_inspections", "fleet");
                 });
 
             modelBuilder.Entity("NorthernLink.Fleet.Infrastructure.Persistence.ReadModels.VehicleReadModel", b =>
                 {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
                     b.Property<decimal>("AcquisitionCostCad")
                         .HasColumnType("numeric")
                         .HasColumnName("acquisition_cost_cad");
@@ -1032,10 +1038,6 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                     b.Property<int>("EndOfLifeKm")
                         .HasColumnType("integer")
                         .HasColumnName("end_of_life_km");
-
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
 
                     b.Property<string>("LicencePlate")
                         .IsRequired()
@@ -1116,13 +1118,18 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("year");
 
-                    b.ToTable((string)null);
+                    b.HasKey("Id");
 
-                    b.ToView("v_vehicles", "fleet");
+                    b.ToTable("rm_vehicles", "fleet");
                 });
 
             modelBuilder.Entity("NorthernLink.Fleet.Infrastructure.Persistence.ReadModels.WorkOrderReadModel", b =>
                 {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
                     b.Property<string>("AssignedTo")
                         .HasColumnType("text")
                         .HasColumnName("assigned_to");
@@ -1160,10 +1167,6 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset?>("DueDate")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("due_date");
-
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
 
                     b.PrimitiveCollection<List<string>>("LineItems")
                         .IsRequired()
@@ -1219,9 +1222,9 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("version");
 
-                    b.ToTable((string)null);
+                    b.HasKey("Id");
 
-                    b.ToView("v_work_orders", "fleet");
+                    b.ToTable("rm_work_orders", "fleet");
                 });
 
             modelBuilder.Entity("NorthernLink.Shared.Persistence.Auditing.AggregateSnapshot", b =>
@@ -1529,9 +1532,7 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
 
                             b1.HasKey("ServiceRecordReadModelId", "__synthesizedOrdinal");
 
-                            b1.ToTable((string)null);
-
-                            b1.ToView("v_service_records", "fleet");
+                            b1.ToTable("rm_service_records", "fleet");
 
                             b1.ToJson("parts_used");
 
@@ -1560,9 +1561,7 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
 
                             b1.HasKey("VehicleInspectionReadModelId", "__synthesizedOrdinal");
 
-                            b1.ToTable((string)null);
-
-                            b1.ToView("v_vehicle_inspections", "fleet");
+                            b1.ToTable("rm_vehicle_inspections", "fleet");
 
                             b1.ToJson("checklist_items");
 
@@ -1587,9 +1586,7 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
 
                             b1.HasKey("VehicleInspectionReadModelId", "__synthesizedOrdinal");
 
-                            b1.ToTable((string)null);
-
-                            b1.ToView("v_vehicle_inspections", "fleet");
+                            b1.ToTable("rm_vehicle_inspections", "fleet");
 
                             b1.ToJson("defects");
 

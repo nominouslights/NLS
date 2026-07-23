@@ -1,21 +1,20 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { docStatusFor } from "./maintenanceStore";
-import type { ClientContact, ClientInteraction, PurchaseOrder } from "./types";
+import type { ClientContact, ClientInteraction } from "./types";
 
 // -----------------------------------------------------------------------------
-// Client CRM prototype store — MOCK ONLY (no backend Client domain yet).
+// Client CRM prototype store — MOCK ONLY (no backend CRM domain yet).
 //
-// Contact roster, interaction (touchpoint) log, and purchase-order tracking for
-// the Clients & Contracts screen. A module-level store (not per-component state)
-// so edits survive navigating away from and back to the screen, which
-// Console.tsx unmounts on nav — the same pattern as lib/maintenanceStore.ts.
+// Contact roster and interaction (touchpoint) log for the Clients & Contracts
+// screen. A module-level store (not per-component state) so edits survive
+// navigating away from and back to the screen, which Console.tsx unmounts on
+// nav — the same pattern as lib/maintenanceStore.ts.
 //
-// The seed contacts below are MIGRATED from the loose `contacts: [name, role][]`
-// tuples that used to live on each Client in lib/data.ts — one ClientContact per
-// tuple, the first contact per client flagged primary. No parallel contact field
-// remains on Client.
+// The client roster, contracts, and purchase orders now come from the real
+// Clients API (lib/api/clients.ts). The CRM rows here are still keyed by the
+// old numeric prototype client ids (1..5) — joined to API clients by the
+// prototype-CRM shim in components/screens/clients/shared.tsx.
 //
 // NOTE: intentionally NO relationship health / happiness / satisfaction data —
 // see the note in lib/types.ts.
@@ -26,7 +25,7 @@ import type { ClientContact, ClientInteraction, PurchaseOrder } from "./types";
 // use share one monotonic source (seed ids below are hard-coded so interactions
 // can reference specific contacts).
 
-const counters = { ct: 110, ix: 500, po: 900 };
+const counters = { ct: 110, ix: 500 };
 function nextId(kind: keyof typeof counters, prefix: string): string {
   counters[kind] += 1;
   return `${prefix}-${counters[kind]}`;
@@ -107,27 +106,7 @@ export const interactions: ClientInteraction[] = [
   },
 ];
 
-// ---- seed: purchase orders --------------------------------------------------
-
-export const purchaseOrders: PurchaseOrder[] = [
-  mkPo("PO-AG-2310", 1, "PO-AG-2310", "2026-06-01", "2027-06-30", 96000, "Crew shuttle — renewal draft"),
-  mkPo("PO-AG-2261", 1, "PO-AG-2261", "2025-08-01", "2026-07-31", 84000, "Crew shuttle — annual"),
-  mkPo("PO-AG-2188", 1, "PO-AG-2188", "2024-06-01", "2026-06-15", 12000, "Site transport supplemental"),
-  mkPo("PO-NIHB-07", 2, "PO-NIHB-VP-07", "2026-04-01", "2026-12-31", undefined, "Voucher pool — Q4"),
-  mkPo("PO-CH-0426", 3, "PO-CH-2026-04", "2026-01-10", "2026-09-01", 22000, "Fall charter block"),
-];
-
-function mkPo(
-  id: string,
-  clientId: number,
-  poNumber: string,
-  issued: string,
-  expiry: string,
-  amountCad: number | undefined,
-  description: string,
-): PurchaseOrder {
-  return { id, clientId, poNumber, issued, expiry, amountCad, description, k: docStatusFor(expiry) };
-}
+// Purchase orders now come from the real Clients API (lib/api/clients.ts).
 
 // ---- queries ----------------------------------------------------------------
 
@@ -145,13 +124,6 @@ export function primaryContactFor(clientId: number): ClientContact | undefined {
 /** Interaction timeline for a client, newest first. */
 export function timelineFor(clientId: number): ClientInteraction[] {
   return [...interactions.filter((i) => i.clientId === clientId)].sort((a, b) => (a.date < b.date ? 1 : -1));
-}
-
-/** Purchase orders for a client, soonest expiry first, status recomputed. */
-export function posFor(clientId: number): PurchaseOrder[] {
-  return [...purchaseOrders.filter((p) => p.clientId === clientId)]
-    .map((p) => ({ ...p, k: docStatusFor(p.expiry) }))
-    .sort((a, b) => (a.expiry < b.expiry ? -1 : 1));
 }
 
 /** Every open follow-up across all clients, soonest due first (overdue first).

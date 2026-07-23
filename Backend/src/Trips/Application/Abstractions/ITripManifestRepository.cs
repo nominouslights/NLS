@@ -10,5 +10,7 @@ public interface ITripManifestRepository
 {
     void Add(TripManifest manifest);
 
+    Task<TripManifest?> GetByIdAsync(Guid manifestId, CancellationToken cancellationToken = default);
+
     Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }

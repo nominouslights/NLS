@@ -22,7 +22,9 @@ import {
   POST_TRIP_ITEMS,
   PRE_TRIP_GROUPS,
 } from "@/lib/tripManifestChecklist";
-import { communities, drivers, fleet, trips } from "@/lib/data";
+import { communities, fleet } from "@/lib/data";
+import { isoDaysFromToday, listTrips, sortTrips, stopNames, type TripRecord } from "@/lib/api/trips";
+import { listDrivers } from "@/lib/api/drivers";
 import type { WorkOrderPrefill, WorkOrderPriority } from "@/lib/types";
 import { printTripManifest } from "@/lib/documents/tripManifestPdf";
 import { PageHeader, Panel, SectionLabel } from "@/components/ui/Panel";
@@ -235,6 +237,31 @@ function TranscriptionForm({
   submitRef: React.MutableRefObject<(() => void) | null>;
   onSaved: (record: TripManifest, woPrefill: WorkOrderPrefill | null) => void;
 }) {
+  // Real reference data — recent + upcoming trips for the prefill picker and
+  // the Active driver roster for the name picker. Both degrade to empty lists
+  // when the API is unreachable (everything stays hand-typeable).
+  const [prefillTrips, setPrefillTrips] = useState<TripRecord[]>([]);
+  const [driverNames, setDriverNames] = useState<string[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    listTrips({ from: isoDaysFromToday(-7), to: isoDaysFromToday(7) }).then(
+      (rows) => {
+        if (active) setPrefillTrips(sortTrips(rows));
+      },
+      () => undefined,
+    );
+    listDrivers().then(
+      (rows) => {
+        if (active) setDriverNames(rows.filter((d) => d.status === "Active").map((d) => d.name));
+      },
+      () => undefined,
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
+
   // §1 Trip information
   const [prefillSel, setPrefillSel] = useState("");
   const [tripDate, setTripDate] = useState(todayIso());
@@ -308,14 +335,16 @@ function TranscriptionForm({
 
   function applyTripPrefill(id: string) {
     setPrefillSel(id);
-    const t = trips.find((x) => x.id === id);
+    const t = prefillTrips.find((x) => x.id === id);
     if (!t) return;
-    setTripNumber(t.id);
-    setRoute(t.stops.join(" → "));
-    setClient(t.client);
-    const unitMatch = t.vehicle.match(/U-\d+/)?.[0];
-    if (unitMatch) applyUnit(unitMatch);
-    if (t.driver) applyDriver(t.driver);
+    setTripNumber(t.tripNumber);
+    setRoute(stopNames(t).join(" → "));
+    setClient(t.clientName ?? "");
+    if (t.vehicleUnit) {
+      const unitMatch = t.vehicleUnit.match(/U-\d+/)?.[0] ?? t.vehicleUnit;
+      applyUnit(unitMatch);
+    }
+    if (t.driverName) applyDriver(t.driverName);
   }
 
   function patchRow(itemKey: string, patch: Partial<ChecklistRow>) {
@@ -503,7 +532,10 @@ function TranscriptionForm({
             onChange={applyTripPrefill}
             options={[
               { value: "", label: "— none —" },
-              ...trips.map((t) => ({ value: t.id, label: `${t.id} · ${t.stops.join(" → ")}` })),
+              ...prefillTrips.map((t) => ({
+                value: t.id,
+                label: `${t.tripNumber} · ${t.serviceDate} · ${stopNames(t).join(" → ")}`,
+              })),
             ]}
             hint={<span style={{ color: colors.textFaint }}>· fills the fields below; everything stays editable</span>}
           />
@@ -547,7 +579,7 @@ function TranscriptionForm({
             label="Driver name"
             value={driverName}
             onChange={applyDriver}
-            options={drivers.map((d) => d.name)}
+            options={driverNames}
             placeholder="D. Chartrand"
           />
           <NumberField label="Odometer start (km)" value={odoStart} onChange={setOdoStart} min={0} step={1} />

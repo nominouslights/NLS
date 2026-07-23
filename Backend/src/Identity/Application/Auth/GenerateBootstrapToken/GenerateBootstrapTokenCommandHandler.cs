@@ -10,22 +10,15 @@ public sealed class GenerateBootstrapTokenCommandHandler(
     IAccessTokenIssuer accessTokenIssuer)
     : ICommandHandler<GenerateBootstrapTokenCommand, GenerateBootstrapTokenResponse>
 {
-    /// <summary>
-    /// Bootstrap tokens don't carry their own expiry column (<see cref="AdminBootstrapToken"/>
-    /// only tracks issued/consumed) — this lifetime only sizes the opaque-token generator's
-    /// shared record shape and is otherwise unused.
-    /// </summary>
-    private static readonly TimeSpan NominalLifetime = TimeSpan.FromDays(365);
-
     public async Task<Result<GenerateBootstrapTokenResponse>> Handle(
         GenerateBootstrapTokenCommand command, CancellationToken cancellationToken)
     {
-        var opaque = accessTokenIssuer.IssueOpaqueToken(NominalLifetime);
-        var token = AdminBootstrapToken.Issue(command.TenantId, opaque.TokenHash);
+        var opaque = accessTokenIssuer.IssueOpaqueToken(BootstrapTokenPolicy.Lifetime);
+        var token = AdminBootstrapToken.Issue(command.TenantId, opaque.TokenHash, opaque.ExpiresAtUtc);
 
         bootstrapTokenRepository.Add(token);
         await bootstrapTokenRepository.SaveChangesAsync(cancellationToken);
 
-        return Result.Success(new GenerateBootstrapTokenResponse(opaque.RawToken));
+        return Result.Success(new GenerateBootstrapTokenResponse(opaque.RawToken, opaque.ExpiresAtUtc));
     }
 }

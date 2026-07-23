@@ -37,7 +37,8 @@ public sealed class WorkOrderReadModelConfiguration : IEntityTypeConfiguration<W
 {
     public void Configure(EntityTypeBuilder<WorkOrderReadModel> builder)
     {
-        builder.HasNoKey().ToView("v_work_orders", FleetServiceCollectionExtensions.SchemaName);
+        builder.HasKey(w => w.Id);
+        builder.ToTable("rm_work_orders", FleetServiceCollectionExtensions.SchemaName);
 
         builder.Property(w => w.Id).HasColumnName("id");
         builder.Property(w => w.TenantId).HasColumnName("tenant_id");

@@ -8,8 +8,11 @@ using NorthernLink.Api.HostDefaults;
 using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Tenancy;
 using NorthernLink.Billing.Infrastructure;
+using NorthernLink.Billing.Infrastructure.Endpoints;
 using NorthernLink.Clients.Infrastructure;
+using NorthernLink.Clients.Infrastructure.Endpoints;
 using NorthernLink.Drivers.Infrastructure;
+using NorthernLink.Drivers.Infrastructure.Endpoints;
 using NorthernLink.Fleet.Infrastructure;
 using NorthernLink.Fleet.Infrastructure.Endpoints;
 using NorthernLink.Grocery.Infrastructure;
@@ -39,9 +42,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ITenantContext, JwtTenantContext>();
 
-var jwtSigningKey = builder.Configuration["Identity:JwtSigningKey"]
-    ?? throw new InvalidOperationException(
-        "Identity:JwtSigningKey is not configured. Set the Identity__JwtSigningKey environment variable.");
+var jwtSigningKey = RequiredEnvironmentVariable.Get("Identity__JwtSigningKey");
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -92,16 +93,8 @@ app.UseAuthorization();
 app.MapIdentityEndpoints();
 app.MapFleetEndpoints();
 app.MapTripsEndpoints();
-
-if (app.Environment.IsDevelopment())
-{
-    // Dev-only: apply Fleet/Trips migrations and seed the demo vehicles + manifest on boot.
-    await app.Services.InitializeFleetDatabaseAsync(SeedTenant.Id);
-    await app.Services.InitializeTripsDatabaseAsync(SeedTenant.Id);
-}
-
-// Identity's seed (one admin account) runs in every environment — a platform with no way to
-// log in isn't usable anywhere, dev or otherwise.
-await app.Services.InitializeIdentityDatabaseAsync(SeedTenant.Id);
+app.MapDriversEndpoints();
+app.MapClientsEndpoints();
+app.MapBillingEndpoints();
 
 await app.RunAsync();
