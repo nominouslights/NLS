@@ -1,18 +1,18 @@
 "use client";
 
-import { fonts } from "@/lib/theme";
+import { colors, fonts, statusMeta } from "@/lib/theme";
 
 const vehicles = [
   {
     unit: "INT-3000 · U-02",
-    color: "#E8A020",
+    color: colors.amber,
     active: true,
     driver: "D. Chartrand · Alamos crew",
     next: "Next: Leaf Rapids · ETA 08:05",
   },
   {
     unit: "Transit · U-04",
-    color: "#3B8DD4",
+    color: colors.blue,
     active: false,
     driver: "M. Okimaw · NIHB medical",
     next: "Next: Thompson · ETA 09:40",
@@ -35,12 +35,12 @@ const communityNodes = [
 ];
 
 const vehicleMarkers = [
-  { left: "45%", top: "47%", size: 20, color: "#E8A020" },
-  { left: "28%", top: "30%", size: 20, color: "#3B8DD4" },
+  { left: "45%", top: "47%", size: 20, color: colors.amber },
+  { left: "28%", top: "30%", size: 20, color: colors.blue },
   { left: "76%", top: "60%", size: 18, color: "#7A8899" },
 ];
 
-export default function LiveMap({ onOpenTrip }: { onOpenTrip: (i: number) => void }) {
+export default function LiveMap({ onOpenTrip }: { onOpenTrip: () => void }) {
   return (
     <div style={{ display: "flex", height: "100%" }} className="detailfade">
       {/* vehicle rail */}
@@ -48,27 +48,27 @@ export default function LiveMap({ onOpenTrip }: { onOpenTrip: (i: number) => voi
         style={{
           width: 280,
           flex: "none",
-          background: "#0A1729",
-          borderRight: "1px solid #1E3350",
+          background: colors.railBg,
+          borderRight: `1px solid ${colors.border}`,
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
         }}
       >
-        <div style={{ flex: "none", padding: "18px 18px 12px", borderBottom: "1px solid #1E3350" }}>
+        <div style={{ flex: "none", padding: "18px 18px 12px", borderBottom: `1px solid ${colors.border}` }}>
           <div
             style={{
               fontFamily: fonts.semiCondensed,
               fontSize: 10.5,
               letterSpacing: ".16em",
               textTransform: "uppercase",
-              color: "#4d688a",
+              color: colors.textFaint,
               marginBottom: 3,
             }}
           >
             Live Dispatch Map
           </div>
-          <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 20, color: "#F2F6FB" }}>3 active vehicles</div>
+          <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 20, color: colors.headingBright }}>3 active vehicles</div>
         </div>
         <div style={{ flex: 1, overflowY: "auto", padding: 12 }}>
           {vehicles.map((v) => (
@@ -78,9 +78,9 @@ export default function LiveMap({ onOpenTrip }: { onOpenTrip: (i: number) => voi
                 padding: "12px 13px",
                 marginBottom: 7,
                 borderRadius: 9,
-                background: v.active ? "#16283F" : "#0F1E33",
-                border: `1px solid ${v.active ? "#2f557d" : "#152941"}`,
-                boxShadow: v.active ? `inset 3px 0 0 ${v.color}` : undefined,
+                background: v.active ? colors.cardBgActive : colors.cardBg,
+                border: `1px solid ${v.active ? colors.borderActive : colors.borderSubtle}`,
+                boxShadow: v.active ? `inset 3px 0 0 ${v.color}, ${colors.shadowCard}` : colors.shadowCard,
                 cursor: "pointer",
               }}
             >
@@ -94,10 +94,10 @@ export default function LiveMap({ onOpenTrip }: { onOpenTrip: (i: number) => voi
                     boxShadow: v.active ? `0 0 0 3px ${v.color}33` : undefined,
                   }}
                 />
-                <span style={{ fontFamily: fonts.mono, fontSize: 11, color: "#7EC8F0" }}>{v.unit}</span>
+                <span style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.skyBlue }}>{v.unit}</span>
               </div>
-              <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: "#E8EEF5", fontWeight: 500 }}>{v.driver}</div>
-              <div style={{ fontFamily: fonts.body, fontSize: 11, color: "#9fb2c8", marginTop: 3 }}>{v.next}</div>
+              <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textPrimary, fontWeight: 500 }}>{v.driver}</div>
+              <div style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textMuted, marginTop: 3 }}>{v.next}</div>
             </div>
           ))}
         </div>
@@ -105,21 +105,21 @@ export default function LiveMap({ onOpenTrip }: { onOpenTrip: (i: number) => voi
           style={{
             flex: "none",
             padding: "12px 16px",
-            borderTop: "1px solid #1E3350",
+            borderTop: `1px solid ${colors.border}`,
             fontFamily: fonts.body,
             fontSize: 11,
-            color: "#6B8099",
+            color: colors.textDim,
             display: "flex",
             flexDirection: "column",
             gap: 6,
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#E8A020" }} />
+            <span style={{ width: 9, height: 9, borderRadius: "50%", background: colors.amber }} />
             Corporate / Alamos
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#3B8DD4" }} />
+            <span style={{ width: 9, height: 9, borderRadius: "50%", background: colors.blue }} />
             Community / NIHB
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -130,7 +130,7 @@ export default function LiveMap({ onOpenTrip }: { onOpenTrip: (i: number) => voi
       </div>
 
       {/* map canvas */}
-      <div style={{ flex: 1, position: "relative", background: "radial-gradient(circle at 40% 35%,#0e2138,#08131f 70%)", overflow: "hidden" }}>
+      <div style={{ flex: 1, position: "relative", background: "radial-gradient(circle at 40% 35%, #FDFEFF, #DFE8F1 70%)", overflow: "hidden" }}>
         {/* stale banner */}
         <div
           style={{
@@ -155,7 +155,7 @@ export default function LiveMap({ onOpenTrip }: { onOpenTrip: (i: number) => voi
               height: 14,
               borderRadius: 4,
               background: "#E1B000",
-              color: "#2e2400",
+              color: colors.navy,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -165,7 +165,7 @@ export default function LiveMap({ onOpenTrip }: { onOpenTrip: (i: number) => voi
           >
             ◐
           </span>
-          <span style={{ fontFamily: fonts.body, fontSize: 12, color: "#ecc94b", fontWeight: 500 }}>
+          <span style={{ fontFamily: fonts.body, fontSize: 12, color: statusMeta("soon").t, fontWeight: 500 }}>
             1 vehicle position stale — Starlink connectivity intermittent near South Indian Lake
           </span>
         </div>
@@ -174,12 +174,12 @@ export default function LiveMap({ onOpenTrip }: { onOpenTrip: (i: number) => voi
           <polyline
             points="140,120 300,220 430,300 560,250 660,430"
             fill="none"
-            stroke="#24405f"
+            stroke={colors.borderStrong}
             strokeWidth={3}
             strokeDasharray="2 8"
             strokeLinecap="round"
           />
-          <polyline points="140,120 300,220 430,300" fill="none" stroke="#3B8DD4" strokeWidth={3} strokeLinecap="round" opacity={0.7} />
+          <polyline points="140,120 300,220 430,300" fill="none" stroke={colors.blue} strokeWidth={3} strokeLinecap="round" opacity={0.7} />
         </svg>
 
         {communityNodes.map((n) => (
@@ -190,8 +190,8 @@ export default function LiveMap({ onOpenTrip }: { onOpenTrip: (i: number) => voi
                 width: n.hub ? 14 : 12,
                 height: n.hub ? 14 : 12,
                 borderRadius: "50%",
-                background: "#0B1626",
-                border: `2px solid ${n.hub ? "#E8A020" : "#7EC8F0"}`,
+                background: "#FFFFFF",
+                border: `2px solid ${n.hub ? colors.amber : colors.skyBlue}`,
                 margin: "0 auto",
               }}
             />
@@ -201,7 +201,7 @@ export default function LiveMap({ onOpenTrip }: { onOpenTrip: (i: number) => voi
                 fontWeight: n.hub ? 700 : undefined,
                 fontSize: n.hub ? 12 : 11,
                 letterSpacing: n.hub ? undefined : ".06em",
-                color: n.hub ? "#F2F6FB" : "#c2d0e0",
+                color: n.hub ? colors.headingBright : colors.textSecondary,
                 whiteSpace: "nowrap",
                 marginTop: 5,
                 display: "block",
@@ -224,7 +224,7 @@ export default function LiveMap({ onOpenTrip }: { onOpenTrip: (i: number) => voi
               height: v.size,
               borderRadius: "50%",
               background: v.color,
-              border: "2px solid #0B1626",
+              border: "2px solid #FFFFFF",
               boxShadow: v.color !== "#7A8899" ? `0 0 0 4px ${v.color}48` : undefined,
             }}
           />
@@ -239,24 +239,24 @@ export default function LiveMap({ onOpenTrip }: { onOpenTrip: (i: number) => voi
             width: 250,
             padding: "15px 16px",
             borderRadius: 12,
-            background: "rgba(15,30,51,.92)",
-            border: "1px solid #2f557d",
+            background: "rgba(255,255,255,.95)",
+            border: `1px solid ${colors.border}`,
             backdropFilter: "blur(6px)",
-            boxShadow: "0 8px 24px rgba(0,0,0,.4)",
+            boxShadow: colors.shadowPop,
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-            <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#E8A020" }} />
-            <span style={{ fontFamily: fonts.mono, fontSize: 11, color: "#7EC8F0" }}>INT-3000 · U-02</span>
-            <span style={{ marginLeft: "auto", fontFamily: fonts.body, fontSize: 11, color: "#38d3a6", fontWeight: 600 }}>On route</span>
+            <span style={{ width: 10, height: 10, borderRadius: "50%", background: colors.amber }} />
+            <span style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.skyBlue }}>INT-3000 · U-02</span>
+            <span style={{ marginLeft: "auto", fontFamily: fonts.body, fontSize: 11, color: statusMeta("ontime").t, fontWeight: 600 }}>On route</span>
           </div>
-          <div style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: 600, color: "#E8EEF5", marginBottom: 2 }}>D. Chartrand · TR-4821</div>
-          <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: "#9fb2c8", marginBottom: 11 }}>
+          <div style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: 600, color: colors.textPrimary, marginBottom: 2 }}>D. Chartrand · TR-4821</div>
+          <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textMuted, marginBottom: 11 }}>
             Next stop Leaf Rapids · ETA 08:05 · 18/24 crew
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <span
-              onClick={() => onOpenTrip(0)}
+              onClick={() => onOpenTrip()}
               style={{
                 flex: 1,
                 textAlign: "center",
@@ -266,8 +266,8 @@ export default function LiveMap({ onOpenTrip }: { onOpenTrip: (i: number) => voi
                 letterSpacing: ".03em",
                 padding: 7,
                 borderRadius: 7,
-                background: "#3B8DD4",
-                color: "#04121f",
+                background: colors.blue,
+                color: "#FFFFFF",
                 cursor: "pointer",
               }}
             >
@@ -284,8 +284,8 @@ export default function LiveMap({ onOpenTrip }: { onOpenTrip: (i: number) => voi
                 padding: 7,
                 borderRadius: 7,
                 background: "transparent",
-                border: "1px solid #2f557d",
-                color: "#c2d0e0",
+                border: `1px solid ${colors.borderActive}`,
+                color: colors.textSecondary,
                 cursor: "pointer",
               }}
             >

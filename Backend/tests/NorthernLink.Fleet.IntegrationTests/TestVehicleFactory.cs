@@ -14,21 +14,29 @@ internal static class TestVehicleFactory
 
     private static int _counter;
 
-    public static Vehicle Create(Guid tenantId, int odometerKm = 100_000, int endOfLifeKm = 500_000)
+    public static Vehicle Create(Guid tenantId, int odometerKm = 100_000, int endOfLifeKm = 500_000) =>
+        Create(tenantId, odometerKm, endOfLifeKm, acquisitionCostCad: 100_000m, seatingCapacity: 24);
+
+    public static Vehicle Create(
+        Guid tenantId,
+        int odometerKm,
+        int endOfLifeKm,
+        decimal acquisitionCostCad,
+        int seatingCapacity)
     {
         var sequence = Interlocked.Increment(ref _counter);
         var result = Vehicle.Register(
             tenantId,
-            unitNumber: $"U-{sequence:D3}",
+            unitNumber: $"U-{sequence:D4}",
             Vin.Create($"{VinStem}{sequence % 100:D2}").Value,
             make: "International",
             model: "3000",
             year: 2019,
-            seatingCapacity: 24,
-            licencePlate: $"MB · GHT {sequence:D3}",
+            seatingCapacity,
+            licencePlate: $"MB · GHT {sequence:D4}",
             requiredLicenceClass: "Class 4",
             odometerKm,
-            acquisitionCostCad: 100_000m,
+            acquisitionCostCad,
             endOfLifeKm);
 
         Assert.True(result.IsSuccess, $"Test vehicle registration failed: {result.Error.Code}");

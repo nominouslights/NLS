@@ -21,5 +21,12 @@
     <Project Path="tests/NorthernLink.Fleet.Tests/NorthernLink.Fleet.Tests.csproj" />
     <Project Path="tests/NorthernLink.Shared.Tests/NorthernLink.Shared.Tests.csproj" />
     <Project Path="tests/NorthernLink.Fleet.IntegrationTests/NorthernLink.Fleet.IntegrationTests.csproj" />
+    <Project Path="tests/NorthernLink.Identity.Tests/NorthernLink.Identity.Tests.csproj" />
+    <Project Path="tests/NorthernLink.Identity.IntegrationTests/NorthernLink.Identity.IntegrationTests.csproj" />
+    <Project Path="tests/NorthernLink.Trips.Tests/NorthernLink.Trips.Tests.csproj" />
+    <Project Path="tests/NorthernLink.Drivers.Tests/NorthernLink.Drivers.Tests.csproj" />
+    <Project Path="tests/NorthernLink.Drivers.IntegrationTests/NorthernLink.Drivers.IntegrationTests.csproj" />
+    <Project Path="tests/NorthernLink.Clients.Tests/NorthernLink.Clients.Tests.csproj" />
+    <Project Path="tests/NorthernLink.Billing.Tests/NorthernLink.Billing.Tests.csproj" />
   </Folder>
 </Solution>

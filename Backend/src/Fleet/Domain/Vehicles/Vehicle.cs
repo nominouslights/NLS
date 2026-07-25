@@ -148,6 +148,7 @@ public sealed class Vehicle : AggregateRoot, ITenantScoped
         EndOfLifeKm = endOfLifeKm;
         UpdatedAtUtc = DateTimeOffset.UtcNow;
 
+        Raise(new VehicleDetailsUpdatedDomainEvent(Id, TenantId));
         return Result.Success();
     }
 
@@ -208,6 +209,8 @@ public sealed class Vehicle : AggregateRoot, ITenantScoped
 
         OdometerKm = odometerKm;
         UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        Raise(new VehicleOdometerRecordedDomainEvent(Id, odometerKm));
 
         if (odometerKm >= EndOfLifeKm && Status != VehicleStatus.Retired)
         {

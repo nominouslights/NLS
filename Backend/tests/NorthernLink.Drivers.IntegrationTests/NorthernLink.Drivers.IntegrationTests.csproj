@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- End-to-end tests for the Drivers read-side projections (journal → worker → rm_* rows)
+       against a real Postgres in a Testcontainers container, connecting as a NON-superuser
+       role so Row-Level Security is actually enforced — the one guarantee local dev
+       (superuser) can never exercise. Requires Docker. -->
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Drivers\NorthernLink.Drivers.csproj" />
+  </ItemGroup>
+
+</Project>

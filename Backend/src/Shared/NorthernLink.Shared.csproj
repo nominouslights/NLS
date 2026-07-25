@@ -13,6 +13,10 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="NorthernLink.Shared.Tests" />
+    <!-- Drives ProjectionWorker.ProcessOnceAsync / ProjectionRegistryBuilder.Build directly
+         (the projection worker's process-once entry point is internal by design). -->
+    <InternalsVisibleTo Include="NorthernLink.Fleet.IntegrationTests" />
+    <InternalsVisibleTo Include="NorthernLink.Drivers.IntegrationTests" />
   </ItemGroup>
 
   <ItemGroup>
@@ -22,6 +26,7 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
     <PackageReference Include="RabbitMQ.Client" />
+    <PackageReference Include="AWSSDK.S3" />
   </ItemGroup>
 
 </Project>

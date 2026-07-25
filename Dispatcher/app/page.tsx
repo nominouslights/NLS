@@ -1,5 +1,5 @@
-import Console from "@/components/Console";
+import AuthGate from "@/components/AuthGate";
 
 export default function Home() {
-  return <Console />;
+  return <AuthGate />;
 }

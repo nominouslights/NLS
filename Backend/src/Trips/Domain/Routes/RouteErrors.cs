@@ -1,0 +1,25 @@
+using NorthernLink.Shared.Kernel;
+
+namespace NorthernLink.Trips.Domain.Routes;
+
+/// <summary>All domain errors the Route aggregate (and its handlers) can produce.</summary>
+public static class RouteErrors
+{
+    public static readonly Error NotFound = Error.NotFound(
+        "Trips.Route.NotFound", "The route was not found.");
+
+    public static readonly Error NameRequired = Error.Validation(
+        "Trips.Route.NameRequired", "A route name is required.");
+
+    public static readonly Error AtLeastTwoStops = Error.Validation(
+        "Trips.Route.AtLeastTwoStops", "A route needs at least an origin and a destination stop.");
+
+    public static readonly Error StopNameRequired = Error.Validation(
+        "Trips.Route.StopNameRequired", "Every route stop needs a name.");
+
+    public static readonly Error InvalidDistance = Error.Validation(
+        "Trips.Route.InvalidDistance", "The route distance must be greater than zero kilometres.");
+
+    public static readonly Error InvalidDuration = Error.Validation(
+        "Trips.Route.InvalidDuration", "The estimated duration must be greater than zero.");
+}

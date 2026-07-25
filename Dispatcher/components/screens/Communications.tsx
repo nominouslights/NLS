@@ -1,6 +1,6 @@
 "use client";
 
-import { fonts } from "@/lib/theme";
+import { colors, fonts, statusMeta } from "@/lib/theme";
 import { PageHeader } from "@/components/ui/Panel";
 
 const messages = [
@@ -42,9 +42,9 @@ export default function Communications() {
       <div style={{ flex: "none", padding: "20px 26px 12px" }}>
         <PageHeader eyebrow="Business · Outbound messaging & templates" title="Communications" />
       </div>
-      <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "1fr 380px", borderTop: "1px solid #1E3350" }}>
-        <div style={{ minHeight: 0, overflowY: "auto", padding: "18px 22px", borderRight: "1px solid #1E3350" }}>
-          <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 16, letterSpacing: ".06em", color: "#c2d0e0", marginBottom: 12 }}>
+      <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "1fr 380px", borderTop: `1px solid ${colors.border}` }}>
+        <div style={{ minHeight: 0, overflowY: "auto", padding: "18px 22px", borderRight: `1px solid ${colors.border}` }}>
+          <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 16, letterSpacing: ".06em", color: colors.textSecondary, marginBottom: 12 }}>
             MESSAGE LOG
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -54,12 +54,13 @@ export default function Communications() {
                 style={{
                   padding: "12px 15px",
                   borderRadius: 10,
-                  background: "#0F1E33",
-                  border: `1px solid ${m.ok ? "#152941" : "rgba(213,94,0,.28)"}`,
+                  background: colors.cardBg,
+                  border: `1px solid ${m.ok ? colors.borderSubtle : "rgba(213,94,0,.28)"}`,
+                  boxShadow: colors.shadowCard,
                 }}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                  <span style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: 600, color: "#E8EEF5" }}>{m.title}</span>
+                  <span style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: 600, color: colors.textPrimary }}>{m.title}</span>
                   <span
                     style={{
                       display: "inline-flex",
@@ -68,7 +69,7 @@ export default function Communications() {
                       fontFamily: fonts.body,
                       fontWeight: 600,
                       fontSize: 10.5,
-                      color: m.ok ? "#38d3a6" : "#f0803f",
+                      color: m.ok ? statusMeta("ontime").t : statusMeta("over").t,
                     }}
                   >
                     <span
@@ -76,8 +77,8 @@ export default function Communications() {
                         width: 13,
                         height: 13,
                         borderRadius: 4,
-                        background: m.ok ? "#14B88A" : "#D55E00",
-                        color: m.ok ? "#04231a" : "#fff",
+                        background: m.ok ? "#009E73" : "#D55E00",
+                        color: "#FFFFFF",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
@@ -90,14 +91,14 @@ export default function Communications() {
                     {m.status}
                   </span>
                 </div>
-                <div style={{ fontFamily: fonts.body, fontSize: 12, color: "#9fb2c8", lineHeight: 1.5 }}>{m.body}</div>
-                <div style={{ fontFamily: fonts.mono, fontSize: 10, color: "#6B8099", marginTop: 5 }}>{m.time}</div>
+                <div style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textMuted, lineHeight: 1.5 }}>{m.body}</div>
+                <div style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.textDim, marginTop: 5 }}>{m.time}</div>
               </div>
             ))}
           </div>
         </div>
         <div style={{ minHeight: 0, overflowY: "auto", padding: "18px 22px" }}>
-          <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 16, letterSpacing: ".06em", color: "#c2d0e0", marginBottom: 12 }}>
+          <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 16, letterSpacing: ".06em", color: colors.textSecondary, marginBottom: 12 }}>
             TEMPLATE LIBRARY
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 18 }}>
@@ -107,11 +108,12 @@ export default function Communications() {
                 style={{
                   padding: "10px 13px",
                   borderRadius: 9,
-                  background: "#0F1E33",
-                  border: "1px solid #152941",
+                  background: colors.cardBg,
+                  border: `1px solid ${colors.borderSubtle}`,
+                  boxShadow: colors.shadowCard,
                   fontFamily: fonts.body,
                   fontSize: 12.5,
-                  color: "#c2d0e0",
+                  color: colors.textSecondary,
                   cursor: "pointer",
                 }}
               >
@@ -119,20 +121,20 @@ export default function Communications() {
               </div>
             ))}
           </div>
-          <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 16, letterSpacing: ".06em", color: "#c2d0e0", marginBottom: 11 }}>
+          <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 16, letterSpacing: ".06em", color: colors.textSecondary, marginBottom: 11 }}>
             COMPOSE
           </div>
-          <div style={{ padding: "14px 15px", borderRadius: 11, background: "#0F1E33", border: "1px solid #1E3350" }}>
+          <div style={{ padding: "14px 15px", borderRadius: 11, background: colors.cardBg, border: `1px solid ${colors.border}`, boxShadow: colors.shadowCard }}>
             <div
               style={{
                 height: 120,
                 borderRadius: 8,
-                background: "#0A1729",
-                border: "1px solid #152941",
+                background: colors.inputBg,
+                border: `1px solid ${colors.borderSubtle}`,
                 padding: "11px 13px",
                 fontFamily: fonts.body,
                 fontSize: 12.5,
-                color: "#6B8099",
+                color: colors.textDim,
                 lineHeight: 1.5,
                 marginBottom: 11,
               }}
@@ -148,8 +150,8 @@ export default function Communications() {
                 letterSpacing: ".03em",
                 padding: "8px 16px",
                 borderRadius: 8,
-                background: "#3B8DD4",
-                color: "#04121f",
+                background: colors.blue,
+                color: "#FFFFFF",
                 cursor: "pointer",
               }}
             >

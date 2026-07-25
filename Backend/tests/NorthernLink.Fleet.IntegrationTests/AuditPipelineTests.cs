@@ -56,7 +56,7 @@ public class AuditPipelineTests(PostgresFixture fixture)
         await context.SaveChangesAsync();                                   // v2: status-changed
 
         Assert.True(vehicle.RecordOdometer(120_000).IsSuccess);
-        await context.SaveChangesAsync();                                   // v3: no event — snapshot only
+        await context.SaveChangesAsync();                                   // v3: odometer-recorded
 
         var snapshots = await context.Set<AggregateSnapshot>()
             .Where(s => s.AggregateId == vehicle.Id)
@@ -64,16 +64,20 @@ public class AuditPipelineTests(PostgresFixture fixture)
             .ToListAsync();
         Assert.Equal([1, 2, 3], snapshots.Select(s => s.Version));
 
-        // The moment-in-time record: the event-less odometer change is still captured.
+        // The moment-in-time record captures the odometer change too.
         using var v3 = JsonDocument.Parse(snapshots[2].State);
         Assert.Equal(120_000, v3.RootElement.GetProperty("odometerKm").GetInt32());
 
+        // Every save journals an event — ModuleDbContext rejects eventless writes, so the
+        // odometer change (formerly journal-invisible) now has its own row.
         var journal = await context.Set<EventJournalEntry>()
             .Where(e => e.AggregateId == vehicle.Id)
             .OrderBy(e => e.Position)
             .ToListAsync();
-        Assert.Equal(["vehicle-registered", "vehicle-status-changed"], journal.Select(e => e.EventType));
-        Assert.Equal([1, 2], journal.Select(e => e.AggregateVersion));
+        Assert.Equal(
+            ["vehicle-registered", "vehicle-status-changed", "vehicle-odometer-recorded"],
+            journal.Select(e => e.EventType));
+        Assert.Equal([1, 2, 3], journal.Select(e => e.AggregateVersion));
     }
 
     [Fact]

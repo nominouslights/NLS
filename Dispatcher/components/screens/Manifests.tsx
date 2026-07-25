@@ -1,108 +1,222 @@
 "use client";
 
-import { useState } from "react";
-import { fonts, rowSurface } from "@/lib/theme";
-import { PageHeader } from "@/components/ui/Panel";
-import { ServiceChip } from "@/components/ui/Chip";
+import { useCallback, useEffect, useState } from "react";
+import { colors, fonts, rowSurface, statusMeta, type StatusKind } from "@/lib/theme";
+import { ApiError, getTripManifest } from "@/lib/api";
+import {
+  corridorLabel,
+  isoDaysFromToday,
+  listTrips,
+  recordTripDemand,
+  refetchUntil,
+  shortDateLabel,
+  sortTrips,
+  svcForTrip,
+  tripWindowLabel,
+  type TripRecord,
+} from "@/lib/api/trips";
+import { PageHeader, Panel, SectionLabel } from "@/components/ui/Panel";
+import { ServiceChip, StatusChip } from "@/components/ui/Chip";
+import { ActionButton } from "@/components/ui/Button";
+import { printTripManifest } from "@/lib/documents/tripManifestPdf";
 
-interface ManifestPassenger {
-  name: string;
-  status: "Confirmed" | "Pending";
+// Manifests & Demand — trips with demand semantics (community / NIHB /
+// contract crew) for today ± a few days, from the real Trips API. The demand
+// meter reads seatsConfirmed / seatsMinimum off the trip; demand controls
+// write POST /api/trips/{id}/demand. Passenger name rosters have no backend —
+// they arrive with the driver's NL-TM-01 manifest after the trip.
+
+const WINDOW_DAYS = 3;
+const DEMAND_SERVICE_TYPES = new Set(["Community", "Nihb", "ContractCrew"]);
+
+function demandBadge(t: TripRecord): { kind: StatusKind; label: string } {
+  if (t.demandGuaranteed) return { kind: "ontime", label: "Guaranteed · Gift-a-Seat" };
+  if (t.seatsMinimum != null) {
+    return t.seatsConfirmed >= t.seatsMinimum
+      ? { kind: "ontime", label: `Viable · ${t.seatsConfirmed} / ${t.seatsMinimum}` }
+      : { kind: "soon", label: `Not yet viable · ${t.seatsConfirmed} / ${t.seatsMinimum}` };
+  }
+  if (t.serviceType === "Nihb") return { kind: "ontime", label: "Confirmed · voucher" };
+  return {
+    kind: "info",
+    label: t.seatsCapacity != null ? `Crew · ${t.seatsConfirmed} / ${t.seatsCapacity}` : `Crew · ${t.seatsConfirmed}`,
+  };
 }
-
-interface ManifestRecord {
-  id: string;
-  svc: "community" | "nihb" | "alamos";
-  svcLabel: string;
-  corridor: string;
-  win: string;
-  km: number;
-  vehicle: string;
-  listBadge: { label: string; bg: string; bd: string; tx: string; glyph: string };
-  capacitySeats: number;
-  passengers: ManifestPassenger[];
-  demand: { confirmed: number; needed: number } | null;
-}
-
-const manifestRecords: ManifestRecord[] = [
-  {
-    id: "TR-4823",
-    svc: "community",
-    svcLabel: "Community",
-    corridor: "Leaf Rapids → Thompson",
-    win: "Fri Jul 7 · 11:00 → 14:20",
-    km: 174,
-    vehicle: "Transit T-150 (7-seat)",
-    listBadge: { label: "Not yet viable · 2 / 4", bg: "rgba(225,176,0,.12)", bd: "rgba(225,176,0,.35)", tx: "#ecc94b", glyph: "◐" },
-    capacitySeats: 7,
-    passengers: [
-      { name: "Marcel Dumas · Leaf Rapids", status: "Confirmed" },
-      { name: "Priya Sandhu · Thompson", status: "Pending" },
-    ],
-    demand: { confirmed: 2, needed: 4 },
-  },
-  {
-    id: "TR-4822",
-    svc: "nihb",
-    svcLabel: "NIHB Medical",
-    corridor: "South Indian Lake → Thompson",
-    win: "Fri Jul 7 · 07:15 → 09:40",
-    km: 220,
-    vehicle: "Transit T-150 (7-seat)",
-    listBadge: { label: "Confirmed · voucher", bg: "rgba(20,184,138,.13)", bd: "rgba(20,184,138,.35)", tx: "#38d3a6", glyph: "✓" },
-    capacitySeats: 7,
-    passengers: [
-      { name: "Eleanor Bighetty · South Indian Lake", status: "Confirmed" },
-      { name: "Escort · authorized", status: "Confirmed" },
-    ],
-    demand: null,
-  },
-  {
-    id: "TR-4821",
-    svc: "alamos",
-    svcLabel: "Alamos",
-    corridor: "Thompson → Lynn Lake",
-    win: "Tue Jul 7 · 06:30 → 09:55",
-    km: 198,
-    vehicle: "International 3000 (24-seat)",
-    listBadge: { label: "Crew · 18 / 24", bg: "rgba(59,141,212,.12)", bd: "rgba(59,141,212,.4)", tx: "#7EC8F0", glyph: "●" },
-    capacitySeats: 24,
-    passengers: [],
-    demand: null,
-  },
-];
 
 export default function Manifests() {
-  const [sel, setSel] = useState(0);
+  const [rows, setRows] = useState<TripRecord[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [giftShown, setGiftShown] = useState(false);
-  const m = manifestRecords[sel];
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  function select(i: number) {
-    setSel(i);
+  const fetchList = useCallback(async () => {
+    const all = await listTrips({
+      from: isoDaysFromToday(-WINDOW_DAYS),
+      to: isoDaysFromToday(WINDOW_DAYS),
+    });
+    return sortTrips(all.filter((t) => DEMAND_SERVICE_TYPES.has(t.serviceType) && t.status !== "Cancelled"));
+  }, []);
+
+  const load = useCallback(async () => {
+    try {
+      const fresh = await fetchList();
+      setRows(fresh);
+      setLoadError(null);
+    } catch (e) {
+      setRows(null);
+      setLoadError(e instanceof ApiError ? e.message : "Failed to load demand trips.");
+    }
+  }, [fetchList]);
+
+  useEffect(() => {
+    let active = true;
+    fetchList().then(
+      (fresh) => {
+        if (active) {
+          setRows(fresh);
+          setLoadError(null);
+        }
+      },
+      (e) => {
+        if (active) {
+          setRows(null);
+          setLoadError(e instanceof ApiError ? e.message : "Failed to load demand trips.");
+        }
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [fetchList]);
+
+  const m = rows?.find((t) => t.id === selectedId) ?? rows?.[0] ?? null;
+
+  function select(id: string) {
+    setSelectedId(id);
     setGiftShown(false);
+    setActionError(null);
   }
+
+  async function submitDemand(t: TripRecord, seatsConfirmed: number, demandGuaranteed: boolean) {
+    if (busy) return;
+    setBusy(true);
+    setActionError(null);
+    try {
+      await recordTripDemand(t.id, seatsConfirmed, demandGuaranteed);
+      const fresh = await refetchUntil(fetchList, (list) => {
+        const row = list.find((x) => x.id === t.id);
+        return row !== undefined && row.seatsConfirmed === seatsConfirmed && row.demandGuaranteed === demandGuaranteed;
+      });
+      setRows(fresh);
+    } catch (e) {
+      setActionError(e instanceof ApiError ? e.message : "Failed to record demand — please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function printManifest(t: TripRecord) {
+    if (!t.manifestId) return;
+    try {
+      const manifest = await getTripManifest(t.manifestId);
+      printTripManifest(manifest);
+    } catch (e) {
+      setActionError(e instanceof ApiError ? e.message : "Failed to load the manifest.");
+    }
+  }
+
+  const header = (
+    <div style={{ flex: "none", padding: "20px 26px 12px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
+      <PageHeader eyebrow="Operations · Manifests, demand activation & run economics" title="Manifests & Demand" />
+      <ActionButton variant="secondary" onClick={() => printTripManifest(null)} style={{ marginTop: 6 }}>
+        PRINT BLANK NL-TM-01
+      </ActionButton>
+    </div>
+  );
+
+  if (loadError) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", height: "100%" }} className="detailfade">
+        {header}
+        <div style={{ padding: "26px", maxWidth: 560 }}>
+          <Panel borderColor="rgba(213,94,0,.4)">
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <StatusChip kind="over" label={`Demand trips unavailable — ${loadError}`} />
+              <ActionButton variant="primary" onClick={load}>
+                RETRY
+              </ActionButton>
+            </div>
+          </Panel>
+        </div>
+      </div>
+    );
+  }
+
+  if (rows === null) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", height: "100%" }} className="detailfade">
+        {header}
+        <div style={{ padding: "16px 26px" }}>
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              style={{
+                height: 74,
+                borderRadius: 9,
+                border: `1px solid ${colors.borderSubtle}`,
+                background: colors.cardBg,
+                marginBottom: 6,
+                opacity: 0.55 - i * 0.12,
+              }}
+            />
+          ))}
+          <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textDim, marginTop: 10 }}>
+            Loading demand trips from API…
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const seatsNeeded = m && m.seatsMinimum != null ? Math.max(0, m.seatsMinimum - m.seatsConfirmed) : 0;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }} className="detailfade">
-      <div style={{ flex: "none", padding: "20px 26px 12px" }}>
-        <PageHeader eyebrow="Operations · Manifests, demand activation & run economics" title="Manifests & Demand" />
-      </div>
-      <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "32% 1fr", borderTop: "1px solid #1E3350" }}>
+      {header}
+      <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "32% 1fr", borderTop: `1px solid ${colors.border}` }}>
         {/* master */}
-        <div style={{ minHeight: 0, overflowY: "auto", padding: "16px 18px", borderRight: "1px solid #1E3350" }}>
-          {manifestRecords.map((rec, i) => {
-            const active = i === sel;
+        <div style={{ minHeight: 0, overflowY: "auto", padding: "16px 18px", borderRight: `1px solid ${colors.border}` }}>
+          {rows.length === 0 && (
+            <Panel>
+              <SectionLabel>No demand runs in window</SectionLabel>
+              <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textMuted, lineHeight: 1.6 }}>
+                No community, NIHB, or contract-crew trips within ±{WINDOW_DAYS} days. Trips appear here as the wizard
+                or the schedule generator creates them.
+              </div>
+            </Panel>
+          )}
+          {rows.map((rec) => {
+            const active = m !== null && rec.id === m.id;
+            const badge = demandBadge(rec);
+            const bm = statusMeta(badge.kind);
             return (
               <div
                 key={rec.id}
-                onClick={() => select(i)}
-                style={{ padding: "12px 14px", marginBottom: 5, ...rowSurface(active, "#3B8DD4") }}
+                onClick={() => select(rec.id)}
+                style={{ padding: "12px 14px", marginBottom: 5, ...rowSurface(active, colors.blue) }}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                  <ServiceChip svc={rec.svc} label={rec.svcLabel} />
-                  <span style={{ fontFamily: fonts.mono, fontSize: 11, color: "#7EC8F0" }}>{rec.id}</span>
+                  <ServiceChip svc={svcForTrip(rec.serviceType)} />
+                  <span style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.skyBlue }}>{rec.tripNumber}</span>
                 </div>
-                <div style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: 600, color: "#E8EEF5" }}>{rec.corridor}</div>
+                <div style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: 600, color: colors.textPrimary }}>
+                  {corridorLabel(rec)}
+                </div>
+                <div style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textDim, marginTop: 3 }}>
+                  {shortDateLabel(rec.serviceDate)} · {tripWindowLabel(rec)}
+                </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
                   <span
                     style={{
@@ -114,12 +228,12 @@ export default function Manifests() {
                       fontFamily: fonts.body,
                       fontWeight: 600,
                       fontSize: 10.5,
-                      background: rec.listBadge.bg,
-                      border: `1px solid ${rec.listBadge.bd}`,
-                      color: rec.listBadge.tx,
+                      background: bm.bg,
+                      border: `1px solid ${bm.bd}`,
+                      color: bm.t,
                     }}
                   >
-                    {rec.listBadge.glyph} {rec.listBadge.label}
+                    {bm.g} {badge.label}
                   </span>
                 </div>
               </div>
@@ -128,271 +242,247 @@ export default function Manifests() {
         </div>
 
         {/* detail */}
-        <div style={{ minHeight: 0, overflowY: "auto", padding: "22px 26px", background: "#0C1A2C" }}>
-          <div className="detailfade" key={m.id}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
-              <ServiceChip svc={m.svc} label={m.svcLabel} />
-              <span style={{ fontFamily: fonts.mono, fontSize: 13, color: "#7EC8F0", marginLeft: "auto" }}>{m.id}</span>
+        <div style={{ minHeight: 0, overflowY: "auto", padding: "22px 26px", background: colors.detailBg }}>
+          {m === null ? (
+            <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textDim }}>
+              Select a run to manage its demand.
             </div>
-            <h2 style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 26, lineHeight: 1.05, color: "#F2F6FB", margin: "6px 0 4px" }}>
-              {m.corridor}
-            </h2>
-            <div style={{ fontFamily: fonts.mono, fontSize: 12, color: "#9fb2c8", marginBottom: 16 }}>
-              {m.win} · {m.km} km · {m.vehicle}
-            </div>
+          ) : (
+            <div className="detailfade" key={m.id}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
+                <ServiceChip svc={svcForTrip(m.serviceType)} />
+                <span style={{ fontFamily: fonts.mono, fontSize: 13, color: colors.skyBlue, marginLeft: "auto" }}>{m.tripNumber}</span>
+              </div>
+              <h2 style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 26, lineHeight: 1.05, color: colors.headingBright, margin: "6px 0 4px" }}>
+                {corridorLabel(m)}
+              </h2>
+              <div style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.textMuted, marginBottom: 16 }}>
+                {shortDateLabel(m.serviceDate)} · {tripWindowLabel(m)} · {m.distanceKm} km
+                {m.vehicleUnit ? ` · ${m.vehicleUnit}` : ""}
+              </div>
 
-            {/* demand meter — community runs only */}
-            {m.demand && (
-              <div style={{ padding: "16px 18px", background: "#0F1E33", border: "1px solid rgba(225,176,0,.3)", borderRadius: 12, marginBottom: 14 }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 11 }}>
-                  <div
-                    style={{
-                      fontFamily: fonts.semiCondensed,
-                      fontSize: 9.5,
-                      letterSpacing: ".14em",
-                      textTransform: "uppercase",
-                      color: "#8fa6c0",
-                    }}
-                  >
-                    Demand meter · {m.demand.needed}-passenger minimum
+              {actionError && (
+                <Panel borderColor="rgba(213,94,0,.4)" style={{ marginBottom: 12 }}>
+                  <StatusChip kind="over" label={actionError} />
+                </Panel>
+              )}
+
+              {/* demand meter — runs with a viability minimum */}
+              {m.seatsMinimum != null && (
+                <div style={{ padding: "16px 18px", background: colors.cardBg, border: "1px solid rgba(225,176,0,.3)", borderRadius: 12, marginBottom: 14, boxShadow: colors.shadowCard }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 11 }}>
+                    <div
+                      style={{
+                        fontFamily: fonts.semiCondensed,
+                        fontSize: 9.5,
+                        letterSpacing: ".14em",
+                        textTransform: "uppercase",
+                        color: colors.textLabel,
+                      }}
+                    >
+                      Demand meter · {m.seatsMinimum}-passenger minimum
+                    </div>
+                    {m.demandGuaranteed ? (
+                      <StatusChip kind="ontime" label="Guaranteed" />
+                    ) : m.seatsConfirmed >= m.seatsMinimum ? (
+                      <StatusChip kind="ontime" label="Viable" />
+                    ) : (
+                      <StatusChip kind="soon" label="Not yet viable" />
+                    )}
                   </div>
-                  <span
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 6,
-                      padding: "3px 10px",
-                      borderRadius: 6,
-                      fontFamily: fonts.body,
-                      fontWeight: 600,
-                      fontSize: 12,
-                      background: "rgba(225,176,0,.13)",
-                      border: "1px solid rgba(225,176,0,.35)",
-                      color: "#ecc94b",
-                    }}
-                  >
+                  <div style={{ display: "flex", gap: 6, marginBottom: 9 }}>
+                    {Array.from({ length: Math.max(m.seatsMinimum, m.seatsConfirmed) }).map((_, i) => (
+                      <div
+                        key={i}
+                        style={{
+                          flex: 1,
+                          height: 14,
+                          borderRadius: 4,
+                          background: i < m.seatsConfirmed ? "#009E73" : colors.inputBg,
+                          border: i < m.seatsConfirmed ? undefined : `1px dashed ${colors.textFaint}`,
+                        }}
+                      />
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                    <div style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textMuted }}>
+                      <strong style={{ color: colors.textPrimary }}>{m.seatsConfirmed} confirmed</strong>
+                      {m.demandGuaranteed
+                        ? " · run guaranteed to depart"
+                        : seatsNeeded > 0
+                          ? ` · ${seatsNeeded} more needed to activate this run`
+                          : " · minimum met"}
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <ActionButton
+                        onClick={() => submitDemand(m, Math.max(0, m.seatsConfirmed - 1), m.demandGuaranteed)}
+                        style={busy || m.seatsConfirmed === 0 ? { opacity: 0.5, cursor: busy ? "wait" : "not-allowed" } : undefined}
+                      >
+                        − REMOVE SEAT
+                      </ActionButton>
+                      <ActionButton
+                        variant="success"
+                        onClick={() => submitDemand(m, m.seatsConfirmed + 1, m.demandGuaranteed)}
+                        disabled={busy}
+                      >
+                        {busy ? "SAVING…" : "+ CONFIRM SEAT"}
+                      </ActionButton>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* crew / NIHB seat confirmation for runs without a minimum */}
+              {m.seatsMinimum == null && (
+                <Panel style={{ marginBottom: 14 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                    <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textMuted }}>
+                      <strong style={{ color: colors.textPrimary }}>{m.seatsConfirmed} confirmed</strong>
+                      {m.seatsCapacity != null ? ` of ${m.seatsCapacity} seats` : ""} — no viability minimum on this run.
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <ActionButton
+                        onClick={() => submitDemand(m, Math.max(0, m.seatsConfirmed - 1), m.demandGuaranteed)}
+                        style={busy || m.seatsConfirmed === 0 ? { opacity: 0.5, cursor: busy ? "wait" : "not-allowed" } : undefined}
+                      >
+                        − REMOVE SEAT
+                      </ActionButton>
+                      <ActionButton
+                        variant="success"
+                        onClick={() => submitDemand(m, m.seatsConfirmed + 1, m.demandGuaranteed)}
+                        disabled={busy}
+                      >
+                        {busy ? "SAVING…" : "+ CONFIRM SEAT"}
+                      </ActionButton>
+                    </div>
+                  </div>
+                </Panel>
+              )}
+
+              {/* passenger roster — no backend yet */}
+              <Panel style={{ marginBottom: 14 }}>
+                <SectionLabel>
+                  Passenger roster{m.seatsCapacity != null ? ` · ${m.seatsConfirmed} / ${m.seatsCapacity} seats` : ""}
+                </SectionLabel>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                  <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textMuted, lineHeight: 1.6, flex: 1, minWidth: 220 }}>
+                    Passenger names come from the driver&rsquo;s NL-TM-01 trip manifest after the run — seat counts here
+                    track demand only.
+                  </div>
+                  {m.manifestId ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                      <StatusChip kind="ontime" label="Manifest on file" />
+                      <ActionButton onClick={() => printManifest(m)}>PRINT MANIFEST</ActionButton>
+                    </div>
+                  ) : (
+                    <StatusChip kind="off" label="No manifest yet" />
+                  )}
+                </div>
+              </Panel>
+
+              {/* GIFT-A-SEAT — community runs below minimum */}
+              {m.serviceType === "Community" && m.seatsMinimum != null && !m.demandGuaranteed && (
+                <div
+                  style={{
+                    padding: "16px 18px",
+                    background: "linear-gradient(180deg,rgba(31,111,178,.08),transparent)",
+                    border: `1px solid ${colors.borderActive}`,
+                    borderRadius: 12,
+                    marginBottom: 14,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
                     <span
                       style={{
-                        width: 16,
-                        height: 16,
-                        borderRadius: 4,
-                        background: "#E1B000",
-                        color: "#2e2400",
+                        width: 22,
+                        height: 22,
+                        borderRadius: 6,
+                        background: colors.blue,
+                        color: "#FFFFFF",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        fontSize: 10,
+                        fontSize: 13,
                         fontWeight: 800,
                       }}
                     >
-                      ◐
+                      ◆
                     </span>
-                    Not yet viable
-                  </span>
-                </div>
-                <div style={{ display: "flex", gap: 6, marginBottom: 9 }}>
-                  {Array.from({ length: m.demand.needed }).map((_, i) => (
-                    <div
-                      key={i}
-                      style={{
-                        flex: 1,
-                        height: 14,
-                        borderRadius: 4,
-                        background: i < m.demand!.confirmed ? "#14B88A" : "#0A1729",
-                        border: i < m.demand!.confirmed ? undefined : "1px dashed #3B5573",
-                      }}
-                    />
-                  ))}
-                </div>
-                <div style={{ fontFamily: fonts.body, fontSize: 12, color: "#9fb2c8" }}>
-                  <strong style={{ color: "#E8EEF5" }}>{m.demand.confirmed} confirmed</strong> · {m.demand.needed - m.demand.confirmed}{" "}
-                  more needed to activate this run
-                </div>
-              </div>
-            )}
-
-            {/* passenger list */}
-            {m.passengers.length > 0 && (
-              <div style={{ padding: "15px 16px", background: "#0F1E33", border: "1px solid #1E3350", borderRadius: 11, marginBottom: 14 }}>
-                <div
-                  style={{
-                    fontFamily: fonts.semiCondensed,
-                    fontSize: 9.5,
-                    letterSpacing: ".14em",
-                    textTransform: "uppercase",
-                    color: "#8fa6c0",
-                    marginBottom: 11,
-                  }}
-                >
-                  Passenger manifest · {m.passengers.length} / {m.capacitySeats} seats
-                </div>
-                {m.passengers.map((p, i) => (
-                  <div
-                    key={p.name}
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      padding: "9px 0",
-                      borderBottom: i < m.passengers.length - 1 ? "1px solid #152941" : undefined,
-                    }}
-                  >
-                    <span style={{ fontFamily: fonts.body, fontSize: 13, color: "#E8EEF5" }}>{p.name}</span>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 5,
-                        fontFamily: fonts.body,
-                        fontWeight: 600,
-                        fontSize: 11,
-                        color: p.status === "Confirmed" ? "#38d3a6" : "#ecc94b",
-                      }}
-                    >
-                      <span
+                    <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 17, color: colors.skyBlue }}>Gift-a-Seat guarantee</div>
+                  </div>
+                  <div style={{ fontFamily: fonts.body, fontSize: 12.5, lineHeight: 1.55, color: colors.textMuted, marginBottom: 13 }}>
+                    A passenger can cover the remaining seats to guarantee this run departs. The{" "}
+                    <strong style={{ color: colors.textPrimary }}>exact commitment is shown before confirming</strong>.
+                  </div>
+                  {giftShown ? (
+                    <>
+                      <div
                         style={{
-                          width: 14,
-                          height: 14,
-                          borderRadius: 4,
-                          background: p.status === "Confirmed" ? "#14B88A" : "#E1B000",
-                          color: p.status === "Confirmed" ? "#04231a" : "#2e2400",
                           display: "flex",
                           alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: 9,
-                          fontWeight: 800,
+                          justifyContent: "space-between",
+                          padding: "13px 16px",
+                          background: colors.inputBg,
+                          border: `1px solid ${colors.borderActive}`,
+                          borderRadius: 10,
+                          marginBottom: 12,
+                          gap: 12,
+                          flexWrap: "wrap",
                         }}
                       >
-                        {p.status === "Confirmed" ? "✓" : "◐"}
-                      </span>
-                      {p.status}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* GIFT-A-SEAT — community only */}
-            {m.svc === "community" && (
-              <div
-                style={{
-                  padding: "16px 18px",
-                  background: "linear-gradient(180deg,rgba(59,141,212,.08),transparent)",
-                  border: "1px solid #2f557d",
-                  borderRadius: 12,
-                  marginBottom: 14,
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
-                  <span
-                    style={{
-                      width: 22,
-                      height: 22,
-                      borderRadius: 6,
-                      background: "#3B8DD4",
-                      color: "#04121f",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 13,
-                      fontWeight: 800,
-                    }}
-                  >
-                    ◆
-                  </span>
-                  <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 17, color: "#7EC8F0" }}>Gift-a-Seat guarantee</div>
-                </div>
-                <div style={{ fontFamily: fonts.body, fontSize: 12.5, lineHeight: 1.55, color: "#9fb2c8", marginBottom: 13 }}>
-                  A passenger can cover the remaining seats to guarantee this run departs. The{" "}
-                  <strong style={{ color: "#E8EEF5" }}>exact total is shown before any commitment</strong>.
-                </div>
-                {giftShown ? (
-                  <>
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        padding: "13px 16px",
-                        background: "#0A1729",
-                        border: "1px solid #2f557d",
-                        borderRadius: 10,
-                        marginBottom: 12,
-                      }}
-                    >
-                      <div>
-                        <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: "#6B8099", marginBottom: 3 }}>
-                          2 seats × $67.00 community fare (CAD)
+                        <div>
+                          <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim, marginBottom: 3 }}>
+                            Seats to cover · community fare per seat is quoted by dispatch
+                          </div>
+                          <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 30, lineHeight: 1, color: statusMeta("ontime").t, fontVariantNumeric: "tabular-nums" }}>
+                            {seatsNeeded} seat{seatsNeeded === 1 ? "" : "s"}
+                          </div>
                         </div>
-                        <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 30, lineHeight: 1, color: "#38d3a6", fontVariantNumeric: "tabular-nums" }}>
-                          $134.00
-                        </div>
+                        <ActionButton
+                          variant="success"
+                          onClick={() => submitDemand(m, m.seatsConfirmed, true)}
+                          disabled={busy}
+                        >
+                          {busy ? "SAVING…" : "CONFIRM GUARANTEE"}
+                        </ActionButton>
                       </div>
-                      <span
-                        style={{
-                          fontFamily: fonts.condensed,
-                          fontWeight: 700,
-                          fontSize: 13,
-                          letterSpacing: ".03em",
-                          padding: "10px 18px",
-                          borderRadius: 9,
-                          background: "#14B88A",
-                          color: "#04231a",
-                          cursor: "pointer",
-                        }}
-                      >
-                        CONFIRM GUARANTEE
-                      </span>
-                    </div>
-                    <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: "#6B8099" }}>
-                      Total shown above — guarantee cannot be confirmed until this figure is displayed.
-                    </div>
-                  </>
-                ) : (
-                  <span
-                    onClick={() => setGiftShown(true)}
-                    style={{
-                      display: "inline-flex",
-                      fontFamily: fonts.condensed,
-                      fontWeight: 700,
-                      fontSize: 13,
-                      letterSpacing: ".03em",
-                      padding: "10px 18px",
-                      borderRadius: 9,
-                      background: "#3B8DD4",
-                      color: "#04121f",
-                      cursor: "pointer",
-                    }}
-                  >
-                    CALCULATE GUARANTEE COST
-                  </span>
-                )}
-              </div>
-            )}
+                      <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim }}>
+                        Confirming marks the run <strong style={{ color: colors.textPrimary }}>guaranteed to depart</strong> regardless of
+                        further confirmations.
+                      </div>
+                    </>
+                  ) : (
+                    <ActionButton variant="primary" onClick={() => setGiftShown(true)}>
+                      CALCULATE GUARANTEE
+                    </ActionButton>
+                  )}
+                </div>
+              )}
 
-            {/* NIHB + mixing */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <div style={{ padding: "14px 16px", background: "#0F1E33", border: "1px solid rgba(126,200,240,.28)", borderRadius: 11 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}>
-                  <span style={{ color: "#7EC8F0", fontWeight: 800 }}>✚</span>
-                  <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 15, color: "#7EC8F0" }}>NIHB voucher</div>
+              {/* NIHB + mixing */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div style={{ padding: "14px 16px", background: colors.cardBg, border: "1px solid rgba(23,119,158,.28)", borderRadius: 11, boxShadow: colors.shadowCard }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}>
+                    <span style={{ color: colors.skyBlue, fontWeight: 800 }}>✚</span>
+                    <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 15, color: colors.skyBlue }}>NIHB voucher</div>
+                  </div>
+                  <div style={{ fontFamily: fonts.body, fontSize: 12, lineHeight: 1.55, color: colors.textMuted }}>
+                    A prior-approved voucher = confirmed demand. Suppresses the minimum,{" "}
+                    <strong style={{ color: statusMeta("ontime").t }}>$0 to patient</strong>, authorized escorts free.
+                  </div>
                 </div>
-                <div style={{ fontFamily: fonts.body, fontSize: 12, lineHeight: 1.55, color: "#9fb2c8" }}>
-                  A prior-approved voucher = confirmed demand. Suppresses the minimum,{" "}
-                  <strong style={{ color: "#38d3a6" }}>$0 to patient</strong>, authorized escorts free.
-                </div>
-              </div>
-              <div style={{ padding: "14px 16px", background: "#0F1E33", border: "1px solid #1E3350", borderRadius: 11 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}>
-                  <span style={{ color: "#38d3a6", fontWeight: 800 }}>✓</span>
-                  <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 15, color: "#E8EEF5" }}>Mixing rule</div>
-                </div>
-                <div style={{ fontFamily: fonts.body, fontSize: 12, lineHeight: 1.55, color: "#9fb2c8" }}>
-                  Community passengers blocked while mine crew aboard. Empty legs surfaced as available.
+                <div style={{ padding: "14px 16px", background: colors.cardBg, border: `1px solid ${colors.border}`, borderRadius: 11, boxShadow: colors.shadowCard }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}>
+                    <span style={{ color: statusMeta("ontime").t, fontWeight: 800 }}>✓</span>
+                    <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 15, color: colors.textPrimary }}>Mixing rule</div>
+                  </div>
+                  <div style={{ fontFamily: fonts.body, fontSize: 12, lineHeight: 1.55, color: colors.textMuted }}>
+                    Community passengers blocked while mine crew aboard. Empty legs surfaced as available.
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>

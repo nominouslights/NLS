@@ -1,6 +1,6 @@
 "use client";
 
-import { fonts } from "@/lib/theme";
+import { colors, fonts, statusMeta } from "@/lib/theme";
 import { NAV_GROUPS, type ScreenId } from "@/lib/nav";
 
 export default function NavRail({
@@ -17,8 +17,8 @@ export default function NavRail({
       style={{
         width: collapsed ? 72 : 236,
         flex: "none",
-        background: "#0A1729",
-        borderRight: "1px solid #1E3350",
+        background: colors.railBg,
+        borderRight: `1px solid ${colors.border}`,
         display: "flex",
         flexDirection: "column",
         transition: "width .18s ease",
@@ -33,7 +33,7 @@ export default function NavRail({
                 fontFamily: fonts.semiCondensed,
                 fontSize: 9.5,
                 letterSpacing: ".2em",
-                color: "#4d688a",
+                color: colors.textFaint,
                 padding: "10px 18px 6px",
                 whiteSpace: "nowrap",
                 overflow: "hidden",
@@ -76,9 +76,9 @@ export default function NavRail({
                       fontFamily: fonts.mono,
                       fontSize: 10,
                       fontWeight: 500,
-                      background: active ? "#E8A020" : "#0F1E33",
-                      color: active ? "#08192D" : "#7d93ad",
-                      border: active ? undefined : "1px solid #1E3350",
+                      background: active ? colors.amber : colors.cardBg,
+                      color: active ? colors.navy : colors.textDim,
+                      border: active ? undefined : `1px solid ${colors.border}`,
                     }}
                   >
                     {it.code}
@@ -92,7 +92,7 @@ export default function NavRail({
                       overflow: "hidden",
                       flex: 1,
                       display: collapsed ? "none" : "block",
-                      color: active ? "#F2F6FB" : "#9fb2c8",
+                      color: active ? colors.headingBright : colors.textMuted,
                     }}
                   >
                     {it.label}
@@ -109,8 +109,8 @@ export default function NavRail({
                         borderRadius: 9,
                         fontFamily: fonts.mono,
                         fontSize: 10,
-                        background: "rgba(213,94,0,.16)",
-                        color: "#f0803f",
+                        background: "rgba(213,94,0,.12)",
+                        color: statusMeta("over").t,
                         border: "1px solid rgba(213,94,0,.35)",
                       }}
                     >
@@ -124,7 +124,7 @@ export default function NavRail({
         ))}
       </div>
       {/* rail footer: health + tenant */}
-      <div style={{ flex: "none", borderTop: "1px solid #1E3350", padding: "12px 16px" }}>
+      <div style={{ flex: "none", borderTop: `1px solid ${colors.border}`, padding: "12px 16px" }}>
         <div
           style={{
             display: "flex",
@@ -139,9 +139,9 @@ export default function NavRail({
               width: 8,
               height: 8,
               borderRadius: "50%",
-              background: "#14B88A",
+              background: "#009E73",
               flex: "none",
-              boxShadow: "0 0 0 3px rgba(20,184,138,.16)",
+              boxShadow: "0 0 0 3px rgba(0,158,115,.16)",
             }}
           />
           {!collapsed && (
@@ -149,7 +149,7 @@ export default function NavRail({
               style={{
                 fontFamily: fonts.mono,
                 fontSize: 10,
-                color: "#7d93ad",
+                color: colors.textDim,
                 whiteSpace: "nowrap",
                 overflow: "hidden",
               }}
@@ -174,22 +174,22 @@ export default function NavRail({
               height: 26,
               flex: "none",
               borderRadius: 7,
-              background: "#0F1E33",
-              border: "1px solid #1E3350",
+              background: colors.cardBg,
+              border: `1px solid ${colors.border}`,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               fontFamily: fonts.condensed,
               fontWeight: 700,
               fontSize: 11,
-              color: "#E8A020",
+              color: colors.amberText,
             }}
           >
             NL
           </div>
           {!collapsed && (
             <div style={{ lineHeight: 1.2, overflow: "hidden" }}>
-              <div style={{ fontFamily: fonts.body, fontSize: 11.5, fontWeight: 600, color: "#c2d0e0" }}>
+              <div style={{ fontFamily: fonts.body, fontSize: 11.5, fontWeight: 600, color: colors.textSecondary }}>
                 Northern Link
               </div>
               <div
@@ -198,7 +198,7 @@ export default function NavRail({
                   fontSize: 9,
                   letterSpacing: ".1em",
                   textTransform: "uppercase",
-                  color: "#6B8099",
+                  color: colors.textDim,
                 }}
               >
                 Internal Tenant

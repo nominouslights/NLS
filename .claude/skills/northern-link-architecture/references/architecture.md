@@ -22,11 +22,13 @@
 6. Client Applications — API Consumption Map
    - 6.1 Owner/Exec Desktop App — Access Model
 7. Data Architecture
+   - 7.1 RLS Convention — Native Policies on Plain Tables
 8. Offline Sync Strategy (Driver Field App)
 9. Integrations
 10. Security & Compliance
 11. Environments & Deployment
     - 11.1 Monitoring & Observability — Recommendation
+    - 11.2 Local Development
 12. Technology Stack Summary
 13. Open Decisions Flagged for Your Input
 14. Next Steps
@@ -151,6 +153,18 @@ own `Domain/`, `Application/`, and `Infrastructure/` layers, references only `No
 and communicates with other domains exclusively through RabbitMQ integration events. That makes
 each library extractable into its own microservice later (copy the library + Shared out) if scale
 demands it, without paying microservices operational overhead now.
+
+**Cross-domain communication — adopted default, flagged (see 13.11).** Domains talk to each other
+via **integration events over a self-hosted message broker (RabbitMQ)**, never direct in-process
+calls. A domain library referencing another domain library is a build error, enforced by
+architecture tests rather than convention. Event records live in `NorthernLink.Shared`
+(`IntegrationEvents/<Domain>/...IntegrationEvent`, routed as `<domain>.<event-name>`); publication
+goes through each domain's transactional outbox table so a committed state change and its event
+can never diverge. RabbitMQ runs self-hosted on OVHcloud Canada alongside everything else,
+consistent with the data-residency principle. This was **not** decided in the original planning —
+it is a reasonable default pulled from established modular-monolith practice and adopted in the
+absence of an objection. Flag it if it should be reconsidered; the cost of reversing it grows with
+every domain added.
 
 **Domain modeling convention: value objects are `sealed record`.** No `ValueObject` base class —
 C# records already give structural equality (component-wise `Equals`/`GetHashCode`) for free.
@@ -422,8 +436,42 @@ practical implications:
 
 - **Single PostgreSQL database**, shared schema, `tenant_id` column on all tenant-scoped tables,
   enforced by RLS (Section 4.3).
-- **CQRS read models** (materialized views or a dedicated read schema) power the Admin and Owner
-  dashboards without hammering the transactional tables.
+
+### 7.1 RLS Convention — Native Policies on Plain Tables
+
+**This is the standard shape for every tenant-scoped table, from day one. Do not invent a
+variant.** Each table gets, in its own migration:
+
+```sql
+ALTER TABLE <schema>.<table> ENABLE ROW LEVEL SECURITY;
+ALTER TABLE <schema>.<table> FORCE ROW LEVEL SECURITY;
+CREATE POLICY <table>_tenant_isolation ON <schema>.<table>
+    USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid);
+```
+
+- `FORCE` is not optional — without it the table owner (which is the app role, since it runs
+  migrations) bypasses its own policies and every policy becomes dead code.
+- `app.tenant_id` is set per connection by `Backend/src/Shared/Tenancy/TenantSessionInterceptor.cs`.
+  The `NULLIF(..., '')` guard makes an unset variable deny-all rather than error.
+- System-context work that has no tenant to scope to (login before a tenant is known, outbox
+  dispatch, projection workers) uses a narrow `current_setting('app.is_system', true) = 'true'`
+  escape hatch on specific policies — see `Backend/src/Identity/Infrastructure/Persistence/SystemAccess.cs`.
+  Add it deliberately per table and per operation, never as a blanket second policy.
+- The API connects as a **non-superuser** role (`northernlink_app`, provisioned by
+  `Backend/docker/initdb/01-app-role.sql`). A superuser bypasses RLS even with `FORCE`.
+
+**What not to do — this pattern caused a real bug and is banned.** Do not implement tenant
+isolation with **security-barrier views over an unprotected base table**, and do not introduce a
+**second database role that owns the read side**. That arrangement came from Postgres not
+supporting RLS policies on materialized views, and it brought a chain of failure modes: ownership
+transfers, `SET ROLE` juggling, and migrations that `GRANT` to a hand-created role and fail with
+`42704` on any freshly provisioned database.
+
+**The read side avoids the problem instead of working around it.** CQRS read models are
+**ordinary projector-maintained tables** (`<schema>.rm_*`), written by a projection worker from
+the event journal — not materialized views. Being plain tables, they carry the exact same native
+RLS policy as every write-side table, so there is one isolation mechanism in the system, not two.
+Read models power the Admin and Owner dashboards without hammering the transactional tables.
 - **Object storage** (OVHcloud Object Storage, S3-compatible) for DVIR photos, signatures, PDF
   manifests, invoices — referenced by URL/key in Postgres, not stored as blobs in the DB.
 - **Audit log** as its own append-only table (or event store), capturing who accessed or modified
@@ -521,11 +569,19 @@ The one deliberate exception is the API→Dispatcher relationship: the AppHost w
 browser only ever talk to the Dispatcher's own origin — **no CORS configuration exists anywhere
 in the stack**, by design, not by omission.
 
-Local Postgres runs as a plain superuser, so **Row-Level Security is unenforced in local dev by
-design**; RLS is only actually verified against the live server (see
-`Backend/docker/initdb/01-app-role.sql`, which provisions the non-superuser role there).
-`ConnectionStrings:Postgres` lives entirely in environment variables — never
-`appsettings.Development.json`.
+**There is no local Postgres** (decommissioned 2026-07-18). Every environment — orchestrated
+`aspire run`, standalone `dotnet run`, production — connects to the same DigitalOcean managed
+database as the non-superuser `northernlink_app` role, which means **RLS is exercised for real in
+every run**, not only in production. This is deliberate: the previous local-superuser arrangement
+made RLS dead code in dev, so isolation bugs only surfaced late. If connections time out, check
+DigitalOcean's Trusted Sources firewall for the cluster before assuming a code problem.
+
+Secrets (`ConnectionStrings__Postgres`, `Identity__JwtSigningKey`, RabbitMQ credentials) are read
+directly via `Environment.GetEnvironmentVariable` through
+`NorthernLink.Shared.Kernel.RequiredEnvironmentVariable`, never through `IConfiguration` or any
+`appsettings*.json`, so they cannot end up in a committed config file. Both
+`AppHost/NorthernLink.AppHost/AppHost.cs` and `Backend/src/Api/NorthernLink.Api/Properties/launchSettings.json`
+carry them as literal values and are **gitignored** — a fresh clone needs both recreated by hand.
 
 ---
 
@@ -582,6 +638,20 @@ the roadmap locks them in:
     employer) that would need a clear policy before building. **Superseded in priority by the
     badge-scan approach (Section 5.2)**, which achieves the same accountability goal without
     requiring workers to carry a phone at all.
+11. **Cross-domain communication via integration events (RabbitMQ)** — **adopted default, not
+    previously decided.** Domains never call each other in-process; they publish integration
+    events through a transactional outbox to a self-hosted RabbitMQ on OVHcloud Canada. This is a
+    default pulled from established modular-monolith practice and applied in the absence of an
+    objection, not a decision made against this platform's specific requirements. Worth a
+    deliberate yes/no: it buys enforceable domain boundaries and a clean microservice extraction
+    path, and costs an always-on broker plus eventual consistency between domains. See Section 5.
+12. ~~Tenant-isolation mechanism~~ — **Resolved (convention, Section 7.1)**: native RLS policies
+    with `FORCE ROW LEVEL SECURITY` on plain tables, keyed on the `app.tenant_id` session
+    variable, with the API connecting as a non-superuser role. Security-barrier views over
+    unprotected base tables and a separate read-side owner role are **banned** — that pattern
+    produced a real isolation bug and a `42704` migration failure on fresh databases. CQRS read
+    models are ordinary projector-maintained tables (`rm_*`) precisely so they can carry the same
+    policy as everything else.
 
 ---
 

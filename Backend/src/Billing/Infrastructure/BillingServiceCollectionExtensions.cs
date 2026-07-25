@@ -1,12 +1,39 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using NorthernLink.Billing.Application.Abstractions;
+using NorthernLink.Billing.Application.BillableTrips;
+using NorthernLink.Billing.Application.BillableTrips.GetBillableTrips;
+using NorthernLink.Billing.Application.Integration;
+using NorthernLink.Billing.Application.Invoices;
+using NorthernLink.Billing.Application.Invoices.GenerateDraft;
+using NorthernLink.Billing.Application.Invoices.GetById;
+using NorthernLink.Billing.Application.Invoices.GetInvoices;
+using NorthernLink.Billing.Application.Invoices.MarkPaid;
+using NorthernLink.Billing.Application.Invoices.ReplaceLines;
+using NorthernLink.Billing.Application.Invoices.Send;
+using NorthernLink.Billing.Application.Invoices.SetQboStatus;
+using NorthernLink.Billing.Application.Invoices.Void;
+using NorthernLink.Billing.Infrastructure.Persistence;
+using NorthernLink.Billing.Infrastructure.Persistence.Projections;
+using NorthernLink.Shared.EventBus;
+using NorthernLink.Shared.IntegrationEvents.Clients;
+using NorthernLink.Shared.IntegrationEvents.Trips;
+using NorthernLink.Shared.Kernel;
+using NorthernLink.Shared.Messaging;
+using NorthernLink.Shared.Persistence.Auditing;
+using NorthernLink.Shared.Persistence.Projections;
+using NorthernLink.Shared.Tenancy;
 
 namespace NorthernLink.Billing.Infrastructure;
 
 /// <summary>
 /// DI entry point for the Billing domain library — the only thing the API gateway sees.
-/// Handlers, the library's DbContext (Postgres schema "billing"), and integration event
-/// consumers register here as they are built.
+/// Registers the library DbContext (Postgres schema "billing"), persistence services,
+/// every CQRS handler explicitly (the reflection-based Sender resolves handlers from DI;
+/// no assembly scanning), the two replica-maintaining integration-event consumers, and
+/// the invoice read-model projection.
 /// </summary>
 public static class BillingServiceCollectionExtensions
 {
@@ -16,10 +43,53 @@ public static class BillingServiceCollectionExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        // Structure-only scaffold: no services yet. Registration order inside a library:
-        //   1. DbContext (ModuleDbContext base, schema "billing")
-        //   2. Command/query handlers
-        //   3. Integration event consumers
+        // 1. DbContext — module schema, tenant session interceptor (RLS session variable).
+        //    TryAdd: the interceptor is shared platform plumbing other modules also register.
+        services.TryAddScoped<TenantSessionInterceptor>();
+
+        services.AddDbContext<BillingDbContext>((serviceProvider, options) =>
+            options
+                .UseNpgsql(
+                    RequiredEnvironmentVariable.Get("ConnectionStrings__Postgres"),
+                    npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", SchemaName))
+                .AddInterceptors(serviceProvider.GetRequiredService<TenantSessionInterceptor>()));
+
+        // 2. Persistence + read services. The mapper is registered as its concrete type —
+        //    every module has its own IIntegrationEventMapper, so the interface can't be
+        //    a single DI registration. The outbox dispatcher drains billing.outbox_messages
+        //    (empty until Billing has a public event surface, but registered now so it never
+        //    silently backs up later).
+        services.AddScoped<BillingIntegrationEventMapper>();
+        services.AddHostedService<OutboxDispatcher<BillingDbContext>>();
+        services.AddScoped<IInvoiceRepository, InvoiceRepository>();
+        services.AddScoped<IContractSnapshotRepository, ContractSnapshotRepository>();
+        services.AddScoped<IBillableTripRepository, BillableTripRepository>();
+        services.AddScoped<IInvoiceNumberGenerator, InvoiceNumberGenerator>();
+        services.AddScoped<IInvoiceReadService, InvoiceReadService>();
+        services.AddScoped<IBillableTripReadService, BillableTripReadService>();
+
+        // 3. Command/query handlers — registered explicitly, one line per handler.
+        services.AddScoped<ICommandHandler<GenerateDraftInvoiceCommand, Guid>, GenerateDraftInvoiceCommandHandler>();
+        services.AddScoped<ICommandHandler<ReplaceInvoiceLinesCommand>, ReplaceInvoiceLinesCommandHandler>();
+        services.AddScoped<ICommandHandler<SendInvoiceCommand>, SendInvoiceCommandHandler>();
+        services.AddScoped<ICommandHandler<MarkInvoicePaidCommand>, MarkInvoicePaidCommandHandler>();
+        services.AddScoped<ICommandHandler<VoidInvoiceCommand>, VoidInvoiceCommandHandler>();
+        services.AddScoped<ICommandHandler<SetInvoiceQboStatusCommand>, SetInvoiceQboStatusCommandHandler>();
+        services.AddScoped<IQueryHandler<GetInvoicesQuery, IReadOnlyList<InvoiceSummaryResponse>>, GetInvoicesQueryHandler>();
+        services.AddScoped<IQueryHandler<GetInvoiceByIdQuery, InvoiceResponse>, GetInvoiceByIdQueryHandler>();
+        services.AddScoped<IQueryHandler<GetBillableTripsQuery, IReadOnlyList<BillableTripResponse>>, GetBillableTripsQueryHandler>();
+
+        // 4. Integration event consumers — the module's replicas: contract snapshots from
+        //    Clients, billable trips from Trips (cross-domain, events-only; both idempotent).
+        services.AddIntegrationEventConsumer(SchemaName, subscriptions => subscriptions
+            .On<ContractChangedIntegrationEvent, ContractChangedIntegrationEventHandler>()
+            .On<TripCompletedIntegrationEvent, TripCompletedIntegrationEventHandler>());
+
+        // 5. Read-side projections — one worker polls billing.event_journal and upserts
+        //    rm_invoices for the invoices each batch touched.
+        services.AddProjections<BillingDbContext>(SchemaName, registry => registry
+            .Project(new InvoiceProjection()));
+
         return services;
     }
 }

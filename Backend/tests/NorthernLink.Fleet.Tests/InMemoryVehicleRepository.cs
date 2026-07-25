@@ -33,6 +33,9 @@ internal sealed class InMemoryVehicleRepository : IVehicleRepository
 
     public void AddCertificate(RetirementCertificate certificate) => Certificates.Add(certificate);
 
+    public Task<bool> HasCertificateAsync(Guid vehicleId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Certificates.Any(c => c.VehicleId == vehicleId));
+
     public Task<int> NextCertificateSequenceAsync(
         Guid tenantId,
         int year,

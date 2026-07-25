@@ -102,7 +102,7 @@ export default function RetirementCertificateModal({
         position: "fixed",
         inset: 0,
         zIndex: 100,
-        background: "rgba(4,10,20,.7)",
+        background: colors.scrim,
         backdropFilter: "blur(3px)",
         display: "flex",
         alignItems: "center",
@@ -129,7 +129,7 @@ export default function RetirementCertificateModal({
             background: "#faf9f4",
             borderRadius: 12,
             border: "1px solid #d8d8ce",
-            boxShadow: "0 24px 64px rgba(0,0,0,.5)",
+            boxShadow: colors.shadowPop,
             overflowY: "auto",
             padding: "34px 38px",
           }}

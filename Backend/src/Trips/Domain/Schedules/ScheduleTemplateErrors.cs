@@ -1,0 +1,28 @@
+using NorthernLink.Shared.Kernel;
+
+namespace NorthernLink.Trips.Domain.Schedules;
+
+/// <summary>All domain errors the ScheduleTemplate aggregate (and its handlers) can produce.</summary>
+public static class ScheduleTemplateErrors
+{
+    public static readonly Error NotFound = Error.NotFound(
+        "Trips.ScheduleTemplate.NotFound", "The schedule template was not found.");
+
+    public static readonly Error NameRequired = Error.Validation(
+        "Trips.ScheduleTemplate.NameRequired", "A template name is required.");
+
+    public static readonly Error RouteRequired = Error.Validation(
+        "Trips.ScheduleTemplate.RouteRequired", "A template must reference a route.");
+
+    public static readonly Error AtLeastOneDay = Error.Validation(
+        "Trips.ScheduleTemplate.AtLeastOneDay", "A template must run on at least one day of the week.");
+
+    public static readonly Error InvalidSeats = Error.Validation(
+        "Trips.ScheduleTemplate.InvalidSeats", "Seat capacity must be positive and the minimum cannot exceed it.");
+
+    public static readonly Error InvalidHorizon = Error.Validation(
+        "Trips.ScheduleTemplate.InvalidHorizon", "The generation horizon must be between 1 and 60 days.");
+
+    public static readonly Error ReturnBeforeDeparture = Error.Validation(
+        "Trips.ScheduleTemplate.ReturnBeforeDeparture", "The return departure must be after the outbound departure.");
+}

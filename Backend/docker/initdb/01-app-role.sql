@@ -20,3 +20,11 @@ CREATE ROLE northernlink_app LOGIN PASSWORD 'northernlink_dev';
 
 GRANT CONNECT ON DATABASE northernlink TO northernlink_app;
 GRANT CREATE ON DATABASE northernlink TO northernlink_app;
+
+-- This is the ONLY role the platform needs. A second, LOGIN-less northernlink_projector role
+-- used to live here, owning the read-side materialized views and their tenant wrapper views —
+-- the workaround for Postgres not supporting RLS policies on a matview. The read side is now
+-- ordinary projector-maintained tables (fleet.rm_*) carrying the same native RLS policy as every
+-- other table, so no second role, no ownership transfer, and no SET ROLE are required. Removing
+-- it also removes a real failure mode: migrations that GRANT to a role assumed to have been
+-- created by hand fail with 42704 on any freshly provisioned database.

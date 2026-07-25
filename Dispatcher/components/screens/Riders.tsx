@@ -1,6 +1,6 @@
 "use client";
 
-import { fonts, rowSurface } from "@/lib/theme";
+import { colors, fonts, rowSurface } from "@/lib/theme";
 import { riders } from "@/lib/data";
 import { PageHeader, Panel, SectionLabel, DetailRow } from "@/components/ui/Panel";
 import { ActionButton } from "@/components/ui/Button";
@@ -13,8 +13,8 @@ export default function Riders({ riderSel, setRiderSel }: { riderSel: number; se
       <div style={{ flex: "none", padding: "20px 26px 12px" }}>
         <PageHeader eyebrow="Business · Community passengers & NIHB patients" title="Riders" />
       </div>
-      <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "38% 1fr", borderTop: "1px solid #1E3350" }}>
-        <div style={{ minHeight: 0, overflowY: "auto", padding: "16px 18px", borderRight: "1px solid #1E3350" }}>
+      <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "38% 1fr", borderTop: `1px solid ${colors.border}` }}>
+        <div style={{ minHeight: 0, overflowY: "auto", padding: "16px 18px", borderRight: `1px solid ${colors.border}` }}>
           {riders.map((row, i) => {
             const active = i === riderSel;
             return (
@@ -28,7 +28,7 @@ export default function Riders({ riderSel, setRiderSel }: { riderSel: number; se
                   alignItems: "center",
                   padding: "11px 13px",
                   marginBottom: 5,
-                  ...rowSurface(active, "#7EC8F0"),
+                  ...rowSurface(active, colors.skyBlue),
                 }}
               >
                 <div style={{ minWidth: 0 }}>
@@ -37,7 +37,7 @@ export default function Riders({ riderSel, setRiderSel }: { riderSel: number; se
                       fontFamily: fonts.body,
                       fontSize: 13.5,
                       fontWeight: 600,
-                      color: "#E8EEF5",
+                      color: colors.textPrimary,
                       whiteSpace: "nowrap",
                       overflow: "hidden",
                       textOverflow: "ellipsis",
@@ -45,7 +45,7 @@ export default function Riders({ riderSel, setRiderSel }: { riderSel: number; se
                   >
                     {row.name}
                   </div>
-                  <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: "#6B8099" }}>
+                  <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim }}>
                     {row.home} · last {row.last}
                   </div>
                 </div>
@@ -56,9 +56,9 @@ export default function Riders({ riderSel, setRiderSel }: { riderSel: number; se
                     fontSize: 10.5,
                     padding: "2px 8px",
                     borderRadius: 5,
-                    background: row.prog === "NIHB" ? "rgba(126,200,240,.12)" : "rgba(59,141,212,.12)",
-                    color: "#7EC8F0",
-                    border: `1px solid ${row.prog === "NIHB" ? "rgba(126,200,240,.35)" : "rgba(59,141,212,.35)"}`,
+                    background: row.prog === "NIHB" ? "rgba(23,119,158,.12)" : "rgba(31,111,178,.12)",
+                    color: row.prog === "NIHB" ? colors.skyBlue : colors.blue,
+                    border: `1px solid ${row.prog === "NIHB" ? "rgba(23,119,158,.35)" : "rgba(31,111,178,.35)"}`,
                   }}
                 >
                   {row.prog}
@@ -68,12 +68,12 @@ export default function Riders({ riderSel, setRiderSel }: { riderSel: number; se
           })}
         </div>
 
-        <div style={{ minHeight: 0, overflowY: "auto", padding: "22px 26px", background: "#0C1A2C" }}>
+        <div style={{ minHeight: 0, overflowY: "auto", padding: "22px 26px", background: colors.detailBg }}>
           <div className="detailfade" key={r.name}>
-            <h2 style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 28, lineHeight: 1, color: "#F2F6FB", margin: "0 0 4px" }}>
+            <h2 style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 28, lineHeight: 1, color: colors.headingBright, margin: "0 0 4px" }}>
               {r.name}
             </h2>
-            <div style={{ fontFamily: fonts.mono, fontSize: 12, color: "#9fb2c8", marginBottom: 16 }}>
+            <div style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.textMuted, marginBottom: 16 }}>
               {r.phone} · {r.home} · {r.pc}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
@@ -95,14 +95,14 @@ export default function Riders({ riderSel, setRiderSel }: { riderSel: number; se
             <div
               style={{
                 padding: "12px 15px",
-                background: "rgba(59,141,212,.07)",
-                border: "1px solid rgba(59,141,212,.25)",
+                background: "rgba(31,111,178,.07)",
+                border: "1px solid rgba(31,111,178,.25)",
                 borderRadius: 10,
                 marginBottom: 16,
                 fontFamily: fonts.body,
                 fontSize: 12,
                 lineHeight: 1.55,
-                color: "#9fb2c8",
+                color: colors.textMuted,
               }}
             >
               Privacy-minded (PIPEDA) — only fields needed to route and bill travel are stored. Sensitive medical detail is not held

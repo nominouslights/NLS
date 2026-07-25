@@ -20,6 +20,9 @@ public interface IVehicleRepository
 
     void AddCertificate(RetirementCertificate certificate);
 
+    /// <summary>True when a retirement certificate already exists for the vehicle (idempotency guard).</summary>
+    Task<bool> HasCertificateAsync(Guid vehicleId, CancellationToken cancellationToken = default);
+
     /// <summary>Next per-tenant sequence for RC-{year}-{seq} certificate numbering.</summary>
     Task<int> NextCertificateSequenceAsync(Guid tenantId, int year, CancellationToken cancellationToken = default);
 

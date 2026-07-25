@@ -11,6 +11,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The projection-worker integration test wires the real internal persistence services
+         (VehicleRepository, read services) into a hand-built worker harness. -->
+    <InternalsVisibleTo Include="NorthernLink.Fleet.IntegrationTests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Minimal-API endpoint mapping lives in the library, not the host. -->
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>

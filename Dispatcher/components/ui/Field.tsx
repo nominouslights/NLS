@@ -55,6 +55,8 @@ export function TextField({
   hint,
   maxLength,
   disabled = false,
+  type = "text",
+  autoComplete,
 }: {
   label: string;
   value: string;
@@ -64,12 +66,16 @@ export function TextField({
   hint?: ReactNode;
   maxLength?: number;
   disabled?: boolean;
+  type?: "text" | "email" | "password";
+  autoComplete?: string;
 }) {
   return (
     <div>
       <FieldLabel hint={hint}>{label}</FieldLabel>
       <input
-        type="text"
+        type={type}
+        autoComplete={autoComplete}
+        className="nl-input"
         value={value}
         maxLength={maxLength}
         placeholder={placeholder}
@@ -111,6 +117,7 @@ export function NumberField({
       <FieldLabel hint={hint}>{label}</FieldLabel>
       <input
         type="number"
+        className="nl-input"
         value={value}
         min={min}
         step={step}
@@ -122,6 +129,118 @@ export function NumberField({
           fontFamily: fonts.mono,
           fontSize: 13,
           fontVariantNumeric: "tabular-nums",
+          opacity: disabled ? 0.55 : 1,
+          cursor: disabled ? "not-allowed" : undefined,
+        }}
+      />
+    </div>
+  );
+}
+
+export function DateField({
+  label,
+  value,
+  onChange,
+  hint,
+  disabled = false,
+}: {
+  label: string;
+  value: string; // ISO YYYY-MM-DD
+  onChange: (v: string) => void;
+  hint?: ReactNode;
+  disabled?: boolean;
+}) {
+  return (
+    <div>
+      <FieldLabel hint={hint}>{label}</FieldLabel>
+      <input
+        type="date"
+        className="nl-input"
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        style={{
+          ...inputBase,
+          fontFamily: fonts.mono,
+          fontSize: 13,
+          colorScheme: "light",
+          opacity: disabled ? 0.55 : 1,
+          cursor: disabled ? "not-allowed" : undefined,
+        }}
+      />
+    </div>
+  );
+}
+
+export function TimeField({
+  label,
+  value,
+  onChange,
+  hint,
+  disabled = false,
+}: {
+  label: string;
+  value: string; // 24h "HH:MM"
+  onChange: (v: string) => void;
+  hint?: ReactNode;
+  disabled?: boolean;
+}) {
+  return (
+    <div>
+      <FieldLabel hint={hint}>{label}</FieldLabel>
+      <input
+        type="time"
+        className="nl-input"
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        style={{
+          ...inputBase,
+          fontFamily: fonts.mono,
+          fontSize: 13,
+          colorScheme: "light",
+          opacity: disabled ? 0.55 : 1,
+          cursor: disabled ? "not-allowed" : undefined,
+        }}
+      />
+    </div>
+  );
+}
+
+export function TextAreaField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  hint,
+  rows = 3,
+  disabled = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  hint?: ReactNode;
+  rows?: number;
+  disabled?: boolean;
+}) {
+  return (
+    <div>
+      <FieldLabel hint={hint}>{label}</FieldLabel>
+      <textarea
+        className="nl-input"
+        value={value}
+        rows={rows}
+        placeholder={placeholder}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        style={{
+          ...inputBase,
+          height: undefined,
+          minHeight: 40,
+          padding: "9px 13px",
+          lineHeight: 1.5,
+          resize: "vertical",
           opacity: disabled ? 0.55 : 1,
           cursor: disabled ? "not-allowed" : undefined,
         }}
@@ -149,6 +268,7 @@ export function SelectField({
     <div>
       <FieldLabel hint={hint}>{label}</FieldLabel>
       <select
+        className="nl-input"
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
@@ -159,7 +279,7 @@ export function SelectField({
           cursor: disabled ? "not-allowed" : "pointer",
           opacity: disabled ? 0.55 : 1,
           backgroundImage:
-            "url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%239fb2c8'/%3E%3C/svg%3E\")",
+            "url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23486581'/%3E%3C/svg%3E\")",
           backgroundRepeat: "no-repeat",
           backgroundPosition: "right 13px center",
           paddingRight: 32,
