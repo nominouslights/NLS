@@ -77,6 +77,7 @@ export default function ClientOnboardingWizard({
       const clientId = await createClient(input);
       setNewClientId(clientId);
       setStep(2);
+      setBusy(false);
     } catch (e) {
       setError(
         e instanceof ApiError ? e.message : "Failed to create the client — please try again."
@@ -113,6 +114,7 @@ export default function ClientOnboardingWizard({
       } else {
         // Client path: offer optional contract setup.
         setStep(3);
+        setBusy(false);
       }
     } catch (e) {
       setError(

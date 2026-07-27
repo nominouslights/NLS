@@ -9,6 +9,12 @@ using NorthernLink.Clients.Application.Clients.GetClients;
 using NorthernLink.Clients.Application.Clients.Update;
 using NorthernLink.Clients.Application.ClientContacts.Create;
 using NorthernLink.Clients.Application.ClientContacts.GetForClient;
+using NorthernLink.Clients.Application.ClientContacts.SetPrimary;
+using NorthernLink.Clients.Application.ClientInteractions;
+using NorthernLink.Clients.Application.ClientInteractions.Create;
+using NorthernLink.Clients.Application.ClientInteractions.Delete;
+using NorthernLink.Clients.Application.ClientInteractions.GetForClient;
+using NorthernLink.Clients.Application.ClientInteractions.GetOpenFollowUps;
 using NorthernLink.Clients.Application.Contracts.Create;
 using NorthernLink.Clients.Application.Contracts.GetForClient;
 using NorthernLink.Clients.Application.Contracts.Terminate;
@@ -47,6 +53,14 @@ public static class ClientsEndpoints
         // Contacts — nested under their client.
         clients.MapGet("{id:guid}/contacts", GetClientContacts);
         clients.MapPost("{id:guid}/contacts", CreateClientContact);
+        clients.MapPut("{id:guid}/contacts/{contactId:guid}/primary", SetPrimaryClientContact);
+
+        // Interactions — nested under their client, plus a cross-client open-follow-ups feed.
+        // "follow-ups" is a literal segment; the {id:guid} constraint rejects it, so no collision.
+        clients.MapGet("follow-ups", GetOpenFollowUps);
+        clients.MapGet("{id:guid}/interactions", GetClientInteractions);
+        clients.MapPost("{id:guid}/interactions", CreateClientInteraction);
+        clients.MapDelete("{id:guid}/interactions/{interactionId:guid}", DeleteClientInteraction);
 
         // Purchase orders — nested under their client.
         clients.MapGet("{id:guid}/purchase-orders", GetClientPurchaseOrders);
@@ -237,6 +251,78 @@ public static class ClientsEndpoints
             : EndpointResults.Problem(result.Error);
     }
 
+    private static async Task<IResult> SetPrimaryClientContact(
+        Guid id, Guid contactId, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(new SetPrimaryClientContactCommand(tenantId, id, contactId), cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> GetClientInteractions(
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(new GetClientInteractionsQuery(tenantId, id), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> GetOpenFollowUps(
+        ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(new GetOpenFollowUpsQuery(tenantId), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> CreateClientInteraction(
+        Guid id, ClientInteractionRequest request, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var command = new CreateClientInteractionCommand(
+            tenantId,
+            id,
+            InteractionTypeWire.FromWire(request.Type),
+            request.OccurredOn ?? default,
+            request.Summary ?? string.Empty,
+            request.ParticipantContactIds ?? [],
+            request.FollowUpDate,
+            request.FollowUpNote);
+
+        var result = await sender.Send(command, cancellationToken);
+        return result.IsSuccess
+            ? Results.Created($"/api/clients/{id}/interactions/{result.Value}", new EntityCreatedResponse(result.Value))
+            : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> DeleteClientInteraction(
+        Guid id, Guid interactionId, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(new DeleteClientInteractionCommand(tenantId, interactionId), cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
     private static async Task<IResult> GetClientPurchaseOrders(
         Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
     {
@@ -355,3 +441,16 @@ public sealed record PurchaseOrderRequest(
     DateOnly? Expiry,
     decimal? AmountCad,
     string? Note);
+
+/// <summary>
+/// Request body for POST /api/clients/{id}/interactions. Type is the wire string — "Call",
+/// "Meeting", "Email", "Site Visit" (with a space), "Other"; a blank or unrecognized value maps
+/// to "Other". ParticipantContactIds references client_contacts rows and may be omitted/empty.
+/// </summary>
+public sealed record ClientInteractionRequest(
+    string? Type,
+    DateOnly? OccurredOn,
+    string? Summary,
+    Guid[]? ParticipantContactIds,
+    DateOnly? FollowUpDate,
+    string? FollowUpNote);

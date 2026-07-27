@@ -16,6 +16,12 @@ using NorthernLink.Clients.Application.Clients.Update;
 using NorthernLink.Clients.Application.ClientContacts;
 using NorthernLink.Clients.Application.ClientContacts.Create;
 using NorthernLink.Clients.Application.ClientContacts.GetForClient;
+using NorthernLink.Clients.Application.ClientContacts.SetPrimary;
+using NorthernLink.Clients.Application.ClientInteractions;
+using NorthernLink.Clients.Application.ClientInteractions.Create;
+using NorthernLink.Clients.Application.ClientInteractions.Delete;
+using NorthernLink.Clients.Application.ClientInteractions.GetForClient;
+using NorthernLink.Clients.Application.ClientInteractions.GetOpenFollowUps;
 using NorthernLink.Clients.Application.Contracts;
 using NorthernLink.Clients.Application.Contracts.Create;
 using NorthernLink.Clients.Application.Contracts.GetForClient;
@@ -69,6 +75,8 @@ public static class ClientsServiceCollectionExtensions
         services.AddScoped<IContractReadService, ContractReadService>();
         services.AddScoped<IPurchaseOrderRepository, PurchaseOrderRepository>();
         services.AddScoped<IPurchaseOrderReadService, PurchaseOrderReadService>();
+        services.AddScoped<IClientInteractionRepository, ClientInteractionRepository>();
+        services.AddScoped<IClientInteractionReadService, ClientInteractionReadService>();
 
         // 3. Command/query handlers — registered explicitly, one line per handler.
         services.AddScoped<ICommandHandler<CreateClientCommand, Guid>, CreateClientCommandHandler>();
@@ -76,6 +84,7 @@ public static class ClientsServiceCollectionExtensions
         services.AddScoped<IQueryHandler<GetClientsQuery, IReadOnlyList<ClientResponse>>, GetClientsQueryHandler>();
         services.AddScoped<IQueryHandler<GetClientByIdQuery, ClientResponse>, GetClientByIdQueryHandler>();
         services.AddScoped<ICommandHandler<CreateClientContactCommand, Guid>, CreateClientContactCommandHandler>();
+        services.AddScoped<ICommandHandler<SetPrimaryClientContactCommand>, SetPrimaryClientContactCommandHandler>();
         services.AddScoped<IQueryHandler<GetClientContactsQuery, IReadOnlyList<ClientContactResponse>>, GetClientContactsQueryHandler>();
         services.AddScoped<ICommandHandler<CreateContractCommand, Guid>, CreateContractCommandHandler>();
         services.AddScoped<ICommandHandler<UpdateContractCommand>, UpdateContractCommandHandler>();
@@ -85,6 +94,10 @@ public static class ClientsServiceCollectionExtensions
         services.AddScoped<ICommandHandler<UpdatePurchaseOrderCommand>, UpdatePurchaseOrderCommandHandler>();
         services.AddScoped<ICommandHandler<DeletePurchaseOrderCommand>, DeletePurchaseOrderCommandHandler>();
         services.AddScoped<IQueryHandler<GetClientPurchaseOrdersQuery, IReadOnlyList<PurchaseOrderResponse>>, GetClientPurchaseOrdersQueryHandler>();
+        services.AddScoped<ICommandHandler<CreateClientInteractionCommand, Guid>, CreateClientInteractionCommandHandler>();
+        services.AddScoped<ICommandHandler<DeleteClientInteractionCommand>, DeleteClientInteractionCommandHandler>();
+        services.AddScoped<IQueryHandler<GetClientInteractionsQuery, IReadOnlyList<ClientInteractionResponse>>, GetClientInteractionsQueryHandler>();
+        services.AddScoped<IQueryHandler<GetOpenFollowUpsQuery, IReadOnlyList<ClientInteractionResponse>>, GetOpenFollowUpsQueryHandler>();
 
         // 4. Integration event consumers — none: Clients only publishes (client-changed,
         //    contract-changed); it consumes nothing from other modules today.
@@ -99,7 +112,8 @@ public static class ClientsServiceCollectionExtensions
             .Project(new ClientContactProjection())
             .Project(new ContractProjection())
             .Project(new ClientContractSummaryProjection())
-            .Project(new PurchaseOrderProjection()));
+            .Project(new PurchaseOrderProjection())
+            .Project(new ClientInteractionProjection()));
 
         return services;
     }

@@ -16,24 +16,22 @@ import { ActionButton } from "@/components/ui/Button";
 import ClientDetail from "@/components/screens/clients/ClientDetail";
 import ClientsOverview from "@/components/screens/clients/ClientsOverview";
 import ClientOnboardingWizard from "@/components/ClientOnboardingWizard";
-import { mockCrmIdFor } from "@/components/screens/clients/shared";
 
 // Clients & Contracts — Fleet-style master list + selection-driven detail.
-// The client roster, contracts, and purchase orders come from the real
-// Clients API (lib/api/clients.ts); the CRM pieces (contacts, interactions,
-// follow-ups) stay on the lib/clientStore mock, joined via the prototype-CRM
-// shim in ./clients/shared.tsx. With nothing selected the pane shows the
-// clients overview (follow-ups + cross-client PO expiry); selecting a client
-// shows the unified detail view.
+// The client roster, contracts, purchase orders, and CRM (contacts,
+// interactions, follow-ups) all come from the real Clients API
+// (lib/api/clients.ts), keyed by client Guid. With nothing selected the pane
+// shows the clients overview (follow-ups + cross-client PO expiry); selecting a
+// client shows the unified detail view.
 
 const EYEBROW = "Business · Client CRM — roster, touchpoints & contract health";
 const TITLE = "Clients & Contracts";
 
-function ScreenFrame({ children }: { children: React.ReactNode }) {
+function ScreenFrame({ children, right }: { children: React.ReactNode; right?: React.ReactNode }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }} className="detailfade">
       <div style={{ flex: "none", padding: "20px 26px 12px" }}>
-        <PageHeader eyebrow={EYEBROW} title={TITLE} />
+        <PageHeader eyebrow={EYEBROW} title={TITLE} right={right} />
       </div>
       {children}
     </div>
@@ -165,6 +163,12 @@ export default function Clients({
     selectClient(newClientId);
   }
 
+  const headerActions = (
+    <ActionButton variant="primary" onClick={() => setModal("new-client")}>
+      + ADD CLIENT
+    </ActionButton>
+  );
+
   if (loadError) {
     return (
       <ScreenFrame>
@@ -183,28 +187,25 @@ export default function Clients({
 
   if (roster.length === 0) {
     return (
-      <ScreenFrame>
+      <ScreenFrame right={headerActions}>
         <div style={{ padding: "26px", maxWidth: 560 }}>
           <Panel>
             <SectionLabel>No clients registered</SectionLabel>
             <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textMuted, lineHeight: 1.6 }}>
-              The client roster is empty for this tenant. Register clients through the Clients API to
-              make them available for contracts, purchase orders, and trip creation.
+              The client roster is empty for this tenant. Use + ADD CLIENT to register the first
+              client and make it available for contracts, purchase orders, and trip creation.
             </div>
           </Panel>
         </div>
+        {modal === "new-client" && (
+          <ClientOnboardingWizard onClose={() => setModal(null)} onSaved={onClientCreated} />
+        )}
       </ScreenFrame>
     );
   }
 
   const selIndex = clientSel === null ? -1 : roster.findIndex((c) => c.id === clientSel);
   const selected = selIndex === -1 ? null : roster[selIndex];
-
-  const headerActions = (
-    <ActionButton variant="primary" onClick={() => setModal("new-client")}>
-      + ADD CLIENT
-    </ActionButton>
-  );
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }} className="detailfade">
@@ -311,7 +312,6 @@ export default function Clients({
           ) : (
             <ClientDetail
               client={selected}
-              mockCrmId={mockCrmIdFor(selected, selIndex)}
               tab={tab}
               setTab={setTab}
               onCreateTrip={onCreateTrip}

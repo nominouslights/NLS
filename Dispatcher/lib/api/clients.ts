@@ -1,15 +1,15 @@
 import { request } from "./transport";
 import { docStatusFor } from "../maintenanceStore";
 import type { ServiceType, StatusKind } from "../theme";
+import type { InteractionType } from "../types";
 
 // ---------------------------------------------------------------------------
 // Clients API client — contract owned by Backend/ (Clients module,
 // ClientsEndpoints). Shapes mirror the backend's ClientResponse /
-// ContractResponse / PurchaseOrderResponse exactly (JSON camelCase, enums as
-// PascalCase strings). Do not invent fields — extend only when the backend
-// contract changes.
-// CRM (contacts, interactions, follow-ups) has NO backend — it stays mocked
-// in lib/clientStore.ts.
+// ContractResponse / PurchaseOrderResponse / ClientContactResponse /
+// ClientInteractionResponse exactly (JSON camelCase, enums as PascalCase
+// strings). Do not invent fields — extend only when the backend contract
+// changes.
 // ---------------------------------------------------------------------------
 
 export type ClientType = "Client" | "VendorPartner";
@@ -84,6 +84,32 @@ export interface ClientContactInput {
   phone?: string | null;
   notes?: string | null;
   isPrimary: boolean;
+}
+
+/** One client interaction / touchpoint (ClientInteractionResponse). `type` is
+ *  the wire string matching the InteractionType union in lib/types
+ *  (e.g. "Site Visit" carries a space). */
+export interface ClientInteractionRecord {
+  id: string;
+  clientId: string;
+  type: InteractionType;
+  occurredOn: string; // DateOnly, "2026-03-10"
+  summary: string;
+  participantContactIds: string[];
+  followUpDate: string | null; // DateOnly, or null when no follow-up
+  followUpNote: string | null;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+}
+
+/** POST /api/clients/{id}/interactions body (ClientInteractionRequest). */
+export interface ClientInteractionInput {
+  type: InteractionType;
+  occurredOn: string;
+  summary: string;
+  participantContactIds: string[];
+  followUpDate?: string | null;
+  followUpNote?: string | null;
 }
 
 export interface ContractRecord {
@@ -205,6 +231,42 @@ export async function createContact(clientId: string, input: ClientContactInput)
     body: JSON.stringify(input),
   });
   return res.id;
+}
+
+/** PUT → 204. Idempotent no-op 204 if already primary; 404 if not found. */
+export function setPrimaryContact(clientId: string, contactId: string): Promise<void> {
+  return request<void>(`/api/clients/${clientId}/contacts/${contactId}/primary`, {
+    method: "PUT",
+  });
+}
+
+/** GET → newest occurredOn first. */
+export function listInteractions(clientId: string): Promise<ClientInteractionRecord[]> {
+  return request<ClientInteractionRecord[]>(`/api/clients/${clientId}/interactions`);
+}
+
+/** POST → 201 { id }. */
+export async function createInteraction(
+  clientId: string,
+  input: ClientInteractionInput,
+): Promise<string> {
+  const res = await request<{ id: string }>(`/api/clients/${clientId}/interactions`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return res.id;
+}
+
+export function deleteInteraction(clientId: string, interactionId: string): Promise<void> {
+  return request<void>(`/api/clients/${clientId}/interactions/${interactionId}`, {
+    method: "DELETE",
+  });
+}
+
+/** GET → open follow-ups across ALL clients (only rows with a followUpDate),
+ *  earliest followUpDate first. Drives the overview follow-ups widget. */
+export function listOpenFollowUps(): Promise<ClientInteractionRecord[]> {
+  return request<ClientInteractionRecord[]>(`/api/clients/follow-ups`);
 }
 
 export function listPurchaseOrders(clientId: string): Promise<PurchaseOrderRecord[]> {

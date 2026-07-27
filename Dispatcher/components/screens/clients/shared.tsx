@@ -1,5 +1,4 @@
 import { chipStyle, statusMeta, type StatusKind } from "@/lib/theme";
-import type { ClientRecord } from "@/lib/api/clients";
 import type { InteractionType } from "@/lib/types";
 
 // Shared bits for the Client detail sub-tree (tabs, client-type gating, small
@@ -13,42 +12,6 @@ export const VENDOR_TABS = ["Overview & POs"];
  *  Vendor/Partner records don't get the CRM UI. */
 export function isClientType(client: { type: string }): boolean {
   return client.type === "Client";
-}
-
-// ---------------------------------------------------------------------------
-// Prototype-CRM shim — clients now come from the real Clients API (Guid ids),
-// but the CRM store (lib/clientStore.ts: contacts, interactions, follow-ups)
-// is still a frontend mock keyed by the old numeric prototype ids (1..5).
-// Bridge them by name-match against the seed roster, falling back to roster
-// position + 1 — mirroring how the Drivers cutover joined the mock HOS rows
-// (components/screens/Drivers.tsx). Remove with the CRM backend phase.
-// ---------------------------------------------------------------------------
-
-const CRM_SEED_NAME_IDS: [RegExp, number][] = [
-  [/alamos/i, 1],
-  [/nihb/i, 2],
-  [/keewatin/i, 3],
-  [/community/i, 4],
-  [/miller/i, 5],
-];
-
-/** Numeric prototype-CRM id for an API client (name-match, then position). */
-export function mockCrmIdFor(client: ClientRecord, rosterIndex: number): number {
-  for (const [re, id] of CRM_SEED_NAME_IDS) {
-    if (re.test(client.name)) return id;
-  }
-  return rosterIndex + 1;
-}
-
-/** mock CRM id → API client, for widgets keyed by clientStore rows (e.g. the
- *  overview follow-ups list). */
-export function crmClientMap(roster: ClientRecord[]): Map<number, ClientRecord> {
-  const map = new Map<number, ClientRecord>();
-  roster.forEach((c, i) => {
-    const mockId = mockCrmIdFor(c, i);
-    if (!map.has(mockId)) map.set(mockId, c);
-  });
-  return map;
 }
 
 export interface TypeMeta {

@@ -3,7 +3,12 @@
 import { useEffect, useState } from "react";
 import { colors, fonts } from "@/lib/theme";
 import { ApiError } from "@/lib/api";
-import { listContacts, type ClientContactRecord } from "@/lib/api/clients";
+import {
+  listContacts,
+  refetchUntil,
+  setPrimaryContact,
+  type ClientContactRecord,
+} from "@/lib/api/clients";
 import { SectionLabel } from "@/components/ui/Panel";
 import { ActionButton } from "@/components/ui/Button";
 import ClientContactFormModal from "@/components/ClientContactFormModal";
@@ -15,6 +20,7 @@ export default function ContactRoster({ clientId, clientName }: { clientId: stri
   const [contacts, setContacts] = useState<ClientContactRecord[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [promotingId, setPromotingId] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -45,6 +51,25 @@ export default function ContactRoster({ clientId, clientName }: { clientId: stri
       setContacts(fresh);
     } catch (e) {
       setLoadError(e instanceof ApiError ? e.message : "Failed to reload contacts.");
+    }
+  }
+
+  async function onMakePrimary(contactId: string) {
+    if (promotingId) return;
+    setPromotingId(contactId);
+    setLoadError(null);
+    try {
+      await setPrimaryContact(clientId, contactId);
+      // Reads are eventually consistent — refetch until the promotion is visible.
+      const fresh = await refetchUntil(
+        () => listContacts(clientId),
+        (rows) => rows.find((c) => c.id === contactId)?.isPrimary === true,
+      );
+      setContacts(fresh);
+    } catch (e) {
+      setLoadError(e instanceof ApiError ? e.message : "Failed to set the primary contact.");
+    } finally {
+      setPromotingId(null);
     }
   }
 
@@ -152,6 +177,17 @@ export default function ContactRoster({ clientId, clientName }: { clientId: stri
                   </div>
                 )}
               </div>
+
+              {!c.isPrimary && (
+                <ActionButton
+                  variant="secondary"
+                  disabled={promotingId !== null}
+                  onClick={() => onMakePrimary(c.id)}
+                  style={{ flex: "none", fontSize: 11, padding: "6px 11px" }}
+                >
+                  {promotingId === c.id ? "SETTING…" : "MAKE PRIMARY"}
+                </ActionButton>
+              )}
             </div>
           ))}
         </div>

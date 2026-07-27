@@ -33,8 +33,7 @@ import { CLIENT_TABS, isClientType, VENDOR_TABS } from "./shared";
 // dates, rate, GST, terms, budget code), contract management (create / edit /
 // terminate), the PO expiry dashboard (real API CRUD), the contact roster, and
 // the interaction timeline. The roster + interaction tabs are Client-type only
-// and still run on the prototype-CRM mock store, joined by mockCrmId (see
-// ./shared.tsx).
+// and read the real Clients API, keyed by the client's Guid.
 
 /** True when the projection row reflects the submitted contract body. */
 function contractMatches(r: ContractRecord, id: string, input: ContractInput): boolean {
@@ -54,15 +53,12 @@ function contractMatches(r: ContractRecord, id: string, input: ContractInput): b
 
 export default function ClientDetail({
   client,
-  mockCrmId,
   tab,
   setTab,
   onCreateTrip,
   onRosterRefresh,
 }: {
   client: ClientRecord;
-  /** Numeric prototype-CRM id joining the mock contact/interaction store. */
-  mockCrmId: number;
   tab: number;
   setTab: (n: number) => void;
   onCreateTrip: () => void;
@@ -388,8 +384,8 @@ export default function ClientDetail({
       {/* Contacts (client-type only — real Clients API, keyed by the real client id) */}
       {clientType && activeTab === 1 && <ContactRoster clientId={client.id} clientName={client.name} />}
 
-      {/* Interactions (client-type only — prototype-CRM mock store) */}
-      {clientType && activeTab === 2 && <InteractionTimeline clientId={mockCrmId} clientName={client.name} />}
+      {/* Interactions (client-type only — real Clients API, keyed by the real client id) */}
+      {clientType && activeTab === 2 && <InteractionTimeline clientId={client.id} clientName={client.name} />}
 
       {modal === "new-contract" && (
         <ContractFormModal
