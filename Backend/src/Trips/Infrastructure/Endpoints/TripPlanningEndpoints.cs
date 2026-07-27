@@ -11,9 +11,14 @@ using NorthernLink.Trips.Application.Schedules.Create;
 using NorthernLink.Trips.Application.Schedules.GetScheduleTemplates;
 using NorthernLink.Trips.Application.Schedules.SetActive;
 using NorthernLink.Trips.Application.Schedules.Update;
+using NorthernLink.Trips.Application.Stops.Create;
+using NorthernLink.Trips.Application.Stops.GetStops;
+using NorthernLink.Trips.Application.Stops.SetActive;
+using NorthernLink.Trips.Application.Stops.Update;
 using NorthernLink.Trips.Application.Trips.Assign;
 using NorthernLink.Trips.Application.Trips.ChangeStatus;
 using NorthernLink.Trips.Application.Trips.Create;
+using NorthernLink.Trips.Application.Trips.GetActivity;
 using NorthernLink.Trips.Application.Trips.GetTripById;
 using NorthernLink.Trips.Application.Trips.GetTrips;
 using NorthernLink.Trips.Application.Trips.RecordDemand;
@@ -21,6 +26,7 @@ using NorthernLink.Trips.Application.Trips.Update;
 using NorthernLink.Trips.Domain.Manifests;
 using NorthernLink.Trips.Domain.Routes;
 using NorthernLink.Trips.Domain.Schedules;
+using NorthernLink.Trips.Domain.Stops;
 using NorthernLink.Trips.Domain.Trips;
 
 namespace NorthernLink.Trips.Infrastructure.Endpoints;
@@ -41,6 +47,7 @@ internal static class TripPlanningEndpoints
         var trips = app.MapGroup("/api/trips").RequireAuthorization();
         trips.MapGet("", GetTrips);
         trips.MapGet("{id:guid}", GetTripById);
+        trips.MapGet("{id:guid}/activity", GetTripActivity);
         trips.MapPost("", CreateTrip);
         trips.MapPut("{id:guid}", UpdateTrip);
         trips.MapPost("{id:guid}/assign", AssignTrip);
@@ -51,6 +58,13 @@ internal static class TripPlanningEndpoints
         routes.MapGet("", GetRoutes);
         routes.MapPost("", CreateRoute);
         routes.MapPut("{id:guid}", UpdateRoute);
+
+        var stops = app.MapGroup("/api/trips/stops").RequireAuthorization();
+        stops.MapGet("", GetStops);
+        stops.MapPost("", CreateStop);
+        stops.MapPut("{id:guid}", UpdateStop);
+        stops.MapPost("{id:guid}/activate", ActivateStop);
+        stops.MapPost("{id:guid}/deactivate", DeactivateStop);
 
         var templates = app.MapGroup("/api/trips/schedule-templates").RequireAuthorization();
         templates.MapGet("", GetScheduleTemplates);
@@ -97,6 +111,18 @@ internal static class TripPlanningEndpoints
         return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
     }
 
+    private static async Task<IResult> GetTripActivity(
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(new GetTripActivityQuery(id, tenantId), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
     private static async Task<IResult> CreateTrip(
         CreateTripRequest request, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
     {
@@ -123,6 +149,7 @@ internal static class TripPlanningEndpoints
             request.ClientName,
             request.PoNumber,
             request.DriverId,
+            request.VehicleId,
             request.VehicleUnit,
             request.SeatsCapacity,
             request.SeatsMinimum);
@@ -173,7 +200,7 @@ internal static class TripPlanningEndpoints
         }
 
         var result = await sender.Send(
-            new AssignTripCommand(id, request.DriverId, request.VehicleUnit), cancellationToken);
+            new AssignTripCommand(id, request.DriverId, request.VehicleId, request.VehicleUnit), cancellationToken);
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
@@ -228,7 +255,7 @@ internal static class TripPlanningEndpoints
         var command = new CreateRouteCommand(
             tenantId,
             request.Name ?? string.Empty,
-            request.Stops ?? [],
+            request.StopIds ?? [],
             request.DistanceKm,
             request.EstimatedDurationMinutes,
             request.RequiredLicenceClass);
@@ -250,13 +277,104 @@ internal static class TripPlanningEndpoints
         var command = new UpdateRouteCommand(
             id,
             request.Name ?? string.Empty,
-            request.Stops ?? [],
+            request.StopIds ?? [],
             request.DistanceKm,
             request.EstimatedDurationMinutes,
             request.RequiredLicenceClass,
             request.Active);
 
         var result = await sender.Send(command, cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
+    // ---- Stops ----
+
+    private static async Task<IResult> GetStops(
+        ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(new GetStopsQuery(tenantId), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> CreateStop(
+        StopRequest request, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var command = new CreateStopCommand(
+            tenantId,
+            request.Name ?? string.Empty,
+            request.StopType,
+            request.Street,
+            request.City ?? string.Empty,
+            request.Province ?? string.Empty,
+            request.PostalCode,
+            request.Country ?? string.Empty,
+            request.Latitude,
+            request.Longitude,
+            request.Notes);
+
+        var result = await sender.Send(command, cancellationToken);
+        return result.IsSuccess
+            ? Results.Created($"/api/trips/stops/{result.Value}", new StopCreatedResponse(result.Value))
+            : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> UpdateStop(
+        Guid id, StopRequest request, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        var command = new UpdateStopCommand(
+            id,
+            request.Name ?? string.Empty,
+            request.StopType,
+            request.Street,
+            request.City ?? string.Empty,
+            request.Province ?? string.Empty,
+            request.PostalCode,
+            request.Country ?? string.Empty,
+            request.Latitude,
+            request.Longitude,
+            request.Notes,
+            request.Active ?? true);
+
+        var result = await sender.Send(command, cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> ActivateStop(
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(new SetStopActiveCommand(id, true), cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> DeactivateStop(
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(new SetStopActiveCommand(id, false), cancellationToken);
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
@@ -370,6 +488,27 @@ public sealed record RouteCreatedResponse(Guid Id);
 /// <summary>Body of a successful schedule template creation (201, with Location header).</summary>
 public sealed record ScheduleTemplateCreatedResponse(Guid Id);
 
+/// <summary>Body of a successful stop creation (201, with Location header).</summary>
+public sealed record StopCreatedResponse(Guid Id);
+
+/// <summary>
+/// Request body for POST and PUT /api/trips/stops. <c>StopType</c> takes an enum name
+/// ("Hub", "Community", …) or null. <c>Active</c> is only honoured on PUT (a create is
+/// always active); toggle it afterwards via /activate and /deactivate.
+/// </summary>
+public sealed record StopRequest(
+    string? Name,
+    StopType? StopType,
+    string? Street,
+    string? City,
+    string? Province,
+    string? PostalCode,
+    string? Country,
+    double Latitude,
+    double Longitude,
+    string? Notes,
+    bool? Active);
+
 /// <summary>
 /// Request body for POST /api/trips. Enum-typed fields take enum names ("ContractCrew",
 /// "Outbound", …). Supplying <c>routeId</c> snapshots the route's corridor fields and
@@ -392,6 +531,7 @@ public sealed record CreateTripRequest(
     string? ClientName,
     string? PoNumber,
     Guid? DriverId,
+    Guid? VehicleId,
     string? VehicleUnit,
     int? SeatsCapacity,
     int? SeatsMinimum);
@@ -415,8 +555,12 @@ public sealed record UpdateTripRequest(
     int? SeatsCapacity,
     int? SeatsMinimum);
 
-/// <summary>Request body for POST /api/trips/{id}/assign — null driverId unassigns, null vehicleUnit clears.</summary>
-public sealed record AssignTripRequest(Guid? DriverId, string? VehicleUnit);
+/// <summary>
+/// Request body for POST /api/trips/{id}/assign — null driverId unassigns; null vehicleId
+/// with null vehicleUnit clears the vehicle. A non-null vehicleId is validated against
+/// vehicle_lookup (exists + Active) and its unit-number snapshotted server-side.
+/// </summary>
+public sealed record AssignTripRequest(Guid? DriverId, Guid? VehicleId, string? VehicleUnit);
 
 /// <summary>Request body for POST /api/trips/{id}/status ("InProgress" | "Completed" | "Cancelled").</summary>
 public sealed record ChangeTripStatusRequest(TripStatus Status, string? Reason);
@@ -424,18 +568,18 @@ public sealed record ChangeTripStatusRequest(TripStatus Status, string? Reason);
 /// <summary>Request body for POST /api/trips/{id}/demand.</summary>
 public sealed record RecordTripDemandRequest(int SeatsConfirmed, bool DemandGuaranteed);
 
-/// <summary>Request body for POST /api/trips/routes.</summary>
+/// <summary>Request body for POST /api/trips/routes. Stops are chosen from the catalog by id (ordered).</summary>
 public sealed record CreateRouteRequest(
     string? Name,
-    IReadOnlyList<RouteStop>? Stops,
+    IReadOnlyList<Guid>? StopIds,
     int DistanceKm,
     int EstimatedDurationMinutes,
     string? RequiredLicenceClass);
 
-/// <summary>Request body for PUT /api/trips/routes/{id} (full row, including active).</summary>
+/// <summary>Request body for PUT /api/trips/routes/{id} (full row, including active). Stops by id (ordered).</summary>
 public sealed record UpdateRouteRequest(
     string? Name,
-    IReadOnlyList<RouteStop>? Stops,
+    IReadOnlyList<Guid>? StopIds,
     int DistanceKm,
     int EstimatedDurationMinutes,
     string? RequiredLicenceClass,

@@ -11,7 +11,8 @@ namespace NorthernLink.Trips.Application.Trips.Create;
 /// name/stops/origin/destination/distance are snapshotted from the route and the
 /// free-form fields are ignored; otherwise the free-form fields describe the corridor.
 /// A supplied <see cref="DriverId"/> is validated against driver_lookup and the name
-/// snapshotted from it.
+/// snapshotted from it; likewise a supplied <see cref="VehicleId"/> is validated against
+/// vehicle_lookup and the unit-number snapshotted from it.
 /// </summary>
 public sealed record CreateTripCommand(
     Guid TenantId,
@@ -31,6 +32,7 @@ public sealed record CreateTripCommand(
     string? ClientName,
     string? PoNumber,
     Guid? DriverId,
+    Guid? VehicleId,
     string? VehicleUnit,
     int? SeatsCapacity,
     int? SeatsMinimum) : ICommand<Guid>;

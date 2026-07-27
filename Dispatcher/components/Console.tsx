@@ -15,8 +15,8 @@ import Clients from "@/components/screens/Clients";
 import Riders from "@/components/screens/Riders";
 import Billing from "@/components/screens/Billing";
 import Manifests from "@/components/screens/Manifests";
-import ManualTripEntry from "@/components/screens/manualtrip/ManualTripEntry";
 import RoutesSchedules from "@/components/screens/RoutesSchedules";
+import Stops from "@/components/screens/Stops";
 import Grocery from "@/components/screens/Grocery";
 import Incidents from "@/components/screens/Incidents";
 import Communications from "@/components/screens/Communications";
@@ -74,8 +74,8 @@ export default function Console() {
           {screen === "drivers" && <Drivers driverSel={driverSel} setDriverSel={setDriverSel} />}
           {screen === "fleet" && <Fleet fleetSelId={fleetSelId} setFleetSelId={setFleetSelId} />}
           {screen === "routes" && <RoutesSchedules />}
+          {screen === "stops" && <Stops />}
           {screen === "manifests" && <Manifests />}
-          {screen === "manualtrip" && <ManualTripEntry />}
           {screen === "grocery" && <Grocery />}
           {screen === "clients" && (
             <Clients clientSel={clientSel} setClientSel={setClientSel} onCreateTrip={() => setWizardOpen(true)} />

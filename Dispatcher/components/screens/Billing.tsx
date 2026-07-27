@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { colors, fonts, rowSurface, statusMeta } from "@/lib/theme";
+import { colors, fonts, rowSurface, statusMeta, type StatusKind } from "@/lib/theme";
 import { ApiError } from "@/lib/api";
 import {
   arAgingFor,
   defaultBillingPeriod,
+  directionMeta,
   formatInvoiceCad,
   generateDraftInvoice,
   getInvoice,
@@ -31,9 +32,17 @@ import {
   type InvoiceSummaryRecord,
   type QboSyncStatus,
 } from "@/lib/api/billing";
+import {
+  getTrip,
+  getTripManifest,
+  shortDateLabel,
+  type ManifestPassenger,
+  type TripManifest,
+  type TripRecord,
+} from "@/lib/api/trips";
 import { listClients, type ClientRecord } from "@/lib/api/clients";
 import { PageHeader, Panel, SectionLabel } from "@/components/ui/Panel";
-import { StatusChip } from "@/components/ui/Chip";
+import { StatusBadge, StatusChip } from "@/components/ui/Chip";
 import { ActionButton } from "@/components/ui/Button";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { DateField, NumberField, SelectField, TextField } from "@/components/ui/Field";
@@ -67,6 +76,184 @@ function MiniCard({ label, value, mono = true }: { label: string; value: string;
       >
         {value}
       </div>
+    </div>
+  );
+}
+
+/** Small inline leg-direction tag — glyph + text label (never colour-only).
+ *  Renders nothing for an unclassified (null) direction. */
+function DirectionTag({ direction }: { direction: BillableTripRecord["direction"] }) {
+  const d = directionMeta(direction);
+  if (!d) return null;
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 3,
+        flex: "none",
+        padding: "1px 6px",
+        borderRadius: 5,
+        border: `1px solid ${colors.borderStrong}`,
+        fontFamily: fonts.semiCondensed,
+        fontSize: 9.5,
+        letterSpacing: ".06em",
+        textTransform: "uppercase",
+        color: colors.textDim,
+      }}
+      title={`${d.label} leg`}
+    >
+      <span aria-hidden style={{ fontSize: 11, lineHeight: 1 }}>
+        {d.glyph}
+      </span>
+      {d.label}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Live trip + passenger detail (InvoiceDetail) — read from the Trips API, not
+// snapshotted onto the invoice. One entry per trip id referenced by a line.
+// ---------------------------------------------------------------------------
+
+interface LoadedTrip {
+  trip: TripRecord | null;
+  manifest: TripManifest | null;
+  /** true = the trip fetch itself failed (trip unknown/unavailable). */
+  error: boolean;
+  /** true = trip loaded but its manifest fetch failed (passengers unavailable). */
+  manifestError: boolean;
+}
+
+/** Boarded on/off indicator — colour + glyph + text label per the accessible
+ *  status-colour rule. Confirmed = teal ✓; pending renders in pendingKind
+ *  (gold for on-boarding, neutral gray for off-boarding). */
+function BoardBadge({ on, label, pendingKind }: { on: boolean; label: string; pendingKind: StatusKind }) {
+  const kind: StatusKind = on ? "ontime" : pendingKind;
+  const m = statusMeta(kind);
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
+        fontFamily: fonts.body,
+        fontSize: 10.5,
+        color: m.t,
+        whiteSpace: "nowrap",
+      }}
+    >
+      <StatusBadge kind={kind} size={13} />
+      {label}
+    </span>
+  );
+}
+
+function PassengerRow({ p }: { p: ManifestPassenger }) {
+  const leg = [p.pickupStopName, p.dropoffStopName].filter(Boolean).join(" → ");
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 10,
+        padding: "5px 0",
+        borderTop: `1px solid ${colors.borderSubtle}`,
+      }}
+    >
+      <div style={{ minWidth: 0 }}>
+        <div
+          style={{
+            fontFamily: fonts.body,
+            fontSize: 12,
+            color: colors.textSecondary,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {p.name}
+        </div>
+        {leg && (
+          <div
+            style={{
+              fontFamily: fonts.mono,
+              fontSize: 10,
+              color: colors.textDim,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {leg}
+          </div>
+        )}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flex: "none" }}>
+        <BoardBadge on={p.boardedOn} pendingKind="soon" label={p.boardedOn ? "On ✓" : "Not on"} />
+        <BoardBadge on={p.boardedOff} pendingKind="off" label={p.boardedOff ? "Off ✓" : "Not off"} />
+      </div>
+    </div>
+  );
+}
+
+/** One trip's live block under an invoice line: number, service date, direction,
+ *  and its passengers with on/off indicators. Handles the loading / trip-failed
+ *  / manifest-failed / no-manifest / empty-manifest cases. */
+function TripDetailBlock({ tripId, loaded }: { tripId: string; loaded: LoadedTrip | undefined }) {
+  const shell = {
+    padding: "8px 11px",
+    marginTop: 6,
+    background: colors.detailBg,
+    border: `1px solid ${colors.borderSubtle}`,
+    borderRadius: 8,
+  } as const;
+
+  if (!loaded) {
+    return (
+      <div style={{ ...shell, fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim }}>
+        Loading trip &amp; passengers…
+      </div>
+    );
+  }
+
+  if (loaded.error || !loaded.trip) {
+    return (
+      <div style={{ ...shell }}>
+        <StatusChip kind="off" label="Trip details unavailable" />
+      </div>
+    );
+  }
+
+  const t = loaded.trip;
+  const passengers = loaded.manifest?.passengers ?? [];
+
+  return (
+    <div style={shell}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: passengers.length ? 4 : 0 }}>
+        <span style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.skyBlue }}>{t.tripNumber}</span>
+        <span style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim }}>{shortDateLabel(t.serviceDate)}</span>
+        <DirectionTag direction={t.direction} />
+        {passengers.length > 0 && (
+          <span style={{ fontFamily: fonts.body, fontSize: 10.5, color: colors.textFaint, marginLeft: "auto" }}>
+            {passengers.length} pax
+          </span>
+        )}
+      </div>
+      {loaded.manifestError ? (
+        <StatusChip kind="soon" label="Passenger details unavailable" />
+      ) : !loaded.trip.manifestId ? (
+        <div style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim }}>No manifest recorded for this trip.</div>
+      ) : passengers.length === 0 ? (
+        <div style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim }}>Manifest has no passengers.</div>
+      ) : (
+        <div>
+          {passengers.map((p, i) => (
+            <PassengerRow key={`${tripId}-${i}`} p={p} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -298,6 +485,7 @@ function GenerateDraftModal({
                 }}
               >
                 <span style={{ fontFamily: fonts.mono, color: colors.skyBlue, flex: "none" }}>{t.tripNumber}</span>
+                <DirectionTag direction={t.direction} />
                 <span
                   style={{
                     color: colors.textSecondary,
@@ -598,6 +786,7 @@ function LineEditor({
             }}
           >
             <span style={{ fontFamily: fonts.mono, color: colors.skyBlue, flex: "none" }}>{t.tripNumber}</span>
+            <DirectionTag direction={t.direction} />
             <span
               style={{
                 color: colors.textSecondary,
@@ -608,7 +797,8 @@ function LineEditor({
                 whiteSpace: "nowrap",
               }}
             >
-              {t.routeName} · {t.serviceDate}
+              {t.routeName}
+              {t.roundTripKey ? "" : " · unpaired leg"} · {t.serviceDate}
             </span>
             <ActionButton onClick={() => attachTrip(t)} style={{ padding: "4px 10px", fontSize: 12 }}>
               + ATTACH
@@ -657,6 +847,53 @@ function InvoiceDetail({
   const [qboOpen, setQboOpen] = useState(false);
   const [qboId, setQboId] = useState("");
   const [qboStatus, setQboStatus] = useState<QboSyncStatus>("NotSynced");
+
+  // Live trip + passenger detail, keyed by trip id, fetched from the Trips API
+  // (never snapshotted onto the invoice). Cached for this mount; the component
+  // remounts per invoice (key={id}), and refetches when the line set changes.
+  const [tripDetails, setTripDetails] = useState<Record<string, LoadedTrip>>({});
+  const [expandedLines, setExpandedLines] = useState<Record<string, boolean>>({});
+
+  // Distinct trip ids across all lines, as a stable comma-joined key so a
+  // status/QBO mutation (which does not touch tripIds) never refetches.
+  const tripIdsKey = useMemo(() => {
+    if (!inv) return "";
+    return Array.from(new Set(inv.lines.flatMap((l) => l.tripIds)))
+      .sort()
+      .join(",");
+  }, [inv]);
+
+  useEffect(() => {
+    const ids = tripIdsKey ? tripIdsKey.split(",") : [];
+    if (ids.length === 0) return;
+    let active = true;
+    // The fetch replaces the whole map (Object.fromEntries below), so trip ids
+    // not in the new set drop out; rendering only reads entries for current
+    // line trip ids, so no synchronous reset is needed here.
+    Promise.all(
+      ids.map(async (tid): Promise<[string, LoadedTrip]> => {
+        try {
+          const trip = await getTrip(tid);
+          if (!trip.manifestId) {
+            return [tid, { trip, manifest: null, error: false, manifestError: false }];
+          }
+          try {
+            const manifest = await getTripManifest(trip.manifestId);
+            return [tid, { trip, manifest, error: false, manifestError: false }];
+          } catch {
+            return [tid, { trip, manifest: null, error: false, manifestError: true }];
+          }
+        } catch {
+          return [tid, { trip: null, manifest: null, error: true, manifestError: false }];
+        }
+      }),
+    ).then((entries) => {
+      if (active) setTripDetails(Object.fromEntries(entries));
+    });
+    return () => {
+      active = false;
+    };
+  }, [tripIdsKey]);
 
   // The parent remounts this component per invoice (key={id}), so all state
   // resets on selection change without synchronous effect resets.
@@ -889,38 +1126,72 @@ function InvoiceDetail({
               No lines on this invoice{isDraft ? " yet — use EDIT LINES to add them" : ""}.
             </div>
           )}
-          {inv.lines.map((l) => (
-            <div
-              key={l.lineId}
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                gap: 12,
-                padding: "9px 0",
-                borderBottom: `1px solid ${colors.borderSubtle}`,
-                fontFamily: fonts.body,
-                fontSize: 12.5,
-              }}
-            >
-              <span style={{ color: colors.textSecondary, minWidth: 0 }}>
-                {l.description}
-                {(l.tripNumber || l.serviceDate) && (
-                  <span style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textDim }}>
-                    {"  "}
-                    {l.tripNumber ?? ""}
-                    {l.tripNumber && l.serviceDate ? " · " : ""}
-                    {l.serviceDate ?? ""}
+          {inv.lines.map((l) => {
+            const hasTrips = l.tripIds.length > 0;
+            const expanded = expandedLines[l.lineId] ?? false;
+            return (
+              <div key={l.lineId} style={{ borderBottom: `1px solid ${colors.borderSubtle}` }}>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    padding: "9px 0",
+                    fontFamily: fonts.body,
+                    fontSize: 12.5,
+                  }}
+                >
+                  <span style={{ color: colors.textSecondary, minWidth: 0 }}>
+                    {l.description}
+                    {(l.tripNumber || l.serviceDate) && (
+                      <span style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textDim }}>
+                        {"  "}
+                        {l.tripNumber ?? ""}
+                        {l.tripNumber && l.serviceDate ? " · " : ""}
+                        {l.serviceDate ?? ""}
+                      </span>
+                    )}
+                    {hasTrips && (
+                      <span
+                        onClick={() =>
+                          setExpandedLines((prev) => ({ ...prev, [l.lineId]: !expanded }))
+                        }
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 4,
+                          marginLeft: 8,
+                          cursor: "pointer",
+                          fontFamily: fonts.semiCondensed,
+                          fontSize: 9.5,
+                          letterSpacing: ".06em",
+                          textTransform: "uppercase",
+                          color: colors.skyBlue,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        <span aria-hidden>{expanded ? "▾" : "▸"}</span>
+                        {l.tripIds.length} trip{l.tripIds.length === 1 ? "" : "s"} · passengers
+                      </span>
+                    )}
                   </span>
+                  <span style={{ fontFamily: fonts.mono, color: colors.textDim, flex: "none" }}>
+                    {l.quantity} × {formatInvoiceCad(l.unitPriceCad)}
+                  </span>
+                  <span style={{ fontFamily: fonts.mono, color: colors.textPrimary, flex: "none", width: 92, textAlign: "right" }}>
+                    {formatInvoiceCad(l.amountCad)}
+                  </span>
+                </div>
+                {hasTrips && expanded && (
+                  <div style={{ padding: "0 0 9px" }}>
+                    {l.tripIds.map((tid) => (
+                      <TripDetailBlock key={tid} tripId={tid} loaded={tripDetails[tid]} />
+                    ))}
+                  </div>
                 )}
-              </span>
-              <span style={{ fontFamily: fonts.mono, color: colors.textDim, flex: "none" }}>
-                {l.quantity} × {formatInvoiceCad(l.unitPriceCad)}
-              </span>
-              <span style={{ fontFamily: fonts.mono, color: colors.textPrimary, flex: "none", width: 92, textAlign: "right" }}>
-                {formatInvoiceCad(l.amountCad)}
-              </span>
-            </div>
-          ))}
+              </div>
+            );
+          })}
 
           <div
             style={{

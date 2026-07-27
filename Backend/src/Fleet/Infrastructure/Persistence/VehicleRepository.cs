@@ -10,6 +10,9 @@ internal sealed class VehicleRepository(FleetDbContext context) : IVehicleReposi
     public Task<Vehicle?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         context.Vehicles.FirstOrDefaultAsync(v => v.Id == id, cancellationToken);
 
+    public Task<Vehicle?> GetByUnitNumberAsync(string unitNumber, CancellationToken cancellationToken = default) =>
+        context.Vehicles.FirstOrDefaultAsync(v => v.UnitNumber == unitNumber, cancellationToken);
+
     public Task<bool> ExistsByVinAsync(
         Vin vin,
         Guid? excludeVehicleId = null,

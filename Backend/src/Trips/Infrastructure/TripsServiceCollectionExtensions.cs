@@ -17,11 +17,17 @@ using NorthernLink.Trips.Application.Manifests;
 using NorthernLink.Trips.Application.Manifests.Create;
 using NorthernLink.Trips.Application.Manifests.GetById;
 using NorthernLink.Trips.Application.Manifests.GetManifests;
+using NorthernLink.Trips.Application.Manifests.Update;
 using NorthernLink.Trips.Application.Routes;
 using NorthernLink.Trips.Application.Routes.Create;
 using NorthernLink.Trips.Application.Routes.GetRoutes;
 using NorthernLink.Trips.Application.Routes.Update;
 using NorthernLink.Trips.Application.Schedules;
+using NorthernLink.Trips.Application.Stops;
+using NorthernLink.Trips.Application.Stops.Create;
+using NorthernLink.Trips.Application.Stops.GetStops;
+using NorthernLink.Trips.Application.Stops.SetActive;
+using NorthernLink.Trips.Application.Stops.Update;
 using NorthernLink.Trips.Application.Schedules.Create;
 using NorthernLink.Trips.Application.Schedules.GetScheduleTemplates;
 using NorthernLink.Trips.Application.Schedules.SetActive;
@@ -31,6 +37,7 @@ using NorthernLink.Trips.Application.Trips.Assign;
 using NorthernLink.Trips.Application.Trips.AttachManifest;
 using NorthernLink.Trips.Application.Trips.ChangeStatus;
 using NorthernLink.Trips.Application.Trips.Create;
+using NorthernLink.Trips.Application.Trips.GetActivity;
 using NorthernLink.Trips.Application.Trips.GetTripById;
 using NorthernLink.Trips.Application.Trips.GetTrips;
 using NorthernLink.Trips.Application.Trips.RecordDemand;
@@ -77,16 +84,21 @@ public static class TripsServiceCollectionExtensions
         services.AddScoped<ITripManifestReadService, TripManifestReadService>();
         services.AddScoped<ITripRepository, TripRepository>();
         services.AddScoped<ITripReadService, TripReadService>();
+        services.AddScoped<ITripActivityReadService, TripActivityReadService>();
         services.AddScoped<IRouteRepository, RouteRepository>();
         services.AddScoped<IRouteReadService, RouteReadService>();
+        services.AddScoped<IStopRepository, StopRepository>();
+        services.AddScoped<IStopReadService, StopReadService>();
         services.AddScoped<IScheduleTemplateRepository, ScheduleTemplateRepository>();
         services.AddScoped<IScheduleTemplateReadService, ScheduleTemplateReadService>();
         services.AddScoped<IDriverLookupRepository, DriverLookupRepository>();
+        services.AddScoped<IVehicleLookupRepository, VehicleLookupRepository>();
         services.AddScoped<IClientLookupRepository, ClientLookupRepository>();
         services.AddScoped<ITripNumberGenerator, TripNumberGenerator>();
 
         // 3. Command/query handlers — registered explicitly, one line per handler.
         services.AddScoped<ICommandHandler<CreateTripManifestCommand, Guid>, CreateTripManifestCommandHandler>();
+        services.AddScoped<ICommandHandler<UpdateTripManifestCommand>, UpdateTripManifestCommandHandler>();
         services.AddScoped<IQueryHandler<GetTripManifestsQuery, IReadOnlyList<TripManifestResponse>>, GetTripManifestsQueryHandler>();
         services.AddScoped<IQueryHandler<GetTripManifestByIdQuery, TripManifestResponse>, GetTripManifestByIdQueryHandler>();
         services.AddScoped<ICommandHandler<CreateTripCommand, Guid>, CreateTripCommandHandler>();
@@ -97,30 +109,37 @@ public static class TripsServiceCollectionExtensions
         services.AddScoped<ICommandHandler<AttachManifestToTripCommand>, AttachManifestToTripCommandHandler>();
         services.AddScoped<IQueryHandler<GetTripsQuery, IReadOnlyList<TripResponse>>, GetTripsQueryHandler>();
         services.AddScoped<IQueryHandler<GetTripByIdQuery, TripResponse>, GetTripByIdQueryHandler>();
+        services.AddScoped<IQueryHandler<GetTripActivityQuery, IReadOnlyList<TripActivityEntryResponse>>, GetTripActivityQueryHandler>();
         services.AddScoped<ICommandHandler<CreateRouteCommand, Guid>, CreateRouteCommandHandler>();
         services.AddScoped<ICommandHandler<UpdateRouteCommand>, UpdateRouteCommandHandler>();
         services.AddScoped<IQueryHandler<GetRoutesQuery, IReadOnlyList<RouteResponse>>, GetRoutesQueryHandler>();
+        services.AddScoped<ICommandHandler<CreateStopCommand, Guid>, CreateStopCommandHandler>();
+        services.AddScoped<ICommandHandler<UpdateStopCommand>, UpdateStopCommandHandler>();
+        services.AddScoped<ICommandHandler<SetStopActiveCommand>, SetStopActiveCommandHandler>();
+        services.AddScoped<IQueryHandler<GetStopsQuery, IReadOnlyList<StopResponse>>, GetStopsQueryHandler>();
         services.AddScoped<ICommandHandler<CreateScheduleTemplateCommand, Guid>, CreateScheduleTemplateCommandHandler>();
         services.AddScoped<ICommandHandler<UpdateScheduleTemplateCommand>, UpdateScheduleTemplateCommandHandler>();
         services.AddScoped<ICommandHandler<SetScheduleTemplateActiveCommand>, SetScheduleTemplateActiveCommandHandler>();
         services.AddScoped<IQueryHandler<GetScheduleTemplatesQuery, IReadOnlyList<ScheduleTemplateResponse>>, GetScheduleTemplatesQueryHandler>();
 
-        // 4. Integration event consumers — Fleet vehicle status (log-only today) plus the
-        //    Drivers/Clients replicas that keep driver_lookup/client_lookup current.
+        // 4. Integration event consumers — the Drivers/Fleet/Clients replicas that keep
+        //    driver_lookup/vehicle_lookup/client_lookup current for assignment validation.
         services.AddIntegrationEventConsumer(SchemaName, subscriptions => subscriptions
-            .On<VehicleStatusChangedIntegrationEvent, VehicleStatusChangedIntegrationEventHandler>()
             .On<DriverChangedIntegrationEvent, DriverChangedIntegrationEventHandler>()
+            .On<VehicleChangedIntegrationEvent, VehicleChangedIntegrationEventHandler>()
+            .On<VehicleInspectionRecordedIntegrationEvent, VehicleInspectionRecordedIntegrationEventHandler>()
             .On<ClientChangedIntegrationEvent, ClientChangedIntegrationEventHandler>());
 
         // 5. Read-side projections — one worker upserts trips.rm_* from the journal, and a
-        //    completed manifest triggers the idempotent attach-to-trip reaction (same-module
+        //    newly created manifest triggers the idempotent link-to-trip reaction (same-module
         //    secondary command, the Fleet EnsureRetirementCertificate pattern).
         services.AddProjections<TripsDbContext>(SchemaName, registry => registry
             .Project(new TripManifestProjection())
             .Project(new TripProjection())
             .Project(new RouteProjection())
+            .Project(new StopProjection())
             .Project(new ScheduleTemplateProjection())
-            .OnEvent<TripManifestCompletedDomainEvent>(entry =>
+            .OnEvent<TripManifestCreatedDomainEvent>(entry =>
                 new AttachManifestToTripCommand(entry.AggregateId)));
 
         // 6. Trip generation — materializes upcoming trips from active schedule templates.

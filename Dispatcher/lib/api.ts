@@ -19,18 +19,18 @@ export * from "./api/maintenance";
 
 export type {
   ManifestSource,
-  ManifestFuelLevel,
   ManifestDirection,
-  ManifestWeather,
-  ManifestRoadCondition,
-  ManifestVisibility,
-  ManifestSeverity,
   ManifestCargoSecured,
-  ManifestPreTripItem,
   ManifestPassenger,
   ManifestCargo,
-  ManifestPostTripItem,
   TripManifest,
   TripManifestInput,
+  TripActivityEntry,
 } from "./api/trips";
-export { createTripManifest, listTripManifests, getTripManifest } from "./api/trips";
+export {
+  createTripManifest,
+  updateTripManifest,
+  listTripManifests,
+  getTripManifest,
+  listTripActivity,
+} from "./api/trips";

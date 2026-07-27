@@ -37,7 +37,7 @@ public class AttachManifestToTripCommandHandlerTests
     }
 
     [Fact]
-    public async Task Matching_trip_gets_the_manifest_and_auto_completes()
+    public async Task Matching_trip_gets_the_manifest_linked_without_completing()
     {
         var manifest = TestManifests.Create(tripNumber: "TR-4821").Value;
         _manifests.Add(manifest);
@@ -49,7 +49,7 @@ public class AttachManifestToTripCommandHandlerTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(manifest.Id, trip.ManifestId);
-        Assert.Equal(TripStatus.Completed, trip.Status);
+        Assert.Equal(TripStatus.Scheduled, trip.Status); // linking never completes
         Assert.Equal(1, _trips.SaveCount);
     }
 
@@ -68,8 +68,8 @@ public class AttachManifestToTripCommandHandlerTests
         var second = await Handler.Handle(command, CancellationToken.None);
 
         Assert.True(second.IsSuccess);
-        Assert.Equal(TripStatus.Completed, trip.Status);
-        Assert.Empty(trip.DomainEvents); // no second completion event
+        Assert.Equal(TripStatus.Scheduled, trip.Status);
+        Assert.Empty(trip.DomainEvents); // no second link event
     }
 
     [Fact]

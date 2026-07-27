@@ -1,47 +1,109 @@
 import { request } from "./transport";
-import type { ManifestSeverity } from "./trips";
 
 // ---------------------------------------------------------------------------
 // Vehicle Inspection contract (Backend Fleet module — VehicleInspectionResponse).
-// Backend-owned inspections derived from submitted manifests (via RabbitMQ),
-// distinct from the mock DVIR store in lib/maintenanceStore.ts.
+// Inspections are entered directly (driver app or dispatcher), tagged with
+// tripNumber + vehicleId, and advance the vehicle odometer. Pre-trip carries
+// weather/road/fuel; post-trip carries issues/attestations/signature/fuel-added
+// — the sections that USED to live on the trip manifest. Distinct from the mock
+// DVIR store in lib/maintenanceStore.ts.
 // ---------------------------------------------------------------------------
 
 export type InspectionResultWire = "Pass" | "PassWithDefects" | "Fail";
+export type InspectionType = "PreTrip" | "PostTrip";
+export type InspectionSourceWire = "DriverApp" | "Dispatcher";
+export type DefectSeverityWire = "Minor" | "Major" | "OutOfService";
+export type InspectionWeather = "Clear" | "Cloudy" | "Rain" | "Snow" | "Fog" | "ExtremeCold";
+export type InspectionRoadCondition = "Dry" | "Wet" | "Icy" | "SnowCovered" | "Muddy";
+export type InspectionVisibility = "Good" | "Reduced" | "Poor";
+export type InspectionFuelLevel = "Full" | "ThreeQuarters" | "Half" | "Quarter";
+
+export interface InspectionChecklistItemWire {
+  group: string | null;
+  item: string;
+  passed: boolean;
+}
+
+export interface InspectionDefectWire {
+  item: string;
+  severity: DefectSeverityWire;
+  note: string | null;
+}
 
 export interface VehicleInspection {
   id: string;
+  type: InspectionType;
+  source: InspectionSourceWire;
+  tripNumber: string | null;
+  vehicleId: string | null;
   unit: string;
-  type: "PreTrip" | "PostTrip";
   driverName: string;
-  source: "DriverApp" | "PaperTranscription";
   enteredBy: string | null;
-  tripNumber: string;
-  manifestId: string;
   performedAt: string;
   odometerKm: number | null;
   result: InspectionResultWire;
-  checklist: { group: string | null; item: string; passed: boolean }[];
-  defects: { item: string; severity: ManifestSeverity; note: string | null }[];
+  checklist: InspectionChecklistItemWire[];
+  defects: InspectionDefectWire[];
+  // Pre-trip sections
+  weather: InspectionWeather[];
+  temperatureC: string | null;
+  roadConditions: InspectionRoadCondition[];
+  visibility: InspectionVisibility | null;
+  roadAdvisories: string | null;
+  fuelLevel: InspectionFuelLevel | null;
+  // Post-trip sections
+  issues: string[];
+  attestations: boolean[];
+  driverSignatureName: string | null;
+  certifiedAt: string | null;
+  fuelAdded: boolean;
+  fuelLitres: number | null;
+  fuelCostCad: number | null;
   createdAtUtc: string;
 }
 
-export function listInspections(unit?: string): Promise<VehicleInspection[]> {
-  const qs = unit ? `?unit=${encodeURIComponent(unit)}` : "";
-  return request<VehicleInspection[]>(`/api/fleet/inspections${qs}`);
+/** GET /api/fleet/inspections — filter by unit and/or trip number. */
+export function listInspections(params?: { unit?: string; tripNumber?: string }): Promise<VehicleInspection[]> {
+  const q = new URLSearchParams();
+  if (params?.unit) q.set("unit", params.unit);
+  if (params?.tripNumber) q.set("tripNumber", params.tripNumber);
+  const qs = q.toString();
+  return request<VehicleInspection[]>(`/api/fleet/inspections${qs ? `?${qs}` : ""}`);
 }
 
-/** Dispatcher paper-backup DVIR entry (POST /api/fleet/inspections). Returns the new id. */
-export async function createInspection(input: {
+/** POST /api/fleet/inspections body. `source` defaults to Dispatcher server-side;
+ *  pre-trip sends the weather/road/fuel fields, post-trip the issues/attestations/
+ *  signature/fuel-added fields. Returns the new inspection id. */
+export interface InspectionInput {
+  type: InspectionType;
+  source?: InspectionSourceWire;
+  tripNumber?: string | null;
+  vehicleId?: string | null;
   unit: string;
-  type: "PreTrip" | "PostTrip";
   driverName: string;
-  enteredBy?: string;
+  enteredBy?: string | null;
   performedAt?: string;
   odometerKm?: number | null;
   checklist: { group?: string | null; item: string; passed: boolean }[];
-  defects: { item: string; severity: "Minor" | "Major" | "OutOfService"; note?: string | null }[];
-}): Promise<string> {
+  defects: { item: string; severity: DefectSeverityWire; note?: string | null }[];
+  // Pre-trip
+  weather?: InspectionWeather[];
+  temperatureC?: string | null;
+  roadConditions?: InspectionRoadCondition[];
+  visibility?: InspectionVisibility | null;
+  roadAdvisories?: string | null;
+  fuelLevel?: InspectionFuelLevel | null;
+  // Post-trip
+  issues?: string[];
+  attestations?: boolean[];
+  driverSignatureName?: string | null;
+  certifiedAt?: string | null;
+  fuelAdded?: boolean;
+  fuelLitres?: number | null;
+  fuelCostCad?: number | null;
+}
+
+export async function createInspection(input: InspectionInput): Promise<string> {
   const res = await request<{ id: string }>("/api/fleet/inspections", {
     method: "POST",
     body: JSON.stringify(input),

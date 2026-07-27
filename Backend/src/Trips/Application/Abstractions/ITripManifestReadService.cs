@@ -8,10 +8,9 @@ namespace NorthernLink.Trips.Application.Abstractions;
 /// </summary>
 public interface ITripManifestReadService
 {
-    /// <summary>Lists manifests, optionally narrowed to a trip number and/or vehicle unit.</summary>
+    /// <summary>Lists manifests, optionally narrowed to a trip number.</summary>
     Task<IReadOnlyList<TripManifestResponse>> GetManifestsAsync(
         string? tripNumber = null,
-        string? unit = null,
         CancellationToken cancellationToken = default);
 
     Task<TripManifestResponse?> GetManifestAsync(Guid manifestId, CancellationToken cancellationToken = default);

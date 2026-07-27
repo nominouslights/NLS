@@ -48,6 +48,11 @@ namespace NorthernLink.Billing.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(200)")
                         .HasColumnName("destination");
 
+                    b.Property<string>("Direction")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("direction");
+
                     b.Property<int>("DistanceKm")
                         .HasColumnType("integer")
                         .HasColumnName("distance_km");

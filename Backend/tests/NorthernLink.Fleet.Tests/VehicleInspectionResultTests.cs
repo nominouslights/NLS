@@ -45,21 +45,9 @@ public class VehicleInspectionResultTests
     }
 
     [Fact]
-    public void Create_stamps_the_derived_result()
+    public void Enter_stamps_the_derived_result()
     {
-        var inspection = VehicleInspection.Create(
-            TestVehicles.TenantId,
-            "U-04",
-            InspectionType.PreTrip,
-            "J. Spence",
-            InspectionSource.DriverApp,
-            enteredBy: null,
-            "TR-4818",
-            Guid.NewGuid(),
-            DateTimeOffset.UtcNow,
-            118_204,
-            [new InspectionChecklistItem { Group = "Exterior & Mechanical", Item = "Tires", Passed = false }],
-            [Defect(InspectionDefectSeverity.OutOfService)]);
+        var inspection = TestInspections.PreTrip(defects: [Defect(InspectionDefectSeverity.OutOfService)]);
 
         Assert.Equal(InspectionResult.Fail, inspection.Result);
         Assert.Equal(TestVehicles.TenantId, inspection.TenantId);

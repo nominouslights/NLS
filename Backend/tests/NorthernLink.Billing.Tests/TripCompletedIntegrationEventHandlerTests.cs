@@ -20,6 +20,7 @@ public class TripCompletedIntegrationEventHandlerTests
         320,
         new DateOnly(2026, 7, 6),
         "rt-1",
+        "Outbound",
         "PO-7781",
         new DateTimeOffset(2026, 7, 6, 18, 0, 0, TimeSpan.Zero));
 
@@ -40,6 +41,7 @@ public class TripCompletedIntegrationEventHandlerTests
         Assert.Equal(TestBilling.TenantId, trip.TenantId);
         Assert.Equal("TR-4821", trip.TripNumber);
         Assert.Equal("rt-1", trip.RoundTripKey);
+        Assert.Equal("Outbound", trip.Direction);
         Assert.Null(trip.InvoiceId);
         Assert.Equal(1, repository.SaveCount);
     }

@@ -46,6 +46,7 @@ public sealed class TripCompletedIntegrationEventHandler(
             DistanceKm = integrationEvent.DistanceKm,
             ServiceDate = integrationEvent.ServiceDate,
             RoundTripKey = integrationEvent.RoundTripKey,
+            Direction = integrationEvent.Direction,
             PoNumber = integrationEvent.PoNumber,
             CompletedAtUtc = integrationEvent.CompletedAtUtc,
             InvoiceId = null,

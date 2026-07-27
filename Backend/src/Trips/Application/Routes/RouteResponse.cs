@@ -17,5 +17,14 @@ public sealed record RouteResponse(
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc);
 
-/// <summary>One ordered stop on a route.</summary>
-public sealed record RouteStopResponse(string Name, int Order);
+/// <summary>
+/// One ordered stop on a route. Carries the catalog reference (<see cref="StopId"/>) and
+/// the snapshotted coordinates when built from the stop catalog; all three are null for
+/// legacy free-text stops.
+/// </summary>
+public sealed record RouteStopResponse(
+    Guid? StopId,
+    string Name,
+    int Order,
+    double? Latitude,
+    double? Longitude);

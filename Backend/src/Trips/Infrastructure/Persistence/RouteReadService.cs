@@ -18,7 +18,8 @@ internal sealed class RouteReadService(TripsDbContext context) : IRouteReadServi
         return routes.Select(r => new RouteResponse(
             r.Id,
             r.Name,
-            r.Stops.Select(stop => new RouteStopResponse(stop.Name, stop.Order)).ToList(),
+            r.Stops.Select(stop => new RouteStopResponse(
+                stop.StopId, stop.Name, stop.Order, stop.Latitude, stop.Longitude)).ToList(),
             r.Origin,
             r.Destination,
             r.DistanceKm,

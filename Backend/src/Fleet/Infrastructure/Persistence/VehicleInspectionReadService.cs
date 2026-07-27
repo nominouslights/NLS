@@ -28,6 +28,7 @@ internal sealed class VehicleInspectionReadService(FleetDbContext context) : IVe
 
         return inspections.Select(i => new VehicleInspectionResponse(
             i.Id,
+            i.VehicleId,
             i.Unit,
             i.Type,
             i.DriverName,
@@ -46,6 +47,19 @@ internal sealed class VehicleInspectionReadService(FleetDbContext context) : IVe
                 defect.Item,
                 defect.Severity.ToString(),
                 defect.Note)).ToList(),
+            i.Weather.Select(w => w.ToString()).ToList(),
+            i.TemperatureC,
+            i.RoadConditions.Select(r => r.ToString()).ToList(),
+            i.Visibility?.ToString(),
+            i.RoadAdvisories,
+            i.FuelLevel?.ToString(),
+            i.Issues.ToList(),
+            i.Attestations.ToList(),
+            i.DriverSignatureName,
+            i.CertifiedAt,
+            i.FuelAdded,
+            i.FuelLitres,
+            i.FuelCostCad,
             i.GeneratedWorkOrderId,
             i.CreatedAtUtc)).ToList();
     }

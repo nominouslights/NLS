@@ -20,10 +20,16 @@ export type TripServiceType = ClientServiceType;
 export type TripStatus = "Scheduled" | "InProgress" | "Completed" | "Cancelled";
 export type TripDirection = "Outbound" | "Inbound";
 
-/** One ordered stop on a trip's route snapshot (TripStopResponse / RouteStop). */
+/** One ordered stop on a trip's route snapshot (TripStopResponse / RouteStop).
+ *  stopId / latitude / longitude are the enriched snapshot fields carried from
+ *  the catalog Stop the route was built from — optional because legacy free-text
+ *  stops (and the wizard's manual-trip fallback) have neither an id nor coords. */
 export interface TripStop {
   name: string;
   order: number;
+  stopId?: string;
+  latitude?: number;
+  longitude?: number;
 }
 
 /** Mirrors TripResponse — list and detail share the same shape. */
@@ -49,6 +55,9 @@ export interface TripRecord {
   poNumber: string | null;
   driverId: string | null;
   driverName: string | null;
+  /** Validated Fleet vehicle reference (mirrors driverId). Null when unassigned. */
+  vehicleId: string | null;
+  /** Server-side snapshot of the vehicle's unit number at assign time. */
   vehicleUnit: string | null;
   seatsCapacity: number | null;
   seatsConfirmed: number;
@@ -56,6 +65,7 @@ export interface TripRecord {
   demandGuaranteed: boolean;
   status: TripStatus;
   manifestId: string | null;
+  hasPostTripInspection: boolean;
   completedAtUtc: string | null;
   cancelledReason: string | null;
   createdAtUtc: string;
@@ -94,7 +104,8 @@ export interface TripInput {
   clientName?: string | null;
   poNumber?: string | null;
   driverId?: string | null;
-  vehicleUnit?: string | null;
+  /** Validated Fleet vehicle reference; the backend snapshots the unit number. */
+  vehicleId?: string | null;
   seatsCapacity?: number | null;
   seatsMinimum?: number | null;
 }
@@ -158,15 +169,16 @@ export function updateTrip(id: string, input: TripUpdateInput): Promise<void> {
   });
 }
 
-/** POST /api/trips/{id}/assign — null driverId unassigns, null vehicleUnit clears. */
+/** POST /api/trips/{id}/assign — null driverId unassigns, null vehicleId clears
+ *  the vehicle (the server snapshots the unit number from the looked-up vehicle). */
 export function assignTrip(
   id: string,
   driverId: string | null,
-  vehicleUnit: string | null,
+  vehicleId: string | null,
 ): Promise<void> {
   return request<void>(`/api/trips/${id}/assign`, {
     method: "POST",
-    body: JSON.stringify({ driverId, vehicleUnit }),
+    body: JSON.stringify({ driverId, vehicleId }),
   });
 }
 
@@ -207,10 +219,12 @@ export interface RouteRecord {
   updatedAtUtc: string;
 }
 
-/** POST /api/trips/routes body (CreateRouteRequest). */
+/** POST /api/trips/routes body (CreateRouteRequest). Stops are selected from the
+ *  Stop catalog by id, in corridor order; the backend loads each Stop, verifies
+ *  it resolves and is active, then snapshots name + lat/lng into RouteRecord.stops. */
 export interface RouteInput {
   name: string;
-  stops: TripStop[];
+  stopIds: string[];
   distanceKm: number;
   estimatedDurationMinutes: number;
   requiredLicenceClass?: string | null;
@@ -456,35 +470,27 @@ export function sortTrips(rows: TripRecord[]): TripRecord[] {
 
 // ---------------------------------------------------------------------------
 // Trip Manifest contract (Backend Trips module — TripManifestResponse /
-// CreateTripManifestRequest, TripsEndpoints.cs). Shapes mirror the backend
-// wire contract exactly (JSON camelCase, enums as PascalCase strings) — do
-// not invent fields.
+// TripManifestInput, TripsEndpoints.cs). The manifest is now a SLIM, editable
+// passenger + cargo manifest: creating/editing it does NOT change trip status.
+// Weather/road/fuel/inspection/certification sections moved to the Fleet
+// VehicleInspection records (lib/api/maintenance.ts). Shapes mirror the backend
+// wire contract exactly (JSON camelCase, enums as PascalCase strings) — do not
+// invent fields.
 // ---------------------------------------------------------------------------
 
-export type ManifestSource = "App" | "Paper";
-export type ManifestFuelLevel = "Full" | "ThreeQuarters" | "Half" | "Quarter";
+export type ManifestSource = "App" | "Dispatcher";
 export type ManifestDirection = "Inbound" | "Outbound";
-export type ManifestWeather = "Clear" | "Cloudy" | "Rain" | "Snow" | "Fog" | "ExtremeCold";
-export type ManifestRoadCondition = "Dry" | "Wet" | "Icy" | "SnowCovered" | "Muddy";
-export type ManifestVisibility = "Good" | "Reduced" | "Poor";
-export type ManifestSeverity = "Minor" | "Major" | "OutOfService";
 export type ManifestCargoSecured = "Yes" | "NotApplicable";
 
-export interface ManifestPreTripItem {
-  /** Backend group label, e.g. "Exterior & Mechanical" (tripManifestChecklist key). */
-  group: string;
-  /** Backend item string, e.g. "Tires" (tripManifestChecklist key). */
-  item: string;
-  status: "Ok" | "Fail";
-  severity: ManifestSeverity | null;
-  note: string | null;
-}
-
+/** A manifest passenger. Pickup/dropoff reference the trip's route stops by id
+ *  (with a snapshot name); free-form trips leave the ids null. */
 export interface ManifestPassenger {
   name: string;
-  contact: string | null;
-  pickup: string | null;
-  dropoff: string | null;
+  contact?: string | null;
+  pickupStopId: string | null;
+  pickupStopName?: string | null;
+  dropoffStopId: string | null;
+  dropoffStopName?: string | null;
   idVerified: boolean;
   boardedOn: boolean;
   boardedOff: boolean;
@@ -492,102 +498,36 @@ export interface ManifestPassenger {
 
 export interface ManifestCargo {
   description: string;
-  ownerRecipient: string | null;
-  weightKg: number | null;
-  chargeCad: number | null;
+  ownerRecipient?: string | null;
+  weightKg?: number | null;
+  chargeCad?: number | null;
   hazmat: boolean;
   secured: boolean;
 }
 
-export interface ManifestPostTripItem {
-  item: string;
-  ok: boolean;
-}
-
-export interface TripManifest {
-  id: string;
+/**
+ * POST /api/trips/manifests and PUT /api/trips/manifests/{id} body. `enteredBy`
+ * is required when `source === "Dispatcher"`.
+ */
+export interface TripManifestInput {
   tripDate: string; // DateOnly, "2026-07-15"
   tripNumber: string;
   route: string;
   direction: ManifestDirection | null;
   client: string | null;
-  unit: string;
-  driverName: string;
-  driverLicenceNo: string | null;
-  licencePlate: string | null;
-  odometerStartKm: number | null;
-  fuelLevel: ManifestFuelLevel | null;
-  preTrip: ManifestPreTripItem[];
-  weather: ManifestWeather[];
-  temperatureC: string | null;
-  roadConditions: ManifestRoadCondition[];
-  visibility: ManifestVisibility | null;
-  roadAdvisories: string | null;
   passengers: ManifestPassenger[];
   allSeatbeltsVerified: boolean;
   cargo: ManifestCargo[];
   allCargoSecured: ManifestCargoSecured | null;
-  issues: string[];
-  noIssues: boolean;
-  departureTime: string | null;
-  arrivalTime: string | null;
-  odometerEndKm: number | null;
-  totalKm: number | null;
-  fuelAdded: boolean;
-  fuelLitres: number | null;
-  fuelCostCad: number | null;
-  postTrip: ManifestPostTripItem[];
-  attestations: boolean[];
-  driverSignatureName: string;
-  certifiedAt: string;
   source: ManifestSource;
   enteredBy: string | null;
-  enteredAt: string | null;
-  createdAtUtc: string;
 }
 
-/**
- * POST /api/trips/manifests body — the response shape minus id / enteredAt /
- * createdAtUtc; certifiedAt is optional (backend stamps "now" when omitted).
- * PreTrip rows REQUIRE group + item (400 otherwise).
- */
-export interface TripManifestInput {
-  tripDate: string;
-  tripNumber: string;
-  route: string;
-  direction: ManifestDirection | null;
-  client: string | null;
-  unit: string;
-  driverName: string;
-  driverLicenceNo: string | null;
-  licencePlate: string | null;
-  odometerStartKm: number | null;
-  fuelLevel: ManifestFuelLevel | null;
-  preTrip: ManifestPreTripItem[];
-  weather: ManifestWeather[];
-  temperatureC: string | null;
-  roadConditions: ManifestRoadCondition[];
-  visibility: ManifestVisibility | null;
-  roadAdvisories: string | null;
-  passengers: ManifestPassenger[];
-  allSeatbeltsVerified: boolean;
-  cargo: ManifestCargo[];
-  allCargoSecured: ManifestCargoSecured | null;
-  issues: string[];
-  noIssues: boolean;
-  departureTime: string | null;
-  arrivalTime: string | null;
-  odometerEndKm: number | null;
-  totalKm: number | null;
-  fuelAdded: boolean;
-  fuelLitres: number | null;
-  fuelCostCad: number | null;
-  postTrip: ManifestPostTripItem[];
-  attestations: boolean[];
-  driverSignatureName: string;
-  certifiedAt?: string;
-  source: ManifestSource;
-  enteredBy: string | null;
+/** TripManifestResponse = the input fields + id / enteredAt / createdAtUtc. */
+export interface TripManifest extends TripManifestInput {
+  id: string;
+  enteredAt: string | null;
+  createdAtUtc: string;
 }
 
 /** POST → 201 { id } (Trips module — ManifestCreatedResponse). */
@@ -598,17 +538,39 @@ export function createTripManifest(input: TripManifestInput): Promise<{ id: stri
   });
 }
 
-export function listTripManifests(params?: {
-  tripNumber?: string;
-  unit?: string;
-}): Promise<TripManifest[]> {
+/** PUT → 204. The manifest is editable any time without changing trip status. */
+export function updateTripManifest(id: string, input: TripManifestInput): Promise<void> {
+  return request<void>(`/api/trips/manifests/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+export function listTripManifests(params?: { tripNumber?: string }): Promise<TripManifest[]> {
   const q = new URLSearchParams();
   if (params?.tripNumber) q.set("tripNumber", params.tripNumber);
-  if (params?.unit) q.set("unit", params.unit);
   const qs = q.toString();
   return request<TripManifest[]>(`/api/trips/manifests${qs ? `?${qs}` : ""}`);
 }
 
 export function getTripManifest(id: string): Promise<TripManifest> {
   return request<TripManifest>(`/api/trips/manifests/${id}`);
+}
+
+// ---------------------------------------------------------------------------
+// Trip activity / audit timeline (Backend Trips module — journaled domain
+// events for the trip + its manifest). GET /api/trips/{id}/activity.
+// ---------------------------------------------------------------------------
+
+export interface TripActivityEntry {
+  occurredAtUtc: string;
+  aggregateType: "trip" | "trip-manifest";
+  /** Kebab-case event type, e.g. "trip-scheduled", "trip-manifest-updated". */
+  eventType: string;
+  source: ManifestSource | null;
+  enteredBy: string | null;
+}
+
+export function listTripActivity(id: string): Promise<TripActivityEntry[]> {
+  return request<TripActivityEntry[]>(`/api/trips/${id}/activity`);
 }

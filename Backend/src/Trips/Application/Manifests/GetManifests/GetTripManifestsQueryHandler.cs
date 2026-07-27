@@ -11,7 +11,7 @@ public sealed class GetTripManifestsQueryHandler(ITripManifestReadService readSe
         GetTripManifestsQuery query,
         CancellationToken cancellationToken)
     {
-        var manifests = await readService.GetManifestsAsync(query.TripNumber, query.Unit, cancellationToken);
+        var manifests = await readService.GetManifestsAsync(query.TripNumber, cancellationToken);
         return Result.Success(manifests);
     }
 }

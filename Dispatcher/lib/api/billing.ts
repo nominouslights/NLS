@@ -16,6 +16,9 @@ import type { BillingFrequency } from "./clients";
 
 export type InvoiceStatus = "Draft" | "Sent" | "Paid" | "Void";
 export type QboSyncStatus = "NotSynced" | "Matched" | "UnmatchedPayment";
+/** A trip leg's direction — Outbound (depart) pairs with Inbound (return) into
+ *  a round trip. Same enum the Trips module exposes as TripDirection. */
+export type TripLegDirection = "Inbound" | "Outbound";
 
 /** Mirrors InvoiceLineResponse — amountCad is server-computed (qty × unit price). */
 export interface InvoiceLineRecord {
@@ -97,6 +100,9 @@ export interface BillableTripRecord {
   distanceKm: number;
   serviceDate: string; // DateOnly
   roundTripKey: string | null;
+  /** Leg direction — Outbound/Inbound legs pair (via roundTripKey) into a round
+   *  trip. Null for legacy/unclassified legs (backend adds this in parallel). */
+  direction: TripLegDirection | null;
   poNumber: string | null;
   completedAtUtc: string;
   invoiceId: string | null;
@@ -311,6 +317,17 @@ export function formatInvoiceCad(value: number): string {
 /** "2026-06-01 → 2026-06-30" (billing period line). */
 export function periodLabel(inv: { periodStart: string; periodEnd: string }): string {
   return `${inv.periodStart} → ${inv.periodEnd}`;
+}
+
+/** Direction glyph + short label for a trip leg — rendered as glyph + text
+ *  (never colour-only). Null direction → null (render nothing). Outbound "→",
+ *  Inbound "←". */
+export function directionMeta(
+  direction: TripLegDirection | null,
+): { glyph: string; label: string } | null {
+  if (direction === "Outbound") return { glyph: "→", label: "Outbound" };
+  if (direction === "Inbound") return { glyph: "←", label: "Inbound" };
+  return null;
 }
 
 // ---------------------------------------------------------------------------

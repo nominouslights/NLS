@@ -10,6 +10,7 @@ public sealed class CreateTripCommandHandler(
     ITripRepository tripRepository,
     IRouteRepository routeRepository,
     IDriverLookupRepository driverLookup,
+    IVehicleLookupRepository vehicleLookup,
     ITripNumberGenerator tripNumberGenerator)
     : ICommandHandler<CreateTripCommand, Guid>
 {
@@ -58,6 +59,26 @@ public sealed class CreateTripCommandHandler(
             driverName = driver.Name;
         }
 
+        // Vehicle snapshot: assignment at creation goes through the same lookup validation
+        // as POST /assign — the vehicle must exist and be Active in vehicle_lookup, and its
+        // unit number is snapshotted from the lookup. A free-form unit with no id passes.
+        var vehicleUnit = command.VehicleUnit;
+        if (command.VehicleId is { } vehicleId)
+        {
+            var vehicle = await vehicleLookup.GetAsync(vehicleId, cancellationToken);
+            if (vehicle is null)
+            {
+                return Result.Failure<Guid>(TripErrors.VehicleNotFound);
+            }
+
+            if (!vehicle.IsActive)
+            {
+                return Result.Failure<Guid>(TripErrors.VehicleNotActive);
+            }
+
+            vehicleUnit = vehicle.UnitNumber;
+        }
+
         var tripNumber = await tripNumberGenerator.NextAsync(command.TenantId, cancellationToken);
 
         var tripResult = Trip.Schedule(
@@ -82,7 +103,8 @@ public sealed class CreateTripCommandHandler(
             command.PoNumber,
             command.DriverId,
             driverName,
-            command.VehicleUnit,
+            command.VehicleId,
+            vehicleUnit,
             command.SeatsCapacity,
             command.SeatsMinimum);
 

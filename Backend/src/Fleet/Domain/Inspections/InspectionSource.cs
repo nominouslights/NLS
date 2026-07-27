@@ -1,11 +1,11 @@
 namespace NorthernLink.Fleet.Domain.Inspections;
 
 /// <summary>
-/// How the originating manifest entered the system: submitted from the Driver Field App,
-/// or transcribed from a paper form by a dispatcher.
+/// How an inspection entered the system: submitted from the Driver Field App, or entered
+/// by a dispatcher from the trip workflow (the office path, including paper transcription).
 /// </summary>
 public enum InspectionSource
 {
     DriverApp,
-    PaperTranscription,
+    Dispatcher,
 }

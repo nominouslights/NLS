@@ -14,6 +14,7 @@ public sealed record BillableTripResponse(
     int DistanceKm,
     DateOnly ServiceDate,
     string? RoundTripKey,
+    string? Direction,
     string? PoNumber,
     DateTimeOffset CompletedAtUtc,
     Guid? InvoiceId);

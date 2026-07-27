@@ -17,6 +17,12 @@ public static class RouteErrors
     public static readonly Error StopNameRequired = Error.Validation(
         "Trips.Route.StopNameRequired", "Every route stop needs a name.");
 
+    public static readonly Error UnknownStop = Error.Validation(
+        "Trips.Route.UnknownStop", "One or more selected stops do not exist.");
+
+    public static readonly Error InactiveStop = Error.Validation(
+        "Trips.Route.InactiveStop", "A route cannot include an inactive stop.");
+
     public static readonly Error InvalidDistance = Error.Validation(
         "Trips.Route.InvalidDistance", "The route distance must be greater than zero kilometres.");
 

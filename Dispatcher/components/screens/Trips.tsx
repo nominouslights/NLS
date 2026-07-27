@@ -2,7 +2,15 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { colors, fonts, rowSurface, statusMeta, svcMeta } from "@/lib/theme";
-import { ApiError, getTripManifest, type TripManifest } from "@/lib/api";
+import {
+  ApiError,
+  getTripManifest,
+  listInspections,
+  listTripActivity,
+  type TripActivityEntry,
+  type TripManifest,
+  type VehicleInspection,
+} from "@/lib/api";
 import {
   assignTrip,
   changeTripStatus,
@@ -31,14 +39,24 @@ import {
   type DriverClearanceRecord,
   type DriverRecord,
 } from "@/lib/api/drivers";
+import { listVehicles, type Vehicle } from "@/lib/api/fleet";
 import { contractRateLabel, getClient, type ActiveContractSummary } from "@/lib/api/clients";
 import { printTripManifest } from "@/lib/documents/tripManifestPdf";
-import { ServiceChip, StatusChip } from "@/components/ui/Chip";
+import { ServiceChip, StatusBadge, StatusChip } from "@/components/ui/Chip";
 import { CorridorStepper } from "@/components/ui/CorridorStepper";
 import { Panel, SectionLabel, DetailRow } from "@/components/ui/Panel";
 import { ActionButton } from "@/components/ui/Button";
 import { ModalShell } from "@/components/ui/ModalShell";
-import { DateField, NumberField, TextAreaField, TextField, TimeField } from "@/components/ui/Field";
+import { DateField, NumberField, SelectField, TextAreaField, TextField, TimeField } from "@/components/ui/Field";
+import ManifestEditorModal from "@/components/ManifestEditorModal";
+import TripInspectionModal from "@/components/TripInspectionModal";
+
+/** Label attributed to dispatcher-entered manifests/inspections (no user id yet). */
+const DISPATCHER_LABEL = "Dispatch";
+
+/** Backend error code when starting a trip without a ≥1-passenger manifest. */
+const PASSENGER_MANIFEST_REQUIRED = "Trips.Trip.PassengerManifestRequired";
+const POST_TRIP_INSPECTION_REQUIRED = "Trips.Trip.PostTripInspectionRequired";
 
 // Trips — master list + detail from the real Trips API (GET /api/trips over a
 // ±1-week window). "Open — needs coverage" / "Empty leg available" are frontend
@@ -59,6 +77,34 @@ function fmtUtcDateTime(iso: string | null): string {
     minute: "2-digit",
     hour12: false,
   });
+}
+
+// Friendly labels for the kebab-case audit event types (GET /activity). Unknown
+// types fall back to their de-kebabed form.
+const EVENT_LABELS: Record<string, string> = {
+  "trip-scheduled": "Trip scheduled",
+  "trip-assigned": "Driver / vehicle assigned",
+  "trip-driver-assigned": "Driver assigned",
+  "trip-vehicle-assigned": "Vehicle assigned",
+  "trip-started": "Trip started",
+  "trip-completed": "Trip completed",
+  "trip-cancelled": "Trip cancelled",
+  "trip-demand-recorded": "Demand recorded",
+  "trip-manifest-linked": "Manifest linked",
+  "trip-manifest-created": "Manifest created",
+  "trip-manifest-updated": "Manifest updated",
+};
+
+/** "Who did what" line for one audit entry (source + event). */
+function activityLabel(e: TripActivityEntry): string {
+  const who =
+    e.source === "App"
+      ? "Driver App"
+      : e.source === "Dispatcher"
+        ? `Dispatcher${e.enteredBy ? ` (${e.enteredBy})` : ""}`
+        : null;
+  const action = EVENT_LABELS[e.eventType] ?? e.eventType.replace(/-/g, " ");
+  return who ? `${who} · ${action}` : action;
 }
 
 // ---------------------------------------------------------------------------
@@ -138,12 +184,13 @@ function AssignModal({
 }: {
   trip: TripRecord;
   onClose: () => void;
-  onSaved: (driverId: string | null, vehicleUnit: string | null) => Promise<void>;
+  onSaved: (driverId: string | null, vehicleId: string | null) => Promise<void>;
 }) {
   const [roster, setRoster] = useState<{ driver: DriverRecord; cleared: boolean }[] | null>(null);
   const [rosterError, setRosterError] = useState<string | null>(null);
   const [driverId, setDriverId] = useState<string | null>(trip.driverId);
-  const [vehicleUnit, setVehicleUnit] = useState(trip.vehicleUnit ?? "");
+  const [vehicles, setVehicles] = useState<Vehicle[] | null>(null);
+  const [vehicleId, setVehicleId] = useState<string>(trip.vehicleId ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -175,12 +222,29 @@ function AssignModal({
     };
   }, [trip.clientName]);
 
+  // Active vehicles for the assignable-vehicle dropdown. The current vehicle is
+  // merged in even if it is no longer Active, so it still shows selected.
+  useEffect(() => {
+    let active = true;
+    listVehicles().then(
+      (rows) => {
+        if (active) setVehicles(rows.filter((v) => v.status === "Active"));
+      },
+      () => {
+        if (active) setVehicles([]);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
+
   async function submit() {
     if (busy) return;
     setBusy(true);
     setError(null);
     try {
-      await onSaved(driverId, vehicleUnit.trim() || null);
+      await onSaved(driverId, vehicleId || null);
       onClose();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Assignment failed — please try again.");
@@ -204,13 +268,22 @@ function AssignModal({
       }
     >
       <div style={{ marginBottom: 16 }}>
-        <TextField
-          label="Vehicle unit"
-          value={vehicleUnit}
-          onChange={setVehicleUnit}
-          mono
-          placeholder="U-02"
-          hint={<span style={{ color: colors.textFaint }}>· free text; blank clears the vehicle</span>}
+        <SelectField
+          label="Vehicle · Active fleet"
+          value={vehicleId}
+          onChange={setVehicleId}
+          options={[
+            { value: "", label: vehicles === null ? "Loading vehicles…" : "— unassigned —" },
+            ...(vehicles ?? []).map((v) => ({
+              value: v.id,
+              label: `${v.unitNumber} · ${v.make} ${v.model} · ${v.requiredLicenceClass}`,
+            })),
+            // Keep a stale-but-selected current vehicle visible in the list.
+            ...(trip.vehicleId && !(vehicles ?? []).some((v) => v.id === trip.vehicleId)
+              ? [{ value: trip.vehicleId, label: `${trip.vehicleUnit ?? "current"} · (not Active)` }]
+              : []),
+          ]}
+          hint={<span style={{ color: colors.textFaint }}>· only Active vehicles are assignable; blank clears</span>}
         />
       </div>
       <SectionLabel>Driver · Active roster</SectionLabel>
@@ -446,6 +519,7 @@ export default function Trips({
   onNewTrip: () => void;
 }) {
   const [filter, setFilter] = useState(0);
+  const [showCancelled, setShowCancelled] = useState(false);
   const [rows, setRows] = useState<TripRecord[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -457,8 +531,11 @@ export default function Trips({
   const [clearanceState, setClearanceState] = useState<{ tripId: string; cleared: boolean } | null>(null);
   const [contractState, setContractState] = useState<{ tripId: string; contract: ActiveContractSummary | null } | null>(null);
   const [manifestState, setManifestState] = useState<{ tripId: string; manifest: TripManifest | null } | null>(null);
+  const [inspectionsState, setInspectionsState] = useState<{ tripId: string; rows: VehicleInspection[] } | null>(null);
+  const [activityState, setActivityState] = useState<{ tripId: string; rows: TripActivityEntry[] } | null>(null);
 
-  const [modal, setModal] = useState<null | "assign" | "edit" | "cancel">(null);
+  const [modal, setModal] = useState<null | "assign" | "edit" | "cancel" | "manifest">(null);
+  const [inspectionType, setInspectionType] = useState<"PreTrip" | "PostTrip" | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -505,8 +582,12 @@ export default function Trips({
   }, [fetchList]);
 
   // "Assigned" is a client-side driver-presence filter; "Open only" already
-  // came filtered from the API (openOnly=true).
-  const visible = rows === null ? null : filter === 2 ? rows.filter((r) => r.driverId !== null) : rows;
+  // came filtered from the API (openOnly=true). Cancelled trips are hidden
+  // across all tabs unless the "Show cancelled" toggle is on.
+  const afterTab = rows === null ? null : filter === 2 ? rows.filter((r) => r.driverId !== null) : rows;
+  const visible =
+    afterTab === null ? null : showCancelled ? afterTab : afterTab.filter((r) => r.status !== "Cancelled");
+  const cancelledCount = rows?.reduce((n, r) => n + (r.status === "Cancelled" ? 1 : 0), 0) ?? 0;
 
   const fromList = rows?.find((r) => r.id === selectedId) ?? null;
   const t = fromList ?? (extraTrip && extraTrip.id === selectedId ? extraTrip : null) ?? visible?.[0] ?? null;
@@ -529,6 +610,7 @@ export default function Trips({
 
   // Auxiliary detail fetches for the selected trip.
   const tripId = t?.id ?? null;
+  const tripNumber = t?.tripNumber ?? null;
   const tripDriverId = t?.driverId ?? null;
   const tripClientId = t?.clientId ?? null;
   const tripClientName = t?.clientName ?? null;
@@ -569,11 +651,35 @@ export default function Trips({
         },
       );
     }
+    // No else: manifestState is keyed by tripId, so a stale entry from another
+    // trip (or a trip that has no manifestId) is ignored by the render.
+
+    // Inspections for this trip (Fleet API, filtered by trip number).
+    if (tripNumber) {
+      listInspections({ tripNumber }).then(
+        (fresh) => {
+          if (active) setInspectionsState({ tripId, rows: fresh });
+        },
+        () => {
+          if (active) setInspectionsState({ tripId, rows: [] });
+        },
+      );
+    }
+
+    // Audit timeline — journaled trip + manifest events.
+    listTripActivity(tripId).then(
+      (fresh) => {
+        if (active) setActivityState({ tripId, rows: fresh });
+      },
+      () => {
+        if (active) setActivityState({ tripId, rows: [] });
+      },
+    );
 
     return () => {
       active = false;
     };
-  }, [tripId, tripDriverId, tripClientId, tripClientName, tripManifestId]);
+  }, [tripId, tripNumber, tripDriverId, tripClientId, tripClientName, tripManifestId]);
 
   async function runAction(fn: () => Promise<void>) {
     if (busy) return;
@@ -597,9 +703,9 @@ export default function Trips({
     if (updated) setExtraTrip(updated);
   }
 
-  async function onAssignSaved(id: string, driverId: string | null, vehicleUnit: string | null) {
-    await assignTrip(id, driverId, vehicleUnit);
-    await reloadUntil(id, (trip) => trip !== undefined && trip.driverId === driverId && trip.vehicleUnit === vehicleUnit);
+  async function onAssignSaved(id: string, driverId: string | null, vehicleId: string | null) {
+    await assignTrip(id, driverId, vehicleId);
+    await reloadUntil(id, (trip) => trip !== undefined && trip.driverId === driverId && trip.vehicleId === vehicleId);
   }
 
   async function onEditSaved(id: string, input: TripUpdateInput) {
@@ -610,9 +716,73 @@ export default function Trips({
     );
   }
 
+  /** After a manifest create/edit: wait for the trip to carry a manifestId, then
+   *  refetch the manifest itself so the panel + START gating reflect it. */
+  async function onManifestSaved(id: string, manifestId: string) {
+    await reloadUntil(id, (trip) => trip !== undefined && trip.manifestId !== null);
+    try {
+      const m = await getTripManifest(manifestId);
+      setManifestState({ tripId: id, manifest: m });
+    } catch {
+      // Non-fatal — the keyed effect will refetch on the next render.
+    }
+    try {
+      const fresh = await listTripActivity(id);
+      setActivityState({ tripId: id, rows: fresh });
+    } catch {
+      // Audit timeline is best-effort.
+    }
+  }
+
+  /** After an inspection is entered: refetch the trip's inspections + timeline. */
+  async function onInspectionSaved(id: string, num: string, isPostTrip: boolean) {
+    try {
+      const fresh = await listInspections({ tripNumber: num });
+      setInspectionsState({ tripId: id, rows: fresh });
+    } catch {
+      // best-effort
+    }
+    try {
+      const fresh = await listTripActivity(id);
+      setActivityState({ tripId: id, rows: fresh });
+    } catch {
+      // best-effort
+    }
+    // A post-trip inspection clears the completion gate, but the trip's
+    // HasPostTripInspection flag flips asynchronously (Fleet event → Trips
+    // consumer). Poll the trip until it reflects so COMPLETE enables on its own.
+    if (isPostTrip) {
+      try {
+        await reloadUntil(id, (trip) => trip !== undefined && trip.hasPostTripInspection);
+      } catch {
+        // best-effort — the flag will appear on the next detail refresh.
+      }
+    }
+  }
+
   function onChangeStatus(id: string, status: TripRecord["status"], reason?: string | null) {
     return runAction(async () => {
-      await changeTripStatus(id, status, reason);
+      try {
+        await changeTripStatus(id, status, reason);
+      } catch (e) {
+        // Friendly inline message for the en-route passenger-manifest guard.
+        if (e instanceof ApiError && e.code === PASSENGER_MANIFEST_REQUIRED) {
+          throw new ApiError(
+            e.code,
+            "This trip needs a passenger manifest with at least one passenger before it can start. Add a manifest first.",
+            e.status,
+          );
+        }
+        // Friendly inline message for the completion post-trip-inspection guard.
+        if (e instanceof ApiError && e.code === POST_TRIP_INSPECTION_REQUIRED) {
+          throw new ApiError(
+            e.code,
+            "This trip needs a post-trip inspection logged before it can be completed. Enter the post-trip inspection first.",
+            e.status,
+          );
+        }
+        throw e;
+      }
       await reloadUntil(id, (trip) => trip !== undefined && trip.status === status);
     });
   }
@@ -679,6 +849,23 @@ export default function Trips({
             {label}
           </span>
         ))}
+        <span
+          onClick={() => setShowCancelled((v) => !v)}
+          style={{
+            fontFamily: fonts.body,
+            fontWeight: showCancelled ? 600 : 500,
+            fontSize: 12,
+            padding: "5px 12px",
+            borderRadius: 7,
+            marginLeft: 4,
+            background: showCancelled ? colors.cardBgActive : colors.cardBg,
+            border: `1px solid ${showCancelled ? colors.borderActive : colors.border}`,
+            color: showCancelled ? colors.headingBright : colors.textMuted,
+            cursor: "pointer",
+          }}
+        >
+          {showCancelled ? "Hide cancelled" : `Show cancelled${cancelledCount ? ` (${cancelledCount})` : ""}`}
+        </span>
       </div>
     </div>
   );
@@ -707,6 +894,30 @@ export default function Trips({
   const clearance = t && clearanceState?.tripId === t.id ? clearanceState.cleared : null;
   const contract = t && contractState?.tripId === t.id ? contractState.contract : null;
   const manifest = t && manifestState?.tripId === t.id ? manifestState.manifest : null;
+  const inspections = t && inspectionsState?.tripId === t.id ? inspectionsState.rows : [];
+  const activity = t && activityState?.tripId === t.id ? activityState.rows : [];
+
+  // Manifest may be present on the trip (manifestId) but not yet fetched into
+  // manifestState — use whichever tells us there's a passenger manifest.
+  const manifestPaxCount = manifest ? manifest.passengers.length : 0;
+  const hasPassengerManifest = manifestPaxCount >= 1;
+  // START gate: a driver AND a linked manifest with ≥1 passenger (mirrors the
+  // backend en-route guard). Vehicle assignment is encouraged but not blocking.
+  const startBlockReason =
+    !t || t.status !== "Scheduled"
+      ? null
+      : t.driverId === null
+        ? "Needs a driver"
+        : !hasPassengerManifest
+          ? "Needs a passenger manifest (≥1 passenger)"
+          : null;
+
+  // COMPLETE gate: an in-progress trip needs a post-trip inspection logged
+  // before it can be completed. Gate on the server's HasPostTripInspection flag
+  // (set once Trips consumes Fleet's inspection event) so the button enables
+  // exactly when the backend would allow completion — no "enabled but 409" gap.
+  const completeBlockReason =
+    !t || t.status !== "InProgress" ? null : !t.hasPostTripInspection ? "Needs a post-trip inspection logged" : null;
 
   const timeline = t
     ? [
@@ -905,14 +1116,88 @@ export default function Trips({
                       }
                     />
                     <DetailRow
-                      label="NL-TM-01"
+                      label="Passenger manifest"
                       value={
-                        t.manifestId ? <StatusChip kind="ontime" label="Manifest on file" /> : "Not yet submitted"
+                        t.manifestId ? (
+                          <StatusChip kind="ontime" label={`${manifestPaxCount} passenger${manifestPaxCount === 1 ? "" : "s"}`} />
+                        ) : (
+                          <StatusChip kind="off" label="No manifest yet" />
+                        )
                       }
                     />
+                    {t.status !== "Cancelled" && (
+                      <div style={{ marginTop: 2 }}>
+                        {t.manifestId && !manifest ? (
+                          <span style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textDim }}>Loading manifest…</span>
+                        ) : (
+                          <ActionButton onClick={() => setModal("manifest")}>
+                            {t.manifestId ? "EDIT MANIFEST" : "ADD MANIFEST"}
+                          </ActionButton>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </Panel>
               </div>
+
+              {/* inspections (Fleet records, by trip number) */}
+              <Panel style={{ marginBottom: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                  <SectionLabel>Pre / post-trip inspections</SectionLabel>
+                  <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                    <ActionButton variant="primary" onClick={() => setInspectionType("PreTrip")}>
+                      ENTER PRE-TRIP
+                    </ActionButton>
+                    <ActionButton onClick={() => setInspectionType("PostTrip")}>ENTER POST-TRIP</ActionButton>
+                  </div>
+                </div>
+                {inspections.length === 0 ? (
+                  <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textDim }}>
+                    No inspections recorded for {t.tripNumber}. Pre/post-trip inspections are Fleet records tagged with
+                    this trip and advance the vehicle odometer.
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {inspections.map((insp) => {
+                      const rm =
+                        insp.result === "Fail"
+                          ? { kind: "over" as const, label: "Fail" }
+                          : insp.result === "PassWithDefects"
+                            ? { kind: "soon" as const, label: "Pass with defects" }
+                            : { kind: "ontime" as const, label: "Pass" };
+                      return (
+                        <div
+                          key={insp.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 9,
+                            flexWrap: "wrap",
+                            padding: "9px 11px",
+                            borderRadius: 9,
+                            border: `1px solid ${colors.borderSubtle}`,
+                            background: colors.cardBg,
+                          }}
+                        >
+                          <span style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: 700, color: colors.headingBright }}>
+                            {insp.type === "PreTrip" ? "Pre-Trip" : "Post-Trip"}
+                          </span>
+                          <StatusChip kind={rm.kind} label={rm.label} />
+                          <StatusChip
+                            kind={insp.source === "Dispatcher" ? "soon" : "info"}
+                            label={insp.source === "Dispatcher" ? "Dispatcher" : "Driver App"}
+                          />
+                          <span style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim }}>
+                            {insp.driverName}
+                            {insp.odometerKm != null ? ` · ${insp.odometerKm.toLocaleString("en-CA")} km` : ""}
+                            {` · ${fmtUtcDateTime(insp.performedAt)}`}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </Panel>
 
               {/* billing */}
               <Panel style={{ marginBottom: 12 }}>
@@ -979,6 +1264,41 @@ export default function Trips({
                     </div>
                   ))}
                 </div>
+
+                {/* Journaled trip + manifest events (source-attributed). */}
+                {activity.length > 0 && (
+                  <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${colors.border}` }}>
+                    <div
+                      style={{
+                        fontFamily: fonts.semiCondensed,
+                        fontSize: 9.5,
+                        letterSpacing: ".14em",
+                        textTransform: "uppercase",
+                        color: colors.textFaint,
+                        marginBottom: 8,
+                      }}
+                    >
+                      Activity log
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                      {activity.map((ev, i) => {
+                        const isManifest = ev.aggregateType === "trip-manifest";
+                        return (
+                          <div key={`${ev.eventType}-${ev.occurredAtUtc}-${i}`} style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                            {/* colour + glyph + label — never colour alone */}
+                            <StatusBadge kind={isManifest ? "info" : "ontime"} size={14} />
+                            <span style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textSecondary, flex: 1 }}>
+                              {activityLabel(ev)}
+                            </span>
+                            <span style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textDim }}>
+                              {fmtUtcDateTime(ev.occurredAtUtc)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </Panel>
 
               {/* actions */}
@@ -991,27 +1311,37 @@ export default function Trips({
                 {(t.status === "Scheduled" || t.status === "InProgress") && (
                   <ActionButton onClick={() => setModal("assign")}>REASSIGN</ActionButton>
                 )}
-                {t.status === "Scheduled" && t.driverId && (
-                  <ActionButton
-                    variant="success"
-                    onClick={() => onChangeStatus(t.id, "InProgress")}
-                    disabled={busy}
-                  >
-                    {busy ? "WORKING…" : "START TRIP"}
-                  </ActionButton>
-                )}
-                {t.status === "InProgress" && (
-                  <ActionButton
-                    variant="success"
-                    onClick={() => onChangeStatus(t.id, "Completed")}
-                    disabled={busy}
-                  >
-                    {busy ? "WORKING…" : "COMPLETE TRIP"}
-                  </ActionButton>
-                )}
-                {manifest && (
-                  <ActionButton onClick={() => printTripManifest(manifest)}>PRINT TRIP MANIFEST</ActionButton>
-                )}
+                {t.status === "Scheduled" &&
+                  (startBlockReason ? (
+                    // Pre-gate the START button with a clear reason chip (mirrors
+                    // the "needs a driver" gating and the backend en-route guard).
+                    <StatusChip kind="soon" label={`Can't start — ${startBlockReason}`} />
+                  ) : (
+                    <ActionButton
+                      variant="success"
+                      onClick={() => onChangeStatus(t.id, "InProgress")}
+                      disabled={busy}
+                    >
+                      {busy ? "WORKING…" : "START TRIP"}
+                    </ActionButton>
+                  ))}
+                {t.status === "InProgress" &&
+                  (completeBlockReason ? (
+                    <StatusChip kind="soon" label={`Can't complete — ${completeBlockReason}`} />
+                  ) : (
+                    <ActionButton
+                      variant="success"
+                      onClick={() => onChangeStatus(t.id, "Completed")}
+                      disabled={busy}
+                    >
+                      {busy ? "WORKING…" : "COMPLETE TRIP"}
+                    </ActionButton>
+                  ))}
+                {/* Always printable: the loaded manifest when one exists, else the
+                    blank NL-TM-01 form (printTripManifest handles null). */}
+                <ActionButton onClick={() => printTripManifest(manifest)}>
+                  {manifest ? "PRINT TRIP MANIFEST" : "PRINT BLANK MANIFEST"}
+                </ActionButton>
                 {(t.status === "Scheduled" || t.status === "InProgress") && (
                   <ActionButton variant="destructive" onClick={() => setModal("cancel")}>
                     CANCEL
@@ -1023,7 +1353,25 @@ export default function Trips({
                 <AssignModal
                   trip={t}
                   onClose={() => setModal(null)}
-                  onSaved={(driverId, vehicleUnit) => onAssignSaved(t.id, driverId, vehicleUnit)}
+                  onSaved={(driverId, vehicleId) => onAssignSaved(t.id, driverId, vehicleId)}
+                />
+              )}
+              {modal === "manifest" && (
+                <ManifestEditorModal
+                  trip={t}
+                  existing={manifest}
+                  enteredBy={DISPATCHER_LABEL}
+                  onClose={() => setModal(null)}
+                  onSaved={(manifestId) => onManifestSaved(t.id, manifestId)}
+                />
+              )}
+              {inspectionType && (
+                <TripInspectionModal
+                  trip={t}
+                  type={inspectionType}
+                  enteredBy={DISPATCHER_LABEL}
+                  onClose={() => setInspectionType(null)}
+                  onSaved={() => onInspectionSaved(t.id, t.tripNumber, inspectionType === "PostTrip")}
                 />
               )}
               {modal === "edit" && (
