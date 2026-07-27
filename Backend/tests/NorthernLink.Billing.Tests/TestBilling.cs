@@ -40,7 +40,8 @@ public static class TestBilling
         string? roundTripKey,
         string tripNumber = "TR-4821",
         Guid? invoiceId = null,
-        DateTimeOffset? completedAtUtc = null) => new()
+        DateTimeOffset? completedAtUtc = null,
+        string? direction = null) => new()
     {
         Id = Guid.NewGuid(),
         TenantId = TenantId,
@@ -54,21 +55,24 @@ public static class TestBilling
         DistanceKm = 320,
         ServiceDate = serviceDate,
         RoundTripKey = roundTripKey,
+        Direction = direction,
         PoNumber = "PO-7781",
         CompletedAtUtc = completedAtUtc ?? serviceDate.ToDateTime(new TimeOnly(18, 0), DateTimeKind.Utc),
         InvoiceId = invoiceId,
     };
 
-    /// <summary>An outbound + return pair sharing one round-trip key.</summary>
+    /// <summary>An Outbound + Inbound pair sharing one round-trip key — a complete round trip.</summary>
     public static (BillableTrip Outbound, BillableTrip Return) RoundTrip(
         DateOnly serviceDate,
         string key,
         string tripNumberPrefix = "TR-48")
     {
         var outbound = Trip(serviceDate, key, $"{tripNumberPrefix}O",
-            completedAtUtc: serviceDate.ToDateTime(new TimeOnly(9, 0), DateTimeKind.Utc));
+            completedAtUtc: serviceDate.ToDateTime(new TimeOnly(9, 0), DateTimeKind.Utc),
+            direction: "Outbound");
         var returnLeg = Trip(serviceDate, key, $"{tripNumberPrefix}R",
-            completedAtUtc: serviceDate.ToDateTime(new TimeOnly(18, 0), DateTimeKind.Utc));
+            completedAtUtc: serviceDate.ToDateTime(new TimeOnly(18, 0), DateTimeKind.Utc),
+            direction: "Inbound");
         return (outbound, returnLeg);
     }
 

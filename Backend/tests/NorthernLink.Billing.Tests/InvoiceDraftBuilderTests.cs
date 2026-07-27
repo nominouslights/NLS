@@ -56,6 +56,66 @@ public class InvoiceDraftBuilderTests
     }
 
     [Fact]
+    public void Group_pairing_an_outbound_with_an_inbound_prices_as_one_full_line()
+    {
+        var contract = TestBilling.Contract(rate: 120m);
+        var outbound = TestBilling.Trip(new DateOnly(2026, 7, 6), "rt-1", "TR-01O", direction: "Outbound");
+        var inbound = TestBilling.Trip(new DateOnly(2026, 7, 6), "rt-1", "TR-01R", direction: "Inbound");
+
+        var result = InvoiceDraftBuilder.Build(
+            [contract], PeriodStart, PeriodEnd, [outbound, inbound]);
+
+        Assert.True(result.IsSuccess);
+        var line = Assert.Single(result.Value.Lines);
+        Assert.Equal(1m, line.Quantity);
+        Assert.Equal(120m, line.AmountCad);
+        Assert.StartsWith("Corridor round trip", line.Description);
+        Assert.Equal(2, line.TripIds.Count);
+        Assert.Equal(2, result.Value.ClaimedTripIds.Count);
+    }
+
+    [Fact]
+    public void Two_legs_sharing_a_direction_are_not_a_pair_and_bill_as_two_half_lines()
+    {
+        var contract = TestBilling.Contract(rate: 120m);
+        // Two Outbound legs on the same key — a data anomaly, never a valid round trip.
+        var a = TestBilling.Trip(new DateOnly(2026, 7, 6), "rt-dup", "TR-A", direction: "Outbound",
+            completedAtUtc: new DateTimeOffset(2026, 7, 6, 9, 0, 0, TimeSpan.Zero));
+        var b = TestBilling.Trip(new DateOnly(2026, 7, 6), "rt-dup", "TR-B", direction: "Outbound",
+            completedAtUtc: new DateTimeOffset(2026, 7, 6, 18, 0, 0, TimeSpan.Zero));
+
+        var result = InvoiceDraftBuilder.Build([contract], PeriodStart, PeriodEnd, [a, b]);
+
+        Assert.True(result.IsSuccess);
+        var draft = result.Value;
+        Assert.Equal(2, draft.Lines.Count);
+        Assert.All(draft.Lines, l => Assert.Equal(0.5m, l.Quantity));
+        Assert.All(draft.Lines, l => Assert.Contains(InvoiceDraftBuilder.UnpairedLegFlag, l.Description));
+        Assert.All(draft.Lines, l => Assert.Single(l.TripIds));
+        Assert.Equal(120m, draft.Lines.Sum(l => l.AmountCad));
+        Assert.Equal(2, draft.ClaimedTripIds.Count);
+        Assert.Contains(a.Id, draft.ClaimedTripIds);
+        Assert.Contains(b.Id, draft.ClaimedTripIds);
+    }
+
+    [Fact]
+    public void Legs_missing_direction_do_not_pair_even_when_two_share_a_key()
+    {
+        var contract = TestBilling.Contract(rate: 120m);
+        // Same key, both directions null (pre-migration rows) — no valid pair.
+        var a = TestBilling.Trip(new DateOnly(2026, 7, 6), "rt-null", "TR-A",
+            completedAtUtc: new DateTimeOffset(2026, 7, 6, 9, 0, 0, TimeSpan.Zero));
+        var b = TestBilling.Trip(new DateOnly(2026, 7, 6), "rt-null", "TR-B",
+            completedAtUtc: new DateTimeOffset(2026, 7, 6, 18, 0, 0, TimeSpan.Zero));
+
+        var result = InvoiceDraftBuilder.Build([contract], PeriodStart, PeriodEnd, [a, b]);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(2, result.Value.Lines.Count);
+        Assert.All(result.Value.Lines, l => Assert.Equal(0.5m, l.Quantity));
+    }
+
+    [Fact]
     public void Multiple_round_trips_produce_one_line_each_ordered_by_service_date()
     {
         var contract = TestBilling.Contract(rate: 100m);

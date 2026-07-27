@@ -18,10 +18,13 @@ public sealed record InvoiceDraft(
 /// <summary>
 /// Pure draft-invoice pricing — no I/O, fully unit-testable. Resolves the contract
 /// covering the period, filters to completed, uninvoiced trips inside it, and groups legs
-/// by <c>RoundTripKey</c>: a key with both legs prices as one line (qty 1 × rate per round
-/// trip); a lone leg prices at qty 0.5 with its description flagged for review; trips with
-/// no key (ad-hoc/charter/cargo) are left unclaimed for manual lines on the draft. GST is
-/// not a line — the invoice computes it from its snapshot rate when applicable.
+/// by <c>RoundTripKey</c>. Pairing is direction-aware: a group prices as one round-trip
+/// line (qty 1 × rate per round trip) only when it holds at least one <c>Outbound</c> leg
+/// and at least one <c>Inbound</c> leg. Any other group — a lone leg, legs with a
+/// missing direction, or two legs sharing the same direction — bills each present leg at
+/// qty 0.5 on its own line, flagged for review. Trips with no key (ad-hoc/charter/cargo)
+/// are left unclaimed for manual lines on the draft. GST is not a line — the invoice
+/// computes it from its snapshot rate when applicable.
 /// </summary>
 public static class InvoiceDraftBuilder
 {
@@ -77,29 +80,61 @@ public static class InvoiceDraftBuilder
         foreach (var group in groups)
         {
             var legs = group.OrderBy(t => t.CompletedAtUtc).ToList();
-            var first = legs[0];
             var serviceDate = legs.Min(t => t.ServiceDate);
-            var isPair = legs.Count >= 2;
 
-            var lineResult = InvoiceLine.Create(
-                isPair
-                    ? $"Corridor round trip · {first.RouteName} · {serviceDate:yyyy-MM-dd}"
-                    : $"{UnpairedLegFlag} · {first.RouteName} · {serviceDate:yyyy-MM-dd}",
-                legs.Select(t => t.Id).ToList(),
-                isPair ? null : first.TripNumber,
-                serviceDate,
-                quantity: isPair ? 1m : 0.5m,
-                unitPriceCad: rate);
+            // A group is a complete round trip only when it pairs an Outbound leg with an
+            // Inbound one — never merely on leg count. Same-direction or direction-less
+            // legs are not a valid pair and each bills as an unpaired half.
+            var hasOutbound = legs.Any(t => IsDirection(t, "Outbound"));
+            var hasInbound = legs.Any(t => IsDirection(t, "Inbound"));
 
-            if (lineResult.IsFailure)
+            if (hasOutbound && hasInbound)
             {
-                return Result.Failure<InvoiceDraft>(lineResult.Error);
-            }
+                var first = legs[0];
+                var lineResult = InvoiceLine.Create(
+                    $"Corridor round trip · {first.RouteName} · {serviceDate:yyyy-MM-dd}",
+                    legs.Select(t => t.Id).ToList(),
+                    null,
+                    serviceDate,
+                    quantity: 1m,
+                    unitPriceCad: rate);
 
-            lines.Add(lineResult.Value);
-            claimed.AddRange(legs.Select(t => t.Id));
+                if (lineResult.IsFailure)
+                {
+                    return Result.Failure<InvoiceDraft>(lineResult.Error);
+                }
+
+                lines.Add(lineResult.Value);
+                claimed.AddRange(legs.Select(t => t.Id));
+            }
+            else
+            {
+                // Lone leg, missing direction, or duplicated direction: each present leg
+                // prices at qty 0.5 on its own review-flagged line.
+                foreach (var leg in legs)
+                {
+                    var lineResult = InvoiceLine.Create(
+                        $"{UnpairedLegFlag} · {leg.RouteName} · {leg.ServiceDate:yyyy-MM-dd}",
+                        [leg.Id],
+                        leg.TripNumber,
+                        leg.ServiceDate,
+                        quantity: 0.5m,
+                        unitPriceCad: rate);
+
+                    if (lineResult.IsFailure)
+                    {
+                        return Result.Failure<InvoiceDraft>(lineResult.Error);
+                    }
+
+                    lines.Add(lineResult.Value);
+                    claimed.Add(leg.Id);
+                }
+            }
         }
 
         return Result.Success(new InvoiceDraft(contract, lines, claimed));
     }
+
+    private static bool IsDirection(BillableTrip trip, string direction) =>
+        string.Equals(trip.Direction, direction, StringComparison.OrdinalIgnoreCase);
 }

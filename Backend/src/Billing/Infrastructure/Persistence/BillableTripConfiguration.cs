@@ -28,6 +28,7 @@ public sealed class BillableTripConfiguration : IEntityTypeConfiguration<Billabl
         builder.Property(t => t.DistanceKm).HasColumnName("distance_km");
         builder.Property(t => t.ServiceDate).HasColumnName("service_date");
         builder.Property(t => t.RoundTripKey).HasColumnName("round_trip_key").HasMaxLength(64);
+        builder.Property(t => t.Direction).HasColumnName("direction").HasMaxLength(16);
         builder.Property(t => t.PoNumber).HasColumnName("po_number").HasMaxLength(64);
         builder.Property(t => t.CompletedAtUtc).HasColumnName("completed_at_utc");
         builder.Property(t => t.InvoiceId).HasColumnName("invoice_id");

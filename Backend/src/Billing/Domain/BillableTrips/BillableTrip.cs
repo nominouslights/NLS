@@ -27,6 +27,12 @@ public sealed class BillableTrip : ITenantScoped
     public int DistanceKm { get; set; }
     public DateOnly ServiceDate { get; set; }
     public string? RoundTripKey { get; set; }
+
+    /// <summary>Travel direction relative to home base ("Inbound"/"Outbound"), null for
+    /// ad-hoc legs. A RoundTripKey group only prices as a complete round trip when it
+    /// pairs an Outbound leg with an Inbound one.</summary>
+    public string? Direction { get; set; }
+
     public string? PoNumber { get; set; }
     public DateTimeOffset CompletedAtUtc { get; set; }
 
