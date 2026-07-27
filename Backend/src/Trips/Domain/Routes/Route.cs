@@ -126,11 +126,21 @@ public sealed class Route : AggregateRoot, ITenantScoped
         return Result.Success();
     }
 
-    /// <summary>Re-sequences stops 0..n-1 in their given order, trimming names.</summary>
+    /// <summary>
+    /// Re-sequences stops 0..n-1 in their given order, trimming names and carrying the
+    /// catalog reference (StopId) and coordinate snapshot through.
+    /// </summary>
     private static List<RouteStop> NormalizeStops(IReadOnlyList<RouteStop> stops) =>
         [.. stops
             .OrderBy(stop => stop.Order)
-            .Select((stop, index) => new RouteStop { Name = stop.Name.Trim(), Order = index })];
+            .Select((stop, index) => new RouteStop
+            {
+                StopId = stop.StopId,
+                Name = stop.Name.Trim(),
+                Order = index,
+                Latitude = stop.Latitude,
+                Longitude = stop.Longitude,
+            })];
 
     private static string? Normalize(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();

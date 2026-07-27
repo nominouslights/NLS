@@ -229,6 +229,7 @@ internal sealed class TripGenerationWorker(
                     poNumber: null,
                     driverId,
                     driverName,
+                    vehicleId: null,
                     template.DefaultVehicleUnit,
                     template.SeatsCapacity,
                     template.SeatsMinimum);

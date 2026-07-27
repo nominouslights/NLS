@@ -67,6 +67,7 @@ internal static class TestPlanning
         string tripNumber = "TR-1001",
         Guid? driverId = null,
         string? driverName = null,
+        Guid? vehicleId = null,
         int? seatsCapacity = 12,
         Guid? scheduleTemplateId = null,
         string? roundTripKey = null,
@@ -93,6 +94,7 @@ internal static class TestPlanning
             poNumber: "PO-2026-118",
             driverId: driverId,
             driverName: driverName,
+            vehicleId: vehicleId,
             vehicleUnit: "U-04",
             seatsCapacity: seatsCapacity,
             seatsMinimum: null);

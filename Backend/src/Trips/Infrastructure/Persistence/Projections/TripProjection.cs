@@ -110,6 +110,7 @@ internal sealed class TripProjection : IProjection<TripsDbContext>
 
         row.DriverId = source.DriverId;
         row.DriverName = source.DriverName;
+        row.VehicleId = source.VehicleId;
         row.VehicleUnit = source.VehicleUnit;
 
         row.SeatsCapacity = source.SeatsCapacity;
@@ -119,6 +120,7 @@ internal sealed class TripProjection : IProjection<TripsDbContext>
 
         row.Status = source.Status.ToString();
         row.ManifestId = source.ManifestId;
+        row.HasPostTripInspection = source.HasPostTripInspection;
         row.CompletedAtUtc = source.CompletedAtUtc;
         row.CancelledReason = source.CancelledReason;
 

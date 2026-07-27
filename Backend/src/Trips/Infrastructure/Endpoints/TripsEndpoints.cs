@@ -6,6 +6,7 @@ using NorthernLink.Shared.Tenancy;
 using NorthernLink.Trips.Application.Manifests.Create;
 using NorthernLink.Trips.Application.Manifests.GetById;
 using NorthernLink.Trips.Application.Manifests.GetManifests;
+using NorthernLink.Trips.Application.Manifests.Update;
 using NorthernLink.Trips.Domain.Manifests;
 
 namespace NorthernLink.Trips.Infrastructure.Endpoints;
@@ -26,6 +27,7 @@ public static class TripsEndpoints
         manifests.MapGet("", GetManifests);
         manifests.MapGet("{id:guid}", GetManifestById);
         manifests.MapPost("", CreateManifest);
+        manifests.MapPut("{id:guid}", UpdateManifest);
 
         app.MapTripPlanningEndpoints();
 
@@ -33,14 +35,14 @@ public static class TripsEndpoints
     }
 
     private static async Task<IResult> GetManifests(
-        string? tripNumber, string? unit, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+        string? tripNumber, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
     {
         if (tenantContext.TenantId is not { } tenantId)
         {
             return Results.Unauthorized();
         }
 
-        var result = await sender.Query(new GetTripManifestsQuery(tenantId, tripNumber, unit), cancellationToken);
+        var result = await sender.Query(new GetTripManifestsQuery(tenantId, tripNumber), cancellationToken);
         return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
     }
 
@@ -71,35 +73,10 @@ public static class TripsEndpoints
             request.Route ?? string.Empty,
             request.Direction,
             request.Client,
-            request.Unit ?? string.Empty,
-            request.DriverName ?? string.Empty,
-            request.DriverLicenceNo,
-            request.LicencePlate,
-            request.OdometerStartKm,
-            request.FuelLevel,
-            request.PreTrip ?? [],
-            request.Weather ?? [],
-            request.TemperatureC,
-            request.RoadConditions ?? [],
-            request.Visibility,
-            request.RoadAdvisories,
             request.Passengers ?? [],
             request.AllSeatbeltsVerified,
             request.Cargo ?? [],
             request.AllCargoSecured,
-            request.Issues ?? [],
-            request.NoIssues,
-            request.DepartureTime,
-            request.ArrivalTime,
-            request.OdometerEndKm,
-            request.TotalKm,
-            request.FuelAdded,
-            request.FuelLitres,
-            request.FuelCostCad,
-            request.PostTrip ?? [],
-            request.Attestations ?? [],
-            request.DriverSignatureName ?? string.Empty,
-            request.CertifiedAt,
             request.Source,
             request.EnteredBy);
 
@@ -108,15 +85,42 @@ public static class TripsEndpoints
             ? Results.Created($"/api/trips/manifests/{result.Value}", new ManifestCreatedResponse(result.Value))
             : EndpointResults.Problem(result.Error);
     }
+
+    private static async Task<IResult> UpdateManifest(
+        Guid id, UpdateTripManifestRequest request, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        var command = new UpdateTripManifestCommand(
+            id,
+            request.TripDate,
+            request.TripNumber ?? string.Empty,
+            request.Route ?? string.Empty,
+            request.Direction,
+            request.Client,
+            request.Passengers ?? [],
+            request.AllSeatbeltsVerified,
+            request.Cargo ?? [],
+            request.AllCargoSecured,
+            request.Source,
+            request.EnteredBy);
+
+        var result = await sender.Send(command, cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
 }
 
 /// <summary>Body of a successful manifest creation (201, with Location header).</summary>
 public sealed record ManifestCreatedResponse(Guid Id);
 
 /// <summary>
-/// Request body for POST /api/trips/manifests — the full NL-TM-01 form. Enum-typed
-/// fields take enum names ("Paper", "ThreeQuarters", "SnowCovered", …); row collections
-/// use the same shapes the manifest response returns.
+/// Request body for POST /api/trips/manifests — a passenger + cargo manifest. Enum-typed
+/// fields take enum names ("App"/"Dispatcher", "Outbound", "NotApplicable"); passengers and
+/// cargo use the shapes the manifest response returns. A Dispatcher-sourced manifest must
+/// carry <see cref="EnteredBy"/>.
 /// </summary>
 public sealed record CreateTripManifestRequest(
     DateOnly TripDate,
@@ -124,34 +128,26 @@ public sealed record CreateTripManifestRequest(
     string? Route,
     TripDirection? Direction,
     string? Client,
-    string? Unit,
-    string? DriverName,
-    string? DriverLicenceNo,
-    string? LicencePlate,
-    int? OdometerStartKm,
-    FuelLevel? FuelLevel,
-    IReadOnlyList<PreTripChecklistItem>? PreTrip,
-    IReadOnlyList<WeatherCondition>? Weather,
-    string? TemperatureC,
-    IReadOnlyList<RoadCondition>? RoadConditions,
-    VisibilityLevel? Visibility,
-    string? RoadAdvisories,
     IReadOnlyList<ManifestPassenger>? Passengers,
     bool AllSeatbeltsVerified,
     IReadOnlyList<ManifestCargoItem>? Cargo,
     CargoSecuredStatus? AllCargoSecured,
-    IReadOnlyList<string>? Issues,
-    bool NoIssues,
-    string? DepartureTime,
-    string? ArrivalTime,
-    int? OdometerEndKm,
-    int? TotalKm,
-    bool FuelAdded,
-    decimal? FuelLitres,
-    decimal? FuelCostCad,
-    IReadOnlyList<PostTripChecklistItem>? PostTrip,
-    IReadOnlyList<bool>? Attestations,
-    string? DriverSignatureName,
-    DateTimeOffset? CertifiedAt,
+    ManifestSource Source,
+    string? EnteredBy);
+
+/// <summary>
+/// Request body for PUT /api/trips/manifests/{id} — revises §1 trip info, passengers, and
+/// cargo. Same shape as the create body (minus the id, which is the route parameter).
+/// </summary>
+public sealed record UpdateTripManifestRequest(
+    DateOnly TripDate,
+    string? TripNumber,
+    string? Route,
+    TripDirection? Direction,
+    string? Client,
+    IReadOnlyList<ManifestPassenger>? Passengers,
+    bool AllSeatbeltsVerified,
+    IReadOnlyList<ManifestCargoItem>? Cargo,
+    CargoSecuredStatus? AllCargoSecured,
     ManifestSource Source,
     string? EnteredBy);

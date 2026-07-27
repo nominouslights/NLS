@@ -8,9 +8,8 @@ namespace NorthernLink.Fleet.Application.Vehicles.EnsureRetirementCertificate;
 /// <summary>
 /// Idempotent ensure-exists for a retired vehicle's certificate. Delivery is at-least-once,
 /// so this must never double-issue: it no-ops when the vehicle isn't visible/retired or a
-/// certificate already exists (check-before-insert on vehicle id), mirroring
-/// <c>TripManifestCompletedIntegrationEventHandler</c>. Runs under the ambient tenant the
-/// projection worker set from the journal row.
+/// certificate already exists (check-before-insert on vehicle id). Runs under the ambient
+/// tenant the projection worker set from the journal row.
 /// </summary>
 public sealed class EnsureRetirementCertificateCommandHandler(IVehicleRepository repository)
     : ICommandHandler<EnsureRetirementCertificateCommand>

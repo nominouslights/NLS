@@ -42,6 +42,7 @@ public class TripLifecycleTests
     public void Complete_sets_the_timestamp_and_raises_the_completed_event()
     {
         var trip = TestPlanning.ScheduleTrip().Value;
+        trip.RecordPostTripInspection();
         trip.ClearDomainEvents();
 
         var result = trip.Complete();
@@ -54,9 +55,53 @@ public class TripLifecycleTests
     }
 
     [Fact]
+    public void Complete_is_rejected_without_a_logged_post_trip_inspection()
+    {
+        var trip = TestPlanning.ScheduleTrip().Value;
+
+        var result = trip.Complete();
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(TripErrors.PostTripInspectionRequired, result.Error);
+        Assert.Equal(TripStatus.Scheduled, trip.Status); // refused via the direct Scheduled -> Completed path
+        Assert.Null(trip.CompletedAtUtc);
+    }
+
+    [Fact]
+    public void Complete_is_allowed_once_a_post_trip_inspection_is_recorded()
+    {
+        var trip = TestPlanning.ScheduleTrip().Value;
+        Assert.True(trip.Complete().IsFailure); // gated before
+
+        Assert.True(trip.RecordPostTripInspection().IsSuccess);
+        var result = trip.Complete();
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(TripStatus.Completed, trip.Status);
+    }
+
+    [Fact]
+    public void Record_post_trip_inspection_is_idempotent_and_raises_one_event()
+    {
+        var trip = TestPlanning.ScheduleTrip().Value;
+        trip.ClearDomainEvents();
+
+        Assert.True(trip.RecordPostTripInspection().IsSuccess);
+        Assert.True(trip.HasPostTripInspection);
+        Assert.Single(trip.DomainEvents.OfType<TripPostTripInspectionRecordedDomainEvent>());
+
+        var second = trip.RecordPostTripInspection(); // redelivery converges
+
+        Assert.True(second.IsSuccess);
+        Assert.True(trip.HasPostTripInspection);
+        Assert.Single(trip.DomainEvents.OfType<TripPostTripInspectionRecordedDomainEvent>()); // no second event
+    }
+
+    [Fact]
     public void Start_then_complete_walks_the_happy_path()
     {
         var trip = TestPlanning.ScheduleTrip().Value;
+        trip.RecordPostTripInspection();
 
         Assert.True(trip.Start().IsSuccess);
         Assert.Equal(TripStatus.InProgress, trip.Status);
@@ -79,6 +124,7 @@ public class TripLifecycleTests
     public void Terminal_trips_reject_further_transitions()
     {
         var completed = TestPlanning.ScheduleTrip().Value;
+        completed.RecordPostTripInspection();
         completed.Complete();
         Assert.True(completed.Start().IsFailure);
         Assert.True(completed.Complete().IsFailure);
@@ -126,11 +172,12 @@ public class TripLifecycleTests
     public void Assignment_is_rejected_on_a_terminal_trip()
     {
         var trip = TestPlanning.ScheduleTrip().Value;
+        trip.RecordPostTripInspection();
         trip.Complete();
 
         Assert.True(trip.AssignDriver(Guid.NewGuid(), "R. Ballantyne").IsFailure);
         Assert.True(trip.UnassignDriver().IsFailure);
-        Assert.True(trip.AssignVehicle("U-07").IsFailure);
+        Assert.True(trip.AssignVehicle(Guid.NewGuid(), "U-07").IsFailure);
     }
 
     [Fact]
@@ -150,17 +197,19 @@ public class TripLifecycleTests
     }
 
     [Fact]
-    public void Attach_manifest_auto_completes_a_scheduled_trip()
+    public void Attach_manifest_links_without_changing_status()
     {
         var trip = TestPlanning.ScheduleTrip().Value;
+        trip.ClearDomainEvents();
         var manifestId = Guid.NewGuid();
 
         var result = trip.AttachManifest(manifestId);
 
         Assert.True(result.IsSuccess);
         Assert.Equal(manifestId, trip.ManifestId);
-        Assert.Equal(TripStatus.Completed, trip.Status);
-        Assert.Single(trip.DomainEvents.OfType<TripCompletedDomainEvent>());
+        Assert.Equal(TripStatus.Scheduled, trip.Status); // linking never completes
+        Assert.Empty(trip.DomainEvents.OfType<TripCompletedDomainEvent>());
+        Assert.Single(trip.DomainEvents.OfType<TripManifestLinkedDomainEvent>());
     }
 
     [Fact]
@@ -174,8 +223,8 @@ public class TripLifecycleTests
         var result = trip.AttachManifest(manifestId);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal(TripStatus.Completed, trip.Status);
-        Assert.Empty(trip.DomainEvents); // no second completion event
+        Assert.Equal(TripStatus.Scheduled, trip.Status);
+        Assert.Empty(trip.DomainEvents); // no second link event
     }
 
     [Fact]
@@ -188,20 +237,5 @@ public class TripLifecycleTests
 
         Assert.True(result.IsFailure);
         Assert.Equal(TripErrors.ManifestAlreadyAttached, result.Error);
-    }
-
-    [Fact]
-    public void Attach_manifest_on_a_cancelled_trip_attaches_without_completing()
-    {
-        var trip = TestPlanning.ScheduleTrip().Value;
-        trip.Cancel("Weather");
-        var manifestId = Guid.NewGuid();
-
-        var result = trip.AttachManifest(manifestId);
-
-        Assert.True(result.IsSuccess);
-        Assert.Equal(manifestId, trip.ManifestId);
-        Assert.Equal(TripStatus.Cancelled, trip.Status);
-        Assert.Empty(trip.DomainEvents.OfType<TripCompletedDomainEvent>());
     }
 }

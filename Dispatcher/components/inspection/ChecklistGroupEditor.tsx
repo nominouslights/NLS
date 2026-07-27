@@ -1,28 +1,28 @@
 "use client";
 
 import { colors, fonts, rowSurface, statusMeta } from "@/lib/theme";
-import type { ManifestSeverity } from "@/lib/api";
+import type { DefectSeverityWire } from "@/lib/api/maintenance";
 import type { PreTripGroup } from "@/lib/tripManifestChecklist";
 import { SelectField, TextField } from "@/components/ui/Field";
 
-// One §3 pre-trip inspection group of the NL-TM-01 transcription form.
-// Each item is an OK/FAIL toggle (default OK); FAIL expands a severity select
-// and a required note, mirroring the InspectionEntryModal row pattern.
-// Rows carry the backend wire keys (group + item) — labels are display-only.
+// One pre-trip inspection group. Each item is an OK/FAIL toggle (default OK);
+// FAIL expands a severity select and a required note. Rows carry the backend
+// wire keys (group + item); labels are display-only. Salvaged from the retired
+// Manual Trip Entry form and now feeds the trip-context Fleet inspection modal.
 
 export interface ChecklistRow {
   /** Backend wire group string (PreTripGroup.key). */
   groupKey: string;
   /** Backend wire item string (PreTripItem.key). */
   itemKey: string;
-  /** Long display label as printed on the form. */
+  /** Long display label. */
   label: string;
   fail: boolean;
-  severity: ManifestSeverity;
+  severity: DefectSeverityWire;
   note: string;
 }
 
-const SEVERITY_OPTIONS: { value: ManifestSeverity; label: string }[] = [
+const SEVERITY_OPTIONS: { value: DefectSeverityWire; label: string }[] = [
   { value: "Minor", label: "Minor" },
   { value: "Major", label: "Major" },
   { value: "OutOfService", label: "Out of service" },
@@ -61,7 +61,6 @@ export default function ChecklistGroupEditor({
         >
           {group.title}
         </span>
-        {/* live result — glyph + label, never colour alone */}
         <span style={{ marginLeft: "auto", fontFamily: fonts.body, fontSize: 12, color: colors.textDim }}>
           Result:{" "}
           <span style={{ color: rm.t, fontWeight: 700 }}>
@@ -74,11 +73,7 @@ export default function ChecklistGroupEditor({
         {rows.map((r) => (
           <div
             key={r.itemKey}
-            style={{
-              padding: "9px 11px",
-              ...rowSurface(r.fail, r.fail ? statusMeta("over").c : colors.blue),
-              cursor: "default",
-            }}
+            style={{ padding: "9px 11px", ...rowSurface(r.fail, r.fail ? statusMeta("over").c : colors.blue), cursor: "default" }}
           >
             <div style={{ display: "grid", gridTemplateColumns: "1fr 140px", gap: 10, alignItems: "center" }}>
               <span style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: 600, color: colors.textPrimary }}>
@@ -94,7 +89,7 @@ export default function ChecklistGroupEditor({
                 <SelectField
                   label="Severity"
                   value={r.severity}
-                  onChange={(v) => onPatch(r.itemKey, { severity: v as ManifestSeverity })}
+                  onChange={(v) => onPatch(r.itemKey, { severity: v as DefectSeverityWire })}
                   options={SEVERITY_OPTIONS}
                 />
                 <TextField

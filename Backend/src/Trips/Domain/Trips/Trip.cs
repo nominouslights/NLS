@@ -58,6 +58,7 @@ public sealed class Trip : AggregateRoot, ITenantScoped
     // Assignment.
     public Guid? DriverId { get; private set; }
     public string? DriverName { get; private set; }
+    public Guid? VehicleId { get; private set; }
     public string? VehicleUnit { get; private set; }
 
     // Demand (gift-a-seat).
@@ -69,6 +70,14 @@ public sealed class Trip : AggregateRoot, ITenantScoped
     // Lifecycle.
     public TripStatus Status { get; private set; }
     public Guid? ManifestId { get; private set; }
+
+    /// <summary>
+    /// Set true once a post-trip vehicle inspection has been logged for this trip (Fleet's
+    /// <c>fleet.vehicle-inspection-recorded</c> event, matched by trip number). Gates
+    /// <see cref="Complete"/>.
+    /// </summary>
+    public bool HasPostTripInspection { get; private set; }
+
     public DateTimeOffset? CompletedAtUtc { get; private set; }
     public string? CancelledReason { get; private set; }
 
@@ -112,6 +121,7 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         string? poNumber,
         Guid? driverId,
         string? driverName,
+        Guid? vehicleId,
         string? vehicleUnit,
         int? seatsCapacity,
         int? seatsMinimum)
@@ -156,6 +166,7 @@ public sealed class Trip : AggregateRoot, ITenantScoped
             PoNumber = Normalize(poNumber),
             DriverId = driverId,
             DriverName = driverId is null ? null : driverName!.Trim(),
+            VehicleId = vehicleId,
             VehicleUnit = Normalize(vehicleUnit),
             SeatsCapacity = seatsCapacity,
             SeatsConfirmed = 0,
@@ -261,14 +272,20 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         return Result.Success();
     }
 
-    /// <summary>Sets (or, with null, clears) the vehicle unit working this trip.</summary>
-    public Result AssignVehicle(string? vehicleUnit)
+    /// <summary>
+    /// Sets (or, with nulls, clears) the vehicle working this trip. A supplied
+    /// <paramref name="vehicleId"/> is validated against vehicle_lookup (exists + Active)
+    /// by the handler, which passes the unit-number snapshot from the lookup as
+    /// <paramref name="vehicleUnit"/>. A free-form unit with no id is still allowed.
+    /// </summary>
+    public Result AssignVehicle(Guid? vehicleId, string? vehicleUnit)
     {
         if (IsTerminal)
         {
             return Result.Failure(TripErrors.TerminalStatus(Status));
         }
 
+        VehicleId = vehicleId;
         VehicleUnit = Normalize(vehicleUnit);
         UpdatedAtUtc = DateTimeOffset.UtcNow;
 
@@ -292,6 +309,14 @@ public sealed class Trip : AggregateRoot, ITenantScoped
 
     public Result Complete()
     {
+        // Business rule: a trip can never reach Completed without a logged post-trip
+        // inspection — checked before the transition so completion is refused via any path
+        // (including a direct Scheduled → Completed).
+        if (!HasPostTripInspection)
+        {
+            return Result.Failure(TripErrors.PostTripInspectionRequired);
+        }
+
         if (!CanTransition(Status, TripStatus.Completed))
         {
             return Result.Failure(TripErrors.InvalidStatusTransition(Status, TripStatus.Completed));
@@ -347,9 +372,11 @@ public sealed class Trip : AggregateRoot, ITenantScoped
     }
 
     /// <summary>
-    /// Links the completed manifest that proves this trip ran, auto-completing a
-    /// non-terminal trip. Idempotent: re-attaching the same manifest is a no-op success
-    /// (the reaction pipeline is at-least-once); a different manifest is a conflict.
+    /// Links the manifest recorded for this trip. Linking no longer changes trip status —
+    /// a manifest can be recorded while the trip is Scheduled or InProgress, and completion
+    /// stays the explicit <c>ChangeStatus → Complete</c> path. Idempotent: re-attaching the
+    /// same manifest is a no-op success (the reaction pipeline is at-least-once); a
+    /// different manifest is a conflict.
     /// </summary>
     public Result AttachManifest(Guid manifestId)
     {
@@ -366,13 +393,29 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         ManifestId = manifestId;
         UpdatedAtUtc = DateTimeOffset.UtcNow;
 
-        if (IsTerminal)
+        Raise(new TripManifestLinkedDomainEvent(Id));
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Records that a post-trip vehicle inspection has been logged for this trip — the signal
+    /// that clears the <see cref="Complete"/> gate. Driven by Fleet's
+    /// <c>fleet.vehicle-inspection-recorded</c> integration event, matched by trip number.
+    /// Idempotent: once set, re-delivery is a no-op success (the reaction pipeline is
+    /// at-least-once), so the flag never flips back and only one event is raised.
+    /// </summary>
+    public Result RecordPostTripInspection()
+    {
+        if (HasPostTripInspection)
         {
-            Raise(new TripManifestLinkedDomainEvent(Id));
             return Result.Success();
         }
 
-        return Complete();
+        HasPostTripInspection = true;
+        UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        Raise(new TripPostTripInspectionRecordedDomainEvent(Id));
+        return Result.Success();
     }
 
     private static Result ValidateDetails(

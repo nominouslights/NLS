@@ -35,11 +35,23 @@ public static class TripErrors
     public static readonly Error DriverNotActive = Error.Validation(
         "Trips.Trip.DriverNotActive", "Only an active driver can be assigned to a trip.");
 
+    public static readonly Error VehicleNotFound = Error.NotFound(
+        "Trips.Trip.VehicleNotFound", "The vehicle to assign was not found.");
+
+    public static readonly Error VehicleNotActive = Error.Validation(
+        "Trips.Trip.VehicleNotActive", "Only an active vehicle can be assigned to a trip.");
+
     public static readonly Error NotEditable = Error.Conflict(
         "Trips.Trip.NotEditable", "Only a scheduled trip can be edited.");
 
     public static readonly Error ManifestAlreadyAttached = Error.Conflict(
         "Trips.Trip.ManifestAlreadyAttached", "A different manifest is already attached to this trip.");
+
+    public static readonly Error PassengerManifestRequired = Error.Conflict(
+        "Trips.Trip.PassengerManifestRequired", "A trip cannot go en route until its manifest has at least one passenger.");
+
+    public static readonly Error PostTripInspectionRequired = Error.Conflict(
+        "Trips.Trip.PostTripInspectionRequired", "A post-trip inspection must be logged before this trip can be completed.");
 
     public static Error InvalidStatusTransition(TripStatus from, TripStatus to) => Error.Conflict(
         "Trips.Trip.InvalidStatusTransition", $"A trip cannot move from {from} to {to}.");

@@ -8,7 +8,7 @@ namespace NorthernLink.Trips.Tests;
 public class TripManifestCreateTests
 {
     [Fact]
-    public void Valid_app_manifest_is_created_and_raises_the_completed_event()
+    public void Valid_app_manifest_is_created_and_raises_the_created_event()
     {
         var result = TestManifests.Create();
 
@@ -17,29 +17,83 @@ public class TripManifestCreateTests
         Assert.Equal(TestManifests.TenantId, manifest.TenantId);
         Assert.Equal(ManifestSource.App, manifest.Source);
         Assert.Null(manifest.EnteredAt);
-        Assert.Equal(28, manifest.PreTripItems.Count);
-        Assert.Equal(6, manifest.PostTripItems.Count);
+        Assert.Single(manifest.Passengers);
 
         var domainEvent = Assert.Single(manifest.DomainEvents);
-        var completed = Assert.IsType<TripManifestCompletedDomainEvent>(domainEvent);
-        Assert.Equal(manifest.Id, completed.ManifestId);
+        var created = Assert.IsType<TripManifestCreatedDomainEvent>(domainEvent);
+        Assert.Equal(manifest.Id, created.ManifestId);
     }
 
     [Fact]
-    public void Valid_paper_manifest_records_provenance()
+    public void A_manifest_is_valid_with_just_a_passenger_and_no_cargo()
     {
-        var result = TestManifests.Create(source: ManifestSource.Paper, enteredBy: "Dispatch — R. Ballantyne");
+        var result = TestManifests.Create(cargo: [], allCargoSecured: CargoSecuredStatus.NotApplicable);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal(ManifestSource.Paper, result.Value.Source);
+        Assert.Empty(result.Value.Cargo);
+    }
+
+    [Fact]
+    public void A_manifest_is_valid_with_zero_passengers()
+    {
+        // No attestations, signature, or inspection are required anymore — passengers >= 0.
+        var result = TestManifests.Create(passengers: []);
+
+        Assert.True(result.IsSuccess);
+        Assert.Empty(result.Value.Passengers);
+    }
+
+    [Fact]
+    public void Route_stop_referenced_passengers_round_trip()
+    {
+        var pickupId = Guid.NewGuid();
+        var dropoffId = Guid.NewGuid();
+        var passenger = new ManifestPassenger
+        {
+            Name = "R. Spence",
+            PickupStopId = pickupId,
+            PickupStopName = "Leaf Rapids",
+            DropoffStopId = dropoffId,
+            DropoffStopName = "Lynn Lake",
+            BoardedOn = true,
+        };
+
+        var manifest = TestManifests.Create(passengers: [passenger]).Value;
+
+        var stored = Assert.Single(manifest.Passengers);
+        Assert.Equal(pickupId, stored.PickupStopId);
+        Assert.Equal("Leaf Rapids", stored.PickupStopName);
+        Assert.Equal(dropoffId, stored.DropoffStopId);
+        Assert.Equal("Lynn Lake", stored.DropoffStopName);
+    }
+
+    [Fact]
+    public void Free_form_passengers_leave_the_stop_ids_null()
+    {
+        var passenger = new ManifestPassenger { Name = "Walk-up rider" };
+
+        var manifest = TestManifests.Create(passengers: [passenger]).Value;
+
+        var stored = Assert.Single(manifest.Passengers);
+        Assert.Null(stored.PickupStopId);
+        Assert.Null(stored.DropoffStopId);
+    }
+
+    [Fact]
+    public void Valid_dispatcher_manifest_records_provenance()
+    {
+        var result = TestManifests.Create(source: ManifestSource.Dispatcher, enteredBy: "Dispatch — R. Ballantyne");
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(ManifestSource.Dispatcher, result.Value.Source);
         Assert.Equal("Dispatch — R. Ballantyne", result.Value.EnteredBy);
         Assert.NotNull(result.Value.EnteredAt);
     }
 
     [Fact]
-    public void Paper_manifest_without_entered_by_is_rejected()
+    public void Dispatcher_manifest_without_entered_by_is_rejected()
     {
-        var result = TestManifests.Create(source: ManifestSource.Paper, enteredBy: "  ");
+        var result = TestManifests.Create(source: ManifestSource.Dispatcher, enteredBy: "  ");
 
         Assert.True(result.IsFailure);
         Assert.Equal(TripManifestErrors.EnteredByRequired, result.Error);
@@ -47,84 +101,21 @@ public class TripManifestCreateTests
     }
 
     [Fact]
-    public void An_unchecked_attestation_is_rejected()
+    public void A_missing_trip_number_is_rejected()
     {
-        var result = TestManifests.Create(attestations: [true, true, false, true, true]);
+        var result = TestManifests.Create(tripNumber: "");
 
         Assert.True(result.IsFailure);
-        Assert.Equal(TripManifestErrors.AttestationsIncomplete, result.Error);
+        Assert.Equal(TripManifestErrors.TripNumberRequired, result.Error);
     }
 
     [Fact]
-    public void A_missing_attestation_is_rejected()
+    public void A_passenger_without_a_name_is_rejected()
     {
-        var result = TestManifests.Create(attestations: [true, true, true, true]);
+        var result = TestManifests.Create(passengers: [new ManifestPassenger { Name = "  " }]);
 
         Assert.True(result.IsFailure);
-        Assert.Equal(TripManifestErrors.AttestationsIncomplete, result.Error);
-    }
-
-    [Fact]
-    public void Missing_signature_is_rejected()
-    {
-        var result = TestManifests.Create(driverSignatureName: " ");
-
-        Assert.True(result.IsFailure);
-        Assert.Equal(TripManifestErrors.SignatureRequired, result.Error);
-    }
-
-    [Fact]
-    public void End_odometer_below_start_is_rejected()
-    {
-        var result = TestManifests.Create(odometerStartKm: 118_346, odometerEndKm: 118_204);
-
-        Assert.True(result.IsFailure);
-        Assert.Equal(TripManifestErrors.OdometerEndBeforeStart, result.Error);
-    }
-
-    [Fact]
-    public void Odometer_check_is_skipped_when_a_reading_is_missing()
-    {
-        var result = TestManifests.Create(odometerStartKm: null, odometerEndKm: 118_204);
-
-        Assert.True(result.IsSuccess);
-    }
-
-    [Fact]
-    public void A_failed_pre_trip_item_without_a_note_is_rejected()
-    {
-        var preTrip = TestManifests.AllOkPreTrip();
-        preTrip[3] = preTrip[3] with { Status = PreTripItemStatus.Fail, Severity = DefectSeverity.Minor, Note = null };
-
-        var result = TestManifests.Create(preTrip: preTrip);
-
-        Assert.True(result.IsFailure);
-        Assert.Equal(TripManifestErrors.FailRequiresNote, result.Error);
-    }
-
-    [Fact]
-    public void A_failed_pre_trip_item_with_a_note_is_accepted()
-    {
-        var preTrip = TestManifests.AllOkPreTrip();
-        preTrip[3] = preTrip[3] with
-        {
-            Status = PreTripItemStatus.Fail,
-            Severity = DefectSeverity.Minor,
-            Note = "Streaking, replace blade",
-        };
-
-        var result = TestManifests.Create(preTrip: preTrip);
-
-        Assert.True(result.IsSuccess);
-    }
-
-    [Fact]
-    public void Fuel_added_without_litres_is_rejected()
-    {
-        var result = TestManifests.Create(fuelAdded: true, fuelLitres: null);
-
-        Assert.True(result.IsFailure);
-        Assert.Equal(TripManifestErrors.FuelLitresRequired, result.Error);
+        Assert.Equal(TripManifestErrors.PassengerNameRequired, result.Error);
     }
 
     [Fact]
@@ -153,24 +144,64 @@ public class TripManifestCreateTests
         Assert.Equal(TripManifestErrors.TooManyCargoItems, result.Error);
     }
 
-    [Theory]
-    [InlineData("", "U-04", "J. Spence")]
-    [InlineData("TR-4818", "", "J. Spence")]
-    [InlineData("TR-4818", "U-04", "")]
-    public void Missing_trip_identity_fields_are_rejected(string tripNumber, string unit, string driverName)
+    [Fact]
+    public void Update_revises_passengers_and_cargo_and_raises_the_updated_event()
     {
-        var result = TestManifests.Create(tripNumber: tripNumber, unit: unit, driverName: driverName);
+        var manifest = TestManifests.Create().Value;
+        manifest.ClearDomainEvents();
 
-        Assert.True(result.IsFailure);
-        Assert.Equal(ErrorType.Validation, result.Error.Type);
+        var newPassengers = new List<ManifestPassenger>
+        {
+            new() { Name = "M. Beardy", BoardedOn = true },
+            new() { Name = "J. Linklater", BoardedOn = true },
+        };
+        var newCargo = new List<ManifestCargoItem> { new() { Description = "Medical supplies", Secured = true } };
+
+        var result = manifest.Update(
+            manifest.TripDate,
+            manifest.TripNumber,
+            manifest.Route,
+            manifest.Direction,
+            manifest.Client,
+            newPassengers,
+            allSeatbeltsVerified: true,
+            newCargo,
+            CargoSecuredStatus.Yes,
+            ManifestSource.Dispatcher,
+            enteredBy: "Dispatch — R. Ballantyne");
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(2, manifest.Passengers.Count);
+        Assert.Single(manifest.Cargo);
+        Assert.Equal(ManifestSource.Dispatcher, manifest.Source);
+        Assert.Equal("Dispatch — R. Ballantyne", manifest.EnteredBy);
+        Assert.NotNull(manifest.EnteredAt);
+
+        var updated = Assert.IsType<TripManifestUpdatedDomainEvent>(Assert.Single(manifest.DomainEvents));
+        Assert.Equal(manifest.Id, updated.ManifestId);
+        Assert.Equal(ManifestSource.Dispatcher, updated.Source);
+        Assert.Equal("Dispatch — R. Ballantyne", updated.EnteredBy);
     }
 
     [Fact]
-    public void Checklist_constants_match_the_printed_form()
+    public void Update_by_dispatcher_without_entered_by_is_rejected()
     {
-        Assert.Equal(28, ManifestChecklist.PreTripGroups.Sum(group => group.Value.Count));
-        Assert.Equal(4, ManifestChecklist.PreTripGroups.Count);
-        Assert.Equal(6, ManifestChecklist.PostTripItems.Count);
-        Assert.Equal(5, ManifestChecklist.Attestations.Count);
+        var manifest = TestManifests.Create().Value;
+
+        var result = manifest.Update(
+            manifest.TripDate,
+            manifest.TripNumber,
+            manifest.Route,
+            manifest.Direction,
+            manifest.Client,
+            manifest.Passengers,
+            manifest.AllSeatbeltsVerified,
+            manifest.Cargo,
+            manifest.AllCargoSecured,
+            ManifestSource.Dispatcher,
+            enteredBy: null);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(TripManifestErrors.EnteredByRequired, result.Error);
     }
 }

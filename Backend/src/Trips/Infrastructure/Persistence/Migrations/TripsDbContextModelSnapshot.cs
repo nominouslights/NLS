@@ -313,6 +313,49 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                     b.ToTable("driver_lookup", "trips");
                 });
 
+            modelBuilder.Entity("NorthernLink.Trips.Application.Integration.VehicleLookup", b =>
+                {
+                    b.Property<Guid>("VehicleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("vehicle_id");
+
+                    b.Property<string>("RequiredLicenceClass")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("required_licence_class");
+
+                    b.Property<int>("SeatingCapacity")
+                        .HasColumnType("integer")
+                        .HasColumnName("seating_capacity");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("UnitNumber")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("unit_number");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.HasKey("VehicleId");
+
+                    b.HasIndex("TenantId", "Status");
+
+                    b.ToTable("vehicle_lookup", "trips");
+                });
+
             modelBuilder.Entity("NorthernLink.Trips.Domain.Manifests.TripManifest", b =>
                 {
                     b.Property<Guid>("Id")
@@ -328,20 +371,6 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("all_seatbelts_verified");
 
-                    b.Property<string>("ArrivalTime")
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)")
-                        .HasColumnName("arrival_time");
-
-                    b.PrimitiveCollection<List<bool>>("Attestations")
-                        .IsRequired()
-                        .HasColumnType("boolean[]")
-                        .HasColumnName("attestations");
-
-                    b.Property<DateTimeOffset>("CertifiedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("certified_at");
-
                     b.Property<string>("Client")
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)")
@@ -351,32 +380,10 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at_utc");
 
-                    b.Property<string>("DepartureTime")
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)")
-                        .HasColumnName("departure_time");
-
                     b.Property<string>("Direction")
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)")
                         .HasColumnName("direction");
-
-                    b.Property<string>("DriverLicenceNo")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("driver_licence_no");
-
-                    b.Property<string>("DriverName")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)")
-                        .HasColumnName("driver_name");
-
-                    b.Property<string>("DriverSignatureName")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)")
-                        .HasColumnName("driver_signature_name");
 
                     b.Property<DateTimeOffset?>("EnteredAt")
                         .HasColumnType("timestamp with time zone")
@@ -386,55 +393,6 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)")
                         .HasColumnName("entered_by");
-
-                    b.Property<bool>("FuelAdded")
-                        .HasColumnType("boolean")
-                        .HasColumnName("fuel_added");
-
-                    b.Property<decimal?>("FuelCostCad")
-                        .HasColumnType("numeric(12,2)")
-                        .HasColumnName("fuel_cost_cad");
-
-                    b.Property<string>("FuelLevel")
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)")
-                        .HasColumnName("fuel_level");
-
-                    b.Property<decimal?>("FuelLitres")
-                        .HasColumnType("numeric(8,2)")
-                        .HasColumnName("fuel_litres");
-
-                    b.PrimitiveCollection<List<string>>("Issues")
-                        .IsRequired()
-                        .HasColumnType("text[]")
-                        .HasColumnName("issues");
-
-                    b.Property<string>("LicencePlate")
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)")
-                        .HasColumnName("licence_plate");
-
-                    b.Property<bool>("NoIssues")
-                        .HasColumnType("boolean")
-                        .HasColumnName("no_issues");
-
-                    b.Property<int?>("OdometerEndKm")
-                        .HasColumnType("integer")
-                        .HasColumnName("odometer_end_km");
-
-                    b.Property<int?>("OdometerStartKm")
-                        .HasColumnType("integer")
-                        .HasColumnName("odometer_start_km");
-
-                    b.Property<string>("RoadAdvisories")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)")
-                        .HasColumnName("road_advisories");
-
-                    b.PrimitiveCollection<string[]>("RoadConditions")
-                        .IsRequired()
-                        .HasColumnType("text[]")
-                        .HasColumnName("road_conditions");
 
                     b.Property<string>("Route")
                         .IsRequired()
@@ -448,18 +406,9 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(16)")
                         .HasColumnName("source");
 
-                    b.Property<string>("TemperatureC")
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)")
-                        .HasColumnName("temperature_c");
-
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");
-
-                    b.Property<int?>("TotalKm")
-                        .HasColumnType("integer")
-                        .HasColumnName("total_km");
 
                     b.Property<DateOnly>("TripDate")
                         .HasColumnType("date")
@@ -471,32 +420,14 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(32)")
                         .HasColumnName("trip_number");
 
-                    b.Property<string>("Unit")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)")
-                        .HasColumnName("unit");
-
                     b.Property<int>("Version")
                         .IsConcurrencyToken()
                         .HasColumnType("integer")
                         .HasColumnName("version");
 
-                    b.Property<string>("Visibility")
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)")
-                        .HasColumnName("visibility");
-
-                    b.PrimitiveCollection<string[]>("Weather")
-                        .IsRequired()
-                        .HasColumnType("text[]")
-                        .HasColumnName("weather");
-
                     b.HasKey("Id");
 
                     b.HasIndex("TenantId", "TripNumber");
-
-                    b.HasIndex("TenantId", "Unit");
 
                     b.ToTable("trip_manifests", "trips");
                 });
@@ -654,6 +585,58 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                     b.ToTable("schedule_templates", "trips");
                 });
 
+            modelBuilder.Entity("NorthernLink.Trips.Domain.Stops.Stop", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("notes");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("Type")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("type");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Active");
+
+                    b.HasIndex("TenantId", "Name");
+
+                    b.ToTable("stops", "trips");
+                });
+
             modelBuilder.Entity("NorthernLink.Trips.Domain.Trips.Trip", b =>
                 {
                     b.Property<Guid>("Id")
@@ -709,6 +692,10 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)")
                         .HasColumnName("driver_name");
+
+                    b.Property<bool>("HasPostTripInspection")
+                        .HasColumnType("boolean")
+                        .HasColumnName("has_post_trip_inspection");
 
                     b.Property<bool>("IsEmptyLeg")
                         .HasColumnType("boolean")
@@ -789,6 +776,10 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at_utc");
+
+                    b.Property<Guid?>("VehicleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("vehicle_id");
 
                     b.Property<string>("VehicleUnit")
                         .HasMaxLength(32)
@@ -979,6 +970,84 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                     b.ToTable("rm_schedule_templates", "trips");
                 });
 
+            modelBuilder.Entity("NorthernLink.Trips.Infrastructure.Persistence.ReadModels.StopReadModel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<string>("City")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("city");
+
+                    b.Property<string>("Country")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("country");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<double>("Latitude")
+                        .HasColumnType("double precision")
+                        .HasColumnName("latitude");
+
+                    b.Property<double>("Longitude")
+                        .HasColumnType("double precision")
+                        .HasColumnName("longitude");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("text")
+                        .HasColumnName("notes");
+
+                    b.Property<string>("PostalCode")
+                        .HasColumnType("text")
+                        .HasColumnName("postal_code");
+
+                    b.Property<string>("Province")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("province");
+
+                    b.Property<string>("Street")
+                        .HasColumnType("text")
+                        .HasColumnName("street");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("Type")
+                        .HasColumnType("text")
+                        .HasColumnName("type");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Active");
+
+                    b.ToTable("rm_stops", "trips");
+                });
+
             modelBuilder.Entity("NorthernLink.Trips.Infrastructure.Persistence.ReadModels.TripManifestReadModel", b =>
                 {
                     b.Property<Guid>("Id")
@@ -994,19 +1063,6 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("all_seatbelts_verified");
 
-                    b.Property<string>("ArrivalTime")
-                        .HasColumnType("text")
-                        .HasColumnName("arrival_time");
-
-                    b.PrimitiveCollection<List<bool>>("Attestations")
-                        .IsRequired()
-                        .HasColumnType("boolean[]")
-                        .HasColumnName("attestations");
-
-                    b.Property<DateTimeOffset>("CertifiedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("certified_at");
-
                     b.Property<string>("Client")
                         .HasColumnType("text")
                         .HasColumnName("client");
@@ -1015,27 +1071,9 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at_utc");
 
-                    b.Property<string>("DepartureTime")
-                        .HasColumnType("text")
-                        .HasColumnName("departure_time");
-
                     b.Property<string>("Direction")
                         .HasColumnType("text")
                         .HasColumnName("direction");
-
-                    b.Property<string>("DriverLicenceNo")
-                        .HasColumnType("text")
-                        .HasColumnName("driver_licence_no");
-
-                    b.Property<string>("DriverName")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("driver_name");
-
-                    b.Property<string>("DriverSignatureName")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("driver_signature_name");
 
                     b.Property<DateTimeOffset?>("EnteredAt")
                         .HasColumnType("timestamp with time zone")
@@ -1044,52 +1082,6 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                     b.Property<string>("EnteredBy")
                         .HasColumnType("text")
                         .HasColumnName("entered_by");
-
-                    b.Property<bool>("FuelAdded")
-                        .HasColumnType("boolean")
-                        .HasColumnName("fuel_added");
-
-                    b.Property<decimal?>("FuelCostCad")
-                        .HasColumnType("numeric")
-                        .HasColumnName("fuel_cost_cad");
-
-                    b.Property<string>("FuelLevel")
-                        .HasColumnType("text")
-                        .HasColumnName("fuel_level");
-
-                    b.Property<decimal?>("FuelLitres")
-                        .HasColumnType("numeric")
-                        .HasColumnName("fuel_litres");
-
-                    b.PrimitiveCollection<List<string>>("Issues")
-                        .IsRequired()
-                        .HasColumnType("text[]")
-                        .HasColumnName("issues");
-
-                    b.Property<string>("LicencePlate")
-                        .HasColumnType("text")
-                        .HasColumnName("licence_plate");
-
-                    b.Property<bool>("NoIssues")
-                        .HasColumnType("boolean")
-                        .HasColumnName("no_issues");
-
-                    b.Property<int?>("OdometerEndKm")
-                        .HasColumnType("integer")
-                        .HasColumnName("odometer_end_km");
-
-                    b.Property<int?>("OdometerStartKm")
-                        .HasColumnType("integer")
-                        .HasColumnName("odometer_start_km");
-
-                    b.Property<string>("RoadAdvisories")
-                        .HasColumnType("text")
-                        .HasColumnName("road_advisories");
-
-                    b.PrimitiveCollection<List<string>>("RoadConditions")
-                        .IsRequired()
-                        .HasColumnType("text[]")
-                        .HasColumnName("road_conditions");
 
                     b.Property<string>("Route")
                         .IsRequired()
@@ -1101,17 +1093,9 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("source");
 
-                    b.Property<string>("TemperatureC")
-                        .HasColumnType("text")
-                        .HasColumnName("temperature_c");
-
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");
-
-                    b.Property<int?>("TotalKm")
-                        .HasColumnType("integer")
-                        .HasColumnName("total_km");
 
                     b.Property<DateOnly>("TripDate")
                         .HasColumnType("date")
@@ -1122,23 +1106,9 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("trip_number");
 
-                    b.Property<string>("Unit")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("unit");
-
                     b.Property<int>("Version")
                         .HasColumnType("integer")
                         .HasColumnName("version");
-
-                    b.Property<string>("Visibility")
-                        .HasColumnType("text")
-                        .HasColumnName("visibility");
-
-                    b.PrimitiveCollection<List<string>>("Weather")
-                        .IsRequired()
-                        .HasColumnType("text[]")
-                        .HasColumnName("weather");
 
                     b.HasKey("Id");
 
@@ -1196,6 +1166,10 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                     b.Property<string>("DriverName")
                         .HasColumnType("text")
                         .HasColumnName("driver_name");
+
+                    b.Property<bool>("HasPostTripInspection")
+                        .HasColumnType("boolean")
+                        .HasColumnName("has_post_trip_inspection");
 
                     b.Property<bool>("IsEmptyLeg")
                         .HasColumnType("boolean")
@@ -1269,6 +1243,10 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at_utc");
+
+                    b.Property<Guid?>("VehicleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("vehicle_id");
 
                     b.Property<string>("VehicleUnit")
                         .HasColumnType("text")
@@ -1355,14 +1333,18 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
 
                             b1.Property<string>("Contact");
 
-                            b1.Property<string>("Dropoff");
+                            b1.Property<Guid?>("DropoffStopId");
+
+                            b1.Property<string>("DropoffStopName");
 
                             b1.Property<bool>("IdVerified");
 
                             b1.Property<string>("Name")
                                 .IsRequired();
 
-                            b1.Property<string>("Pickup");
+                            b1.Property<Guid?>("PickupStopId");
+
+                            b1.Property<string>("PickupStopName");
 
                             b1.HasKey("TripManifestId", "__synthesizedOrdinal");
 
@@ -1374,65 +1356,9 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                                 .HasForeignKey("TripManifestId");
                         });
 
-                    b.OwnsMany("NorthernLink.Trips.Domain.Manifests.PostTripChecklistItem", "PostTripItems", b1 =>
-                        {
-                            b1.Property<Guid>("TripManifestId");
-
-                            b1.Property<int>("__synthesizedOrdinal")
-                                .ValueGeneratedOnAdd();
-
-                            b1.Property<string>("Item")
-                                .IsRequired();
-
-                            b1.Property<bool>("Ok");
-
-                            b1.HasKey("TripManifestId", "__synthesizedOrdinal");
-
-                            b1.ToTable("trip_manifests", "trips");
-
-                            b1.ToJson("post_trip_items");
-
-                            b1.WithOwner()
-                                .HasForeignKey("TripManifestId");
-                        });
-
-                    b.OwnsMany("NorthernLink.Trips.Domain.Manifests.PreTripChecklistItem", "PreTripItems", b1 =>
-                        {
-                            b1.Property<Guid>("TripManifestId");
-
-                            b1.Property<int>("__synthesizedOrdinal")
-                                .ValueGeneratedOnAdd();
-
-                            b1.Property<string>("Group")
-                                .IsRequired();
-
-                            b1.Property<string>("Item")
-                                .IsRequired();
-
-                            b1.Property<string>("Note");
-
-                            b1.Property<string>("Severity");
-
-                            b1.Property<string>("Status")
-                                .IsRequired();
-
-                            b1.HasKey("TripManifestId", "__synthesizedOrdinal");
-
-                            b1.ToTable("trip_manifests", "trips");
-
-                            b1.ToJson("pre_trip_items");
-
-                            b1.WithOwner()
-                                .HasForeignKey("TripManifestId");
-                        });
-
                     b.Navigation("Cargo");
 
                     b.Navigation("Passengers");
-
-                    b.Navigation("PostTripItems");
-
-                    b.Navigation("PreTripItems");
                 });
 
             modelBuilder.Entity("NorthernLink.Trips.Domain.Routes.Route", b =>
@@ -1444,10 +1370,16 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                             b1.Property<int>("__synthesizedOrdinal")
                                 .ValueGeneratedOnAdd();
 
+                            b1.Property<double?>("Latitude");
+
+                            b1.Property<double?>("Longitude");
+
                             b1.Property<string>("Name")
                                 .IsRequired();
 
                             b1.Property<int>("Order");
+
+                            b1.Property<Guid?>("StopId");
 
                             b1.HasKey("RouteId", "__synthesizedOrdinal");
 
@@ -1462,6 +1394,77 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                     b.Navigation("Stops");
                 });
 
+            modelBuilder.Entity("NorthernLink.Trips.Domain.Stops.Stop", b =>
+                {
+                    b.OwnsOne("NorthernLink.Trips.Domain.Stops.Address", "Address", b1 =>
+                        {
+                            b1.Property<Guid>("StopId")
+                                .HasColumnType("uuid");
+
+                            b1.Property<string>("City")
+                                .IsRequired()
+                                .HasMaxLength(120)
+                                .HasColumnType("character varying(120)")
+                                .HasColumnName("city");
+
+                            b1.Property<string>("Country")
+                                .IsRequired()
+                                .HasMaxLength(120)
+                                .HasColumnType("character varying(120)")
+                                .HasColumnName("country");
+
+                            b1.Property<string>("PostalCode")
+                                .HasMaxLength(16)
+                                .HasColumnType("character varying(16)")
+                                .HasColumnName("postal_code");
+
+                            b1.Property<string>("Province")
+                                .IsRequired()
+                                .HasMaxLength(120)
+                                .HasColumnType("character varying(120)")
+                                .HasColumnName("province");
+
+                            b1.Property<string>("Street")
+                                .HasMaxLength(200)
+                                .HasColumnType("character varying(200)")
+                                .HasColumnName("street");
+
+                            b1.HasKey("StopId");
+
+                            b1.ToTable("stops", "trips");
+
+                            b1.WithOwner()
+                                .HasForeignKey("StopId");
+                        });
+
+                    b.OwnsOne("NorthernLink.Trips.Domain.Stops.Coordinate", "Coordinate", b1 =>
+                        {
+                            b1.Property<Guid>("StopId")
+                                .HasColumnType("uuid");
+
+                            b1.Property<double>("Latitude")
+                                .HasColumnType("double precision")
+                                .HasColumnName("latitude");
+
+                            b1.Property<double>("Longitude")
+                                .HasColumnType("double precision")
+                                .HasColumnName("longitude");
+
+                            b1.HasKey("StopId");
+
+                            b1.ToTable("stops", "trips");
+
+                            b1.WithOwner()
+                                .HasForeignKey("StopId");
+                        });
+
+                    b.Navigation("Address")
+                        .IsRequired();
+
+                    b.Navigation("Coordinate")
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("NorthernLink.Trips.Domain.Trips.Trip", b =>
                 {
                     b.OwnsMany("NorthernLink.Trips.Domain.Routes.RouteStop", "Stops", b1 =>
@@ -1471,10 +1474,16 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                             b1.Property<int>("__synthesizedOrdinal")
                                 .ValueGeneratedOnAdd();
 
+                            b1.Property<double?>("Latitude");
+
+                            b1.Property<double?>("Longitude");
+
                             b1.Property<string>("Name")
                                 .IsRequired();
 
                             b1.Property<int>("Order");
+
+                            b1.Property<Guid?>("StopId");
 
                             b1.HasKey("TripId", "__synthesizedOrdinal");
 
@@ -1498,10 +1507,16 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                             b1.Property<int>("__synthesizedOrdinal")
                                 .ValueGeneratedOnAdd();
 
+                            b1.Property<double?>("Latitude");
+
+                            b1.Property<double?>("Longitude");
+
                             b1.Property<string>("Name")
                                 .IsRequired();
 
                             b1.Property<int>("Order");
+
+                            b1.Property<Guid?>("StopId");
 
                             b1.HasKey("RouteReadModelId", "__synthesizedOrdinal");
 
@@ -1563,14 +1578,18 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
 
                             b1.Property<string>("Contact");
 
-                            b1.Property<string>("Dropoff");
+                            b1.Property<Guid?>("DropoffStopId");
+
+                            b1.Property<string>("DropoffStopName");
 
                             b1.Property<bool>("IdVerified");
 
                             b1.Property<string>("Name")
                                 .IsRequired();
 
-                            b1.Property<string>("Pickup");
+                            b1.Property<Guid?>("PickupStopId");
+
+                            b1.Property<string>("PickupStopName");
 
                             b1.HasKey("TripManifestReadModelId", "__synthesizedOrdinal");
 
@@ -1582,65 +1601,9 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                                 .HasForeignKey("TripManifestReadModelId");
                         });
 
-                    b.OwnsMany("NorthernLink.Trips.Domain.Manifests.PostTripChecklistItem", "PostTripItems", b1 =>
-                        {
-                            b1.Property<Guid>("TripManifestReadModelId");
-
-                            b1.Property<int>("__synthesizedOrdinal")
-                                .ValueGeneratedOnAdd();
-
-                            b1.Property<string>("Item")
-                                .IsRequired();
-
-                            b1.Property<bool>("Ok");
-
-                            b1.HasKey("TripManifestReadModelId", "__synthesizedOrdinal");
-
-                            b1.ToTable("rm_trip_manifests", "trips");
-
-                            b1.ToJson("post_trip_items");
-
-                            b1.WithOwner()
-                                .HasForeignKey("TripManifestReadModelId");
-                        });
-
-                    b.OwnsMany("NorthernLink.Trips.Domain.Manifests.PreTripChecklistItem", "PreTripItems", b1 =>
-                        {
-                            b1.Property<Guid>("TripManifestReadModelId");
-
-                            b1.Property<int>("__synthesizedOrdinal")
-                                .ValueGeneratedOnAdd();
-
-                            b1.Property<string>("Group")
-                                .IsRequired();
-
-                            b1.Property<string>("Item")
-                                .IsRequired();
-
-                            b1.Property<string>("Note");
-
-                            b1.Property<string>("Severity");
-
-                            b1.Property<string>("Status")
-                                .IsRequired();
-
-                            b1.HasKey("TripManifestReadModelId", "__synthesizedOrdinal");
-
-                            b1.ToTable("rm_trip_manifests", "trips");
-
-                            b1.ToJson("pre_trip_items");
-
-                            b1.WithOwner()
-                                .HasForeignKey("TripManifestReadModelId");
-                        });
-
                     b.Navigation("Cargo");
 
                     b.Navigation("Passengers");
-
-                    b.Navigation("PostTripItems");
-
-                    b.Navigation("PreTripItems");
                 });
 
             modelBuilder.Entity("NorthernLink.Trips.Infrastructure.Persistence.ReadModels.TripReadModel", b =>
@@ -1652,10 +1615,16 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                             b1.Property<int>("__synthesizedOrdinal")
                                 .ValueGeneratedOnAdd();
 
+                            b1.Property<double?>("Latitude");
+
+                            b1.Property<double?>("Longitude");
+
                             b1.Property<string>("Name")
                                 .IsRequired();
 
                             b1.Property<int>("Order");
+
+                            b1.Property<Guid?>("StopId");
 
                             b1.HasKey("TripReadModelId", "__synthesizedOrdinal");
 

@@ -44,8 +44,9 @@ public static partial class FleetEndpoints
         workOrders.MapPost("{id:guid}/status", ChangeWorkOrderStatus);
         workOrders.MapPost("{id:guid}/complete", CompleteWorkOrder);
 
-        // Inspections are read-only here: rows are materialized by the
-        // trips.trip-manifest-completed event consumer, never posted directly.
+        // Inspections: list DVIRs, and enter a pre-/post-trip inspection directly from the
+        // trip workflow (or, later, the Driver Field App). The reading advances the vehicle
+        // odometer intra-Fleet.
         var inspections = app.MapGroup("/api/fleet/inspections");
 
         inspections.MapGet("", GetInspections);

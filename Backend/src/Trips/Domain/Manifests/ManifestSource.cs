@@ -1,11 +1,12 @@
 namespace NorthernLink.Trips.Domain.Manifests;
 
 /// <summary>
-/// How a manifest entered the system: submitted from the Driver Field App, or a printed
-/// blank form transcribed by a dispatcher after a device failure (paper provenance).
+/// How a manifest entered the system: submitted from the Driver Field App, or entered by
+/// a dispatcher (a transcribed paper form, or a manifest built/edited in the Dispatch
+/// Console). Stamped on every create and edit for source attribution in the audit log.
 /// </summary>
 public enum ManifestSource
 {
     App,
-    Paper,
+    Dispatcher,
 }

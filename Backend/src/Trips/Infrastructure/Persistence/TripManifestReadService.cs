@@ -6,15 +6,13 @@ using NorthernLink.Trips.Infrastructure.Persistence.ReadModels;
 namespace NorthernLink.Trips.Infrastructure.Persistence;
 
 /// <summary>
-/// Read side — queries the materialized-view-backed read model through the tenant wrapper
-/// view <c>trips.v_trip_manifests</c> and maps to the public contract (the jsonb row
-/// collections materialize with the read model).
+/// Read side — queries the projection read model (<c>trips.rm_trip_manifests</c>) and maps
+/// to the public contract (the jsonb row collections materialize with the read model).
 /// </summary>
 internal sealed class TripManifestReadService(TripsDbContext context) : ITripManifestReadService
 {
     public async Task<IReadOnlyList<TripManifestResponse>> GetManifestsAsync(
         string? tripNumber = null,
-        string? unit = null,
         CancellationToken cancellationToken = default)
     {
         var query = context.ManifestReadModels.AsNoTracking();
@@ -22,11 +20,6 @@ internal sealed class TripManifestReadService(TripsDbContext context) : ITripMan
         if (!string.IsNullOrWhiteSpace(tripNumber))
         {
             query = query.Where(m => m.TripNumber == tripNumber.Trim());
-        }
-
-        if (!string.IsNullOrWhiteSpace(unit))
-        {
-            query = query.Where(m => m.Unit == unit.Trim());
         }
 
         var manifests = await query
@@ -55,28 +48,13 @@ internal sealed class TripManifestReadService(TripsDbContext context) : ITripMan
         m.Route,
         m.Direction,
         m.Client,
-        m.Unit,
-        m.DriverName,
-        m.DriverLicenceNo,
-        m.LicencePlate,
-        m.OdometerStartKm,
-        m.FuelLevel,
-        m.PreTripItems.Select(item => new PreTripItemResponse(
-            item.Group,
-            item.Item,
-            item.Status.ToString(),
-            item.Severity?.ToString(),
-            item.Note)).ToList(),
-        m.Weather,
-        m.TemperatureC,
-        m.RoadConditions,
-        m.Visibility,
-        m.RoadAdvisories,
         m.Passengers.Select(p => new PassengerResponse(
             p.Name,
             p.Contact,
-            p.Pickup,
-            p.Dropoff,
+            p.PickupStopId,
+            p.PickupStopName,
+            p.DropoffStopId,
+            p.DropoffStopName,
             p.IdVerified,
             p.BoardedOn,
             p.BoardedOff)).ToList(),
@@ -89,19 +67,6 @@ internal sealed class TripManifestReadService(TripsDbContext context) : ITripMan
             c.Hazmat,
             c.Secured)).ToList(),
         m.AllCargoSecured,
-        m.Issues,
-        m.NoIssues,
-        m.DepartureTime,
-        m.ArrivalTime,
-        m.OdometerEndKm,
-        m.TotalKm,
-        m.FuelAdded,
-        m.FuelLitres,
-        m.FuelCostCad,
-        m.PostTripItems.Select(item => new PostTripItemResponse(item.Item, item.Ok)).ToList(),
-        m.Attestations,
-        m.DriverSignatureName,
-        m.CertifiedAt,
         m.Source,
         m.EnteredBy,
         m.EnteredAt,

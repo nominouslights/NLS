@@ -104,6 +104,15 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.PrimitiveCollection<List<bool>>("Attestations")
+                        .IsRequired()
+                        .HasColumnType("boolean[]")
+                        .HasColumnName("attestations");
+
+                    b.Property<DateTimeOffset?>("CertifiedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("certified_at");
+
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at_utc");
@@ -114,14 +123,41 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(128)")
                         .HasColumnName("driver_name");
 
+                    b.Property<string>("DriverSignatureName")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("driver_signature_name");
+
                     b.Property<string>("EnteredBy")
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)")
                         .HasColumnName("entered_by");
 
+                    b.Property<bool>("FuelAdded")
+                        .HasColumnType("boolean")
+                        .HasColumnName("fuel_added");
+
+                    b.Property<decimal?>("FuelCostCad")
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("fuel_cost_cad");
+
+                    b.Property<string>("FuelLevel")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("fuel_level");
+
+                    b.Property<decimal?>("FuelLitres")
+                        .HasColumnType("numeric(8,2)")
+                        .HasColumnName("fuel_litres");
+
                     b.Property<Guid?>("GeneratedWorkOrderId")
                         .HasColumnType("uuid")
                         .HasColumnName("generated_work_order_id");
+
+                    b.PrimitiveCollection<List<string>>("Issues")
+                        .IsRequired()
+                        .HasColumnType("text[]")
+                        .HasColumnName("issues");
 
                     b.Property<Guid?>("ManifestId")
                         .HasColumnType("uuid")
@@ -141,11 +177,26 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(32)")
                         .HasColumnName("result");
 
+                    b.Property<string>("RoadAdvisories")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("road_advisories");
+
+                    b.PrimitiveCollection<string[]>("RoadConditions")
+                        .IsRequired()
+                        .HasColumnType("text[]")
+                        .HasColumnName("road_conditions");
+
                     b.Property<string>("Source")
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)")
                         .HasColumnName("source");
+
+                    b.Property<string>("TemperatureC")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("temperature_c");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
@@ -168,10 +219,24 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(32)")
                         .HasColumnName("unit");
 
+                    b.Property<Guid?>("VehicleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("vehicle_id");
+
                     b.Property<int>("Version")
                         .IsConcurrencyToken()
                         .HasColumnType("integer")
                         .HasColumnName("version");
+
+                    b.Property<string>("Visibility")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("visibility");
+
+                    b.PrimitiveCollection<string[]>("Weather")
+                        .IsRequired()
+                        .HasColumnType("text[]")
+                        .HasColumnName("weather");
 
                     b.HasKey("Id");
 
@@ -946,6 +1011,15 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.PrimitiveCollection<List<bool>>("Attestations")
+                        .IsRequired()
+                        .HasColumnType("boolean[]")
+                        .HasColumnName("attestations");
+
+                    b.Property<DateTimeOffset?>("CertifiedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("certified_at");
+
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at_utc");
@@ -955,13 +1029,38 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("driver_name");
 
+                    b.Property<string>("DriverSignatureName")
+                        .HasColumnType("text")
+                        .HasColumnName("driver_signature_name");
+
                     b.Property<string>("EnteredBy")
                         .HasColumnType("text")
                         .HasColumnName("entered_by");
 
+                    b.Property<bool>("FuelAdded")
+                        .HasColumnType("boolean")
+                        .HasColumnName("fuel_added");
+
+                    b.Property<decimal?>("FuelCostCad")
+                        .HasColumnType("numeric")
+                        .HasColumnName("fuel_cost_cad");
+
+                    b.Property<string>("FuelLevel")
+                        .HasColumnType("text")
+                        .HasColumnName("fuel_level");
+
+                    b.Property<decimal?>("FuelLitres")
+                        .HasColumnType("numeric")
+                        .HasColumnName("fuel_litres");
+
                     b.Property<Guid?>("GeneratedWorkOrderId")
                         .HasColumnType("uuid")
                         .HasColumnName("generated_work_order_id");
+
+                    b.PrimitiveCollection<List<string>>("Issues")
+                        .IsRequired()
+                        .HasColumnType("text[]")
+                        .HasColumnName("issues");
 
                     b.Property<Guid?>("ManifestId")
                         .HasColumnType("uuid")
@@ -980,10 +1079,23 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("result");
 
+                    b.Property<string>("RoadAdvisories")
+                        .HasColumnType("text")
+                        .HasColumnName("road_advisories");
+
+                    b.PrimitiveCollection<string[]>("RoadConditions")
+                        .IsRequired()
+                        .HasColumnType("text[]")
+                        .HasColumnName("road_conditions");
+
                     b.Property<string>("Source")
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("source");
+
+                    b.Property<string>("TemperatureC")
+                        .HasColumnType("text")
+                        .HasColumnName("temperature_c");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
@@ -1003,9 +1115,22 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("unit");
 
+                    b.Property<Guid?>("VehicleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("vehicle_id");
+
                     b.Property<int>("Version")
                         .HasColumnType("integer")
                         .HasColumnName("version");
+
+                    b.Property<string>("Visibility")
+                        .HasColumnType("text")
+                        .HasColumnName("visibility");
+
+                    b.PrimitiveCollection<string[]>("Weather")
+                        .IsRequired()
+                        .HasColumnType("text[]")
+                        .HasColumnName("weather");
 
                     b.HasKey("Id");
 
