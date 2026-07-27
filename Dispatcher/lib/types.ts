@@ -240,41 +240,17 @@ export interface Inspection {
   generatedWorkOrderId?: string;
 }
 
-// Client CRM — contact roster + interaction (touchpoint) log. Prototype/mock
-// only (no backend CRM domain yet); the mutable records live in a module
-// store (lib/clientStore.ts), mirroring the Fleet & Maintenance store pattern.
-// The client roster, contracts, and purchase orders now come from the real
-// Clients API (lib/api/clients.ts); these CRM rows are still keyed by the old
-// numeric prototype client ids (see the shim in
-// components/screens/clients/shared.tsx).
+// Client CRM — contact roster + interaction (touchpoint) log now come from the
+// real Clients API (lib/api/clients.ts: ClientContactRecord /
+// ClientInteractionRecord), keyed by client Guid. Only the interaction-type
+// vocabulary stays here — it's the wire enum shared by the API record type and
+// the log-interaction modal's Type dropdown.
 // NOTE: deliberately NO relationship health / happiness / satisfaction field —
 // relationship quality is a written business methodology at Northern Link, not
 // a tracked signal. Contract renewal chips are contract-expiry status (a
 // date-derived signal), not a relationship sentiment.
 
-export interface ClientContact {
-  id: string;
-  clientId: number;
-  name: string;
-  title: string; // free-text / tagged role, e.g. "Operations", "AP", "Compliance"
-  email?: string;
-  phone?: string;
-  notes?: string;
-  primary: boolean; // exactly one primary per client, enforced by the store
-}
-
 export type InteractionType = "Call" | "Meeting" | "Email" | "Site Visit" | "Other";
-
-export interface ClientInteraction {
-  id: string;
-  clientId: number;
-  date: string; // ISO date the touchpoint happened
-  type: InteractionType;
-  summary: string;
-  participantContactIds: string[]; // many-to-many → ClientContact.id
-  followUpDate?: string; // ISO date a follow-up is due
-  followUpNote?: string;
-}
 
 // Invoice records now come from the real Billing API (lib/api/billing.ts).
 

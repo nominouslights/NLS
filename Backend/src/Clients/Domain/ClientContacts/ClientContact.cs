@@ -70,6 +70,26 @@ public sealed class ClientContact : AggregateRoot, ITenantScoped
         return Result.Success(contact);
     }
 
+    /// <summary>
+    /// Promotes this contact to primary. Raises the primary-changed event so the read model
+    /// re-projects. The caller is responsible for demoting whatever was primary before and for
+    /// ordering the writes against the non-deferrable one-primary-per-client index.
+    /// </summary>
+    public void SetPrimary()
+    {
+        IsPrimary = true;
+        UpdatedAtUtc = DateTimeOffset.UtcNow;
+        Raise(new ClientContactPrimaryChangedDomainEvent(Id, ClientId, TenantId));
+    }
+
+    /// <summary>Demotes this contact from primary, raising the primary-changed event.</summary>
+    public void ClearPrimary()
+    {
+        IsPrimary = false;
+        UpdatedAtUtc = DateTimeOffset.UtcNow;
+        Raise(new ClientContactPrimaryChangedDomainEvent(Id, ClientId, TenantId));
+    }
+
     private static string? Clean(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }

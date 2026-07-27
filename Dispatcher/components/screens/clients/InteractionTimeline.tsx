@@ -1,9 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { colors, fonts } from "@/lib/theme";
-import { formatUtcDate } from "@/lib/api";
-import { contactsFor, timelineFor, useClientStore } from "@/lib/clientStore";
+import { ApiError, formatUtcDate } from "@/lib/api";
+import {
+  listContacts,
+  listInteractions,
+  type ClientContactRecord,
+  type ClientInteractionRecord,
+} from "@/lib/api/clients";
 import { docStatusFor } from "@/lib/maintenanceStore";
 import { Panel, SectionLabel } from "@/components/ui/Panel";
 import { StatusChip } from "@/components/ui/Chip";
@@ -12,39 +17,97 @@ import InteractionModal from "@/components/InteractionModal";
 import { followUpLabel, InteractionTypeChip } from "./shared";
 
 // Chronological interaction / touchpoint log for a client, newest first, with
-// the ability to log a new interaction. Mock (lib/clientStore).
+// the ability to log a new interaction. Real Clients API (interactions + the
+// contact roster for participant names), keyed by the real client Guid.
 
-export default function InteractionTimeline({ clientId, clientName }: { clientId: number; clientName: string }) {
-  useClientStore();
+export default function InteractionTimeline({
+  clientId,
+  clientName,
+}: {
+  clientId: string;
+  clientName: string;
+}) {
+  const [rows, setRows] = useState<ClientInteractionRecord[] | null>(null);
+  const [contacts, setContacts] = useState<ClientContactRecord[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
 
-  const rows = timelineFor(clientId);
-  const nameById = new Map(contactsFor(clientId).map((c) => [c.id, c.name]));
+  useEffect(() => {
+    // Fetch on mount; setState only inside the async callbacks, with a mounted
+    // guard (same convention as ContactRoster / Drivers).
+    let active = true;
+    Promise.all([listInteractions(clientId), listContacts(clientId)]).then(
+      ([timeline, roster]) => {
+        if (active) {
+          setRows(timeline);
+          setContacts(roster);
+          setLoadError(null);
+        }
+      },
+      (e) => {
+        if (active) {
+          setLoadError(e instanceof ApiError ? e.message : "Failed to load interactions.");
+          setRows([]);
+        }
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [clientId]);
+
+  async function onSaved() {
+    // Refetch the timeline after logging an interaction.
+    try {
+      const [timeline, roster] = await Promise.all([
+        listInteractions(clientId),
+        listContacts(clientId),
+      ]);
+      setRows(timeline);
+      setContacts(roster);
+      setLoadError(null);
+    } catch (e) {
+      setLoadError(e instanceof ApiError ? e.message : "Failed to reload interactions.");
+    }
+  }
+
+  const nameById = new Map(contacts.map((c) => [c.id, c.name]));
+  const timeline = rows ?? [];
 
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
         <SectionLabel>
-          Interaction log · {rows.length} touchpoint{rows.length === 1 ? "" : "s"}
+          Interaction log · {timeline.length} touchpoint{timeline.length === 1 ? "" : "s"}
         </SectionLabel>
         <ActionButton variant="primary" style={{ marginLeft: "auto" }} onClick={() => setOpen(true)}>
           + LOG INTERACTION
         </ActionButton>
       </div>
 
-      {rows.length === 0 ? (
+      {loadError && (
+        <div style={{ marginBottom: 12 }}>
+          <StatusChip kind="over" label={`Interactions unavailable — ${loadError}`} />
+        </div>
+      )}
+
+      {rows === null && !loadError ? (
+        <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textDim, padding: "6px 2px" }}>
+          Loading interactions…
+        </div>
+      ) : timeline.length === 0 && !loadError ? (
         <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textDim, padding: "6px 2px" }}>
           No interactions logged for {clientName} yet.
         </div>
       ) : (
-        rows.map((ix) => {
+        timeline.map((ix) => {
           const names = ix.participantContactIds.map((id) => nameById.get(id) ?? "Unknown").join(", ");
           return (
             <Panel key={ix.id} style={{ marginBottom: 10 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 9, flexWrap: "wrap" }}>
                 <InteractionTypeChip type={ix.type} />
                 <span style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim }}>
-                  {formatUtcDate(ix.date)}
+                  {formatUtcDate(ix.occurredOn)}
                 </span>
                 {ix.followUpDate && (
                   <span style={{ marginLeft: "auto" }}>
@@ -103,7 +166,7 @@ export default function InteractionTimeline({ clientId, clientName }: { clientId
       )}
 
       {open && (
-        <InteractionModal clientId={clientId} clientName={clientName} onClose={() => setOpen(false)} onSaved={() => undefined} />
+        <InteractionModal clientId={clientId} clientName={clientName} onClose={() => setOpen(false)} onSaved={onSaved} />
       )}
     </div>
   );

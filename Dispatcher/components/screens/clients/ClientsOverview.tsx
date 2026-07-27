@@ -4,23 +4,24 @@ import { useEffect, useState } from "react";
 import { colors, fonts, rowSurface, statusMeta } from "@/lib/theme";
 import { ApiError, formatUtcDate } from "@/lib/api";
 import {
+  listOpenFollowUps,
   listPurchaseOrders,
   poExpiryKindFor,
+  type ClientInteractionRecord,
   type ClientRecord,
   type PurchaseOrderRecord,
 } from "@/lib/api/clients";
-import { openFollowUps, useClientStore } from "@/lib/clientStore";
 import { docStatusFor } from "@/lib/maintenanceStore";
 import { Panel, SectionLabel } from "@/components/ui/Panel";
-import { MonoTag, StatusChip } from "@/components/ui/Chip";
+import { StatusChip } from "@/components/ui/Chip";
 import { MetricTile } from "@/components/ui/MetricTile";
-import { CLIENT_TABS, crmClientMap, followUpLabel, InteractionTypeChip, poExpiryLabel } from "./shared";
+import { CLIENT_TABS, followUpLabel, InteractionTypeChip, poExpiryLabel } from "./shared";
 
 // Clients overview — shown in the detail pane until a client is selected.
 // The cross-client PO expiry watch reads the real Clients API (POs fetched
 // per client and aggregated client-side — no aggregation endpoint yet). The
-// upcoming-follow-ups widget stays on the prototype-CRM mock store
-// (lib/clientStore), joined to API clients via the shim in ./shared.tsx.
+// upcoming-follow-ups widget reads the real /api/clients/follow-ups endpoint,
+// joined to the roster by client Guid.
 
 const INTERACTIONS_TAB = CLIENT_TABS.indexOf("Interactions");
 
@@ -35,10 +36,31 @@ export default function ClientsOverview({
   roster: ClientRecord[];
   onOpenClient: (clientId: string, tab?: number) => void;
 }) {
-  useClientStore();
-
   const [allPos, setAllPos] = useState<FlaggedPo[] | null>(null);
   const [poError, setPoError] = useState<string | null>(null);
+  const [followUps, setFollowUps] = useState<ClientInteractionRecord[] | null>(null);
+  const [followUpError, setFollowUpError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    listOpenFollowUps().then(
+      (rows) => {
+        if (active) {
+          setFollowUps(rows);
+          setFollowUpError(null);
+        }
+      },
+      (e) => {
+        if (active) {
+          setFollowUps(null);
+          setFollowUpError(e instanceof ApiError ? e.message : "Failed to load follow-ups.");
+        }
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -66,16 +88,17 @@ export default function ClientsOverview({
     };
   }, [roster]);
 
-  // Prototype-CRM shim: follow-ups are keyed by the mock numeric client id.
-  const crmClients = crmClientMap(roster);
-  const followUps = openFollowUps();
+  // Follow-ups come from the real /api/clients/follow-ups endpoint; join each
+  // row to its client by Guid.
+  const clientById = new Map(roster.map((c) => [c.id, c]));
+  const followUpRows = followUps ?? [];
 
   const flaggedPos = (allPos ?? [])
     .filter((p) => poExpiryKindFor(p.expiry) !== "ontime")
     .sort((a, b) => ((a.expiry ?? "9999") < (b.expiry ?? "9999") ? -1 : 1));
 
-  const overdue = followUps.filter((f) => docStatusFor(f.followUpDate as string) === "over").length;
-  const dueSoon = followUps.filter((f) => docStatusFor(f.followUpDate as string) === "soon").length;
+  const overdue = followUpRows.filter((f) => docStatusFor(f.followUpDate) === "over").length;
+  const dueSoon = followUpRows.filter((f) => docStatusFor(f.followUpDate) === "soon").length;
   const expiredPos = flaggedPos.filter((p) => poExpiryKindFor(p.expiry) === "over").length;
 
   return (
@@ -89,23 +112,26 @@ export default function ClientsOverview({
 
       {/* KPI row */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 16 }}>
-        <MetricTile icon="▲" iconBg="rgba(213,94,0,.16)" iconColor={statusMeta("over").t} label="Follow-ups overdue" value={overdue} valueColor={overdue > 0 ? statusMeta("over").t : colors.headingBright} borderColor={overdue > 0 ? "rgba(213,94,0,.35)" : undefined} />
-        <MetricTile icon="◐" iconBg="rgba(225,176,0,.18)" iconColor={statusMeta("soon").t} label="Follow-ups due soon" value={dueSoon} valueColor={statusMeta("soon").t} />
+        <MetricTile icon="▲" iconBg="rgba(213,94,0,.16)" iconColor={statusMeta("over").t} label="Follow-ups overdue" value={followUps === null ? "…" : overdue} valueColor={overdue > 0 ? statusMeta("over").t : colors.headingBright} borderColor={overdue > 0 ? "rgba(213,94,0,.35)" : undefined} />
+        <MetricTile icon="◐" iconBg="rgba(225,176,0,.18)" iconColor={statusMeta("soon").t} label="Follow-ups due soon" value={followUps === null ? "…" : dueSoon} valueColor={statusMeta("soon").t} />
         <MetricTile icon="●" iconBg="rgba(213,94,0,.16)" iconColor={statusMeta("over").t} label="POs expiring / expired" value={allPos === null ? "…" : flaggedPos.length} valueColor={expiredPos > 0 ? statusMeta("over").t : colors.headingBright} />
       </div>
 
-      {/* Upcoming follow-ups — prototype-CRM mock store */}
+      {/* Upcoming follow-ups — real Clients API (/api/clients/follow-ups) */}
       <Panel style={{ marginBottom: 14 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
           <SectionLabel>Upcoming follow-ups</SectionLabel>
-          <MonoTag color={statusMeta("soon").t}>MOCK</MonoTag>
         </div>
-        {followUps.length === 0 ? (
+        {followUpError ? (
+          <StatusChip kind="over" label={`Follow-ups unavailable — ${followUpError}`} />
+        ) : followUps === null ? (
+          <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textDim }}>Loading follow-ups…</div>
+        ) : followUpRows.length === 0 ? (
           <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textDim }}>No follow-ups scheduled.</div>
         ) : (
-          followUps.map((f) => {
-            const kind = docStatusFor(f.followUpDate as string);
-            const apiClient = crmClients.get(f.clientId);
+          followUpRows.map((f) => {
+            const kind = docStatusFor(f.followUpDate);
+            const apiClient = clientById.get(f.clientId);
             return (
               <div
                 key={f.id}

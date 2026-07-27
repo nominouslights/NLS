@@ -22,4 +22,15 @@ internal sealed class ClientContactRepository(ClientsDbContext context) : IClien
     {
         await context.SaveChangesAsync(cancellationToken);
     }
+
+    public async Task ExecuteInTransactionAsync(Func<CancellationToken, Task> action, CancellationToken cancellationToken = default)
+    {
+        var strategy = context.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+            await action(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        });
+    }
 }
