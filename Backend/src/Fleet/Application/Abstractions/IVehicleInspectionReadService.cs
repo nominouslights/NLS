@@ -8,8 +8,10 @@ namespace NorthernLink.Fleet.Application.Abstractions;
 /// </summary>
 public interface IVehicleInspectionReadService
 {
-    /// <summary>Lists inspections, optionally narrowed to a vehicle unit, newest first.</summary>
+    /// <summary>Lists inspections, optionally narrowed to a vehicle unit and/or a trip
+    /// number, newest first.</summary>
     Task<IReadOnlyList<VehicleInspectionResponse>> GetInspectionsAsync(
         string? unit = null,
+        string? tripNumber = null,
         CancellationToken cancellationToken = default);
 }

@@ -33,6 +33,8 @@ public sealed class FleetIntegrationEventMapper : IIntegrationEventMapper
                 ToVehicleChanged((Vehicle)aggregate),
             VehicleInspectionCreatedDomainEvent =>
                 ToInspectionRecorded((VehicleInspection)aggregate),
+            VehicleInspectionRemovedDomainEvent =>
+                ToInspectionRemoved((VehicleInspection)aggregate),
             _ => null,
         };
 
@@ -52,4 +54,10 @@ public sealed class FleetIntegrationEventMapper : IIntegrationEventMapper
         inspection.Type.ToString(),
         inspection.VehicleId,
         inspection.Source.ToString());
+
+    private static VehicleInspectionRemovedIntegrationEvent ToInspectionRemoved(VehicleInspection inspection) => new(
+        inspection.Id,
+        inspection.TenantId,
+        inspection.TripNumber,
+        inspection.Type.ToString());
 }

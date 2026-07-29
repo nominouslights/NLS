@@ -10,10 +10,11 @@ namespace NorthernLink.Billing.Application.Integration;
 /// <summary>
 /// Records every completed trip into the <c>billable_trips</c> replica, insert-if-absent
 /// keyed on TripId — idempotent under at-least-once delivery, backstopped by the primary
-/// key. The row lands uninvoiced (<c>invoice_id</c> null) and stays immutable afterwards:
-/// draft generation claims it, it is never re-upserted (a trip completes once). Runs
-/// outside any HTTP request — tenant from the payload, ambient push for RLS, explicit
-/// tenant filter on the existence check (Fleet-consumer pattern).
+/// key. The row lands uninvoiced (<c>invoice_id</c> null) and is never re-upserted here
+/// (a trip completes once); the only post-insert mutation is
+/// <see cref="TripRoundTripChangedIntegrationEventHandler"/> re-keying an uninvoiced
+/// row's pairing. Runs outside any HTTP request — tenant from the payload, ambient push
+/// for RLS, explicit tenant filter on the existence check (Fleet-consumer pattern).
 /// </summary>
 public sealed class TripCompletedIntegrationEventHandler(
     IBillableTripRepository repository,
@@ -47,6 +48,7 @@ public sealed class TripCompletedIntegrationEventHandler(
             ServiceDate = integrationEvent.ServiceDate,
             RoundTripKey = integrationEvent.RoundTripKey,
             Direction = integrationEvent.Direction,
+            IsEmptyLeg = integrationEvent.IsEmptyLeg,
             PoNumber = integrationEvent.PoNumber,
             CompletedAtUtc = integrationEvent.CompletedAtUtc,
             InvoiceId = null,

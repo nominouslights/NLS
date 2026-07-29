@@ -41,7 +41,8 @@ public static class TestBilling
         string tripNumber = "TR-4821",
         Guid? invoiceId = null,
         DateTimeOffset? completedAtUtc = null,
-        string? direction = null) => new()
+        string? direction = null,
+        bool isEmptyLeg = false) => new()
     {
         Id = Guid.NewGuid(),
         TenantId = TenantId,
@@ -56,6 +57,7 @@ public static class TestBilling
         ServiceDate = serviceDate,
         RoundTripKey = roundTripKey,
         Direction = direction,
+        IsEmptyLeg = isEmptyLeg,
         PoNumber = "PO-7781",
         CompletedAtUtc = completedAtUtc ?? serviceDate.ToDateTime(new TimeOnly(18, 0), DateTimeKind.Utc),
         InvoiceId = invoiceId,

@@ -34,3 +34,31 @@ export {
   getTripManifest,
   listTripActivity,
 } from "./api/trips";
+
+export type {
+  NotificationServiceType,
+  EmailDispatchStatus,
+  EmailRecipientStatus,
+  EmailTemplateRecord,
+  EmailTemplateInput,
+  EmailTemplateListParams,
+  EmailPreviewInput,
+  EmailPreviewResult,
+  SendRecipientInput,
+  SendTripPickupEmailInput,
+  EmailRecipientResult,
+  EmailDispatchRecord,
+} from "./api/notifications";
+export {
+  listEmailTemplates,
+  getEmailTemplate,
+  createEmailTemplate,
+  updateEmailTemplate,
+  setEmailTemplateActive,
+  previewEmailTemplate,
+  sendTripPickupEmail,
+  listTripEmailDispatches,
+  MERGE_FIELDS,
+  isEmailContact,
+  dispatchChip,
+} from "./api/notifications";

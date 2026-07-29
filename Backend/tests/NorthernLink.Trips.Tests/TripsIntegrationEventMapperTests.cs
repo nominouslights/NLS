@@ -51,8 +51,52 @@ public class TripsIntegrationEventMapperTests
         Assert.Equal(new DateOnly(2026, 7, 21), integrationEvent.ServiceDate);
         Assert.Equal("abc123:20260721", integrationEvent.RoundTripKey);
         Assert.Equal("Outbound", integrationEvent.Direction);
+        Assert.False(integrationEvent.IsEmptyLeg);
         Assert.Equal("PO-2026-118", integrationEvent.PoNumber);
         Assert.Equal(trip.CompletedAtUtc, integrationEvent.CompletedAtUtc);
+    }
+
+    [Fact]
+    public void Deadhead_leg_completion_carries_the_empty_leg_flag()
+    {
+        var trip = TestPlanning.ScheduleTrip(
+            tripNumber: "TR-9002", clientId: Guid.NewGuid(), isEmptyLeg: true).Value;
+        trip.RecordPostTripInspection();
+        trip.ClearDomainEvents();
+        trip.Complete();
+        var domainEvent = (TripCompletedDomainEvent)trip.DomainEvents.Single();
+
+        var integrationEvent = Assert.IsType<TripCompletedIntegrationEvent>(_mapper.Map(domainEvent, trip));
+        Assert.True(integrationEvent.IsEmptyLeg);
+    }
+
+    [Fact]
+    public void Round_trip_pairing_maps_to_the_public_round_trip_changed_event()
+    {
+        var trip = TestPlanning.ScheduleTrip(tripNumber: "TR-9003", clientId: Guid.NewGuid()).Value;
+        trip.ClearDomainEvents();
+        trip.AssignRoundTrip("merge:abc", TripDirection.Outbound);
+        var domainEvent = (TripRoundTripChangedDomainEvent)trip.DomainEvents.Single();
+
+        var integrationEvent = Assert.IsType<TripRoundTripChangedIntegrationEvent>(_mapper.Map(domainEvent, trip));
+        Assert.Equal(trip.Id, integrationEvent.TripId);
+        Assert.Equal(TestPlanning.TenantId, integrationEvent.TenantId);
+        Assert.Equal("merge:abc", integrationEvent.RoundTripKey);
+        Assert.Equal("Outbound", integrationEvent.Direction);
+    }
+
+    [Fact]
+    public void Round_trip_unpair_maps_null_key_and_direction()
+    {
+        var trip = TestPlanning.ScheduleTrip(tripNumber: "TR-9004", clientId: Guid.NewGuid()).Value;
+        trip.AssignRoundTrip("merge:abc", TripDirection.Outbound);
+        trip.ClearDomainEvents();
+        trip.ClearRoundTrip();
+        var domainEvent = (TripRoundTripChangedDomainEvent)trip.DomainEvents.Single();
+
+        var integrationEvent = Assert.IsType<TripRoundTripChangedIntegrationEvent>(_mapper.Map(domainEvent, trip));
+        Assert.Null(integrationEvent.RoundTripKey);
+        Assert.Null(integrationEvent.Direction);
     }
 
     [Fact]

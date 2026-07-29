@@ -10,6 +10,15 @@ public sealed class EnterInspectionCommandHandler(IVehicleInspectionRepository r
 {
     public async Task<Result<Guid>> Handle(EnterInspectionCommand command, CancellationToken cancellationToken)
     {
+        // One pre-trip and one post-trip per trip. Only trip-context inspections are guarded;
+        // standalone vehicle entries (no trip number) can repeat. The partial unique index
+        // (tenant_id, trip_number, type) is the DB backstop under a race.
+        if (!string.IsNullOrWhiteSpace(command.TripNumber)
+            && await repository.ExistsForTripAsync(command.TenantId, command.TripNumber.Trim(), command.Type, cancellationToken))
+        {
+            return Result.Failure<Guid>(InspectionErrors.DuplicateForTrip(command.Type));
+        }
+
         var checklist = command.Checklist
             .Select(c => new InspectionChecklistItem { Group = c.Group, Item = c.Item, Passed = c.Passed })
             .ToList();

@@ -15,6 +15,12 @@ internal sealed class TripRepository(TripsDbContext context) : ITripRepository
     public Task<Trip?> GetByTripNumberAsync(string tripNumber, CancellationToken cancellationToken = default) =>
         context.Trips.FirstOrDefaultAsync(t => t.TripNumber == tripNumber, cancellationToken);
 
+    public async Task<IReadOnlyList<Trip>> GetByRoundTripKeyAsync(
+        string roundTripKey, CancellationToken cancellationToken = default) =>
+        await context.Trips
+            .Where(t => t.RoundTripKey == roundTripKey)
+            .ToListAsync(cancellationToken);
+
     public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
         context.SaveChangesAsync(cancellationToken);
 }

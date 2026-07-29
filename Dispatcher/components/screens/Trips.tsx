@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { colors, fonts, rowSurface, statusMeta, svcMeta } from "@/lib/theme";
 import {
   ApiError,
+  deleteInspection,
   getTripManifest,
   listInspections,
   listTripActivity,
@@ -50,6 +51,7 @@ import { ModalShell } from "@/components/ui/ModalShell";
 import { DateField, NumberField, SelectField, TextAreaField, TextField, TimeField } from "@/components/ui/Field";
 import ManifestEditorModal from "@/components/ManifestEditorModal";
 import TripInspectionModal from "@/components/TripInspectionModal";
+import SendPickupEmailModal from "@/components/SendPickupEmailModal";
 
 /** Label attributed to dispatcher-entered manifests/inspections (no user id yet). */
 const DISPATCHER_LABEL = "Dispatch";
@@ -506,6 +508,66 @@ function CancelTripModal({
 }
 
 // ---------------------------------------------------------------------------
+// Remove-inspection confirm — DELETE /api/fleet/inspections/{id} is a hard
+// delete. Removing a post-trip inspection re-gates trip completion.
+// ---------------------------------------------------------------------------
+
+function RemoveInspectionModal({
+  trip,
+  inspection,
+  onClose,
+  onConfirmed,
+}: {
+  trip: TripRecord;
+  inspection: VehicleInspection;
+  onClose: () => void;
+  onConfirmed: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const isPost = inspection.type === "PostTrip";
+
+  async function submit() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onConfirmed();
+      onClose();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Failed to remove the inspection — please try again.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ModalShell
+      eyebrow={`Fleet · ${trip.tripNumber} · Remove inspection`}
+      title={isPost ? "Remove Post-Trip Inspection" : "Remove Pre-Trip Inspection"}
+      onClose={onClose}
+      error={error}
+      maxWidth={480}
+      footer={
+        <>
+          <ActionButton onClick={onClose}>KEEP</ActionButton>
+          <ActionButton variant="destructive" onClick={submit} disabled={busy}>
+            {busy ? "REMOVING…" : "REMOVE INSPECTION"}
+          </ActionButton>
+        </>
+      }
+    >
+      <div style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textSecondary, lineHeight: 1.6 }}>
+        This permanently deletes the {isPost ? "post-trip" : "pre-trip"} inspection recorded by {inspection.driverName} on{" "}
+        {fmtUtcDateTime(inspection.performedAt)}. This cannot be undone.
+        {isPost
+          ? " Removing it re-gates trip completion — a new post-trip inspection must be logged before this trip can be completed."
+          : ""}
+      </div>
+    </ModalShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Screen
 // ---------------------------------------------------------------------------
 
@@ -513,10 +575,14 @@ export default function Trips({
   selectedId,
   setSelectedId,
   onNewTrip,
+  createdId,
 }: {
   selectedId: string | null;
   setSelectedId: (id: string | null) => void;
   onNewTrip: () => void;
+  /** Id of a just-created trip — triggers a list reload so it appears in the
+   *  master list (the list is otherwise only loaded on mount). */
+  createdId?: string | null;
 }) {
   const [filter, setFilter] = useState(0);
   const [showCancelled, setShowCancelled] = useState(false);
@@ -534,8 +600,12 @@ export default function Trips({
   const [inspectionsState, setInspectionsState] = useState<{ tripId: string; rows: VehicleInspection[] } | null>(null);
   const [activityState, setActivityState] = useState<{ tripId: string; rows: TripActivityEntry[] } | null>(null);
 
-  const [modal, setModal] = useState<null | "assign" | "edit" | "cancel" | "manifest">(null);
+  const [modal, setModal] = useState<null | "assign" | "edit" | "cancel" | "manifest" | "sendEmail">(null);
+  // Inspection modal opens for either create (inspectionType set, editing null)
+  // or edit (editingInspection set). removingInspection drives the delete confirm.
   const [inspectionType, setInspectionType] = useState<"PreTrip" | "PostTrip" | null>(null);
+  const [editingInspection, setEditingInspection] = useState<VehicleInspection | null>(null);
+  const [removingInspection, setRemovingInspection] = useState<VehicleInspection | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -580,6 +650,24 @@ export default function Trips({
       active = false;
     };
   }, [fetchList]);
+
+  // After a trip is created, reload the list until the new trip shows up
+  // (reads are eventually consistent, so a plain reload can miss it).
+  useEffect(() => {
+    if (!createdId) return;
+    let active = true;
+    refetchUntil(fetchList, (list) => list.some((r) => r.id === createdId)).then(
+      (fresh) => {
+        if (active) setRows(sortTrips(fresh));
+      },
+      () => {
+        /* leave the current list in place on failure */
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [createdId, fetchList]);
 
   // "Assigned" is a client-side driver-presence filter; "Open only" already
   // came filtered from the API (openOnly=true). Cancelled trips are hidden
@@ -760,6 +848,35 @@ export default function Trips({
     }
   }
 
+  /** After an inspection is removed (hard delete): refetch the trip's
+   *  inspections + timeline, and — for a post-trip removal — re-poll the trip
+   *  until HasPostTripInspection flips back to false so COMPLETE re-gates. */
+  async function onInspectionRemoved(id: string, num: string, insp: VehicleInspection) {
+    await deleteInspection(insp.id);
+    try {
+      const fresh = await listInspections({ tripNumber: num });
+      setInspectionsState({ tripId: id, rows: fresh });
+    } catch {
+      // best-effort
+    }
+    try {
+      const fresh = await listTripActivity(id);
+      setActivityState({ tripId: id, rows: fresh });
+    } catch {
+      // best-effort
+    }
+    // Removing a post-trip inspection asynchronously clears the trip's
+    // HasPostTripInspection flag (Fleet event → Trips consumer). Poll until it
+    // reflects so the COMPLETE gate reappears on its own.
+    if (insp.type === "PostTrip") {
+      try {
+        await reloadUntil(id, (trip) => trip !== undefined && !trip.hasPostTripInspection);
+      } catch {
+        // best-effort — the flag will clear on the next detail refresh.
+      }
+    }
+  }
+
   function onChangeStatus(id: string, status: TripRecord["status"], reason?: string | null) {
     return runAction(async () => {
       try {
@@ -895,12 +1012,22 @@ export default function Trips({
   const contract = t && contractState?.tripId === t.id ? contractState.contract : null;
   const manifest = t && manifestState?.tripId === t.id ? manifestState.manifest : null;
   const inspections = t && inspectionsState?.tripId === t.id ? inspectionsState.rows : [];
+  // The trip-scoped list is authoritative (backend filters by trip number), so
+  // it's safe to gate the ENTER buttons on the one-each-per-trip guard.
+  const hasPreTrip = inspections.some((i) => i.type === "PreTrip");
+  const hasPostTrip = inspections.some((i) => i.type === "PostTrip");
   const activity = t && activityState?.tripId === t.id ? activityState.rows : [];
 
   // Manifest may be present on the trip (manifestId) but not yet fetched into
   // manifestState — use whichever tells us there's a passenger manifest.
   const manifestPaxCount = manifest ? manifest.passengers.length : 0;
   const hasPassengerManifest = manifestPaxCount >= 1;
+  // A completed (or cancelled) trip is read-only: its fields, manifest, and
+  // inspections can be viewed and printed but no longer edited.
+  const tripEditable = !!t && (t.status === "Scheduled" || t.status === "InProgress");
+  // Pickup emails need a loaded manifest with ≥1 passenger; a cancelled trip
+  // never sends (completed trips may — e.g. a return-leg reminder).
+  const canSendPickupEmail = !!t && manifest !== null && manifest.passengers.length > 0 && t.status !== "Cancelled";
   // START gate: a driver AND a linked manifest with ≥1 passenger (mirrors the
   // backend en-route guard). Vehicle assignment is encouraged but not blocking.
   const startBlockReason =
@@ -1125,7 +1252,9 @@ export default function Trips({
                         )
                       }
                     />
-                    {t.status !== "Cancelled" && (
+                    {/* Editable while Scheduled/InProgress; a completed trip's
+                        manifest is view-only (cancelled trips show nothing). */}
+                    {tripEditable ? (
                       <div style={{ marginTop: 2 }}>
                         {t.manifestId && !manifest ? (
                           <span style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textDim }}>Loading manifest…</span>
@@ -1134,6 +1263,22 @@ export default function Trips({
                             {t.manifestId ? "EDIT MANIFEST" : "ADD MANIFEST"}
                           </ActionButton>
                         )}
+                      </div>
+                    ) : (
+                      t.status === "Completed" &&
+                      t.manifestId && (
+                        <div style={{ marginTop: 2 }}>
+                          {manifest ? (
+                            <ActionButton onClick={() => setModal("manifest")}>VIEW MANIFEST</ActionButton>
+                          ) : (
+                            <span style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textDim }}>Loading manifest…</span>
+                          )}
+                        </div>
+                      )
+                    )}
+                    {canSendPickupEmail && (
+                      <div style={{ marginTop: 2 }}>
+                        <ActionButton onClick={() => setModal("sendEmail")}>SEND PICKUP EMAIL</ActionButton>
                       </div>
                     )}
                   </div>
@@ -1144,13 +1289,30 @@ export default function Trips({
               <Panel style={{ marginBottom: 12 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
                   <SectionLabel>Pre / post-trip inspections</SectionLabel>
-                  <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-                    <ActionButton variant="primary" onClick={() => setInspectionType("PreTrip")}>
-                      ENTER PRE-TRIP
-                    </ActionButton>
-                    <ActionButton onClick={() => setInspectionType("PostTrip")}>ENTER POST-TRIP</ActionButton>
-                  </div>
+                  {/* Inspection entry is locked once the trip is completed/cancelled.
+                      The backend allows exactly one pre- and one post-trip per trip,
+                      so disable the ENTER button whose type already exists. */}
+                  {tripEditable && (
+                    <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                      <ActionButton
+                        variant="primary"
+                        disabled={hasPreTrip}
+                        onClick={() => setInspectionType("PreTrip")}
+                      >
+                        ENTER PRE-TRIP
+                      </ActionButton>
+                      <ActionButton disabled={hasPostTrip} onClick={() => setInspectionType("PostTrip")}>
+                        ENTER POST-TRIP
+                      </ActionButton>
+                    </div>
+                  )}
                 </div>
+                {tripEditable && (hasPreTrip || hasPostTrip) && (
+                  <div style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim, marginBottom: 10, lineHeight: 1.5 }}>
+                    {hasPreTrip ? "Pre-trip already entered — edit it below. " : ""}
+                    {hasPostTrip ? "Post-trip already entered — edit it below." : ""}
+                  </div>
+                )}
                 {inspections.length === 0 ? (
                   <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textDim }}>
                     No inspections recorded for {t.tripNumber}. Pre/post-trip inspections are Fleet records tagged with
@@ -1192,6 +1354,15 @@ export default function Trips({
                             {insp.odometerKm != null ? ` · ${insp.odometerKm.toLocaleString("en-CA")} km` : ""}
                             {` · ${fmtUtcDateTime(insp.performedAt)}`}
                           </span>
+                          {/* Edit / remove only while the trip is not terminal. */}
+                          {t.status !== "Completed" && t.status !== "Cancelled" && (
+                            <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                              <ActionButton onClick={() => setEditingInspection(insp)}>EDIT</ActionButton>
+                              <ActionButton variant="destructive" onClick={() => setRemovingInspection(insp)}>
+                                REMOVE
+                              </ActionButton>
+                            </span>
+                          )}
                         </div>
                       );
                     })}
@@ -1302,7 +1473,10 @@ export default function Trips({
               </Panel>
 
               {/* actions */}
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 9 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 9 }}>
+                {t.status === "Completed" && (
+                  <StatusChip kind="ontime" label="Completed · read-only" />
+                )}
                 {t.status === "Scheduled" && (
                   <ActionButton variant="primary" onClick={() => setModal("edit")}>
                     EDIT TRIP
@@ -1363,15 +1537,37 @@ export default function Trips({
                   enteredBy={DISPATCHER_LABEL}
                   onClose={() => setModal(null)}
                   onSaved={(manifestId) => onManifestSaved(t.id, manifestId)}
+                  readOnly={!tripEditable}
                 />
               )}
-              {inspectionType && (
+              {modal === "sendEmail" && manifest && (
+                <SendPickupEmailModal trip={t} manifest={manifest} onClose={() => setModal(null)} />
+              )}
+              {(inspectionType || editingInspection) && (
                 <TripInspectionModal
                   trip={t}
-                  type={inspectionType}
+                  type={editingInspection ? editingInspection.type : inspectionType!}
+                  existing={editingInspection ?? undefined}
                   enteredBy={DISPATCHER_LABEL}
-                  onClose={() => setInspectionType(null)}
-                  onSaved={() => onInspectionSaved(t.id, t.tripNumber, inspectionType === "PostTrip")}
+                  onClose={() => {
+                    setInspectionType(null);
+                    setEditingInspection(null);
+                  }}
+                  onSaved={() =>
+                    onInspectionSaved(
+                      t.id,
+                      t.tripNumber,
+                      (editingInspection ? editingInspection.type : inspectionType) === "PostTrip",
+                    )
+                  }
+                />
+              )}
+              {removingInspection && (
+                <RemoveInspectionModal
+                  trip={t}
+                  inspection={removingInspection}
+                  onClose={() => setRemovingInspection(null)}
+                  onConfirmed={() => onInspectionRemoved(t.id, t.tripNumber, removingInspection)}
                 />
               )}
               {modal === "edit" && (

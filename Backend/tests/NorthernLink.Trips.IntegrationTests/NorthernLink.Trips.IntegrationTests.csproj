@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Cross-module delivery tests for the storing/projecting event path: Fleet's outbox
+       polled by the Trips consumer against a real Postgres (Testcontainers), connecting as
+       a NON-superuser role so Row-Level Security is actually enforced. References BOTH
+       domain libraries — allowed here: the architecture reference rules bind domain
+       libraries and the Api, not test projects. Requires Docker. -->
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Trips\NorthernLink.Trips.csproj" />
+    <ProjectReference Include="..\..\src\Fleet\NorthernLink.Fleet.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -23,10 +23,23 @@ internal sealed class VehicleInspectionRepository(FleetDbContext context) : IVeh
                 i => i.TenantId == tenantId && i.ManifestId == manifestId && i.Type == type,
                 cancellationToken);
 
+    public Task<bool> ExistsForTripAsync(
+        Guid tenantId,
+        string tripNumber,
+        InspectionType type,
+        CancellationToken cancellationToken = default) =>
+        context.VehicleInspections
+            .IgnoreQueryFilters()
+            .AnyAsync(
+                i => i.TenantId == tenantId && i.TripNumber == tripNumber && i.Type == type,
+                cancellationToken);
+
     public Task<VehicleInspection?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         context.VehicleInspections.FirstOrDefaultAsync(i => i.Id == id, cancellationToken);
 
     public void Add(VehicleInspection inspection) => context.VehicleInspections.Add(inspection);
+
+    public void Remove(VehicleInspection inspection) => context.VehicleInspections.Remove(inspection);
 
     public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
         context.SaveChangesAsync(cancellationToken);

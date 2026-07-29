@@ -200,6 +200,37 @@ export function recordTripDemand(
   });
 }
 
+/** POST /api/trips/{id}/merge-round-trip → 204 — pairs this leg with
+ *  `otherTripId` under a shared roundTripKey (Billing prices an
+ *  Outbound+Inbound pair sharing a key as one round-trip line).
+ *  With `allowMismatch` the backend skips the same-date and mirrored-corridor
+ *  checks (same client / not cancelled / unpaired still enforced) and assigns
+ *  direction chronologically — the earlier leg becomes Outbound. The flag is
+ *  omitted from the body when false to keep the wire shape backward compatible. */
+export function mergeRoundTrip(id: string, otherTripId: string, allowMismatch = false): Promise<void> {
+  return request<void>(`/api/trips/${id}/merge-round-trip`, {
+    method: "POST",
+    body: JSON.stringify(allowMismatch ? { otherTripId, allowMismatch: true } : { otherTripId }),
+  });
+}
+
+/** POST /api/trips/{id}/unpair-round-trip → 204 — clears the pairing on BOTH legs. */
+export function unpairRoundTrip(id: string): Promise<void> {
+  return request<void>(`/api/trips/${id}/unpair-round-trip`, {
+    method: "POST",
+  });
+}
+
+/** POST /api/trips/{id}/deadhead-return → { id } (same created-id shape as
+ *  createTrip) — creates the reversed empty repositioning leg, already paired
+ *  to this trip as its return. */
+export async function createDeadheadReturn(id: string): Promise<string> {
+  const res = await request<{ id: string }>(`/api/trips/${id}/deadhead-return`, {
+    method: "POST",
+  });
+  return res.id;
+}
+
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
@@ -390,6 +421,59 @@ export function tripChip(t: TripRecord): { kind: StatusKind; label: string } {
   }
 }
 
+/** UI mirror of the backend's round-trip pairing eligibility: a client trip,
+ *  not cancelled, not already paired. Gates MERGE INTO ROUND TRIP and (with an
+ *  extra !isEmptyLeg check) CREATE DEADHEAD RETURN. */
+export function canPairRoundTrip(t: TripRecord): boolean {
+  return t.clientId !== null && t.roundTripKey === null && t.status !== "Cancelled";
+}
+
+const normPlace = (s: string) => s.trim().toLowerCase();
+
+/** What the strict matcher would object to about pairing `other` with `trip` —
+ *  drives the manual-pairing mismatch warnings (each surfaced as colour + icon
+ *  + text, never colour alone). Both false ⇒ `other` is a strict match. */
+export function roundTripMismatch(
+  trip: TripRecord,
+  other: TripRecord,
+): { differentDate: boolean; routeNotMirrored: boolean } {
+  return {
+    differentDate: other.serviceDate !== trip.serviceDate,
+    routeNotMirrored:
+      normPlace(other.origin) !== normPlace(trip.destination) ||
+      normPlace(other.destination) !== normPlace(trip.origin),
+  };
+}
+
+/** Merge candidates for `trip`, derived client-side from the already-loaded
+ *  list: same client, same service date, mirrored corridor (their origin is
+ *  our destination and vice versa, case-insensitive/trimmed), unpaired, not
+ *  cancelled, and not the trip itself. */
+export function roundTripMergeCandidates(trip: TripRecord, all: TripRecord[]): TripRecord[] {
+  return sortTrips(
+    all.filter((c) => {
+      const mm = roundTripMismatch(trip, c);
+      return (
+        c.id !== trip.id &&
+        canPairRoundTrip(c) &&
+        c.clientId === trip.clientId &&
+        !mm.differentDate &&
+        !mm.routeNotMirrored
+      );
+    }),
+  );
+}
+
+/** Manual-pairing candidates (allowMismatch merges): every unpaired,
+ *  non-cancelled trip for the same client except the trip itself — no date or
+ *  corridor requirement. Derived from the already-loaded list, so the reach is
+ *  bounded by the screen's fetch window. */
+export function roundTripManualCandidates(trip: TripRecord, all: TripRecord[]): TripRecord[] {
+  return sortTrips(
+    all.filter((c) => c.id !== trip.id && canPairRoundTrip(c) && c.clientId === trip.clientId),
+  );
+}
+
 /** Backend ServiceType enum → the console's theme service key (svcMeta). */
 export function svcForTrip(serviceType: TripServiceType): ServiceType {
   return svcForServiceType(serviceType);
@@ -466,6 +550,15 @@ export function sortTrips(rows: TripRecord[]): TripRecord[] {
     if (a.windowStart !== b.windowStart) return a.windowStart < b.windowStart ? -1 : 1;
     return a.tripNumber.localeCompare(b.tripNumber);
   });
+}
+
+/**
+ * Most-recent-first ordering for the Trips screen's master list. The exact
+ * reverse of {@link sortTrips}, which the forward-looking chronological views
+ * (dispatch board, driver roster, manifests) keep.
+ */
+export function sortTripsRecentFirst(rows: TripRecord[]): TripRecord[] {
+  return sortTrips(rows).reverse();
 }
 
 // ---------------------------------------------------------------------------

@@ -18,10 +18,13 @@ using NorthernLink.Trips.Application.Stops.Update;
 using NorthernLink.Trips.Application.Trips.Assign;
 using NorthernLink.Trips.Application.Trips.ChangeStatus;
 using NorthernLink.Trips.Application.Trips.Create;
+using NorthernLink.Trips.Application.Trips.CreateDeadheadReturn;
 using NorthernLink.Trips.Application.Trips.GetActivity;
 using NorthernLink.Trips.Application.Trips.GetTripById;
 using NorthernLink.Trips.Application.Trips.GetTrips;
+using NorthernLink.Trips.Application.Trips.MergeRoundTrip;
 using NorthernLink.Trips.Application.Trips.RecordDemand;
+using NorthernLink.Trips.Application.Trips.UnpairRoundTrip;
 using NorthernLink.Trips.Application.Trips.Update;
 using NorthernLink.Trips.Domain.Manifests;
 using NorthernLink.Trips.Domain.Routes;
@@ -53,6 +56,9 @@ internal static class TripPlanningEndpoints
         trips.MapPost("{id:guid}/assign", AssignTrip);
         trips.MapPost("{id:guid}/status", ChangeTripStatus);
         trips.MapPost("{id:guid}/demand", RecordTripDemand);
+        trips.MapPost("{id:guid}/merge-round-trip", MergeRoundTrip);
+        trips.MapPost("{id:guid}/unpair-round-trip", UnpairRoundTrip);
+        trips.MapPost("{id:guid}/deadhead-return", CreateDeadheadReturn);
 
         var routes = app.MapGroup("/api/trips/routes").RequireAuthorization();
         routes.MapGet("", GetRoutes);
@@ -228,6 +234,45 @@ internal static class TripPlanningEndpoints
         var result = await sender.Send(
             new RecordTripDemandCommand(id, request.SeatsConfirmed, request.DemandGuaranteed), cancellationToken);
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> MergeRoundTrip(
+        Guid id, MergeRoundTripRequest request, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(
+            new MergeRoundTripCommand(id, request.OtherTripId, request.AllowMismatch), cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> UnpairRoundTrip(
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(new UnpairRoundTripCommand(id), cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> CreateDeadheadReturn(
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(new CreateDeadheadReturnCommand(id), cancellationToken);
+        return result.IsSuccess
+            ? Results.Created($"/api/trips/{result.Value}", new TripCreatedResponse(result.Value))
+            : EndpointResults.Problem(result.Error);
     }
 
     // ---- Routes ----
@@ -567,6 +612,14 @@ public sealed record ChangeTripStatusRequest(TripStatus Status, string? Reason);
 
 /// <summary>Request body for POST /api/trips/{id}/demand.</summary>
 public sealed record RecordTripDemandRequest(int SeatsConfirmed, bool DemandGuaranteed);
+
+/// <summary>
+/// Request body for POST /api/trips/{id}/merge-round-trip — the other leg of the pair,
+/// plus the optional <c>allowMismatch</c> manual override (defaults false when omitted),
+/// which relaxes only the same-service-date and mirrored-corridor checks.
+/// (/unpair-round-trip and /deadhead-return take no body.)
+/// </summary>
+public sealed record MergeRoundTripRequest(Guid OtherTripId, bool AllowMismatch = false);
 
 /// <summary>Request body for POST /api/trips/routes. Stops are chosen from the catalog by id (ordered).</summary>
 public sealed record CreateRouteRequest(

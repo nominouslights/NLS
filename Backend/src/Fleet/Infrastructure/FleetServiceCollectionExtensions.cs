@@ -14,6 +14,8 @@ using NorthernLink.Fleet.Application.Inspections;
 using NorthernLink.Fleet.Application.Inspections.Enter;
 using NorthernLink.Fleet.Application.Inspections.GetInspections;
 using NorthernLink.Fleet.Application.Inspections.PropagateOdometer;
+using NorthernLink.Fleet.Application.Inspections.Remove;
+using NorthernLink.Fleet.Application.Inspections.Update;
 using NorthernLink.Fleet.Application.Services;
 using NorthernLink.Fleet.Application.Services.Add;
 using NorthernLink.Fleet.Application.Services.GetForVehicle;
@@ -102,6 +104,8 @@ public static class FleetServiceCollectionExtensions
         services.AddScoped<IQueryHandler<GetRetirementCertificateQuery, RetirementCertificateResponse>, GetRetirementCertificateQueryHandler>();
         services.AddScoped<IQueryHandler<GetVehicleInspectionsQuery, IReadOnlyList<VehicleInspectionResponse>>, GetVehicleInspectionsQueryHandler>();
         services.AddScoped<ICommandHandler<EnterInspectionCommand, Guid>, EnterInspectionCommandHandler>();
+        services.AddScoped<ICommandHandler<UpdateInspectionCommand>, UpdateInspectionCommandHandler>();
+        services.AddScoped<ICommandHandler<RemoveInspectionCommand>, RemoveInspectionCommandHandler>();
         services.AddScoped<ICommandHandler<PropagateInspectionOdometerCommand>, PropagateInspectionOdometerCommandHandler>();
         services.AddScoped<ICommandHandler<RegisterShopCommand, Guid>, RegisterShopCommandHandler>();
         services.AddScoped<ICommandHandler<UpdateShopCommand>, UpdateShopCommandHandler>();
@@ -136,6 +140,12 @@ public static class FleetServiceCollectionExtensions
             .OnEvent<VehicleReachedEndOfLifeDomainEvent>(entry =>
                 new EnsureRetirementCertificateCommand(entry.AggregateId))
             .OnEvent<VehicleInspectionCreatedDomainEvent>(entry =>
+                new PropagateInspectionOdometerCommand(entry.TenantId, entry.AggregateId))
+            // A corrected odometer still flows to the vehicle. The vehicle odometer is monotonic
+            // (Vehicle.RecordOdometer no-ops a non-advancing reading), so a downward correction
+            // will not roll the vehicle back — acceptable: the inspection remains the record of
+            // what was actually read.
+            .OnEvent<VehicleInspectionAmendedDomainEvent>(entry =>
                 new PropagateInspectionOdometerCommand(entry.TenantId, entry.AggregateId)));
 
         return services;

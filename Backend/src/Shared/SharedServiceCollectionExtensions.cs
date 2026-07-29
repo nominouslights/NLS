@@ -45,6 +45,15 @@ public static class SharedServiceCollectionExtensions
             ?? new OutboxOptions();
         services.AddSingleton(outboxOptions);
 
+        var outboxPollingOptions = configuration.GetSection(OutboxPollingOptions.SectionName).Get<OutboxPollingOptions>()
+            ?? new OutboxPollingOptions();
+        services.AddSingleton(outboxPollingOptions);
+
+        // Chain-reaction events that must go through RabbitMQ list their types here.
+        // Currently empty: every integration event is storing/projecting and is consumed
+        // in-database by the modules' outbox polling consumers.
+        services.AddSingleton(new BusPublicationRegistry());
+
         var projectionOptions = configuration.GetSection(ProjectionOptions.SectionName).Get<ProjectionOptions>()
             ?? new ProjectionOptions();
         services.AddSingleton(projectionOptions);

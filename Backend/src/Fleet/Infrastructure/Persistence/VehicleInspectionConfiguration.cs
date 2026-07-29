@@ -86,6 +86,14 @@ public sealed class VehicleInspectionConfiguration : IEntityTypeConfiguration<Ve
         builder.Property(i => i.CreatedAtUtc).HasColumnName("created_at_utc");
 
         builder.HasIndex(i => new { i.TenantId, i.ManifestId, i.Type }).IsUnique();
+
+        // One pre-trip and one post-trip per trip — the DB backstop for the enter-path guard.
+        // Partial: only trip-context inspections are constrained; standalone (null trip_number)
+        // vehicle entries can repeat freely.
+        builder.HasIndex(i => new { i.TenantId, i.TripNumber, i.Type })
+            .IsUnique()
+            .HasFilter("trip_number IS NOT NULL");
+
         builder.HasIndex(i => new { i.TenantId, i.Unit });
 
         // DomainEvents ignore + Version concurrency token come from ModuleDbContext's

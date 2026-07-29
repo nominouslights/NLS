@@ -7,7 +7,7 @@ namespace NorthernLink.Billing.Tests;
 
 public class TripCompletedIntegrationEventHandlerTests
 {
-    private static TripCompletedIntegrationEvent Event(Guid tripId) => new(
+    private static TripCompletedIntegrationEvent Event(Guid tripId, bool isEmptyLeg = false) => new(
         tripId,
         TestBilling.TenantId,
         "TR-4821",
@@ -21,6 +21,7 @@ public class TripCompletedIntegrationEventHandlerTests
         new DateOnly(2026, 7, 6),
         "rt-1",
         "Outbound",
+        isEmptyLeg,
         "PO-7781",
         new DateTimeOffset(2026, 7, 6, 18, 0, 0, TimeSpan.Zero));
 
@@ -63,6 +64,19 @@ public class TripCompletedIntegrationEventHandlerTests
         Assert.Equal(320, trip.DistanceKm);
         Assert.Equal(new DateOnly(2026, 7, 6), trip.ServiceDate);
         Assert.Equal("PO-7781", trip.PoNumber);
+        Assert.False(trip.IsEmptyLeg);
         Assert.True(trip.IsUninvoiced);
+    }
+
+    [Fact]
+    public async Task A_deadhead_leg_is_recorded_with_its_empty_leg_flag()
+    {
+        var repository = new InMemoryBillableTripRepository();
+        var handler = new TripCompletedIntegrationEventHandler(
+            repository, NullLogger<TripCompletedIntegrationEventHandler>.Instance);
+
+        await handler.Handle(Event(Guid.NewGuid(), isEmptyLeg: true), CancellationToken.None);
+
+        Assert.True(Assert.Single(repository.Trips).IsEmptyLeg);
     }
 }

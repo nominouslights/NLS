@@ -19,7 +19,9 @@ public sealed class ChangeTripStatusCommandHandler(
         }
 
         // En-route guard: a trip cannot go InProgress without a manifest carrying >=1 passenger.
-        if (command.Status == TripStatus.InProgress)
+        // Deadheads (IsEmptyLeg) are exempt — an empty repositioning run starts and ends
+        // without passengers, and manifests can't even be created for it.
+        if (command.Status == TripStatus.InProgress && !trip.IsEmptyLeg)
         {
             var guard = await GuardPassengerManifest(trip, cancellationToken);
             if (guard.IsFailure)

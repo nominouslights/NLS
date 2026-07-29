@@ -26,6 +26,9 @@ export default function Console() {
   const [screen, setScreen] = useState<ScreenId>("dispatch");
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
+  // Id of the most recently created trip — handed to the Trips screen so it
+  // reloads its list (which is otherwise loaded once on mount) after creation.
+  const [createdTripId, setCreatedTripId] = useState<string | null>(null);
 
   const [tripSelId, setTripSelId] = useState<string | null>(null); // Trips API Guid
   const [driverSel, setDriverSel] = useState(0);
@@ -69,7 +72,12 @@ export default function Console() {
           {screen === "dispatch" && <DispatchBoard onOpenTrip={openTrip} />}
           {screen === "map" && <LiveMap onOpenTrip={() => openTrip(null)} />}
           {screen === "trips" && (
-            <Trips selectedId={tripSelId} setSelectedId={setTripSelId} onNewTrip={() => setWizardOpen(true)} />
+            <Trips
+              selectedId={tripSelId}
+              setSelectedId={setTripSelId}
+              onNewTrip={() => setWizardOpen(true)}
+              createdId={createdTripId}
+            />
           )}
           {screen === "drivers" && <Drivers driverSel={driverSel} setDriverSel={setDriverSel} />}
           {screen === "fleet" && <Fleet fleetSelId={fleetSelId} setFleetSelId={setFleetSelId} />}
@@ -93,6 +101,7 @@ export default function Console() {
           onClose={() => setWizardOpen(false)}
           onCreated={(tripId) => {
             setWizardOpen(false);
+            setCreatedTripId(tripId);
             openTrip(tripId);
           }}
         />

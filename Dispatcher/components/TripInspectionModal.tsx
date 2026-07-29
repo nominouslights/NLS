@@ -5,12 +5,15 @@ import { colors, fonts, statusMeta } from "@/lib/theme";
 import {
   ApiError,
   createInspection,
+  updateInspection,
+  type DefectSeverityWire,
   type InspectionFuelLevel,
   type InspectionInput,
   type InspectionRoadCondition,
   type InspectionType,
   type InspectionVisibility,
   type InspectionWeather,
+  type VehicleInspection,
 } from "@/lib/api";
 import type { TripRecord } from "@/lib/api/trips";
 import { listDrivers } from "@/lib/api/drivers";
@@ -77,26 +80,69 @@ function nowLocal(): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+/** ISO → "YYYY-MM-DD HH:MM" local (the format the certifiedAt TextField expects). */
+function isoToLocal(iso: string | null): string {
+  if (!iso) return nowLocal();
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return nowLocal();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** Rebuild the editable pre-trip checklist rows from a saved inspection —
+ *  fail/severity/note come from the recorded checklist passes + defects. */
+function checklistRowsFromExisting(existing: VehicleInspection): ChecklistRow[] {
+  const passedByItem = new Map(existing.checklist.map((c) => [c.item, c.passed]));
+  const defectByItem = new Map(existing.defects.map((d) => [d.item, d]));
+  return PRE_TRIP_GROUPS.flatMap((g) =>
+    g.items.map((it) => {
+      const defect = defectByItem.get(it.key);
+      const passed = passedByItem.get(it.key);
+      return {
+        groupKey: g.key,
+        itemKey: it.key,
+        label: it.label,
+        fail: passed === false || defect != null,
+        severity: (defect?.severity ?? "Minor") as DefectSeverityWire,
+        note: defect?.note ?? "",
+      };
+    }),
+  );
+}
+
+/** Rebuild the post-trip checklist booleans (in POST_TRIP_ITEMS order). */
+function postChecksFromExisting(existing: VehicleInspection): boolean[] {
+  const passedByItem = new Map(existing.checklist.map((c) => [c.item, c.passed]));
+  return POST_TRIP_ITEMS.map((item) => passedByItem.get(item) ?? true);
+}
+
 export default function TripInspectionModal({
   trip,
   type,
+  existing,
   enteredBy,
   onClose,
   onSaved,
 }: {
   trip: TripRecord;
   type: InspectionType;
+  /** When set, the modal edits this inspection (PUT) instead of creating one.
+   *  Its type is fixed and immutable — the `type` prop is ignored in that case. */
+  existing?: VehicleInspection;
   enteredBy: string;
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
-  const isPre = type === "PreTrip";
+  // In edit mode the inspection type comes from the record itself (immutable).
+  const insType: InspectionType = existing?.type ?? type;
+  const isPre = insType === "PreTrip";
+  const defaultDriver = existing?.driverName ?? trip.driverName ?? "";
 
-  // Driver roster (Active) — default to the trip's assigned driver.
+  // Driver roster (Active) — default to the trip's (or edited record's) driver.
   const [driverOptions, setDriverOptions] = useState<string[]>(
-    trip.driverName ? [trip.driverName] : [],
+    defaultDriver ? [defaultDriver] : [],
   );
-  const [driverName, setDriverName] = useState(trip.driverName ?? "");
+  const [driverName, setDriverName] = useState(defaultDriver);
 
   useEffect(() => {
     let active = true;
@@ -104,7 +150,7 @@ export default function TripInspectionModal({
       (rows) => {
         if (!active) return;
         const names = rows.filter((d) => d.status === "Active").map((d) => d.name);
-        const merged = trip.driverName && !names.includes(trip.driverName) ? [trip.driverName, ...names] : names;
+        const merged = defaultDriver && !names.includes(defaultDriver) ? [defaultDriver, ...names] : names;
         setDriverOptions(merged);
         setDriverName((cur) => cur || merged[0] || "");
       },
@@ -113,28 +159,34 @@ export default function TripInspectionModal({
     return () => {
       active = false;
     };
-  }, [trip.driverName]);
+  }, [defaultDriver]);
 
-  const [odometer, setOdometer] = useState("");
-  const [checklist, setChecklist] = useState<ChecklistRow[]>(initialChecklistRows);
+  const [odometer, setOdometer] = useState(existing?.odometerKm != null ? String(existing.odometerKm) : "");
+  const [checklist, setChecklist] = useState<ChecklistRow[]>(() =>
+    existing && existing.type === "PreTrip" ? checklistRowsFromExisting(existing) : initialChecklistRows(),
+  );
 
   // Pre-trip sections
-  const [weather, setWeather] = useState<InspectionWeather[]>([]);
-  const [roadConditions, setRoadConditions] = useState<InspectionRoadCondition[]>([]);
-  const [visibility, setVisibility] = useState<InspectionVisibility | null>(null);
-  const [temperatureC, setTemperatureC] = useState("");
-  const [roadAdvisories, setRoadAdvisories] = useState("");
-  const [fuelLevel, setFuelLevel] = useState<InspectionFuelLevel | null>(null);
+  const [weather, setWeather] = useState<InspectionWeather[]>(existing?.weather ?? []);
+  const [roadConditions, setRoadConditions] = useState<InspectionRoadCondition[]>(existing?.roadConditions ?? []);
+  const [visibility, setVisibility] = useState<InspectionVisibility | null>(existing?.visibility ?? null);
+  const [temperatureC, setTemperatureC] = useState(existing?.temperatureC ?? "");
+  const [roadAdvisories, setRoadAdvisories] = useState(existing?.roadAdvisories ?? "");
+  const [fuelLevel, setFuelLevel] = useState<InspectionFuelLevel | null>(existing?.fuelLevel ?? null);
 
   // Post-trip sections
-  const [postChecks, setPostChecks] = useState<boolean[]>(POST_TRIP_ITEMS.map(() => true));
-  const [issues, setIssues] = useState<string[]>([]);
-  const [attest, setAttest] = useState<boolean[]>(ATTESTATIONS.map(() => false));
-  const [signature, setSignature] = useState(trip.driverName ?? "");
-  const [certifiedAt, setCertifiedAt] = useState(nowLocal());
-  const [fuelAdded, setFuelAdded] = useState(false);
-  const [fuelLitres, setFuelLitres] = useState("");
-  const [fuelCostCad, setFuelCostCad] = useState("");
+  const [postChecks, setPostChecks] = useState<boolean[]>(() =>
+    existing && existing.type === "PostTrip" ? postChecksFromExisting(existing) : POST_TRIP_ITEMS.map(() => true),
+  );
+  const [issues, setIssues] = useState<string[]>(existing?.issues ?? []);
+  const [attest, setAttest] = useState<boolean[]>(
+    existing && existing.attestations.length === ATTESTATIONS.length ? existing.attestations : ATTESTATIONS.map(() => false),
+  );
+  const [signature, setSignature] = useState(existing?.driverSignatureName ?? trip.driverName ?? "");
+  const [certifiedAt, setCertifiedAt] = useState(existing ? isoToLocal(existing.certifiedAt) : nowLocal());
+  const [fuelAdded, setFuelAdded] = useState(existing?.fuelAdded ?? false);
+  const [fuelLitres, setFuelLitres] = useState(existing?.fuelLitres != null ? String(existing.fuelLitres) : "");
+  const [fuelCostCad, setFuelCostCad] = useState(existing?.fuelCostCad != null ? String(existing.fuelCostCad) : "");
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -166,7 +218,7 @@ export default function TripInspectionModal({
   function buildInput(): InspectionInput {
     const odo = parseInt(odometer, 10);
     const base: InspectionInput = {
-      type,
+      type: insType,
       source: "Dispatcher",
       tripNumber: trip.tripNumber,
       vehicleId: trip.vehicleId,
@@ -217,19 +269,39 @@ export default function TripInspectionModal({
     setBusy(true);
     setError(null);
     try {
-      await createInspection(buildInput());
+      if (existing) {
+        await updateInspection(existing.id, buildInput());
+      } else {
+        await createInspection(buildInput());
+      }
       await onSaved();
       onClose();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Failed to save the inspection — please try again.");
+      // A pre/post-trip already exists for this trip — the backend rejects a
+      // second one. Map the code to a friendly inline message.
+      if (e instanceof ApiError && e.code === "Fleet.Inspection.DuplicateForTrip") {
+        setError(
+          `A ${isPre ? "pre-trip" : "post-trip"} inspection already exists for ${trip.tripNumber} — edit that one instead of entering another.`,
+        );
+      } else {
+        setError(e instanceof ApiError ? e.message : "Failed to save the inspection — please try again.");
+      }
       setBusy(false);
     }
   }
 
   return (
     <ModalShell
-      eyebrow={`Fleet · ${trip.tripNumber} · ${trip.vehicleUnit ?? "no unit"} · Inspection`}
-      title={isPre ? "Enter Pre-Trip Inspection" : "Enter Post-Trip Inspection"}
+      eyebrow={`Fleet · ${trip.tripNumber} · ${trip.vehicleUnit ?? "no unit"} · ${existing ? "Edit inspection" : "Inspection"}`}
+      title={
+        existing
+          ? isPre
+            ? "Edit Pre-Trip Inspection"
+            : "Edit Post-Trip Inspection"
+          : isPre
+            ? "Enter Pre-Trip Inspection"
+            : "Enter Post-Trip Inspection"
+      }
       onClose={onClose}
       error={error}
       maxWidth={880}
@@ -243,7 +315,7 @@ export default function TripInspectionModal({
           </span>
           <ActionButton onClick={onClose}>CANCEL</ActionButton>
           <ActionButton variant="primary" onClick={submit} disabled={busy}>
-            {busy ? "SAVING…" : "SAVE INSPECTION"}
+            {busy ? "SAVING…" : existing ? "SAVE CHANGES" : "SAVE INSPECTION"}
           </ActionButton>
         </>
       }

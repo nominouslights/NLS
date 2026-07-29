@@ -22,13 +22,18 @@ public sealed record InvoiceDraft(
 /// line (qty 1 × rate per round trip) only when it holds at least one <c>Outbound</c> leg
 /// and at least one <c>Inbound</c> leg. Any other group — a lone leg, legs with a
 /// missing direction, or two legs sharing the same direction — bills each present leg at
-/// qty 0.5 on its own line, flagged for review. Trips with no key (ad-hoc/charter/cargo)
-/// are left unclaimed for manual lines on the draft. GST is not a line — the invoice
-/// computes it from its snapshot rate when applicable.
+/// qty 0.5 on its own line, flagged for review. A pair whose legs include a deadhead
+/// (empty repositioning) leg still prices at the full round-trip rate, but the line is
+/// flagged so the dispatcher can apply an optional manual discount — worksheet lines are
+/// editable. Trips with no key (ad-hoc/charter/cargo) are left unclaimed for manual
+/// lines on the draft. GST is not a line — the invoice computes it from its snapshot
+/// rate when applicable.
 /// </summary>
 public static class InvoiceDraftBuilder
 {
     public const string UnpairedLegFlag = "½ round trip — unpaired leg, review";
+
+    public const string DeadheadReturnFlag = "round trip incl. deadhead return — discount optional";
 
     public static Result<InvoiceDraft> Build(
         IReadOnlyList<ContractSnapshot> clientContracts,
@@ -91,8 +96,11 @@ public static class InvoiceDraftBuilder
             if (hasOutbound && hasInbound)
             {
                 var first = legs[0];
+                var description = legs.Any(t => t.IsEmptyLeg)
+                    ? $"{DeadheadReturnFlag} · {first.RouteName} · {serviceDate:yyyy-MM-dd}"
+                    : $"Corridor round trip · {first.RouteName} · {serviceDate:yyyy-MM-dd}";
                 var lineResult = InvoiceLine.Create(
-                    $"Corridor round trip · {first.RouteName} · {serviceDate:yyyy-MM-dd}",
+                    description,
                     legs.Select(t => t.Id).ToList(),
                     null,
                     serviceDate,

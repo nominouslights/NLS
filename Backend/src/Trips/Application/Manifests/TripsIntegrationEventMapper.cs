@@ -7,8 +7,9 @@ using NorthernLink.Trips.Domain.Trips.Events;
 namespace NorthernLink.Trips.Application.Manifests;
 
 /// <summary>
-/// Trips' explicit domain-event → integration-event translation. The one public contract
-/// today is trip completion (Billing records a billable trip). Manifest events stay
+/// Trips' explicit domain-event → integration-event translation. The public contracts
+/// today are trip completion (Billing records a billable trip) and post-hoc round-trip
+/// pairing changes (Billing re-keys its uninvoiced replica rows). Manifest events stay
 /// internal: since inspections detached from the manifest (Phase B moved them into Fleet's
 /// own VehicleInspection records), the manifest no longer carries anything another module
 /// consumes. Everything unmapped stays internal (null). Extending Trips' public surface
@@ -21,6 +22,7 @@ public sealed class TripsIntegrationEventMapper : IIntegrationEventMapper
         domainEvent switch
         {
             TripCompletedDomainEvent => MapTripCompleted((Trip)aggregate),
+            TripRoundTripChangedDomainEvent => MapRoundTripChanged((Trip)aggregate),
             _ => null,
         };
 
@@ -38,6 +40,13 @@ public sealed class TripsIntegrationEventMapper : IIntegrationEventMapper
         trip.ServiceDate,
         trip.RoundTripKey,
         trip.Direction?.ToString(),
+        trip.IsEmptyLeg,
         trip.PoNumber,
         trip.CompletedAtUtc ?? DateTimeOffset.UtcNow);
+
+    private static TripRoundTripChangedIntegrationEvent MapRoundTripChanged(Trip trip) => new(
+        trip.Id,
+        trip.TenantId,
+        trip.RoundTripKey,
+        trip.Direction?.ToString());
 }

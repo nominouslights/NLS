@@ -51,6 +51,8 @@ public static partial class FleetEndpoints
 
         inspections.MapGet("", GetInspections);
         inspections.MapPost("", EnterInspection);
+        inspections.MapPut("{id:guid}", UpdateInspection);
+        inspections.MapDelete("{id:guid}", RemoveInspection);
 
         // Fleet-wide compliance documents (dashboard compliance watch).
         app.MapGet("/api/fleet/documents", GetAllDocuments);

@@ -85,7 +85,11 @@ export function tripInfoBlock(m: TripManifest | null): string {
 // ---- §2 passenger manifest ---------------------------------------------------
 
 export function passengerManifestBlock(m: TripManifest | null): string {
-  const rows = Array.from({ length: MAX_PASSENGER_ROWS }, (_, i) => {
+  // Render a full blank form (MAX_PASSENGER_ROWS rows) but grow to fit every
+  // passenger when a larger unit carries more than the default 8 — otherwise
+  // passengers past row 8 would be silently dropped from the printed manifest.
+  const rowCount = Math.max(MAX_PASSENGER_ROWS, m?.passengers.length ?? 0);
+  const rows = Array.from({ length: rowCount }, (_, i) => {
     const p = m?.passengers[i] ?? null;
     return `<tr>
       <td class="num">${i + 1}</td>

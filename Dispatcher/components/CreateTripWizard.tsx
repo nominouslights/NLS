@@ -39,11 +39,13 @@ import {
   cargoRowsToWire,
   OptChip,
   PassengerRowsEditor,
+  passengerCapFor,
   paxRowsToWire,
   type CargoRow,
   type PaxRow,
   type StopOption,
 } from "@/components/manifest/manifestRows";
+import PassengerCsvImport from "@/components/manifest/PassengerCsvImport";
 
 // Create Trip — the 6-step wizard, now a real form submitting POST /api/trips.
 // Client/rate lookups come from the Clients API (active-contract summary),
@@ -180,6 +182,20 @@ export default function CreateTripWizard({
   const corridor = route ? stopNames(route) : [origin, destination].filter((s) => s.trim());
   const km = route ? route.distanceKm : Number(distanceKm) || 0;
 
+  // Passenger cap = the assigned unit's seat capacity, else the manually entered
+  // seats capacity, else the default 8. Different units seat different numbers.
+  const paxCap = vehicle?.seatingCapacity ?? (seatsCapacity ? Number(seatsCapacity) : null);
+  const maxPax = passengerCapFor(paxCap);
+  const contentPax = passengers.filter((p) => p.name.trim() || p.contact.trim()).length;
+
+  // Merge an imported passenger sheet onto the current rows, clamped to the cap.
+  function applyImport(rows: PaxRow[]) {
+    setPassengers((prev) => {
+      const kept = prev.filter((p) => p.name.trim() || p.contact.trim());
+      return [...kept, ...rows].slice(0, maxPax);
+    });
+  }
+
   const estBillable =
     contract?.billingModel === "RoundTripRate" && contract.ratePerRoundTripCad != null
       ? rateFmt.format(contract.ratePerRoundTripCad) // 1 round trip, display only
@@ -273,7 +289,7 @@ export default function CreateTripWizard({
 
       // Build the manifest from the captured passengers + cargo. The trip number
       // is server-generated, so read the created trip back (projection may trail).
-      const wirePax = paxRowsToWire(passengers, stopOptions);
+      const wirePax = paxRowsToWire(passengers, stopOptions, maxPax);
       const wireCargo = cargoRowsToWire(cargo);
       if (wirePax.length > 0 || wireCargo.length > 0) {
         const created = await refetchUntil(
@@ -689,9 +705,18 @@ export default function CreateTripWizard({
                   />
                 </div>
 
-                <SectionLabel>Passengers (optional)</SectionLabel>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                  <SectionLabel>Passengers (optional)</SectionLabel>
+                  <PassengerCsvImport
+                    stops={stopOptions}
+                    capacity={paxCap}
+                    existingCount={contentPax}
+                    trip={{ clientName: client?.name ?? null, serviceDate, direction: null }}
+                    onApply={applyImport}
+                  />
+                </div>
                 <div style={{ marginBottom: 10 }}>
-                  <PassengerRowsEditor rows={passengers} stops={stopOptions} onChange={setPassengers} />
+                  <PassengerRowsEditor rows={passengers} stops={stopOptions} onChange={setPassengers} maxRows={maxPax} />
                 </div>
                 <div style={{ marginBottom: 16 }}>
                   <OptChip

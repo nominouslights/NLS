@@ -9,13 +9,16 @@ import type { BillingFrequency } from "./clients";
 // exactly (JSON camelCase, enums as PascalCase strings, DateOnly as
 // "yyyy-MM-dd"). Do not invent fields — extend only when the backend
 // contract changes.
-// QuickBooks Online is a READ-ONLY book of record: qboInvoiceId/qboSyncStatus
-// merely RECORD reconciliation state (set via /qbo-status) — there is no QBO
-// API write path anywhere in the stack.
+//
+// This section PREPARES invoices for manual entry into QuickBooks Online — it
+// is NOT an internal invoice system-of-record. QuickBooks is never called via
+// API: the user copies/prints the numbers, keys them into QBO, then records the
+// resulting QBO invoice number + entered date back here (mark-entered). There
+// is no send / paid / overdue / AR-aging concept anymore; netTermsDays is
+// purely informational.
 // ---------------------------------------------------------------------------
 
-export type InvoiceStatus = "Draft" | "Sent" | "Paid" | "Void";
-export type QboSyncStatus = "NotSynced" | "Matched" | "UnmatchedPayment";
+export type InvoiceStatus = "Draft" | "EnteredInQbo" | "Void";
 /** A trip leg's direction — Outbound (depart) pairs with Inbound (return) into
  *  a round trip. Same enum the Trips module exposes as TripDirection. */
 export type TripLegDirection = "Inbound" | "Outbound";
@@ -32,9 +35,8 @@ export interface InvoiceLineRecord {
   amountCad: number;
 }
 
-/** Mirrors InvoiceSummaryResponse (list rows — no lines). DueDate/IsOverdue
- *  are derived read-time by the backend (Sent + netTerms); Overdue is never a
- *  stored status. */
+/** Mirrors InvoiceSummaryResponse (list rows — no lines). qboEnteredDate is set
+ *  once the invoice has been keyed into QuickBooks (EnteredInQbo). */
 export interface InvoiceSummaryRecord {
   id: string;
   invoiceNumber: string;
@@ -42,21 +44,17 @@ export interface InvoiceSummaryRecord {
   clientName: string;
   poNumber: string | null;
   budgetCode: string | null;
-  netTermsDays: number;
+  netTermsDays: number; // informational only — no overdue logic
   periodStart: string; // DateOnly
   periodEnd: string;
   status: InvoiceStatus;
   issuedAtUtc: string;
-  sentAtUtc: string | null;
-  paidAtUtc: string | null;
-  dueDate: string | null; // DateOnly
-  isOverdue: boolean;
   subtotalCad: number;
   gstCad: number;
   totalCad: number;
   lineCount: number;
   qboInvoiceId: string | null;
-  qboSyncStatus: QboSyncStatus;
+  qboEnteredDate: string | null; // DateOnly, set when EnteredInQbo
 }
 
 /** Mirrors InvoiceResponse (detail — lines included, contract snapshots). */
@@ -68,22 +66,18 @@ export interface InvoiceDetailRecord {
   contractId: string | null;
   poNumber: string | null;
   budgetCode: string | null;
-  netTermsDays: number;
+  netTermsDays: number; // informational only — no overdue logic
   gstApplicable: boolean;
   gstRate: number; // fraction, e.g. 0.05
   periodStart: string;
   periodEnd: string;
   status: InvoiceStatus;
   issuedAtUtc: string;
-  sentAtUtc: string | null;
-  paidAtUtc: string | null;
-  dueDate: string | null;
-  isOverdue: boolean;
   subtotalCad: number;
   gstCad: number;
   totalCad: number;
   qboInvoiceId: string | null;
-  qboSyncStatus: QboSyncStatus;
+  qboEnteredDate: string | null; // DateOnly, set when EnteredInQbo
   lines: InvoiceLineRecord[];
 }
 
@@ -163,29 +157,39 @@ export function replaceInvoiceLines(id: string, lines: InvoiceLineInput[]): Prom
   });
 }
 
-export function sendInvoice(id: string): Promise<void> {
-  return request<void>(`/api/billing/invoices/${id}/send`, { method: "POST" });
+/** POST → 204. Records that this draft was keyed into QuickBooks: captures the
+ *  QBO invoice number + entered date, Draft → EnteredInQbo. */
+export function markInvoiceEntered(
+  id: string,
+  qboInvoiceNumber: string,
+  enteredDate: string,
+): Promise<void> {
+  return request<void>(`/api/billing/invoices/${id}/mark-entered`, {
+    method: "POST",
+    body: JSON.stringify({ qboInvoiceNumber, enteredDate }),
+  });
 }
 
-export function markInvoicePaid(id: string): Promise<void> {
-  return request<void>(`/api/billing/invoices/${id}/mark-paid`, { method: "POST" });
+/** POST → 204. Corrects the recorded QBO reference (EnteredInQbo only). */
+export function updateQboReference(
+  id: string,
+  qboInvoiceNumber: string,
+  enteredDate: string,
+): Promise<void> {
+  return request<void>(`/api/billing/invoices/${id}/qbo-reference`, {
+    method: "POST",
+    body: JSON.stringify({ qboInvoiceNumber, enteredDate }),
+  });
+}
+
+/** POST → 204. EnteredInQbo → Draft, clearing the QBO reference (e.g. the QBO
+ *  entry was a mistake and needs re-keying). */
+export function reopenInvoice(id: string): Promise<void> {
+  return request<void>(`/api/billing/invoices/${id}/reopen`, { method: "POST" });
 }
 
 export function voidInvoice(id: string): Promise<void> {
   return request<void>(`/api/billing/invoices/${id}/void`, { method: "POST" });
-}
-
-/** Records the QBO reconciliation state (read-only book of record — this is
- *  bookkeeping about QBO, never a write TO QBO). */
-export function setInvoiceQboStatus(
-  id: string,
-  qboInvoiceId: string | null,
-  syncStatus: QboSyncStatus,
-): Promise<void> {
-  return request<void>(`/api/billing/invoices/${id}/qbo-status`, {
-    method: "POST",
-    body: JSON.stringify({ qboInvoiceId, syncStatus }),
-  });
 }
 
 export function listBillableTrips(params?: {
@@ -210,68 +214,21 @@ export { refetchUntil } from "./drivers";
 
 // ---------------------------------------------------------------------------
 // Display derivations — status colour NEVER stands alone (StatusChip pairs
-// the colour with a glyph and text label). Overdue is a frontend/read-side
-// derivation of Sent (never a stored status), rendered as the vermillion chip
-// replacing Sent when isOverdue.
+// the colour with a glyph and text label).
 // ---------------------------------------------------------------------------
 
-const DAY_MS = 86_400_000;
-
-function daysSince(iso: string): number {
-  return Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / DAY_MS));
-}
-
-/** Whole days past a DateOnly due date (negative = not yet due). */
-export function daysPastDue(dueDate: string | null): number | null {
-  if (!dueDate) return null;
-  return Math.floor((Date.now() - new Date(`${dueDate}T00:00:00`).getTime()) / DAY_MS);
-}
-
-/** Invoice status chip — Sent + isOverdue renders as the vermillion Overdue
- *  chip (replacing Sent). */
-export function invoiceChip(inv: {
-  status: InvoiceStatus;
-  isOverdue: boolean;
-}): { kind: StatusKind; label: string } {
+/** Invoice status chip — keyed only on status. Draft (gold, still to key into
+ *  QBO), EnteredInQbo (teal, keyed), Void (gray). */
+export function invoiceChip(inv: { status: InvoiceStatus }): { kind: StatusKind; label: string } {
   switch (inv.status) {
     case "Draft":
       return { kind: "soon", label: "Draft" };
-    case "Sent":
-      return inv.isOverdue ? { kind: "over", label: "Overdue" } : { kind: "info", label: "Sent" };
-    case "Paid":
-      return { kind: "ontime", label: "Paid" };
+    case "EnteredInQbo":
+      return { kind: "ontime", label: "Entered in QBO" };
     case "Void":
     default:
       return { kind: "off", label: "Void" };
   }
-}
-
-export const QBO_LABELS: Record<QboSyncStatus, string> = {
-  NotSynced: "Not synced",
-  Matched: "Matched",
-  UnmatchedPayment: "Unmatched payment",
-};
-
-export function qboKindFor(status: QboSyncStatus): StatusKind {
-  switch (status) {
-    case "Matched":
-      return "ontime";
-    case "UnmatchedPayment":
-      return "over";
-    case "NotSynced":
-    default:
-      return "off";
-  }
-}
-
-/** List "age" column: days since sent for Sent rows, "Paid" once paid. */
-export function invoiceAgeLabel(inv: {
-  status: InvoiceStatus;
-  sentAtUtc: string | null;
-}): string {
-  if (inv.status === "Paid") return "Paid";
-  if (inv.status === "Sent" && inv.sentAtUtc) return `${daysSince(inv.sentAtUtc)}d`;
-  return "—";
 }
 
 /** Newest first — issued timestamp, then invoice number. */
@@ -280,26 +237,6 @@ export function sortInvoices(rows: InvoiceSummaryRecord[]): InvoiceSummaryRecord
     if (a.issuedAtUtc !== b.issuedAtUtc) return a.issuedAtUtc < b.issuedAtUtc ? 1 : -1;
     return b.invoiceNumber.localeCompare(a.invoiceNumber);
   });
-}
-
-/** AR aging, computed client-side from the live invoice list: Sent invoices
- *  bucketed by days past dueDate (current ≤30 incl. not-yet-due / 31–60 / 61+). */
-export interface ArAging {
-  current: number;
-  days31to60: number;
-  days61plus: number;
-}
-
-export function arAgingFor(rows: InvoiceSummaryRecord[]): ArAging {
-  const aging: ArAging = { current: 0, days31to60: 0, days61plus: 0 };
-  for (const r of rows) {
-    if (r.status !== "Sent") continue;
-    const past = daysPastDue(r.dueDate) ?? 0;
-    if (past > 60) aging.days61plus += r.totalCad;
-    else if (past > 30) aging.days31to60 += r.totalCad;
-    else aging.current += r.totalCad;
-  }
-  return aging;
 }
 
 // Invoice amounts carry cents (unlike the whole-dollar formatCad in lib/api.ts).
@@ -328,6 +265,45 @@ export function directionMeta(
   if (direction === "Outbound") return { glyph: "→", label: "Outbound" };
   if (direction === "Inbound") return { glyph: "←", label: "Inbound" };
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Clipboard export — a clean, paste-friendly block for keying an invoice into
+// QuickBooks Online by hand. Header lines, then one tab-delimited row per line
+// (paste straight into a QBO line grid), then totals. Money via formatInvoiceCad.
+// ---------------------------------------------------------------------------
+
+function lineRef(l: InvoiceLineRecord): string {
+  return [l.tripNumber, l.serviceDate].filter(Boolean).join(" · ");
+}
+
+export function invoiceClipboardText(inv: InvoiceDetailRecord): string {
+  const out: string[] = [];
+  out.push(`Client: ${inv.clientName}`);
+  out.push(`Billing period: ${periodLabel(inv)}`);
+  out.push(`PO #: ${inv.poNumber ?? "—"}`);
+  out.push(`Budget code: ${inv.budgetCode ?? "—"}`);
+  out.push(`Net terms: Net ${inv.netTermsDays}`);
+  out.push("");
+  out.push(["Description", "Trip # / Service date", "Qty", "Unit (CAD)", "Amount (CAD)"].join("\t"));
+  for (const l of inv.lines) {
+    out.push(
+      [
+        l.description,
+        lineRef(l),
+        String(l.quantity),
+        formatInvoiceCad(l.unitPriceCad),
+        formatInvoiceCad(l.amountCad),
+      ].join("\t"),
+    );
+  }
+  out.push("");
+  out.push(`Subtotal: ${formatInvoiceCad(inv.subtotalCad)}`);
+  if (inv.gstApplicable) {
+    out.push(`GST (${Math.round(inv.gstRate * 1000) / 10}%): ${formatInvoiceCad(inv.gstCad)}`);
+  }
+  out.push(`Total (CAD): ${formatInvoiceCad(inv.totalCad)}`);
+  return out.join("\n");
 }
 
 // ---------------------------------------------------------------------------

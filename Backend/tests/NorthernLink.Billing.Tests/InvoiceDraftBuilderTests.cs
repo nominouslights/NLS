@@ -75,6 +75,45 @@ public class InvoiceDraftBuilderTests
     }
 
     [Fact]
+    public void Deadhead_pair_prices_at_full_rate_with_the_discount_optional_note()
+    {
+        var contract = TestBilling.Contract(rate: 120m);
+        var outbound = TestBilling.Trip(new DateOnly(2026, 7, 6), "merge:abc", "TR-01O",
+            direction: "Outbound",
+            completedAtUtc: new DateTimeOffset(2026, 7, 6, 9, 0, 0, TimeSpan.Zero));
+        var deadhead = TestBilling.Trip(new DateOnly(2026, 7, 6), "merge:abc", "TR-01R",
+            direction: "Inbound", isEmptyLeg: true,
+            completedAtUtc: new DateTimeOffset(2026, 7, 6, 18, 0, 0, TimeSpan.Zero));
+
+        var result = InvoiceDraftBuilder.Build(
+            [contract], PeriodStart, PeriodEnd, [outbound, deadhead]);
+
+        Assert.True(result.IsSuccess);
+        var line = Assert.Single(result.Value.Lines);
+        Assert.Equal(1m, line.Quantity);
+        Assert.Equal(120m, line.UnitPriceCad);
+        Assert.Equal(120m, line.AmountCad); // full rate — the discount is a manual worksheet edit
+        Assert.Contains(InvoiceDraftBuilder.DeadheadReturnFlag, line.Description);
+        Assert.Contains("Thompson–Lynn Lake", line.Description);
+        Assert.Equal(2, line.TripIds.Count);
+        Assert.Equal(2, result.Value.ClaimedTripIds.Count);
+    }
+
+    [Fact]
+    public void Regular_pair_carries_no_deadhead_note()
+    {
+        var contract = TestBilling.Contract(rate: 120m);
+        var (outbound, returnLeg) = TestBilling.RoundTrip(new DateOnly(2026, 7, 6), "rt-1");
+
+        var result = InvoiceDraftBuilder.Build(
+            [contract], PeriodStart, PeriodEnd, [outbound, returnLeg]);
+
+        Assert.DoesNotContain(
+            InvoiceDraftBuilder.DeadheadReturnFlag,
+            Assert.Single(result.Value.Lines).Description);
+    }
+
+    [Fact]
     public void Two_legs_sharing_a_direction_are_not_a_pair_and_bill_as_two_half_lines()
     {
         var contract = TestBilling.Contract(rate: 120m);

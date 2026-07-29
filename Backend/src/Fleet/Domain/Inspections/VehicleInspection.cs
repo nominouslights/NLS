@@ -155,6 +155,87 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
         return NorthernLink.Shared.Kernel.Result.Success(inspection);
     }
 
+    /// <summary>
+    /// Corrects an existing inspection's contents in place. Identity is fixed:
+    /// <see cref="Type"/> and <see cref="TripNumber"/> never change here — an amend fixes the
+    /// odometer/driver/checklist/defects/sections/unit/vehicle link of the same pre- or post-trip
+    /// record, not which trip or which half it is (re-record by removing and re-entering for
+    /// that). Re-runs the same validation as <see cref="Enter"/> and re-derives
+    /// <see cref="Result"/> from the corrected <paramref name="defects"/>. Raises
+    /// <see cref="VehicleInspectionAmendedDomainEvent"/>.
+    /// </summary>
+    public Result Amend(
+        InspectionSource source,
+        Guid? vehicleId,
+        string unit,
+        string driverName,
+        string? enteredBy,
+        DateTimeOffset performedAt,
+        int? odometerKm,
+        IReadOnlyList<InspectionChecklistItem> checklistItems,
+        IReadOnlyList<InspectionDefect> defects,
+        IReadOnlyList<InspectionWeather> weather,
+        string? temperatureC,
+        IReadOnlyList<InspectionRoadCondition> roadConditions,
+        InspectionVisibility? visibility,
+        string? roadAdvisories,
+        InspectionFuelLevel? fuelLevel,
+        IReadOnlyList<string> issues,
+        IReadOnlyList<bool> attestations,
+        string? driverSignatureName,
+        DateTimeOffset? certifiedAt,
+        bool fuelAdded,
+        decimal? fuelLitres,
+        decimal? fuelCostCad)
+    {
+        if (string.IsNullOrWhiteSpace(unit))
+        {
+            return NorthernLink.Shared.Kernel.Result.Failure(InspectionErrors.UnitRequired);
+        }
+
+        if (string.IsNullOrWhiteSpace(driverName))
+        {
+            return NorthernLink.Shared.Kernel.Result.Failure(InspectionErrors.DriverRequired);
+        }
+
+        Source = source;
+        EnteredBy = string.IsNullOrWhiteSpace(enteredBy)
+            ? source == InspectionSource.Dispatcher ? "Dispatch" : null
+            : enteredBy.Trim();
+        VehicleId = vehicleId;
+        Unit = unit.Trim();
+        DriverName = driverName.Trim();
+        PerformedAt = performedAt;
+        OdometerKm = odometerKm;
+        Result = DeriveResult(defects);
+        ChecklistItems = [.. checklistItems];
+        Defects = [.. defects];
+        Weather = [.. weather];
+        TemperatureC = Normalize(temperatureC);
+        RoadConditions = [.. roadConditions];
+        Visibility = visibility;
+        RoadAdvisories = Normalize(roadAdvisories);
+        FuelLevel = fuelLevel;
+        Issues = [.. issues];
+        Attestations = [.. attestations];
+        DriverSignatureName = Normalize(driverSignatureName);
+        CertifiedAt = certifiedAt;
+        FuelAdded = fuelAdded;
+        FuelLitres = fuelLitres;
+        FuelCostCad = fuelCostCad;
+
+        Raise(new VehicleInspectionAmendedDomainEvent(Id, TenantId));
+        return NorthernLink.Shared.Kernel.Result.Success();
+    }
+
+    /// <summary>
+    /// Flags this inspection for hard removal. Raised just before the repository deletes the row
+    /// so the removal is carried across the module boundary (the mapper only ever sees real
+    /// domain events; the synthetic aggregate-deleted journal row is not mapped). Read-model
+    /// deletion is driven separately by that synthetic journal row.
+    /// </summary>
+    public void MarkRemoved() => Raise(new VehicleInspectionRemovedDomainEvent(Id, TenantId));
+
     /// <summary>Links the work order generated from this inspection's defects.</summary>
     public void LinkWorkOrder(Guid workOrderId)
     {

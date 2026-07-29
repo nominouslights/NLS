@@ -35,13 +35,14 @@ internal static class TestManifests
         IReadOnlyList<ManifestCargoItem>? cargo = null,
         CargoSecuredStatus? allCargoSecured = CargoSecuredStatus.NotApplicable,
         ManifestSource source = ManifestSource.App,
-        string? enteredBy = null) =>
+        string? enteredBy = null,
+        TripDirection? direction = TripDirection.Outbound) =>
         TripManifest.Create(
             TenantId,
             tripDate: new DateOnly(2026, 7, 14),
             tripNumber: tripNumber,
             route: "Black Sturgeon Falls → Thompson",
-            direction: TripDirection.Outbound,
+            direction: direction,
             client: null,
             passengers: passengers ?? OnePassenger(),
             allSeatbeltsVerified: allSeatbeltsVerified,

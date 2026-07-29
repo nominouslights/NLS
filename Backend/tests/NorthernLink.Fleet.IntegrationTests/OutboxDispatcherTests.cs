@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using NorthernLink.Shared.EventBus;
+using NorthernLink.Shared.IntegrationEvents.Fleet;
 using NorthernLink.Shared.Persistence.Auditing;
 using NorthernLink.Shared.Tenancy;
 using NorthernLink.Fleet.Application.Vehicles;
@@ -91,6 +92,35 @@ public class OutboxDispatcherTests(PostgresFixture fixture)
         });
     }
 
+    [Fact]
+    public async Task Empty_registry_leaves_rows_untouched_and_publishes_nothing()
+    {
+        var vehicle = await SaveVehicleWithStatusChangeAsync();
+
+        // With nothing designated for the bus (the current production state — every event
+        // is storing/projecting, delivered by the polling consumer), the dispatcher idles:
+        // no publishes, no attempts, rows stay undispatched.
+        var transport = new RecordingTransport();
+        await RunDispatcherUntilAsync(
+            transport,
+            async () =>
+            {
+                await Task.Delay(300);
+                return true; // give it a few polls, then assert nothing happened
+            },
+            new BusPublicationRegistry());
+
+        Assert.Empty(transport.Published);
+        await using var context = fixture.CreateContext(PostgresFixture.TenantA);
+        var messages = await PendingRowsForAsync(context, vehicle.Id);
+        Assert.NotEmpty(messages);
+        Assert.All(messages, message =>
+        {
+            Assert.Null(message.DispatchedAtUtc);
+            Assert.Equal(0, message.Attempts);
+        });
+    }
+
     private async Task<Vehicle> SaveVehicleWithStatusChangeAsync()
     {
         var vehicle = TestVehicleFactory.Create(PostgresFixture.TenantA);
@@ -111,7 +141,10 @@ public class OutboxDispatcherTests(PostgresFixture fixture)
     }
 
     /// <summary>Runs the real hosted dispatcher with a fast poll until the condition holds (or 30 s).</summary>
-    private async Task RunDispatcherUntilAsync(IOutboxTransport transport, Func<Task<bool>> condition)
+    private async Task RunDispatcherUntilAsync(
+        IOutboxTransport transport,
+        Func<Task<bool>> condition,
+        BusPublicationRegistry? registry = null)
     {
         var services = new ServiceCollection();
         services.AddScoped<ITenantContext>(_ => new PostgresFixture.TestTenantContext(null));
@@ -127,6 +160,8 @@ public class OutboxDispatcherTests(PostgresFixture fixture)
         var dispatcher = new OutboxDispatcher<FleetDbContext>(
             provider.GetRequiredService<IServiceScopeFactory>(),
             transport,
+            // Tests exercise the bus path, so the tested event must be bus-designated.
+            registry ?? new BusPublicationRegistry(typeof(VehicleChangedIntegrationEvent)),
             new OutboxOptions { PollInterval = TimeSpan.FromMilliseconds(100) },
             NullLogger<OutboxDispatcher<FleetDbContext>>.Instance);
 

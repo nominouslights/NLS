@@ -5,10 +5,10 @@ using NorthernLink.Billing.Application.BillableTrips.GetBillableTrips;
 using NorthernLink.Billing.Application.Invoices.GenerateDraft;
 using NorthernLink.Billing.Application.Invoices.GetById;
 using NorthernLink.Billing.Application.Invoices.GetInvoices;
-using NorthernLink.Billing.Application.Invoices.MarkPaid;
+using NorthernLink.Billing.Application.Invoices.MarkEntered;
 using NorthernLink.Billing.Application.Invoices.ReplaceLines;
-using NorthernLink.Billing.Application.Invoices.Send;
-using NorthernLink.Billing.Application.Invoices.SetQboStatus;
+using NorthernLink.Billing.Application.Invoices.Reopen;
+using NorthernLink.Billing.Application.Invoices.UpdateQboReference;
 using NorthernLink.Billing.Application.Invoices.Void;
 using NorthernLink.Billing.Domain.Invoices;
 using NorthernLink.Shared.Messaging;
@@ -31,10 +31,10 @@ public static class BillingEndpoints
         invoices.MapGet("{id:guid}", GetInvoiceById);
         invoices.MapPost("generate-draft", GenerateDraft);
         invoices.MapPut("{id:guid}/lines", ReplaceLines);
-        invoices.MapPost("{id:guid}/send", SendInvoice);
-        invoices.MapPost("{id:guid}/mark-paid", MarkPaid);
+        invoices.MapPost("{id:guid}/mark-entered", MarkEntered);
+        invoices.MapPost("{id:guid}/qbo-reference", UpdateQboReference);
+        invoices.MapPost("{id:guid}/reopen", ReopenInvoice);
         invoices.MapPost("{id:guid}/void", VoidInvoice);
-        invoices.MapPost("{id:guid}/qbo-status", SetQboStatus);
 
         // The billable-trip pool the drafts draw from (uninvoiced view for manual lines).
         app.MapGet("/api/billing/billable-trips", GetBillableTrips).RequireAuthorization();
@@ -128,19 +128,25 @@ public static class BillingEndpoints
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
-    private static async Task<IResult> SendInvoice(
-        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    private static async Task<IResult> MarkEntered(
+        Guid id,
+        MarkEnteredRequest request,
+        ITenantContext tenantContext,
+        ISender sender,
+        CancellationToken cancellationToken)
     {
         if (tenantContext.TenantId is not { } tenantId)
         {
             return Results.Unauthorized();
         }
 
-        var result = await sender.Send(new SendInvoiceCommand(tenantId, id), cancellationToken);
+        var result = await sender.Send(
+            new MarkInvoiceEnteredCommand(tenantId, id, request.QboInvoiceNumber, request.EnteredDate),
+            cancellationToken);
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
-    private static async Task<IResult> MarkPaid(
+    private static async Task<IResult> ReopenInvoice(
         Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
     {
         if (tenantContext.TenantId is not { } tenantId)
@@ -148,7 +154,7 @@ public static class BillingEndpoints
             return Results.Unauthorized();
         }
 
-        var result = await sender.Send(new MarkInvoicePaidCommand(tenantId, id), cancellationToken);
+        var result = await sender.Send(new ReopenInvoiceCommand(tenantId, id), cancellationToken);
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
@@ -164,9 +170,9 @@ public static class BillingEndpoints
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
-    private static async Task<IResult> SetQboStatus(
+    private static async Task<IResult> UpdateQboReference(
         Guid id,
-        SetQboStatusRequest request,
+        QboReferenceRequest request,
         ITenantContext tenantContext,
         ISender sender,
         CancellationToken cancellationToken)
@@ -176,13 +182,9 @@ public static class BillingEndpoints
             return Results.Unauthorized();
         }
 
-        if (!Enum.TryParse<QboSyncStatus>(request.SyncStatus, ignoreCase: true, out var syncStatus))
-        {
-            return EndpointResults.Problem(InvoiceErrors.InvalidQboSyncStatus);
-        }
-
         var result = await sender.Send(
-            new SetInvoiceQboStatusCommand(tenantId, id, request.QboInvoiceId, syncStatus), cancellationToken);
+            new UpdateInvoiceQboReferenceCommand(tenantId, id, request.QboInvoiceNumber, request.EnteredDate),
+            cancellationToken);
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
@@ -220,5 +222,7 @@ public static class BillingEndpoints
 
     public sealed record ReplaceInvoiceLinesRequest(IReadOnlyList<InvoiceLineRequest> Lines);
 
-    public sealed record SetQboStatusRequest(string? QboInvoiceId, string SyncStatus);
+    public sealed record MarkEnteredRequest(string QboInvoiceNumber, DateOnly EnteredDate);
+
+    public sealed record QboReferenceRequest(string QboInvoiceNumber, DateOnly EnteredDate);
 }

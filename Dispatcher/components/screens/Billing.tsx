@@ -4,34 +4,30 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { colors, fonts, rowSurface, statusMeta, type StatusKind } from "@/lib/theme";
 import { ApiError } from "@/lib/api";
 import {
-  arAgingFor,
   defaultBillingPeriod,
   directionMeta,
   formatInvoiceCad,
   generateDraftInvoice,
   getInvoice,
-  invoiceAgeLabel,
   invoiceChip,
+  invoiceClipboardText,
   listBillableTrips,
   listInvoices,
-  markInvoicePaid,
+  markInvoiceEntered,
   periodLabel,
-  qboKindFor,
-  QBO_LABELS,
   refetchUntil,
+  reopenInvoice,
   replaceInvoiceLines,
-  sendInvoice,
-  setInvoiceQboStatus,
   sortInvoices,
+  updateQboReference,
   voidInvoice,
-  daysPastDue,
-  type ArAging,
   type BillableTripRecord,
   type InvoiceDetailRecord,
   type InvoiceLineInput,
   type InvoiceSummaryRecord,
-  type QboSyncStatus,
 } from "@/lib/api/billing";
+import { copyToClipboard } from "@/lib/clipboard";
+import { printInvoicePrepSheet } from "@/lib/documents/invoicePdf";
 import {
   getTrip,
   getTripManifest,
@@ -40,19 +36,20 @@ import {
   type TripManifest,
   type TripRecord,
 } from "@/lib/api/trips";
-import { listClients, type ClientRecord } from "@/lib/api/clients";
+import { getClient, listClients, type ClientRecord } from "@/lib/api/clients";
 import { PageHeader, Panel, SectionLabel } from "@/components/ui/Panel";
 import { StatusBadge, StatusChip } from "@/components/ui/Chip";
 import { ActionButton } from "@/components/ui/Button";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { DateField, NumberField, SelectField, TextField } from "@/components/ui/Field";
 
-// Billing & Invoicing — real invoices from the Billing API (GET /api/billing/
-// invoices). Draft generation pulls uninvoiced completed round trips at the
-// contract rate; lines are editable while Draft only; Overdue and AR aging are
-// frontend derivations of Sent + dueDate (never stored statuses). QuickBooks
-// Online stays a READ-ONLY book of record — the qbo-status endpoint merely
-// records reconciliation state; there is no write path to QBO.
+// Billing Worksheets — prepares invoices for MANUAL entry into QuickBooks
+// Online. Draft generation pulls uninvoiced completed round trips at the
+// contract rate; lines are editable while Draft only. QuickBooks is never
+// called via API: the user copies/prints the numbers, keys them into QBO, then
+// records the resulting QBO invoice number + entered date back here
+// (mark-entered). There is no send / paid / overdue / AR-aging concept —
+// netTermsDays is purely informational.
 
 const cardStyle = {
   padding: "13px 15px",
@@ -61,6 +58,12 @@ const cardStyle = {
   borderRadius: 10,
   boxShadow: colors.shadowCard,
 } as const;
+
+function todayIso(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
 
 function MiniCard({ label, value, mono = true }: { label: string; value: string; mono?: boolean }) {
   return (
@@ -258,6 +261,59 @@ function TripDetailBlock({ tripId, loaded }: { tripId: string; loaded: LoadedTri
   );
 }
 
+/**
+ * Per-line clipboard notes for keying into QuickBooks: the line's amounts plus
+ * one row per trip with its date, direction, and the passengers actually taken
+ * (boarded), with no-shows listed separately. Deadhead legs are called out
+ * explicitly — they ran empty by design, not because passenger data is missing.
+ */
+function lineClipboardText(
+  l: InvoiceDetailRecord["lines"][number],
+  tripDetails: Record<string, LoadedTrip>,
+): string {
+  const out: string[] = [
+    l.description,
+    `Qty ${l.quantity} × ${formatInvoiceCad(l.unitPriceCad)} = ${formatInvoiceCad(l.amountCad)}`,
+  ];
+
+  if (l.tripIds.length === 0) {
+    if (l.serviceDate) out.push(`Service date: ${l.serviceDate}`);
+    return out.join("\n");
+  }
+
+  for (const tid of l.tripIds) {
+    const d = tripDetails[tid];
+    const t = d?.trip;
+    if (!t) {
+      out.push("- trip details unavailable");
+      continue;
+    }
+
+    const head = `- ${t.tripNumber}${t.direction ? ` ${t.direction.toLowerCase()}` : ""} · ${t.serviceDate}`;
+    if (t.isEmptyLeg) {
+      out.push(`${head} — DEADHEAD (ran empty, no passengers)`);
+      continue;
+    }
+
+    const pax = d.manifest?.passengers ?? [];
+    if (d.manifestError) {
+      out.push(`${head} — passengers unavailable`);
+    } else if (!t.manifestId) {
+      out.push(`${head} — no manifest recorded`);
+    } else if (pax.length === 0) {
+      out.push(`${head} — manifest has no passengers`);
+    } else {
+      const taken = pax.filter((p) => p.boardedOn);
+      const noShows = pax.filter((p) => !p.boardedOn);
+      let row = `${head} — passengers (${taken.length}): ${taken.map((p) => p.name).join(", ") || "none boarded"}`;
+      if (noShows.length > 0) row += ` · did not board: ${noShows.map((p) => p.name).join(", ")}`;
+      out.push(row);
+    }
+  }
+
+  return out.join("\n");
+}
+
 function ConfirmModal({
   eyebrow,
   title,
@@ -297,6 +353,79 @@ function ConfirmModal({
       }
     >
       <div style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textSecondary, lineHeight: 1.6 }}>{body}</div>
+    </ModalShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Mark-entered / edit-reference modal — records the QuickBooks invoice number
+// and entered date the user keyed by hand. "enter" (Draft → EnteredInQbo) uses
+// mark-entered; "edit" (correct an already-entered reference) uses qbo-reference.
+// ---------------------------------------------------------------------------
+
+function MarkEnteredModal({
+  inv,
+  mode,
+  onClose,
+  onDone,
+}: {
+  inv: InvoiceDetailRecord;
+  mode: "enter" | "edit";
+  onClose: () => void;
+  onDone: (fresh: InvoiceDetailRecord) => void;
+}) {
+  const [qboNumber, setQboNumber] = useState(inv.qboInvoiceId ?? "");
+  const [enteredDate, setEnteredDate] = useState(inv.qboEnteredDate ?? todayIso());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    if (busy) return;
+    const num = qboNumber.trim();
+    if (!num) return setError("Enter the QuickBooks invoice number you keyed.");
+    if (!enteredDate) return setError("Enter the date you entered it in QuickBooks.");
+    setBusy(true);
+    setError(null);
+    try {
+      if (mode === "edit") await updateQboReference(inv.id, num, enteredDate);
+      else await markInvoiceEntered(inv.id, num, enteredDate);
+      // Eventually consistent read — wait until the recorded reference is visible.
+      const fresh = await refetchUntil(
+        () => getInvoice(inv.id),
+        (d) => d.status === "EnteredInQbo" && d.qboInvoiceId === num,
+      );
+      onDone(fresh);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Failed to record the QuickBooks reference — please try again.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ModalShell
+      eyebrow={`Billing · ${inv.invoiceNumber}`}
+      title={mode === "edit" ? "Edit QuickBooks reference" : "Mark entered in QuickBooks"}
+      onClose={onClose}
+      error={error}
+      maxWidth={480}
+      footer={
+        <>
+          <ActionButton onClick={onClose}>CANCEL</ActionButton>
+          <ActionButton variant="primary" onClick={submit} disabled={busy}>
+            {busy ? "SAVING…" : mode === "edit" ? "SAVE REFERENCE" : "MARK ENTERED"}
+          </ActionButton>
+        </>
+      }
+    >
+      <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textSecondary, lineHeight: 1.6, marginBottom: 14 }}>
+        {mode === "edit"
+          ? `Correct the QuickBooks reference recorded for ${inv.invoiceNumber}.`
+          : `Key ${inv.invoiceNumber} (${formatInvoiceCad(inv.totalCad)}) into QuickBooks Online first — use COPY FOR QUICKBOOKS or PRINT PREP SHEET — then record its QBO invoice number and entered date here.`}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <TextField label="QBO invoice number" value={qboNumber} onChange={setQboNumber} mono placeholder="1042" />
+        <DateField label="Entered date" value={enteredDate} onChange={setEnteredDate} />
+      </div>
     </ModalShell>
   );
 }
@@ -528,23 +657,36 @@ function GenerateDraftModal({
 // the whole set; amounts are server-computed.
 // ---------------------------------------------------------------------------
 
+// Stable client-side line id so line selection survives reordering/removal
+// (a new line has no server lineId yet, and indices shift as lines change).
+let lineUidSeq = 0;
+function newLineUid(): string {
+  return `l${++lineUidSeq}`;
+}
+
 interface EditableLine {
+  uid: string;
   lineId: string | null;
   description: string;
   tripIds: string[];
   tripNumber: string | null;
   serviceDate: string | null;
+  /** Display labels (trip numbers) for the trips this line prices — one for a
+   *  single leg, several once legs are combined into a round-trip line. */
+  tripLabels: string[];
   quantity: string;
   unitPriceCad: string;
 }
 
 function toEditable(l: InvoiceDetailRecord["lines"][number]): EditableLine {
   return {
+    uid: newLineUid(),
     lineId: l.lineId,
     description: l.description,
     tripIds: l.tripIds,
     tripNumber: l.tripNumber,
     serviceDate: l.serviceDate,
+    tripLabels: l.tripNumber ? [l.tripNumber] : [],
     quantity: String(l.quantity),
     unitPriceCad: String(l.unitPriceCad),
   };
@@ -564,6 +706,11 @@ function LineEditor({
   const [poolError, setPoolError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Line uids ticked for combining into a single round-trip line.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Contract round-trip rate — pre-fills the price when combining legs (null
+  // when unavailable or not a RoundTripRate contract; the user then types it).
+  const [roundTripRate, setRoundTripRate] = useState<number | null>(null);
 
   // Uninvoiced billable trips for this client — attachable as new lines.
   useEffect(() => {
@@ -581,6 +728,26 @@ function LineEditor({
     };
   }, [inv.clientId]);
 
+  // Best-effort contract round-trip rate for pre-filling combined lines.
+  useEffect(() => {
+    let active = true;
+    getClient(inv.clientId).then(
+      (c) => {
+        if (active && c.activeContract?.billingModel === "RoundTripRate") {
+          setRoundTripRate(c.activeContract.ratePerRoundTripCad);
+        }
+      },
+      () => {
+        /* rate stays null — the user enters the price */
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [inv.clientId]);
+
+  const poolById = useMemo(() => new Map((pool ?? []).map((t) => [t.id, t])), [pool]);
+
   function patch(i: number, part: Partial<EditableLine>) {
     setLines((prev) => prev.map((l, j) => (j === i ? { ...l, ...part } : l)));
   }
@@ -588,7 +755,17 @@ function LineEditor({
   function addManualLine() {
     setLines((prev) => [
       ...prev,
-      { lineId: null, description: "", tripIds: [], tripNumber: null, serviceDate: null, quantity: "1", unitPriceCad: "" },
+      {
+        uid: newLineUid(),
+        lineId: null,
+        description: "",
+        tripIds: [],
+        tripNumber: null,
+        serviceDate: null,
+        tripLabels: [],
+        quantity: "1",
+        unitPriceCad: "",
+      },
     ]);
   }
 
@@ -596,19 +773,80 @@ function LineEditor({
     setLines((prev) => [
       ...prev,
       {
+        uid: newLineUid(),
         lineId: null,
         description: `${t.routeName} — ${t.tripNumber}`,
         tripIds: [t.id],
         tripNumber: t.tripNumber,
         serviceDate: t.serviceDate,
+        tripLabels: [t.tripNumber],
         quantity: "1",
         unitPriceCad: "",
       },
     ]);
   }
 
+  function removeLine(uid: string) {
+    setLines((prev) => prev.filter((l) => l.uid !== uid));
+    setSelected((prev) => {
+      if (!prev.has(uid)) return prev;
+      const next = new Set(prev);
+      next.delete(uid);
+      return next;
+    });
+  }
+
+  function toggleSelect(uid: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(uid)) next.delete(uid);
+      else next.add(uid);
+      return next;
+    });
+  }
+
+  // Combine the ticked lines (≥2) into one round-trip line: unions their trips,
+  // prices once at the contract round-trip rate (falling back to the richest
+  // merged leg price), and drops the originals. The net trip set is unchanged,
+  // so trip claims are untouched when the draft is saved.
+  function combineSelected() {
+    const chosen = lines.filter((l) => selected.has(l.uid));
+    if (chosen.length < 2) return;
+    const tripIds = Array.from(new Set(chosen.flatMap((l) => l.tripIds)));
+    const tripLabels = Array.from(
+      new Set([
+        ...chosen.flatMap((l) => l.tripLabels),
+        ...tripIds.map((id) => poolById.get(id)?.tripNumber).filter((n): n is string => !!n),
+      ]),
+    );
+    const routes = Array.from(
+      new Set(tripIds.map((id) => poolById.get(id)?.routeName).filter((r): r is string => !!r)),
+    );
+    const description = routes.length === 1 ? `Round trip · ${routes[0]}` : "Round trip";
+    const mergedPrices = chosen
+      .map((l) => Number(l.unitPriceCad))
+      .filter((n) => !Number.isNaN(n) && n > 0);
+    const price = roundTripRate ?? (mergedPrices.length ? Math.max(...mergedPrices) : NaN);
+    const serviceDate =
+      chosen.map((l) => l.serviceDate).filter((d): d is string => !!d).sort()[0] ?? null;
+    const combined: EditableLine = {
+      uid: newLineUid(),
+      lineId: null,
+      description,
+      tripIds,
+      tripNumber: null,
+      serviceDate,
+      tripLabels,
+      quantity: "1",
+      unitPriceCad: Number.isNaN(price) ? "" : String(price),
+    };
+    setLines((prev) => [...prev.filter((l) => !selected.has(l.uid)), combined]);
+    setSelected(new Set());
+  }
+
   const attachedTripIds = new Set(lines.flatMap((l) => l.tripIds));
   const attachable = (pool ?? []).filter((t) => !attachedTripIds.has(t.id));
+  const selectedCount = lines.reduce((n, l) => (selected.has(l.uid) ? n + 1 : n), 0);
 
   async function save() {
     if (busy) return;
@@ -683,27 +921,52 @@ function LineEditor({
           !Number.isNaN(qty) && !Number.isNaN(price) && l.unitPriceCad !== ""
             ? formatInvoiceCad(Math.round(qty * price * 100) / 100)
             : "—";
+        const isSel = selected.has(l.uid);
+        const isRoundTrip = l.tripIds.length > 1;
         return (
           <div
-            key={l.lineId ?? `new-${i}`}
+            key={l.uid}
             style={{
               display: "grid",
-              gridTemplateColumns: "minmax(0,1fr) 84px 110px 92px 34px",
+              gridTemplateColumns: "26px minmax(0,1fr) 84px 110px 92px 34px",
               gap: 9,
               alignItems: "end",
               marginBottom: 9,
             }}
           >
+            <div
+              onClick={() => toggleSelect(l.uid)}
+              title={isSel ? "Deselect line" : "Select to combine into a round trip"}
+              style={{ height: 40, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+            >
+              <span
+                aria-hidden
+                style={{
+                  width: 16,
+                  height: 16,
+                  borderRadius: 4,
+                  border: `1.5px solid ${isSel ? statusMeta("info").t : colors.borderStrong}`,
+                  background: isSel ? statusMeta("info").t : "transparent",
+                  color: "#fff",
+                  fontSize: 11,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                {isSel ? "✓" : ""}
+              </span>
+            </div>
             <TextField
               label={i === 0 ? "Description" : `Line ${i + 1}`}
               value={l.description}
               onChange={(v) => patch(i, { description: v })}
               placeholder="Corridor round trip · Thompson → Lynn Lake"
               hint={
-                l.tripNumber ? (
+                l.tripLabels.length > 0 ? (
                   <span style={{ fontFamily: fonts.mono, color: colors.textFaint }}>
-                    {l.tripNumber}
-                    {l.serviceDate ? ` · ${l.serviceDate}` : ""}
+                    {l.tripLabels.join(" + ")}
+                    {isRoundTrip ? " · round trip" : l.serviceDate ? ` · ${l.serviceDate}` : ""}
                   </span>
                 ) : undefined
               }
@@ -733,7 +996,7 @@ function LineEditor({
               </div>
             </div>
             <div
-              onClick={() => setLines((prev) => prev.filter((_, j) => j !== i))}
+              onClick={() => removeLine(l.uid)}
               title="Remove line"
               style={{
                 height: 40,
@@ -754,8 +1017,20 @@ function LineEditor({
         );
       })}
 
-      <div style={{ display: "flex", gap: 9, marginTop: 4 }}>
+      <div style={{ display: "flex", gap: 9, marginTop: 4, alignItems: "center", flexWrap: "wrap" }}>
         <ActionButton onClick={addManualLine}>+ ADD MANUAL LINE</ActionButton>
+        <ActionButton
+          onClick={combineSelected}
+          disabled={selectedCount < 2}
+          style={selectedCount < 2 ? { opacity: 0.45, cursor: "not-allowed" } : undefined}
+        >
+          ⇄ COMBINE AS ROUND TRIP{selectedCount >= 2 ? ` (${selectedCount})` : ""}
+        </ActionButton>
+        <span style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim }}>
+          {selectedCount >= 2
+            ? "Bills the ticked legs once at the round-trip rate."
+            : "Tip: tick two legs (outbound + inbound) to bill them as one round trip."}
+        </span>
       </div>
 
       {/* attachable uninvoiced billable trips */}
@@ -828,12 +1103,10 @@ function LineEditor({
 
 function InvoiceDetail({
   id,
-  aging,
   onMutated,
 }: {
   id: string;
-  aging: ArAging;
-  /** List-affecting change (status/QBO/lines) — parent refreshes the list. */
+  /** List-affecting change (status/QBO reference/lines) — parent refreshes the list. */
   onMutated: () => void;
 }) {
   const [inv, setInv] = useState<InvoiceDetailRecord | null>(null);
@@ -841,12 +1114,11 @@ function InvoiceDetail({
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [confirm, setConfirm] = useState<"send" | "void" | "paid" | null>(null);
-
-  // QBO reconcile control (records state only — QBO stays read-only).
-  const [qboOpen, setQboOpen] = useState(false);
-  const [qboId, setQboId] = useState("");
-  const [qboStatus, setQboStatus] = useState<QboSyncStatus>("NotSynced");
+  const [confirm, setConfirm] = useState<"void" | "reopen" | null>(null);
+  const [markMode, setMarkMode] = useState<"enter" | "edit" | null>(null);
+  const [copyState, setCopyState] = useState<"idle" | "ok" | "fail">("idle");
+  // Per-line copy feedback: the lineId that was just copied (cleared after 2s).
+  const [copiedLine, setCopiedLine] = useState<string | null>(null);
 
   // Live trip + passenger detail, keyed by trip id, fetched from the Trips API
   // (never snapshotted onto the invoice). Cached for this mount; the component
@@ -855,7 +1127,7 @@ function InvoiceDetail({
   const [expandedLines, setExpandedLines] = useState<Record<string, boolean>>({});
 
   // Distinct trip ids across all lines, as a stable comma-joined key so a
-  // status/QBO mutation (which does not touch tripIds) never refetches.
+  // status/reference mutation (which does not touch tripIds) never refetches.
   const tripIdsKey = useMemo(() => {
     if (!inv) return "";
     return Array.from(new Set(inv.lines.flatMap((l) => l.tripIds)))
@@ -929,23 +1201,13 @@ function InvoiceDetail({
     };
   }, [id]);
 
-  function openQbo() {
-    if (!inv) return;
-    setQboId(inv.qboInvoiceId ?? "");
-    setQboStatus(inv.qboSyncStatus);
-    setQboOpen(true);
-  }
-
-  async function runStatusAction(action: "send" | "void" | "paid") {
+  async function runVoid() {
     if (!inv || busy) return;
-    const target = action === "send" ? "Sent" : action === "void" ? "Void" : "Paid";
     setBusy(true);
     setActionError(null);
     try {
-      if (action === "send") await sendInvoice(inv.id);
-      else if (action === "void") await voidInvoice(inv.id);
-      else await markInvoicePaid(inv.id);
-      const fresh = await refetchUntil(() => getInvoice(inv.id), (d) => d.status === target);
+      await voidInvoice(inv.id);
+      const fresh = await refetchUntil(() => getInvoice(inv.id), (d) => d.status === "Void");
       setInv(fresh);
       setConfirm(null);
       onMutated();
@@ -956,24 +1218,36 @@ function InvoiceDetail({
     setBusy(false);
   }
 
-  async function applyQbo() {
+  async function runReopen() {
     if (!inv || busy) return;
     setBusy(true);
     setActionError(null);
-    const nextId = qboId.trim() || null;
     try {
-      await setInvoiceQboStatus(inv.id, nextId, qboStatus);
-      const fresh = await refetchUntil(
-        () => getInvoice(inv.id),
-        (d) => d.qboSyncStatus === qboStatus && d.qboInvoiceId === nextId,
-      );
+      await reopenInvoice(inv.id);
+      const fresh = await refetchUntil(() => getInvoice(inv.id), (d) => d.status === "Draft");
       setInv(fresh);
-      setQboOpen(false);
+      setConfirm(null);
       onMutated();
     } catch (e) {
-      setActionError(e instanceof ApiError ? e.message : "Failed to record the QBO state — please try again.");
+      setActionError(e instanceof ApiError ? e.message : "The action failed — please try again.");
+      setConfirm(null);
     }
     setBusy(false);
+  }
+
+  async function handleCopy() {
+    if (!inv) return;
+    const ok = await copyToClipboard(invoiceClipboardText(inv));
+    setCopyState(ok ? "ok" : "fail");
+    setTimeout(() => setCopyState("idle"), ok ? 2000 : 4500);
+  }
+
+  async function handleCopyLine(l: InvoiceDetailRecord["lines"][number]) {
+    const ok = await copyToClipboard(lineClipboardText(l, tripDetails));
+    setCopiedLine(ok ? l.lineId : null);
+    if (ok) {
+      setTimeout(() => setCopiedLine((cur) => (cur === l.lineId ? null : cur)), 2000);
+    }
   }
 
   if (loadError) {
@@ -1012,9 +1286,7 @@ function InvoiceDetail({
 
   const chip = invoiceChip(inv);
   const isDraft = inv.status === "Draft";
-  const overdueDays = inv.isOverdue ? daysPastDue(inv.dueDate) : null;
-  const unmatched = inv.qboSyncStatus === "UnmatchedPayment";
-  const qm = statusMeta(qboKindFor(inv.qboSyncStatus));
+  const isEntered = inv.status === "EnteredInQbo";
 
   return (
     <div className="detailfade" key={inv.id}>
@@ -1040,43 +1312,6 @@ function InvoiceDetail({
       {actionError && (
         <div style={{ marginBottom: 12 }}>
           <StatusChip kind="over" label={actionError} />
-        </div>
-      )}
-
-      {/* alert banners — driven by real derived fields */}
-      {inv.isOverdue && (
-        <div
-          style={{
-            padding: "11px 14px",
-            background: "rgba(213,94,0,.1)",
-            border: "1px solid rgba(213,94,0,.4)",
-            borderRadius: 9,
-            marginBottom: 14,
-            fontFamily: fonts.body,
-            fontSize: 12.5,
-            color: statusMeta("over").t,
-            fontWeight: 600,
-          }}
-        >
-          ▲ Overdue{overdueDays != null ? ` ${overdueDays}d past due` : ""} · net {inv.netTermsDays} terms
-          {inv.dueDate ? ` · was due ${inv.dueDate}` : ""} · follow-up recommended
-        </div>
-      )}
-      {unmatched && (
-        <div
-          style={{
-            padding: "11px 14px",
-            background: "rgba(225,176,0,.09)",
-            border: "1px solid rgba(225,176,0,.3)",
-            borderRadius: 9,
-            marginBottom: 14,
-            fontFamily: fonts.body,
-            fontSize: 12.5,
-            color: statusMeta("soon").t,
-            fontWeight: 600,
-          }}
-        >
-          ◐ Unmatched payment in QBO — reconcile manually, then record the match below (QBO stays read-only)
         </div>
       )}
 
@@ -1129,6 +1364,9 @@ function InvoiceDetail({
           {inv.lines.map((l) => {
             const hasTrips = l.tripIds.length > 0;
             const expanded = expandedLines[l.lineId] ?? false;
+            // Copy waits for the line's trip+passenger details so the notes
+            // are complete (dates, passengers taken, deadhead call-outs).
+            const copyReady = l.tripIds.every((tid) => tripDetails[tid]);
             return (
               <div key={l.lineId} style={{ borderBottom: `1px solid ${colors.borderSubtle}` }}>
                 <div
@@ -1174,6 +1412,30 @@ function InvoiceDetail({
                         {l.tripIds.length} trip{l.tripIds.length === 1 ? "" : "s"} · passengers
                       </span>
                     )}
+                    <span
+                      onClick={() => copyReady && void handleCopyLine(l)}
+                      title={
+                        copyReady
+                          ? "Copy this line for QuickBooks — dates, passengers taken, deadhead notes"
+                          : "Loading trip & passenger details…"
+                      }
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
+                        marginLeft: 8,
+                        cursor: copyReady ? "pointer" : "default",
+                        fontFamily: fonts.semiCondensed,
+                        fontSize: 9.5,
+                        letterSpacing: ".06em",
+                        textTransform: "uppercase",
+                        color: copyReady ? colors.skyBlue : colors.textFaint,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      <span aria-hidden>⧉</span>
+                      {copiedLine === l.lineId ? "COPIED ✓" : "COPY"}
+                    </span>
                   </span>
                   <span style={{ fontFamily: fonts.mono, color: colors.textDim, flex: "none" }}>
                     {l.quantity} × {formatInvoiceCad(l.unitPriceCad)}
@@ -1234,105 +1496,92 @@ function InvoiceDetail({
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 12 }}>
         <MiniCard label="PO match" value={inv.poNumber ?? "—"} />
         <MiniCard label="Budget code (ZBB)" value={inv.budgetCode ?? "—"} />
-        <MiniCard
-          label="Terms"
-          value={`Net ${inv.netTermsDays}${inv.dueDate ? ` · due ${inv.dueDate}` : ""}`}
-        />
+        <MiniCard label="Terms (informational)" value={`Net ${inv.netTermsDays}`} />
       </div>
 
-      {/* QBO sync card — reconciliation state only, no write path */}
-      <div style={{ ...cardStyle, marginBottom: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      {/* QuickBooks entry card — where the manual QBO reference is recorded */}
+      <div style={{ ...cardStyle, marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim, marginBottom: 5 }}>
-              QBO sync · read-only book of record
+              QuickBooks entry
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
-              <StatusChip kind={qboKindFor(inv.qboSyncStatus)} label={QBO_LABELS[inv.qboSyncStatus]} />
-              <span style={{ fontFamily: fonts.mono, fontSize: 11, color: qm.t }}>{inv.qboInvoiceId ?? "no QBO id"}</span>
-            </div>
+            {isEntered ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+                <StatusChip kind="ontime" label="Entered in QBO" />
+                <span style={{ fontFamily: fonts.mono, fontSize: 11.5, color: colors.textSecondary }}>
+                  {inv.qboInvoiceId ?? "—"}
+                </span>
+                {inv.qboEnteredDate && (
+                  <span style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim }}>
+                    entered {inv.qboEnteredDate}
+                  </span>
+                )}
+              </div>
+            ) : isDraft ? (
+              <div style={{ fontFamily: fonts.body, fontSize: 12, color: statusMeta("soon").t, fontWeight: 600 }}>
+                Not yet entered in QuickBooks
+              </div>
+            ) : (
+              <StatusChip kind="off" label="Void — nothing to enter" />
+            )}
           </div>
-          {!qboOpen && (
-            <ActionButton onClick={openQbo} style={{ padding: "4px 10px", fontSize: 12 }}>
-              RECORD RECONCILIATION
+          {isDraft && (
+            <ActionButton variant="primary" onClick={() => setMarkMode("enter")} style={{ padding: "4px 10px", fontSize: 12 }}>
+              MARK ENTERED
             </ActionButton>
           )}
-        </div>
-        {qboOpen && (
-          <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr auto auto", gap: 9, alignItems: "end" }}>
-            <TextField label="QBO invoice id" value={qboId} onChange={setQboId} mono placeholder="QBO-10422" />
-            <SelectField
-              label="Reconciliation state"
-              value={qboStatus}
-              onChange={(v) => setQboStatus(v as QboSyncStatus)}
-              options={(Object.keys(QBO_LABELS) as QboSyncStatus[]).map((s) => ({ value: s, label: QBO_LABELS[s] }))}
-            />
-            <ActionButton variant="primary" onClick={applyQbo} disabled={busy}>
-              {busy ? "SAVING…" : "APPLY"}
+          {isEntered && (
+            <ActionButton onClick={() => setMarkMode("edit")} style={{ padding: "4px 10px", fontSize: 12 }}>
+              EDIT QBO REFERENCE
             </ActionButton>
-            <ActionButton onClick={() => setQboOpen(false)}>CANCEL</ActionButton>
-          </div>
-        )}
-      </div>
-
-      {/* AR aging — computed client-side from the live invoice list */}
-      <div style={{ padding: "15px 16px", background: colors.cardBg, border: `1px solid ${colors.border}`, borderRadius: 11, marginBottom: 16, boxShadow: colors.shadowCard }}>
-        <SectionLabel>AR aging · outstanding (Sent) invoices by days past due</SectionLabel>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
-          <div>
-            <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 20, color: statusMeta("ontime").t, fontVariantNumeric: "tabular-nums" }}>
-              {formatInvoiceCad(aging.current)}
-            </div>
-            <div style={{ fontFamily: fonts.body, fontSize: 10.5, color: colors.textDim }}>Current · 0–30</div>
-          </div>
-          <div>
-            <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 20, color: statusMeta("soon").t, fontVariantNumeric: "tabular-nums" }}>
-              {formatInvoiceCad(aging.days31to60)}
-            </div>
-            <div style={{ fontFamily: fonts.body, fontSize: 10.5, color: colors.textDim }}>31–60</div>
-          </div>
-          <div>
-            <div style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 20, color: statusMeta("over").t, fontVariantNumeric: "tabular-nums" }}>
-              {formatInvoiceCad(aging.days61plus)}
-            </div>
-            <div style={{ fontFamily: fonts.body, fontSize: 10.5, color: colors.textDim }}>61+</div>
-          </div>
+          )}
         </div>
       </div>
 
       {/* actions */}
-      <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 9, flexWrap: "wrap", alignItems: "center" }}>
         {isDraft && (
           <>
-            <ActionButton variant="primary" onClick={() => setConfirm("send")}>
-              REVIEW &amp; SEND
+            <ActionButton onClick={handleCopy}>
+              {copyState === "ok" ? "COPIED ✓" : "COPY FOR QUICKBOOKS"}
+            </ActionButton>
+            <ActionButton onClick={() => printInvoicePrepSheet(inv)}>PRINT PREP SHEET</ActionButton>
+            <ActionButton variant="primary" onClick={() => setMarkMode("enter")}>
+              MARK ENTERED IN QUICKBOOKS
             </ActionButton>
             <ActionButton variant="destructive" onClick={() => setConfirm("void")}>
               VOID DRAFT
             </ActionButton>
           </>
         )}
-        {inv.status === "Sent" && (
-          <ActionButton variant="success" onClick={() => setConfirm("paid")}>
-            ✓ MARK PAID
-          </ActionButton>
+        {isEntered && (
+          <>
+            <ActionButton onClick={handleCopy}>
+              {copyState === "ok" ? "COPIED ✓" : "COPY FOR QUICKBOOKS"}
+            </ActionButton>
+            <ActionButton onClick={() => printInvoicePrepSheet(inv)}>PRINT PREP SHEET</ActionButton>
+            <ActionButton onClick={() => setMarkMode("edit")}>EDIT QBO REFERENCE</ActionButton>
+            <ActionButton onClick={() => setConfirm("reopen")}>REOPEN</ActionButton>
+          </>
         )}
-        {/* TODO(billing): PDF export & QBO deep link — placeholders until a
-            document pipeline / QBO id-to-URL mapping exists. Disabled on
-            purpose; no backend endpoint yet. */}
-        <ActionButton style={{ opacity: 0.45, cursor: "not-allowed" }}>EXPORT PDF</ActionButton>
-        <ActionButton style={{ opacity: 0.45, cursor: "not-allowed" }}>VIEW IN QBO</ActionButton>
+        {copyState === "fail" && (
+          <span style={{ fontFamily: fonts.body, fontSize: 11.5, color: statusMeta("over").t }}>
+            Copy failed — select the prep sheet text to copy manually.
+          </span>
+        )}
       </div>
 
-      {confirm === "send" && (
-        <ConfirmModal
-          eyebrow={`Billing · ${inv.invoiceNumber}`}
-          title="Send invoice?"
-          body={`Send ${inv.invoiceNumber} (${formatInvoiceCad(inv.totalCad)}) to ${inv.clientName}? Lines lock once sent — net ${inv.netTermsDays} terms start today.`}
-          confirmLabel="SEND INVOICE"
-          busy={busy}
-          onConfirm={() => runStatusAction("send")}
-          onClose={() => setConfirm(null)}
+      {markMode !== null && (
+        <MarkEnteredModal
+          inv={inv}
+          mode={markMode}
+          onClose={() => setMarkMode(null)}
+          onDone={(fresh) => {
+            setInv(fresh);
+            setMarkMode(null);
+            onMutated();
+          }}
         />
       )}
       {confirm === "void" && (
@@ -1343,18 +1592,18 @@ function InvoiceDetail({
           confirmLabel="VOID DRAFT"
           destructive
           busy={busy}
-          onConfirm={() => runStatusAction("void")}
+          onConfirm={runVoid}
           onClose={() => setConfirm(null)}
         />
       )}
-      {confirm === "paid" && (
+      {confirm === "reopen" && (
         <ConfirmModal
           eyebrow={`Billing · ${inv.invoiceNumber}`}
-          title="Mark paid?"
-          body={`Record ${inv.invoiceNumber} (${formatInvoiceCad(inv.totalCad)}) as paid by ${inv.clientName}?`}
-          confirmLabel="MARK PAID"
+          title="Reopen to draft?"
+          body={`Reopen ${inv.invoiceNumber} back to Draft? This clears the recorded QuickBooks reference here — it does not change anything in QuickBooks. Use this if the QBO entry was a mistake and needs re-keying.`}
+          confirmLabel="REOPEN TO DRAFT"
           busy={busy}
-          onConfirm={() => runStatusAction("paid")}
+          onConfirm={runReopen}
           onClose={() => setConfirm(null)}
         />
       )}
@@ -1416,13 +1665,11 @@ export default function Billing({
     setInvoiceSelId(rows.length > 0 ? rows[0].id : null);
   }, [rows, invoiceSelId, setInvoiceSelId]);
 
-  const aging = useMemo(() => arAgingFor(rows ?? []), [rows]);
-
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }} className="detailfade">
       <div style={{ flex: "none", padding: "20px 26px 12px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-          <PageHeader eyebrow="Business · Invoicing & QBO reconciliation" title="Billing & Invoicing" />
+          <PageHeader eyebrow="Business · Prepare invoices for QuickBooks" title="Billing Worksheets" />
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div
               style={{
@@ -1438,10 +1685,10 @@ export default function Billing({
               <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#009E73" }} />
               <div style={{ lineHeight: 1.3 }}>
                 <div style={{ fontFamily: fonts.body, fontSize: 11.5, fontWeight: 600, color: colors.skyBlue }}>
-                  QuickBooks Online · read-only book of record
+                  QuickBooks is your invoicing system
                 </div>
                 <div style={{ fontFamily: fonts.mono, fontSize: 9.5, color: colors.textDim }}>
-                  Reconciliation recorded here · no write path
+                  Prepare here · enter there · record the QBO number back
                 </div>
               </div>
             </div>
@@ -1525,7 +1772,6 @@ export default function Billing({
               {rows.map((row) => {
                 const active = row.id === invoiceSelId;
                 const chip = invoiceChip(row);
-                const qm = statusMeta(qboKindFor(row.qboSyncStatus));
                 return (
                   <div
                     key={row.id}
@@ -1542,17 +1788,11 @@ export default function Billing({
                   >
                     <div>
                       <div style={{ fontFamily: fonts.mono, fontSize: 11.5, color: colors.skyBlue }}>{row.invoiceNumber}</div>
-                      <div
-                        style={{
-                          fontFamily: fonts.semiCondensed,
-                          fontSize: 10,
-                          letterSpacing: ".05em",
-                          textTransform: "uppercase",
-                          color: qm.t,
-                        }}
-                      >
-                        {QBO_LABELS[row.qboSyncStatus]}
-                      </div>
+                      {row.status === "EnteredInQbo" && row.qboInvoiceId && (
+                        <div style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.textDim }}>
+                          QBO {row.qboInvoiceId}
+                        </div>
+                      )}
                     </div>
                     <div style={{ minWidth: 0 }}>
                       <div
@@ -1576,7 +1816,7 @@ export default function Billing({
                     <div>
                       <StatusChip kind={chip.kind} label={chip.label} />
                       <div style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.textDim, marginTop: 3 }}>
-                        {invoiceAgeLabel(row)}
+                        {row.status === "EnteredInQbo" && row.qboEnteredDate ? row.qboEnteredDate : "—"}
                       </div>
                     </div>
                   </div>
@@ -1589,12 +1829,12 @@ export default function Billing({
         {/* detail */}
         <div style={{ minHeight: 0, overflowY: "auto", padding: "22px 26px", background: colors.detailBg }}>
           {invoiceSelId ? (
-            <InvoiceDetail key={invoiceSelId} id={invoiceSelId} aging={aging} onMutated={load} />
+            <InvoiceDetail key={invoiceSelId} id={invoiceSelId} onMutated={load} />
           ) : (
             rows !== null &&
             !loadError && (
               <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textDim }}>
-                Select an invoice to see its lines, QBO reconciliation, and actions.
+                Select an invoice to see its lines, QuickBooks entry, and actions.
               </div>
             )
           )}

@@ -18,6 +18,11 @@ internal sealed class BillableTripRepository(BillingDbContext context) : IBillab
             .IgnoreQueryFilters()
             .AnyAsync(t => t.TenantId == tenantId && t.Id == tripId, cancellationToken);
 
+    public Task<BillableTrip?> GetAsync(Guid tenantId, Guid tripId, CancellationToken cancellationToken = default) =>
+        context.BillableTrips
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(t => t.TenantId == tenantId && t.Id == tripId, cancellationToken);
+
     public void Add(BillableTrip trip) => context.BillableTrips.Add(trip);
 
     public async Task<IReadOnlyList<BillableTrip>> GetUninvoicedForClientAsync(

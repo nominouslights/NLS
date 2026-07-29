@@ -6,6 +6,7 @@ import { PageHeader, Panel, SectionLabel } from "@/components/ui/Panel";
 import { ActionButton } from "@/components/ui/Button";
 import { generateAdminInvite, type AdminInvite } from "@/lib/auth";
 import { ApiError } from "@/lib/api";
+import { copyToClipboard } from "@/lib/clipboard";
 
 const TABS = ["Organization", "Users & Roles", "Budget Codes", "Rate Schedules", "Connectors", "Audit Log"];
 
@@ -71,13 +72,9 @@ export default function Settings() {
 
   async function handleCopyInvite() {
     if (!invite) return;
-    try {
-      await navigator.clipboard.writeText(invite.token);
-      setInviteCopied(true);
-    } catch {
-      // Clipboard unavailable (permissions/insecure context) — the token text
-      // below stays selectable for manual copying.
-    }
+    // On failure (permissions/insecure context) the token text below stays
+    // selectable for manual copying.
+    if (await copyToClipboard(invite.token)) setInviteCopied(true);
   }
 
   return (

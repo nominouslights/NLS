@@ -35,6 +35,16 @@ public sealed class AttachManifestToTripCommandHandler(
             return Result.Success();
         }
 
+        if (trip.IsEmptyLeg)
+        {
+            // Defense in depth behind the create-time guard: a deadhead never carries a
+            // manifest, so a number-matching manifest is left unlinked rather than attached.
+            logger.LogWarning(
+                "Trips skipped attaching manifest {ManifestId} to deadhead trip {TripNumber} ({TripId}); empty legs carry no manifest",
+                manifest.Id, trip.TripNumber, trip.Id);
+            return Result.Success();
+        }
+
         var result = trip.AttachManifest(manifest.Id);
         if (result.IsFailure)
         {

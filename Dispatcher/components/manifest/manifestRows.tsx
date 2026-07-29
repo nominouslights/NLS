@@ -14,6 +14,14 @@ import { ActionButton } from "@/components/ui/Button";
 export const MAX_PASSENGER_ROWS = 8;
 export const MAX_CARGO_ROWS = 8;
 
+/** The passenger cap for a trip: the assigned unit's seating capacity when
+ *  known, else the classic 8-row default (also the printed form's blank-row
+ *  floor). Different units seat different numbers, so the cap tracks the
+ *  vehicle rather than a flat constant. */
+export function passengerCapFor(seatingCapacity: number | null | undefined): number {
+  return seatingCapacity && seatingCapacity > 0 ? seatingCapacity : MAX_PASSENGER_ROWS;
+}
+
 /** A pickable stop on the trip's route — id may be null for free-text stops. */
 export interface StopOption {
   stopId: string | null;
@@ -95,8 +103,13 @@ export function cargoRowsFromManifest(cargo: ManifestCargo[]): CargoRow[] {
   }));
 }
 
-/** Convert editor rows to the wire ManifestPassenger[] (names required). */
-export function paxRowsToWire(rows: PaxRow[], stops: StopOption[]): ManifestPassenger[] {
+/** Convert editor rows to the wire ManifestPassenger[] (names required). The cap
+ *  clamps to the trip's passenger capacity (default 8 when unknown). */
+export function paxRowsToWire(
+  rows: PaxRow[],
+  stops: StopOption[],
+  maxRows: number = MAX_PASSENGER_ROWS,
+): ManifestPassenger[] {
   const stopAt = (idx: string): StopOption | null => {
     if (idx === "") return null;
     const n = Number(idx);
@@ -104,7 +117,7 @@ export function paxRowsToWire(rows: PaxRow[], stops: StopOption[]): ManifestPass
   };
   return rows
     .filter((p) => p.name.trim())
-    .slice(0, MAX_PASSENGER_ROWS)
+    .slice(0, maxRows)
     .map((p) => {
       const pickup = stopAt(p.pickupIdx);
       const dropoff = stopAt(p.dropoffIdx);
@@ -144,10 +157,16 @@ export function PassengerRowsEditor({
   rows,
   stops,
   onChange,
+  maxRows = MAX_PASSENGER_ROWS,
+  readOnly = false,
 }: {
   rows: PaxRow[];
   stops: StopOption[];
   onChange: (rows: PaxRow[]) => void;
+  /** Passenger cap — the assigned unit's seat capacity (default 8). */
+  maxRows?: number;
+  /** Display-only (e.g. a completed trip) — inputs disabled, no add/remove. */
+  readOnly?: boolean;
 }) {
   const stopOptions = [
     { value: "", label: "— none —" },
@@ -166,8 +185,8 @@ export function PassengerRowsEditor({
         >
           <div style={{ display: "grid", gridTemplateColumns: "24px 1.4fr 1.2fr", gap: 10, alignItems: "end" }}>
             <div style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.textDim, paddingBottom: 12 }}>{i + 1}</div>
-            <TextField label="Passenger name" value={p.name} onChange={(v) => patch(i, { name: v })} />
-            <TextField label="Email / phone" value={p.contact} onChange={(v) => patch(i, { contact: v })} />
+            <TextField label="Passenger name" value={p.name} onChange={(v) => patch(i, { name: v })} disabled={readOnly} />
+            <TextField label="Email / phone" value={p.contact} onChange={(v) => patch(i, { contact: v })} disabled={readOnly} />
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto auto", gap: 10, marginTop: 9, alignItems: "end" }}>
             <SelectField
@@ -175,31 +194,35 @@ export function PassengerRowsEditor({
               value={p.pickupIdx}
               onChange={(v) => patch(i, { pickupIdx: v })}
               options={stopOptions}
+              disabled={readOnly}
             />
             <SelectField
               label="Drop-off stop"
               value={p.dropoffIdx}
               onChange={(v) => patch(i, { dropoffIdx: v })}
               options={stopOptions}
+              disabled={readOnly}
             />
             <div style={{ display: "flex", gap: 6, paddingBottom: 6 }}>
-              <OptChip active={p.idVerified} label="ID verified" onClick={() => patch(i, { idVerified: !p.idVerified })} />
-              <OptChip active={p.boardedOn} label="On" onClick={() => patch(i, { boardedOn: !p.boardedOn })} />
-              <OptChip active={p.boardedOff} label="Off" onClick={() => patch(i, { boardedOff: !p.boardedOff })} />
+              <OptChip active={p.idVerified} label="ID verified" onClick={() => patch(i, { idVerified: !p.idVerified })} disabled={readOnly} />
+              <OptChip active={p.boardedOn} label="On" onClick={() => patch(i, { boardedOn: !p.boardedOn })} disabled={readOnly} />
+              <OptChip active={p.boardedOff} label="Off" onClick={() => patch(i, { boardedOff: !p.boardedOff })} disabled={readOnly} />
             </div>
-            <div style={{ paddingBottom: 6 }}>
-              <RemoveButton onClick={() => onChange(rows.filter((_, x) => x !== i))} />
-            </div>
+            {!readOnly && (
+              <div style={{ paddingBottom: 6 }}>
+                <RemoveButton onClick={() => onChange(rows.filter((_, x) => x !== i))} />
+              </div>
+            )}
           </div>
         </div>
       ))}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 4 }}>
-        {rows.length < MAX_PASSENGER_ROWS && (
+        {!readOnly && rows.length < maxRows && (
           <ActionButton onClick={() => onChange([...rows, emptyPax()])}>+ ADD PASSENGER</ActionButton>
         )}
         <span style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textDim }}>
           Passengers: <span style={{ fontFamily: fonts.mono, color: colors.textSecondary }}>{paxCount}</span> (max{" "}
-          {MAX_PASSENGER_ROWS})
+          {maxRows})
         </span>
       </div>
     </div>
@@ -209,9 +232,12 @@ export function PassengerRowsEditor({
 export function CargoRowsEditor({
   rows,
   onChange,
+  readOnly = false,
 }: {
   rows: CargoRow[];
   onChange: (rows: CargoRow[]) => void;
+  /** Display-only (e.g. a completed trip) — inputs disabled, no add/remove. */
+  readOnly?: boolean;
 }) {
   const patch = (i: number, p: Partial<CargoRow>) =>
     onChange(rows.map((r, x) => (x === i ? { ...r, ...p } : r)));
@@ -226,24 +252,26 @@ export function CargoRowsEditor({
         >
           <div style={{ display: "grid", gridTemplateColumns: "24px 1.4fr 1fr", gap: 10, alignItems: "end" }}>
             <div style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.textDim, paddingBottom: 12 }}>{i + 1}</div>
-            <TextField label="Description" value={c.description} onChange={(v) => patch(i, { description: v })} />
-            <TextField label="Owner / recipient" value={c.ownerRecipient} onChange={(v) => patch(i, { ownerRecipient: v })} />
+            <TextField label="Description" value={c.description} onChange={(v) => patch(i, { description: v })} disabled={readOnly} />
+            <TextField label="Owner / recipient" value={c.ownerRecipient} onChange={(v) => patch(i, { ownerRecipient: v })} disabled={readOnly} />
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto auto", gap: 10, marginTop: 9, alignItems: "end" }}>
-            <NumberField label="Weight (kg)" value={c.weightKg} onChange={(v) => patch(i, { weightKg: v })} min={0} step={1} />
-            <NumberField label="Charge (CAD)" value={c.chargeCad} onChange={(v) => patch(i, { chargeCad: v })} min={0} step={5} />
+            <NumberField label="Weight (kg)" value={c.weightKg} onChange={(v) => patch(i, { weightKg: v })} min={0} step={1} disabled={readOnly} />
+            <NumberField label="Charge (CAD)" value={c.chargeCad} onChange={(v) => patch(i, { chargeCad: v })} min={0} step={5} disabled={readOnly} />
             <div style={{ display: "flex", gap: 6, paddingBottom: 6 }}>
-              <OptChip active={c.hazmat} label="Hazmat" onClick={() => patch(i, { hazmat: !c.hazmat })} />
-              <OptChip active={c.secured} label="Secured" onClick={() => patch(i, { secured: !c.secured })} />
+              <OptChip active={c.hazmat} label="Hazmat" onClick={() => patch(i, { hazmat: !c.hazmat })} disabled={readOnly} />
+              <OptChip active={c.secured} label="Secured" onClick={() => patch(i, { secured: !c.secured })} disabled={readOnly} />
             </div>
-            <div style={{ paddingBottom: 6 }}>
-              <RemoveButton onClick={() => onChange(rows.filter((_, x) => x !== i))} />
-            </div>
+            {!readOnly && (
+              <div style={{ paddingBottom: 6 }}>
+                <RemoveButton onClick={() => onChange(rows.filter((_, x) => x !== i))} />
+              </div>
+            )}
           </div>
         </div>
       ))}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 4 }}>
-        {rows.length < MAX_CARGO_ROWS && (
+        {!readOnly && rows.length < MAX_CARGO_ROWS && (
           <ActionButton onClick={() => onChange([...rows, emptyCargo()])}>+ ADD CARGO</ActionButton>
         )}
         <span style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textDim }}>
@@ -259,10 +287,22 @@ export function CargoRowsEditor({
 // colour alone).
 // ---------------------------------------------------------------------------
 
-export function OptChip({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
+export function OptChip({
+  active,
+  label,
+  onClick,
+  disabled = false,
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+  /** Display-only — keeps the ☒/☐ glyph + label but drops interactivity. */
+  disabled?: boolean;
+}) {
   return (
     <span
-      onClick={onClick}
+      onClick={disabled ? undefined : onClick}
+      aria-disabled={disabled || undefined}
       style={{
         fontFamily: fonts.body,
         fontWeight: active ? 600 : 500,
@@ -272,7 +312,8 @@ export function OptChip({ active, label, onClick }: { active: boolean; label: st
         background: active ? colors.cardBgActive : colors.cardBg,
         border: `1px solid ${active ? colors.borderActive : colors.border}`,
         color: active ? colors.headingBright : colors.textMuted,
-        cursor: "pointer",
+        cursor: disabled ? "default" : "pointer",
+        opacity: disabled ? 0.7 : 1,
         whiteSpace: "nowrap",
         userSelect: "none",
       }}

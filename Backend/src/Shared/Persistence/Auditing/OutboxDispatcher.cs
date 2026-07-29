@@ -8,9 +8,12 @@ using NorthernLink.Shared.EventBus;
 namespace NorthernLink.Shared.Persistence.Auditing;
 
 /// <summary>
-/// Publishes a module's pending outbox rows to RabbitMQ. One instance per module
-/// (registered as <c>AddHostedService&lt;OutboxDispatcher&lt;FleetDbContext&gt;&gt;()</c> in the
-/// module's DI extension). Delivery is at-least-once: a crash between publish and
+/// Publishes a module's pending CHAIN-REACTION outbox rows to RabbitMQ — only routing keys
+/// designated in <see cref="BusPublicationRegistry"/>; storing/projecting events are
+/// consumed in-database by <c>OutboxPollingConsumer</c> and never touch the bus. With an
+/// empty registry (the current state) the dispatcher idles without querying. One instance
+/// per module (registered as <c>AddHostedService&lt;OutboxDispatcher&lt;FleetDbContext&gt;&gt;()</c>
+/// in the module's DI extension). Delivery is at-least-once: a crash between publish and
 /// mark-dispatched causes a redelivery, so consumers dedupe on the event id.
 ///
 /// The dispatcher has no tenant, so it opts into the outbox tables' system RLS policy by
@@ -23,6 +26,7 @@ namespace NorthernLink.Shared.Persistence.Auditing;
 public sealed class OutboxDispatcher<TDbContext>(
     IServiceScopeFactory scopeFactory,
     IOutboxTransport transport,
+    BusPublicationRegistry registry,
     OutboxOptions options,
     ILogger<OutboxDispatcher<TDbContext>> logger) : BackgroundService
     where TDbContext : ModuleDbContext
@@ -31,12 +35,11 @@ public sealed class OutboxDispatcher<TDbContext>(
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            // Delay BEFORE the first poll, not after. All hosted services (this dispatcher
-            // and every module's RabbitMqIntegrationEventConsumer) start together; against
-            // a cold broker an immediate first poll can publish before consumers have
-            // declared and bound their durable queues, and a topic exchange silently drops
-            // unroutable messages. One interval of head start closes that boot race for
-            // the price of PollInterval of extra latency on the first event after startup.
+            // Delay BEFORE the first poll, not after — one interval of head start so
+            // consumers declare and bind their durable queues before the first publish.
+            // The old silent-loss consequence of losing that race is gone (publishes are
+            // now mandatory + confirmed, so an unroutable message throws and retries),
+            // but the head start still spares the first events a pointless failed attempt.
             try
             {
                 await Task.Delay(options.PollInterval, stoppingToken);
@@ -63,6 +66,12 @@ public sealed class OutboxDispatcher<TDbContext>(
 
     private async Task DispatchPendingAsync(CancellationToken cancellationToken)
     {
+        if (registry.RoutingKeys.Count == 0)
+        {
+            // Nothing is designated for the bus — idle without touching the database.
+            return;
+        }
+
         using var scope = scopeFactory.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<TDbContext>();
 
@@ -77,6 +86,7 @@ public sealed class OutboxDispatcher<TDbContext>(
             var pending = await context.Set<OutboxMessage>()
                 .IgnoreQueryFilters()
                 .Where(m => m.DispatchedAtUtc == null
+                    && registry.RoutingKeys.Contains(m.RoutingKey)
                     && m.Attempts < options.MaxAttempts
                     && (m.NextAttemptAtUtc == null || m.NextAttemptAtUtc <= now))
                 .OrderBy(m => m.Position)

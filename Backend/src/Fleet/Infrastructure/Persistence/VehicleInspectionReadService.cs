@@ -12,6 +12,7 @@ internal sealed class VehicleInspectionReadService(FleetDbContext context) : IVe
 {
     public async Task<IReadOnlyList<VehicleInspectionResponse>> GetInspectionsAsync(
         string? unit = null,
+        string? tripNumber = null,
         CancellationToken cancellationToken = default)
     {
         var query = context.VehicleInspectionReadModels.AsNoTracking();
@@ -19,6 +20,12 @@ internal sealed class VehicleInspectionReadService(FleetDbContext context) : IVe
         if (!string.IsNullOrWhiteSpace(unit))
         {
             query = query.Where(i => i.Unit == unit.Trim());
+        }
+
+        if (!string.IsNullOrWhiteSpace(tripNumber))
+        {
+            var trimmedTripNumber = tripNumber.Trim();
+            query = query.Where(i => i.TripNumber == trimmedTripNumber);
         }
 
         var inspections = await query

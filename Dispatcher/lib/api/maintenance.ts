@@ -111,6 +111,19 @@ export async function createInspection(input: InspectionInput): Promise<string> 
   return res.id;
 }
 
+/** PUT /api/fleet/inspections/{id} — body is the same InspectionInput shape as
+ *  create; `type` and `tripNumber` are immutable and ignored server-side. */
+export function updateInspection(id: string, input: InspectionInput): Promise<void> {
+  return request<void>(`/api/fleet/inspections/${id}`, { method: "PUT", body: JSON.stringify(input) });
+}
+
+/** DELETE /api/fleet/inspections/{id} — hard delete. Removing a post-trip
+ *  inspection asynchronously flips the trip's HasPostTripInspection back to
+ *  false (re-gating completion). */
+export function deleteInspection(id: string): Promise<void> {
+  return request<void>(`/api/fleet/inspections/${id}`, { method: "DELETE" });
+}
+
 // ---------------------------------------------------------------------------
 // Maintenance contract (Backend Fleet module) — Shops, Documents, Service
 // records, Work orders. Wire enums travel as their backend enum names (e.g.

@@ -214,6 +214,7 @@ export function TextAreaField({
   placeholder,
   hint,
   rows = 3,
+  mono = false,
   disabled = false,
 }: {
   label: string;
@@ -222,6 +223,7 @@ export function TextAreaField({
   placeholder?: string;
   hint?: ReactNode;
   rows?: number;
+  mono?: boolean;
   disabled?: boolean;
 }) {
   return (
@@ -241,6 +243,8 @@ export function TextAreaField({
           padding: "9px 13px",
           lineHeight: 1.5,
           resize: "vertical",
+          fontFamily: mono ? fonts.mono : fonts.body,
+          fontSize: mono ? 12.5 : 13.5,
           opacity: disabled ? 0.55 : 1,
           cursor: disabled ? "not-allowed" : undefined,
         }}

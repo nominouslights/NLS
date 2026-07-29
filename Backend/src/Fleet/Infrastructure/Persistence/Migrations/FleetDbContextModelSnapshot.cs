@@ -245,6 +245,10 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                     b.HasIndex("TenantId", "ManifestId", "Type")
                         .IsUnique();
 
+                    b.HasIndex("TenantId", "TripNumber", "Type")
+                        .IsUnique()
+                        .HasFilter("trip_number IS NOT NULL");
+
                     b.ToTable("vehicle_inspections", "fleet");
                 });
 
@@ -1516,6 +1520,32 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                         .HasColumnType("jsonb")
                         .HasColumnName("payload");
 
+                    b.Property<DateTimeOffset?>("ProcessedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("processed_at_utc");
+
+                    b.Property<int>("ProcessingAttempts")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("processing_attempts");
+
+                    b.Property<string>("ProcessingLastError")
+                        .HasColumnType("text")
+                        .HasColumnName("processing_last_error");
+
+                    b.Property<DateTimeOffset?>("ProcessingNextAttemptAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("processing_next_attempt_at_utc");
+
+                    b.Property<string>("ProcessingStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("Pending")
+                        .HasColumnName("processing_status");
+
                     b.Property<string>("RoutingKey")
                         .IsRequired()
                         .HasMaxLength(128)
@@ -1531,9 +1561,11 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                     b.HasIndex("Id")
                         .IsUnique();
 
-                    b.HasIndex("Position")
-                        .HasDatabaseName("ix_outbox_messages_pending")
+                    b.HasIndex(new[] { "Position" }, "ix_outbox_messages_pending")
                         .HasFilter("dispatched_at_utc IS NULL");
+
+                    b.HasIndex(new[] { "Position" }, "ix_outbox_messages_unprocessed")
+                        .HasFilter("processing_status = 'Pending'");
 
                     b.ToTable("outbox_messages", "fleet");
                 });

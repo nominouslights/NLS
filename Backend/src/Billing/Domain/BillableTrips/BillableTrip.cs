@@ -33,6 +33,11 @@ public sealed class BillableTrip : ITenantScoped
     /// pairs an Outbound leg with an Inbound one.</summary>
     public string? Direction { get; set; }
 
+    /// <summary>True for a deadhead (empty repositioning) leg. A round-trip pair
+    /// containing one still prices at the full rate, but its worksheet line carries a
+    /// review note so the dispatcher can apply an optional manual discount.</summary>
+    public bool IsEmptyLeg { get; set; }
+
     public string? PoNumber { get; set; }
     public DateTimeOffset CompletedAtUtc { get; set; }
 

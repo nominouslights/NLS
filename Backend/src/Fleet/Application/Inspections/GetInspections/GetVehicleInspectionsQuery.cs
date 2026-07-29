@@ -5,8 +5,9 @@ namespace NorthernLink.Fleet.Application.Inspections.GetInspections;
 
 /// <summary>
 /// Lists inspections visible to the current tenant, newest first, optionally narrowed
-/// to a vehicle unit.
+/// to a vehicle unit and/or a trip number.
 /// </summary>
 public sealed record GetVehicleInspectionsQuery(
     Guid TenantId,
-    string? Unit = null) : IQuery<IReadOnlyList<VehicleInspectionResponse>>;
+    string? Unit = null,
+    string? TripNumber = null) : IQuery<IReadOnlyList<VehicleInspectionResponse>>;

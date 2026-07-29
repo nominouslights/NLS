@@ -4,16 +4,16 @@ using NorthernLink.Shared.Kernel;
 namespace NorthernLink.Billing.Domain.Invoices;
 
 /// <summary>
-/// A client invoice — the platform's authored record of what a billing period costs, built
-/// from completed billable trips at the contract rate (plus manual lines). Everything
-/// contract-derived (<see cref="PoNumber"/>, <see cref="BudgetCode"/>,
-/// <see cref="NetTermsDays"/>, <see cref="GstApplicable"/>, <see cref="GstRate"/>) is a
-/// snapshot taken at drafting: later contract amendments never rewrite an issued invoice.
-/// Totals are computed, never stored on the write side — a line list can't disagree with
-/// its own subtotal. "Overdue" is deliberately derived downstream
-/// (<c>Sent &amp;&amp; today &gt; SentAt + NetTermsDays</c>), never persisted. The QBO
-/// fields record manual reconciliation against QuickBooks Online; there are no QBO API
-/// calls anywhere.
+/// A billing worksheet — the platform prepares the numbers (completed uninvoiced round trips
+/// priced at the contract rate, plus manual lines, GST and totals) that are then keyed into
+/// QuickBooks Online by hand. QBO owns sent/paid/overdue/receivables; the platform never
+/// calls the QBO API. Everything contract-derived (<see cref="PoNumber"/>,
+/// <see cref="BudgetCode"/>, <see cref="NetTermsDays"/>, <see cref="GstApplicable"/>,
+/// <see cref="GstRate"/>) is a snapshot taken at drafting: later contract amendments never
+/// rewrite an existing worksheet. Totals are computed, never stored on the write side — a
+/// line list can't disagree with its own subtotal. The QBO fields record the manual
+/// reconciliation: <see cref="QboInvoiceId"/> is the QBO invoice number and
+/// <see cref="QboEnteredDate"/> the date it was keyed in.
 /// </summary>
 public sealed class Invoice : AggregateRoot, ITenantScoped
 {
@@ -37,6 +37,9 @@ public sealed class Invoice : AggregateRoot, ITenantScoped
     public Guid? ContractId { get; private set; }
     public string? PoNumber { get; private set; }
     public string? BudgetCode { get; private set; }
+
+    /// <summary>Informational snapshot of the contract's net terms at drafting — the platform
+    /// no longer derives due dates or overdue state; QBO owns receivables.</summary>
     public int NetTermsDays { get; private set; }
     public bool GstApplicable { get; private set; }
     public decimal GstRate { get; private set; }
@@ -44,10 +47,12 @@ public sealed class Invoice : AggregateRoot, ITenantScoped
     public DateOnly PeriodEnd { get; private set; }
     public InvoiceStatus Status { get; private set; }
     public DateTimeOffset IssuedAtUtc { get; private set; }
-    public DateTimeOffset? SentAtUtc { get; private set; }
-    public DateTimeOffset? PaidAtUtc { get; private set; }
+
+    /// <summary>The QBO invoice number this worksheet was entered as (manual reconciliation).</summary>
     public string? QboInvoiceId { get; private set; }
-    public QboSyncStatus QboSyncStatus { get; private set; }
+
+    /// <summary>The date the worksheet was keyed into QBO. Null until entered.</summary>
+    public DateOnly? QboEnteredDate { get; private set; }
 
     public IReadOnlyList<InvoiceLine> Lines => _lines;
 
@@ -108,7 +113,6 @@ public sealed class Invoice : AggregateRoot, ITenantScoped
             PeriodEnd = periodEnd,
             Status = InvoiceStatus.Draft,
             IssuedAtUtc = DateTimeOffset.UtcNow,
-            QboSyncStatus = QboSyncStatus.NotSynced,
         };
 
         invoice._lines.AddRange(lines);
@@ -135,31 +139,69 @@ public sealed class Invoice : AggregateRoot, ITenantScoped
         return Result.Success();
     }
 
-    public Result Send()
+    /// <summary>
+    /// Records that the worksheet has been keyed into QuickBooks Online (Draft→EnteredInQbo).
+    /// Lines lock and the claimed trips stay claimed permanently. No QBO API call — this only
+    /// stamps the manually-entered reference.
+    /// </summary>
+    public Result MarkEnteredInQbo(string qboInvoiceId, DateOnly enteredDate)
     {
         if (Status != InvoiceStatus.Draft)
         {
-            return Result.Failure(InvoiceErrors.AlreadySent);
+            return Result.Failure(InvoiceErrors.AlreadyEntered);
         }
 
-        Status = InvoiceStatus.Sent;
-        SentAtUtc = DateTimeOffset.UtcNow;
+        if (string.IsNullOrWhiteSpace(qboInvoiceId))
+        {
+            return Result.Failure(InvoiceErrors.QboInvoiceIdRequired);
+        }
 
-        Raise(new InvoiceStatusChangedDomainEvent(Id, InvoiceStatus.Draft, InvoiceStatus.Sent));
+        Status = InvoiceStatus.EnteredInQbo;
+        QboInvoiceId = qboInvoiceId.Trim();
+        QboEnteredDate = enteredDate;
+
+        Raise(new InvoiceEnteredInQboDomainEvent(Id, QboInvoiceId, enteredDate));
         return Result.Success();
     }
 
-    public Result MarkPaid()
+    /// <summary>
+    /// Corrects the recorded QBO reference on an already-entered worksheet (EnteredInQbo only).
+    /// </summary>
+    public Result UpdateQboReference(string qboInvoiceId, DateOnly enteredDate)
     {
-        if (Status != InvoiceStatus.Sent)
+        if (Status != InvoiceStatus.EnteredInQbo)
         {
-            return Result.Failure(InvoiceErrors.NotSent);
+            return Result.Failure(InvoiceErrors.NotEntered);
         }
 
-        Status = InvoiceStatus.Paid;
-        PaidAtUtc = DateTimeOffset.UtcNow;
+        if (string.IsNullOrWhiteSpace(qboInvoiceId))
+        {
+            return Result.Failure(InvoiceErrors.QboInvoiceIdRequired);
+        }
 
-        Raise(new InvoiceStatusChangedDomainEvent(Id, InvoiceStatus.Sent, InvoiceStatus.Paid));
+        QboInvoiceId = qboInvoiceId.Trim();
+        QboEnteredDate = enteredDate;
+
+        Raise(new InvoiceEnteredInQboDomainEvent(Id, QboInvoiceId, enteredDate));
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Reopens an entered worksheet for further editing (EnteredInQbo→Draft), clearing the
+    /// recorded QBO reference. The claimed trips are untouched — they stay claimed.
+    /// </summary>
+    public Result Reopen()
+    {
+        if (Status != InvoiceStatus.EnteredInQbo)
+        {
+            return Result.Failure(InvoiceErrors.NotEntered);
+        }
+
+        Status = InvoiceStatus.Draft;
+        QboInvoiceId = null;
+        QboEnteredDate = null;
+
+        Raise(new InvoiceStatusChangedDomainEvent(Id, InvoiceStatus.EnteredInQbo, InvoiceStatus.Draft));
         return Result.Success();
     }
 
@@ -174,16 +216,6 @@ public sealed class Invoice : AggregateRoot, ITenantScoped
         Status = InvoiceStatus.Void;
 
         Raise(new InvoiceStatusChangedDomainEvent(Id, InvoiceStatus.Draft, InvoiceStatus.Void));
-        return Result.Success();
-    }
-
-    /// <summary>Records the manual QBO reconciliation state — bookkeeping metadata, allowed in any status.</summary>
-    public Result SetQboStatus(string? qboInvoiceId, QboSyncStatus syncStatus)
-    {
-        QboInvoiceId = string.IsNullOrWhiteSpace(qboInvoiceId) ? null : qboInvoiceId.Trim();
-        QboSyncStatus = syncStatus;
-
-        Raise(new InvoiceQboStatusChangedDomainEvent(Id, QboInvoiceId, syncStatus));
         return Result.Success();
     }
 }

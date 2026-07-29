@@ -50,7 +50,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: "clients", label: "Clients & Contracts", code: "CL", badge: "1" },
       { id: "riders", label: "Riders", code: "RD" },
-      { id: "billing", label: "Billing & Invoicing", code: "BL", badge: "1" },
+      { id: "billing", label: "Billing", code: "BL" },
       { id: "incidents", label: "Incidents & Faults", code: "IN", badge: "2" },
       { id: "comms", label: "Communications", code: "CM" },
       { id: "settings", label: "Settings", code: "ST" },

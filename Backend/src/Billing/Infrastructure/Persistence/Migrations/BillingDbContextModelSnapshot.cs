@@ -61,6 +61,12 @@ namespace NorthernLink.Billing.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("invoice_id");
 
+                    b.Property<bool>("IsEmptyLeg")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_empty_leg");
+
                     b.Property<string>("Origin")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -238,10 +244,6 @@ namespace NorthernLink.Billing.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("net_terms_days");
 
-                    b.Property<DateTimeOffset?>("PaidAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("paid_at_utc");
-
                     b.Property<DateOnly>("PeriodEnd")
                         .HasColumnType("date")
                         .HasColumnName("period_end");
@@ -255,20 +257,14 @@ namespace NorthernLink.Billing.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(64)")
                         .HasColumnName("po_number");
 
+                    b.Property<DateOnly?>("QboEnteredDate")
+                        .HasColumnType("date")
+                        .HasColumnName("qbo_entered_date");
+
                     b.Property<string>("QboInvoiceId")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)")
                         .HasColumnName("qbo_invoice_id");
-
-                    b.Property<string>("QboSyncStatus")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)")
-                        .HasColumnName("qbo_sync_status");
-
-                    b.Property<DateTimeOffset?>("SentAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("sent_at_utc");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -350,10 +346,6 @@ namespace NorthernLink.Billing.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("net_terms_days");
 
-                    b.Property<DateTimeOffset?>("PaidAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("paid_at_utc");
-
                     b.Property<DateOnly>("PeriodEnd")
                         .HasColumnType("date")
                         .HasColumnName("period_end");
@@ -366,18 +358,13 @@ namespace NorthernLink.Billing.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("po_number");
 
+                    b.Property<DateOnly?>("QboEnteredDate")
+                        .HasColumnType("date")
+                        .HasColumnName("qbo_entered_date");
+
                     b.Property<string>("QboInvoiceId")
                         .HasColumnType("text")
                         .HasColumnName("qbo_invoice_id");
-
-                    b.Property<string>("QboSyncStatus")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("qbo_sync_status");
-
-                    b.Property<DateTimeOffset?>("SentAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("sent_at_utc");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -573,6 +560,32 @@ namespace NorthernLink.Billing.Infrastructure.Persistence.Migrations
                         .HasColumnType("jsonb")
                         .HasColumnName("payload");
 
+                    b.Property<DateTimeOffset?>("ProcessedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("processed_at_utc");
+
+                    b.Property<int>("ProcessingAttempts")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("processing_attempts");
+
+                    b.Property<string>("ProcessingLastError")
+                        .HasColumnType("text")
+                        .HasColumnName("processing_last_error");
+
+                    b.Property<DateTimeOffset?>("ProcessingNextAttemptAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("processing_next_attempt_at_utc");
+
+                    b.Property<string>("ProcessingStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("Pending")
+                        .HasColumnName("processing_status");
+
                     b.Property<string>("RoutingKey")
                         .IsRequired()
                         .HasMaxLength(128)
@@ -588,9 +601,11 @@ namespace NorthernLink.Billing.Infrastructure.Persistence.Migrations
                     b.HasIndex("Id")
                         .IsUnique();
 
-                    b.HasIndex("Position")
-                        .HasDatabaseName("ix_outbox_messages_pending")
+                    b.HasIndex(new[] { "Position" }, "ix_outbox_messages_pending")
                         .HasFilter("dispatched_at_utc IS NULL");
+
+                    b.HasIndex(new[] { "Position" }, "ix_outbox_messages_unprocessed")
+                        .HasFilter("processing_status = 'Pending'");
 
                     b.ToTable("outbox_messages", "billing");
                 });

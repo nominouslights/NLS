@@ -12,7 +12,7 @@ public sealed class GetVehicleInspectionsQueryHandler(IVehicleInspectionReadServ
         GetVehicleInspectionsQuery query,
         CancellationToken cancellationToken)
     {
-        var inspections = await readService.GetInspectionsAsync(query.Unit, cancellationToken);
+        var inspections = await readService.GetInspectionsAsync(query.Unit, query.TripNumber, cancellationToken);
         return Result.Success(inspections);
     }
 }

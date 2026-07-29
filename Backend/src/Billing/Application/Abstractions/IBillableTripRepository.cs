@@ -3,13 +3,17 @@ using NorthernLink.Billing.Domain.BillableTrips;
 namespace NorthernLink.Billing.Application.Abstractions;
 
 /// <summary>
-/// The <c>billable_trips</c> replica. <see cref="ExistsAsync"/> takes an explicit tenant
-/// id because its caller is the integration-event consumer (no ambient tenant); the
-/// remaining members run on the request path under the tenant query filter.
+/// The <c>billable_trips</c> replica. <see cref="ExistsAsync"/> and <see cref="GetAsync"/>
+/// take an explicit tenant id because their callers are the integration-event consumers
+/// (no ambient tenant); the remaining members run on the request path under the tenant
+/// query filter.
 /// </summary>
 public interface IBillableTripRepository
 {
     Task<bool> ExistsAsync(Guid tenantId, Guid tripId, CancellationToken cancellationToken = default);
+
+    /// <summary>Tracked single-row fetch for the round-trip re-key consumer; null when the trip was never recorded.</summary>
+    Task<BillableTrip?> GetAsync(Guid tenantId, Guid tripId, CancellationToken cancellationToken = default);
 
     void Add(BillableTrip trip);
 

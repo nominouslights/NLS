@@ -61,6 +61,22 @@ public class ChangeTripStatusCommandHandlerTests
     }
 
     [Fact]
+    public async Task Start_of_a_deadhead_needs_no_manifest()
+    {
+        // An empty repositioning leg starts and ends without passengers — the en-route
+        // manifest guard is waived for IsEmptyLeg trips.
+        var deadhead = TestPlanning.ScheduleTrip(isEmptyLeg: true).Value;
+        _trips.Add(deadhead);
+
+        var result = await Handler.Handle(
+            new ChangeTripStatusCommand(deadhead.Id, TripStatus.InProgress, null), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(TripStatus.InProgress, deadhead.Status);
+        Assert.Equal(1, _trips.SaveCount);
+    }
+
+    [Fact]
     public async Task Complete_does_not_require_a_passenger_manifest()
     {
         var trip = TestPlanning.ScheduleTrip().Value;

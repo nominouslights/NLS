@@ -37,10 +37,13 @@ using NorthernLink.Trips.Application.Trips.Assign;
 using NorthernLink.Trips.Application.Trips.AttachManifest;
 using NorthernLink.Trips.Application.Trips.ChangeStatus;
 using NorthernLink.Trips.Application.Trips.Create;
+using NorthernLink.Trips.Application.Trips.CreateDeadheadReturn;
 using NorthernLink.Trips.Application.Trips.GetActivity;
 using NorthernLink.Trips.Application.Trips.GetTripById;
 using NorthernLink.Trips.Application.Trips.GetTrips;
+using NorthernLink.Trips.Application.Trips.MergeRoundTrip;
 using NorthernLink.Trips.Application.Trips.RecordDemand;
+using NorthernLink.Trips.Application.Trips.UnpairRoundTrip;
 using NorthernLink.Trips.Application.Trips.Update;
 using NorthernLink.Trips.Domain.Manifests.Events;
 using NorthernLink.Trips.Infrastructure.Generation;
@@ -107,6 +110,9 @@ public static class TripsServiceCollectionExtensions
         services.AddScoped<ICommandHandler<ChangeTripStatusCommand>, ChangeTripStatusCommandHandler>();
         services.AddScoped<ICommandHandler<RecordTripDemandCommand>, RecordTripDemandCommandHandler>();
         services.AddScoped<ICommandHandler<AttachManifestToTripCommand>, AttachManifestToTripCommandHandler>();
+        services.AddScoped<ICommandHandler<MergeRoundTripCommand>, MergeRoundTripCommandHandler>();
+        services.AddScoped<ICommandHandler<UnpairRoundTripCommand>, UnpairRoundTripCommandHandler>();
+        services.AddScoped<ICommandHandler<CreateDeadheadReturnCommand, Guid>, CreateDeadheadReturnCommandHandler>();
         services.AddScoped<IQueryHandler<GetTripsQuery, IReadOnlyList<TripResponse>>, GetTripsQueryHandler>();
         services.AddScoped<IQueryHandler<GetTripByIdQuery, TripResponse>, GetTripByIdQueryHandler>();
         services.AddScoped<IQueryHandler<GetTripActivityQuery, IReadOnlyList<TripActivityEntryResponse>>, GetTripActivityQueryHandler>();
@@ -123,11 +129,14 @@ public static class TripsServiceCollectionExtensions
         services.AddScoped<IQueryHandler<GetScheduleTemplatesQuery, IReadOnlyList<ScheduleTemplateResponse>>, GetScheduleTemplatesQueryHandler>();
 
         // 4. Integration event consumers — the Drivers/Fleet/Clients replicas that keep
-        //    driver_lookup/vehicle_lookup/client_lookup current for assignment validation.
-        services.AddIntegrationEventConsumer(SchemaName, subscriptions => subscriptions
+        //    driver_lookup/vehicle_lookup/client_lookup current for assignment validation,
+        //    plus the trip inspection flags. Storing/projecting events, so they arrive by
+        //    polling the producer outboxes in-database, not via RabbitMQ.
+        services.AddOutboxPollingConsumer<TripsDbContext>(SchemaName, subscriptions => subscriptions
             .On<DriverChangedIntegrationEvent, DriverChangedIntegrationEventHandler>()
             .On<VehicleChangedIntegrationEvent, VehicleChangedIntegrationEventHandler>()
             .On<VehicleInspectionRecordedIntegrationEvent, VehicleInspectionRecordedIntegrationEventHandler>()
+            .On<VehicleInspectionRemovedIntegrationEvent, VehicleInspectionRemovedIntegrationEventHandler>()
             .On<ClientChangedIntegrationEvent, ClientChangedIntegrationEventHandler>());
 
         // 5. Read-side projections — one worker upserts trips.rm_* from the journal, and a

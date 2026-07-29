@@ -7,8 +7,9 @@ namespace NorthernLink.Billing.Infrastructure.Persistence.Projections;
 /// <summary>
 /// Projects <see cref="Invoice"/> into <c>billing.rm_invoices</c>. Totals are read straight
 /// off the aggregate's computed properties, so the API and the read model can never disagree
-/// about a rounded value. Overdue is deliberately NOT materialized — it depends on "today",
-/// so it derives at read time from sent_at_utc + net_terms_days.
+/// about a rounded value. Consumes every Invoice domain event (drafted, lines replaced,
+/// entered-in-QBO, status-changed for Void/Reopen) — the projector re-maps the whole row from
+/// the current aggregate state each time, so no per-event branching is needed.
 /// </summary>
 internal sealed class InvoiceProjection : BillingProjection<Invoice, InvoiceReadModel>
 {
@@ -31,10 +32,8 @@ internal sealed class InvoiceProjection : BillingProjection<Invoice, InvoiceRead
         row.PeriodEnd = source.PeriodEnd;
         row.Status = source.Status.ToString();
         row.IssuedAtUtc = source.IssuedAtUtc;
-        row.SentAtUtc = source.SentAtUtc;
-        row.PaidAtUtc = source.PaidAtUtc;
         row.QboInvoiceId = source.QboInvoiceId;
-        row.QboSyncStatus = source.QboSyncStatus.ToString();
+        row.QboEnteredDate = source.QboEnteredDate;
         row.Version = source.Version;
 
         // Derived — the aggregate is the only implementation.

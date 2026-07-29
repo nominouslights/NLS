@@ -21,6 +21,10 @@ internal sealed class FakeTripRepository : ITripRepository
     public Task<Trip?> GetByTripNumberAsync(string tripNumber, CancellationToken cancellationToken = default) =>
         Task.FromResult(Trips.FirstOrDefault(t => t.TripNumber == tripNumber));
 
+    public Task<IReadOnlyList<Trip>> GetByRoundTripKeyAsync(
+        string roundTripKey, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<Trip>>(Trips.Where(t => t.RoundTripKey == roundTripKey).ToList());
+
     public Task SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         SaveCount++;

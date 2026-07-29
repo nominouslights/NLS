@@ -98,6 +98,42 @@ public class TripLifecycleTests
     }
 
     [Fact]
+    public void Clearing_the_post_trip_inspection_re_arms_the_completion_gate()
+    {
+        var trip = TestPlanning.ScheduleTrip().Value;
+        Assert.True(trip.RecordPostTripInspection().IsSuccess);
+        Assert.True(trip.HasPostTripInspection);
+        trip.ClearDomainEvents();
+
+        var cleared = trip.ClearPostTripInspection();
+
+        Assert.True(cleared.IsSuccess);
+        Assert.False(trip.HasPostTripInspection);
+        Assert.Single(trip.DomainEvents.OfType<TripPostTripInspectionClearedDomainEvent>());
+
+        // The gate is re-armed: Complete() refuses again until a fresh post-trip DVIR is logged.
+        var complete = trip.Complete();
+        Assert.True(complete.IsFailure);
+        Assert.Equal(TripErrors.PostTripInspectionRequired, complete.Error);
+        Assert.Equal(TripStatus.Scheduled, trip.Status);
+        Assert.Null(trip.CompletedAtUtc);
+    }
+
+    [Fact]
+    public void Clear_post_trip_inspection_is_an_idempotent_no_op_when_already_clear()
+    {
+        var trip = TestPlanning.ScheduleTrip().Value; // flag starts false
+        Assert.False(trip.HasPostTripInspection);
+        trip.ClearDomainEvents();
+
+        var result = trip.ClearPostTripInspection();
+
+        Assert.True(result.IsSuccess);
+        Assert.False(trip.HasPostTripInspection);
+        Assert.Empty(trip.DomainEvents.OfType<TripPostTripInspectionClearedDomainEvent>()); // nothing raised
+    }
+
+    [Fact]
     public void Start_then_complete_walks_the_happy_path()
     {
         var trip = TestPlanning.ScheduleTrip().Value;

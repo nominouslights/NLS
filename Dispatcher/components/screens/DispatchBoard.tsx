@@ -36,19 +36,20 @@ function todayHeading(): string {
 export default function DispatchBoard({ onOpenTrip }: { onOpenTrip: (id: string) => void }) {
   const [rows, setRows] = useState<TripRecord[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  // Overdue invoices tile — real count from the Billing API (isOverdue is the
-  // backend's read-time derivation of Sent + netTerms; never a stored status).
-  // A billing fetch failure only greys the tile — it never blocks the board.
-  const [overdueInvoices, setOverdueInvoices] = useState<number | null>(null);
+  // Draft invoices tile — real count from the Billing API of drafts still to be
+  // keyed into QuickBooks (Draft status). Billing prepares invoices for manual
+  // QBO entry; there is no overdue/AR concept anymore. A billing fetch failure
+  // only greys the tile — it never blocks the board.
+  const [draftInvoices, setDraftInvoices] = useState<number | null>(null);
 
   useEffect(() => {
     let active = true;
     listInvoices().then(
       (invs) => {
-        if (active) setOverdueInvoices(invs.filter((i) => i.isOverdue).length);
+        if (active) setDraftInvoices(invs.filter((i) => i.status === "Draft").length);
       },
       () => {
-        if (active) setOverdueInvoices(null);
+        if (active) setDraftInvoices(null);
       },
     );
     return () => {
@@ -159,19 +160,19 @@ export default function DispatchBoard({ onOpenTrip }: { onOpenTrip: (id: string)
               compliance rollup exists (HOS has no backend domain yet). */}
           <MetricTile icon="▲" iconBg="#D55E00" iconColor="#fff" label="Compliance alerts" value="—" valueColor={colors.textDim} />
           <MetricTile
-            icon="▲"
-            iconBg="#D55E00"
+            icon="◷"
+            iconBg="#9C6500"
             iconColor="#fff"
-            label="Overdue invoices"
-            value={overdueInvoices ?? "—"}
+            label="Drafts to enter in QBO"
+            value={draftInvoices ?? "—"}
             valueColor={
-              overdueInvoices === null
+              draftInvoices === null
                 ? colors.textDim
-                : overdueInvoices > 0
-                  ? statusMeta("over").t
+                : draftInvoices > 0
+                  ? statusMeta("soon").t
                   : statusMeta("ontime").t
             }
-            borderColor={overdueInvoices ? "rgba(213,94,0,.4)" : undefined}
+            borderColor={draftInvoices ? "rgba(225,176,0,.4)" : undefined}
           />
         </div>
 
