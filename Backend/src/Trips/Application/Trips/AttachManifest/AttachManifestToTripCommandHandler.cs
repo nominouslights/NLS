@@ -7,10 +7,11 @@ using NorthernLink.Trips.Domain.Trips;
 namespace NorthernLink.Trips.Application.Trips.AttachManifest;
 
 /// <summary>
-/// Idempotent manifest → trip attachment. No-ops successfully when the manifest is not
-/// visible under the ambient tenant or no trip carries its trip number; re-attaching the
-/// same manifest converges (the aggregate treats it as a no-op). A different manifest
-/// already attached surfaces as a conflict in the worker's log, never an exception.
+/// Idempotent manifest → trip link. No-ops successfully when the manifest is not visible
+/// under the ambient tenant or no trip carries its trip number; re-linking the same
+/// manifest converges (the aggregate treats it as a no-op). Linking sets
+/// <c>Trip.ManifestId</c> without changing trip status. A different manifest already
+/// attached surfaces as a conflict in the worker's log, never an exception.
 /// </summary>
 public sealed class AttachManifestToTripCommandHandler(
     ITripManifestRepository manifestRepository,
@@ -31,6 +32,16 @@ public sealed class AttachManifestToTripCommandHandler(
         if (trip is null)
         {
             // Ad-hoc manifest with no planned trip — perfectly normal.
+            return Result.Success();
+        }
+
+        if (trip.IsEmptyLeg)
+        {
+            // Defense in depth behind the create-time guard: a deadhead never carries a
+            // manifest, so a number-matching manifest is left unlinked rather than attached.
+            logger.LogWarning(
+                "Trips skipped attaching manifest {ManifestId} to deadhead trip {TripNumber} ({TripId}); empty legs carry no manifest",
+                manifest.Id, trip.TripNumber, trip.Id);
             return Result.Success();
         }
 

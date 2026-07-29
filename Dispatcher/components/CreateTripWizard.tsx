@@ -5,8 +5,11 @@ import { colors, fonts, statusMeta, svcMeta } from "@/lib/theme";
 import { ApiError } from "@/lib/api";
 import {
   createTrip,
+  createTripManifest,
+  getTrip,
   hasClearanceFor,
   hhmm,
+  refetchUntil,
   stopNames,
   svcForTrip,
   todayIso,
@@ -27,8 +30,22 @@ import {
   type DriverClearanceRecord,
   type DriverRecord,
 } from "@/lib/api/drivers";
+import { listVehicles, type Vehicle } from "@/lib/api/fleet";
 import { ModalError } from "@/components/ui/ModalShell";
 import { DateField, NumberField, SelectField, TextField, TimeField } from "@/components/ui/Field";
+import { SectionLabel } from "@/components/ui/Panel";
+import {
+  CargoRowsEditor,
+  cargoRowsToWire,
+  OptChip,
+  PassengerRowsEditor,
+  passengerCapFor,
+  paxRowsToWire,
+  type CargoRow,
+  type PaxRow,
+  type StopOption,
+} from "@/components/manifest/manifestRows";
+import PassengerCsvImport from "@/components/manifest/PassengerCsvImport";
 
 // Create Trip — the 6-step wizard, now a real form submitting POST /api/trips.
 // Client/rate lookups come from the Clients API (active-contract summary),
@@ -69,16 +86,18 @@ export default function CreateTripWizard({
   const [clients, setClients] = useState<ClientRecord[] | null>(null);
   const [routes, setRoutes] = useState<RouteRecord[] | null>(null);
   const [drivers, setDrivers] = useState<DriverRecord[] | null>(null);
+  const [vehicles, setVehicles] = useState<Vehicle[] | null>(null);
   const [refError, setRefError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
-    Promise.all([listClients(), listRoutes(), listDrivers()]).then(
-      ([c, r, d]) => {
+    Promise.all([listClients(), listRoutes(), listDrivers(), listVehicles()]).then(
+      ([c, r, d, v]) => {
         if (active) {
           setClients(c);
           setRoutes(r.filter((x) => x.active));
           setDrivers(d.filter((x) => x.status === "Active"));
+          setVehicles(v.filter((x) => x.status === "Active"));
         }
       },
       (e) => {
@@ -104,17 +123,35 @@ export default function CreateTripWizard({
   const [windowStart, setWindowStart] = useState("");
   const [windowEnd, setWindowEnd] = useState("");
 
-  const [vehicleUnit, setVehicleUnit] = useState("");
+  const [vehicleId, setVehicleId] = useState("");
   const [driverId, setDriverId] = useState<string | null>(null);
   const [clearances, setClearances] = useState<{ driverId: string; rows: DriverClearanceRecord[] } | null>(null);
 
   const [seatsCapacity, setSeatsCapacity] = useState("");
   const [seatsMinimum, setSeatsMinimum] = useState(serviceType === "Community" ? "4" : "");
 
+  // Optional passenger + cargo manifest captured up front → a Dispatcher-sourced
+  // manifest is created for the new trip on submit (when any passenger or cargo
+  // row is entered).
+  const [passengers, setPassengers] = useState<PaxRow[]>([]);
+  const [cargo, setCargo] = useState<CargoRow[]>([]);
+  const [allSeatbeltsVerified, setAllSeatbeltsVerified] = useState(false);
+  const [allCargoSecured, setAllCargoSecured] = useState(false);
+  // The trip is created before its manifest; remember its id so a manifest-only
+  // retry (after a manifest failure) reuses the trip instead of creating another.
+  const [createdTripId, setCreatedTripId] = useState<string | null>(null);
+
   const client = clients?.find((c) => c.id === clientId) ?? null;
   const route = routes?.find((r) => r.id === routeId) ?? null;
   const driver = drivers?.find((d) => d.id === driverId) ?? null;
+  const vehicle = vehicles?.find((v) => v.id === vehicleId) ?? null;
   const contract = client?.activeContract ?? null;
+
+  // Stop options for the passenger pickers: the selected route's stops, or the
+  // free-form origin/destination (which carry no stop ids).
+  const stopOptions: StopOption[] = route
+    ? [...route.stops].sort((a, b) => a.order - b.order).map((s) => ({ stopId: s.stopId ?? null, name: s.name }))
+    : [origin, destination].filter((s) => s.trim()).map((s) => ({ stopId: null, name: s.trim() }));
 
   // The PO defaults from the client's active contract until the dispatcher
   // edits it — a derived value, not an effect.
@@ -144,6 +181,20 @@ export default function CreateTripWizard({
 
   const corridor = route ? stopNames(route) : [origin, destination].filter((s) => s.trim());
   const km = route ? route.distanceKm : Number(distanceKm) || 0;
+
+  // Passenger cap = the assigned unit's seat capacity, else the manually entered
+  // seats capacity, else the default 8. Different units seat different numbers.
+  const paxCap = vehicle?.seatingCapacity ?? (seatsCapacity ? Number(seatsCapacity) : null);
+  const maxPax = passengerCapFor(paxCap);
+  const contentPax = passengers.filter((p) => p.name.trim() || p.contact.trim()).length;
+
+  // Merge an imported passenger sheet onto the current rows, clamped to the cap.
+  function applyImport(rows: PaxRow[]) {
+    setPassengers((prev) => {
+      const kept = prev.filter((p) => p.name.trim() || p.contact.trim());
+      return [...kept, ...rows].slice(0, maxPax);
+    });
+  }
 
   const estBillable =
     contract?.billingModel === "RoundTripRate" && contract.ratePerRoundTripCad != null
@@ -219,28 +270,80 @@ export default function CreateTripWizard({
       clientName: client?.name ?? null,
       poNumber: effectivePo.trim() || null,
       driverId,
-      vehicleUnit: vehicleUnit.trim() || null,
+      vehicleId: vehicleId || null,
       seatsCapacity: seatsCapacity === "" ? null : Number(seatsCapacity),
       seatsMinimum: seatsMinimum === "" ? null : Number(seatsMinimum),
     };
 
     setBusy(true);
     setError(null);
+    // Local id — createTrip runs once; a manifest-only retry reuses it. Using a
+    // local (not the createdTripId state, which updates asynchronously) lets the
+    // catch tell "trip failed" from "trip created, manifest failed".
+    let tripId = createdTripId;
     try {
-      const id = await createTrip(input);
-      onCreated(id);
+      if (!tripId) {
+        tripId = await createTrip(input);
+        setCreatedTripId(tripId);
+      }
+
+      // Build the manifest from the captured passengers + cargo. The trip number
+      // is server-generated, so read the created trip back (projection may trail).
+      const wirePax = paxRowsToWire(passengers, stopOptions, maxPax);
+      const wireCargo = cargoRowsToWire(cargo);
+      if (wirePax.length > 0 || wireCargo.length > 0) {
+        const created = await refetchUntil(
+          () => getTrip(tripId!).catch(() => null),
+          (v) => v !== null,
+        );
+        if (!created) throw new Error("Could not read the new trip back to build its manifest.");
+        await createTripManifest({
+          tripDate: created.serviceDate,
+          tripNumber: created.tripNumber,
+          route: corridor.join(" → "),
+          direction: created.direction ?? null,
+          client: created.clientName,
+          passengers: wirePax,
+          allSeatbeltsVerified,
+          cargo: wireCargo,
+          allCargoSecured: allCargoSecured ? "Yes" : null,
+          source: "Dispatcher",
+          enteredBy: "Dispatch",
+        });
+      }
+      onCreated(tripId);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Failed to create the trip — please try again.");
+      // If tripId is set, the trip was created and only the manifest failed — keep
+      // the wizard open so the dispatcher can retry (reusing the trip) or close and
+      // add the manifest later from the Trips screen.
+      if (tripId) {
+        setError(
+          e instanceof ApiError
+            ? `Trip created — but the manifest didn't save: ${e.message}. Retry, or add it later from Trips.`
+            : "Trip created — but the manifest didn't save. Retry, or add it later from the Trips screen.",
+        );
+      } else {
+        setError(e instanceof ApiError ? e.message : "Failed to create the trip — please try again.");
+      }
       setBusy(false);
     }
   }
+
+  const paxCount = passengers.filter((p) => p.name.trim()).length;
+  const cargoCount = cargo.filter((c) => c.description.trim()).length;
 
   const reviewRows: [string, string][] = [
     ["Service", SERVICE_TYPE_LABELS[serviceType] + (client ? ` · ${client.name}` : "")],
     ["Corridor", corridor.length >= 2 ? corridor.join(" → ") : "—"],
     ["Schedule", `${serviceDate} · ${windowStart || "—"}${windowEnd ? ` → ${windowEnd}` : ""}`],
-    ["Vehicle", vehicleUnit.trim() || "unassigned"],
+    ["Vehicle", vehicle ? vehicle.unitNumber : "unassigned"],
     ["Driver", driver ? driver.name : "OPEN — claimable"],
+    [
+      "Manifest",
+      paxCount || cargoCount
+        ? `${paxCount} passenger${paxCount === 1 ? "" : "s"} · ${cargoCount} cargo item${cargoCount === 1 ? "" : "s"}`
+        : "none — add later from Trips",
+    ],
     ["Billing", `${effectivePo.trim() || "no PO"}${contract?.budgetCode ? ` · ${contract.budgetCode}` : ""}`],
   ];
 
@@ -486,8 +589,20 @@ export default function CreateTripWizard({
                 <p style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textMuted, margin: "0 0 18px" }}>
                   Leave the driver open (claimable) or lock to a named driver — clearance mismatches warn, never block.
                 </p>
-                <div style={{ marginBottom: 18, maxWidth: 320 }}>
-                  <TextField label="Vehicle unit" value={vehicleUnit} onChange={setVehicleUnit} mono placeholder="U-02" />
+                <div style={{ marginBottom: 18, maxWidth: 360 }}>
+                  <SelectField
+                    label="Vehicle · Active fleet"
+                    value={vehicleId}
+                    onChange={setVehicleId}
+                    options={[
+                      { value: "", label: vehicles === null ? "Loading vehicles…" : "— unassigned —" },
+                      ...(vehicles ?? []).map((v) => ({
+                        value: v.id,
+                        label: `${v.unitNumber} · ${v.make} ${v.model} · ${v.requiredLicenceClass}`,
+                      })),
+                    ]}
+                    hint={<span style={{ color: colors.textFaint }}>· only Active vehicles are assignable</span>}
+                  />
                 </div>
                 <div
                   style={{
@@ -569,10 +684,11 @@ export default function CreateTripWizard({
                   Passengers / demand
                 </h3>
                 <p style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textMuted, margin: "0 0 18px" }}>
-                  Capacity and (for community runs) the viability minimum. Seat confirmations happen on the Manifests
-                  &amp; Demand screen once the trip exists.
+                  Capacity and (for community runs) the viability minimum. Optionally add passengers and cargo now — a
+                  Dispatcher-sourced manifest is created for the trip (and a trip needs a ≥1-passenger manifest before
+                  it can go en route). Seat confirmations happen on the Manifests &amp; Demand screen.
                 </p>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, maxWidth: 480, marginBottom: 14 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, maxWidth: 480, marginBottom: 18 }}>
                   <NumberField label="Seats capacity" value={seatsCapacity} onChange={setSeatsCapacity} min={1} step={1} placeholder="24" />
                   <NumberField
                     label="Seats minimum (viability)"
@@ -588,6 +704,40 @@ export default function CreateTripWizard({
                     }
                   />
                 </div>
+
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                  <SectionLabel>Passengers (optional)</SectionLabel>
+                  <PassengerCsvImport
+                    stops={stopOptions}
+                    capacity={paxCap}
+                    existingCount={contentPax}
+                    trip={{ clientName: client?.name ?? null, serviceDate, direction: null }}
+                    onApply={applyImport}
+                  />
+                </div>
+                <div style={{ marginBottom: 10 }}>
+                  <PassengerRowsEditor rows={passengers} stops={stopOptions} onChange={setPassengers} maxRows={maxPax} />
+                </div>
+                <div style={{ marginBottom: 16 }}>
+                  <OptChip
+                    active={allSeatbeltsVerified}
+                    label="All seatbelts verified"
+                    onClick={() => setAllSeatbeltsVerified((v) => !v)}
+                  />
+                </div>
+
+                <SectionLabel>Cargo (optional)</SectionLabel>
+                <div style={{ marginBottom: 10 }}>
+                  <CargoRowsEditor rows={cargo} onChange={setCargo} />
+                </div>
+                <div style={{ marginBottom: 14 }}>
+                  <OptChip
+                    active={allCargoSecured}
+                    label="All cargo secured"
+                    onClick={() => setAllCargoSecured((v) => !v)}
+                  />
+                </div>
+
                 <div
                   style={{
                     padding: "12px 15px",
@@ -600,8 +750,9 @@ export default function CreateTripWizard({
                     lineHeight: 1.5,
                   }}
                 >
-                  Gift-a-Seat guarantees and NIHB vouchers are recorded against the trip&rsquo;s demand after creation.
-                  Mixing rule: community passengers cannot be added while mine crew are aboard.
+                  Pickup / drop-off options come from the selected route&rsquo;s stops. Gift-a-Seat guarantees and NIHB
+                  vouchers are recorded against the trip&rsquo;s demand after creation. Mixing rule: community passengers
+                  cannot be added while mine crew are aboard.
                 </div>
               </div>
             )}
@@ -725,7 +876,7 @@ export default function CreateTripWizard({
               <div>
                 <div style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim, marginBottom: 2 }}>Vehicle · driver</div>
                 <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: driver ? colors.textPrimary : colors.amberText }}>
-                  {vehicleUnit.trim() || "no unit"} · {driver ? driver.name : "OPEN"}
+                  {vehicle ? vehicle.unitNumber : "no unit"} · {driver ? driver.name : "OPEN"}
                 </div>
               </div>
               <div style={{ paddingTop: 12, borderTop: `1px solid ${colors.border}` }}>

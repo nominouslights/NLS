@@ -15,8 +15,9 @@ public sealed record InvoiceLineResponse(
     decimal AmountCad);
 
 /// <summary>
-/// Full invoice detail, lines included. <c>IsOverdue</c>/<c>DueDate</c> are derived at
-/// read time from SentAtUtc + NetTermsDays — overdue is never a stored status.
+/// Full worksheet detail, lines included. <c>NetTermsDays</c> is an informational snapshot;
+/// receivables (sent/paid/overdue) live in QuickBooks, not here. <c>QboInvoiceId</c> and
+/// <c>QboEnteredDate</c> record the manual QBO reconciliation.
 /// </summary>
 public sealed record InvoiceResponse(
     Guid Id,
@@ -33,21 +34,16 @@ public sealed record InvoiceResponse(
     DateOnly PeriodEnd,
     string Status,
     DateTimeOffset IssuedAtUtc,
-    DateTimeOffset? SentAtUtc,
-    DateTimeOffset? PaidAtUtc,
-    DateOnly? DueDate,
-    bool IsOverdue,
     decimal SubtotalCad,
     decimal GstCad,
     decimal TotalCad,
     string? QboInvoiceId,
-    string QboSyncStatus,
+    DateOnly? QboEnteredDate,
     IReadOnlyList<InvoiceLineResponse> Lines);
 
 /// <summary>
-/// Invoice list row (no lines), served from <c>rm_invoices</c>. Carries SentAtUtc and
-/// NetTermsDays alongside the derived DueDate/IsOverdue so the frontend can also compute
-/// overdue/AR age client-side without another call.
+/// Worksheet list row (no lines), served from <c>rm_invoices</c>. Carries the QBO
+/// reconciliation fields so the frontend can show entered-in-QBO state without another call.
 /// </summary>
 public sealed record InvoiceSummaryResponse(
     Guid Id,
@@ -61,13 +57,9 @@ public sealed record InvoiceSummaryResponse(
     DateOnly PeriodEnd,
     string Status,
     DateTimeOffset IssuedAtUtc,
-    DateTimeOffset? SentAtUtc,
-    DateTimeOffset? PaidAtUtc,
-    DateOnly? DueDate,
-    bool IsOverdue,
     decimal SubtotalCad,
     decimal GstCad,
     decimal TotalCad,
     int LineCount,
     string? QboInvoiceId,
-    string QboSyncStatus);
+    DateOnly? QboEnteredDate);

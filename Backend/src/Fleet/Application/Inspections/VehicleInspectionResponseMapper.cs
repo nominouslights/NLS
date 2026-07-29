@@ -7,6 +7,7 @@ public static class VehicleInspectionResponseMapper
 {
     public static VehicleInspectionResponse ToResponse(VehicleInspection inspection) => new(
         inspection.Id,
+        inspection.VehicleId,
         inspection.Unit,
         inspection.Type.ToString(),
         inspection.DriverName,
@@ -25,6 +26,19 @@ public static class VehicleInspectionResponseMapper
             defect.Item,
             defect.Severity.ToString(),
             defect.Note)).ToList(),
+        inspection.Weather.Select(w => w.ToString()).ToList(),
+        inspection.TemperatureC,
+        inspection.RoadConditions.Select(r => r.ToString()).ToList(),
+        inspection.Visibility?.ToString(),
+        inspection.RoadAdvisories,
+        inspection.FuelLevel?.ToString(),
+        inspection.Issues.ToList(),
+        inspection.Attestations.ToList(),
+        inspection.DriverSignatureName,
+        inspection.CertifiedAt,
+        inspection.FuelAdded,
+        inspection.FuelLitres,
+        inspection.FuelCostCad,
         inspection.GeneratedWorkOrderId,
         inspection.CreatedAtUtc);
 }

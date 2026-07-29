@@ -1,13 +1,16 @@
 using NorthernLink.Shared.Messaging;
-using NorthernLink.Trips.Domain.Routes;
 
 namespace NorthernLink.Trips.Application.Routes.Create;
 
-/// <summary>Creates a route (active by default). Duration arrives as whole minutes.</summary>
+/// <summary>
+/// Creates a route (active by default) from an ordered list of catalog stop ids. Duration
+/// arrives as whole minutes. The handler resolves the stops (same tenant, same domain) and
+/// snapshots their name + coordinates onto the route.
+/// </summary>
 public sealed record CreateRouteCommand(
     Guid TenantId,
     string Name,
-    IReadOnlyList<RouteStop> Stops,
+    IReadOnlyList<Guid> StopIds,
     int DistanceKm,
     int EstimatedDurationMinutes,
     string? RequiredLicenceClass) : ICommand<Guid>;

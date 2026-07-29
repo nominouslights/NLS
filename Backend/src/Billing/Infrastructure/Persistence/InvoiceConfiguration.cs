@@ -39,14 +39,9 @@ public sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
             .HasMaxLength(16);
 
         builder.Property(i => i.IssuedAtUtc).HasColumnName("issued_at_utc");
-        builder.Property(i => i.SentAtUtc).HasColumnName("sent_at_utc");
-        builder.Property(i => i.PaidAtUtc).HasColumnName("paid_at_utc");
 
         builder.Property(i => i.QboInvoiceId).HasColumnName("qbo_invoice_id").HasMaxLength(64);
-        builder.Property(i => i.QboSyncStatus)
-            .HasColumnName("qbo_sync_status")
-            .HasConversion<string>()
-            .HasMaxLength(32);
+        builder.Property(i => i.QboEnteredDate).HasColumnName("qbo_entered_date");
 
         builder.OwnsMany(i => i.Lines, line =>
         {

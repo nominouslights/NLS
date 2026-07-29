@@ -15,8 +15,8 @@ import Clients from "@/components/screens/Clients";
 import Riders from "@/components/screens/Riders";
 import Billing from "@/components/screens/Billing";
 import Manifests from "@/components/screens/Manifests";
-import ManualTripEntry from "@/components/screens/manualtrip/ManualTripEntry";
 import RoutesSchedules from "@/components/screens/RoutesSchedules";
+import Stops from "@/components/screens/Stops";
 import Grocery from "@/components/screens/Grocery";
 import Incidents from "@/components/screens/Incidents";
 import Communications from "@/components/screens/Communications";
@@ -26,6 +26,9 @@ export default function Console() {
   const [screen, setScreen] = useState<ScreenId>("dispatch");
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
+  // Id of the most recently created trip — handed to the Trips screen so it
+  // reloads its list (which is otherwise loaded once on mount) after creation.
+  const [createdTripId, setCreatedTripId] = useState<string | null>(null);
 
   const [tripSelId, setTripSelId] = useState<string | null>(null); // Trips API Guid
   const [driverSel, setDriverSel] = useState(0);
@@ -69,13 +72,18 @@ export default function Console() {
           {screen === "dispatch" && <DispatchBoard onOpenTrip={openTrip} />}
           {screen === "map" && <LiveMap onOpenTrip={() => openTrip(null)} />}
           {screen === "trips" && (
-            <Trips selectedId={tripSelId} setSelectedId={setTripSelId} onNewTrip={() => setWizardOpen(true)} />
+            <Trips
+              selectedId={tripSelId}
+              setSelectedId={setTripSelId}
+              onNewTrip={() => setWizardOpen(true)}
+              createdId={createdTripId}
+            />
           )}
           {screen === "drivers" && <Drivers driverSel={driverSel} setDriverSel={setDriverSel} />}
           {screen === "fleet" && <Fleet fleetSelId={fleetSelId} setFleetSelId={setFleetSelId} />}
           {screen === "routes" && <RoutesSchedules />}
+          {screen === "stops" && <Stops />}
           {screen === "manifests" && <Manifests />}
-          {screen === "manualtrip" && <ManualTripEntry />}
           {screen === "grocery" && <Grocery />}
           {screen === "clients" && (
             <Clients clientSel={clientSel} setClientSel={setClientSel} onCreateTrip={() => setWizardOpen(true)} />
@@ -93,6 +101,7 @@ export default function Console() {
           onClose={() => setWizardOpen(false)}
           onCreated={(tripId) => {
             setWizardOpen(false);
+            setCreatedTripId(tripId);
             openTrip(tripId);
           }}
         />

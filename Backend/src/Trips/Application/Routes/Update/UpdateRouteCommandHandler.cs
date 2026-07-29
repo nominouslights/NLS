@@ -1,11 +1,12 @@
 using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Trips.Application.Abstractions;
+using NorthernLink.Trips.Application.Routes;
 using NorthernLink.Trips.Domain.Routes;
 
 namespace NorthernLink.Trips.Application.Routes.Update;
 
-public sealed class UpdateRouteCommandHandler(IRouteRepository repository)
+public sealed class UpdateRouteCommandHandler(IRouteRepository repository, IStopRepository stops)
     : ICommandHandler<UpdateRouteCommand>
 {
     public async Task<Result> Handle(UpdateRouteCommand command, CancellationToken cancellationToken)
@@ -16,9 +17,15 @@ public sealed class UpdateRouteCommandHandler(IRouteRepository repository)
             return Result.Failure(RouteErrors.NotFound);
         }
 
+        var stopsResult = await RouteStopResolver.ResolveAsync(stops, command.StopIds, cancellationToken);
+        if (stopsResult.IsFailure)
+        {
+            return stopsResult;
+        }
+
         var result = route.Update(
             command.Name,
-            command.Stops,
+            stopsResult.Value,
             command.DistanceKm,
             TimeSpan.FromMinutes(command.EstimatedDurationMinutes),
             command.RequiredLicenceClass,

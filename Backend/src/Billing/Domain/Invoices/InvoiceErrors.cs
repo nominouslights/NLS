@@ -39,20 +39,20 @@ public static class InvoiceErrors
     public static readonly Error NotDraft = Error.Conflict(
         "Billing.Invoice.NotDraft", "Only a draft invoice can be edited or voided.");
 
-    public static readonly Error NotSent = Error.Conflict(
-        "Billing.Invoice.NotSent", "Only a sent invoice can be marked paid.");
+    public static readonly Error NotEntered = Error.Conflict(
+        "Billing.Invoice.NotEntered", "Only an invoice already entered in QuickBooks can do this.");
 
-    public static readonly Error AlreadySent = Error.Conflict(
-        "Billing.Invoice.AlreadySent", "Only a draft invoice can be sent.");
+    public static readonly Error AlreadyEntered = Error.Conflict(
+        "Billing.Invoice.AlreadyEntered", "Only a draft invoice can be entered in QuickBooks.");
+
+    public static readonly Error QboInvoiceIdRequired = Error.Validation(
+        "Billing.Invoice.QboInvoiceIdRequired", "A QuickBooks invoice number is required.");
 
     public static Error TripNotFound(Guid tripId) => Error.NotFound(
         "Billing.Invoice.TripNotFound", $"Billable trip {tripId} was not found for this tenant.");
 
     public static Error TripAlreadyInvoiced(Guid tripId) => Error.Conflict(
         "Billing.Invoice.TripAlreadyInvoiced", $"Billable trip {tripId} is already claimed by another invoice.");
-
-    public static readonly Error InvalidQboSyncStatus = Error.Validation(
-        "Billing.Invoice.InvalidQboSyncStatus", "Unknown QBO sync status.");
 
     public static readonly Error InvalidStatusFilter = Error.Validation(
         "Billing.Invoice.InvalidStatusFilter", "Unknown invoice status filter.");

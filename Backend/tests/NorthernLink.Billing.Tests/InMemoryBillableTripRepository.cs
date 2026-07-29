@@ -13,6 +13,9 @@ public sealed class InMemoryBillableTripRepository : IBillableTripRepository
     public Task<bool> ExistsAsync(Guid tenantId, Guid tripId, CancellationToken cancellationToken = default) =>
         Task.FromResult(Trips.Any(t => t.TenantId == tenantId && t.Id == tripId));
 
+    public Task<BillableTrip?> GetAsync(Guid tenantId, Guid tripId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Trips.FirstOrDefault(t => t.TenantId == tenantId && t.Id == tripId));
+
     public void Add(BillableTrip trip) => Trips.Add(trip);
 
     public Task<IReadOnlyList<BillableTrip>> GetUninvoicedForClientAsync(

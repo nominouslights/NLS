@@ -29,6 +29,31 @@ public sealed class DriverLookupConfiguration : IEntityTypeConfiguration<DriverL
 }
 
 /// <summary>
+/// Maps the vehicle replica (upserted from <c>fleet.vehicle-changed</c> events) to
+/// trips.vehicle_lookup. Plain keyed rows — no audit pipeline, no concurrency token.
+/// </summary>
+public sealed class VehicleLookupConfiguration : IEntityTypeConfiguration<VehicleLookup>
+{
+    public void Configure(EntityTypeBuilder<VehicleLookup> builder)
+    {
+        builder.ToTable("vehicle_lookup");
+
+        builder.HasKey(v => v.VehicleId);
+        builder.Property(v => v.VehicleId).HasColumnName("vehicle_id").ValueGeneratedNever();
+        builder.Property(v => v.TenantId).HasColumnName("tenant_id");
+        builder.Property(v => v.UnitNumber).HasColumnName("unit_number").HasMaxLength(32);
+        builder.Property(v => v.Status).HasColumnName("status").HasMaxLength(16);
+        builder.Property(v => v.RequiredLicenceClass).HasColumnName("required_licence_class").HasMaxLength(16);
+        builder.Property(v => v.SeatingCapacity).HasColumnName("seating_capacity");
+        builder.Property(v => v.UpdatedAtUtc).HasColumnName("updated_at_utc");
+
+        builder.Ignore(v => v.IsActive);
+
+        builder.HasIndex(v => new { v.TenantId, v.Status });
+    }
+}
+
+/// <summary>
 /// Maps the client replica (upserted from <c>clients.client-changed</c> events) to
 /// trips.client_lookup. Plain keyed rows — no audit pipeline, no concurrency token.
 /// </summary>

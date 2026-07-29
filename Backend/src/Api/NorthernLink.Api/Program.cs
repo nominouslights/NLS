@@ -21,6 +21,7 @@ using NorthernLink.Identity.Infrastructure.Auth;
 using NorthernLink.Identity.Infrastructure.Endpoints;
 using NorthernLink.Incidents.Infrastructure;
 using NorthernLink.Notifications.Infrastructure;
+using NorthernLink.Notifications.Infrastructure.Endpoints;
 using NorthernLink.Trips.Infrastructure;
 using NorthernLink.Trips.Infrastructure.Endpoints;
 
@@ -96,5 +97,6 @@ app.MapTripsEndpoints();
 app.MapDriversEndpoints();
 app.MapClientsEndpoints();
 app.MapBillingEndpoints();
+app.MapNotificationsEndpoints();
 
 await app.RunAsync();

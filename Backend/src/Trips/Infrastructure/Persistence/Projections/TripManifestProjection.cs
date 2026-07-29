@@ -14,8 +14,7 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Projections;
 /// Spanning tenants is intentional and is what the worker's pinned <c>app.is_system</c> session
 /// authorises. Nothing is saved here — the worker commits with the checkpoint in one save.
 ///
-/// Enum-typed scalars and the §4 multi-selects are written as their string forms, matching the
-/// stored shape the previous matview selected verbatim (the response contract is strings anyway).
+/// Enum-typed scalars are written as their string forms (the response contract is strings anyway).
 /// </summary>
 internal sealed class TripManifestProjection : IProjection<TripsDbContext>
 {
@@ -98,24 +97,6 @@ internal sealed class TripManifestProjection : IProjection<TripsDbContext>
         row.Direction = source.Direction?.ToString();
         row.Client = source.Client;
 
-        // §2.
-        row.Unit = source.Unit;
-        row.DriverName = source.DriverName;
-        row.DriverLicenceNo = source.DriverLicenceNo;
-        row.LicencePlate = source.LicencePlate;
-        row.OdometerStartKm = source.OdometerStartKm;
-        row.FuelLevel = source.FuelLevel?.ToString();
-
-        // §3.
-        row.PreTripItems = [.. source.PreTripItems];
-
-        // §4.
-        row.Weather = [.. source.Weather.Select(condition => condition.ToString())];
-        row.TemperatureC = source.TemperatureC;
-        row.RoadConditions = [.. source.RoadConditions.Select(condition => condition.ToString())];
-        row.Visibility = source.Visibility?.ToString();
-        row.RoadAdvisories = source.RoadAdvisories;
-
         // §5.
         row.Passengers = [.. source.Passengers];
         row.AllSeatbeltsVerified = source.AllSeatbeltsVerified;
@@ -123,27 +104,6 @@ internal sealed class TripManifestProjection : IProjection<TripsDbContext>
         // §6.
         row.Cargo = [.. source.Cargo];
         row.AllCargoSecured = source.AllCargoSecured?.ToString();
-
-        // §7.
-        row.Issues = [.. source.Issues];
-        row.NoIssues = source.NoIssues;
-
-        // §8.
-        row.DepartureTime = source.DepartureTime;
-        row.ArrivalTime = source.ArrivalTime;
-        row.OdometerEndKm = source.OdometerEndKm;
-        row.TotalKm = source.TotalKm;
-        row.FuelAdded = source.FuelAdded;
-        row.FuelLitres = source.FuelLitres;
-        row.FuelCostCad = source.FuelCostCad;
-
-        // §9.
-        row.PostTripItems = [.. source.PostTripItems];
-
-        // §10.
-        row.Attestations = [.. source.Attestations];
-        row.DriverSignatureName = source.DriverSignatureName;
-        row.CertifiedAt = source.CertifiedAt;
 
         // Provenance.
         row.Source = source.Source.ToString();

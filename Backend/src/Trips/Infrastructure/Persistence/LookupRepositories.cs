@@ -44,6 +44,38 @@ internal sealed class DriverLookupRepository(TripsDbContext context) : IDriverLo
 }
 
 /// <summary>See <see cref="DriverLookupRepository"/> for the tenancy notes.</summary>
+internal sealed class VehicleLookupRepository(TripsDbContext context) : IVehicleLookupRepository
+{
+    public Task<VehicleLookup?> GetAsync(Guid vehicleId, CancellationToken cancellationToken = default) =>
+        context.VehicleLookups.AsNoTracking()
+            .FirstOrDefaultAsync(v => v.VehicleId == vehicleId, cancellationToken);
+
+    public async Task UpsertAsync(VehicleLookup vehicle, CancellationToken cancellationToken = default)
+    {
+        var existing = await context.VehicleLookups
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(
+                v => v.VehicleId == vehicle.VehicleId && v.TenantId == vehicle.TenantId,
+                cancellationToken);
+
+        if (existing is null)
+        {
+            context.VehicleLookups.Add(vehicle);
+        }
+        else
+        {
+            existing.UnitNumber = vehicle.UnitNumber;
+            existing.Status = vehicle.Status;
+            existing.RequiredLicenceClass = vehicle.RequiredLicenceClass;
+            existing.SeatingCapacity = vehicle.SeatingCapacity;
+            existing.UpdatedAtUtc = vehicle.UpdatedAtUtc;
+        }
+
+        await context.SaveChangesAsync(cancellationToken);
+    }
+}
+
+/// <summary>See <see cref="DriverLookupRepository"/> for the tenancy notes.</summary>
 internal sealed class ClientLookupRepository(TripsDbContext context) : IClientLookupRepository
 {
     public Task<ClientLookup?> GetAsync(Guid clientId, CancellationToken cancellationToken = default) =>

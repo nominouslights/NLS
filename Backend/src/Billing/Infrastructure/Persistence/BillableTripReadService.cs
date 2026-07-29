@@ -60,6 +60,7 @@ internal sealed class BillableTripReadService(BillingDbContext context) : IBilla
         t.DistanceKm,
         t.ServiceDate,
         t.RoundTripKey,
+        t.Direction,
         t.PoNumber,
         t.CompletedAtUtc,
         t.InvoiceId);

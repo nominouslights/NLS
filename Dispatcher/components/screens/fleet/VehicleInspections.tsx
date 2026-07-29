@@ -57,7 +57,7 @@ export default function VehicleInspections({
     // Backend inspections (Fleet API) — derived from submitted trip manifests
     // via the RabbitMQ consumer. Fail silent: the mock DVIR log below still works.
     let active = true;
-    listInspections(unit).then(
+    listInspections({ unit }).then(
       (fresh) => {
         if (active) setApiFetch({ unit, rows: fresh });
       },
@@ -106,8 +106,8 @@ export default function VehicleInspections({
                     {insp.type === "PreTrip" ? "Pre-Trip" : "Post-Trip"}
                   </span>
                   <StatusChip kind={rm.kind} label={rm.label} />
-                  <MonoTag color={insp.source === "PaperTranscription" ? colors.amberText : colors.textDim}>
-                    {insp.source === "PaperTranscription" ? "Paper transcription" : "Driver App"}
+                  <MonoTag color={insp.source === "Dispatcher" ? colors.amberText : colors.textDim}>
+                    {insp.source === "Dispatcher" ? "Dispatcher" : "Driver App"}
                   </MonoTag>
                 </div>
                 <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim, marginBottom: insp.defects.length ? 8 : 0 }}>

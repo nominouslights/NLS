@@ -32,11 +32,23 @@ public sealed class RabbitMqIntegrationEventBus(
             integrationEvent.GetType().Name, integrationEvent.EventId, routingKey);
     }
 
-    /// <summary>Raw publish used by the outbox dispatcher — the payload is already wire JSON.</summary>
+    /// <summary>
+    /// Raw publish used by the outbox dispatcher — the payload is already wire JSON.
+    /// Mandatory + awaited publisher confirm: an unroutable or unconfirmed message throws
+    /// (surfacing in the dispatcher's retry/poison machinery) instead of being silently
+    /// dropped by the topic exchange; persistent delivery so queued messages survive a
+    /// broker restart.
+    /// </summary>
     public async Task Publish(string routingKey, ReadOnlyMemory<byte> body, CancellationToken cancellationToken)
     {
         var channel = await EnsureChannel(cancellationToken);
-        await channel.BasicPublishAsync(options.ExchangeName, routingKey, body, cancellationToken);
+        await channel.BasicPublishAsync(
+            options.ExchangeName,
+            routingKey,
+            mandatory: true,
+            basicProperties: new BasicProperties { Persistent = true, ContentType = "application/json" },
+            body,
+            cancellationToken);
     }
 
     /// <summary>
@@ -67,7 +79,15 @@ public sealed class RabbitMqIntegrationEventBus(
             };
 
             _connection = await factory.CreateConnectionAsync(cancellationToken);
-            _channel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken);
+
+            // Publisher confirmations with tracking: BasicPublishAsync completes only when
+            // the broker acks, and faults on nack or mandatory-return — the load-bearing
+            // half of the no-silent-loss guarantee.
+            _channel = await _connection.CreateChannelAsync(
+                new CreateChannelOptions(
+                    publisherConfirmationsEnabled: true,
+                    publisherConfirmationTrackingEnabled: true),
+                cancellationToken);
 
             await _channel.ExchangeDeclareAsync(
                 exchange: options.ExchangeName,

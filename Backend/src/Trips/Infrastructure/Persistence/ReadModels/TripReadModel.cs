@@ -40,6 +40,7 @@ public sealed class TripReadModel
 
     public Guid? DriverId { get; set; }
     public string? DriverName { get; set; }
+    public Guid? VehicleId { get; set; }
     public string? VehicleUnit { get; set; }
 
     public int? SeatsCapacity { get; set; }
@@ -49,6 +50,7 @@ public sealed class TripReadModel
 
     public string Status { get; set; } = null!;
     public Guid? ManifestId { get; set; }
+    public bool HasPostTripInspection { get; set; }
     public DateTimeOffset? CompletedAtUtc { get; set; }
     public string? CancelledReason { get; set; }
 
@@ -91,6 +93,7 @@ public sealed class TripReadModelConfiguration : IEntityTypeConfiguration<TripRe
 
         builder.Property(t => t.DriverId).HasColumnName("driver_id");
         builder.Property(t => t.DriverName).HasColumnName("driver_name");
+        builder.Property(t => t.VehicleId).HasColumnName("vehicle_id");
         builder.Property(t => t.VehicleUnit).HasColumnName("vehicle_unit");
 
         builder.Property(t => t.SeatsCapacity).HasColumnName("seats_capacity");
@@ -100,6 +103,7 @@ public sealed class TripReadModelConfiguration : IEntityTypeConfiguration<TripRe
 
         builder.Property(t => t.Status).HasColumnName("status");
         builder.Property(t => t.ManifestId).HasColumnName("manifest_id");
+        builder.Property(t => t.HasPostTripInspection).HasColumnName("has_post_trip_inspection");
         builder.Property(t => t.CompletedAtUtc).HasColumnName("completed_at_utc");
         builder.Property(t => t.CancelledReason).HasColumnName("cancelled_reason");
 

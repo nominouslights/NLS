@@ -4,10 +4,10 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 namespace NorthernLink.Billing.Infrastructure.Persistence.ReadModels;
 
 /// <summary>
-/// Read-side projection of an invoice for the list view, maintained by
-/// <c>InvoiceProjection</c> in <c>billing.rm_invoices</c>. Carries the computed totals
-/// plus <see cref="SentAtUtc"/> and <see cref="NetTermsDays"/> so overdue and AR age
-/// derive at read time (server or client) — never stored. Lines stay on the write row's
+/// Read-side projection of a worksheet for the list view, maintained by
+/// <c>InvoiceProjection</c> in <c>billing.rm_invoices</c>. Carries the computed totals plus
+/// the manual QBO reference (<see cref="QboInvoiceId"/>, <see cref="QboEnteredDate"/>).
+/// Receivables live in QuickBooks — no overdue/AR fields here. Lines stay on the write row's
 /// jsonb; the detail endpoint reads the aggregate. <see cref="Version"/> is the
 /// aggregate's optimistic-concurrency version at last projection; staleness is
 /// <c>event_journal.aggregate_version &gt; version</c>.
@@ -29,10 +29,8 @@ public sealed class InvoiceReadModel
     public DateOnly PeriodEnd { get; set; }
     public string Status { get; set; } = null!;
     public DateTimeOffset IssuedAtUtc { get; set; }
-    public DateTimeOffset? SentAtUtc { get; set; }
-    public DateTimeOffset? PaidAtUtc { get; set; }
     public string? QboInvoiceId { get; set; }
-    public string QboSyncStatus { get; set; } = null!;
+    public DateOnly? QboEnteredDate { get; set; }
 
     // Derived columns, computed by the aggregate at projection time.
     public decimal SubtotalCad { get; set; }
@@ -70,10 +68,8 @@ public sealed class InvoiceReadModelConfiguration : IEntityTypeConfiguration<Inv
         builder.Property(i => i.PeriodEnd).HasColumnName("period_end");
         builder.Property(i => i.Status).HasColumnName("status");
         builder.Property(i => i.IssuedAtUtc).HasColumnName("issued_at_utc");
-        builder.Property(i => i.SentAtUtc).HasColumnName("sent_at_utc");
-        builder.Property(i => i.PaidAtUtc).HasColumnName("paid_at_utc");
         builder.Property(i => i.QboInvoiceId).HasColumnName("qbo_invoice_id");
-        builder.Property(i => i.QboSyncStatus).HasColumnName("qbo_sync_status");
+        builder.Property(i => i.QboEnteredDate).HasColumnName("qbo_entered_date");
         builder.Property(i => i.SubtotalCad).HasColumnName("subtotal_cad");
         builder.Property(i => i.GstCad).HasColumnName("gst_cad");
         builder.Property(i => i.TotalCad).HasColumnName("total_cad");

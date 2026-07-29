@@ -17,6 +17,9 @@
          (the projection worker's process-once entry point is internal by design). -->
     <InternalsVisibleTo Include="NorthernLink.Fleet.IntegrationTests" />
     <InternalsVisibleTo Include="NorthernLink.Drivers.IntegrationTests" />
+    <!-- Drives OutboxPollingConsumer.ProcessOnceAsync directly (internal by design, like
+         the projection worker's) and builds IntegrationEventSubscriptions in isolation. -->
+    <InternalsVisibleTo Include="NorthernLink.Trips.IntegrationTests" />
   </ItemGroup>
 
   <ItemGroup>

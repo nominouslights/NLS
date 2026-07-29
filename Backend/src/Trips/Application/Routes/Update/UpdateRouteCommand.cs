@@ -1,16 +1,16 @@
 using NorthernLink.Shared.Messaging;
-using NorthernLink.Trips.Domain.Routes;
 
 namespace NorthernLink.Trips.Application.Routes.Update;
 
 /// <summary>
-/// Full-row route edit (including active/inactive). Trips already generated keep their
-/// snapshot; templates pick the change up at their next generation.
+/// Full-row route edit (including active/inactive) from an ordered list of catalog stop
+/// ids. Trips already generated keep their snapshot; templates pick the change up at their
+/// next generation.
 /// </summary>
 public sealed record UpdateRouteCommand(
     Guid RouteId,
     string Name,
-    IReadOnlyList<RouteStop> Stops,
+    IReadOnlyList<Guid> StopIds,
     int DistanceKm,
     int EstimatedDurationMinutes,
     string? RequiredLicenceClass,

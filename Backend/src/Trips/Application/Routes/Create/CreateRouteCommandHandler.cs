@@ -5,15 +5,21 @@ using NorthernLink.Trips.Domain.Routes;
 
 namespace NorthernLink.Trips.Application.Routes.Create;
 
-public sealed class CreateRouteCommandHandler(IRouteRepository repository)
+public sealed class CreateRouteCommandHandler(IRouteRepository repository, IStopRepository stops)
     : ICommandHandler<CreateRouteCommand, Guid>
 {
     public async Task<Result<Guid>> Handle(CreateRouteCommand command, CancellationToken cancellationToken)
     {
+        var stopsResult = await RouteStopResolver.ResolveAsync(stops, command.StopIds, cancellationToken);
+        if (stopsResult.IsFailure)
+        {
+            return Result.Failure<Guid>(stopsResult.Error);
+        }
+
         var routeResult = Route.Create(
             command.TenantId,
             command.Name,
-            command.Stops,
+            stopsResult.Value,
             command.DistanceKm,
             TimeSpan.FromMinutes(command.EstimatedDurationMinutes),
             command.RequiredLicenceClass);

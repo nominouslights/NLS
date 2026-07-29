@@ -19,18 +19,46 @@ export * from "./api/maintenance";
 
 export type {
   ManifestSource,
-  ManifestFuelLevel,
   ManifestDirection,
-  ManifestWeather,
-  ManifestRoadCondition,
-  ManifestVisibility,
-  ManifestSeverity,
   ManifestCargoSecured,
-  ManifestPreTripItem,
   ManifestPassenger,
   ManifestCargo,
-  ManifestPostTripItem,
   TripManifest,
   TripManifestInput,
+  TripActivityEntry,
 } from "./api/trips";
-export { createTripManifest, listTripManifests, getTripManifest } from "./api/trips";
+export {
+  createTripManifest,
+  updateTripManifest,
+  listTripManifests,
+  getTripManifest,
+  listTripActivity,
+} from "./api/trips";
+
+export type {
+  NotificationServiceType,
+  EmailDispatchStatus,
+  EmailRecipientStatus,
+  EmailTemplateRecord,
+  EmailTemplateInput,
+  EmailTemplateListParams,
+  EmailPreviewInput,
+  EmailPreviewResult,
+  SendRecipientInput,
+  SendTripPickupEmailInput,
+  EmailRecipientResult,
+  EmailDispatchRecord,
+} from "./api/notifications";
+export {
+  listEmailTemplates,
+  getEmailTemplate,
+  createEmailTemplate,
+  updateEmailTemplate,
+  setEmailTemplateActive,
+  previewEmailTemplate,
+  sendTripPickupEmail,
+  listTripEmailDispatches,
+  MERGE_FIELDS,
+  isEmailContact,
+  dispatchChip,
+} from "./api/notifications";

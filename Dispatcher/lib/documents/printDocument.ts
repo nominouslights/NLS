@@ -51,7 +51,12 @@ export function openPrintDocument(title: string, bodyHtml: string): void {
 </body>
 </html>`;
 
-  win.document.open();
-  win.document.write(doc);
-  win.document.close();
+  // Navigate the tab to a Blob URL instead of document.write()-ing into it:
+  // writes into a just-opened window race its initial about:blank navigation
+  // (and are neutered by some content blockers), which intermittently leaves
+  // the tab blank. A blob navigation delivers the whole document atomically.
+  const url = URL.createObjectURL(new Blob([doc], { type: "text/html" }));
+  win.location.href = url;
+  // Revoke once the tab has surely loaded — revoking too early aborts the load.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }

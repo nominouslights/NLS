@@ -50,6 +50,7 @@ public sealed class TripConfiguration : IEntityTypeConfiguration<Trip>
 
         builder.Property(t => t.DriverId).HasColumnName("driver_id");
         builder.Property(t => t.DriverName).HasColumnName("driver_name").HasMaxLength(128);
+        builder.Property(t => t.VehicleId).HasColumnName("vehicle_id");
         builder.Property(t => t.VehicleUnit).HasColumnName("vehicle_unit").HasMaxLength(32);
 
         builder.Property(t => t.SeatsCapacity).HasColumnName("seats_capacity");
@@ -62,6 +63,7 @@ public sealed class TripConfiguration : IEntityTypeConfiguration<Trip>
             .HasConversion<string>()
             .HasMaxLength(16);
         builder.Property(t => t.ManifestId).HasColumnName("manifest_id");
+        builder.Property(t => t.HasPostTripInspection).HasColumnName("has_post_trip_inspection");
         builder.Property(t => t.CompletedAtUtc).HasColumnName("completed_at_utc");
         builder.Property(t => t.CancelledReason).HasColumnName("cancelled_reason").HasMaxLength(500);
 

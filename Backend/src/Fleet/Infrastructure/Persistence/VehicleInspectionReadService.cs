@@ -12,6 +12,7 @@ internal sealed class VehicleInspectionReadService(FleetDbContext context) : IVe
 {
     public async Task<IReadOnlyList<VehicleInspectionResponse>> GetInspectionsAsync(
         string? unit = null,
+        string? tripNumber = null,
         CancellationToken cancellationToken = default)
     {
         var query = context.VehicleInspectionReadModels.AsNoTracking();
@@ -21,6 +22,12 @@ internal sealed class VehicleInspectionReadService(FleetDbContext context) : IVe
             query = query.Where(i => i.Unit == unit.Trim());
         }
 
+        if (!string.IsNullOrWhiteSpace(tripNumber))
+        {
+            var trimmedTripNumber = tripNumber.Trim();
+            query = query.Where(i => i.TripNumber == trimmedTripNumber);
+        }
+
         var inspections = await query
             .OrderByDescending(i => i.PerformedAt)
             .ThenBy(i => i.Type)
@@ -28,6 +35,7 @@ internal sealed class VehicleInspectionReadService(FleetDbContext context) : IVe
 
         return inspections.Select(i => new VehicleInspectionResponse(
             i.Id,
+            i.VehicleId,
             i.Unit,
             i.Type,
             i.DriverName,
@@ -46,6 +54,19 @@ internal sealed class VehicleInspectionReadService(FleetDbContext context) : IVe
                 defect.Item,
                 defect.Severity.ToString(),
                 defect.Note)).ToList(),
+            i.Weather.Select(w => w.ToString()).ToList(),
+            i.TemperatureC,
+            i.RoadConditions.Select(r => r.ToString()).ToList(),
+            i.Visibility?.ToString(),
+            i.RoadAdvisories,
+            i.FuelLevel?.ToString(),
+            i.Issues.ToList(),
+            i.Attestations.ToList(),
+            i.DriverSignatureName,
+            i.CertifiedAt,
+            i.FuelAdded,
+            i.FuelLitres,
+            i.FuelCostCad,
             i.GeneratedWorkOrderId,
             i.CreatedAtUtc)).ToList();
     }

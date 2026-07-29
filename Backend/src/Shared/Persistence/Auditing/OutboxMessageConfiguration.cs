@@ -5,8 +5,9 @@ namespace NorthernLink.Shared.Persistence.Auditing;
 
 /// <summary>
 /// Maps <see cref="OutboxMessage"/> to <c>&lt;module-schema&gt;.outbox_messages</c>
-/// (snake_case columns), with a partial index on undispatched rows so the dispatcher's
-/// poll stays cheap as dispatched history accumulates.
+/// (snake_case columns), with one partial index per delivery path — undispatched rows
+/// for the RabbitMQ dispatcher, unprocessed rows for the polling consumer — so both
+/// polls stay cheap as history accumulates.
 /// </summary>
 public sealed class OutboxMessageConfiguration : IEntityTypeConfiguration<OutboxMessage>
 {
@@ -29,9 +30,24 @@ public sealed class OutboxMessageConfiguration : IEntityTypeConfiguration<Outbox
         builder.Property(m => m.LastError).HasColumnName("last_error");
         builder.Property(m => m.NextAttemptAtUtc).HasColumnName("next_attempt_at_utc");
 
+        // Stored as text; the Pending default applies to pre-existing rows when the column
+        // is added, which is what makes the polling consumer replay all history.
+        builder.Property(m => m.ProcessingStatus)
+            .HasColumnName("processing_status")
+            .HasConversion<string>()
+            .HasMaxLength(16)
+            .HasDefaultValue(OutboxProcessingStatus.Pending);
+        builder.Property(m => m.ProcessedAtUtc).HasColumnName("processed_at_utc");
+        builder.Property(m => m.ProcessingAttempts).HasColumnName("processing_attempts").HasDefaultValue(0);
+        builder.Property(m => m.ProcessingLastError).HasColumnName("processing_last_error");
+        builder.Property(m => m.ProcessingNextAttemptAtUtc).HasColumnName("processing_next_attempt_at_utc");
+
         builder.HasIndex(m => m.Id).IsUnique();
-        builder.HasIndex(m => m.Position)
-            .HasFilter("dispatched_at_utc IS NULL")
-            .HasDatabaseName("ix_outbox_messages_pending");
+        // Same column, two named indexes — the name in HasIndex keeps them distinct in the
+        // EF model (an unnamed second HasIndex on the same column would replace the first).
+        builder.HasIndex([nameof(OutboxMessage.Position)], "ix_outbox_messages_pending")
+            .HasFilter("dispatched_at_utc IS NULL");
+        builder.HasIndex([nameof(OutboxMessage.Position)], "ix_outbox_messages_unprocessed")
+            .HasFilter("processing_status = 'Pending'");
     }
 }

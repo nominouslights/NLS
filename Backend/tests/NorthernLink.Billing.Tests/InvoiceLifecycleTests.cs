@@ -14,9 +14,8 @@ public class InvoiceLifecycleTests
             TestBilling.Line(0.5m, 120m));
 
         Assert.Equal(InvoiceStatus.Draft, invoice.Status);
-        Assert.Null(invoice.SentAtUtc);
-        Assert.Null(invoice.PaidAtUtc);
-        Assert.Equal(QboSyncStatus.NotSynced, invoice.QboSyncStatus);
+        Assert.Null(invoice.QboInvoiceId);
+        Assert.Null(invoice.QboEnteredDate);
         Assert.Equal(180m, invoice.SubtotalCad);
         Assert.Equal(9m, invoice.GstCad);
         Assert.Equal(189m, invoice.TotalCad);
@@ -43,47 +42,128 @@ public class InvoiceLifecycleTests
         Assert.True(replace.IsSuccess);
         Assert.Equal(150m, invoice.SubtotalCad);
 
-        Assert.True(invoice.Send().IsSuccess);
+        Assert.True(invoice.MarkEnteredInQbo("QBO-1042", new DateOnly(2026, 8, 1)).IsSuccess);
 
-        var afterSend = invoice.ReplaceLines([TestBilling.Line(1m, 99m)]);
-        Assert.True(afterSend.IsFailure);
-        Assert.Equal("Billing.Invoice.NotDraft", afterSend.Error.Code);
+        var afterEntered = invoice.ReplaceLines([TestBilling.Line(1m, 99m)]);
+        Assert.True(afterEntered.IsFailure);
+        Assert.Equal("Billing.Invoice.NotDraft", afterEntered.Error.Code);
         Assert.Equal(150m, invoice.SubtotalCad);
     }
 
     [Fact]
-    public void Send_transitions_draft_to_sent_once()
+    public void MarkEnteredInQbo_transitions_draft_to_entered_once()
     {
         var invoice = TestBilling.DraftInvoice(true, TestBilling.Line());
 
-        var send = invoice.Send();
-        Assert.True(send.IsSuccess);
-        Assert.Equal(InvoiceStatus.Sent, invoice.Status);
-        Assert.NotNull(invoice.SentAtUtc);
+        var entered = invoice.MarkEnteredInQbo("QBO-1042", new DateOnly(2026, 8, 1));
+        Assert.True(entered.IsSuccess);
+        Assert.Equal(InvoiceStatus.EnteredInQbo, invoice.Status);
+        Assert.Equal("QBO-1042", invoice.QboInvoiceId);
+        Assert.Equal(new DateOnly(2026, 8, 1), invoice.QboEnteredDate);
 
-        var again = invoice.Send();
+        var again = invoice.MarkEnteredInQbo("QBO-1043", new DateOnly(2026, 8, 2));
         Assert.True(again.IsFailure);
-        Assert.Equal("Billing.Invoice.AlreadySent", again.Error.Code);
+        Assert.Equal("Billing.Invoice.AlreadyEntered", again.Error.Code);
     }
 
     [Fact]
-    public void MarkPaid_requires_sent()
+    public void MarkEnteredInQbo_requires_a_qbo_invoice_number()
     {
         var invoice = TestBilling.DraftInvoice(true, TestBilling.Line());
 
-        var early = invoice.MarkPaid();
+        var result = invoice.MarkEnteredInQbo("  ", new DateOnly(2026, 8, 1));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Billing.Invoice.QboInvoiceIdRequired", result.Error.Code);
+        Assert.Equal(InvoiceStatus.Draft, invoice.Status);
+    }
+
+    [Fact]
+    public void MarkEnteredInQbo_is_rejected_from_void()
+    {
+        var invoice = TestBilling.DraftInvoice(true, TestBilling.Line());
+        Assert.True(invoice.Void().IsSuccess);
+
+        var result = invoice.MarkEnteredInQbo("QBO-1042", new DateOnly(2026, 8, 1));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Billing.Invoice.AlreadyEntered", result.Error.Code);
+        Assert.Equal(InvoiceStatus.Void, invoice.Status);
+        Assert.Null(invoice.QboInvoiceId);
+    }
+
+    [Fact]
+    public void UpdateQboReference_requires_entered_status()
+    {
+        var invoice = TestBilling.DraftInvoice(true, TestBilling.Line());
+
+        var early = invoice.UpdateQboReference("QBO-1", new DateOnly(2026, 8, 1));
         Assert.True(early.IsFailure);
-        Assert.Equal("Billing.Invoice.NotSent", early.Error.Code);
+        Assert.Equal("Billing.Invoice.NotEntered", early.Error.Code);
 
-        Assert.True(invoice.Send().IsSuccess);
-        var paid = invoice.MarkPaid();
-        Assert.True(paid.IsSuccess);
-        Assert.Equal(InvoiceStatus.Paid, invoice.Status);
-        Assert.NotNull(invoice.PaidAtUtc);
+        Assert.True(invoice.MarkEnteredInQbo("QBO-1042", new DateOnly(2026, 8, 1)).IsSuccess);
+        var update = invoice.UpdateQboReference("QBO-9999", new DateOnly(2026, 8, 5));
+        Assert.True(update.IsSuccess);
+        Assert.Equal("QBO-9999", invoice.QboInvoiceId);
+        Assert.Equal(new DateOnly(2026, 8, 5), invoice.QboEnteredDate);
+    }
 
-        // Terminal: cannot pay twice or void.
-        Assert.True(invoice.MarkPaid().IsFailure);
-        Assert.True(invoice.Void().IsFailure);
+    [Fact]
+    public void UpdateQboReference_is_rejected_from_void()
+    {
+        var invoice = TestBilling.DraftInvoice(true, TestBilling.Line());
+        Assert.True(invoice.Void().IsSuccess);
+
+        var result = invoice.UpdateQboReference("QBO-1", new DateOnly(2026, 8, 1));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Billing.Invoice.NotEntered", result.Error.Code);
+    }
+
+    [Fact]
+    public void UpdateQboReference_requires_a_qbo_invoice_number()
+    {
+        var invoice = TestBilling.DraftInvoice(true, TestBilling.Line());
+        Assert.True(invoice.MarkEnteredInQbo("QBO-1042", new DateOnly(2026, 8, 1)).IsSuccess);
+
+        var result = invoice.UpdateQboReference("   ", new DateOnly(2026, 8, 5));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Billing.Invoice.QboInvoiceIdRequired", result.Error.Code);
+        // The prior reference is left untouched on a rejected correction.
+        Assert.Equal("QBO-1042", invoice.QboInvoiceId);
+        Assert.Equal(new DateOnly(2026, 8, 1), invoice.QboEnteredDate);
+    }
+
+    [Fact]
+    public void Reopen_returns_entered_to_draft_and_clears_reference()
+    {
+        var invoice = TestBilling.DraftInvoice(true, TestBilling.Line());
+
+        var early = invoice.Reopen();
+        Assert.True(early.IsFailure);
+        Assert.Equal("Billing.Invoice.NotEntered", early.Error.Code);
+
+        Assert.True(invoice.MarkEnteredInQbo("QBO-1042", new DateOnly(2026, 8, 1)).IsSuccess);
+
+        var reopen = invoice.Reopen();
+        Assert.True(reopen.IsSuccess);
+        Assert.Equal(InvoiceStatus.Draft, invoice.Status);
+        Assert.Null(invoice.QboInvoiceId);
+        Assert.Null(invoice.QboEnteredDate);
+    }
+
+    [Fact]
+    public void Reopen_is_rejected_from_void()
+    {
+        var invoice = TestBilling.DraftInvoice(true, TestBilling.Line());
+        Assert.True(invoice.Void().IsSuccess);
+
+        var result = invoice.Reopen();
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Billing.Invoice.NotEntered", result.Error.Code);
+        Assert.Equal(InvoiceStatus.Void, invoice.Status);
     }
 
     [Fact]
@@ -93,24 +173,52 @@ public class InvoiceLifecycleTests
         Assert.True(draft.Void().IsSuccess);
         Assert.Equal(InvoiceStatus.Void, draft.Status);
 
-        var sent = TestBilling.DraftInvoice(true, TestBilling.Line());
-        Assert.True(sent.Send().IsSuccess);
-        var voidSent = sent.Void();
-        Assert.True(voidSent.IsFailure);
-        Assert.Equal("Billing.Invoice.NotDraft", voidSent.Error.Code);
+        var entered = TestBilling.DraftInvoice(true, TestBilling.Line());
+        Assert.True(entered.MarkEnteredInQbo("QBO-1042", new DateOnly(2026, 8, 1)).IsSuccess);
+        var voidEntered = entered.Void();
+        Assert.True(voidEntered.IsFailure);
+        Assert.Equal("Billing.Invoice.NotDraft", voidEntered.Error.Code);
     }
 
     [Fact]
-    public void SetQboStatus_records_reference_and_flag_in_any_status()
+    public void Void_is_rejected_when_already_void()
     {
         var invoice = TestBilling.DraftInvoice(true, TestBilling.Line());
-        Assert.True(invoice.Send().IsSuccess);
+        Assert.True(invoice.Void().IsSuccess);
 
-        var result = invoice.SetQboStatus("qbo-1042", QboSyncStatus.Matched);
+        var again = invoice.Void();
 
-        Assert.True(result.IsSuccess);
-        Assert.Equal("qbo-1042", invoice.QboInvoiceId);
-        Assert.Equal(QboSyncStatus.Matched, invoice.QboSyncStatus);
+        Assert.True(again.IsFailure);
+        Assert.Equal("Billing.Invoice.NotDraft", again.Error.Code);
+    }
+
+    [Fact]
+    public void Reopened_draft_can_be_re_entered_with_a_fresh_reference()
+    {
+        var invoice = TestBilling.DraftInvoice(true, TestBilling.Line());
+        Assert.True(invoice.MarkEnteredInQbo("QBO-1042", new DateOnly(2026, 8, 1)).IsSuccess);
+        Assert.True(invoice.Reopen().IsSuccess);
+
+        var reEntered = invoice.MarkEnteredInQbo("QBO-2000", new DateOnly(2026, 9, 1));
+
+        Assert.True(reEntered.IsSuccess);
+        Assert.Equal(InvoiceStatus.EnteredInQbo, invoice.Status);
+        Assert.Equal("QBO-2000", invoice.QboInvoiceId);
+        Assert.Equal(new DateOnly(2026, 9, 1), invoice.QboEnteredDate);
+    }
+
+    [Fact]
+    public void CreateDraft_computes_totals_without_gst_when_not_applicable()
+    {
+        var invoice = TestBilling.DraftInvoice(
+            gstApplicable: false,
+            TestBilling.Line(1m, 120m),
+            TestBilling.Line(2m, 100m),
+            TestBilling.Line(0.5m, 120m));
+
+        Assert.Equal(380m, invoice.SubtotalCad);
+        Assert.Equal(0m, invoice.GstCad);
+        Assert.Equal(380m, invoice.TotalCad);
     }
 
     [Fact]

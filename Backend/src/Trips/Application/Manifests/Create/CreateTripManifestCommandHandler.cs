@@ -5,11 +5,22 @@ using NorthernLink.Trips.Domain.Manifests;
 
 namespace NorthernLink.Trips.Application.Manifests.Create;
 
-public sealed class CreateTripManifestCommandHandler(ITripManifestRepository repository)
+public sealed class CreateTripManifestCommandHandler(
+    ITripManifestRepository repository,
+    ITripRepository tripRepository)
     : ICommandHandler<CreateTripManifestCommand, Guid>
 {
     public async Task<Result<Guid>> Handle(CreateTripManifestCommand command, CancellationToken cancellationToken)
     {
+        // Deadheads carry no passengers by definition — refuse a manifest outright rather
+        // than letting the async attach link one later. A manifest whose trip number
+        // matches no trip yet is still allowed (manifests associate by number, lazily).
+        var trip = await tripRepository.GetByTripNumberAsync(command.TripNumber, cancellationToken);
+        if (trip is { IsEmptyLeg: true })
+        {
+            return Result.Failure<Guid>(Domain.Trips.TripErrors.ManifestNotAllowedForEmptyLeg);
+        }
+
         var manifestResult = TripManifest.Create(
             command.TenantId,
             command.TripDate,
@@ -17,35 +28,10 @@ public sealed class CreateTripManifestCommandHandler(ITripManifestRepository rep
             command.Route,
             command.Direction,
             command.Client,
-            command.Unit,
-            command.DriverName,
-            command.DriverLicenceNo,
-            command.LicencePlate,
-            command.OdometerStartKm,
-            command.FuelLevel,
-            command.PreTrip,
-            command.Weather,
-            command.TemperatureC,
-            command.RoadConditions,
-            command.Visibility,
-            command.RoadAdvisories,
             command.Passengers,
             command.AllSeatbeltsVerified,
             command.Cargo,
             command.AllCargoSecured,
-            command.Issues,
-            command.NoIssues,
-            command.DepartureTime,
-            command.ArrivalTime,
-            command.OdometerEndKm,
-            command.TotalKm,
-            command.FuelAdded,
-            command.FuelLitres,
-            command.FuelCostCad,
-            command.PostTrip,
-            command.Attestations,
-            command.DriverSignatureName,
-            command.CertifiedAt ?? DateTimeOffset.UtcNow,
             command.Source,
             command.EnteredBy);
 

@@ -15,5 +15,8 @@ public interface ITripRepository
     /// <summary>Looks a trip up by its human trip number — unique per tenant.</summary>
     Task<Trip?> GetByTripNumberAsync(string tripNumber, CancellationToken cancellationToken = default);
 
+    /// <summary>All legs sharing a round-trip key (normally two) — unpair clears every one.</summary>
+    Task<IReadOnlyList<Trip>> GetByRoundTripKeyAsync(string roundTripKey, CancellationToken cancellationToken = default);
+
     Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }

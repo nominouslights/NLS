@@ -25,12 +25,13 @@ import {
 } from "@/lib/api/trips";
 import { listClients, SERVICE_TYPE_LABELS, type ClientRecord } from "@/lib/api/clients";
 import { listDrivers, type DriverRecord } from "@/lib/api/drivers";
+import { listStops, type StopRecord } from "@/lib/api/stops";
 import { PageHeader, Panel, SectionLabel, DetailRow } from "@/components/ui/Panel";
 import { ServiceChip, StatusChip } from "@/components/ui/Chip";
 import { ActionButton } from "@/components/ui/Button";
 import { CorridorStepper } from "@/components/ui/CorridorStepper";
 import { ModalShell } from "@/components/ui/ModalShell";
-import { NumberField, SelectField, TextAreaField, TextField, TimeField } from "@/components/ui/Field";
+import { FieldLabel, NumberField, SelectField, TextField, TimeField } from "@/components/ui/Field";
 
 // Routes & Schedules — corridor routes and recurring schedule templates from
 // the real Trips API (GET /api/trips/routes, /api/trips/schedule-templates).
@@ -50,6 +51,33 @@ function durationLabel(minutes: number): string {
 // Route form modal — POST /api/trips/routes · PUT /api/trips/routes/{id}
 // ---------------------------------------------------------------------------
 
+function ReorderButton({ label, onClick, disabled }: { label: string; onClick: () => void; disabled?: boolean }) {
+  return (
+    <span
+      onClick={disabled ? undefined : onClick}
+      aria-disabled={disabled || undefined}
+      style={{
+        width: 28,
+        height: 28,
+        flex: "none",
+        borderRadius: 7,
+        border: `1px solid ${colors.borderStrong}`,
+        background: colors.inputBg,
+        color: disabled ? colors.textFaint : colors.textMuted,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: 13,
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.5 : 1,
+        userSelect: "none",
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
 function RouteFormModal({
   existing,
   onClose,
@@ -61,9 +89,6 @@ function RouteFormModal({
 }) {
   const editing = existing !== null;
   const [name, setName] = useState(existing?.name ?? "");
-  const [stopsText, setStopsText] = useState(
-    existing ? [...existing.stops].sort((a, b) => a.order - b.order).map((s) => s.name).join("\n") : "",
-  );
   const [distanceKm, setDistanceKm] = useState(existing ? String(existing.distanceKm) : "");
   const [durationMin, setDurationMin] = useState(existing ? String(existing.estimatedDurationMinutes) : "");
   const [licenceClass, setLicenceClass] = useState(existing?.requiredLicenceClass ?? "");
@@ -71,15 +96,82 @@ function RouteFormModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Stop catalog (active stops only) for the picker; null while loading.
+  const [stops, setStops] = useState<StopRecord[] | null>(null);
+  // Ordered selection primed from the existing route's snapshot by stopId.
+  const [stopIds, setStopIds] = useState<string[]>(
+    existing
+      ? [...existing.stops]
+          .sort((a, b) => a.order - b.order)
+          .map((s) => s.stopId)
+          .filter((id): id is string => Boolean(id))
+      : [],
+  );
+  const [addPick, setAddPick] = useState("");
+
+  // Legacy free-text stops (no stopId) can't be resolved to catalog ids — shown
+  // read-only and excluded from the new list, forcing re-selection before save.
+  const legacyStops = editing
+    ? [...existing.stops].sort((a, b) => a.order - b.order).filter((s) => !s.stopId)
+    : [];
+  const hasLegacy = legacyStops.length > 0;
+
+  useEffect(() => {
+    let mounted = true;
+    listStops().then(
+      (rows) => {
+        if (mounted) setStops(rows.filter((s) => s.active));
+      },
+      () => {
+        if (mounted) setStops([]);
+      },
+    );
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // Name for a selected id: prefer the live catalog, fall back to the route's
+  // snapshot (handles a now-inactive stop that's still on the route).
+  function nameForStop(id: string): string {
+    return (
+      stops?.find((s) => s.id === id)?.name ??
+      existing?.stops.find((s) => s.stopId === id)?.name ??
+      "Unknown stop"
+    );
+  }
+
+  const available = (stops ?? []).filter((s) => !stopIds.includes(s.id));
+  const origin = stopIds.length > 0 ? nameForStop(stopIds[0]) : "—";
+  const destination = stopIds.length > 0 ? nameForStop(stopIds[stopIds.length - 1]) : "—";
+
+  function addStop(id: string) {
+    if (!id || stopIds.includes(id)) return;
+    setStopIds((cur) => [...cur, id]);
+    setAddPick("");
+  }
+  function removeStop(index: number) {
+    setStopIds((cur) => cur.filter((_, i) => i !== index));
+  }
+  function move(index: number, delta: number) {
+    setStopIds((cur) => {
+      const next = [...cur];
+      const target = index + delta;
+      if (target < 0 || target >= next.length) return cur;
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }
+
   async function submit() {
     if (busy) return;
-    const stops = stopsText
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .map((s, i) => ({ name: s, order: i + 1 }));
     if (!name.trim()) return setError("Enter the route name.");
-    if (stops.length < 2) return setError("Enter at least two stops (one per line, in corridor order).");
+    if (stopIds.length < 2)
+      return setError(
+        hasLegacy
+          ? "This route's stops are legacy free text — re-select at least two stops from the catalog."
+          : "Select at least two stops from the catalog, in corridor order.",
+      );
     const km = Number(distanceKm);
     if (!Number.isInteger(km) || km <= 0) return setError("Distance must be a whole number of km.");
     const mins = Number(durationMin);
@@ -91,7 +183,7 @@ function RouteFormModal({
       await onSaved(
         {
           name: name.trim(),
-          stops,
+          stopIds,
           distanceKm: km,
           estimatedDurationMinutes: mins,
           requiredLicenceClass: licenceClass.trim() || null,
@@ -127,16 +219,108 @@ function RouteFormModal({
         <NumberField label="Distance (km)" value={distanceKm} onChange={setDistanceKm} min={1} step={1} />
         <NumberField label="Estimated duration (minutes)" value={durationMin} onChange={setDurationMin} min={1} step={5} />
       </div>
-      <div style={{ marginTop: 14 }}>
-        <TextAreaField
-          label="Stops · one per line, corridor order"
-          value={stopsText}
-          onChange={setStopsText}
-          rows={4}
-          placeholder={"Thompson\nLeaf Rapids\nLynn Lake"}
-          hint={<span style={{ color: colors.textFaint }}>· origin first, destination last</span>}
+
+      <div style={{ marginTop: 16 }}>
+        <FieldLabel hint={<span style={{ color: colors.textFaint }}>· pick from the Stop catalog, origin first &amp; destination last</span>}>
+          Stops · corridor order
+        </FieldLabel>
+
+        {hasLegacy && (
+          <div
+            style={{
+              padding: "10px 13px",
+              marginBottom: 10,
+              background: statusMeta("soon").bg,
+              border: `1px solid ${statusMeta("soon").bd}`,
+              borderRadius: 9,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+              <StatusChip kind="soon" label="Legacy free-text stops — re-select from the catalog to save" />
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {legacyStops.map((s, i) => (
+                <span
+                  key={`${s.name}-${i}`}
+                  style={{
+                    fontFamily: fonts.body,
+                    fontSize: 11.5,
+                    padding: "3px 9px",
+                    borderRadius: 6,
+                    background: colors.inputBg,
+                    border: `1px dashed ${colors.borderStrong}`,
+                    color: colors.textDim,
+                  }}
+                >
+                  {s.name}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ordered selection */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+          {stopIds.length === 0 && (
+            <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textDim, padding: "4px 0" }}>
+              No stops selected yet — add at least two below.
+            </div>
+          )}
+          {stopIds.map((id, i) => (
+            <div
+              key={id}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "9px 12px",
+                borderRadius: 9,
+                background: colors.cardBg,
+                border: `1px solid ${colors.border}`,
+                boxShadow: colors.shadowCard,
+              }}
+            >
+              <span style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.textDim, width: 20, flex: "none" }}>{i + 1}</span>
+              <span style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: 600, color: colors.textPrimary, flex: 1, minWidth: 0 }}>
+                {nameForStop(id)}
+                {i === 0 && <span style={{ fontFamily: fonts.body, fontSize: 10.5, fontWeight: 500, color: colors.textDim, marginLeft: 7 }}>origin</span>}
+                {i === stopIds.length - 1 && i > 0 && (
+                  <span style={{ fontFamily: fonts.body, fontSize: 10.5, fontWeight: 500, color: colors.textDim, marginLeft: 7 }}>destination</span>
+                )}
+              </span>
+              <div style={{ display: "flex", gap: 5, flex: "none" }}>
+                <ReorderButton label="↑" disabled={i === 0} onClick={() => move(i, -1)} />
+                <ReorderButton label="↓" disabled={i === stopIds.length - 1} onClick={() => move(i, 1)} />
+                <ReorderButton label="✕" onClick={() => removeStop(i)} />
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <SelectField
+          label="Add stop"
+          value={addPick}
+          onChange={addStop}
+          hint={
+            stops === null ? (
+              <span style={{ color: colors.textFaint }}>· loading catalog…</span>
+            ) : available.length === 0 ? (
+              <span style={{ color: colors.textFaint }}>· no more active stops available</span>
+            ) : undefined
+          }
+          options={[
+            { value: "", label: stops === null ? "Loading stops…" : "— select a stop to append —" },
+            ...available.map((s) => ({ value: s.id, label: `${s.name} · ${s.city}, ${s.province}` })),
+          ]}
         />
+
+        {stopIds.length >= 1 && (
+          <div style={{ fontFamily: fonts.mono, fontSize: 11.5, color: colors.textDim, marginTop: 9 }}>
+            Origin → destination: {origin} → {destination}
+          </div>
+        )}
       </div>
+
       {editing && (
         <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 10 }}>
           <ActionButton variant={active ? "secondary" : "success"} onClick={() => setActive((v) => !v)}>

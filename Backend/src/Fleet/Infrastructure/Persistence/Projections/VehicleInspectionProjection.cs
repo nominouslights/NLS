@@ -17,6 +17,7 @@ internal sealed class VehicleInspectionProjection : FleetProjection<VehicleInspe
     {
         row.Id = source.Id;
         row.TenantId = source.TenantId;
+        row.VehicleId = source.VehicleId;
         row.Unit = source.Unit;
         row.Type = source.Type.ToString();
         row.DriverName = source.DriverName;
@@ -30,6 +31,19 @@ internal sealed class VehicleInspectionProjection : FleetProjection<VehicleInspe
         row.Result = source.Result.ToString();
         row.ChecklistItems = [.. source.ChecklistItems];
         row.Defects = [.. source.Defects];
+        row.Weather = [.. source.Weather];
+        row.TemperatureC = source.TemperatureC;
+        row.RoadConditions = [.. source.RoadConditions];
+        row.Visibility = source.Visibility;
+        row.RoadAdvisories = source.RoadAdvisories;
+        row.FuelLevel = source.FuelLevel;
+        row.Issues = [.. source.Issues];
+        row.Attestations = [.. source.Attestations];
+        row.DriverSignatureName = source.DriverSignatureName;
+        row.CertifiedAt = source.CertifiedAt;
+        row.FuelAdded = source.FuelAdded;
+        row.FuelLitres = source.FuelLitres;
+        row.FuelCostCad = source.FuelCostCad;
         row.CreatedAtUtc = source.CreatedAtUtc;
         row.Version = source.Version;
     }

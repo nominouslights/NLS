@@ -4,12 +4,15 @@ using NorthernLink.Trips.Domain.Manifests.Events;
 namespace NorthernLink.Trips.Domain.Manifests;
 
 /// <summary>
-/// A completed NL-TM-01 Trip Manifest &amp; Vehicle Inspection Report — all ten sections
-/// of the paper form as one aggregate. Manifests are only ever created whole (there is
-/// no draft state): the driver certifies on the device, or a dispatcher transcribes a
-/// finished paper copy, so <see cref="Create"/> is the single entry point and the only
-/// place the form's invariants are enforced. Row collections (§3, §5, §6, §9) persist
-/// as jsonb. Provenance distinguishes App submissions from paper transcriptions.
+/// A route-aware passenger + cargo manifest for a trip. Since inspections detached from
+/// the manifest (their pre/post checklists, odometer, fuel, conditions, issues, and
+/// certification now live in Fleet's <c>VehicleInspection</c>), this aggregate keeps only
+/// §1 trip info, §5 passengers, and §6 cargo. Unlike the old create-whole form, a manifest
+/// is <b>editable any time without changing trip status</b>: <see cref="Create"/> records
+/// it and <see cref="Update"/> revises it, each raising a journaled domain event stamped
+/// with <see cref="Source"/> + <see cref="EnteredBy"/> — that event stream is the audit
+/// log. Passengers reference the trip's route stops by snapshot; the row collections
+/// (§5/§6) persist as jsonb.
 /// </summary>
 public sealed class TripManifest : AggregateRoot, ITenantScoped
 {
@@ -18,9 +21,6 @@ public sealed class TripManifest : AggregateRoot, ITenantScoped
         // EF Core materialization only.
         TripNumber = null!;
         Route = null!;
-        Unit = null!;
-        DriverName = null!;
-        DriverSignatureName = null!;
     }
 
     public Guid TenantId { get; private set; }
@@ -32,24 +32,6 @@ public sealed class TripManifest : AggregateRoot, ITenantScoped
     public TripDirection? Direction { get; private set; }
     public string? Client { get; private set; }
 
-    // §2 — vehicle & driver.
-    public string Unit { get; private set; }
-    public string DriverName { get; private set; }
-    public string? DriverLicenceNo { get; private set; }
-    public string? LicencePlate { get; private set; }
-    public int? OdometerStartKm { get; private set; }
-    public FuelLevel? FuelLevel { get; private set; }
-
-    // §3 — pre-trip inspection (28 canonical items).
-    public List<PreTripChecklistItem> PreTripItems { get; private set; } = [];
-
-    // §4 — weather & road conditions.
-    public List<WeatherCondition> Weather { get; private set; } = [];
-    public string? TemperatureC { get; private set; }
-    public List<RoadCondition> RoadConditions { get; private set; } = [];
-    public VisibilityLevel? Visibility { get; private set; }
-    public string? RoadAdvisories { get; private set; }
-
     // §5 — passengers (max 8).
     public List<ManifestPassenger> Passengers { get; private set; } = [];
     public bool AllSeatbeltsVerified { get; private set; }
@@ -58,34 +40,18 @@ public sealed class TripManifest : AggregateRoot, ITenantScoped
     public List<ManifestCargoItem> Cargo { get; private set; } = [];
     public CargoSecuredStatus? AllCargoSecured { get; private set; }
 
-    // §7 — issues log.
-    public List<string> Issues { get; private set; } = [];
-    public bool NoIssues { get; private set; }
-
-    // §8 — trip completion log.
-    public string? DepartureTime { get; private set; }
-    public string? ArrivalTime { get; private set; }
-    public int? OdometerEndKm { get; private set; }
-    public int? TotalKm { get; private set; }
-    public bool FuelAdded { get; private set; }
-    public decimal? FuelLitres { get; private set; }
-    public decimal? FuelCostCad { get; private set; }
-
-    // §9 — post-trip check (6 items).
-    public List<PostTripChecklistItem> PostTripItems { get; private set; } = [];
-
-    // §10 — certification.
-    public List<bool> Attestations { get; private set; } = [];
-    public string DriverSignatureName { get; private set; }
-    public DateTimeOffset CertifiedAt { get; private set; }
-
-    // Provenance.
+    // Provenance — stamped on create and re-stamped on every edit.
     public ManifestSource Source { get; private set; }
     public string? EnteredBy { get; private set; }
     public DateTimeOffset? EnteredAt { get; private set; }
 
     public DateTimeOffset CreatedAtUtc { get; private set; }
 
+    /// <summary>
+    /// Records a manifest. Valid with just §1 trip info plus zero-or-more passengers and
+    /// cargo — no inspection, attestation, or signature requirements anymore. A
+    /// dispatcher-entered manifest must say who entered it.
+    /// </summary>
     public static Result<TripManifest> Create(
         Guid tenantId,
         DateOnly tripDate,
@@ -93,92 +59,17 @@ public sealed class TripManifest : AggregateRoot, ITenantScoped
         string route,
         TripDirection? direction,
         string? client,
-        string unit,
-        string driverName,
-        string? driverLicenceNo,
-        string? licencePlate,
-        int? odometerStartKm,
-        FuelLevel? fuelLevel,
-        IReadOnlyList<PreTripChecklistItem> preTripItems,
-        IReadOnlyList<WeatherCondition> weather,
-        string? temperatureC,
-        IReadOnlyList<RoadCondition> roadConditions,
-        VisibilityLevel? visibility,
-        string? roadAdvisories,
         IReadOnlyList<ManifestPassenger> passengers,
         bool allSeatbeltsVerified,
         IReadOnlyList<ManifestCargoItem> cargo,
         CargoSecuredStatus? allCargoSecured,
-        IReadOnlyList<string> issues,
-        bool noIssues,
-        string? departureTime,
-        string? arrivalTime,
-        int? odometerEndKm,
-        int? totalKm,
-        bool fuelAdded,
-        decimal? fuelLitres,
-        decimal? fuelCostCad,
-        IReadOnlyList<PostTripChecklistItem> postTripItems,
-        IReadOnlyList<bool> attestations,
-        string driverSignatureName,
-        DateTimeOffset certifiedAt,
         ManifestSource source,
         string? enteredBy)
     {
-        if (string.IsNullOrWhiteSpace(tripNumber))
+        var validation = Validate(tripNumber, passengers, cargo, source, enteredBy);
+        if (validation.IsFailure)
         {
-            return Result.Failure<TripManifest>(TripManifestErrors.TripNumberRequired);
-        }
-
-        if (string.IsNullOrWhiteSpace(unit))
-        {
-            return Result.Failure<TripManifest>(TripManifestErrors.UnitRequired);
-        }
-
-        if (string.IsNullOrWhiteSpace(driverName))
-        {
-            return Result.Failure<TripManifest>(TripManifestErrors.DriverNameRequired);
-        }
-
-        if (passengers.Count > ManifestChecklist.MaxPassengers)
-        {
-            return Result.Failure<TripManifest>(TripManifestErrors.TooManyPassengers);
-        }
-
-        if (cargo.Count > ManifestChecklist.MaxCargoItems)
-        {
-            return Result.Failure<TripManifest>(TripManifestErrors.TooManyCargoItems);
-        }
-
-        if (preTripItems.Any(item =>
-                item.Status == PreTripItemStatus.Fail && string.IsNullOrWhiteSpace(item.Note)))
-        {
-            return Result.Failure<TripManifest>(TripManifestErrors.FailRequiresNote);
-        }
-
-        if (odometerStartKm is { } start && odometerEndKm is { } end && end < start)
-        {
-            return Result.Failure<TripManifest>(TripManifestErrors.OdometerEndBeforeStart);
-        }
-
-        if (fuelAdded && fuelLitres is null)
-        {
-            return Result.Failure<TripManifest>(TripManifestErrors.FuelLitresRequired);
-        }
-
-        if (attestations.Count != ManifestChecklist.AttestationCount || attestations.Contains(false))
-        {
-            return Result.Failure<TripManifest>(TripManifestErrors.AttestationsIncomplete);
-        }
-
-        if (string.IsNullOrWhiteSpace(driverSignatureName))
-        {
-            return Result.Failure<TripManifest>(TripManifestErrors.SignatureRequired);
-        }
-
-        if (source == ManifestSource.Paper && string.IsNullOrWhiteSpace(enteredBy))
-        {
-            return Result.Failure<TripManifest>(TripManifestErrors.EnteredByRequired);
+            return Result.Failure<TripManifest>(validation.Error);
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -190,44 +81,99 @@ public sealed class TripManifest : AggregateRoot, ITenantScoped
             Route = route?.Trim() ?? string.Empty,
             Direction = direction,
             Client = Normalize(client),
-            Unit = unit.Trim(),
-            DriverName = driverName.Trim(),
-            DriverLicenceNo = Normalize(driverLicenceNo),
-            LicencePlate = Normalize(licencePlate),
-            OdometerStartKm = odometerStartKm,
-            FuelLevel = fuelLevel,
-            PreTripItems = [.. preTripItems],
-            Weather = [.. weather],
-            TemperatureC = Normalize(temperatureC),
-            RoadConditions = [.. roadConditions],
-            Visibility = visibility,
-            RoadAdvisories = Normalize(roadAdvisories),
             Passengers = [.. passengers],
             AllSeatbeltsVerified = allSeatbeltsVerified,
             Cargo = [.. cargo],
             AllCargoSecured = allCargoSecured,
-            Issues = [.. issues],
-            NoIssues = noIssues,
-            DepartureTime = Normalize(departureTime),
-            ArrivalTime = Normalize(arrivalTime),
-            OdometerEndKm = odometerEndKm,
-            TotalKm = totalKm,
-            FuelAdded = fuelAdded,
-            FuelLitres = fuelLitres,
-            FuelCostCad = fuelCostCad,
-            PostTripItems = [.. postTripItems],
-            Attestations = [.. attestations],
-            DriverSignatureName = driverSignatureName.Trim(),
-            CertifiedAt = certifiedAt,
             Source = source,
-            EnteredBy = source == ManifestSource.Paper ? enteredBy!.Trim() : Normalize(enteredBy),
-            EnteredAt = source == ManifestSource.Paper ? now : null,
+            EnteredBy = StampEnteredBy(source, enteredBy),
+            EnteredAt = source == ManifestSource.Dispatcher ? now : null,
             CreatedAtUtc = now,
         };
 
-        manifest.Raise(new TripManifestCompletedDomainEvent(manifest.Id));
+        manifest.Raise(new TripManifestCreatedDomainEvent(manifest.Id));
         return Result.Success(manifest);
     }
+
+    /// <summary>
+    /// Revises §1 trip info, passengers, and cargo in place — any time, without touching
+    /// trip status. Re-stamps provenance from the editing <paramref name="source"/> /
+    /// <paramref name="enteredBy"/> and raises the journaled
+    /// <see cref="TripManifestUpdatedDomainEvent"/> (the audit entry for this edit).
+    /// </summary>
+    public Result Update(
+        DateOnly tripDate,
+        string tripNumber,
+        string route,
+        TripDirection? direction,
+        string? client,
+        IReadOnlyList<ManifestPassenger> passengers,
+        bool allSeatbeltsVerified,
+        IReadOnlyList<ManifestCargoItem> cargo,
+        CargoSecuredStatus? allCargoSecured,
+        ManifestSource source,
+        string? enteredBy)
+    {
+        var validation = Validate(tripNumber, passengers, cargo, source, enteredBy);
+        if (validation.IsFailure)
+        {
+            return validation;
+        }
+
+        TripDate = tripDate;
+        TripNumber = tripNumber.Trim();
+        Route = route?.Trim() ?? string.Empty;
+        Direction = direction;
+        Client = Normalize(client);
+        Passengers = [.. passengers];
+        AllSeatbeltsVerified = allSeatbeltsVerified;
+        Cargo = [.. cargo];
+        AllCargoSecured = allCargoSecured;
+        Source = source;
+        EnteredBy = StampEnteredBy(source, enteredBy);
+        EnteredAt = DateTimeOffset.UtcNow;
+
+        Raise(new TripManifestUpdatedDomainEvent(Id, source, EnteredBy));
+        return Result.Success();
+    }
+
+    private static Result Validate(
+        string tripNumber,
+        IReadOnlyList<ManifestPassenger> passengers,
+        IReadOnlyList<ManifestCargoItem> cargo,
+        ManifestSource source,
+        string? enteredBy)
+    {
+        if (string.IsNullOrWhiteSpace(tripNumber))
+        {
+            return Result.Failure(TripManifestErrors.TripNumberRequired);
+        }
+
+        if (passengers.Count > ManifestChecklist.MaxPassengers)
+        {
+            return Result.Failure(TripManifestErrors.TooManyPassengers);
+        }
+
+        if (cargo.Count > ManifestChecklist.MaxCargoItems)
+        {
+            return Result.Failure(TripManifestErrors.TooManyCargoItems);
+        }
+
+        if (passengers.Any(p => string.IsNullOrWhiteSpace(p.Name)))
+        {
+            return Result.Failure(TripManifestErrors.PassengerNameRequired);
+        }
+
+        if (source == ManifestSource.Dispatcher && string.IsNullOrWhiteSpace(enteredBy))
+        {
+            return Result.Failure(TripManifestErrors.EnteredByRequired);
+        }
+
+        return Result.Success();
+    }
+
+    private static string? StampEnteredBy(ManifestSource source, string? enteredBy) =>
+        source == ManifestSource.Dispatcher ? enteredBy!.Trim() : Normalize(enteredBy);
 
     private static string? Normalize(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();

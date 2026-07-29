@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using NorthernLink.Shared.EventBus;
+using NorthernLink.Shared.IntegrationEvents.Fleet;
 using NorthernLink.Shared.Persistence.Auditing;
 using NorthernLink.Shared.Tenancy;
 using NorthernLink.Fleet.Application.Vehicles;
@@ -38,12 +39,18 @@ public class OutboxDispatcherTests(PostgresFixture fixture)
     {
         var vehicle = await SaveVehicleWithStatusChangeAsync();
 
-        // The outbox row was written in the same transaction as the status change.
+        // Fleet publishes fleet.vehicle-changed on register AND status change (the
+        // upsert-shaped event Trips' vehicle_lookup consumes), so both saves left an
+        // outbox row written in the same transaction as their aggregate change.
         await using (var reader = fixture.CreateContext(PostgresFixture.TenantA))
         {
-            var message = Assert.Single(await PendingRowsForAsync(reader, vehicle.Id));
-            Assert.Equal("fleet.vehicle-status-changed", message.RoutingKey);
-            Assert.Equal("VehicleStatusChangedIntegrationEvent", message.EventType);
+            var messages = await PendingRowsForAsync(reader, vehicle.Id);
+            Assert.NotEmpty(messages);
+            Assert.All(messages, message =>
+            {
+                Assert.Equal("fleet.vehicle-changed", message.RoutingKey);
+                Assert.Equal("VehicleChangedIntegrationEvent", message.EventType);
+            });
         }
 
         var transport = new RecordingTransport();
@@ -53,8 +60,11 @@ public class OutboxDispatcherTests(PostgresFixture fixture)
             return (await PendingRowsForAsync(reader, vehicle.Id)).Count == 0;
         });
 
-        var published = Assert.Single(transport.Published, p => p.Body.Contains(vehicle.Id.ToString()));
-        Assert.Equal("fleet.vehicle-status-changed", published.RoutingKey);
+        // The status-change row carries the new status; isolate it from the register row.
+        var published = Assert.Single(
+            transport.Published,
+            p => p.Body.Contains(vehicle.Id.ToString()) && p.Body.Contains("InMaintenance"));
+        Assert.Equal("fleet.vehicle-changed", published.RoutingKey);
         Assert.Contains(PostgresFixture.TenantA.ToString(), published.Body);
     }
 
@@ -67,15 +77,48 @@ public class OutboxDispatcherTests(PostgresFixture fixture)
         {
             await using var reader = fixture.CreateContext(PostgresFixture.TenantA);
             var rows = await PendingRowsForAsync(reader, vehicle.Id);
-            return rows.Count == 1 && rows[0].Attempts >= 1;
+            return rows.Count >= 1 && rows.All(r => r.Attempts >= 1);
         });
 
         await using var context = fixture.CreateContext(PostgresFixture.TenantA);
-        var message = Assert.Single(await PendingRowsForAsync(context, vehicle.Id));
-        Assert.Null(message.DispatchedAtUtc);
-        Assert.True(message.Attempts >= 1);
-        Assert.Contains("broker unavailable", message.LastError);
-        Assert.NotNull(message.NextAttemptAtUtc);
+        var messages = await PendingRowsForAsync(context, vehicle.Id);
+        Assert.NotEmpty(messages);
+        Assert.All(messages, message =>
+        {
+            Assert.Null(message.DispatchedAtUtc);
+            Assert.True(message.Attempts >= 1);
+            Assert.Contains("broker unavailable", message.LastError);
+            Assert.NotNull(message.NextAttemptAtUtc);
+        });
+    }
+
+    [Fact]
+    public async Task Empty_registry_leaves_rows_untouched_and_publishes_nothing()
+    {
+        var vehicle = await SaveVehicleWithStatusChangeAsync();
+
+        // With nothing designated for the bus (the current production state — every event
+        // is storing/projecting, delivered by the polling consumer), the dispatcher idles:
+        // no publishes, no attempts, rows stay undispatched.
+        var transport = new RecordingTransport();
+        await RunDispatcherUntilAsync(
+            transport,
+            async () =>
+            {
+                await Task.Delay(300);
+                return true; // give it a few polls, then assert nothing happened
+            },
+            new BusPublicationRegistry());
+
+        Assert.Empty(transport.Published);
+        await using var context = fixture.CreateContext(PostgresFixture.TenantA);
+        var messages = await PendingRowsForAsync(context, vehicle.Id);
+        Assert.NotEmpty(messages);
+        Assert.All(messages, message =>
+        {
+            Assert.Null(message.DispatchedAtUtc);
+            Assert.Equal(0, message.Attempts);
+        });
     }
 
     private async Task<Vehicle> SaveVehicleWithStatusChangeAsync()
@@ -98,7 +141,10 @@ public class OutboxDispatcherTests(PostgresFixture fixture)
     }
 
     /// <summary>Runs the real hosted dispatcher with a fast poll until the condition holds (or 30 s).</summary>
-    private async Task RunDispatcherUntilAsync(IOutboxTransport transport, Func<Task<bool>> condition)
+    private async Task RunDispatcherUntilAsync(
+        IOutboxTransport transport,
+        Func<Task<bool>> condition,
+        BusPublicationRegistry? registry = null)
     {
         var services = new ServiceCollection();
         services.AddScoped<ITenantContext>(_ => new PostgresFixture.TestTenantContext(null));
@@ -114,6 +160,8 @@ public class OutboxDispatcherTests(PostgresFixture fixture)
         var dispatcher = new OutboxDispatcher<FleetDbContext>(
             provider.GetRequiredService<IServiceScopeFactory>(),
             transport,
+            // Tests exercise the bus path, so the tested event must be bus-designated.
+            registry ?? new BusPublicationRegistry(typeof(VehicleChangedIntegrationEvent)),
             new OutboxOptions { PollInterval = TimeSpan.FromMilliseconds(100) },
             NullLogger<OutboxDispatcher<FleetDbContext>>.Instance);
 

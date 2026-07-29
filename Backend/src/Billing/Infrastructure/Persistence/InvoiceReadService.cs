@@ -7,8 +7,8 @@ using NorthernLink.Billing.Infrastructure.Persistence.ReadModels;
 namespace NorthernLink.Billing.Infrastructure.Persistence;
 
 /// <summary>
-/// Read side — the invoice list from <c>billing.rm_invoices</c> (tenant-filtered), with
-/// DueDate/IsOverdue derived per row via the same formula the detail mapper uses.
+/// Read side — the worksheet list from <c>billing.rm_invoices</c> (tenant-filtered). No
+/// overdue/AR derivation: receivables live in QuickBooks, not the platform.
 /// </summary>
 internal sealed class InvoiceReadService(BillingDbContext context) : IInvoiceReadService
 {
@@ -39,8 +39,6 @@ internal sealed class InvoiceReadService(BillingDbContext context) : IInvoiceRea
 
     private static InvoiceSummaryResponse ToResponse(InvoiceReadModel i)
     {
-        var (dueDate, isOverdue) = InvoiceResponseMapper.DeriveDue(i.Status, i.SentAtUtc, i.NetTermsDays);
-
         return new InvoiceSummaryResponse(
             i.Id,
             i.InvoiceNumber,
@@ -53,15 +51,11 @@ internal sealed class InvoiceReadService(BillingDbContext context) : IInvoiceRea
             i.PeriodEnd,
             i.Status,
             i.IssuedAtUtc,
-            i.SentAtUtc,
-            i.PaidAtUtc,
-            dueDate,
-            isOverdue,
             i.SubtotalCad,
             i.GstCad,
             i.TotalCad,
             i.LineCount,
             i.QboInvoiceId,
-            i.QboSyncStatus);
+            i.QboEnteredDate);
     }
 }

@@ -35,8 +35,12 @@ invents endpoint shapes.
 - One class library per domain, composed in the gateway API (`Backend/src/Api`): new features
   extend an existing library; never a new deployment unit. A future microservice = copy the
   library + `NorthernLink.Shared` out
-- Domain libraries never reference each other — cross-domain communication is integration-events-only
-  (RabbitMQ); event records live in `NorthernLink.Shared`
+- Domain libraries never reference each other — cross-domain communication is integration-events-only;
+  event records live in `NorthernLink.Shared`. Delivery is two-path: storing/projecting events
+  (replica upserts, flag flips — all current events) are consumed in-database by each module's
+  `OutboxPollingConsumer` polling the producer outbox tables (`processing_status` column tracks
+  delivery); RabbitMQ is reserved for future chain-reaction events that must trigger commands in
+  another module (`BusPublicationRegistry`, currently empty — the bus is wired but dormant)
 - Every tenant-scoped table: `tenant_id` + API-level check + Postgres RLS (both, always)
 - Canadian data residency (OVHcloud Canada) governs every infrastructure choice
 - Status colors never stand alone: Teal `#009E73` / Gold `#E1B000` / Vermillion `#D55E00` + icon + label

@@ -2,8 +2,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using NorthernLink.Shared.EventBus;
-using NorthernLink.Shared.IntegrationEvents.Trips;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Shared.Tenancy;
 using NorthernLink.Fleet.Application.Abstractions;
@@ -15,6 +13,9 @@ using NorthernLink.Fleet.Application.Documents.Remove;
 using NorthernLink.Fleet.Application.Inspections;
 using NorthernLink.Fleet.Application.Inspections.Enter;
 using NorthernLink.Fleet.Application.Inspections.GetInspections;
+using NorthernLink.Fleet.Application.Inspections.PropagateOdometer;
+using NorthernLink.Fleet.Application.Inspections.Remove;
+using NorthernLink.Fleet.Application.Inspections.Update;
 using NorthernLink.Fleet.Application.Services;
 using NorthernLink.Fleet.Application.Services.Add;
 using NorthernLink.Fleet.Application.Services.GetForVehicle;
@@ -41,6 +42,7 @@ using NorthernLink.Fleet.Application.WorkOrders.GetForVehicle;
 using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Persistence.Auditing;
 using NorthernLink.Shared.Persistence.Projections;
+using NorthernLink.Fleet.Domain.Inspections.Events;
 using NorthernLink.Fleet.Domain.Vehicles.Events;
 using NorthernLink.Fleet.Infrastructure.Persistence;
 using NorthernLink.Fleet.Infrastructure.Persistence.Projections;
@@ -102,6 +104,9 @@ public static class FleetServiceCollectionExtensions
         services.AddScoped<IQueryHandler<GetRetirementCertificateQuery, RetirementCertificateResponse>, GetRetirementCertificateQueryHandler>();
         services.AddScoped<IQueryHandler<GetVehicleInspectionsQuery, IReadOnlyList<VehicleInspectionResponse>>, GetVehicleInspectionsQueryHandler>();
         services.AddScoped<ICommandHandler<EnterInspectionCommand, Guid>, EnterInspectionCommandHandler>();
+        services.AddScoped<ICommandHandler<UpdateInspectionCommand>, UpdateInspectionCommandHandler>();
+        services.AddScoped<ICommandHandler<RemoveInspectionCommand>, RemoveInspectionCommandHandler>();
+        services.AddScoped<ICommandHandler<PropagateInspectionOdometerCommand>, PropagateInspectionOdometerCommandHandler>();
         services.AddScoped<ICommandHandler<RegisterShopCommand, Guid>, RegisterShopCommandHandler>();
         services.AddScoped<ICommandHandler<UpdateShopCommand>, UpdateShopCommandHandler>();
         services.AddScoped<IQueryHandler<GetShopsQuery, IReadOnlyList<ShopResponse>>, GetShopsQueryHandler>();
@@ -117,16 +122,13 @@ public static class FleetServiceCollectionExtensions
         services.AddScoped<IQueryHandler<GetVehicleWorkOrdersQuery, IReadOnlyList<WorkOrderResponse>>, GetVehicleWorkOrdersQueryHandler>();
         services.AddScoped<IQueryHandler<GetAllWorkOrdersQuery, IReadOnlyList<WorkOrderResponse>>, GetAllWorkOrdersQueryHandler>();
 
-        // 4. Integration event consumers — a completed trip manifest materializes the
-        //    pre- and post-trip inspection records (cross-domain, events-only).
-        services.AddIntegrationEventConsumer(SchemaName, subscriptions => subscriptions
-            .On<TripManifestCompletedIntegrationEvent, TripManifestCompletedIntegrationEventHandler>());
-
-        // 5. Read-side projections — one worker polls fleet.event_journal, upserts the read-model
+        // 4. Read-side projections — one worker polls fleet.event_journal, upserts the read-model
         //    rows for the aggregates the batch touched, and dispatches same-module secondary
         //    commands. Retirement certificates are driven by vehicle events (they're created
         //    inline during a vehicle's retirement, so they share the "vehicle" aggregate's
-        //    journal) — hence two projections keyed on the same aggregate type.
+        //    journal) — hence two projections keyed on the same aggregate type. A newly entered
+        //    inspection advances the linked vehicle's odometer intra-Fleet (monotonic, auto-retire
+        //    applies) — the same same-module reaction pattern.
         services.AddProjections<FleetDbContext>(SchemaName, registry => registry
             .Project(new VehicleProjection())
             .Project(new RetirementCertificateProjection())
@@ -136,7 +138,15 @@ public static class FleetServiceCollectionExtensions
             .Project(new WorkOrderProjection())
             .Project(new VehicleInspectionProjection())
             .OnEvent<VehicleReachedEndOfLifeDomainEvent>(entry =>
-                new EnsureRetirementCertificateCommand(entry.AggregateId)));
+                new EnsureRetirementCertificateCommand(entry.AggregateId))
+            .OnEvent<VehicleInspectionCreatedDomainEvent>(entry =>
+                new PropagateInspectionOdometerCommand(entry.TenantId, entry.AggregateId))
+            // A corrected odometer still flows to the vehicle. The vehicle odometer is monotonic
+            // (Vehicle.RecordOdometer no-ops a non-advancing reading), so a downward correction
+            // will not roll the vehicle back — acceptable: the inspection remains the record of
+            // what was actually read.
+            .OnEvent<VehicleInspectionAmendedDomainEvent>(entry =>
+                new PropagateInspectionOdometerCommand(entry.TenantId, entry.AggregateId)));
 
         return services;
     }

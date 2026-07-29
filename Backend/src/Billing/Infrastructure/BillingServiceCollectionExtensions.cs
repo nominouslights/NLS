@@ -10,10 +10,10 @@ using NorthernLink.Billing.Application.Invoices;
 using NorthernLink.Billing.Application.Invoices.GenerateDraft;
 using NorthernLink.Billing.Application.Invoices.GetById;
 using NorthernLink.Billing.Application.Invoices.GetInvoices;
-using NorthernLink.Billing.Application.Invoices.MarkPaid;
+using NorthernLink.Billing.Application.Invoices.MarkEntered;
 using NorthernLink.Billing.Application.Invoices.ReplaceLines;
-using NorthernLink.Billing.Application.Invoices.Send;
-using NorthernLink.Billing.Application.Invoices.SetQboStatus;
+using NorthernLink.Billing.Application.Invoices.Reopen;
+using NorthernLink.Billing.Application.Invoices.UpdateQboReference;
 using NorthernLink.Billing.Application.Invoices.Void;
 using NorthernLink.Billing.Infrastructure.Persistence;
 using NorthernLink.Billing.Infrastructure.Persistence.Projections;
@@ -71,19 +71,22 @@ public static class BillingServiceCollectionExtensions
         // 3. Command/query handlers — registered explicitly, one line per handler.
         services.AddScoped<ICommandHandler<GenerateDraftInvoiceCommand, Guid>, GenerateDraftInvoiceCommandHandler>();
         services.AddScoped<ICommandHandler<ReplaceInvoiceLinesCommand>, ReplaceInvoiceLinesCommandHandler>();
-        services.AddScoped<ICommandHandler<SendInvoiceCommand>, SendInvoiceCommandHandler>();
-        services.AddScoped<ICommandHandler<MarkInvoicePaidCommand>, MarkInvoicePaidCommandHandler>();
+        services.AddScoped<ICommandHandler<MarkInvoiceEnteredCommand>, MarkInvoiceEnteredCommandHandler>();
+        services.AddScoped<ICommandHandler<UpdateInvoiceQboReferenceCommand>, UpdateInvoiceQboReferenceCommandHandler>();
+        services.AddScoped<ICommandHandler<ReopenInvoiceCommand>, ReopenInvoiceCommandHandler>();
         services.AddScoped<ICommandHandler<VoidInvoiceCommand>, VoidInvoiceCommandHandler>();
-        services.AddScoped<ICommandHandler<SetInvoiceQboStatusCommand>, SetInvoiceQboStatusCommandHandler>();
         services.AddScoped<IQueryHandler<GetInvoicesQuery, IReadOnlyList<InvoiceSummaryResponse>>, GetInvoicesQueryHandler>();
         services.AddScoped<IQueryHandler<GetInvoiceByIdQuery, InvoiceResponse>, GetInvoiceByIdQueryHandler>();
         services.AddScoped<IQueryHandler<GetBillableTripsQuery, IReadOnlyList<BillableTripResponse>>, GetBillableTripsQueryHandler>();
 
         // 4. Integration event consumers — the module's replicas: contract snapshots from
         //    Clients, billable trips from Trips (cross-domain, events-only; both idempotent).
-        services.AddIntegrationEventConsumer(SchemaName, subscriptions => subscriptions
+        //    Storing/projecting events, so they arrive by polling the producer outboxes
+        //    in-database, not via RabbitMQ.
+        services.AddOutboxPollingConsumer<BillingDbContext>(SchemaName, subscriptions => subscriptions
             .On<ContractChangedIntegrationEvent, ContractChangedIntegrationEventHandler>()
-            .On<TripCompletedIntegrationEvent, TripCompletedIntegrationEventHandler>());
+            .On<TripCompletedIntegrationEvent, TripCompletedIntegrationEventHandler>()
+            .On<TripRoundTripChangedIntegrationEvent, TripRoundTripChangedIntegrationEventHandler>());
 
         // 5. Read-side projections — one worker polls billing.event_journal and upserts
         //    rm_invoices for the invoices each batch touched.
