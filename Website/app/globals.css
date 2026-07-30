@@ -1,0 +1,136 @@
+/* Light reset for the public marketing site. Colors/typography tokens live in
+   lib/theme.ts (inline CSS-in-JS, same convention as Dispatcher). This file only
+   holds what inline styles can't express: resets, focus rings, keyframes, hover
+   affordances, and the responsive layout classes (media queries). */
+
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+}
+body {
+  background: #f7faf9;
+  font-family: "Barlow", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  color: #33443f;
+}
+a {
+  color: #007a59;
+  text-decoration: none;
+}
+a:hover {
+  color: #009e73;
+}
+:focus-visible {
+  outline: 3px solid rgba(0, 158, 115, 0.55);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+button {
+  font: inherit;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.fadein {
+  animation: fadeIn 0.25s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fadein {
+    animation: none;
+  }
+}
+
+.nl-btn {
+  transition: filter 0.15s ease;
+}
+.nl-btn:hover {
+  filter: brightness(1.06);
+}
+.nl-card-link {
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+  display: block;
+}
+.nl-card-link:hover {
+  box-shadow: 0 6px 18px rgba(18, 43, 36, 0.12);
+  transform: translateY(-2px);
+}
+
+/* ── Responsive layout helpers ─────────────────────────────────────────────
+   Inline styles can't carry media queries; these classes handle stacking.
+   Everything else (colors, spacing, type) stays in lib/theme.ts tokens. */
+.nl-grid {
+  display: grid;
+  gap: 24px;
+}
+.nl-grid-2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+.nl-grid-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+.nl-grid-4 {
+  grid-template-columns: repeat(4, 1fr);
+}
+.nl-hero-split {
+  display: grid;
+  gap: 48px;
+  grid-template-columns: 1.05fr 1fr;
+  align-items: center;
+}
+.nl-form-row {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1fr 1fr;
+}
+.nl-contact-split {
+  display: grid;
+  gap: 32px;
+  grid-template-columns: 1fr 1.2fr;
+  align-items: start;
+}
+.nl-desktop-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.nl-mobile-toggle {
+  display: none;
+}
+
+@media (max-width: 940px) {
+  .nl-grid-3,
+  .nl-grid-4 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .nl-hero-split,
+  .nl-contact-split {
+    grid-template-columns: 1fr;
+  }
+  .nl-desktop-nav {
+    display: none;
+  }
+  .nl-mobile-toggle {
+    display: inline-flex;
+  }
+}
+
+@media (max-width: 620px) {
+  .nl-grid-2,
+  .nl-grid-3,
+  .nl-grid-4,
+  .nl-form-row {
+    grid-template-columns: 1fr;
+  }
+}
