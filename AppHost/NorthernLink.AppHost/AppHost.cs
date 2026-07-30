@@ -44,6 +44,11 @@ builder.AddNextJsApp("dispatcher", "../../Dispatcher")
     .WithHttpEndpoint(port: 3001, targetPort: 3001, env: "PORT", isProxied: false)
     .WithExternalHttpEndpoints()
     .WithReference(api);
+
+// Public marketing site — no .WithReference(api): it makes no API calls yet (prototype forms).
+builder.AddNextJsApp("website", "../../Website")
+    .WithHttpEndpoint(port: 3002, targetPort: 3002, env: "PORT", isProxied: false)
+    .WithExternalHttpEndpoints();
 #pragma warning restore ASPIREJAVASCRIPT001
 
 builder.Build().Run();

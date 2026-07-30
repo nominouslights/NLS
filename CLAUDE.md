@@ -11,6 +11,7 @@ frontend or backend.**
 |---|---|---|
 | `Backend/` | The one shared API — one class library per domain, composed by the API gateway | .NET 10, CQRS/DDD, PostgreSQL, RabbitMQ |
 | `Dispatcher/` | Admin Web App (Dispatch Console) — currently a frontend-only prototype on mock data | Next.js 16, React 19 |
+| `Website/` | Public marketing site (northernlink shuttle & cargo) — static/prototype, no API calls yet | Next.js 16, React 19 |
 | `AppHost/` | Local dev orchestrator — starts Postgres, RabbitMQ, the API, and Dispatcher together. Platform-level, not part of Backend — it depends on Backend and Dispatcher, not the other way around | .NET 10, Aspire |
 
 Future app folders (Driver Field App, Client Web App/Alamos, Community Mobile, Owner Desktop)
@@ -73,3 +74,8 @@ invents endpoint shapes.
 - `npm run dev` — dev server standalone (no AppHost), usually lands on port **3001** (3000 is
   often taken on this machine). Requests to `/api/*` proxy to `http://localhost:5215` by default
   (see `next.config.ts`) — works against a manually-started API with no other setup.
+
+### Website (`Website/`)
+- `npm run dev` — dev server on port **3002** (pinned in the script). No API proxy — the site is
+  a prototype with static forms; a `/api/*` rewrite gets added only once real public endpoints
+  exist. Also started by `aspire run` alongside the Dispatcher.
