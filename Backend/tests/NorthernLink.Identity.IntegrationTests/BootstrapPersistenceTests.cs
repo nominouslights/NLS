@@ -17,16 +17,17 @@ public class BootstrapPersistenceTests(PostgresFixture fixture)
 {
     private static User CreateUser(string email)
     {
-        var result = User.Create(SeedTenant.Id, email, $"hashed:pw-{email}", "Admin");
+        var result = User.Create(SeedTenant.Id, email, $"hashed:pw-{email}", Roles.Owner);
         Assert.True(result.IsSuccess, $"Test user creation failed: {result.Error.Code}");
         return result.Value;
     }
 
-    private static AdminBootstrapToken IssueToken(Guid tenantId) =>
+    private static AdminBootstrapToken IssueToken(Guid tenantId, string role = Roles.Owner) =>
         AdminBootstrapToken.Issue(
             tenantId,
             $"hashed:{Guid.NewGuid():N}",
-            DateTimeOffset.UtcNow.AddMinutes(15));
+            DateTimeOffset.UtcNow.AddMinutes(15),
+            role);
 
     [Fact]
     public async Task Duplicate_email_hits_the_real_unique_index_and_keeps_the_token_alive()

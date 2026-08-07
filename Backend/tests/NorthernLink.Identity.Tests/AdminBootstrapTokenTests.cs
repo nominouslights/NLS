@@ -6,11 +6,20 @@ namespace NorthernLink.Identity.Tests;
 
 public class AdminBootstrapTokenTests
 {
-    private static AdminBootstrapToken Issue(TimeSpan? untilExpiry = null) =>
+    private static AdminBootstrapToken Issue(TimeSpan? untilExpiry = null, string role = Roles.Owner) =>
         AdminBootstrapToken.Issue(
             SeedTenant.Id,
             "hashed:opaque-1",
-            DateTimeOffset.UtcNow.Add(untilExpiry ?? TimeSpan.FromMinutes(15)));
+            DateTimeOffset.UtcNow.Add(untilExpiry ?? TimeSpan.FromMinutes(15)),
+            role);
+
+    [Fact]
+    public void Issue_records_the_role_the_redeemer_will_be_created_with()
+    {
+        var token = Issue(role: Roles.Dispatcher);
+
+        Assert.Equal(Roles.Dispatcher, token.Role);
+    }
 
     [Fact]
     public void Consume_succeeds_exactly_once()

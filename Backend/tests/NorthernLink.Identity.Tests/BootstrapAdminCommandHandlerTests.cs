@@ -19,12 +19,13 @@ public class BootstrapAdminCommandHandlerTests
             _tokenRepository, _userRepository, new FakePasswordHasher(), new FakeAccessTokenIssuer());
     }
 
-    private AdminBootstrapToken IssueActiveToken(TimeSpan? untilExpiry = null)
+    private AdminBootstrapToken IssueActiveToken(TimeSpan? untilExpiry = null, string role = Roles.Owner)
     {
         var token = AdminBootstrapToken.Issue(
             SeedTenant.Id,
             $"hashed:{RawToken}",
-            DateTimeOffset.UtcNow.Add(untilExpiry ?? TimeSpan.FromMinutes(15)));
+            DateTimeOffset.UtcNow.Add(untilExpiry ?? TimeSpan.FromMinutes(15)),
+            role);
         _tokenRepository.Add(token);
         return token;
     }
@@ -122,7 +123,7 @@ public class BootstrapAdminCommandHandlerTests
         Assert.True(result.IsSuccess);
         var user = Assert.Single(_userRepository.Users);
         Assert.Equal(result.Value, user.Id);
-        Assert.Equal("Admin", user.Role);
+        Assert.Equal(Roles.Owner, user.Role);
         Assert.Equal(SeedTenant.Id, user.TenantId);
         Assert.True(token.IsConsumed);
         Assert.Equal(1, _userRepository.SaveChangesCallCount);
@@ -131,5 +132,24 @@ public class BootstrapAdminCommandHandlerTests
         var secondAttempt = await _handler.Handle(Command(email: "another@northernlink.ca"), CancellationToken.None);
         Assert.True(secondAttempt.IsFailure);
         Assert.Equal(UserErrors.InvalidBootstrapToken, secondAttempt.Error);
+    }
+
+    // The whole point of putting the role on the invite: this is how a non-Owner account comes
+    // to exist at all, and therefore how the Budgeting console's rejection path can be exercised
+    // against a real token rather than a hand-built one.
+    [Theory]
+    [InlineData(Roles.Dispatcher)]
+    [InlineData(Roles.Accountant)]
+    [InlineData(Roles.Supervisor)]
+    [InlineData(Roles.Driver)]
+    public async Task New_user_takes_the_role_recorded_on_the_invite(string role)
+    {
+        IssueActiveToken(role: role);
+
+        var result = await _handler.Handle(Command(), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        var user = Assert.Single(_userRepository.Users);
+        Assert.Equal(role, user.Role);
     }
 }

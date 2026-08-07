@@ -15,7 +15,8 @@ public static class UserErrors
         "Identity.User.InvalidPassword", "A password is required.");
 
     public static readonly Error InvalidRole = Error.Validation(
-        "Identity.User.InvalidRole", "A role is required.");
+        "Identity.User.InvalidRole",
+        $"A role is required, and must be one of: {string.Join(", ", Roles.Internal)}.");
 
     public static readonly Error DuplicateEmail = Error.Conflict(
         "Identity.User.DuplicateEmail", "A user with this email already exists for this tenant.");

@@ -1,0 +1,67 @@
+/* COPIED FROM Dispatcher/app/globals.css — keep identical below this header. */
+/* Change Dispatcher first, then re-copy. Drift check: see Budgeting/CLAUDE.md. */
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+body {
+  background: #eef2f6;
+  font-family: "Barlow", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  color: #1c2b3a;
+}
+a {
+  color: #1f6fb2;
+  text-decoration: none;
+}
+a:hover {
+  color: #175a8e;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #c3d0de;
+  border-radius: 6px;
+  border: 2px solid #eef2f6;
+}
+::-webkit-scrollbar-track {
+  background: #eef2f6;
+}
+.nl-input:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(31, 111, 178, 0.25);
+  border-color: #1f6fb2 !important;
+}
+@keyframes rowPulse {
+  0% {
+    background: rgba(31, 111, 178, 0.16);
+  }
+  100% {
+    background: transparent;
+  }
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.detailfade {
+  animation: fadeIn 0.15s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .detailfade {
+    animation: none;
+  }
+}

@@ -1,12 +1,16 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using NorthernLink.Identity.Infrastructure.Auth;
 using NorthernLink.Identity.Application.Auth.BootstrapAdmin;
 using NorthernLink.Identity.Application.Auth.GenerateBootstrapToken;
 using NorthernLink.Identity.Application.Auth.Login;
 using NorthernLink.Identity.Application.Auth.Logout;
 using NorthernLink.Identity.Application.Auth.Refresh;
 using NorthernLink.Identity.Application.Auth.Setup;
+using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Shared.Tenancy;
 
@@ -15,7 +19,7 @@ namespace NorthernLink.Identity.Infrastructure.Endpoints;
 /// <summary>
 /// The Identity module's minimal-API surface under <c>/api/identity</c>. Login, refresh,
 /// logout, and admin bootstrap are anonymous by design (that's the whole point — they run
-/// before a caller has a token); minting a new bootstrap token requires an existing Admin
+/// before a caller has a token); minting a new bootstrap token requires an existing Owner
 /// session.
 /// </summary>
 public static class IdentityEndpoints
@@ -27,6 +31,10 @@ public static class IdentityEndpoints
         auth.MapPost("refresh", Refresh);
         auth.MapPost("logout", Logout);
 
+        // Any authenticated caller, whatever their role — a client needs to be able to read its
+        // own role in order to render the right thing, including "you may not be here".
+        auth.MapGet("me", Me).RequireAuthorization();
+
         // First-run setup — anonymous, and self-closing once any user exists. The status check
         // drives whether the console shows the create-admin screen; setup creates the first admin.
         auth.MapGet("setup-status", SetupStatus);
@@ -34,7 +42,8 @@ public static class IdentityEndpoints
 
         var admin = app.MapGroup("/api/identity/admin");
         admin.MapPost("bootstrap", BootstrapAdminAccount);
-        admin.MapPost("bootstrap-token", GenerateBootstrapToken).RequireAuthorization("AdminOnly");
+        admin.MapPost("bootstrap-token", GenerateBootstrapToken)
+            .RequireAuthorization(AuthorizationPolicies.AdminOnly);
 
         return app;
     }
@@ -96,15 +105,34 @@ public static class IdentityEndpoints
             : EndpointResults.Problem(result.Error);
     }
 
+    /// <summary>
+    /// The signed-in caller's own claims, straight off the validated principal — no database
+    /// read. Clients decode the JWT themselves for immediate rendering, but that decode is
+    /// unverified by construction; this is the server-confirmed answer.
+    /// </summary>
+    private static IResult Me(ClaimsPrincipal principal) =>
+        Results.Ok(new MeResponse(
+            principal.FindFirstValue(JwtRegisteredClaimNames.Sub) ?? string.Empty,
+            principal.FindFirstValue(JwtRegisteredClaimNames.Email) ?? string.Empty,
+            principal.FindFirstValue(JwtAccessTokenIssuer.RoleClaimType) ?? string.Empty,
+            principal.FindFirstValue(JwtAccessTokenIssuer.TenantIdClaimType) ?? string.Empty,
+            principal.FindFirstValue(JwtAccessTokenIssuer.TenantTypeClaimType) ?? string.Empty));
+
     private static async Task<IResult> GenerateBootstrapToken(
-        ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+        ITenantContext tenantContext, ISender sender, string? role, CancellationToken cancellationToken)
     {
         if (tenantContext.TenantId is not { } tenantId)
         {
             return Results.Unauthorized();
         }
 
-        var result = await sender.Send(new GenerateBootstrapTokenCommand(tenantId), cancellationToken);
+        // A query parameter, deliberately, not a request body: Dispatcher's generateAdminInvite()
+        // POSTs here with no body but a Content-Type of application/json, so a record body
+        // parameter would fail to bind and 400 the existing client. Defaulting to Owner keeps
+        // that call meaning exactly what it meant before roles existed.
+        var result = await sender.Send(
+            new GenerateBootstrapTokenCommand(tenantId, role ?? Roles.Owner), cancellationToken);
+
         return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
     }
 }
@@ -123,3 +151,7 @@ public sealed record BootstrapAdminRequest(string? Token, string? Email, string?
 
 /// <summary>Body of a successful admin bootstrap (201, with Location header).</summary>
 public sealed record BootstrapAdminResponse(Guid UserId);
+
+/// <summary>Response body for GET /api/identity/auth/me — the caller's own token claims.</summary>
+public sealed record MeResponse(
+    string UserId, string Email, string Role, string TenantId, string TenantType);

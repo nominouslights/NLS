@@ -68,6 +68,20 @@ public class IdentityEndpointMetadataTests : IAsyncLifetime
         Assert.Equal("AdminOnly", authorizeData.Policy);
     }
 
+    [Fact]
+    public void Me_requires_authentication_but_no_particular_role()
+    {
+        // Any signed-in caller, whatever their role — a client that is about to be told "you may
+        // not be here" still has to be able to read the role that decided it.
+        var endpoint = Endpoint("GET", "/api/identity/auth/me");
+
+        var authorizeData = endpoint.Metadata.GetMetadata<IAuthorizeData>();
+
+        Assert.NotNull(authorizeData);
+        Assert.Null(authorizeData.Policy);
+        Assert.Null(authorizeData.Roles);
+    }
+
     [Theory]
     [InlineData("POST", "/api/identity/auth/login")]
     [InlineData("POST", "/api/identity/auth/refresh")]

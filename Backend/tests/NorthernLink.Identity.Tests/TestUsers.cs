@@ -9,7 +9,7 @@ internal static class TestUsers
 {
     public static User Create(
         string email = "admin@northernlink.ca",
-        string role = "Admin",
+        string role = Roles.Owner,
         Guid? tenantId = null)
     {
         var result = User.Create(tenantId ?? SeedTenant.Id, email, $"hashed:pw-{email}", role);

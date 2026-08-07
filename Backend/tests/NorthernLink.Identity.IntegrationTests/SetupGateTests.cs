@@ -17,7 +17,7 @@ public class SetupGateTests(PostgresFixture fixture)
 {
     private static User CreateUser(string email)
     {
-        var result = User.Create(SeedTenant.Id, email, $"hashed:pw-{email}", "Admin");
+        var result = User.Create(SeedTenant.Id, email, $"hashed:pw-{email}", Roles.Owner);
         Assert.True(result.IsSuccess, $"Test user creation failed: {result.Error.Code}");
         return result.Value;
     }

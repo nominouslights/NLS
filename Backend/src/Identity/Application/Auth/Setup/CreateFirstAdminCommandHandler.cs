@@ -19,8 +19,11 @@ public sealed class CreateFirstAdminCommandHandler(
             return Result.Failure<LoginResponse>(UserErrors.InvalidPassword);
         }
 
-        // The first admin belongs to the single Internal tenant, same as the (now opt-in) seeder.
-        var userResult = User.Create(SeedTenant.Id, command.Email, passwordHasher.Hash(command.Password), "Admin");
+        // The first admin belongs to the single Internal tenant, same as the (now opt-in) seeder,
+        // and is the Owner by definition — first-run setup is the business owner standing up the
+        // platform. Every other role arrives through a bootstrap invite that names it.
+        var userResult = User.Create(
+            SeedTenant.Id, command.Email, passwordHasher.Hash(command.Password), Roles.Owner);
         if (userResult.IsFailure)
         {
             return Result.Failure<LoginResponse>(userResult.Error);

@@ -13,8 +13,17 @@ public sealed class GenerateBootstrapTokenCommandHandler(
     public async Task<Result<GenerateBootstrapTokenResponse>> Handle(
         GenerateBootstrapTokenCommand command, CancellationToken cancellationToken)
     {
+        // Validate before minting: an invite carrying an unknown role would hash, persist and be
+        // handed out, only to fail at redemption when User.Create rejects it — by which point the
+        // token is spent and the holder has no way to tell what went wrong.
+        var role = command.Role?.Trim();
+        if (string.IsNullOrWhiteSpace(role) || !Roles.IsKnown(role))
+        {
+            return Result.Failure<GenerateBootstrapTokenResponse>(UserErrors.InvalidRole);
+        }
+
         var opaque = accessTokenIssuer.IssueOpaqueToken(BootstrapTokenPolicy.Lifetime);
-        var token = AdminBootstrapToken.Issue(command.TenantId, opaque.TokenHash, opaque.ExpiresAtUtc);
+        var token = AdminBootstrapToken.Issue(command.TenantId, opaque.TokenHash, opaque.ExpiresAtUtc, role);
 
         bootstrapTokenRepository.Add(token);
         await bootstrapTokenRepository.SaveChangesAsync(cancellationToken);

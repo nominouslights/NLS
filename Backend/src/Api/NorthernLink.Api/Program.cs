@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
+using NorthernLink.Api.Auth;
 using NorthernLink.Api.Tenancy;
 using NorthernLink.Shared;
 using NorthernLink.Api.HostDefaults;
@@ -66,8 +67,7 @@ builder.Services
         };
     });
 
-builder.Services.AddAuthorization(options =>
-    options.AddPolicy("AdminOnly", policy => policy.RequireRole("Admin")));
+builder.Services.AddAuthorization(AuthorizationPolicyRegistration.Add);
 
 // Domain libraries — one registration call per library, nothing else.
 builder.Services
