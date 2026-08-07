@@ -16,11 +16,13 @@ import {
   markInvoiceEntered,
   periodLabel,
   refetchUntil,
-  reopenInvoice,
+  clearInvoicePayment,
+  confirmInvoicePayment,
   replaceInvoiceLines,
   sortInvoices,
   updateQboReference,
   voidInvoice,
+  writeOffInvoice,
   type BillableTripRecord,
   type InvoiceDetailRecord,
   type InvoiceLineInput,
@@ -41,7 +43,7 @@ import { PageHeader, Panel, SectionLabel } from "@/components/ui/Panel";
 import { StatusBadge, StatusChip } from "@/components/ui/Chip";
 import { ActionButton } from "@/components/ui/Button";
 import { ModalShell } from "@/components/ui/ModalShell";
-import { DateField, NumberField, SelectField, TextField } from "@/components/ui/Field";
+import { DateField, NumberField, SelectField, TextAreaField, TextField } from "@/components/ui/Field";
 
 // Billing Worksheets — prepares invoices for MANUAL entry into QuickBooks
 // Online. Draft generation pulls uninvoiced completed round trips at the
@@ -314,6 +316,49 @@ function lineClipboardText(
   return out.join("\n");
 }
 
+/**
+ * One side of the receivable split. The status kind pairs a colour with the StatusChip's
+ * glyph and a text label, so the outstanding/paid distinction never rests on colour alone.
+ */
+function ReceivableTile({
+  label,
+  kind,
+  count,
+  total,
+}: {
+  label: string;
+  kind: StatusKind;
+  count: number;
+  total: number;
+}) {
+  return (
+    <div
+      style={{
+        flex: "1 1 180px",
+        padding: "11px 14px",
+        background: colors.cardBg,
+        border: `1px solid ${colors.border}`,
+        borderRadius: 11,
+        boxShadow: colors.shadowCard,
+      }}
+    >
+      <StatusChip kind={kind} label={`${label} · ${count} invoice${count === 1 ? "" : "s"}`} />
+      <div
+        style={{
+          fontFamily: fonts.condensed,
+          fontWeight: 700,
+          fontSize: 22,
+          color: colors.headingBright,
+          fontVariantNumeric: "tabular-nums",
+          marginTop: 7,
+        }}
+      >
+        {formatInvoiceCad(total)}
+      </div>
+    </div>
+  );
+}
+
 function ConfirmModal({
   eyebrow,
   title,
@@ -362,6 +407,160 @@ function ConfirmModal({
 // and entered date the user keyed by hand. "enter" (Draft → EnteredInQbo) uses
 // mark-entered; "edit" (correct an already-entered reference) uses qbo-reference.
 // ---------------------------------------------------------------------------
+
+/**
+ * Records that payment against the QBO invoice was received. Manual entry, exactly like the
+ * QBO reference above it — the platform never calls the QuickBooks API; this only lets the
+ * console answer outstanding-vs-paid without opening QBO.
+ */
+function ConfirmPaymentModal({
+  inv,
+  onClose,
+  onDone,
+}: {
+  inv: InvoiceDetailRecord;
+  onClose: () => void;
+  onDone: (fresh: InvoiceDetailRecord) => void;
+}) {
+  const [confirmedDate, setConfirmedDate] = useState(todayIso());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    if (busy) return;
+    if (!confirmedDate) return setError("Enter the date the payment was received.");
+    setBusy(true);
+    setError(null);
+    try {
+      await confirmInvoicePayment(inv.id, confirmedDate);
+      // Eventually consistent read — wait until the projection shows it settled.
+      const fresh = await refetchUntil(() => getInvoice(inv.id), (d) => d.status === "Paid");
+      onDone(fresh);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Failed to record the payment — please try again.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ModalShell
+      eyebrow={`Billing · ${inv.invoiceNumber}`}
+      title="Confirm payment received"
+      onClose={onClose}
+      error={error}
+      maxWidth={480}
+      footer={
+        <>
+          <ActionButton onClick={onClose}>CANCEL</ActionButton>
+          <ActionButton variant="success" onClick={submit} disabled={busy}>
+            {busy ? "SAVING…" : "CONFIRM PAYMENT"}
+          </ActionButton>
+        </>
+      }
+    >
+      <div
+        style={{
+          fontFamily: fonts.body,
+          fontSize: 12.5,
+          color: colors.textSecondary,
+          lineHeight: 1.6,
+          marginBottom: 14,
+        }}
+      >
+        Confirm in QuickBooks that payment for {inv.invoiceNumber} ({formatInvoiceCad(inv.totalCad)}
+        {inv.qboInvoiceId ? `, QBO ${inv.qboInvoiceId}` : ""}) has been received, then record the date here. This
+        marks the invoice paid in the console and shows every trip on it as paid — it changes nothing in QuickBooks.
+      </div>
+      <DateField label="Payment received" value={confirmedDate} onChange={setConfirmedDate} />
+    </ModalShell>
+  );
+}
+
+/**
+ * Writes the invoice off (EnteredInQbo → WrittenOff): the money is recorded as
+ * lost, with an amount (defaults to the full total), effective date, and a
+ * required reason. Like every QBO-adjacent action here, it changes nothing in
+ * QuickBooks — the matching write-off must be keyed there by hand.
+ */
+function WriteOffModal({
+  inv,
+  onClose,
+  onDone,
+}: {
+  inv: InvoiceDetailRecord;
+  onClose: () => void;
+  onDone: (fresh: InvoiceDetailRecord) => void;
+}) {
+  const [amount, setAmount] = useState(String(inv.totalCad));
+  const [writtenOffDate, setWrittenOffDate] = useState(todayIso());
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    if (busy) return;
+    const amt = Number(amount);
+    if (amount === "" || Number.isNaN(amt) || amt <= 0)
+      return setError("Enter the amount being written off (CAD, greater than zero).");
+    if (!writtenOffDate) return setError("Enter the write-off date.");
+    const trimmed = reason.trim();
+    if (!trimmed) return setError("A reason is required — it is recorded on the written-off invoice.");
+    setBusy(true);
+    setError(null);
+    try {
+      await writeOffInvoice(inv.id, { amountCad: amt, writtenOffDate, reason: trimmed });
+      // Eventually consistent read — wait until the projection shows it written off.
+      const fresh = await refetchUntil(() => getInvoice(inv.id), (d) => d.status === "WrittenOff");
+      onDone(fresh);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Failed to write the invoice off — please try again.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ModalShell
+      eyebrow={`Billing · ${inv.invoiceNumber}`}
+      title="Write off invoice"
+      onClose={onClose}
+      error={error}
+      maxWidth={480}
+      footer={
+        <>
+          <ActionButton onClick={onClose}>CANCEL</ActionButton>
+          <ActionButton variant="destructive" onClick={submit} disabled={busy}>
+            {busy ? "WRITING OFF…" : "WRITE OFF"}
+          </ActionButton>
+        </>
+      }
+    >
+      <div
+        style={{
+          fontFamily: fonts.body,
+          fontSize: 12.5,
+          color: colors.textSecondary,
+          lineHeight: 1.6,
+          marginBottom: 14,
+        }}
+      >
+        Write off {inv.invoiceNumber} ({formatInvoiceCad(inv.totalCad)}
+        {inv.qboInvoiceId ? `, QBO ${inv.qboInvoiceId}` : ""})? The invoice and the trips it claims are recorded as a
+        loss — this cannot be re-invoiced, and nothing changes in QuickBooks.
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+        <NumberField label="Amount written off (CAD)" value={amount} onChange={setAmount} min={0} step={0.01} />
+        <DateField label="Write-off date" value={writtenOffDate} onChange={setWrittenOffDate} />
+      </div>
+      <TextAreaField
+        label="Reason (required — recorded on the invoice)"
+        value={reason}
+        onChange={setReason}
+        rows={3}
+        placeholder="Client insolvent · balance uncollectable"
+      />
+    </ModalShell>
+  );
+}
 
 function MarkEnteredModal({
   inv,
@@ -1114,7 +1313,9 @@ function InvoiceDetail({
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [confirm, setConfirm] = useState<"void" | "reopen" | null>(null);
+  const [confirm, setConfirm] = useState<"void" | "clearPayment" | null>(null);
+  const [paymentOpen, setPaymentOpen] = useState(false);
+  const [writeOffOpen, setWriteOffOpen] = useState(false);
   const [markMode, setMarkMode] = useState<"enter" | "edit" | null>(null);
   const [copyState, setCopyState] = useState<"idle" | "ok" | "fail">("idle");
   // Per-line copy feedback: the lineId that was just copied (cleared after 2s).
@@ -1218,13 +1419,13 @@ function InvoiceDetail({
     setBusy(false);
   }
 
-  async function runReopen() {
+  async function runClearPayment() {
     if (!inv || busy) return;
     setBusy(true);
     setActionError(null);
     try {
-      await reopenInvoice(inv.id);
-      const fresh = await refetchUntil(() => getInvoice(inv.id), (d) => d.status === "Draft");
+      await clearInvoicePayment(inv.id);
+      const fresh = await refetchUntil(() => getInvoice(inv.id), (d) => d.status === "EnteredInQbo");
       setInv(fresh);
       setConfirm(null);
       onMutated();
@@ -1287,6 +1488,11 @@ function InvoiceDetail({
   const chip = invoiceChip(inv);
   const isDraft = inv.status === "Draft";
   const isEntered = inv.status === "EnteredInQbo";
+  const isPaid = inv.status === "Paid";
+  // Written off = fully read-only, exactly like Void — the loss is on record.
+  const isWrittenOff = inv.status === "WrittenOff";
+  // Entered but unpaid is what "outstanding" means everywhere in this screen.
+  const isOutstanding = isEntered;
 
   return (
     <div className="detailfade" key={inv.id}>
@@ -1506,9 +1712,9 @@ function InvoiceDetail({
             <div style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim, marginBottom: 5 }}>
               QuickBooks entry
             </div>
-            {isEntered ? (
+            {isEntered || isPaid ? (
               <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
-                <StatusChip kind="ontime" label="Entered in QBO" />
+                <StatusChip kind={isPaid ? "ontime" : "info"} label={isPaid ? "Paid" : "Entered in QBO — outstanding"} />
                 <span style={{ fontFamily: fonts.mono, fontSize: 11.5, color: colors.textSecondary }}>
                   {inv.qboInvoiceId ?? "—"}
                 </span>
@@ -1522,6 +1728,18 @@ function InvoiceDetail({
               <div style={{ fontFamily: fonts.body, fontSize: 12, color: statusMeta("soon").t, fontWeight: 600 }}>
                 Not yet entered in QuickBooks
               </div>
+            ) : isWrittenOff ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+                <StatusChip kind="over" label="Written off" />
+                <span style={{ fontFamily: fonts.mono, fontSize: 11.5, color: colors.textSecondary }}>
+                  {inv.qboInvoiceId ?? "—"}
+                </span>
+                {inv.qboEnteredDate && (
+                  <span style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim }}>
+                    entered {inv.qboEnteredDate}
+                  </span>
+                )}
+              </div>
             ) : (
               <StatusChip kind="off" label="Void — nothing to enter" />
             )}
@@ -1531,13 +1749,77 @@ function InvoiceDetail({
               MARK ENTERED
             </ActionButton>
           )}
-          {isEntered && (
+          {(isEntered || isPaid) && (
             <ActionButton onClick={() => setMarkMode("edit")} style={{ padding: "4px 10px", fontSize: 12 }}>
               EDIT QBO REFERENCE
             </ActionButton>
           )}
         </div>
+        {(isEntered || isPaid) && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              flexWrap: "wrap",
+              marginTop: 12,
+              paddingTop: 10,
+              borderTop: `1px solid ${colors.borderSubtle}`,
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim, marginBottom: 5 }}>
+                Payment
+              </div>
+              {isPaid ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+                  <StatusChip kind="ontime" label="Payment confirmed" />
+                  <span style={{ fontFamily: fonts.mono, fontSize: 11.5, color: colors.textSecondary }}>
+                    {inv.paymentConfirmedDate ?? "—"}
+                  </span>
+                </div>
+              ) : (
+                <div style={{ fontFamily: fonts.body, fontSize: 12, color: statusMeta("soon").t, fontWeight: 600 }}>
+                  Outstanding — payment not yet confirmed
+                </div>
+              )}
+            </div>
+            {isOutstanding && (
+              <ActionButton
+                variant="success"
+                onClick={() => setPaymentOpen(true)}
+                style={{ padding: "4px 10px", fontSize: 12 }}
+              >
+                CONFIRM PAYMENT
+              </ActionButton>
+            )}
+            {isPaid && (
+              <ActionButton onClick={() => setConfirm("clearPayment")} style={{ padding: "4px 10px", fontSize: 12 }}>
+                CLEAR PAYMENT
+              </ActionButton>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* write-off record — amount, date, and reason of the loss */}
+      {isWrittenOff && (
+        <div style={{ ...cardStyle, marginBottom: 16, borderColor: "rgba(213,94,0,.4)" }}>
+          <div style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim, marginBottom: 6 }}>Write-off</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
+            <StatusChip kind="over" label="Written off" />
+            <span style={{ fontFamily: fonts.mono, fontSize: 12.5, color: statusMeta("over").t, fontWeight: 600 }}>
+              {inv.writtenOffAmountCad != null ? formatInvoiceCad(inv.writtenOffAmountCad) : "—"}
+            </span>
+            {inv.writtenOffDate && (
+              <span style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim }}>on {inv.writtenOffDate}</span>
+            )}
+          </div>
+          <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textSecondary, lineHeight: 1.5 }}>
+            {inv.writtenOffReason ?? "No reason recorded."}
+          </div>
+        </div>
+      )}
 
       {/* actions */}
       <div style={{ display: "flex", gap: 9, flexWrap: "wrap", alignItems: "center" }}>
@@ -1562,7 +1844,32 @@ function InvoiceDetail({
             </ActionButton>
             <ActionButton onClick={() => printInvoicePrepSheet(inv)}>PRINT PREP SHEET</ActionButton>
             <ActionButton onClick={() => setMarkMode("edit")}>EDIT QBO REFERENCE</ActionButton>
-            <ActionButton onClick={() => setConfirm("reopen")}>REOPEN</ActionButton>
+            <ActionButton variant="success" onClick={() => setPaymentOpen(true)}>
+              CONFIRM PAYMENT
+            </ActionButton>
+            <ActionButton variant="destructive" onClick={() => setWriteOffOpen(true)}>
+              WRITE OFF
+            </ActionButton>
+          </>
+        )}
+        {isWrittenOff && (
+          <>
+            <ActionButton onClick={handleCopy}>
+              {copyState === "ok" ? "COPIED ✓" : "COPY FOR QUICKBOOKS"}
+            </ActionButton>
+            <ActionButton onClick={() => printInvoicePrepSheet(inv)}>PRINT PREP SHEET</ActionButton>
+          </>
+        )}
+        {isPaid && (
+          <>
+            <ActionButton onClick={handleCopy}>
+              {copyState === "ok" ? "COPIED ✓" : "COPY FOR QUICKBOOKS"}
+            </ActionButton>
+            <ActionButton onClick={() => printInvoicePrepSheet(inv)}>PRINT PREP SHEET</ActionButton>
+            <ActionButton onClick={() => setMarkMode("edit")}>EDIT QBO REFERENCE</ActionButton>
+            {/* No REOPEN here: the backend refuses to reopen a paid invoice until the
+                payment confirmation is cleared, so offering it would only ever 409. */}
+            <ActionButton onClick={() => setConfirm("clearPayment")}>CLEAR PAYMENT</ActionButton>
           </>
         )}
         {copyState === "fail" && (
@@ -1596,15 +1903,37 @@ function InvoiceDetail({
           onClose={() => setConfirm(null)}
         />
       )}
-      {confirm === "reopen" && (
+      {paymentOpen && (
+        <ConfirmPaymentModal
+          inv={inv}
+          onClose={() => setPaymentOpen(false)}
+          onDone={(fresh) => {
+            setInv(fresh);
+            setPaymentOpen(false);
+            onMutated();
+          }}
+        />
+      )}
+      {confirm === "clearPayment" && (
         <ConfirmModal
           eyebrow={`Billing · ${inv.invoiceNumber}`}
-          title="Reopen to draft?"
-          body={`Reopen ${inv.invoiceNumber} back to Draft? This clears the recorded QuickBooks reference here — it does not change anything in QuickBooks. Use this if the QBO entry was a mistake and needs re-keying.`}
-          confirmLabel="REOPEN TO DRAFT"
+          title="Clear confirmed payment?"
+          body={`Clear the recorded payment on ${inv.invoiceNumber}? It returns to outstanding here — nothing changes in QuickBooks. Use this if the payment was confirmed in error.`}
+          confirmLabel="CLEAR PAYMENT"
           busy={busy}
-          onConfirm={runReopen}
+          onConfirm={runClearPayment}
           onClose={() => setConfirm(null)}
+        />
+      )}
+      {writeOffOpen && (
+        <WriteOffModal
+          inv={inv}
+          onClose={() => setWriteOffOpen(false)}
+          onDone={(fresh) => {
+            setInv(fresh);
+            setWriteOffOpen(false);
+            onMutated();
+          }}
         />
       )}
     </div>
@@ -1664,6 +1993,13 @@ export default function Billing({
     if (invoiceSelId && rows.some((r) => r.id === invoiceSelId)) return;
     setInvoiceSelId(rows.length > 0 ? rows[0].id : null);
   }, [rows, invoiceSelId, setInvoiceSelId]);
+
+  // Receivable split, derived from the rows the list already has. Drafts and voids are in
+  // no bucket: nothing has been billed yet, so there is nothing owing. Written-off
+  // invoices get their own bucket — the lost money must not silently vanish.
+  const outstanding = (rows ?? []).filter((r) => r.status === "EnteredInQbo");
+  const paid = (rows ?? []).filter((r) => r.status === "Paid");
+  const writtenOff = (rows ?? []).filter((r) => r.status === "WrittenOff");
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }} className="detailfade">
@@ -1751,6 +2087,37 @@ export default function Billing({
 
           {rows !== null && rows.length > 0 && (
             <>
+              {/* Outstanding vs paid vs written off — entered in QBO but not yet
+                  confirmed received, against confirmed received, against recorded
+                  losses. Drafts and voids are in none: nothing has been billed yet,
+                  so there is nothing owing. */}
+              <div
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  flexWrap: "wrap",
+                  marginBottom: 12,
+                }}
+              >
+                <ReceivableTile
+                  label="Outstanding"
+                  kind="info"
+                  count={outstanding.length}
+                  total={outstanding.reduce((sum, r) => sum + r.totalCad, 0)}
+                />
+                <ReceivableTile
+                  label="Paid"
+                  kind="ontime"
+                  count={paid.length}
+                  total={paid.reduce((sum, r) => sum + r.totalCad, 0)}
+                />
+                <ReceivableTile
+                  label="Written off"
+                  kind="over"
+                  count={writtenOff.length}
+                  total={writtenOff.reduce((sum, r) => sum + (r.writtenOffAmountCad ?? 0), 0)}
+                />
+              </div>
               <div
                 style={{
                   display: "grid",

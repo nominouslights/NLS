@@ -2,7 +2,7 @@
 
 import { useId } from "react";
 import { colors, fonts } from "@/lib/theme";
-import type { ManifestCargo, ManifestPassenger } from "@/lib/api/trips";
+import type { FarePaymentMethod, ManifestCargo, ManifestPassenger } from "@/lib/api/trips";
 import { FieldLabel, NumberField, SelectField, TextField } from "@/components/ui/Field";
 import { ActionButton } from "@/components/ui/Button";
 
@@ -37,6 +37,12 @@ export interface PaxRow {
   idVerified: boolean;
   boardedOn: boolean;
   boardedOff: boolean;
+  /** Fare amount as typed ("" = none). */
+  fareAmount: string;
+  /** "" = no method picked (allowed while no amount is recorded). */
+  fareMethod: FarePaymentMethod | "";
+  /** Stamped when a method is first picked; cleared when the method is cleared. */
+  farePaidAtUtc: string | null;
 }
 
 export interface CargoRow {
@@ -56,6 +62,9 @@ export const emptyPax = (): PaxRow => ({
   idVerified: false,
   boardedOn: false,
   boardedOff: false,
+  fareAmount: "",
+  fareMethod: "",
+  farePaidAtUtc: null,
 });
 
 export const emptyCargo = (): CargoRow => ({
@@ -89,6 +98,9 @@ export function paxRowsFromManifest(passengers: ManifestPassenger[], stops: Stop
     idVerified: p.idVerified,
     boardedOn: p.boardedOn,
     boardedOff: p.boardedOff,
+    fareAmount: p.fareAmountCad != null ? String(p.fareAmountCad) : "",
+    fareMethod: p.farePaymentMethod ?? "",
+    farePaidAtUtc: p.farePaidAtUtc ?? null,
   }));
 }
 
@@ -121,6 +133,7 @@ export function paxRowsToWire(
     .map((p) => {
       const pickup = stopAt(p.pickupIdx);
       const dropoff = stopAt(p.dropoffIdx);
+      const amount = p.fareAmount.trim() === "" ? null : Number(p.fareAmount);
       return {
         name: p.name.trim(),
         contact: p.contact.trim() || null,
@@ -131,8 +144,37 @@ export function paxRowsToWire(
         idVerified: p.idVerified,
         boardedOn: p.boardedOn,
         boardedOff: p.boardedOff,
+        fareAmountCad: amount !== null && !Number.isNaN(amount) ? amount : null,
+        farePaymentMethod: p.fareMethod || null,
+        farePaidAtUtc: p.fareMethod ? p.farePaidAtUtc : null,
       };
     });
+}
+
+/** UI mirror of the backend's per-passenger fare rules — run before submit so
+ *  the save never round-trips just to bounce. Returns the first problem found
+ *  (1-based row number included), or null when every row is valid:
+ *  amount ≥ 0 with max 2 decimals · amount > 0 requires a method ·
+ *  Cash/Online requires amount > 0 · Waived requires amount 0 or empty. */
+export function paxFareValidationError(rows: PaxRow[]): string | null {
+  const withNames = rows.filter((p) => p.name.trim());
+  for (const [i, p] of withNames.entries()) {
+    const row = `Passenger ${i + 1}`;
+    const raw = p.fareAmount.trim();
+    const amount = raw === "" ? null : Number(raw);
+    if (amount !== null) {
+      if (Number.isNaN(amount) || amount < 0) return `${row}: fare must be zero or more.`;
+      if (Math.round(amount * 100) !== amount * 100) return `${row}: fare can have at most 2 decimals.`;
+      if (amount > 0 && !p.fareMethod) return `${row}: a fare amount needs a payment method (Cash / Online).`;
+    }
+    if ((p.fareMethod === "Cash" || p.fareMethod === "Online") && !(amount !== null && amount > 0)) {
+      return `${row}: ${p.fareMethod} fares need an amount greater than zero.`;
+    }
+    if (p.fareMethod === "Waived" && amount !== null && amount !== 0) {
+      return `${row}: a waived fare must have amount 0 (or none).`;
+    }
+  }
+  return null;
 }
 
 export function cargoRowsToWire(rows: CargoRow[]): ManifestCargo[] {
@@ -176,6 +218,28 @@ export function PassengerRowsEditor({
     onChange(rows.map((r, x) => (x === i ? { ...r, ...p } : r)));
   const paxCount = rows.filter((p) => p.name.trim()).length;
 
+  /** Pick / clear a fare payment method: stamps farePaidAtUtc the first time a
+   *  method is picked, clears it when the method is cleared; Waived forces the
+   *  amount to 0 (the amount input disables). */
+  const pickFareMethod = (i: number, method: FarePaymentMethod) => {
+    const row = rows[i];
+    if (row.fareMethod === method) {
+      patch(i, { fareMethod: "", farePaidAtUtc: null });
+      return;
+    }
+    patch(i, {
+      fareMethod: method,
+      farePaidAtUtc: row.farePaidAtUtc ?? new Date().toISOString(),
+      ...(method === "Waived" ? { fareAmount: "0" } : {}),
+    });
+  };
+
+  // Fare rollup for the count line — recorded amounts only, not a settled figure.
+  const named = rows.filter((p) => p.name.trim());
+  const paidRows = named.filter((p) => p.fareMethod === "Cash" || p.fareMethod === "Online");
+  const waivedCount = named.filter((p) => p.fareMethod === "Waived").length;
+  const collected = paidRows.reduce((sum, p) => sum + (Number(p.fareAmount) || 0), 0);
+
   return (
     <div>
       {rows.map((p, i) => (
@@ -214,9 +278,36 @@ export function PassengerRowsEditor({
               </div>
             )}
           </div>
+          {/* fare — recorded just after the run; Waived pins the amount at 0 */}
+          <div style={{ display: "grid", gridTemplateColumns: "110px auto 1fr", gap: 10, marginTop: 9, alignItems: "end" }}>
+            <NumberField
+              label="Fare (CAD)"
+              value={p.fareAmount}
+              onChange={(v) => patch(i, { fareAmount: v })}
+              min={0}
+              step={0.01}
+              disabled={readOnly || p.fareMethod === "Waived"}
+            />
+            <div style={{ display: "flex", gap: 6, paddingBottom: 6 }}>
+              {(["Cash", "Online", "Waived"] as FarePaymentMethod[]).map((m) => (
+                <OptChip
+                  key={m}
+                  active={p.fareMethod === m}
+                  label={m.toUpperCase()}
+                  onClick={() => pickFareMethod(i, m)}
+                  disabled={readOnly}
+                />
+              ))}
+            </div>
+            {p.farePaidAtUtc && (
+              <div style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textDim, paddingBottom: 12, textAlign: "right" }}>
+                recorded {new Date(p.farePaidAtUtc).toLocaleString("en-CA", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}
+              </div>
+            )}
+          </div>
         </div>
       ))}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 4 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 4, flexWrap: "wrap" }}>
         {!readOnly && rows.length < maxRows && (
           <ActionButton onClick={() => onChange([...rows, emptyPax()])}>+ ADD PASSENGER</ActionButton>
         )}
@@ -224,6 +315,14 @@ export function PassengerRowsEditor({
           Passengers: <span style={{ fontFamily: fonts.mono, color: colors.textSecondary }}>{paxCount}</span> (max{" "}
           {maxRows})
         </span>
+        {(paidRows.length > 0 || waivedCount > 0) && (
+          <span style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textDim }}>
+            · Fares collected{" "}
+            <span style={{ fontFamily: fonts.mono, color: colors.textSecondary }}>${collected.toFixed(2)}</span> ·{" "}
+            {paidRows.length} paid · {waivedCount} waived{" "}
+            <span style={{ color: colors.textFaint, fontSize: 11 }}>(not yet reconciled to QuickBooks)</span>
+          </span>
+        )}
       </div>
     </div>
   );

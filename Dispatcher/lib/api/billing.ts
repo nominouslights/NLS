@@ -18,7 +18,7 @@ import type { BillingFrequency } from "./clients";
 // purely informational.
 // ---------------------------------------------------------------------------
 
-export type InvoiceStatus = "Draft" | "EnteredInQbo" | "Void";
+export type InvoiceStatus = "Draft" | "EnteredInQbo" | "Void" | "Paid" | "WrittenOff";
 /** A trip leg's direction — Outbound (depart) pairs with Inbound (return) into
  *  a round trip. Same enum the Trips module exposes as TripDirection. */
 export type TripLegDirection = "Inbound" | "Outbound";
@@ -55,6 +55,11 @@ export interface InvoiceSummaryRecord {
   lineCount: number;
   qboInvoiceId: string | null;
   qboEnteredDate: string | null; // DateOnly, set when EnteredInQbo
+  paymentConfirmedDate: string | null; // DateOnly, null while outstanding
+  writtenOffAmountCad: number | null; // set when WrittenOff
+  writtenOffDate: string | null; // DateOnly, set when WrittenOff
+  writtenOffReason: string | null; // set when WrittenOff
+  outstandingCad: number; // server-computed amount still owing
 }
 
 /** Mirrors InvoiceResponse (detail — lines included, contract snapshots). */
@@ -78,6 +83,11 @@ export interface InvoiceDetailRecord {
   totalCad: number;
   qboInvoiceId: string | null;
   qboEnteredDate: string | null; // DateOnly, set when EnteredInQbo
+  paymentConfirmedDate: string | null; // DateOnly, null while outstanding
+  writtenOffAmountCad: number | null; // set when WrittenOff
+  writtenOffDate: string | null; // DateOnly, set when WrittenOff
+  writtenOffReason: string | null; // set when WrittenOff
+  outstandingCad: number; // server-computed amount still owing
   lines: InvoiceLineRecord[];
 }
 
@@ -182,10 +192,32 @@ export function updateQboReference(
   });
 }
 
-/** POST → 204. EnteredInQbo → Draft, clearing the QBO reference (e.g. the QBO
- *  entry was a mistake and needs re-keying). */
-export function reopenInvoice(id: string): Promise<void> {
-  return request<void>(`/api/billing/invoices/${id}/reopen`, { method: "POST" });
+/** POST → 204. Records that payment against the QBO invoice was received
+ *  (EnteredInQbo → Paid). Manual entry — the platform never calls the QBO API. */
+export function confirmInvoicePayment(id: string, confirmedDate: string): Promise<void> {
+  return request<void>(`/api/billing/invoices/${id}/confirm-payment`, {
+    method: "POST",
+    body: JSON.stringify({ confirmedDate }),
+  });
+}
+
+/** POST → 204. Clears a payment confirmed in error (Paid → EnteredInQbo). */
+export function clearInvoicePayment(id: string): Promise<void> {
+  return request<void>(`/api/billing/invoices/${id}/clear-payment`, { method: "POST" });
+}
+
+/** POST → 204. Writes the invoice off (EnteredInQbo → WrittenOff): records the
+ *  amount, effective date, and a required reason. The trips it claims are
+ *  written off with it — the money is recorded as lost, not released for
+ *  re-invoicing. (The old /reopen endpoint is gone — 404.) */
+export function writeOffInvoice(
+  id: string,
+  input: { amountCad: number; writtenOffDate: string; reason: string },
+): Promise<void> {
+  return request<void>(`/api/billing/invoices/${id}/write-off`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
 }
 
 export function voidInvoice(id: string): Promise<void> {
@@ -218,16 +250,24 @@ export { refetchUntil } from "./drivers";
 // ---------------------------------------------------------------------------
 
 /** Invoice status chip — keyed only on status. Draft (gold, still to key into
- *  QBO), EnteredInQbo (teal, keyed), Void (gray). */
+ *  QBO), EnteredInQbo (blue, keyed but outstanding), Paid (teal, settled),
+ *  Void (gray), WrittenOff (vermillion, money recorded as lost). Colour never
+ *  stands alone — StatusChip pairs it with a glyph and this label. */
 export function invoiceChip(inv: { status: InvoiceStatus }): { kind: StatusKind; label: string } {
   switch (inv.status) {
     case "Draft":
       return { kind: "soon", label: "Draft" };
+    case "Paid":
+      return { kind: "ontime", label: "Paid" };
     case "EnteredInQbo":
-      return { kind: "ontime", label: "Entered in QBO" };
+      return { kind: "info", label: "Entered in QBO — outstanding" };
+    case "WrittenOff":
+      return { kind: "over", label: "Written off" };
     case "Void":
-    default:
       return { kind: "off", label: "Void" };
+    default:
+      // An unknown status must show itself, never masquerade as Void.
+      return { kind: "off", label: inv.status };
   }
 }
 
