@@ -18,6 +18,8 @@ public sealed class InMemoryBillableTripRepository : IBillableTripRepository
 
     public void Add(BillableTrip trip) => Trips.Add(trip);
 
+    public void Remove(BillableTrip trip) => Trips.Remove(trip);
+
     public Task<IReadOnlyList<BillableTrip>> GetUninvoicedForClientAsync(
         Guid clientId,
         DateOnly periodStart,

@@ -95,14 +95,14 @@ public class TripRoundTripTests
     }
 
     [Fact]
-    public void Merge_of_completed_trips_succeeds()
+    public void Merge_of_finished_trips_succeeds()
     {
         var outbound = Outbound();
         var inbound = Inbound();
         outbound.RecordPostTripInspection();
-        outbound.Complete();
+        outbound.FinishOperations();
         inbound.RecordPostTripInspection();
-        inbound.Complete();
+        inbound.FinishOperations();
 
         Assert.True(Trip.MergeRoundTrip(outbound, inbound).IsSuccess);
         Assert.Equal(outbound.RoundTripKey, inbound.RoundTripKey);
@@ -182,7 +182,7 @@ public class TripRoundTripTests
         var inbound = Inbound();
         inbound.Cancel("Weather");
 
-        Assert.Equal(TripErrors.RoundTripCancelled, Trip.MergeRoundTrip(outbound, inbound).Error);
+        Assert.Equal(TripErrors.RoundTripFinal, Trip.MergeRoundTrip(outbound, inbound).Error);
     }
 
     [Fact]
@@ -293,7 +293,7 @@ public class TripRoundTripTests
         inbound.Cancel("Weather");
 
         Assert.Equal(
-            TripErrors.RoundTripCancelled,
+            TripErrors.RoundTripFinal,
             Trip.MergeRoundTrip(outbound, inbound, allowMismatch: true).Error);
     }
 
@@ -426,7 +426,7 @@ public class TripRoundTripTests
         var source = Outbound();
         source.Cancel(null);
 
-        Assert.Equal(TripErrors.RoundTripCancelled, source.CreateDeadheadReturn("TR-3001").Error);
+        Assert.Equal(TripErrors.RoundTripFinal, source.CreateDeadheadReturn("TR-3001").Error);
     }
 
     [Fact]

@@ -31,7 +31,16 @@ public sealed class TripManifestConfiguration : IEntityTypeConfiguration<TripMan
         builder.Property(m => m.Client).HasColumnName("client").HasMaxLength(200);
 
         // §5 — passengers as jsonb (pickup/dropoff are route-stop snapshot references).
-        builder.OwnsMany(m => m.Passengers, passenger => passenger.ToJson("passengers"));
+        builder.OwnsMany(m => m.Passengers, passenger =>
+        {
+            passenger.ToJson("passengers");
+            passenger.Property(p => p.FareAmountCad).HasPrecision(12, 2);
+
+            // Explicit, because EF serializes an enum inside owned JSON as an integer by
+            // default. A jsonb payload gets read by people and by hand-written SQL far more
+            // often than a column does, and an opaque 0/1/2 in there is a trap.
+            passenger.Property(p => p.FarePaymentMethod).HasConversion<string>();
+        });
         builder.Property(m => m.AllSeatbeltsVerified).HasColumnName("all_seatbelts_verified");
 
         // §6 — cargo as jsonb.

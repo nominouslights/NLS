@@ -42,6 +42,11 @@ public sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
 
         builder.Property(i => i.QboInvoiceId).HasColumnName("qbo_invoice_id").HasMaxLength(64);
         builder.Property(i => i.QboEnteredDate).HasColumnName("qbo_entered_date");
+        builder.Property(i => i.PaymentConfirmedDate).HasColumnName("payment_confirmed_date");
+
+        builder.Property(i => i.WrittenOffAmountCad).HasColumnName("written_off_amount_cad").HasPrecision(12, 2);
+        builder.Property(i => i.WrittenOffDate).HasColumnName("written_off_date");
+        builder.Property(i => i.WrittenOffReason).HasColumnName("written_off_reason").HasMaxLength(500);
 
         builder.OwnsMany(i => i.Lines, line =>
         {

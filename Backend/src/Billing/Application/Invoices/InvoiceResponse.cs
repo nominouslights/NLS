@@ -15,9 +15,13 @@ public sealed record InvoiceLineResponse(
     decimal AmountCad);
 
 /// <summary>
-/// Full worksheet detail, lines included. <c>NetTermsDays</c> is an informational snapshot;
-/// receivables (sent/paid/overdue) live in QuickBooks, not here. <c>QboInvoiceId</c> and
-/// <c>QboEnteredDate</c> record the manual QBO reconciliation.
+/// Full worksheet detail, lines included. <c>NetTermsDays</c> is an informational snapshot.
+/// <c>QboInvoiceId</c>/<c>QboEnteredDate</c> record the manual QBO reconciliation and
+/// <c>PaymentConfirmedDate</c> the manually confirmed settlement (null while outstanding).
+/// <c>OutstandingCad</c> is what the platform still expects to collect — the total while the
+/// worksheet sits in QuickBooks unpaid, and zero once it is paid, voided, or written off. That
+/// zeroing is what writing off a balance means here; there is no stored balance to adjust.
+/// QuickBooks still owns sent/overdue and partial settlement — no aging here.
 /// </summary>
 public sealed record InvoiceResponse(
     Guid Id,
@@ -39,11 +43,17 @@ public sealed record InvoiceResponse(
     decimal TotalCad,
     string? QboInvoiceId,
     DateOnly? QboEnteredDate,
+    DateOnly? PaymentConfirmedDate,
+    decimal? WrittenOffAmountCad,
+    DateOnly? WrittenOffDate,
+    string? WrittenOffReason,
+    decimal OutstandingCad,
     IReadOnlyList<InvoiceLineResponse> Lines);
 
 /// <summary>
 /// Worksheet list row (no lines), served from <c>rm_invoices</c>. Carries the QBO
-/// reconciliation fields so the frontend can show entered-in-QBO state without another call.
+/// reconciliation and payment-confirmation fields so the frontend can show entered-in-QBO
+/// and outstanding/paid state without another call.
 /// </summary>
 public sealed record InvoiceSummaryResponse(
     Guid Id,
@@ -62,4 +72,9 @@ public sealed record InvoiceSummaryResponse(
     decimal TotalCad,
     int LineCount,
     string? QboInvoiceId,
-    DateOnly? QboEnteredDate);
+    DateOnly? QboEnteredDate,
+    DateOnly? PaymentConfirmedDate,
+    decimal? WrittenOffAmountCad,
+    DateOnly? WrittenOffDate,
+    string? WrittenOffReason,
+    decimal OutstandingCad);

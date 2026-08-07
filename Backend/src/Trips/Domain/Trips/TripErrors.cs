@@ -54,7 +54,24 @@ public static class TripErrors
         "Trips.Trip.ManifestNotAllowedForEmptyLeg", "A deadhead trip carries no passengers — a manifest cannot be created for it.");
 
     public static readonly Error PostTripInspectionRequired = Error.Conflict(
-        "Trips.Trip.PostTripInspectionRequired", "A post-trip inspection must be logged before this trip can be completed.");
+        "Trips.Trip.PostTripInspectionRequired", "A post-trip inspection must be logged before this trip's run can be closed out.");
+
+    public static readonly Error WriteOffReasonRequired = Error.Validation(
+        "Trips.Trip.WriteOffReasonRequired", "Closing a trip without billing requires a reason.");
+
+    public static readonly Error OnWorksheetCannotCloseWithoutBilling = Error.Conflict(
+        "Trips.Trip.OnWorksheetCannotCloseWithoutBilling",
+        "A worksheet already claims this trip — void the draft (or write the invoice off) instead of closing the trip without billing.");
+
+    public static readonly Error BillingStateOnClientlessTrip = Error.Conflict(
+        "Trips.Trip.BillingStateOnClientlessTrip", "A run with no client never enters the billing arc, so no invoice can speak for it.");
+
+    public static readonly Error FinishIsItsOwnCommand = Error.Conflict(
+        "Trips.Trip.FinishIsItsOwnCommand",
+        "Recording that a run is over goes through POST /api/trips/{id}/finish — the resulting status depends on whether the trip has a client.");
+
+    public static readonly Error InvalidStatusFilter = Error.Validation(
+        "Trips.Trip.InvalidStatusFilter", "The status filter is not a known trip status.");
 
     public static readonly Error RoundTripSameTrip = Error.Validation(
         "Trips.Trip.RoundTripSameTrip", "A trip cannot be merged with itself.");
@@ -77,8 +94,8 @@ public static class TripErrors
     public static readonly Error RoundTripAlreadyPaired = Error.Conflict(
         "Trips.Trip.RoundTripAlreadyPaired", "The trip already belongs to a round trip.");
 
-    public static readonly Error RoundTripCancelled = Error.Conflict(
-        "Trips.Trip.RoundTripCancelled", "A cancelled trip cannot take part in a round trip.");
+    public static readonly Error RoundTripFinal = Error.Conflict(
+        "Trips.Trip.RoundTripFinal", "A cancelled or written-off trip cannot take part in a round trip.");
 
     public static readonly Error RoundTripNotPaired = Error.Conflict(
         "Trips.Trip.RoundTripNotPaired", "The trip does not belong to a round trip.");
@@ -96,6 +113,11 @@ public static class TripErrors
     public static Error InvalidStatusTransition(TripStatus from, TripStatus to) => Error.Conflict(
         "Trips.Trip.InvalidStatusTransition", $"A trip cannot move from {from} to {to}.");
 
-    public static Error TerminalStatus(TripStatus status) => Error.Conflict(
-        "Trips.Trip.TerminalStatus", $"A {status} trip can no longer be changed.");
+    public static Error OperationallyClosed(TripStatus status) => Error.Conflict(
+        "Trips.Trip.OperationallyClosed",
+        $"The run has already happened — a {status} trip's driver, vehicle, and demand can no longer be changed.");
+
+    public static Error SystemDrivenStatus(TripStatus status) => Error.Conflict(
+        "Trips.Trip.SystemDrivenStatus",
+        $"{status} is set by Billing when the worksheet is entered in QuickBooks, paid, or written off — it cannot be set by hand.");
 }

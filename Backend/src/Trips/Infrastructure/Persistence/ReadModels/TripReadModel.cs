@@ -51,8 +51,10 @@ public sealed class TripReadModel
     public string Status { get; set; } = null!;
     public Guid? ManifestId { get; set; }
     public bool HasPostTripInspection { get; set; }
+    public DateTimeOffset? OperationsFinishedAtUtc { get; set; }
     public DateTimeOffset? CompletedAtUtc { get; set; }
     public string? CancelledReason { get; set; }
+    public string? WrittenOffReason { get; set; }
 
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset UpdatedAtUtc { get; set; }
@@ -104,13 +106,20 @@ public sealed class TripReadModelConfiguration : IEntityTypeConfiguration<TripRe
         builder.Property(t => t.Status).HasColumnName("status");
         builder.Property(t => t.ManifestId).HasColumnName("manifest_id");
         builder.Property(t => t.HasPostTripInspection).HasColumnName("has_post_trip_inspection");
+        builder.Property(t => t.OperationsFinishedAtUtc).HasColumnName("operations_finished_at_utc");
         builder.Property(t => t.CompletedAtUtc).HasColumnName("completed_at_utc");
         builder.Property(t => t.CancelledReason).HasColumnName("cancelled_reason");
+        builder.Property(t => t.WrittenOffReason).HasColumnName("written_off_reason");
 
         builder.Property(t => t.CreatedAtUtc).HasColumnName("created_at_utc");
         builder.Property(t => t.UpdatedAtUtc).HasColumnName("updated_at_utc");
         builder.Property(t => t.Version).HasColumnName("version");
 
+        // Narrow index for exact-date lookups (the dispatch board's "today").
         builder.HasIndex(t => new { t.TenantId, t.ServiceDate });
+
+        // Covers the paged list's full sort key, so ORDER BY … OFFSET reads the index
+        // instead of sorting the whole period on every page past the first.
+        builder.HasIndex(t => new { t.TenantId, t.ServiceDate, t.WindowStart, t.TripNumber });
     }
 }

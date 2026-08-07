@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Shared.Tenancy;
 using NorthernLink.Trips.Application.Abstractions;
@@ -15,10 +16,13 @@ using NorthernLink.Trips.Application.Stops.Create;
 using NorthernLink.Trips.Application.Stops.GetStops;
 using NorthernLink.Trips.Application.Stops.SetActive;
 using NorthernLink.Trips.Application.Stops.Update;
+using NorthernLink.Trips.Application.Trips;
 using NorthernLink.Trips.Application.Trips.Assign;
 using NorthernLink.Trips.Application.Trips.ChangeStatus;
+using NorthernLink.Trips.Application.Trips.CloseWithoutBilling;
 using NorthernLink.Trips.Application.Trips.Create;
 using NorthernLink.Trips.Application.Trips.CreateDeadheadReturn;
+using NorthernLink.Trips.Application.Trips.FinishOperations;
 using NorthernLink.Trips.Application.Trips.GetActivity;
 using NorthernLink.Trips.Application.Trips.GetTripById;
 using NorthernLink.Trips.Application.Trips.GetTrips;
@@ -55,6 +59,8 @@ internal static class TripPlanningEndpoints
         trips.MapPut("{id:guid}", UpdateTrip);
         trips.MapPost("{id:guid}/assign", AssignTrip);
         trips.MapPost("{id:guid}/status", ChangeTripStatus);
+        trips.MapPost("{id:guid}/finish", FinishTripOperations);
+        trips.MapPost("{id:guid}/close-without-billing", CloseTripWithoutBilling);
         trips.MapPost("{id:guid}/demand", RecordTripDemand);
         trips.MapPost("{id:guid}/merge-round-trip", MergeRoundTrip);
         trips.MapPost("{id:guid}/unpair-round-trip", UnpairRoundTrip);
@@ -82,15 +88,28 @@ internal static class TripPlanningEndpoints
 
     // ---- Trips ----
 
+    /// <summary>Largest page a caller may ask for — a guard on payload size, not a default.</summary>
+    private const int MaxPageSize = 200;
+
+    /// <summary>
+    /// Lists trips as <c>{ items, page, pageSize, totalCount }</c>. Omitting
+    /// <paramref name="page"/>/<paramref name="pageSize"/> returns every match in the same
+    /// envelope — callers that need a whole set (a dispatch day, a driver's history) are
+    /// never silently truncated by a default page size.
+    /// </summary>
     private static async Task<IResult> GetTrips(
         DateOnly? date,
         DateOnly? from,
         DateOnly? to,
-        TripStatus? status,
+        string? status,
         TripServiceType? serviceType,
         Guid? clientId,
         Guid? driverId,
         bool? openOnly,
+        bool? assignedOnly,
+        bool? excludeCancelled,
+        int? page,
+        int? pageSize,
         ITenantContext tenantContext,
         ISender sender,
         CancellationToken cancellationToken)
@@ -100,9 +119,51 @@ internal static class TripPlanningEndpoints
             return Results.Unauthorized();
         }
 
-        var filter = new TripFilter(date, from, to, status, serviceType, clientId, driverId, openOnly ?? false);
+        // Matched against the member NAMES, not parsed. Enum.TryParse happily accepts "2"
+        // (and IsDefined then confirms it, since 2 is a defined ordinal) — so ?status=2 would
+        // still bind by position, and inserting a member would silently repoint every such
+        // caller at a different status. Only the spelled-out name gets through.
+        TripStatus? parsedStatus = null;
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            if (!Enum.GetNames<TripStatus>().Contains(status, StringComparer.Ordinal))
+            {
+                return EndpointResults.Problem(TripErrors.InvalidStatusFilter);
+            }
+
+            parsedStatus = Enum.Parse<TripStatus>(status);
+        }
+
+        // Clamped rather than rejected — an out-of-range page is a navigation artifact
+        // (a filter narrowed the set under the user), not a malformed request.
+        var normalizedPage = page is { } p ? Math.Max(1, p) : (int?)null;
+        var normalizedPageSize = pageSize is { } s ? Math.Clamp(s, 1, MaxPageSize) : (int?)null;
+
+        // Paging is all-or-nothing: a page number without a size means "unpaged".
+        if (normalizedPage is null || normalizedPageSize is null)
+        {
+            normalizedPage = null;
+            normalizedPageSize = null;
+        }
+
+        var filter = new TripFilter(
+            date,
+            from,
+            to,
+            parsedStatus,
+            serviceType,
+            clientId,
+            driverId,
+            openOnly ?? false,
+            assignedOnly ?? false,
+            excludeCancelled ?? false,
+            normalizedPage,
+            normalizedPageSize);
+
         var result = await sender.Query(new GetTripsQuery(tenantId, filter), cancellationToken);
-        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+        return result.IsSuccess
+            ? Results.Ok(PagedResponse<TripResponse>.From(result.Value, result.PageInfo))
+            : EndpointResults.Problem(result.Error);
     }
 
     private static async Task<IResult> GetTripById(
@@ -220,6 +281,41 @@ internal static class TripPlanningEndpoints
 
         var result = await sender.Send(
             new ChangeTripStatusCommand(id, request.Status, request.Reason), cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>
+    /// Records that the run is over. No body: the resulting status is the trip's to decide —
+    /// ReadyForBilling when it has a client, Completed when it doesn't — so there is nothing for
+    /// the caller to supply. Re-read the trip to see where it landed.
+    /// </summary>
+    private static async Task<IResult> FinishTripOperations(
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(new FinishTripOperationsCommand(id), cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>Closes out a ReadyForBilling trip that will never be invoiced. Reason required.</summary>
+    private static async Task<IResult> CloseTripWithoutBilling(
+        Guid id,
+        CloseTripWithoutBillingRequest request,
+        ITenantContext tenantContext,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(
+            new CloseTripWithoutBillingCommand(id, request.Reason), cancellationToken);
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
@@ -607,8 +703,15 @@ public sealed record UpdateTripRequest(
 /// </summary>
 public sealed record AssignTripRequest(Guid? DriverId, Guid? VehicleId, string? VehicleUnit);
 
-/// <summary>Request body for POST /api/trips/{id}/status ("InProgress" | "Completed" | "Cancelled").</summary>
+/// <summary>
+/// Request body for POST /api/trips/{id}/status ("InProgress" | "Cancelled"). Finishing a run
+/// goes to POST /finish and closing an unbillable one to POST /close-without-billing; Invoiced
+/// and the invoice-driven WrittenOff are Billing's to set and are refused here.
+/// </summary>
 public sealed record ChangeTripStatusRequest(TripStatus Status, string? Reason);
+
+/// <summary>Request body for POST /api/trips/{id}/close-without-billing.</summary>
+public sealed record CloseTripWithoutBillingRequest(string Reason);
 
 /// <summary>Request body for POST /api/trips/{id}/demand.</summary>
 public sealed record RecordTripDemandRequest(int SeatsConfirmed, bool DemandGuaranteed);

@@ -77,32 +77,61 @@ public class ChangeTripStatusCommandHandlerTests
     }
 
     [Fact]
-    public async Task Complete_does_not_require_a_passenger_manifest()
+    public async Task Finish_states_are_refused_here_and_pointed_at_the_finish_command()
     {
+        // "Set status to Completed/ReadyForBilling" is a contract the caller can't honour —
+        // which of the two a finish lands in depends on the trip's client, so finishing has
+        // its own command and this endpoint refuses both names outright.
         var trip = TestPlanning.ScheduleTrip().Value;
-        trip.RecordPostTripInspection(); // the completion gate is the post-trip inspection, not a manifest
+        trip.RecordPostTripInspection();
         _trips.Add(trip);
 
-        var result = await Handler.Handle(
-            new ChangeTripStatusCommand(trip.Id, TripStatus.Completed, null), CancellationToken.None);
+        foreach (var status in new[] { TripStatus.Completed, TripStatus.ReadyForBilling })
+        {
+            var result = await Handler.Handle(
+                new ChangeTripStatusCommand(trip.Id, status, null), CancellationToken.None);
 
-        Assert.True(result.IsSuccess);
-        Assert.Equal(TripStatus.Completed, trip.Status);
+            Assert.True(result.IsFailure);
+            Assert.Equal(TripErrors.FinishIsItsOwnCommand, result.Error);
+        }
+
+        Assert.Equal(TripStatus.Scheduled, trip.Status);
+        Assert.Equal(0, _trips.SaveCount);
     }
 
     [Fact]
-    public async Task Complete_is_rejected_without_a_logged_post_trip_inspection()
+    public async Task System_driven_statuses_can_never_be_set_by_hand()
     {
-        var trip = TestPlanning.ScheduleTrip().Value;
+        var trip = TestPlanning.ScheduleTrip(clientId: Guid.NewGuid()).Value;
         _trips.Add(trip);
 
-        var result = await Handler.Handle(
-            new ChangeTripStatusCommand(trip.Id, TripStatus.Completed, null), CancellationToken.None);
+        foreach (var status in new[] { TripStatus.Invoiced, TripStatus.WrittenOff })
+        {
+            var result = await Handler.Handle(
+                new ChangeTripStatusCommand(trip.Id, status, null), CancellationToken.None);
 
-        Assert.True(result.IsFailure);
-        Assert.Equal(TripErrors.PostTripInspectionRequired, result.Error);
+            Assert.True(result.IsFailure);
+            Assert.Equal(TripErrors.SystemDrivenStatus(status), result.Error);
+        }
+
         Assert.Equal(TripStatus.Scheduled, trip.Status);
         Assert.Equal(0, _trips.SaveCount);
+    }
+
+    [Fact]
+    public async Task Every_status_the_command_accepts_is_deliberate()
+    {
+        // The handler's switch spells out every member, but C# still forces a discard arm for
+        // out-of-range casts — so a NEW enum member would land there silently. This walk fails
+        // the moment someone adds a member without deciding what this command does with it.
+        var handled = new[]
+        {
+            TripStatus.Scheduled, TripStatus.InProgress, TripStatus.ReadyForBilling,
+            TripStatus.Invoiced, TripStatus.Completed, TripStatus.Cancelled, TripStatus.WrittenOff,
+        };
+
+        Assert.Equal(handled.OrderBy(s => s), Enum.GetValues<TripStatus>().OrderBy(s => s));
+        await Task.CompletedTask;
     }
 
     [Fact]

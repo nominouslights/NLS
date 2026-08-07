@@ -48,6 +48,31 @@ public sealed class TripManifest : AggregateRoot, ITenantScoped
     public DateTimeOffset CreatedAtUtc { get; private set; }
 
     /// <summary>
+    /// Fares actually collected on this run — cash and online, waived seats excluded. Computed
+    /// from the passenger rows rather than stored, for the same reason an invoice's subtotal is:
+    /// a total that can disagree with the lines under it is worse than no total.
+    /// <para>
+    /// Nothing downstream consumes this yet. It is not reconciled against a bank deposit or a
+    /// QuickBooks receipt, so it answers "what did the driver write down", not "what did we
+    /// bank" — the screen says so, and the QBO path is its own change.
+    /// </para>
+    /// </summary>
+    public decimal FaresCollectedCad => Math.Round(
+        Passengers
+            .Where(p => p.FarePaymentMethod is Manifests.FarePaymentMethod.Cash
+                or Manifests.FarePaymentMethod.Online)
+            .Sum(p => p.FareAmountCad ?? 0m),
+        2);
+
+    /// <summary>Fares deliberately not charged — recorded so a waived seat is a decision, not a gap.</summary>
+    public int FaresWaivedCount =>
+        Passengers.Count(p => p.FarePaymentMethod is Manifests.FarePaymentMethod.Waived);
+
+    /// <summary>How many passengers actually paid something.</summary>
+    public int FaresPaidCount => Passengers.Count(p =>
+        p.FarePaymentMethod is Manifests.FarePaymentMethod.Cash or Manifests.FarePaymentMethod.Online);
+
+    /// <summary>
     /// Records a manifest. Valid with just §1 trip info plus zero-or-more passengers and
     /// cargo — no inspection, attestation, or signature requirements anymore. A
     /// dispatcher-entered manifest must say who entered it.
@@ -167,6 +192,38 @@ public sealed class TripManifest : AggregateRoot, ITenantScoped
         if (source == ManifestSource.Dispatcher && string.IsNullOrWhiteSpace(enteredBy))
         {
             return Result.Failure(TripManifestErrors.EnteredByRequired);
+        }
+
+        return ValidateFares(passengers);
+    }
+
+    /// <summary>
+    /// Fares are optional — a contract run has none — but a half-recorded one is worse than
+    /// nothing: an amount with no method can't be reconciled, and a method with no amount reads
+    /// as unpaid. Rounding is checked here because jsonb enforces no scale of its own.
+    /// </summary>
+    private static Result ValidateFares(IReadOnlyList<ManifestPassenger> passengers)
+    {
+        foreach (var passenger in passengers)
+        {
+            if (passenger.FareAmountCad is { } amount
+                && (amount < 0m || decimal.Round(amount, 2) != amount))
+            {
+                return Result.Failure(TripManifestErrors.InvalidFareAmount);
+            }
+
+            switch (passenger.FarePaymentMethod)
+            {
+                case null when passenger.FareAmountCad is > 0m || passenger.FarePaidAtUtc is not null:
+                    return Result.Failure(TripManifestErrors.FarePaymentMethodRequired);
+
+                case Manifests.FarePaymentMethod.Cash or Manifests.FarePaymentMethod.Online
+                    when passenger.FareAmountCad is null or <= 0m:
+                    return Result.Failure(TripManifestErrors.FareAmountRequired);
+
+                case Manifests.FarePaymentMethod.Waived when passenger.FareAmountCad is > 0m:
+                    return Result.Failure(TripManifestErrors.WaivedFareMustBeZero);
+            }
         }
 
         return Result.Success();

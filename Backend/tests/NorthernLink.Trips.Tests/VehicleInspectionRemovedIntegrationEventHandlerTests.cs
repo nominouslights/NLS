@@ -8,7 +8,7 @@ namespace NorthernLink.Trips.Tests;
 
 /// <summary>
 /// The inverse of the recorded handler: a Fleet <c>PostTrip</c> removal carrying a trip number
-/// clears the matching trip's post-trip-inspection flag, re-arming <c>Trip.Complete()</c>.
+/// clears the matching trip's post-trip-inspection flag, re-arming <c>Trip.FinishOperations()</c>.
 /// Pre-trip removals, removals with no trip context, and removals for an unknown trip are ignored.
 /// </summary>
 public class VehicleInspectionRemovedIntegrationEventHandlerTests
@@ -45,7 +45,7 @@ public class VehicleInspectionRemovedIntegrationEventHandlerTests
         Assert.Equal(1, _trips.SaveCount);
 
         // Gate re-armed — completion is refused again.
-        var complete = trip.Complete();
+        var complete = trip.FinishOperations();
         Assert.True(complete.IsFailure);
         Assert.Equal(TripErrors.PostTripInspectionRequired, complete.Error);
     }

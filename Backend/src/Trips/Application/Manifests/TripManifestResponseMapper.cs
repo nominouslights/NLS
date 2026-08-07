@@ -21,7 +21,10 @@ public static class TripManifestResponseMapper
             p.DropoffStopName,
             p.IdVerified,
             p.BoardedOn,
-            p.BoardedOff)).ToList(),
+            p.BoardedOff,
+            p.FareAmountCad,
+            p.FarePaymentMethod?.ToString(),
+            p.FarePaidAtUtc)).ToList(),
         manifest.AllSeatbeltsVerified,
         manifest.Cargo.Select(c => new CargoItemResponse(
             c.Description,
@@ -34,5 +37,8 @@ public static class TripManifestResponseMapper
         manifest.Source.ToString(),
         manifest.EnteredBy,
         manifest.EnteredAt,
-        manifest.CreatedAtUtc);
+        manifest.CreatedAtUtc,
+        manifest.FaresCollectedCad,
+        manifest.FaresPaidCount,
+        manifest.FaresWaivedCount);
 }

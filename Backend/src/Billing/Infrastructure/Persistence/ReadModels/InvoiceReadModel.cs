@@ -6,8 +6,10 @@ namespace NorthernLink.Billing.Infrastructure.Persistence.ReadModels;
 /// <summary>
 /// Read-side projection of a worksheet for the list view, maintained by
 /// <c>InvoiceProjection</c> in <c>billing.rm_invoices</c>. Carries the computed totals plus
-/// the manual QBO reference (<see cref="QboInvoiceId"/>, <see cref="QboEnteredDate"/>).
-/// Receivables live in QuickBooks — no overdue/AR fields here. Lines stay on the write row's
+/// the manual QBO reference (<see cref="QboInvoiceId"/>, <see cref="QboEnteredDate"/>) and
+/// the manually confirmed payment date (<see cref="PaymentConfirmedDate"/>) that drives the
+/// outstanding/paid split. QuickBooks still owns sent/overdue and partial settlement — no
+/// aging or balance fields here. Lines stay on the write row's
 /// jsonb; the detail endpoint reads the aggregate. <see cref="Version"/> is the
 /// aggregate's optimistic-concurrency version at last projection; staleness is
 /// <c>event_journal.aggregate_version &gt; version</c>.
@@ -31,6 +33,16 @@ public sealed class InvoiceReadModel
     public DateTimeOffset IssuedAtUtc { get; set; }
     public string? QboInvoiceId { get; set; }
     public DateOnly? QboEnteredDate { get; set; }
+
+    /// <summary>Null while outstanding — the list view's paid/outstanding split is this field.</summary>
+    public DateOnly? PaymentConfirmedDate { get; set; }
+
+    public decimal? WrittenOffAmountCad { get; set; }
+    public DateOnly? WrittenOffDate { get; set; }
+    public string? WrittenOffReason { get; set; }
+
+    /// <summary>Materialized so the receivables tiles are a sum, not a per-row status test.</summary>
+    public decimal OutstandingCad { get; set; }
 
     // Derived columns, computed by the aggregate at projection time.
     public decimal SubtotalCad { get; set; }
@@ -70,6 +82,11 @@ public sealed class InvoiceReadModelConfiguration : IEntityTypeConfiguration<Inv
         builder.Property(i => i.IssuedAtUtc).HasColumnName("issued_at_utc");
         builder.Property(i => i.QboInvoiceId).HasColumnName("qbo_invoice_id");
         builder.Property(i => i.QboEnteredDate).HasColumnName("qbo_entered_date");
+        builder.Property(i => i.PaymentConfirmedDate).HasColumnName("payment_confirmed_date");
+        builder.Property(i => i.WrittenOffAmountCad).HasColumnName("written_off_amount_cad").HasPrecision(12, 2);
+        builder.Property(i => i.WrittenOffDate).HasColumnName("written_off_date");
+        builder.Property(i => i.WrittenOffReason).HasColumnName("written_off_reason").HasMaxLength(500);
+        builder.Property(i => i.OutstandingCad).HasColumnName("outstanding_cad").HasPrecision(12, 2);
         builder.Property(i => i.SubtotalCad).HasColumnName("subtotal_cad");
         builder.Property(i => i.GstCad).HasColumnName("gst_cad");
         builder.Property(i => i.TotalCad).HasColumnName("total_cad");

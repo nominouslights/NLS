@@ -63,17 +63,19 @@ public class InvoiceDomainEventTests
     }
 
     [Fact]
-    public void Reopen_raises_status_changed_from_entered_to_draft()
+    public void Write_off_raises_its_own_event_with_amount_date_and_reason()
     {
         var invoice = TestBilling.DraftInvoice(true, TestBilling.Line());
         Assert.True(invoice.MarkEnteredInQbo("QBO-1042", new DateOnly(2026, 8, 1)).IsSuccess);
         invoice.ClearDomainEvents();
 
-        Assert.True(invoice.Reopen().IsSuccess);
+        Assert.True(invoice.WriteOff(invoice.TotalCad, new DateOnly(2026, 9, 15), "Client insolvent").IsSuccess);
 
-        var changed = Assert.Single(invoice.DomainEvents.OfType<InvoiceStatusChangedDomainEvent>());
-        Assert.Equal(InvoiceStatus.EnteredInQbo, changed.PreviousStatus);
-        Assert.Equal(InvoiceStatus.Draft, changed.NewStatus);
+        var writtenOff = Assert.Single(invoice.DomainEvents.OfType<InvoiceWrittenOffDomainEvent>());
+        Assert.Equal(invoice.Id, writtenOff.InvoiceId);
+        Assert.Equal(invoice.TotalCad, writtenOff.AmountCad);
+        Assert.Equal(new DateOnly(2026, 9, 15), writtenOff.WrittenOffDate);
+        Assert.Equal("Client insolvent", writtenOff.Reason);
     }
 
     [Fact]

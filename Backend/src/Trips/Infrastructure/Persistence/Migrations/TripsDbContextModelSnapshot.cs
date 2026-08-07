@@ -341,6 +341,61 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                     b.ToTable("driver_lookup", "trips");
                 });
 
+            modelBuilder.Entity("NorthernLink.Trips.Application.Integration.TripBilling", b =>
+                {
+                    b.Property<Guid>("TripId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("trip_id");
+
+                    b.Property<Guid>("InvoiceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("invoice_id");
+
+                    b.Property<string>("InvoiceNumber")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("invoice_number");
+
+                    b.Property<DateOnly?>("PaymentConfirmedDate")
+                        .HasColumnType("date")
+                        .HasColumnName("payment_confirmed_date");
+
+                    b.Property<DateOnly?>("QboEnteredDate")
+                        .HasColumnType("date")
+                        .HasColumnName("qbo_entered_date");
+
+                    b.Property<string>("QboInvoiceId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("qbo_invoice_id");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("state");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<string>("WrittenOffReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("written_off_reason");
+
+                    b.HasKey("TripId");
+
+                    b.HasIndex("TenantId", "InvoiceId");
+
+                    b.ToTable("trip_billing", "trips");
+                });
+
             modelBuilder.Entity("NorthernLink.Trips.Application.Integration.VehicleLookup", b =>
                 {
                     b.Property<Guid>("VehicleId")
@@ -733,6 +788,10 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("manifest_id");
 
+                    b.Property<DateTimeOffset?>("OperationsFinishedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("operations_finished_at_utc");
+
                     b.Property<string>("Origin")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -826,6 +885,11 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                     b.Property<TimeOnly>("WindowStart")
                         .HasColumnType("time without time zone")
                         .HasColumnName("window_start");
+
+                    b.Property<string>("WrittenOffReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("written_off_reason");
 
                     b.HasKey("Id");
 
@@ -1207,6 +1271,10 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("manifest_id");
 
+                    b.Property<DateTimeOffset?>("OperationsFinishedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("operations_finished_at_utc");
+
                     b.Property<string>("Origin")
                         .IsRequired()
                         .HasColumnType("text")
@@ -1292,9 +1360,15 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                         .HasColumnType("time without time zone")
                         .HasColumnName("window_start");
 
+                    b.Property<string>("WrittenOffReason")
+                        .HasColumnType("text")
+                        .HasColumnName("written_off_reason");
+
                     b.HasKey("Id");
 
                     b.HasIndex("TenantId", "ServiceDate");
+
+                    b.HasIndex("TenantId", "ServiceDate", "WindowStart", "TripNumber");
 
                     b.ToTable("rm_trips", "trips");
                 });
@@ -1364,6 +1438,13 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                             b1.Property<Guid?>("DropoffStopId");
 
                             b1.Property<string>("DropoffStopName");
+
+                            b1.Property<decimal?>("FareAmountCad")
+                                .HasPrecision(12, 2);
+
+                            b1.Property<DateTimeOffset?>("FarePaidAtUtc");
+
+                            b1.Property<string>("FarePaymentMethod");
 
                             b1.Property<bool>("IdVerified");
 
@@ -1609,6 +1690,13 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                             b1.Property<Guid?>("DropoffStopId");
 
                             b1.Property<string>("DropoffStopName");
+
+                            b1.Property<decimal?>("FareAmountCad")
+                                .HasPrecision(12, 2);
+
+                            b1.Property<DateTimeOffset?>("FarePaidAtUtc");
+
+                            b1.Property<string>("FarePaymentMethod");
 
                             b1.Property<bool>("IdVerified");
 
