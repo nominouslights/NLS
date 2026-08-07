@@ -29,4 +29,20 @@ public sealed record ManifestPassenger
     public bool IdVerified { get; init; }
     public bool BoardedOn { get; init; }
     public bool BoardedOff { get; init; }
+
+    /// <summary>
+    /// What this passenger paid, in CAD. Null on a contract run, where the client is invoiced
+    /// and no individual fare exists. Zero is a legitimate value for a waived seat.
+    /// </summary>
+    public decimal? FareAmountCad { get; init; }
+
+    /// <summary>How the fare was settled — required whenever an amount is recorded, and vice versa.</summary>
+    public FarePaymentMethod? FarePaymentMethod { get; init; }
+
+    /// <summary>
+    /// When the fare was recorded. Honestly named: on a dispatcher-entered manifest this is when
+    /// someone keyed it in, which can be days after the money changed hands. It becomes a real
+    /// audit timestamp once the driver app captures fares at the door.
+    /// </summary>
+    public DateTimeOffset? FarePaidAtUtc { get; init; }
 }

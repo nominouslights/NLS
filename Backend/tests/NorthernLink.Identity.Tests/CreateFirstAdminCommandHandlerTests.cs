@@ -28,7 +28,8 @@ public class CreateFirstAdminCommandHandlerTests
 
         Assert.True(result.IsSuccess);
         var user = Assert.Single(userRepository.Users);
-        Assert.Equal("Admin", user.Role);
+        // First-run setup is the business owner standing up the platform.
+        Assert.Equal(Roles.Owner, user.Role);
         Assert.Equal(SeedTenant.Id, user.TenantId);
         Assert.Equal("owner@northernlink.ca", user.Email);
 

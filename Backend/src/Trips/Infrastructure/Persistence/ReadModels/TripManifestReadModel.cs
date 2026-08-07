@@ -56,7 +56,15 @@ public sealed class TripManifestReadModelConfiguration : IEntityTypeConfiguratio
         builder.Property(m => m.Direction).HasColumnName("direction");
         builder.Property(m => m.Client).HasColumnName("client");
 
-        builder.OwnsMany(m => m.Passengers, passenger => passenger.ToJson("passengers"));
+        builder.OwnsMany(m => m.Passengers, passenger =>
+        {
+            passenger.ToJson("passengers");
+
+            // Mirrors the aggregate's mapping exactly — same jsonb shape, same string-form
+            // enum, or the projector would write names the read side can't parse back.
+            passenger.Property(p => p.FareAmountCad).HasPrecision(12, 2);
+            passenger.Property(p => p.FarePaymentMethod).HasConversion<string>();
+        });
         builder.Property(m => m.AllSeatbeltsVerified).HasColumnName("all_seatbelts_verified");
 
         builder.OwnsMany(m => m.Cargo, cargo =>

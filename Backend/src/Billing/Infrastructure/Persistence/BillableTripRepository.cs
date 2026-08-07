@@ -25,6 +25,8 @@ internal sealed class BillableTripRepository(BillingDbContext context) : IBillab
 
     public void Add(BillableTrip trip) => context.BillableTrips.Add(trip);
 
+    public void Remove(BillableTrip trip) => context.BillableTrips.Remove(trip);
+
     public async Task<IReadOnlyList<BillableTrip>> GetUninvoicedForClientAsync(
         Guid clientId,
         DateOnly periodStart,

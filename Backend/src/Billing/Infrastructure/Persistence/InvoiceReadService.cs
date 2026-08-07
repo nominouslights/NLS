@@ -56,6 +56,11 @@ internal sealed class InvoiceReadService(BillingDbContext context) : IInvoiceRea
             i.TotalCad,
             i.LineCount,
             i.QboInvoiceId,
-            i.QboEnteredDate);
+            i.QboEnteredDate,
+            i.PaymentConfirmedDate,
+            i.WrittenOffAmountCad,
+            i.WrittenOffDate,
+            i.WrittenOffReason,
+            i.OutstandingCad);
     }
 }

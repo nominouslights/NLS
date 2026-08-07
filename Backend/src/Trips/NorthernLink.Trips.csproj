@@ -16,6 +16,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The read services are internal; the integration tests exercise them against a
+         real Postgres rather than through a fake (matches Drivers/Fleet/Identity). -->
+    <InternalsVisibleTo Include="NorthernLink.Trips.IntegrationTests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
       <PrivateAssets>all</PrivateAssets>

@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Unit tests for the gateway's own composition concerns — today, the authorization
+       policies. Deliberately does NOT boot the host: Program.cs reads four required
+       environment variables at startup and needs Postgres and RabbitMQ before a single
+       policy could be asked a question. AuthorizationPolicyRegistration is extracted
+       precisely so it can be registered on a bare ServiceCollection instead. -->
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Api\NorthernLink.Api\NorthernLink.Api.csproj" />
+  </ItemGroup>
+
+</Project>

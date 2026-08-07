@@ -11,7 +11,11 @@ public sealed class GetTripsQueryHandler(ITripReadService readService)
         GetTripsQuery query,
         CancellationToken cancellationToken)
     {
-        var trips = await readService.GetTripsAsync(query.Filter, cancellationToken);
-        return Result.Success(trips);
+        var (trips, totalCount) = await readService.GetTripsAsync(query.Filter, cancellationToken);
+
+        // Paging rides along on the Result rather than in the response type, so this query
+        // keeps the same IQuery<IReadOnlyList<TripResponse>> shape as every other list query.
+        return Result.Success(trips)
+            .WithPage(new PageInfo(query.Filter.Page, query.Filter.PageSize, totalCount));
     }
 }

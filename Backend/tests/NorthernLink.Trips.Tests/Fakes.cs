@@ -25,9 +25,81 @@ internal sealed class FakeTripRepository : ITripRepository
         string roundTripKey, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<Trip>>(Trips.Where(t => t.RoundTripKey == roundTripKey).ToList());
 
+    public Task<IReadOnlyList<Trip>> GetByIdsAsync(
+        Guid tenantId,
+        IReadOnlyCollection<Guid> tripIds,
+        CancellationToken cancellationToken = default)
+    {
+        var wanted = tripIds.ToHashSet();
+        IReadOnlyList<Trip> matches = Trips
+            .Where(t => t.TenantId == tenantId && wanted.Contains(t.Id))
+            .ToList();
+        return Task.FromResult(matches);
+    }
+
     public Task SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         SaveCount++;
+        return Task.CompletedTask;
+    }
+}
+
+/// <summary>
+/// In-memory trip-billing replica. Mirrors the real reconcile's semantics where tests care:
+/// upsert-by-trip, delete-on-release, and the per-trip high-water mark on UpdatedAtUtc.
+/// </summary>
+internal sealed class FakeTripBillingRepository : ITripBillingRepository
+{
+    public List<TripBilling> Rows { get; } = [];
+    public int ReconcileCount { get; private set; }
+
+    public Task<IReadOnlyList<TripBilling>> GetByInvoiceAsync(
+        Guid tenantId, Guid invoiceId, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<TripBilling>>(
+            Rows.Where(b => b.TenantId == tenantId && b.InvoiceId == invoiceId).ToList());
+
+    public Task<IReadOnlyList<TripBilling>> GetByTripIdsAsync(
+        Guid tenantId, IReadOnlyCollection<Guid> tripIds, CancellationToken cancellationToken = default)
+    {
+        var wanted = tripIds.ToHashSet();
+        IReadOnlyList<TripBilling> matches = Rows
+            .Where(b => b.TenantId == tenantId && wanted.Contains(b.TripId))
+            .ToList();
+        return Task.FromResult(matches);
+    }
+
+    public Task ReconcileAsync(
+        Guid tenantId,
+        Guid invoiceId,
+        IReadOnlyList<TripBilling> claimed,
+        DateTimeOffset occurredAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        ReconcileCount++;
+
+        var claimedTripIds = claimed.Select(b => b.TripId).ToHashSet();
+        foreach (var row in claimed)
+        {
+            var current = Rows.FirstOrDefault(b => b.TripId == row.TripId && b.TenantId == tenantId);
+            if (current is not null && current.UpdatedAtUtc > occurredAtUtc)
+            {
+                continue;
+            }
+
+            if (current is not null)
+            {
+                Rows.Remove(current);
+            }
+
+            Rows.Add(row);
+        }
+
+        Rows.RemoveAll(b =>
+            b.TenantId == tenantId
+            && b.InvoiceId == invoiceId
+            && !claimedTripIds.Contains(b.TripId)
+            && b.UpdatedAtUtc <= occurredAtUtc);
+
         return Task.CompletedTask;
     }
 }

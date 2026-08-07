@@ -189,6 +189,15 @@ public class PostTripInspectionDeliveryTests(PostgresFixture fixture)
                 .Where(t => t.RoundTripKey == roundTripKey)
                 .ToListAsync(cancellationToken);
 
+        public async Task<IReadOnlyList<Trip>> GetByIdsAsync(
+            Guid tenantId,
+            IReadOnlyCollection<Guid> tripIds,
+            CancellationToken cancellationToken = default) =>
+            await context.Trips
+                .IgnoreQueryFilters()
+                .Where(t => t.TenantId == tenantId && tripIds.Contains(t.Id))
+                .ToListAsync(cancellationToken);
+
         public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
             context.SaveChangesAsync(cancellationToken);
     }

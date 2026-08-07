@@ -11,7 +11,7 @@ import {
   type TripManifest,
   type TripManifestInput,
 } from "@/lib/api";
-import { stopNames, type TripRecord } from "@/lib/api/trips";
+import { stopNames, tripStatusLabel, type TripRecord } from "@/lib/api/trips";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { ActionButton } from "@/components/ui/Button";
 import { SectionLabel } from "@/components/ui/Panel";
@@ -25,6 +25,7 @@ import {
   emptyCargo,
   emptyPax,
   passengerCapFor,
+  paxFareValidationError,
   paxRowsFromManifest,
   paxRowsToWire,
   type CargoRow,
@@ -59,7 +60,9 @@ export default function ManifestEditorModal({
   onClose: () => void;
   /** Called with the manifest id once the create/update has been accepted. */
   onSaved: (manifestId: string) => Promise<void>;
-  /** View-only — used for completed/cancelled trips whose manifest is locked. */
+  /** View-only — the manifest stays editable through InProgress AND
+   *  ReadyForBilling (fares get recorded just after the run), and locks from
+   *  Invoiced onward (and for Cancelled/WrittenOff/Completed). */
   readOnly?: boolean;
 }) {
   const stops = stopOptionsFor(trip);
@@ -100,6 +103,12 @@ export default function ManifestEditorModal({
     if (busy || readOnly) return;
     if (namedPax === 0) {
       setError("Add at least one named passenger — a trip cannot start without a passenger manifest.");
+      return;
+    }
+    // Mirror the backend's per-passenger fare rules before the round trip.
+    const fareError = paxFareValidationError(passengers);
+    if (fareError) {
+      setError(fareError);
       return;
     }
     const input: TripManifestInput = {
@@ -146,7 +155,7 @@ export default function ManifestEditorModal({
         readOnly ? (
           <>
             <span style={{ marginRight: "auto", fontFamily: fonts.body, fontSize: 12, color: colors.textDim }}>
-              {namedPax} passenger{namedPax === 1 ? "" : "s"} · read-only ({trip.status.toLowerCase()})
+              {namedPax} passenger{namedPax === 1 ? "" : "s"} · read-only ({tripStatusLabel(trip.status).toLowerCase()})
             </span>
             <ActionButton onClick={onClose}>CLOSE</ActionButton>
           </>
@@ -181,7 +190,7 @@ export default function ManifestEditorModal({
         {stopNames(trip).join(" → ")}
         {trip.clientName ? ` · ${trip.clientName}` : ""}. Passengers pick up and drop off at the trip&rsquo;s route
         stops. {readOnly
-          ? `This trip is ${trip.status.toLowerCase()} — the manifest is read-only.`
+          ? `This trip is ${tripStatusLabel(trip.status).toLowerCase()} — the manifest is read-only.`
           : "Editing the manifest does not change trip status."}
       </div>
 

@@ -4,7 +4,8 @@ import { useState } from "react";
 import { colors, fonts, statusMeta } from "@/lib/theme";
 import { PageHeader, Panel, SectionLabel } from "@/components/ui/Panel";
 import { ActionButton } from "@/components/ui/Button";
-import { generateAdminInvite, type AdminInvite } from "@/lib/auth";
+import { SelectField } from "@/components/ui/Field";
+import { generateAdminInvite, INVITE_ROLES, type AdminInvite, type InviteRole } from "@/lib/auth";
 import { ApiError } from "@/lib/api";
 import { copyToClipboard } from "@/lib/clipboard";
 
@@ -13,7 +14,7 @@ const TABS = ["Organization", "Users & Roles", "Budget Codes", "Rate Schedules",
 const users = [
   { name: "R. Kelsey", role: "Owner · Dispatcher", tenant: "Internal", active: true },
   { name: "S. Okimaw", role: "Dispatcher", tenant: "Internal", active: true },
-  { name: "L. Fontaine", role: "Bookkeeper", tenant: "Internal", active: true },
+  { name: "L. Fontaine", role: "Accountant", tenant: "Internal", active: true },
 ];
 
 const budgetCodes = [
@@ -50,6 +51,7 @@ export default function Settings() {
   const [invitePending, setInvitePending] = useState(false);
   const [inviteError, setInviteError] = useState<{ code: string; message: string } | null>(null);
   const [inviteCopied, setInviteCopied] = useState(false);
+  const [inviteRole, setInviteRole] = useState<InviteRole>("Owner");
 
   async function handleGenerateInvite() {
     if (invitePending) return;
@@ -57,7 +59,7 @@ export default function Settings() {
     setInviteError(null);
     setInviteCopied(false);
     try {
-      setInvite(await generateAdminInvite());
+      setInvite(await generateAdminInvite(inviteRole));
     } catch (err) {
       setInvite(null);
       setInviteError(
@@ -195,7 +197,7 @@ export default function Settings() {
                 ))}
               </div>
               <Panel style={{ marginTop: 14, borderRadius: 11 }}>
-                <SectionLabel>Invite administrator</SectionLabel>
+                <SectionLabel>Invite user</SectionLabel>
                 <div
                   style={{
                     fontFamily: fonts.body,
@@ -205,16 +207,27 @@ export default function Settings() {
                     marginBottom: 12,
                   }}
                 >
-                  Mints a one-time invite token. Hand it to the new administrator — they redeem it on the
-                  sign-in screen (&ldquo;Have an admin invite token?&rdquo;) with their own email and password.
+                  Mints a one-time invite token for the chosen role. Hand it to the new user — they redeem
+                  it on the sign-in screen (&ldquo;Have an admin invite token?&rdquo;) with their own email
+                  and password. The role is fixed now, not by whoever redeems it.
                 </div>
-                <ActionButton
-                  variant="primary"
-                  onClick={handleGenerateInvite}
-                  style={{ opacity: invitePending ? 0.65 : 1, cursor: invitePending ? "default" : "pointer" }}
-                >
-                  {invitePending ? "Generating…" : "Generate invite token"}
-                </ActionButton>
+                <div style={{ display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap" }}>
+                  <div style={{ minWidth: 190 }}>
+                    <SelectField
+                      label="Role"
+                      value={inviteRole}
+                      onChange={(v) => setInviteRole(v as InviteRole)}
+                      options={INVITE_ROLES.map((r) => ({ value: r, label: r }))}
+                    />
+                  </div>
+                  <ActionButton
+                    variant="primary"
+                    onClick={handleGenerateInvite}
+                    style={{ opacity: invitePending ? 0.65 : 1, cursor: invitePending ? "default" : "pointer" }}
+                  >
+                    {invitePending ? "Generating…" : "Generate invite token"}
+                  </ActionButton>
+                </div>
 
                 {invite && (
                   <div style={{ marginTop: 12 }}>

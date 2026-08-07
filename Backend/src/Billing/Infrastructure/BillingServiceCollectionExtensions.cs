@@ -12,7 +12,9 @@ using NorthernLink.Billing.Application.Invoices.GetById;
 using NorthernLink.Billing.Application.Invoices.GetInvoices;
 using NorthernLink.Billing.Application.Invoices.MarkEntered;
 using NorthernLink.Billing.Application.Invoices.ReplaceLines;
-using NorthernLink.Billing.Application.Invoices.Reopen;
+using NorthernLink.Billing.Application.Invoices.WriteOff;
+using NorthernLink.Billing.Application.Invoices.ClearPayment;
+using NorthernLink.Billing.Application.Invoices.ConfirmPayment;
 using NorthernLink.Billing.Application.Invoices.UpdateQboReference;
 using NorthernLink.Billing.Application.Invoices.Void;
 using NorthernLink.Billing.Infrastructure.Persistence;
@@ -73,7 +75,9 @@ public static class BillingServiceCollectionExtensions
         services.AddScoped<ICommandHandler<ReplaceInvoiceLinesCommand>, ReplaceInvoiceLinesCommandHandler>();
         services.AddScoped<ICommandHandler<MarkInvoiceEnteredCommand>, MarkInvoiceEnteredCommandHandler>();
         services.AddScoped<ICommandHandler<UpdateInvoiceQboReferenceCommand>, UpdateInvoiceQboReferenceCommandHandler>();
-        services.AddScoped<ICommandHandler<ReopenInvoiceCommand>, ReopenInvoiceCommandHandler>();
+        services.AddScoped<ICommandHandler<WriteOffInvoiceCommand>, WriteOffInvoiceCommandHandler>();
+        services.AddScoped<ICommandHandler<ConfirmInvoicePaymentCommand>, ConfirmInvoicePaymentCommandHandler>();
+        services.AddScoped<ICommandHandler<ClearInvoicePaymentCommand>, ClearInvoicePaymentCommandHandler>();
         services.AddScoped<ICommandHandler<VoidInvoiceCommand>, VoidInvoiceCommandHandler>();
         services.AddScoped<IQueryHandler<GetInvoicesQuery, IReadOnlyList<InvoiceSummaryResponse>>, GetInvoicesQueryHandler>();
         services.AddScoped<IQueryHandler<GetInvoiceByIdQuery, InvoiceResponse>, GetInvoiceByIdQueryHandler>();
@@ -83,9 +87,20 @@ public static class BillingServiceCollectionExtensions
         //    Clients, billable trips from Trips (cross-domain, events-only; both idempotent).
         //    Storing/projecting events, so they arrive by polling the producer outboxes
         //    in-database, not via RabbitMQ.
+        //
+        //    trip-completed and trip-ready-for-billing are subscribed together on purpose, for
+        //    one release only. The billable feed moved to the latter when the trip lifecycle
+        //    became billing-driven (Completed now means paid, far too late to draft a
+        //    worksheet); keeping the old key live lets any still-Pending outbox rows drain
+        //    instead of stranding. Both handlers insert the same row if-absent on TripId, so the
+        //    overlap is harmless. Drop the trip-completed line — and its handler and event
+        //    record — once `SELECT count(*) FROM trips.outbox_messages WHERE
+        //    routing_key = 'trips.trip-completed' AND processing_status = 'Pending'` is 0.
         services.AddOutboxPollingConsumer<BillingDbContext>(SchemaName, subscriptions => subscriptions
             .On<ContractChangedIntegrationEvent, ContractChangedIntegrationEventHandler>()
             .On<TripCompletedIntegrationEvent, TripCompletedIntegrationEventHandler>()
+            .On<TripReadyForBillingIntegrationEvent, TripReadyForBillingIntegrationEventHandler>()
+            .On<TripClosedWithoutBillingIntegrationEvent, TripClosedWithoutBillingIntegrationEventHandler>()
             .On<TripRoundTripChangedIntegrationEvent, TripRoundTripChangedIntegrationEventHandler>());
 
         // 5. Read-side projections — one worker polls billing.event_journal and upserts

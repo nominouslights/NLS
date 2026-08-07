@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using NorthernLink.Shared.EventBus;
+using NorthernLink.Shared.IntegrationEvents.Billing;
 using NorthernLink.Shared.IntegrationEvents.Clients;
 using NorthernLink.Shared.IntegrationEvents.Drivers;
 using NorthernLink.Shared.IntegrationEvents.Fleet;
@@ -36,6 +37,8 @@ using NorthernLink.Trips.Application.Trips;
 using NorthernLink.Trips.Application.Trips.Assign;
 using NorthernLink.Trips.Application.Trips.AttachManifest;
 using NorthernLink.Trips.Application.Trips.ChangeStatus;
+using NorthernLink.Trips.Application.Trips.CloseWithoutBilling;
+using NorthernLink.Trips.Application.Trips.FinishOperations;
 using NorthernLink.Trips.Application.Trips.Create;
 using NorthernLink.Trips.Application.Trips.CreateDeadheadReturn;
 using NorthernLink.Trips.Application.Trips.GetActivity;
@@ -97,6 +100,7 @@ public static class TripsServiceCollectionExtensions
         services.AddScoped<IDriverLookupRepository, DriverLookupRepository>();
         services.AddScoped<IVehicleLookupRepository, VehicleLookupRepository>();
         services.AddScoped<IClientLookupRepository, ClientLookupRepository>();
+        services.AddScoped<ITripBillingRepository, TripBillingRepository>();
         services.AddScoped<ITripNumberGenerator, TripNumberGenerator>();
 
         // 3. Command/query handlers — registered explicitly, one line per handler.
@@ -108,6 +112,8 @@ public static class TripsServiceCollectionExtensions
         services.AddScoped<ICommandHandler<UpdateTripCommand>, UpdateTripCommandHandler>();
         services.AddScoped<ICommandHandler<AssignTripCommand>, AssignTripCommandHandler>();
         services.AddScoped<ICommandHandler<ChangeTripStatusCommand>, ChangeTripStatusCommandHandler>();
+        services.AddScoped<ICommandHandler<FinishTripOperationsCommand>, FinishTripOperationsCommandHandler>();
+        services.AddScoped<ICommandHandler<CloseTripWithoutBillingCommand>, CloseTripWithoutBillingCommandHandler>();
         services.AddScoped<ICommandHandler<RecordTripDemandCommand>, RecordTripDemandCommandHandler>();
         services.AddScoped<ICommandHandler<AttachManifestToTripCommand>, AttachManifestToTripCommandHandler>();
         services.AddScoped<ICommandHandler<MergeRoundTripCommand>, MergeRoundTripCommandHandler>();
@@ -137,7 +143,8 @@ public static class TripsServiceCollectionExtensions
             .On<VehicleChangedIntegrationEvent, VehicleChangedIntegrationEventHandler>()
             .On<VehicleInspectionRecordedIntegrationEvent, VehicleInspectionRecordedIntegrationEventHandler>()
             .On<VehicleInspectionRemovedIntegrationEvent, VehicleInspectionRemovedIntegrationEventHandler>()
-            .On<ClientChangedIntegrationEvent, ClientChangedIntegrationEventHandler>());
+            .On<ClientChangedIntegrationEvent, ClientChangedIntegrationEventHandler>()
+            .On<InvoiceBillingStateChangedIntegrationEvent, InvoiceBillingStateChangedIntegrationEventHandler>());
 
         // 5. Read-side projections — one worker upserts trips.rm_* from the journal, and a
         //    newly created manifest triggers the idempotent link-to-trip reaction (same-module

@@ -136,34 +136,56 @@ public class InvoiceLifecycleTests
     }
 
     [Fact]
-    public void Reopen_returns_entered_to_draft_and_clears_reference()
+    public void Write_off_zeroes_the_outstanding_balance_and_keeps_the_qbo_reference()
     {
         var invoice = TestBilling.DraftInvoice(true, TestBilling.Line());
-
-        var early = invoice.Reopen();
-        Assert.True(early.IsFailure);
-        Assert.Equal("Billing.Invoice.NotEntered", early.Error.Code);
-
         Assert.True(invoice.MarkEnteredInQbo("QBO-1042", new DateOnly(2026, 8, 1)).IsSuccess);
+        Assert.Equal(invoice.TotalCad, invoice.OutstandingCad);
 
-        var reopen = invoice.Reopen();
-        Assert.True(reopen.IsSuccess);
-        Assert.Equal(InvoiceStatus.Draft, invoice.Status);
-        Assert.Null(invoice.QboInvoiceId);
-        Assert.Null(invoice.QboEnteredDate);
+        var result = invoice.WriteOff(invoice.TotalCad, new DateOnly(2026, 9, 15), "Client insolvent");
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(InvoiceStatus.WrittenOff, invoice.Status);
+        Assert.Equal(0m, invoice.OutstandingCad); // "zero the balance" is exactly this
+        Assert.Equal(invoice.TotalCad, invoice.WrittenOffAmountCad);
+        Assert.Equal(new DateOnly(2026, 9, 15), invoice.WrittenOffDate);
+        Assert.Equal("Client insolvent", invoice.WrittenOffReason);
+        // The QBO invoice still exists — only its collectability changed.
+        Assert.Equal("QBO-1042", invoice.QboInvoiceId);
+        Assert.Equal(new DateOnly(2026, 8, 1), invoice.QboEnteredDate);
     }
 
     [Fact]
-    public void Reopen_is_rejected_from_void()
+    public void Write_off_validates_state_amount_and_reason()
+    {
+        // Only from EnteredInQbo: a draft was never sent, void it instead.
+        var draft = TestBilling.DraftInvoice(true, TestBilling.Line());
+        Assert.Equal(InvoiceErrors.NotEnteredForWriteOff, draft.WriteOff(10m, new DateOnly(2026, 9, 15), "x").Error);
+
+        var invoice = TestBilling.DraftInvoice(true, TestBilling.Line());
+        Assert.True(invoice.MarkEnteredInQbo("QBO-1042", new DateOnly(2026, 8, 1)).IsSuccess);
+
+        Assert.Equal(InvoiceErrors.InvalidWriteOffAmount, invoice.WriteOff(0m, new DateOnly(2026, 9, 15), "x").Error);
+        Assert.Equal(InvoiceErrors.WriteOffExceedsTotal, invoice.WriteOff(invoice.TotalCad + 0.01m, new DateOnly(2026, 9, 15), "x").Error);
+        Assert.Equal(InvoiceErrors.WriteOffReasonRequired, invoice.WriteOff(invoice.TotalCad, new DateOnly(2026, 9, 15), "  ").Error);
+        Assert.Equal(InvoiceStatus.EnteredInQbo, invoice.Status); // untouched by the rejections
+    }
+
+    [Fact]
+    public void A_written_off_invoice_is_terminal()
     {
         var invoice = TestBilling.DraftInvoice(true, TestBilling.Line());
-        Assert.True(invoice.Void().IsSuccess);
+        Assert.True(invoice.MarkEnteredInQbo("QBO-1042", new DateOnly(2026, 8, 1)).IsSuccess);
+        Assert.True(invoice.WriteOff(invoice.TotalCad, new DateOnly(2026, 9, 15), "Client insolvent").IsSuccess);
 
-        var result = invoice.Reopen();
-
-        Assert.True(result.IsFailure);
-        Assert.Equal("Billing.Invoice.NotEntered", result.Error.Code);
-        Assert.Equal(InvoiceStatus.Void, invoice.Status);
+        Assert.True(invoice.MarkEnteredInQbo("QBO-2000", new DateOnly(2026, 9, 16)).IsFailure);
+        Assert.True(invoice.ReplaceLines([TestBilling.Line()]).IsFailure);
+        Assert.True(invoice.ConfirmPayment(new DateOnly(2026, 9, 16)).IsFailure);
+        Assert.True(invoice.ClearPaymentConfirmation().IsFailure);
+        Assert.True(invoice.Void().IsFailure);
+        Assert.True(invoice.UpdateQboReference("QBO-2000", new DateOnly(2026, 9, 16)).IsFailure);
+        Assert.True(invoice.WriteOff(invoice.TotalCad, new DateOnly(2026, 9, 17), "again").IsFailure);
+        Assert.Equal(InvoiceStatus.WrittenOff, invoice.Status);
     }
 
     [Fact]
@@ -193,18 +215,19 @@ public class InvoiceLifecycleTests
     }
 
     [Fact]
-    public void Reopened_draft_can_be_re_entered_with_a_fresh_reference()
+    public void Entry_into_quickbooks_is_a_one_way_door()
     {
+        // Reopen (EnteredInQbo -> Draft) no longer exists: once the worksheet is keyed into
+        // QBO the invoice is out in the world — correct the reference or write it off, never
+        // un-send it. This pins the method's absence semantically: re-entering must fail.
         var invoice = TestBilling.DraftInvoice(true, TestBilling.Line());
         Assert.True(invoice.MarkEnteredInQbo("QBO-1042", new DateOnly(2026, 8, 1)).IsSuccess);
-        Assert.True(invoice.Reopen().IsSuccess);
 
         var reEntered = invoice.MarkEnteredInQbo("QBO-2000", new DateOnly(2026, 9, 1));
 
-        Assert.True(reEntered.IsSuccess);
+        Assert.True(reEntered.IsFailure);
         Assert.Equal(InvoiceStatus.EnteredInQbo, invoice.Status);
-        Assert.Equal("QBO-2000", invoice.QboInvoiceId);
-        Assert.Equal(new DateOnly(2026, 9, 1), invoice.QboEnteredDate);
+        Assert.Equal("QBO-1042", invoice.QboInvoiceId); // the original entry stands
     }
 
     [Fact]

@@ -6,8 +6,12 @@ namespace NorthernLink.Billing.Domain.Invoices;
 /// <summary>
 /// A billing worksheet — the platform prepares the numbers (completed uninvoiced round trips
 /// priced at the contract rate, plus manual lines, GST and totals) that are then keyed into
-/// QuickBooks Online by hand. QBO owns sent/paid/overdue/receivables; the platform never
-/// calls the QBO API. Everything contract-derived (<see cref="PoNumber"/>,
+/// QuickBooks Online by hand. The platform never calls the QBO API — QBO remains the
+/// accounting system of record and owns sent/overdue and any partial-settlement detail —
+/// but two facts are recorded here by hand so dispatch can answer them without opening QBO:
+/// that the worksheet was entered (<see cref="QboInvoiceId"/>, <see cref="QboEnteredDate"/>)
+/// and that payment was confirmed (<see cref="PaymentConfirmedDate"/>).
+/// Everything contract-derived (<see cref="PoNumber"/>,
 /// <see cref="BudgetCode"/>, <see cref="NetTermsDays"/>, <see cref="GstApplicable"/>,
 /// <see cref="GstRate"/>) is a snapshot taken at drafting: later contract amendments never
 /// rewrite an existing worksheet. Totals are computed, never stored on the write side — a
@@ -54,6 +58,20 @@ public sealed class Invoice : AggregateRoot, ITenantScoped
     /// <summary>The date the worksheet was keyed into QBO. Null until entered.</summary>
     public DateOnly? QboEnteredDate { get; private set; }
 
+    /// <summary>
+    /// The date payment against the QBO invoice was confirmed, entered by hand. Null while
+    /// outstanding — "outstanding vs paid" is exactly this field being null or not.
+    /// </summary>
+    public DateOnly? PaymentConfirmedDate { get; private set; }
+
+    /// <summary>How much was written off. Null unless <see cref="Status"/> is WrittenOff.</summary>
+    public decimal? WrittenOffAmountCad { get; private set; }
+
+    public DateOnly? WrittenOffDate { get; private set; }
+
+    /// <summary>Why it was written off — required, and the whole point of recording the write-off.</summary>
+    public string? WrittenOffReason { get; private set; }
+
     public IReadOnlyList<InvoiceLine> Lines => _lines;
 
     public decimal SubtotalCad => Math.Round(_lines.Sum(line => line.AmountCad), 2);
@@ -61,6 +79,14 @@ public sealed class Invoice : AggregateRoot, ITenantScoped
     public decimal GstCad => GstApplicable ? Math.Round(SubtotalCad * GstRate, 2) : 0m;
 
     public decimal TotalCad => SubtotalCad + GstCad;
+
+    /// <summary>
+    /// What the platform still expects to collect. Computed, not stored: only an invoice sitting
+    /// in QuickBooks unpaid is outstanding — a draft was never sent, a void never existed, a paid
+    /// one settled, and a written-off one is the balance being zeroed. That zeroing is exactly
+    /// what "write off the balance" means here; there is no separate balance column to adjust.
+    /// </summary>
+    public decimal OutstandingCad => Status == InvoiceStatus.EnteredInQbo ? TotalCad : 0m;
 
     public static Result<Invoice> CreateDraft(
         Guid tenantId,
@@ -165,11 +191,13 @@ public sealed class Invoice : AggregateRoot, ITenantScoped
     }
 
     /// <summary>
-    /// Corrects the recorded QBO reference on an already-entered worksheet (EnteredInQbo only).
+    /// Corrects the recorded QBO reference on an already-entered worksheet. Allowed while Paid
+    /// too: fixing a mistyped QBO number is a correction, not a lifecycle change, and forcing
+    /// the payment confirmation to be cleared first would lose that fact to fix a typo.
     /// </summary>
     public Result UpdateQboReference(string qboInvoiceId, DateOnly enteredDate)
     {
-        if (Status != InvoiceStatus.EnteredInQbo)
+        if (Status is not (InvoiceStatus.EnteredInQbo or InvoiceStatus.Paid))
         {
             return Result.Failure(InvoiceErrors.NotEntered);
         }
@@ -187,21 +215,82 @@ public sealed class Invoice : AggregateRoot, ITenantScoped
     }
 
     /// <summary>
-    /// Reopens an entered worksheet for further editing (EnteredInQbo→Draft), clearing the
-    /// recorded QBO reference. The claimed trips are untouched — they stay claimed.
+    /// Confirms that payment against the QBO invoice has been received (EnteredInQbo→Paid).
+    /// Entered by hand like the QBO reference itself — no QBO API call. QuickBooks stays the
+    /// accounting system of record; this only lets the platform answer "outstanding or paid".
     /// </summary>
-    public Result Reopen()
+    public Result ConfirmPayment(DateOnly confirmedDate)
     {
         if (Status != InvoiceStatus.EnteredInQbo)
         {
-            return Result.Failure(InvoiceErrors.NotEntered);
+            return Result.Failure(InvoiceErrors.NotEnteredForPayment);
         }
 
-        Status = InvoiceStatus.Draft;
-        QboInvoiceId = null;
-        QboEnteredDate = null;
+        Status = InvoiceStatus.Paid;
+        PaymentConfirmedDate = confirmedDate;
 
-        Raise(new InvoiceStatusChangedDomainEvent(Id, InvoiceStatus.EnteredInQbo, InvoiceStatus.Draft));
+        Raise(new InvoicePaymentConfirmedDomainEvent(Id, confirmedDate));
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Clears a payment confirmation recorded in error (Paid→EnteredInQbo). The QBO reference
+    /// is untouched — the worksheet is still entered, just no longer settled.
+    /// </summary>
+    public Result ClearPaymentConfirmation()
+    {
+        if (Status != InvoiceStatus.Paid)
+        {
+            return Result.Failure(InvoiceErrors.NotPaid);
+        }
+
+        Status = InvoiceStatus.EnteredInQbo;
+        PaymentConfirmedDate = null;
+
+        Raise(new InvoicePaymentConfirmedDomainEvent(Id, null));
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Writes off an outstanding worksheet: the client will not pay, and the balance goes to zero
+    /// so the receivable stops counting. Only from EnteredInQbo — a draft was never sent (void it
+    /// instead) and a paid one has nothing to write off.
+    /// <para>
+    /// The QBO reference is left intact: the invoice still exists in QuickBooks, and this only
+    /// records that it will never be collected. The claimed trips are <em>not</em> released
+    /// either — that is the difference from a void. Those runs happened and were billed once;
+    /// putting them back in the billable pool would invite a second invoice for the same work.
+    /// </para>
+    /// </summary>
+    public Result WriteOff(decimal amountCad, DateOnly writtenOffDate, string reason)
+    {
+        if (Status != InvoiceStatus.EnteredInQbo)
+        {
+            return Result.Failure(InvoiceErrors.NotEnteredForWriteOff);
+        }
+
+        if (amountCad <= 0m)
+        {
+            return Result.Failure(InvoiceErrors.InvalidWriteOffAmount);
+        }
+
+        if (amountCad > TotalCad)
+        {
+            return Result.Failure(InvoiceErrors.WriteOffExceedsTotal);
+        }
+
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return Result.Failure(InvoiceErrors.WriteOffReasonRequired);
+        }
+
+        Status = InvoiceStatus.WrittenOff;
+        WrittenOffAmountCad = Math.Round(amountCad, 2);
+        WrittenOffDate = writtenOffDate;
+        WrittenOffReason = reason.Trim();
+
+        Raise(new InvoiceWrittenOffDomainEvent(
+            Id, WrittenOffAmountCad.Value, writtenOffDate, WrittenOffReason));
         return Result.Success();
     }
 

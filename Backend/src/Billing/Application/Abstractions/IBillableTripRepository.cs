@@ -17,6 +17,13 @@ public interface IBillableTripRepository
 
     void Add(BillableTrip trip);
 
+    /// <summary>
+    /// Drops a trip from the billable pool — the close-without-billing consumer, for a trip that
+    /// will never be invoiced. Row deletion, not a flag: absence is what "not billable" means
+    /// throughout this table.
+    /// </summary>
+    void Remove(BillableTrip trip);
+
     /// <summary>Uninvoiced, round-trip-keyed or not, for a client with service dates inside the period.</summary>
     Task<IReadOnlyList<BillableTrip>> GetUninvoicedForClientAsync(
         Guid clientId,

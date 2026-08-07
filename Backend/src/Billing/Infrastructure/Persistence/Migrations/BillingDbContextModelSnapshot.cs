@@ -244,6 +244,10 @@ namespace NorthernLink.Billing.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("net_terms_days");
 
+                    b.Property<DateOnly?>("PaymentConfirmedDate")
+                        .HasColumnType("date")
+                        .HasColumnName("payment_confirmed_date");
+
                     b.Property<DateOnly>("PeriodEnd")
                         .HasColumnType("date")
                         .HasColumnName("period_end");
@@ -280,6 +284,20 @@ namespace NorthernLink.Billing.Infrastructure.Persistence.Migrations
                         .IsConcurrencyToken()
                         .HasColumnType("integer")
                         .HasColumnName("version");
+
+                    b.Property<decimal?>("WrittenOffAmountCad")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("written_off_amount_cad");
+
+                    b.Property<DateOnly?>("WrittenOffDate")
+                        .HasColumnType("date")
+                        .HasColumnName("written_off_date");
+
+                    b.Property<string>("WrittenOffReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("written_off_reason");
 
                     b.HasKey("Id");
 
@@ -346,6 +364,15 @@ namespace NorthernLink.Billing.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("net_terms_days");
 
+                    b.Property<decimal>("OutstandingCad")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("outstanding_cad");
+
+                    b.Property<DateOnly?>("PaymentConfirmedDate")
+                        .HasColumnType("date")
+                        .HasColumnName("payment_confirmed_date");
+
                     b.Property<DateOnly>("PeriodEnd")
                         .HasColumnType("date")
                         .HasColumnName("period_end");
@@ -386,6 +413,20 @@ namespace NorthernLink.Billing.Infrastructure.Persistence.Migrations
                     b.Property<int>("Version")
                         .HasColumnType("integer")
                         .HasColumnName("version");
+
+                    b.Property<decimal?>("WrittenOffAmountCad")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("written_off_amount_cad");
+
+                    b.Property<DateOnly?>("WrittenOffDate")
+                        .HasColumnType("date")
+                        .HasColumnName("written_off_date");
+
+                    b.Property<string>("WrittenOffReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("written_off_reason");
 
                     b.HasKey("Id");
 

@@ -31,6 +31,11 @@ public static class InvoiceResponseMapper
             invoice.TotalCad,
             invoice.QboInvoiceId,
             invoice.QboEnteredDate,
+            invoice.PaymentConfirmedDate,
+            invoice.WrittenOffAmountCad,
+            invoice.WrittenOffDate,
+            invoice.WrittenOffReason,
+            invoice.OutstandingCad,
             invoice.Lines
                 .Select(line => new InvoiceLineResponse(
                     line.LineId,

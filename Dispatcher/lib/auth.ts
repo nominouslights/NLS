@@ -143,12 +143,36 @@ export interface AdminInvite {
 }
 
 /**
- * Mints a one-time admin invite token (authenticated — requires the Admin
- * role). The backend stores only a hash, so the raw token in the response is
- * visible exactly once: single-use, expires 15 minutes after issue.
+ * The Internal-tenant roles an invite can name. Mirrors Roles.Internal in
+ * Backend/src/Shared/Kernel/Roles.cs — the backend rejects anything else with
+ * Identity.User.InvalidRole, so keep these in step.
  */
-export function generateAdminInvite(): Promise<AdminInvite> {
-  return request<AdminInvite>("/api/identity/admin/bootstrap-token", { method: "POST" });
+export const INVITE_ROLES = [
+  "Owner",
+  "Dispatcher",
+  "Supervisor",
+  "Accountant",
+  "BoardMember",
+  "Driver",
+] as const;
+
+export type InviteRole = (typeof INVITE_ROLES)[number];
+
+/**
+ * Mints a one-time invite token (authenticated — requires the Owner role). The
+ * backend stores only a hash, so the raw token in the response is visible
+ * exactly once: single-use, expires 15 minutes after issue.
+ *
+ * The role is fixed here, at mint time — whoever redeems the invite is
+ * anonymous and must not get to name their own privileges. It rides as a query
+ * parameter rather than a body because this call sends no body at all;
+ * defaulting to Owner server-side keeps a bare call meaning what it always did.
+ */
+export function generateAdminInvite(role: InviteRole = "Owner"): Promise<AdminInvite> {
+  return request<AdminInvite>(
+    `/api/identity/admin/bootstrap-token?role=${encodeURIComponent(role)}`,
+    { method: "POST" },
+  );
 }
 
 /**

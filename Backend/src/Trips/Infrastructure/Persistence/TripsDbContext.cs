@@ -36,6 +36,7 @@ public sealed class TripsDbContext(
     public DbSet<DriverLookup> DriverLookups => Set<DriverLookup>();
     public DbSet<VehicleLookup> VehicleLookups => Set<VehicleLookup>();
     public DbSet<ClientLookup> ClientLookups => Set<ClientLookup>();
+    public DbSet<TripBilling> TripBillings => Set<TripBilling>();
 
     /// <summary>Per-tenant "TR-####" sequence rows — only touched by <see cref="TripNumberGenerator"/>.</summary>
     public DbSet<TripNumberCounter> TripNumberCounters => Set<TripNumberCounter>();
@@ -57,6 +58,7 @@ public sealed class TripsDbContext(
         modelBuilder.ApplyConfiguration(new DriverLookupConfiguration());
         modelBuilder.ApplyConfiguration(new VehicleLookupConfiguration());
         modelBuilder.ApplyConfiguration(new ClientLookupConfiguration());
+        modelBuilder.ApplyConfiguration(new TripBillingConfiguration());
         modelBuilder.ApplyConfiguration(new TripNumberCounterConfiguration());
         modelBuilder.ApplyConfiguration(new TripManifestReadModelConfiguration());
         modelBuilder.ApplyConfiguration(new TripReadModelConfiguration());
@@ -73,6 +75,7 @@ public sealed class TripsDbContext(
         modelBuilder.Entity<DriverLookup>().HasQueryFilter(d => d.TenantId == TenantId);
         modelBuilder.Entity<VehicleLookup>().HasQueryFilter(v => v.TenantId == TenantId);
         modelBuilder.Entity<ClientLookup>().HasQueryFilter(c => c.TenantId == TenantId);
+        modelBuilder.Entity<TripBilling>().HasQueryFilter(b => b.TenantId == TenantId);
         modelBuilder.Entity<TripNumberCounter>().HasQueryFilter(c => c.TenantId == TenantId);
         modelBuilder.Entity<TripManifestReadModel>().HasQueryFilter(m => m.TenantId == TenantId);
         modelBuilder.Entity<TripReadModel>().HasQueryFilter(t => t.TenantId == TenantId);

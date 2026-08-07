@@ -48,6 +48,30 @@ public static class InvoiceErrors
     public static readonly Error QboInvoiceIdRequired = Error.Validation(
         "Billing.Invoice.QboInvoiceIdRequired", "A QuickBooks invoice number is required.");
 
+    public static readonly Error NotEnteredForPayment = Error.Conflict(
+        "Billing.Invoice.NotEnteredForPayment",
+        "Payment can only be confirmed on an invoice already entered in QuickBooks.");
+
+    public static readonly Error NotPaid = Error.Conflict(
+        "Billing.Invoice.NotPaid", "This invoice is not marked paid.");
+
+    public static readonly Error NotEnteredForWriteOff = Error.Conflict(
+        "Billing.Invoice.NotEnteredForWriteOff",
+        "Only an invoice already entered in QuickBooks and still outstanding can be written off.");
+
+    public static readonly Error InvalidWriteOffAmount = Error.Validation(
+        "Billing.Invoice.InvalidWriteOffAmount", "A write-off amount must be greater than zero.");
+
+    public static readonly Error WriteOffExceedsTotal = Error.Validation(
+        "Billing.Invoice.WriteOffExceedsTotal", "A write-off cannot exceed the invoice total.");
+
+    public static readonly Error WriteOffReasonRequired = Error.Validation(
+        "Billing.Invoice.WriteOffReasonRequired",
+        "A write-off needs a reason — an unexplained one is useless as an audit record.");
+
+    public static readonly Error WrittenOff = Error.Conflict(
+        "Billing.Invoice.WrittenOff", "This invoice has been written off and can no longer be changed.");
+
     public static Error TripNotFound(Guid tripId) => Error.NotFound(
         "Billing.Invoice.TripNotFound", $"Billable trip {tripId} was not found for this tenant.");
 
