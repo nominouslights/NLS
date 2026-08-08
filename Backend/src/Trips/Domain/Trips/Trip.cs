@@ -403,7 +403,11 @@ public sealed class Trip : AggregateRoot, ITenantScoped
     {
         // Business rule: a trip can never leave the operational phase without a logged
         // post-trip inspection — checked before the transition so it is refused via any path.
-        if (!HasPostTripInspection)
+        // Deadheads are exempt: an inspection is logged (by trip number) against the trip the
+        // vehicle actually worked, and an empty repositioning leg never gets its own — the same
+        // reasoning that exempts them from the passenger-manifest gate on Start. Without this,
+        // an empty leg could never reach ReadyForBilling and its round trip could never bill.
+        if (!HasPostTripInspection && !IsEmptyLeg)
         {
             return Result.Failure(TripErrors.PostTripInspectionRequired);
         }

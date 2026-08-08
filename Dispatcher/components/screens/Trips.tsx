@@ -1267,21 +1267,33 @@ export default function Trips({
   const canSendPickupEmail = !!t && manifest !== null && manifest.passengers.length > 0 && t.status !== "Cancelled";
   // START gate: a driver AND a linked manifest with ≥1 passenger (mirrors the
   // backend en-route guard). Vehicle assignment is encouraged but not blocking.
+  // Deadheads skip the manifest half — one can't even be created for an empty
+  // leg — but still need a driver to actually go en route.
   const startBlockReason =
     !t || t.status !== "Scheduled"
       ? null
       : t.driverId === null
         ? "Needs a driver"
-        : !hasPassengerManifest
+        : !t.isEmptyLeg && !hasPassengerManifest
           ? "Needs a passenger manifest (≥1 passenger)"
           : null;
 
-  // FINISH gate: an in-progress trip needs a post-trip inspection logged
-  // before the run can be finished. Gate on the server's HasPostTripInspection
-  // flag (set once Trips consumes Fleet's inspection event) so the button
-  // enables exactly when the backend would allow it — no "enabled but 409" gap.
+  // FINISH: an in-progress trip needs a post-trip inspection logged before the
+  // run can be finished — gated on the server's HasPostTripInspection flag so
+  // the button enables exactly when the backend would allow it (no "enabled but
+  // 409" gap). Deadheads are exempt (the inspection belongs to the trip the
+  // vehicle actually worked) and finishable straight from Scheduled: an empty
+  // leg has no driver or manifest to start with, and the only reason to finish
+  // it is to hand the round trip to Billing.
+  const finishable =
+    !!t &&
+    (t.status === "InProgress" || (t.status === "Scheduled" && t.isEmptyLeg));
   const finishBlockReason =
-    !t || t.status !== "InProgress" ? null : !t.hasPostTripInspection ? "Needs a post-trip inspection logged" : null;
+    !t || !finishable || t.isEmptyLeg
+      ? null
+      : !t.hasPostTripInspection
+        ? "Needs a post-trip inspection logged"
+        : null;
 
   // Billing runs on its own axis from the operational status — see tripBillingChip.
   const billingChip = t ? tripBillingChip(t) : null;
@@ -1823,7 +1835,7 @@ export default function Trips({
                       {busy ? "WORKING…" : "START TRIP"}
                     </ActionButton>
                   ))}
-                {t.status === "InProgress" &&
+                {finishable &&
                   (finishBlockReason ? (
                     <StatusChip kind="soon" label={`Can't finish — ${finishBlockReason}`} />
                   ) : (
