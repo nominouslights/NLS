@@ -81,7 +81,8 @@ public class CreateTripCommandHandlerTests
         var vehicleId = Guid.NewGuid();
         _vehicles.Vehicles.Add(Vehicle(vehicleId));
 
-        // A stale/free-form unit is ignored in favour of the lookup snapshot.
+        // A stale/free-form unit is ignored in favour of the lookup snapshot — and so is the
+        // command's manual capacity (12): the vehicle's 24 seats are server-authoritative.
         var result = await Handler.Handle(
             Command(vehicleId: vehicleId, vehicleUnit: "stale-unit"), CancellationToken.None);
 
@@ -89,6 +90,7 @@ public class CreateTripCommandHandlerTests
         var trip = Assert.Single(_trips.Trips);
         Assert.Equal(vehicleId, trip.VehicleId);
         Assert.Equal("U-12", trip.VehicleUnit);
+        Assert.Equal(24, trip.SeatsCapacity);
     }
 
     [Fact]
@@ -100,6 +102,7 @@ public class CreateTripCommandHandlerTests
         var trip = Assert.Single(_trips.Trips);
         Assert.Null(trip.VehicleId);
         Assert.Equal("U-99", trip.VehicleUnit);
+        Assert.Equal(12, trip.SeatsCapacity); // no vehicle to derive from — manual capacity stands
     }
 
     private sealed class FakeTripNumberGenerator : ITripNumberGenerator

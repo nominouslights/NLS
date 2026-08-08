@@ -385,15 +385,80 @@ public class TripLifecycleTests
 
         var invoiced = ReadyForBillingTrip();
         invoiced.MarkInvoiced();
-        Assert.True(invoiced.AssignVehicle(Guid.NewGuid(), "U-07").IsFailure);
+        Assert.True(invoiced.AssignVehicle(Guid.NewGuid(), "U-07", seatingCapacity: 24).IsFailure);
 
         var completed = TestPlanning.ScheduleTrip().Value;
         completed.RecordPostTripInspection();
         completed.FinishOperations();
         Assert.True(completed.AssignDriver(Guid.NewGuid(), "R. Ballantyne").IsFailure);
         Assert.True(completed.UnassignDriver().IsFailure);
-        Assert.True(completed.AssignVehicle(Guid.NewGuid(), "U-07").IsFailure);
+        Assert.True(completed.AssignVehicle(Guid.NewGuid(), "U-07", seatingCapacity: 24).IsFailure);
     }
+
+    [Fact]
+    public void Assign_vehicle_snapshots_the_capacity_and_reassign_re_snapshots_it()
+    {
+        var trip = TestPlanning.ScheduleTrip(seatsCapacity: 12).Value;
+
+        // A fleet vehicle stamps SeatsCapacity the way it stamps the unit number.
+        Assert.True(trip.AssignVehicle(Guid.NewGuid(), "U-07", seatingCapacity: 24).IsSuccess);
+        Assert.Equal(24, trip.SeatsCapacity);
+
+        Assert.True(trip.AssignVehicle(Guid.NewGuid(), "U-08", seatingCapacity: 48).IsSuccess);
+        Assert.Equal(48, trip.SeatsCapacity);
+    }
+
+    [Fact]
+    public void Unassign_and_free_form_unit_keep_the_last_known_capacity()
+    {
+        var trip = TestPlanning.ScheduleTrip(seatsCapacity: 12).Value;
+        Assert.True(trip.AssignVehicle(Guid.NewGuid(), "U-07", seatingCapacity: 24).IsSuccess);
+
+        // Demand may already be booked against the snapshot, so clearing the vehicle keeps it.
+        Assert.True(trip.AssignVehicle(null, null, null).IsSuccess);
+        Assert.Null(trip.VehicleId);
+        Assert.Equal(24, trip.SeatsCapacity);
+
+        // Same for a free-form unit with no id — there is no vehicle to derive from.
+        Assert.True(trip.AssignVehicle(null, "U-99", null).IsSuccess);
+        Assert.Equal("U-99", trip.VehicleUnit);
+        Assert.Equal(24, trip.SeatsCapacity);
+    }
+
+    [Fact]
+    public void Assigning_a_vehicle_seating_fewer_than_confirmed_demand_is_rejected()
+    {
+        var trip = TestPlanning.ScheduleTrip(seatsCapacity: 30).Value;
+        Assert.True(trip.RecordDemand(28, demandGuaranteed: false).IsSuccess);
+
+        var result = trip.AssignVehicle(Guid.NewGuid(), "U-07", seatingCapacity: 24);
+
+        Assert.Equal(TripErrors.VehicleCapacityBelowConfirmed, result.Error);
+        Assert.Null(trip.VehicleId); // the assignment never landed
+        Assert.Equal(30, trip.SeatsCapacity);
+    }
+
+    [Fact]
+    public void Update_keeps_derived_capacity_with_a_vehicle_and_applies_manual_without_one()
+    {
+        // While a fleet vehicle is assigned, the snapshotted capacity survives plan edits.
+        var withVehicle = TestPlanning.ScheduleTrip(seatsCapacity: 12).Value;
+        Assert.True(withVehicle.AssignVehicle(Guid.NewGuid(), "U-07", seatingCapacity: 24).IsSuccess);
+        Assert.True(Replan(withVehicle, seatsCapacity: 10).IsSuccess);
+        Assert.Equal(24, withVehicle.SeatsCapacity);
+
+        // Without one, the manual capacity edit applies as before.
+        var withoutVehicle = TestPlanning.ScheduleTrip(seatsCapacity: 12).Value;
+        Assert.True(Replan(withoutVehicle, seatsCapacity: 10).IsSuccess);
+        Assert.Equal(10, withoutVehicle.SeatsCapacity);
+    }
+
+    private static Result Replan(Trip trip, int? seatsCapacity) =>
+        trip.Update(
+            trip.ServiceDate, trip.WindowStart, trip.WindowEnd, trip.ServiceType,
+            trip.RouteId, trip.RouteName, trip.Origin, trip.Destination, trip.Stops,
+            trip.DistanceKm, trip.IsEmptyLeg, trip.ClientId, trip.ClientName,
+            trip.PoNumber, seatsCapacity, trip.SeatsMinimum);
 
     [Fact]
     public void Demand_is_recorded_within_capacity()

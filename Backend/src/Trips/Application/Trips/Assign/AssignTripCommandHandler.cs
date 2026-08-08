@@ -47,8 +47,11 @@ public sealed class AssignTripCommandHandler(
 
         // Vehicle snapshot: a supplied VehicleId goes through the same lookup validation as
         // the driver — the vehicle must exist and be Active in vehicle_lookup, and its unit
-        // number is snapshotted from the lookup. A free-form unit with no id passes through.
+        // number and seating capacity are snapshotted from the lookup (the domain refuses a
+        // vehicle seating fewer than SeatsConfirmed). A free-form unit with no id passes
+        // through and leaves the trip's capacity as it was.
         var vehicleUnit = command.VehicleUnit;
+        int? seatingCapacity = null;
         if (command.VehicleId is { } vehicleId)
         {
             var vehicle = await vehicleLookup.GetAsync(vehicleId, cancellationToken);
@@ -63,9 +66,10 @@ public sealed class AssignTripCommandHandler(
             }
 
             vehicleUnit = vehicle.UnitNumber;
+            seatingCapacity = vehicle.SeatingCapacity;
         }
 
-        var vehicleResult = trip.AssignVehicle(command.VehicleId, vehicleUnit);
+        var vehicleResult = trip.AssignVehicle(command.VehicleId, vehicleUnit, seatingCapacity);
         if (vehicleResult.IsFailure)
         {
             return vehicleResult;

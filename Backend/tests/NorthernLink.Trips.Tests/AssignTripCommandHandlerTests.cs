@@ -23,14 +23,14 @@ public class AssignTripCommandHandlerTests
         UpdatedAtUtc = DateTimeOffset.UtcNow,
     };
 
-    private static VehicleLookup Vehicle(Guid id, string status = VehicleLookup.ActiveStatus) => new()
+    private static VehicleLookup Vehicle(Guid id, string status = VehicleLookup.ActiveStatus, int seatingCapacity = 24) => new()
     {
         VehicleId = id,
         TenantId = TestPlanning.TenantId,
         UnitNumber = "U-12",
         Status = status,
         RequiredLicenceClass = "Class 4",
-        SeatingCapacity = 24,
+        SeatingCapacity = seatingCapacity,
         UpdatedAtUtc = DateTimeOffset.UtcNow,
     };
 
@@ -113,14 +113,34 @@ public class AssignTripCommandHandlerTests
         var vehicleId = Guid.NewGuid();
         _vehicles.Vehicles.Add(Vehicle(vehicleId));
 
-        // A stale/free-form unit supplied by the caller is ignored in favour of the snapshot.
+        // A stale/free-form unit supplied by the caller is ignored in favour of the snapshot,
+        // and the trip's capacity is re-derived from the vehicle (12 becomes 24).
         var result = await Handler.Handle(
             new AssignTripCommand(trip.Id, null, vehicleId, "stale-unit"), CancellationToken.None);
 
         Assert.True(result.IsSuccess);
         Assert.Equal(vehicleId, trip.VehicleId);
         Assert.Equal("U-12", trip.VehicleUnit);
+        Assert.Equal(24, trip.SeatsCapacity);
         Assert.Equal(1, _trips.SaveCount);
+    }
+
+    [Fact]
+    public async Task Vehicle_seating_fewer_than_confirmed_demand_is_rejected()
+    {
+        var trip = TestPlanning.ScheduleTrip(seatsCapacity: 30).Value;
+        Assert.True(trip.RecordDemand(28, demandGuaranteed: false).IsSuccess);
+        _trips.Add(trip);
+        var vehicleId = Guid.NewGuid();
+        _vehicles.Vehicles.Add(Vehicle(vehicleId, seatingCapacity: 24));
+
+        var result = await Handler.Handle(
+            new AssignTripCommand(trip.Id, null, vehicleId, null), CancellationToken.None);
+
+        Assert.Equal(TripErrors.VehicleCapacityBelowConfirmed, result.Error);
+        Assert.Null(trip.VehicleId);
+        Assert.Equal(30, trip.SeatsCapacity);
+        Assert.Equal(0, _trips.SaveCount);
     }
 
     [Fact]
@@ -139,6 +159,7 @@ public class AssignTripCommandHandlerTests
         Assert.Equal("R. Ballantyne", trip.DriverName);
         Assert.Equal("U-07", trip.VehicleUnit);
         Assert.Null(trip.VehicleId);
+        Assert.Equal(12, trip.SeatsCapacity); // free-form unit — capacity is left as it was
         Assert.Equal(1, _trips.SaveCount);
     }
 

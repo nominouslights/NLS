@@ -151,6 +151,9 @@ export interface TripInput {
   driverId?: string | null;
   /** Validated Fleet vehicle reference; the backend snapshots the unit number. */
   vehicleId?: string | null;
+  /** Ignored when vehicleId is set — the server snapshots the vehicle's
+   *  seating capacity onto the trip instead. Manual capacity applies only to
+   *  trips created without a fleet vehicle. */
   seatsCapacity?: number | null;
   seatsMinimum?: number | null;
 }
@@ -234,7 +237,11 @@ export function updateTrip(id: string, input: TripUpdateInput): Promise<void> {
 }
 
 /** POST /api/trips/{id}/assign — null driverId unassigns, null vehicleId clears
- *  the vehicle (the server snapshots the unit number from the looked-up vehicle). */
+ *  the vehicle (the server snapshots the unit number from the looked-up vehicle).
+ *  Assigning a vehicle also re-snapshots the trip's seats capacity from the
+ *  vehicle; one seating fewer than the seats already confirmed is rejected
+ *  ("Trips.Trip.VehicleCapacityBelowConfirmed"). Unassigning keeps the
+ *  last-known capacity. */
 export function assignTrip(
   id: string,
   driverId: string | null,
