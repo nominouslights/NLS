@@ -2,43 +2,51 @@
 
 import { useEffect, useState } from "react";
 import { colors, fonts, rowSurface, statusMeta } from "@/lib/theme";
-import type {
-  DefectSeverity,
-  Inspection,
-  InspectionChecklistItem,
-  InspectionType,
-} from "@/lib/types";
-import { addInspection, DVIR_CHECKLIST, resultForDefects } from "@/lib/maintenanceStore";
+import { ApiError } from "@/lib/api";
+import {
+  createInspection,
+  type DefectSeverityWire,
+  type InspectionResultWire,
+  type InspectionType,
+} from "@/lib/api/maintenance";
+import { DVIR_CHECKLIST } from "@/lib/maintenanceStore";
+import { DEFECT_SEVERITY_LABEL, INSPECTION_RESULT_META } from "@/lib/workOrderDisplay";
 import { listDrivers } from "@/lib/api/drivers";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { NumberField, SelectField, TextField } from "@/components/ui/Field";
 import { ActionButton } from "@/components/ui/Button";
 
-const SEVERITIES: DefectSeverity[] = ["Minor", "Major", "Out-of-Service"];
+const SEVERITIES: DefectSeverityWire[] = ["Minor", "Major", "OutOfService"];
 
 interface Row {
   item: string;
   defect: boolean;
-  severity: DefectSeverity;
+  severity: DefectSeverityWire;
   note: string;
 }
 
 // Dispatcher data-entry for a pre/post-trip DVIR — the office fallback for when
 // the Driver Field App fails in the field and the driver uses a paper backup form.
+// Saves to the live Fleet API (source "Dispatcher"), which also advances the
+// vehicle odometer.
 
 export default function InspectionEntryModal({
+  vehicleId,
   unit,
   type,
   odometerKm,
   onClose,
   onSaved,
 }: {
+  vehicleId: string;
   unit: string;
   type: InspectionType;
   odometerKm: number;
   onClose: () => void;
-  onSaved: (inspection: Inspection) => void;
+  onSaved: (inspectionId: string) => void;
 }) {
+  const typeLabel = type === "PreTrip" ? "Pre-Trip" : "Post-Trip";
+
   // Driver roster from the real Drivers API (Active drivers only).
   const [driverNames, setDriverNames] = useState<string[]>([]);
   const [driver, setDriver] = useState("");
@@ -66,6 +74,7 @@ export default function InspectionEntryModal({
   const [rows, setRows] = useState<Row[]>(
     DVIR_CHECKLIST.map((item) => ({ item, defect: false, severity: "Minor", note: "" })),
   );
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function setRow(i: number, patch: Partial<Row>) {
@@ -74,40 +83,46 @@ export default function InspectionEntryModal({
 
   const defects = rows
     .filter((r) => r.defect)
-    .map((r) => ({ item: r.item, severity: r.severity, note: r.note.trim() || undefined }));
-  const result = resultForDefects(defects);
+    .map((r) => ({ item: r.item, severity: r.severity, note: r.note.trim() || null }));
+  const result: InspectionResultWire = defects.some(
+    (d) => d.severity === "OutOfService" || d.severity === "Major",
+  )
+    ? "Fail"
+    : defects.length > 0
+      ? "PassWithDefects"
+      : "Pass";
 
-  function submit() {
+  async function submit() {
+    if (busy) return;
     if (!driver) return setError("Select the driver who performed the inspection.");
-    const checklist: InspectionChecklistItem[] = rows.map((r) =>
-      r.defect
-        ? { item: r.item, status: "Defect", severity: r.severity, note: r.note.trim() || undefined }
-        : { item: r.item, status: "Pass" },
-    );
-    const insp = addInspection({
-      unit,
-      type,
-      driver,
-      source: "Dispatcher Entry (paper backup)",
-      enteredBy: "Dispatch",
-      performedAt: new Date().toISOString().slice(0, 10),
-      odometerKm: parseInt(odo, 10) || odometerKm,
-      result,
-      defects,
-      checklist,
-    });
-    onSaved(insp);
-    onClose();
+    setBusy(true);
+    setError(null);
+    try {
+      const id = await createInspection({
+        type,
+        source: "Dispatcher",
+        vehicleId,
+        unit,
+        driverName: driver,
+        enteredBy: "Dispatch",
+        odometerKm: parseInt(odo, 10) || odometerKm,
+        checklist: rows.map((r) => ({ item: r.item, passed: !r.defect })),
+        defects,
+      });
+      onSaved(id);
+      onClose();
+    } catch (e) {
+      setBusy(false);
+      setError(e instanceof ApiError ? e.message : "Failed to save the inspection — please try again.");
+    }
   }
 
-  const resultMeta = statusMeta(
-    result === "Pass" ? "ontime" : result === "Fail" ? "over" : "soon",
-  );
+  const resultMeta = statusMeta(INSPECTION_RESULT_META[result].kind);
 
   return (
     <ModalShell
       eyebrow={`Fleet & Maintenance · ${unit} · DVIR`}
-      title={`Enter ${type} Inspection`}
+      title={`Enter ${typeLabel} Inspection`}
       onClose={onClose}
       error={error}
       footer={
@@ -115,12 +130,14 @@ export default function InspectionEntryModal({
           <span style={{ marginRight: "auto", fontFamily: fonts.body, fontSize: 12, color: colors.textDim }}>
             Result:{" "}
             <span style={{ color: resultMeta.t, fontWeight: 700 }}>
-              {resultMeta.g} {result}
+              {resultMeta.g} {INSPECTION_RESULT_META[result].label}
             </span>
           </span>
-          <ActionButton onClick={onClose}>CANCEL</ActionButton>
-          <ActionButton variant="primary" onClick={submit}>
-            SAVE INSPECTION
+          <ActionButton onClick={onClose} disabled={busy}>
+            CANCEL
+          </ActionButton>
+          <ActionButton variant="primary" onClick={submit} disabled={busy}>
+            {busy ? "SAVING…" : "SAVE INSPECTION"}
           </ActionButton>
         </>
       }
@@ -141,7 +158,7 @@ export default function InspectionEntryModal({
       >
         Dispatcher paper-backup entry — use when the Driver App failed in the field and the driver
         recorded this DVIR on the backup paper form. Recorded as
-        <span style={{ fontWeight: 600 }}> Dispatcher Entry (paper backup)</span>.
+        <span style={{ fontWeight: 600 }}> Dispatcher</span> entry.
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
@@ -174,8 +191,8 @@ export default function InspectionEntryModal({
                 <SelectField
                   label="Severity"
                   value={r.severity}
-                  onChange={(v) => setRow(i, { severity: v as DefectSeverity })}
-                  options={SEVERITIES.map((s) => ({ value: s, label: s }))}
+                  onChange={(v) => setRow(i, { severity: v as DefectSeverityWire })}
+                  options={SEVERITIES.map((s) => ({ value: s, label: DEFECT_SEVERITY_LABEL[s] }))}
                 />
                 <TextField label="Note" value={r.note} onChange={(v) => setRow(i, { note: v })} placeholder="Describe the defect" />
               </div>
@@ -184,7 +201,7 @@ export default function InspectionEntryModal({
         ))}
       </div>
 
-      {defects.some((d) => d.severity === "Out-of-Service" || d.severity === "Major") && (
+      {defects.some((d) => d.severity === "OutOfService" || d.severity === "Major") && (
         <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: statusMeta("over").t, marginTop: 12, fontWeight: 600 }}>
           ▲ Major / out-of-service defect present — you&apos;ll be prompted to generate a work order after saving.
         </div>

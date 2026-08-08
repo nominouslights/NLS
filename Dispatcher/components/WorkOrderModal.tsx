@@ -1,95 +1,129 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { colors, fonts } from "@/lib/theme";
-import type { WorkOrderPrefill, WorkOrderPriority } from "@/lib/types";
-import { addWorkOrder, linkInspectionWorkOrder, shops, useMaintenanceStore } from "@/lib/maintenanceStore";
+import { ApiError } from "@/lib/api";
+import {
+  createWorkOrder,
+  listShops,
+  type ShopWire,
+  type WorkOrderPriorityWire,
+} from "@/lib/api/maintenance";
+import type { WorkOrderPrefillWire } from "@/lib/inspectionWorkOrder";
+import { toUtcIso, WO_SOURCE_LABEL } from "@/lib/workOrderDisplay";
+import type { VehicleOption } from "@/components/screens/fleet/vehicle-detail/shared";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { NumberField, SelectField, TextAreaField, TextField } from "@/components/ui/Field";
 import { ActionButton } from "@/components/ui/Button";
 
-const PRIORITIES: WorkOrderPriority[] = ["Low", "Medium", "High", "Critical"];
+const PRIORITIES: WorkOrderPriorityWire[] = ["Low", "Medium", "High", "Critical"];
 
 // Create a work order — manually from the interface, or prefilled from a
-// pre/post-trip inspection's defects (WorkOrderPrefill). A registered shop can be
-// attached so its details auto-fill the printable NL-WO-01 work order.
+// pre/post-trip inspection's defects (WorkOrderPrefillWire, which links the WO
+// back to the inspection server-side). A registered shop can be attached so its
+// details auto-fill the printable NL-WO-01 work order.
 
 export default function WorkOrderModal({
-  units,
-  defaultUnit,
+  vehicles,
+  defaultVehicleId,
   prefill,
   onClose,
   onSaved,
 }: {
-  units: { value: string; label: string }[];
-  defaultUnit?: string;
-  prefill?: WorkOrderPrefill;
+  vehicles: VehicleOption[];
+  defaultVehicleId?: string;
+  prefill?: WorkOrderPrefillWire;
   onClose: () => void;
   onSaved: () => void;
 }) {
-  useMaintenanceStore();
-  const [unit, setUnit] = useState(defaultUnit ?? units[0]?.value ?? "");
+  const [vehicleId, setVehicleId] = useState(defaultVehicleId ?? vehicles[0]?.id ?? "");
   const [title, setTitle] = useState(prefill?.title ?? "");
-  const [priority, setPriority] = useState<WorkOrderPriority>(prefill?.priority ?? "Medium");
+  const [priority, setPriority] = useState<WorkOrderPriorityWire>(prefill?.priority ?? "Medium");
   const [description, setDescription] = useState(prefill?.description ?? "");
   const [lineItems, setLineItems] = useState((prefill?.lineItems ?? []).join("\n"));
+  const [shops, setShops] = useState<ShopWire[]>([]);
   const [shopId, setShopId] = useState("");
   const [limit, setLimit] = useState("");
   const [budgetCode, setBudgetCode] = useState("");
   const [assignedTo, setAssignedTo] = useState("");
   const [dueDate, setDueDate] = useState("");
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fromInspection = !!prefill?.inspectionId;
-  const shopOptions = [{ value: "", label: "— none —" }, ...shops.map((s) => ({ value: s.id, label: s.name }))];
+  useEffect(() => {
+    // Registered shops for the §2 select. Fail-soft: the select just stays "— none —".
+    let active = true;
+    listShops().then(
+      (rows) => {
+        if (active) setShops(rows);
+      },
+      (e) => {
+        console.error("Shops unavailable:", e);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
 
-  function submit() {
-    if (!unit) return setError("Select the vehicle this work order is for.");
+  const fromInspection = !!prefill?.inspectionId;
+  const sourceLabel = prefill ? WO_SOURCE_LABEL[prefill.source] : "Manual";
+  const shopOptions = [{ value: "", label: "— none —" }, ...shops.map((s) => ({ value: s.id, label: s.name }))];
+  const vehicleOptions = vehicles.map((v) => ({ value: v.id, label: v.label }));
+
+  async function submit() {
+    if (busy) return;
+    if (!vehicleId) return setError("Select the vehicle this work order is for.");
     if (!title.trim()) return setError("Enter a work order title.");
 
     const shop = shops.find((s) => s.id === shopId);
-    const wo = addWorkOrder({
-      unit,
-      title: title.trim(),
-      description: description.trim(),
-      status: "Open",
-      priority,
-      source: prefill?.source ?? "Manual",
-      sourceRef: prefill?.sourceRef,
-      createdBy: "Dispatch",
-      assignedTo: assignedTo.trim() || shop?.name || undefined,
-      dueDate: dueDate.trim() || undefined,
-      dateRequiredOrOos: dueDate.trim() || undefined,
-      lineItems: lineItems.split("\n").map((s) => s.trim()).filter(Boolean),
-      shopId: shopId || undefined,
-      authorizedLimitCad: limit ? parseFloat(limit) : undefined,
-      budgetCode: budgetCode.trim() || undefined,
-    });
-
-    if (prefill?.inspectionId) linkInspectionWorkOrder(prefill.inspectionId, wo.id);
-
-    onSaved();
-    onClose();
+    setBusy(true);
+    setError(null);
+    try {
+      await createWorkOrder({
+        vehicleId,
+        title: title.trim(),
+        description: description.trim() || null,
+        priority,
+        source: prefill?.source ?? "Manual",
+        sourceRef: prefill?.sourceRef ?? null,
+        assignedTo: assignedTo.trim() || shop?.name || null,
+        dueDate: dueDate.trim() ? toUtcIso(dueDate.trim()) : null,
+        lineItems: lineItems.split("\n").map((s) => s.trim()).filter(Boolean),
+        shopId: shopId || null,
+        authorizedLimitCad: limit ? parseFloat(limit) : null,
+        budgetCode: budgetCode.trim() || null,
+        dateRequiredOrOos: dueDate.trim() ? toUtcIso(dueDate.trim()) : null,
+        inspectionId: prefill?.inspectionId ?? null,
+      });
+      onSaved();
+      onClose();
+    } catch (e) {
+      setBusy(false);
+      setError(e instanceof ApiError ? e.message : "Failed to create the work order — please try again.");
+    }
   }
 
   return (
     <ModalShell
-      eyebrow={`Fleet & Maintenance · Work orders${prefill && prefill.source !== "Manual" ? ` · from ${prefill.source}` : ""}`}
+      eyebrow={`Fleet & Maintenance · Work orders${prefill && prefill.source !== "Manual" ? ` · from ${sourceLabel}` : ""}`}
       title="New Work Order"
       onClose={onClose}
       error={error}
       footer={
         <>
-          <ActionButton onClick={onClose}>CANCEL</ActionButton>
-          <ActionButton variant="primary" onClick={submit}>
-            CREATE WORK ORDER
+          <ActionButton onClick={onClose} disabled={busy}>
+            CANCEL
+          </ActionButton>
+          <ActionButton variant="primary" onClick={submit} disabled={busy}>
+            {busy ? "CREATING…" : "CREATE WORK ORDER"}
           </ActionButton>
         </>
       }
     >
       {prefill && prefill.source !== "Manual" && (
         <div style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textMuted, marginBottom: 14 }}>
-          Generated from <span style={{ fontWeight: 600 }}>{prefill.source}</span>
+          Generated from <span style={{ fontWeight: 600 }}>{sourceLabel}</span>
           {prefill.sourceRef ? (
             <>
               {" "}
@@ -102,15 +136,15 @@ export default function WorkOrderModal({
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
         <SelectField
           label="Vehicle"
-          value={unit}
-          onChange={setUnit}
+          value={vehicleId}
+          onChange={setVehicleId}
           disabled={fromInspection}
-          options={units.length ? units : [{ value: unit, label: unit || "—" }]}
+          options={vehicleOptions.length ? vehicleOptions : [{ value: vehicleId, label: vehicleId || "—" }]}
         />
         <SelectField
           label="Priority"
           value={priority}
-          onChange={(v) => setPriority(v as WorkOrderPriority)}
+          onChange={(v) => setPriority(v as WorkOrderPriorityWire)}
           options={PRIORITIES.map((p) => ({ value: p, label: p }))}
         />
         <SelectField

@@ -10,15 +10,15 @@ import VehicleServiceHistory from "@/components/screens/fleet/VehicleServiceHist
 import VehicleWorkOrders from "@/components/screens/fleet/VehicleWorkOrders";
 import VehicleInspections from "@/components/screens/fleet/VehicleInspections";
 import OverviewTab, { type OverviewTabProps } from "./OverviewTab";
-import { EmptyTabNote, PreviewCaption, TABS } from "./shared";
+import { EmptyTabNote, PreviewCaption, TABS, type VehicleOption } from "./shared";
 
 interface VehicleDetailProps extends OverviewTabProps {
   tab: number;
   setTab: (n: number) => void;
-  units: { value: string; label: string }[];
+  vehicleOptions: VehicleOption[];
 }
 
-export default function VehicleDetail({ tab, setTab, units, ...overview }: VehicleDetailProps) {
+export default function VehicleDetail({ tab, setTab, vehicleOptions, ...overview }: VehicleDetailProps) {
   const { f } = overview;
   const kind = statusKindFor(f.status);
   const label = statusLabelFor(f.status);
@@ -78,8 +78,8 @@ export default function VehicleDetail({ tab, setTab, units, ...overview }: Vehic
       {tab === 0 && <OverviewTab {...overview} />}
       {tab === 1 && <VehicleDocuments unit={f.unitNumber} requiresPeriodic={f.requiresPeriodicInspection} />}
       {tab === 2 && <VehicleServiceHistory unit={f.unitNumber} odometerKm={f.odometerKm} />}
-      {tab === 3 && <VehicleWorkOrders vehicle={f} units={units} />}
-      {tab === 4 && <VehicleInspections unit={f.unitNumber} odometerKm={f.odometerKm} units={units} />}
+      {tab === 3 && <VehicleWorkOrders vehicle={f} vehicles={vehicleOptions} />}
+      {tab === 4 && <VehicleInspections vehicle={f} vehicles={vehicleOptions} />}
 
       {/* DTC alerts (mock) */}
       {tab === 5 && (

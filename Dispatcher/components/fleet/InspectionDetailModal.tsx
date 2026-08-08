@@ -2,37 +2,64 @@
 
 import { useState } from "react";
 import { colors, fonts, statusMeta } from "@/lib/theme";
-import type { Inspection, InspectionChecklistItem, WorkOrderPrefill } from "@/lib/types";
-import { buildChecklist } from "@/lib/maintenanceStore";
-import { prefillFromInspection } from "@/lib/inspectionWorkOrder";
 import { formatKm, formatUtcDate } from "@/lib/api";
+import type { DefectSeverityWire, VehicleInspection } from "@/lib/api/maintenance";
+import { prefillFromInspection, type WorkOrderPrefillWire } from "@/lib/inspectionWorkOrder";
+import { DEFECT_SEVERITY_LABEL, INSPECTION_RESULT_META } from "@/lib/workOrderDisplay";
+import type { VehicleOption } from "@/components/screens/fleet/vehicle-detail/shared";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { MonoTag, StatusChip } from "@/components/ui/Chip";
 import { ActionButton } from "@/components/ui/Button";
 import WorkOrderModal from "@/components/WorkOrderModal";
 
-// Detail view of a DVIR inspection — the full checklist (what passed and what
-// failed), with a "create work order" action on every failed item.
+// Detail view of a live DVIR inspection — the full checklist (what passed and
+// what failed), with a "create work order" action on every failed item and one
+// for all defects at once. Both disappear once a work order has been generated.
+
+interface ChecklistRow {
+  item: string;
+  passed: boolean;
+  severity?: DefectSeverityWire;
+  note?: string | null;
+}
 
 export default function InspectionDetailModal({
   inspection,
-  units,
+  vehicleId,
+  woNumber,
+  vehicles,
+  onWorkOrderCreated,
   onClose,
 }: {
-  inspection: Inspection;
-  units: { value: string; label: string }[];
+  inspection: VehicleInspection;
+  vehicleId: string;
+  woNumber?: string;
+  vehicles: VehicleOption[];
+  onWorkOrderCreated: () => void;
   onClose: () => void;
 }) {
-  const [woPrefill, setWoPrefill] = useState<WorkOrderPrefill | null>(null);
+  const [woPrefill, setWoPrefill] = useState<WorkOrderPrefillWire | null>(null);
 
-  const checklist: InspectionChecklistItem[] = inspection.checklist ?? buildChecklist(inspection.defects);
-  const passed = checklist.filter((c) => c.status === "Pass").length;
-  const failed = checklist.filter((c) => c.status === "Defect").length;
+  const typeLabel = inspection.type === "PreTrip" ? "Pre-Trip" : "Post-Trip";
+  const rm = INSPECTION_RESULT_META[inspection.result] ?? INSPECTION_RESULT_META.Pass;
+  const canGenerate = inspection.defects.length > 0 && !inspection.generatedWorkOrderId;
+
+  // Checklist joined with defects by item name; manifest-derived records can
+  // carry defects without a checklist, so synthesize rows from the defects then.
+  const defectByItem = new Map(inspection.defects.map((d) => [d.item, d]));
+  const checklist: ChecklistRow[] = inspection.checklist.length
+    ? inspection.checklist.map((c) => {
+        const d = defectByItem.get(c.item);
+        return { item: c.item, passed: c.passed && !d, severity: d?.severity, note: d?.note };
+      })
+    : inspection.defects.map((d) => ({ item: d.item, passed: false, severity: d.severity, note: d.note }));
+  const passed = checklist.filter((c) => c.passed).length;
+  const failed = checklist.filter((c) => !c.passed).length;
 
   return (
     <ModalShell
       eyebrow={`Fleet & Maintenance · ${inspection.unit} · DVIR`}
-      title={`${inspection.id} · ${inspection.type}`}
+      title={`${typeLabel} Inspection${inspection.tripNumber ? ` · ${inspection.tripNumber}` : ""}`}
       onClose={onClose}
       footer={
         <>
@@ -40,7 +67,7 @@ export default function InspectionDetailModal({
             {passed} passed · {failed} failed
           </span>
           <ActionButton onClick={onClose}>CLOSE</ActionButton>
-          {inspection.defects.length > 0 && !inspection.generatedWorkOrderId && (
+          {canGenerate && (
             <ActionButton
               variant="primary"
               onClick={() => setWoPrefill(prefillFromInspection(inspection, inspection.unit))}
@@ -53,21 +80,24 @@ export default function InspectionDetailModal({
     >
       {/* summary */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
-        <StatusChip kind={inspection.k} label={inspection.result} />
-        <MonoTag color={inspection.source.startsWith("Dispatcher") ? colors.amberText : colors.textDim}>
-          {inspection.source}
+        <StatusChip kind={rm.kind} label={rm.label} />
+        <MonoTag color={inspection.source === "Dispatcher" ? colors.amberText : colors.textDim}>
+          {inspection.source === "Dispatcher" ? "Dispatcher" : "Driver App"}
         </MonoTag>
-        {inspection.generatedWorkOrderId && <MonoTag color={colors.skyBlue}>→ {inspection.generatedWorkOrderId}</MonoTag>}
+        {inspection.generatedWorkOrderId && (
+          <MonoTag color={colors.skyBlue}>→ {woNumber ?? "work order"}</MonoTag>
+        )}
       </div>
       <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim, marginBottom: 16 }}>
-        {inspection.driver} · {formatUtcDate(inspection.performedAt)} · {formatKm(inspection.odometerKm)}
+        {inspection.driverName} · {formatUtcDate(inspection.performedAt)}
+        {inspection.odometerKm != null ? ` · ${formatKm(inspection.odometerKm)}` : ""}
         {inspection.enteredBy ? ` · entered by ${inspection.enteredBy}` : ""}
       </div>
 
       {/* checklist */}
       <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
         {checklist.map((c, i) => {
-          const isDefect = c.status === "Defect";
+          const isDefect = !c.passed;
           const meta = statusMeta(isDefect ? "over" : "ontime");
           return (
             <div
@@ -89,19 +119,19 @@ export default function InspectionDetailModal({
                 </div>
                 {isDefect && (
                   <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: meta.t, marginTop: 2 }}>
-                    {c.severity}
+                    {c.severity ? DEFECT_SEVERITY_LABEL[c.severity] : "Defect"}
                     {c.note ? ` — ${c.note}` : ""}
                   </div>
                 )}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
                 <StatusChip kind={isDefect ? "over" : "ontime"} label={isDefect ? "Defect" : "Pass"} />
-                {isDefect && !inspection.generatedWorkOrderId && (
+                {isDefect && canGenerate && (
                   <ActionButton
                     onClick={() =>
                       setWoPrefill(
                         prefillFromInspection(inspection, inspection.unit, [
-                          { item: c.item, severity: c.severity ?? "Major", note: c.note },
+                          { item: c.item, severity: c.severity ?? "Major", note: c.note ?? null },
                         ]),
                       )
                     }
@@ -117,11 +147,14 @@ export default function InspectionDetailModal({
 
       {woPrefill && (
         <WorkOrderModal
-          units={units}
-          defaultUnit={inspection.unit}
+          vehicles={vehicles}
+          defaultVehicleId={inspection.vehicleId ?? vehicleId}
           prefill={woPrefill}
           onClose={() => setWoPrefill(null)}
-          onSaved={onClose}
+          onSaved={() => {
+            onWorkOrderCreated();
+            onClose();
+          }}
         />
       )}
     </ModalShell>
