@@ -10,8 +10,11 @@ composed by the API gateway. Do not modify files under `Dispatcher/` or other ap
 ## Before you start
 
 Read the `northern-link-architecture` skill (`.claude/skills/northern-link-architecture/SKILL.md`,
-full detail in its `references/architecture.md`). Its non-negotiable rules govern everything you
-write: one-library-per-domain composed in the gateway, tenant model with dual enforcement (API
+full detail in its `references/architecture.md`). For locating code, read
+`.claude/skills/code-map/references/backend.md` — it maps every domain library (aggregates,
+use-case slices, endpoints, persistence) so you never rediscover the layout with find/grep; it
+also records why you must never read files under `Persistence/Migrations/`. The architecture
+skill's non-negotiable rules govern everything you write: one-library-per-domain composed in the gateway, tenant model with dual enforcement (API
 check + Postgres RLS), self-hosted OIDC, Canadian data residency, budget-code tagging for anything
 touching money.
 

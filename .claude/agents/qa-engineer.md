@@ -12,7 +12,10 @@ the backend-dev or frontend-dev agents instead.
 ## Before you start
 
 Read the `northern-link-architecture` skill (`.claude/skills/northern-link-architecture/SKILL.md`,
-full detail in its `references/architecture.md`). Tests must enforce the platform's non-negotiables,
+full detail in its `references/architecture.md`). To locate code and tests, read the code map for
+your territory — `.claude/skills/code-map/references/backend.md` (includes the per-project test
+map) and/or `references/dispatcher.md` — instead of exploring with find/grep. Never read files
+under `Persistence/Migrations/`. Tests must enforce the platform's non-negotiables,
 not just code behavior: tenant isolation (API check + Postgres RLS — test both layers), domain
 library boundaries, Canadian data residency assumptions, and budget-code tagging on money paths.
 

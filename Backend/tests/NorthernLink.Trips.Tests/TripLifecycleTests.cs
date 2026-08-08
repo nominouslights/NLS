@@ -104,6 +104,53 @@ public class TripLifecycleTests
     }
 
     [Fact]
+    public void Finish_on_a_deadhead_needs_no_inspection_and_lands_in_ready_for_billing()
+    {
+        // Built the way real deadheads are — off a client trip — so the leg carries the
+        // client, the pairing key, and IsEmptyLeg exactly as production data would.
+        var outbound = TestPlanning.ScheduleTrip(clientId: Guid.NewGuid()).Value;
+        var deadhead = outbound.CreateDeadheadReturn("TR-1002").Value;
+        deadhead.ClearDomainEvents();
+
+        // No inspection recorded, no driver, still Scheduled: the empty leg is exempt from the
+        // inspection gate (its inspection belongs to the trip the vehicle actually worked) and
+        // the direct Scheduled -> finish edge carries it straight to Billing's doorstep.
+        var result = deadhead.FinishOperations();
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(TripStatus.ReadyForBilling, deadhead.Status);
+        Assert.NotNull(deadhead.OperationsFinishedAtUtc);
+        Assert.Null(deadhead.CompletedAtUtc);
+        var ready = Assert.IsType<TripReadyForBillingDomainEvent>(Assert.Single(deadhead.DomainEvents));
+        Assert.Equal(deadhead.Id, ready.TripId);
+    }
+
+    [Fact]
+    public void Deadhead_inspection_exemption_does_not_leak_to_regular_trips()
+    {
+        var regular = TestPlanning.ScheduleTrip(clientId: Guid.NewGuid()).Value;
+
+        var result = regular.FinishOperations();
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(TripErrors.PostTripInspectionRequired, result.Error);
+        Assert.Equal(TripStatus.Scheduled, regular.Status);
+    }
+
+    [Fact]
+    public void Finish_on_a_clientless_empty_leg_completes_it_without_an_inspection()
+    {
+        var trip = TestPlanning.ScheduleTrip(isEmptyLeg: true).Value; // no client
+        trip.ClearDomainEvents();
+
+        var result = trip.FinishOperations();
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(TripStatus.Completed, trip.Status);
+        Assert.IsType<TripCompletedDomainEvent>(Assert.Single(trip.DomainEvents));
+    }
+
+    [Fact]
     public void Finish_is_rejected_without_a_logged_post_trip_inspection()
     {
         var trip = TestPlanning.ScheduleTrip().Value;

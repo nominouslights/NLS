@@ -25,6 +25,23 @@ public class FinishTripOperationsCommandHandlerTests
     }
 
     [Fact]
+    public async Task Finishing_a_deadhead_needs_no_inspection()
+    {
+        // The dispatcher's "bill the deadhead" path: an empty leg has no inspection of its own
+        // (Fleet logs one against the trip the vehicle actually worked) and goes straight from
+        // Scheduled to ReadyForBilling so the round trip can be invoiced.
+        var outbound = TestPlanning.ScheduleTrip(clientId: Guid.NewGuid()).Value;
+        var deadhead = outbound.CreateDeadheadReturn("TR-1002").Value;
+        _trips.Add(deadhead);
+
+        var result = await Handler.Handle(new FinishTripOperationsCommand(deadhead.Id), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(TripStatus.ReadyForBilling, deadhead.Status);
+        Assert.Equal(1, _trips.SaveCount);
+    }
+
+    [Fact]
     public async Task Finishing_a_clientless_trip_completes_it()
     {
         var trip = TestPlanning.ScheduleTrip().Value; // community/walk-up shape
