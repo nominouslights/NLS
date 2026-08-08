@@ -1,6 +1,7 @@
 using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Fleet.Application.Abstractions;
+using NorthernLink.Fleet.Domain.Inspections;
 using NorthernLink.Fleet.Domain.Vehicles;
 using NorthernLink.Fleet.Domain.WorkOrders;
 
@@ -16,6 +17,19 @@ public sealed class CreateWorkOrderCommandHandler(
         if (!await repository.VehicleExistsAsync(command.VehicleId, cancellationToken))
         {
             return Result.Failure<Guid>(VehicleErrors.NotFound);
+        }
+
+        // Resolve the generating inspection up front so an unknown id fails before anything
+        // is created rather than being silently skipped.
+        VehicleInspection? inspection = null;
+        if (command.InspectionId is { } inspectionId)
+        {
+            inspection = await inspectionRepository.GetByIdAsync(inspectionId, cancellationToken);
+
+            if (inspection is null)
+            {
+                return Result.Failure<Guid>(InspectionErrors.NotFound);
+            }
         }
 
         var sequence = await repository.NextSequenceAsync(command.TenantId, cancellationToken);
@@ -47,11 +61,17 @@ public sealed class CreateWorkOrderCommandHandler(
         var workOrder = workOrderResult.Value;
         repository.Add(workOrder);
 
-        // Link the generating inspection (same DbContext → one transaction).
-        if (command.InspectionId is { } inspectionId)
+        // Link the generating inspection (same DbContext → one SaveChanges keeps create+link
+        // atomic). Already-linked always fails — even if the earlier work order was cancelled;
+        // the cancelled-WO escape hatch is a deliberate follow-up.
+        if (inspection is not null)
         {
-            var inspection = await inspectionRepository.GetByIdAsync(inspectionId, cancellationToken);
-            inspection?.LinkWorkOrder(workOrder.Id);
+            var linkResult = inspection.LinkWorkOrder(workOrder.Id);
+
+            if (linkResult.IsFailure)
+            {
+                return Result.Failure<Guid>(linkResult.Error);
+            }
         }
 
         await repository.SaveChangesAsync(cancellationToken);

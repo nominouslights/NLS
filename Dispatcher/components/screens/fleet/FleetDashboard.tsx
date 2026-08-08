@@ -1,8 +1,10 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { colors, fonts, rowSurface, statusMeta } from "@/lib/theme";
 import { dtcAlerts, partsInventory, pmReminders } from "@/lib/data";
 import {
+  ApiError,
   formatCad,
   formatKm,
   formatUtcDate,
@@ -12,18 +14,19 @@ import {
   statusLabelFor,
   type Vehicle,
 } from "@/lib/api";
-import { documents, useMaintenanceStore, workOrders } from "@/lib/maintenanceStore";
-import type { WorkOrderPriority } from "@/lib/types";
+import { listAllWorkOrders, type WorkOrderPriorityWire, type WorkOrderWire } from "@/lib/api/maintenance";
+import { OPEN_WIRE_STATUSES, WO_SOURCE_LABEL, WO_STATUS_LABEL, workOrderKindWire } from "@/lib/workOrderDisplay";
+import { documents, useMaintenanceStore } from "@/lib/maintenanceStore";
 import { Panel, SectionLabel } from "@/components/ui/Panel";
 import { MonoTag, StatusChip } from "@/components/ui/Chip";
 import { MetricTile } from "@/components/ui/MetricTile";
 
 // Fleet-wide Fleet & Maintenance dashboard — shown in the detail pane until a
-// vehicle is selected. Work orders + compliance are the merged prototype (mock
-// store); PM / DTC / parts are mock previews; end-of-life is real Fleet API data.
+// vehicle is selected. Work orders + end-of-life are real Fleet API data;
+// compliance is the merged prototype (mock store); PM / DTC / parts are mock
+// previews.
 
-const PRIORITY_ORDER: Record<WorkOrderPriority, number> = { Critical: 0, High: 1, Medium: 2, Low: 3 };
-const OPEN_STATUSES = ["Open", "In Progress", "Awaiting Parts"];
+const PRIORITY_ORDER: Record<WorkOrderPriorityWire, number> = { Critical: 0, High: 1, Medium: 2, Low: 3 };
 
 function Caption({ mock, children }: { mock: boolean; children: string }) {
   return (
@@ -36,14 +39,38 @@ function Caption({ mock, children }: { mock: boolean; children: string }) {
 
 export default function FleetDashboard({
   vehicles,
+  woVersion,
   onOpenVehicle,
 }: {
   vehicles: Vehicle[];
+  woVersion: number;
   onOpenVehicle: (id: string, tab?: string) => void;
 }) {
   useMaintenanceStore();
 
+  const [wos, setWos] = useState<WorkOrderWire[] | null>(null);
+  const [woError, setWoError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    listAllWorkOrders().then(
+      (fresh) => {
+        if (active) {
+          setWos(fresh);
+          setWoError(null);
+        }
+      },
+      (e) => {
+        if (active) setWoError(e instanceof ApiError ? e.message : "Failed to load work orders.");
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [woVersion]);
+
   const unitToId = new Map(vehicles.map((v) => [v.unitNumber, v.id]));
+  const idToUnit = new Map(vehicles.map((v) => [v.id, v.unitNumber]));
   function openUnit(unit: string, tab?: string) {
     const id = unitToId.get(unit);
     if (id) onOpenVehicle(id, tab);
@@ -54,7 +81,7 @@ export default function FleetDashboard({
   const openDtc = dtcAlerts.filter((r) => r.k !== "ontime").length;
   const lowStock = partsInventory.filter((p) => p.k !== "ontime");
 
-  const openWos = [...workOrders.filter((w) => OPEN_STATUSES.includes(w.status))].sort(
+  const openWos = [...(wos ?? []).filter((w) => OPEN_WIRE_STATUSES.includes(w.status))].sort(
     (a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority],
   );
   const flaggedDocs = documents.filter((d) => d.k !== "ontime");
@@ -86,26 +113,34 @@ export default function FleetDashboard({
         {/* Open work orders queue */}
         <Panel>
           <SectionLabel>Open work orders</SectionLabel>
-          <Caption mock>Prototype — merged maintenance work queue.</Caption>
-          {openWos.length === 0 ? (
+          <Caption mock={false}>Fleet API · work orders</Caption>
+          {woError ? (
+            <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: statusMeta("over").t, fontWeight: 600 }}>
+              ▲ {woError}
+            </div>
+          ) : wos === null ? (
+            <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textDim }}>Loading work orders…</div>
+          ) : openWos.length === 0 ? (
             <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textDim }}>No open work orders.</div>
           ) : (
             openWos.map((w) => (
               <div
                 key={w.id}
-                onClick={() => openUnit(w.unit, "Work Orders")}
+                onClick={() => onOpenVehicle(w.vehicleId, "Work Orders")}
                 style={{ display: "grid", gridTemplateColumns: "48px 1fr 150px", gap: 10, alignItems: "center", padding: "9px 11px", marginBottom: 5, ...rowSurface(false) }}
               >
-                <span style={{ fontFamily: fonts.mono, fontSize: 11.5, color: colors.skyBlue }}>{w.unit}</span>
+                <span style={{ fontFamily: fonts.mono, fontSize: 11.5, color: colors.skyBlue }}>
+                  {idToUnit.get(w.vehicleId) ?? "—"}
+                </span>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: 600, color: colors.textPrimary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                     {w.title}
                   </div>
                   <div style={{ fontFamily: fonts.body, fontSize: 10.5, color: colors.textDim }}>
-                    {w.source === "Manual" ? w.id : `${w.id} · from ${w.source}`}
+                    {w.source === "Manual" ? w.number : `${w.number} · from ${WO_SOURCE_LABEL[w.source]}`}
                   </div>
                 </div>
-                <StatusChip kind={w.k} label={`${w.status} · ${w.priority}`} />
+                <StatusChip kind={workOrderKindWire(w)} label={`${WO_STATUS_LABEL[w.status]} · ${w.priority}`} />
               </div>
             ))
           )}

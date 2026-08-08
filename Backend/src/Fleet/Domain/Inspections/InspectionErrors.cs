@@ -14,6 +14,10 @@ public static class InspectionErrors
     public static readonly Error DriverRequired = Error.Validation(
         "Fleet.Inspection.DriverRequired", "The driver who performed the inspection is required.");
 
+    public static readonly Error WorkOrderAlreadyGenerated = Error.Conflict(
+        "Fleet.Inspection.WorkOrderAlreadyGenerated",
+        "A work order was already generated from this inspection.");
+
     /// <summary>
     /// A trip already has an inspection of this half (one pre-trip and one post-trip per trip is
     /// the invariant). The caller should edit the existing record rather than enter a second.

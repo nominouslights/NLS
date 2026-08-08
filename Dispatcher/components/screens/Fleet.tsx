@@ -43,6 +43,7 @@ export default function Fleet({
 
   const [modal, setModal] = useState<ModalKind>(null);
   const [certOpen, setCertOpen] = useState(false);
+  const [woVersion, setWoVersion] = useState(0);
 
   const [prompt, setPrompt] = useState<PromptKind>(null);
   const [reasonInput, setReasonInput] = useState("");
@@ -198,7 +199,11 @@ export default function Fleet({
   // Loaded — master list + (dashboard | vehicle detail)
   // -------------------------------------------------------------------------
 
-  const units = vehicles.map((v) => ({ value: v.unitNumber, label: `${v.unitNumber} · ${v.make} ${v.model}` }));
+  const vehicleOptions = vehicles.map((v) => ({
+    id: v.id,
+    unit: v.unitNumber,
+    label: `${v.unitNumber} · ${v.make} ${v.model}`,
+  }));
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }} className="detailfade">
@@ -225,13 +230,13 @@ export default function Fleet({
         {/* detail pane */}
         <div style={{ minHeight: 0, overflowY: "auto", padding: "22px 26px", background: colors.detailBg }}>
           {sel === null ? (
-            <FleetDashboard vehicles={vehicles} onOpenVehicle={openVehicleTab} />
+            <FleetDashboard vehicles={vehicles} woVersion={woVersion} onOpenVehicle={openVehicleTab} />
           ) : (
             <VehicleDetail
               f={sel}
               tab={tab}
               setTab={setTab}
-              units={units}
+              vehicleOptions={vehicleOptions}
               prompt={prompt}
               setPrompt={setPrompt}
               reasonInput={reasonInput}
@@ -259,10 +264,10 @@ export default function Fleet({
       )}
       {modal === "workorder" && (
         <WorkOrderModal
-          units={units}
-          defaultUnit={sel?.unitNumber}
+          vehicles={vehicleOptions}
+          defaultVehicleId={sel?.id}
           onClose={() => setModal(null)}
-          onSaved={() => undefined}
+          onSaved={() => setWoVersion((n) => n + 1)}
         />
       )}
       {modal === "shops" && <ShopRegistryModal onClose={() => setModal(null)} />}
