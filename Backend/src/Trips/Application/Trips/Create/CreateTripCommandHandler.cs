@@ -61,8 +61,11 @@ public sealed class CreateTripCommandHandler(
 
         // Vehicle snapshot: assignment at creation goes through the same lookup validation
         // as POST /assign — the vehicle must exist and be Active in vehicle_lookup, and its
-        // unit number is snapshotted from the lookup. A free-form unit with no id passes.
+        // unit number AND seating capacity are snapshotted from the lookup (the derived
+        // capacity wins over any client-supplied value). A free-form unit with no id passes,
+        // keeping the manual capacity.
         var vehicleUnit = command.VehicleUnit;
+        var seatsCapacity = command.SeatsCapacity;
         if (command.VehicleId is { } vehicleId)
         {
             var vehicle = await vehicleLookup.GetAsync(vehicleId, cancellationToken);
@@ -77,6 +80,7 @@ public sealed class CreateTripCommandHandler(
             }
 
             vehicleUnit = vehicle.UnitNumber;
+            seatsCapacity = vehicle.SeatingCapacity;
         }
 
         var tripNumber = await tripNumberGenerator.NextAsync(command.TenantId, cancellationToken);
@@ -105,7 +109,7 @@ public sealed class CreateTripCommandHandler(
             driverName,
             command.VehicleId,
             vehicleUnit,
-            command.SeatsCapacity,
+            seatsCapacity,
             command.SeatsMinimum);
 
         if (tripResult.IsFailure)

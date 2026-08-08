@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/skills/code-map/scripts/codemap.mjs\" log"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/skills/code-map/scripts/codemap.mjs\" check || echo 'Code map is stale (sections listed above). Launch the code-indexer agent when convenient.'"
+          }
+        ]
+      }
+    ]
+  }
+}

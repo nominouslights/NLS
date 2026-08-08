@@ -104,6 +104,53 @@ public class TripLifecycleTests
     }
 
     [Fact]
+    public void Finish_on_a_deadhead_needs_no_inspection_and_lands_in_ready_for_billing()
+    {
+        // Built the way real deadheads are — off a client trip — so the leg carries the
+        // client, the pairing key, and IsEmptyLeg exactly as production data would.
+        var outbound = TestPlanning.ScheduleTrip(clientId: Guid.NewGuid()).Value;
+        var deadhead = outbound.CreateDeadheadReturn("TR-1002").Value;
+        deadhead.ClearDomainEvents();
+
+        // No inspection recorded, no driver, still Scheduled: the empty leg is exempt from the
+        // inspection gate (its inspection belongs to the trip the vehicle actually worked) and
+        // the direct Scheduled -> finish edge carries it straight to Billing's doorstep.
+        var result = deadhead.FinishOperations();
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(TripStatus.ReadyForBilling, deadhead.Status);
+        Assert.NotNull(deadhead.OperationsFinishedAtUtc);
+        Assert.Null(deadhead.CompletedAtUtc);
+        var ready = Assert.IsType<TripReadyForBillingDomainEvent>(Assert.Single(deadhead.DomainEvents));
+        Assert.Equal(deadhead.Id, ready.TripId);
+    }
+
+    [Fact]
+    public void Deadhead_inspection_exemption_does_not_leak_to_regular_trips()
+    {
+        var regular = TestPlanning.ScheduleTrip(clientId: Guid.NewGuid()).Value;
+
+        var result = regular.FinishOperations();
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(TripErrors.PostTripInspectionRequired, result.Error);
+        Assert.Equal(TripStatus.Scheduled, regular.Status);
+    }
+
+    [Fact]
+    public void Finish_on_a_clientless_empty_leg_completes_it_without_an_inspection()
+    {
+        var trip = TestPlanning.ScheduleTrip(isEmptyLeg: true).Value; // no client
+        trip.ClearDomainEvents();
+
+        var result = trip.FinishOperations();
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(TripStatus.Completed, trip.Status);
+        Assert.IsType<TripCompletedDomainEvent>(Assert.Single(trip.DomainEvents));
+    }
+
+    [Fact]
     public void Finish_is_rejected_without_a_logged_post_trip_inspection()
     {
         var trip = TestPlanning.ScheduleTrip().Value;
@@ -385,15 +432,80 @@ public class TripLifecycleTests
 
         var invoiced = ReadyForBillingTrip();
         invoiced.MarkInvoiced();
-        Assert.True(invoiced.AssignVehicle(Guid.NewGuid(), "U-07").IsFailure);
+        Assert.True(invoiced.AssignVehicle(Guid.NewGuid(), "U-07", seatingCapacity: 24).IsFailure);
 
         var completed = TestPlanning.ScheduleTrip().Value;
         completed.RecordPostTripInspection();
         completed.FinishOperations();
         Assert.True(completed.AssignDriver(Guid.NewGuid(), "R. Ballantyne").IsFailure);
         Assert.True(completed.UnassignDriver().IsFailure);
-        Assert.True(completed.AssignVehicle(Guid.NewGuid(), "U-07").IsFailure);
+        Assert.True(completed.AssignVehicle(Guid.NewGuid(), "U-07", seatingCapacity: 24).IsFailure);
     }
+
+    [Fact]
+    public void Assign_vehicle_snapshots_the_capacity_and_reassign_re_snapshots_it()
+    {
+        var trip = TestPlanning.ScheduleTrip(seatsCapacity: 12).Value;
+
+        // A fleet vehicle stamps SeatsCapacity the way it stamps the unit number.
+        Assert.True(trip.AssignVehicle(Guid.NewGuid(), "U-07", seatingCapacity: 24).IsSuccess);
+        Assert.Equal(24, trip.SeatsCapacity);
+
+        Assert.True(trip.AssignVehicle(Guid.NewGuid(), "U-08", seatingCapacity: 48).IsSuccess);
+        Assert.Equal(48, trip.SeatsCapacity);
+    }
+
+    [Fact]
+    public void Unassign_and_free_form_unit_keep_the_last_known_capacity()
+    {
+        var trip = TestPlanning.ScheduleTrip(seatsCapacity: 12).Value;
+        Assert.True(trip.AssignVehicle(Guid.NewGuid(), "U-07", seatingCapacity: 24).IsSuccess);
+
+        // Demand may already be booked against the snapshot, so clearing the vehicle keeps it.
+        Assert.True(trip.AssignVehicle(null, null, null).IsSuccess);
+        Assert.Null(trip.VehicleId);
+        Assert.Equal(24, trip.SeatsCapacity);
+
+        // Same for a free-form unit with no id — there is no vehicle to derive from.
+        Assert.True(trip.AssignVehicle(null, "U-99", null).IsSuccess);
+        Assert.Equal("U-99", trip.VehicleUnit);
+        Assert.Equal(24, trip.SeatsCapacity);
+    }
+
+    [Fact]
+    public void Assigning_a_vehicle_seating_fewer_than_confirmed_demand_is_rejected()
+    {
+        var trip = TestPlanning.ScheduleTrip(seatsCapacity: 30).Value;
+        Assert.True(trip.RecordDemand(28, demandGuaranteed: false).IsSuccess);
+
+        var result = trip.AssignVehicle(Guid.NewGuid(), "U-07", seatingCapacity: 24);
+
+        Assert.Equal(TripErrors.VehicleCapacityBelowConfirmed, result.Error);
+        Assert.Null(trip.VehicleId); // the assignment never landed
+        Assert.Equal(30, trip.SeatsCapacity);
+    }
+
+    [Fact]
+    public void Update_keeps_derived_capacity_with_a_vehicle_and_applies_manual_without_one()
+    {
+        // While a fleet vehicle is assigned, the snapshotted capacity survives plan edits.
+        var withVehicle = TestPlanning.ScheduleTrip(seatsCapacity: 12).Value;
+        Assert.True(withVehicle.AssignVehicle(Guid.NewGuid(), "U-07", seatingCapacity: 24).IsSuccess);
+        Assert.True(Replan(withVehicle, seatsCapacity: 10).IsSuccess);
+        Assert.Equal(24, withVehicle.SeatsCapacity);
+
+        // Without one, the manual capacity edit applies as before.
+        var withoutVehicle = TestPlanning.ScheduleTrip(seatsCapacity: 12).Value;
+        Assert.True(Replan(withoutVehicle, seatsCapacity: 10).IsSuccess);
+        Assert.Equal(10, withoutVehicle.SeatsCapacity);
+    }
+
+    private static Result Replan(Trip trip, int? seatsCapacity) =>
+        trip.Update(
+            trip.ServiceDate, trip.WindowStart, trip.WindowEnd, trip.ServiceType,
+            trip.RouteId, trip.RouteName, trip.Origin, trip.Destination, trip.Stops,
+            trip.DistanceKm, trip.IsEmptyLeg, trip.ClientId, trip.ClientName,
+            trip.PoNumber, seatsCapacity, trip.SeatsMinimum);
 
     [Fact]
     public void Demand_is_recorded_within_capacity()

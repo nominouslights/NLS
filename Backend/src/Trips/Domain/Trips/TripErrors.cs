@@ -26,6 +26,9 @@ public static class TripErrors
     public static readonly Error SeatsExceedCapacity = Error.Validation(
         "Trips.Trip.SeatsExceedCapacity", "Confirmed seats cannot exceed the trip's seat capacity.");
 
+    public static readonly Error VehicleCapacityBelowConfirmed = Error.Validation(
+        "Trips.Trip.VehicleCapacityBelowConfirmed", "The vehicle's seating capacity is below the seats already confirmed on this trip.");
+
     public static readonly Error DriverNameRequired = Error.Validation(
         "Trips.Trip.DriverNameRequired", "Assigning a driver requires the driver's name snapshot.");
 

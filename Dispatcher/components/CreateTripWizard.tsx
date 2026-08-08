@@ -32,7 +32,7 @@ import {
 } from "@/lib/api/drivers";
 import { listVehicles, type Vehicle } from "@/lib/api/fleet";
 import { ModalError } from "@/components/ui/ModalShell";
-import { DateField, NumberField, SelectField, TextField, TimeField } from "@/components/ui/Field";
+import { DateField, FieldLabel, NumberField, SelectField, TextField, TimeField } from "@/components/ui/Field";
 import { SectionLabel } from "@/components/ui/Panel";
 import {
   CargoRowsEditor,
@@ -218,8 +218,12 @@ export default function CreateTripWizard({
       return null;
     }
     if (n === 4) {
-      const cap = seatsCapacity === "" ? null : Number(seatsCapacity);
-      if (cap !== null && (!Number.isInteger(cap) || cap <= 0)) return "Seats capacity must be a whole number.";
+      // Capacity is server-derived from the vehicle when one is assigned — only
+      // the manual entry (no fleet vehicle) needs validating.
+      if (!vehicle) {
+        const cap = seatsCapacity === "" ? null : Number(seatsCapacity);
+        if (cap !== null && (!Number.isInteger(cap) || cap <= 0)) return "Seats capacity must be a whole number.";
+      }
       const min = seatsMinimum === "" ? null : Number(seatsMinimum);
       if (min !== null && (!Number.isInteger(min) || min < 0)) return "Seats minimum must be a whole number.";
       return null;
@@ -271,7 +275,9 @@ export default function CreateTripWizard({
       poNumber: effectivePo.trim() || null,
       driverId,
       vehicleId: vehicleId || null,
-      seatsCapacity: seatsCapacity === "" ? null : Number(seatsCapacity),
+      // With a fleet vehicle, capacity is server-derived (the backend snapshots
+      // the vehicle's seating capacity and ignores a client-supplied value).
+      seatsCapacity: vehicleId ? null : seatsCapacity === "" ? null : Number(seatsCapacity),
       seatsMinimum: seatsMinimum === "" ? null : Number(seatsMinimum),
     };
 
@@ -345,6 +351,15 @@ export default function CreateTripWizard({
         : "none — add later from Trips",
     ],
     ["Billing", `${effectivePo.trim() || "no PO"}${contract?.budgetCode ? ` · ${contract.budgetCode}` : ""}`],
+    // Appended last — indices 2/5 above drive the mono-font styling.
+    [
+      "Seats",
+      vehicle
+        ? `${vehicle.seatingCapacity} · from ${vehicle.unitNumber}`
+        : seatsCapacity
+          ? `${Number(seatsCapacity)} · manual`
+          : "—",
+    ],
   ];
 
   return (
@@ -598,7 +613,7 @@ export default function CreateTripWizard({
                       { value: "", label: vehicles === null ? "Loading vehicles…" : "— unassigned —" },
                       ...(vehicles ?? []).map((v) => ({
                         value: v.id,
-                        label: `${v.unitNumber} · ${v.make} ${v.model} · ${v.requiredLicenceClass}`,
+                        label: `${v.unitNumber} · ${v.make} ${v.model} · ${v.seatingCapacity} seats · ${v.requiredLicenceClass}`,
                       })),
                     ]}
                     hint={<span style={{ color: colors.textFaint }}>· only Active vehicles are assignable</span>}
@@ -689,7 +704,38 @@ export default function CreateTripWizard({
                   it can go en route). Seat confirmations happen on the Manifests &amp; Demand screen.
                 </p>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, maxWidth: 480, marginBottom: 18 }}>
-                  <NumberField label="Seats capacity" value={seatsCapacity} onChange={setSeatsCapacity} min={1} step={1} placeholder="24" />
+                  {vehicle ? (
+                    // Capacity is derived from the assigned vehicle (server
+                    // snapshots it) — shown read-only, never typed over.
+                    <div>
+                      <FieldLabel hint={<span style={{ color: colors.textFaint }}>· derived from the assigned vehicle</span>}>
+                        Seats capacity
+                      </FieldLabel>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          height: 40,
+                          boxSizing: "border-box",
+                          padding: "0 13px",
+                          background: colors.cardBg,
+                          border: `1px solid ${colors.border}`,
+                          borderRadius: 9,
+                          boxShadow: colors.shadowCard,
+                        }}
+                      >
+                        <span style={{ fontFamily: fonts.mono, fontSize: 13, fontVariantNumeric: "tabular-nums", color: colors.textPrimary }}>
+                          {vehicle.seatingCapacity} seats
+                        </span>
+                        <span style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textMuted }}>
+                          — from {vehicle.unitNumber}
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <NumberField label="Seats capacity" value={seatsCapacity} onChange={setSeatsCapacity} min={1} step={1} placeholder="24" />
+                  )}
                   <NumberField
                     label="Seats minimum (viability)"
                     value={seatsMinimum}

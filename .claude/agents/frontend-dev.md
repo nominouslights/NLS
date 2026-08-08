@@ -21,10 +21,10 @@ Rules that bite hardest on the frontend:
 
 ## Codebase shape
 
-- `components/Console.tsx` — shell: TopBar + NavRail + screen switch (state in `lib/nav.ts`)
-- `components/screens/*.tsx` — one file per screen (13 screens)
-- `components/ui/*` — shared primitives (Button, Chip, Panel, MetricTile, CorridorStepper)
-- `lib/data.ts` — ALL mock data · `lib/types.ts` — entity types · `lib/theme.ts` — colors/typography
+Read `.claude/skills/code-map/references/dispatcher.md` for the file map before exploring —
+it names every screen (with sizes; some are 2k lines, read those in targeted slices), component,
+and lib module, so don't rediscover the layout with find/grep.
+
 - Styling is inline `style={{}}` objects driven by `lib/theme.ts` tokens — follow that convention;
   no Tailwind/CSS modules.
 

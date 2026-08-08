@@ -289,7 +289,9 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         ClientId = clientId;
         ClientName = Normalize(clientName);
         PoNumber = Normalize(poNumber);
-        SeatsCapacity = seatsCapacity;
+        // Manual capacity applies only to trips without a fleet vehicle — an assigned
+        // vehicle's snapshotted capacity is server-authoritative and survives plan edits.
+        SeatsCapacity = VehicleId is null ? seatsCapacity : SeatsCapacity;
         SeatsMinimum = seatsMinimum;
         UpdatedAtUtc = DateTimeOffset.UtcNow;
 
@@ -336,14 +338,29 @@ public sealed class Trip : AggregateRoot, ITenantScoped
     /// <summary>
     /// Sets (or, with nulls, clears) the vehicle working this trip. A supplied
     /// <paramref name="vehicleId"/> is validated against vehicle_lookup (exists + Active)
-    /// by the handler, which passes the unit-number snapshot from the lookup as
-    /// <paramref name="vehicleUnit"/>. A free-form unit with no id is still allowed.
+    /// by the handler, which passes the unit-number and seating-capacity snapshots from the
+    /// lookup as <paramref name="vehicleUnit"/>/<paramref name="seatingCapacity"/> — so a
+    /// fleet vehicle stamps <see cref="SeatsCapacity"/> the way it stamps the unit number
+    /// (snapshot semantics; later Fleet edits never ripple back). Assignment is refused when
+    /// the vehicle seats fewer than <see cref="SeatsConfirmed"/>. A free-form unit with no id
+    /// is still allowed and — like an unassign — leaves <see cref="SeatsCapacity"/> alone:
+    /// demand may already be booked against the last-known capacity.
     /// </summary>
-    public Result AssignVehicle(Guid? vehicleId, string? vehicleUnit)
+    public Result AssignVehicle(Guid? vehicleId, string? vehicleUnit, int? seatingCapacity)
     {
         if (IsOperationallyClosed)
         {
             return Result.Failure(TripErrors.OperationallyClosed(Status));
+        }
+
+        if (vehicleId is not null)
+        {
+            if (seatingCapacity is { } capacity && SeatsConfirmed > capacity)
+            {
+                return Result.Failure(TripErrors.VehicleCapacityBelowConfirmed);
+            }
+
+            SeatsCapacity = seatingCapacity;
         }
 
         VehicleId = vehicleId;
@@ -386,7 +403,11 @@ public sealed class Trip : AggregateRoot, ITenantScoped
     {
         // Business rule: a trip can never leave the operational phase without a logged
         // post-trip inspection — checked before the transition so it is refused via any path.
-        if (!HasPostTripInspection)
+        // Deadheads are exempt: an inspection is logged (by trip number) against the trip the
+        // vehicle actually worked, and an empty repositioning leg never gets its own — the same
+        // reasoning that exempts them from the passenger-manifest gate on Start. Without this,
+        // an empty leg could never reach ReadyForBilling and its round trip could never bill.
+        if (!HasPostTripInspection && !IsEmptyLeg)
         {
             return Result.Failure(TripErrors.PostTripInspectionRequired);
         }

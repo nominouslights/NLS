@@ -653,7 +653,10 @@ public sealed record StopRequest(
 /// <summary>
 /// Request body for POST /api/trips. Enum-typed fields take enum names ("ContractCrew",
 /// "Outbound", …). Supplying <c>routeId</c> snapshots the route's corridor fields and
-/// ignores the free-form ones; the trip number is always generated server-side.
+/// ignores the free-form ones; the trip number is always generated server-side. Supplying
+/// <c>vehicleId</c> likewise makes <c>seatsCapacity</c> server-derived: the vehicle's
+/// seating capacity is snapshotted from vehicle_lookup and any client-supplied value is
+/// ignored — manual capacity applies only when no fleet vehicle is chosen.
 /// </summary>
 public sealed record CreateTripRequest(
     DateOnly ServiceDate,
@@ -699,7 +702,11 @@ public sealed record UpdateTripRequest(
 /// <summary>
 /// Request body for POST /api/trips/{id}/assign — null driverId unassigns; null vehicleId
 /// with null vehicleUnit clears the vehicle. A non-null vehicleId is validated against
-/// vehicle_lookup (exists + Active) and its unit-number snapshotted server-side.
+/// vehicle_lookup (exists + Active) and its unit number AND seating capacity snapshotted
+/// server-side — assignment re-derives the trip's seatsCapacity, and a vehicle seating
+/// fewer than the seats already confirmed is refused
+/// (Trips.Trip.VehicleCapacityBelowConfirmed). Clearing the vehicle (or a free-form unit)
+/// keeps the last-known capacity.
 /// </summary>
 public sealed record AssignTripRequest(Guid? DriverId, Guid? VehicleId, string? VehicleUnit);
 

@@ -51,7 +51,7 @@ import { CorridorStepper } from "@/components/ui/CorridorStepper";
 import { Panel, SectionLabel, DetailRow } from "@/components/ui/Panel";
 import { ActionButton } from "@/components/ui/Button";
 import { ModalShell } from "@/components/ui/ModalShell";
-import { DateField, NumberField, SelectField, TextAreaField, TextField, TimeField } from "@/components/ui/Field";
+import { DateField, FieldLabel, NumberField, SelectField, TextAreaField, TextField, TimeField } from "@/components/ui/Field";
 import { PeriodNav } from "@/components/ui/PeriodNav";
 import { Pager } from "@/components/ui/Pager";
 import { periodContaining, periodContains, periodLabel, type Period } from "@/lib/period";
@@ -249,6 +249,15 @@ function AssignModal({
     };
   }, []);
 
+  // The selected vehicle, when it comes from the Active list. The stale-vehicle
+  // fallback option (current vehicle no longer Active) is deliberately not
+  // matched here — it carries no seatingCapacity, so no hint/warning can show.
+  const selectedVehicle = (vehicles ?? []).find((v) => v.id === vehicleId) ?? null;
+  // The server refuses a vehicle seating fewer than the seats already confirmed
+  // (Trips.Trip.VehicleCapacityBelowConfirmed) — warn before the round trip.
+  const capacityBelowConfirmed =
+    selectedVehicle !== null && trip.seatsConfirmed > selectedVehicle.seatingCapacity;
+
   async function submit() {
     if (busy) return;
     setBusy(true);
@@ -286,7 +295,7 @@ function AssignModal({
             { value: "", label: vehicles === null ? "Loading vehicles…" : "— unassigned —" },
             ...(vehicles ?? []).map((v) => ({
               value: v.id,
-              label: `${v.unitNumber} · ${v.make} ${v.model} · ${v.requiredLicenceClass}`,
+              label: `${v.unitNumber} · ${v.make} ${v.model} · ${v.seatingCapacity} seats · ${v.requiredLicenceClass}`,
             })),
             // Keep a stale-but-selected current vehicle visible in the list.
             ...(trip.vehicleId && !(vehicles ?? []).some((v) => v.id === trip.vehicleId)
@@ -295,6 +304,36 @@ function AssignModal({
           ]}
           hint={<span style={{ color: colors.textFaint }}>· only Active vehicles are assignable; blank clears</span>}
         />
+        {selectedVehicle && !capacityBelowConfirmed && (
+          <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim, marginTop: 6 }}>
+            Trip capacity will be set to {selectedVehicle.seatingCapacity} seats from {selectedVehicle.unitNumber}.
+          </div>
+        )}
+        {capacityBelowConfirmed && selectedVehicle && (
+          <div
+            style={{
+              marginTop: 8,
+              padding: "11px 14px",
+              background: statusMeta("soon").bg,
+              border: `1px solid ${statusMeta("soon").bd}`,
+              borderRadius: 10,
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 9,
+              fontFamily: fonts.body,
+              fontSize: 12.5,
+              fontWeight: 600,
+              color: statusMeta("soon").t,
+              lineHeight: 1.5,
+            }}
+          >
+            <StatusBadge kind="soon" />
+            <span>
+              {trip.seatsConfirmed} seat{trip.seatsConfirmed === 1 ? "" : "s"} already confirmed — this vehicle only
+              seats {selectedVehicle.seatingCapacity}; the server will refuse this assignment.
+            </span>
+          </div>
+        )}
       </div>
       <SectionLabel>Driver · Active roster</SectionLabel>
       {roster === null && !rosterError && (
@@ -390,9 +429,12 @@ function EditTripModal({
     if (!windowStart) return setError("Enter the departure window start.");
     const km = Number(distanceKm);
     if (!Number.isInteger(km) || km < 0) return setError("Distance must be a whole number of km.");
-    const cap = seatsCapacity === "" ? null : Number(seatsCapacity);
+    // With a fleet vehicle assigned, capacity is vehicle-derived — pass the
+    // trip's existing snapshot through unchanged (reassigning is how it moves).
+    const cap = trip.vehicleId ? trip.seatsCapacity : seatsCapacity === "" ? null : Number(seatsCapacity);
     const min = seatsMinimum === "" ? null : Number(seatsMinimum);
-    if (cap !== null && (!Number.isInteger(cap) || cap < 0)) return setError("Seats capacity must be a whole number.");
+    if (!trip.vehicleId && cap !== null && (!Number.isInteger(cap) || cap < 0))
+      return setError("Seats capacity must be a whole number.");
     if (min !== null && (!Number.isInteger(min) || min < 0)) return setError("Seats minimum must be a whole number.");
 
     const input: TripUpdateInput = {
@@ -447,7 +489,35 @@ function EditTripModal({
         <TimeField label="Window end (optional)" value={windowEnd} onChange={setWindowEnd} />
         <TextField label="PO number (optional)" value={poNumber} onChange={setPoNumber} mono placeholder="PO-AG-2261" />
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-          <NumberField label="Seats capacity" value={seatsCapacity} onChange={setSeatsCapacity} min={0} step={1} />
+          {trip.vehicleId ? (
+            // Capacity is snapshotted from the assigned vehicle — read-only here.
+            <div>
+              <FieldLabel>Seats capacity</FieldLabel>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  height: 40,
+                  boxSizing: "border-box",
+                  padding: "0 13px",
+                  background: colors.cardBg,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 9,
+                  fontFamily: fonts.mono,
+                  fontSize: 13,
+                  fontVariantNumeric: "tabular-nums",
+                  color: colors.textPrimary,
+                }}
+              >
+                {trip.seatsCapacity != null ? `${trip.seatsCapacity} seats` : "—"}
+              </div>
+              <div style={{ fontFamily: fonts.body, fontSize: 10.5, color: colors.textDim, marginTop: 4 }}>
+                derived from assigned vehicle — reassign to change
+              </div>
+            </div>
+          ) : (
+            <NumberField label="Seats capacity" value={seatsCapacity} onChange={setSeatsCapacity} min={0} step={1} />
+          )}
           <NumberField label="Seats minimum" value={seatsMinimum} onChange={setSeatsMinimum} min={0} step={1} />
         </div>
       </div>
@@ -1197,21 +1267,33 @@ export default function Trips({
   const canSendPickupEmail = !!t && manifest !== null && manifest.passengers.length > 0 && t.status !== "Cancelled";
   // START gate: a driver AND a linked manifest with ≥1 passenger (mirrors the
   // backend en-route guard). Vehicle assignment is encouraged but not blocking.
+  // Deadheads skip the manifest half — one can't even be created for an empty
+  // leg — but still need a driver to actually go en route.
   const startBlockReason =
     !t || t.status !== "Scheduled"
       ? null
       : t.driverId === null
         ? "Needs a driver"
-        : !hasPassengerManifest
+        : !t.isEmptyLeg && !hasPassengerManifest
           ? "Needs a passenger manifest (≥1 passenger)"
           : null;
 
-  // FINISH gate: an in-progress trip needs a post-trip inspection logged
-  // before the run can be finished. Gate on the server's HasPostTripInspection
-  // flag (set once Trips consumes Fleet's inspection event) so the button
-  // enables exactly when the backend would allow it — no "enabled but 409" gap.
+  // FINISH: an in-progress trip needs a post-trip inspection logged before the
+  // run can be finished — gated on the server's HasPostTripInspection flag so
+  // the button enables exactly when the backend would allow it (no "enabled but
+  // 409" gap). Deadheads are exempt (the inspection belongs to the trip the
+  // vehicle actually worked) and finishable straight from Scheduled: an empty
+  // leg has no driver or manifest to start with, and the only reason to finish
+  // it is to hand the round trip to Billing.
+  const finishable =
+    !!t &&
+    (t.status === "InProgress" || (t.status === "Scheduled" && t.isEmptyLeg));
   const finishBlockReason =
-    !t || t.status !== "InProgress" ? null : !t.hasPostTripInspection ? "Needs a post-trip inspection logged" : null;
+    !t || !finishable || t.isEmptyLeg
+      ? null
+      : !t.hasPostTripInspection
+        ? "Needs a post-trip inspection logged"
+        : null;
 
   // Billing runs on its own axis from the operational status — see tripBillingChip.
   const billingChip = t ? tripBillingChip(t) : null;
@@ -1753,7 +1835,7 @@ export default function Trips({
                       {busy ? "WORKING…" : "START TRIP"}
                     </ActionButton>
                   ))}
-                {t.status === "InProgress" &&
+                {finishable &&
                   (finishBlockReason ? (
                     <StatusChip kind="soon" label={`Can't finish — ${finishBlockReason}`} />
                   ) : (
