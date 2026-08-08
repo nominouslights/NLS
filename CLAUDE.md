@@ -18,6 +18,11 @@ frontend or backend.**
 Future app folders (Driver Field App, Client Web App/Alamos, Community Mobile, Owner Desktop)
 will be added as siblings, and `AppHost/` will grow to orchestrate them too.
 
+File-level index: the `code-map` skill (`.claude/skills/code-map/`) — read the reference file for
+your territory instead of exploring with find/grep.
+`node .claude/skills/code-map/scripts/codemap.mjs check` prints nothing when the map is in sync;
+the `code-indexer` agent refreshes it when stale.
+
 `Directory.Build.props` and `Directory.Packages.props` live at this workspace root, not inside
 `Backend/` — they're shared, platform-wide build settings and central package versions, picked up
 by every .NET project regardless of which folder it lives in (`Backend/`, `AppHost/`, and any

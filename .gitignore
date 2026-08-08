@@ -15,6 +15,9 @@ TestResults/
 .claude/settings.local.json
 **/.claude/settings.local.json
 
+# Per-machine Claude scratch state (code-map pending-changes log)
+.claude/state/
+
 # Env / secrets
 .env
 .env.*
@@ -28,3 +31,9 @@ AppHost/NorthernLink.AppHost/AppHost.cs
 # launchSettings.json now also carries the DigitalOcean Postgres connection string (there's no
 # local Postgres to fall back to) — same reasoning as AppHost.cs above.
 Backend/src/Api/NorthernLink.Api/Properties/launchSettings.json
+
+# The AppHost's own launchSettings.json is per-machine local dev state too — same category as
+# the two above, and it was never tracked. Naming it keeps `git status` quiet and keeps the
+# code map stable: the map lists untracked-but-unignored files, so this one made the AppHost
+# section read as stale on any machine that had run the orchestrator.
+AppHost/NorthernLink.AppHost/Properties/launchSettings.json
