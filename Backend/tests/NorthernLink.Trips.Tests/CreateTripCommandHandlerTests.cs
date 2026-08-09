@@ -17,6 +17,16 @@ public class CreateTripCommandHandlerTests
 
     private CreateTripCommandHandler Handler => new(_trips, _routes, _drivers, _vehicles, _numbers);
 
+    private static DriverLookup Driver(Guid id, string status = DriverLookup.ActiveStatus) => new()
+    {
+        DriverId = id,
+        TenantId = TestPlanning.TenantId,
+        Name = "R. Ballantyne",
+        LicenceClass = "Class 4",
+        Status = status,
+        UpdatedAtUtc = DateTimeOffset.UtcNow,
+    };
+
     private static VehicleLookup Vehicle(Guid id, string status = VehicleLookup.ActiveStatus) => new()
     {
         VehicleId = id,
@@ -28,7 +38,17 @@ public class CreateTripCommandHandlerTests
         UpdatedAtUtc = DateTimeOffset.UtcNow,
     };
 
-    private static CreateTripCommand Command(Guid? vehicleId = null, string? vehicleUnit = null) => new(
+    /// <summary>Registers an Active driver + vehicle and returns their ids.</summary>
+    private (Guid DriverId, Guid VehicleId) AddActiveAssignment()
+    {
+        var driverId = Guid.NewGuid();
+        var vehicleId = Guid.NewGuid();
+        _drivers.Drivers.Add(Driver(driverId));
+        _vehicles.Vehicles.Add(Vehicle(vehicleId));
+        return (driverId, vehicleId);
+    }
+
+    private static CreateTripCommand Command(Guid? driverId = null, Guid? vehicleId = null) => new(
         TestPlanning.TenantId,
         ServiceDate: new DateOnly(2026, 7, 21),
         WindowStart: new TimeOnly(6, 30),
@@ -45,16 +65,67 @@ public class CreateTripCommandHandlerTests
         ClientId: null,
         ClientName: "Alamos Gold",
         PoNumber: "PO-2026-118",
-        DriverId: null,
+        DriverId: driverId,
         VehicleId: vehicleId,
-        VehicleUnit: vehicleUnit,
-        SeatsCapacity: 12,
         SeatsMinimum: null);
+
+    [Fact]
+    public async Task A_trip_without_a_driver_is_rejected()
+    {
+        var vehicleId = Guid.NewGuid();
+        _vehicles.Vehicles.Add(Vehicle(vehicleId));
+
+        var result = await Handler.Handle(Command(vehicleId: vehicleId), CancellationToken.None);
+
+        Assert.Equal(TripErrors.DriverRequired, result.Error);
+        Assert.Empty(_trips.Trips);
+    }
+
+    [Fact]
+    public async Task A_trip_without_a_vehicle_is_rejected()
+    {
+        var driverId = Guid.NewGuid();
+        _drivers.Drivers.Add(Driver(driverId));
+
+        var result = await Handler.Handle(Command(driverId: driverId), CancellationToken.None);
+
+        Assert.Equal(TripErrors.VehicleRequired, result.Error);
+        Assert.Empty(_trips.Trips);
+    }
+
+    [Fact]
+    public async Task Unknown_driver_is_rejected()
+    {
+        var result = await Handler.Handle(
+            Command(driverId: Guid.NewGuid(), vehicleId: Guid.NewGuid()), CancellationToken.None);
+
+        Assert.Equal(TripErrors.DriverNotFound, result.Error);
+        Assert.Empty(_trips.Trips);
+    }
+
+    [Theory]
+    [InlineData("Inactive")]
+    [InlineData("Deactivated")]
+    public async Task Non_active_driver_is_rejected(string status)
+    {
+        var driverId = Guid.NewGuid();
+        _drivers.Drivers.Add(Driver(driverId, status));
+
+        var result = await Handler.Handle(
+            Command(driverId: driverId, vehicleId: Guid.NewGuid()), CancellationToken.None);
+
+        Assert.Equal(TripErrors.DriverNotActive, result.Error);
+        Assert.Empty(_trips.Trips);
+    }
 
     [Fact]
     public async Task Unknown_vehicle_is_rejected()
     {
-        var result = await Handler.Handle(Command(vehicleId: Guid.NewGuid()), CancellationToken.None);
+        var driverId = Guid.NewGuid();
+        _drivers.Drivers.Add(Driver(driverId));
+
+        var result = await Handler.Handle(
+            Command(driverId: driverId, vehicleId: Guid.NewGuid()), CancellationToken.None);
 
         Assert.Equal(TripErrors.VehicleNotFound, result.Error);
         Assert.Empty(_trips.Trips);
@@ -66,43 +137,34 @@ public class CreateTripCommandHandlerTests
     [InlineData("Retired")]
     public async Task Non_active_vehicle_is_rejected(string status)
     {
+        var driverId = Guid.NewGuid();
         var vehicleId = Guid.NewGuid();
+        _drivers.Drivers.Add(Driver(driverId));
         _vehicles.Vehicles.Add(Vehicle(vehicleId, status));
 
-        var result = await Handler.Handle(Command(vehicleId: vehicleId), CancellationToken.None);
+        var result = await Handler.Handle(
+            Command(driverId: driverId, vehicleId: vehicleId), CancellationToken.None);
 
         Assert.Equal(TripErrors.VehicleNotActive, result.Error);
         Assert.Empty(_trips.Trips);
     }
 
     [Fact]
-    public async Task Active_vehicle_is_snapshotted_onto_the_trip()
+    public async Task Driver_and_vehicle_are_snapshotted_onto_the_trip_from_the_lookups()
     {
-        var vehicleId = Guid.NewGuid();
-        _vehicles.Vehicles.Add(Vehicle(vehicleId));
+        var (driverId, vehicleId) = AddActiveAssignment();
 
-        // A stale/free-form unit is ignored in favour of the lookup snapshot — and so is the
-        // command's manual capacity (12): the vehicle's 24 seats are server-authoritative.
         var result = await Handler.Handle(
-            Command(vehicleId: vehicleId, vehicleUnit: "stale-unit"), CancellationToken.None);
+            Command(driverId: driverId, vehicleId: vehicleId), CancellationToken.None);
 
         Assert.True(result.IsSuccess);
         var trip = Assert.Single(_trips.Trips);
+        Assert.Equal(driverId, trip.DriverId);
+        Assert.Equal("R. Ballantyne", trip.DriverName);
         Assert.Equal(vehicleId, trip.VehicleId);
         Assert.Equal("U-12", trip.VehicleUnit);
+        // The fleet vehicle's capacity is server-authoritative — no manual figure exists.
         Assert.Equal(24, trip.SeatsCapacity);
-    }
-
-    [Fact]
-    public async Task No_vehicle_id_keeps_the_free_form_unit_and_leaves_vehicle_id_null()
-    {
-        var result = await Handler.Handle(Command(vehicleUnit: "U-99"), CancellationToken.None);
-
-        Assert.True(result.IsSuccess);
-        var trip = Assert.Single(_trips.Trips);
-        Assert.Null(trip.VehicleId);
-        Assert.Equal("U-99", trip.VehicleUnit);
-        Assert.Equal(12, trip.SeatsCapacity); // no vehicle to derive from — manual capacity stands
     }
 
     private sealed class FakeTripNumberGenerator : ITripNumberGenerator

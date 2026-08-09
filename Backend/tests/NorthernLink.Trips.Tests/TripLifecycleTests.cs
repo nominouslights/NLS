@@ -70,6 +70,39 @@ public class TripLifecycleTests
     }
 
     [Fact]
+    public void Schedule_without_a_driver_is_rejected()
+    {
+        // A trip is never born unassigned — the ghost-board cleanup rule.
+        var result = TestPlanning.ScheduleTrip(driverId: Guid.Empty);
+
+        Assert.Equal(TripErrors.DriverRequired, result.Error);
+    }
+
+    [Fact]
+    public void Schedule_without_a_driver_name_snapshot_is_rejected()
+    {
+        var result = TestPlanning.ScheduleTrip(driverName: "   ");
+
+        Assert.Equal(TripErrors.DriverNameRequired, result.Error);
+    }
+
+    [Fact]
+    public void Schedule_without_a_vehicle_is_rejected()
+    {
+        var result = TestPlanning.ScheduleTrip(vehicleId: Guid.Empty);
+
+        Assert.Equal(TripErrors.VehicleRequired, result.Error);
+    }
+
+    [Fact]
+    public void Schedule_without_a_vehicle_unit_snapshot_is_rejected()
+    {
+        var result = TestPlanning.ScheduleTrip(vehicleUnit: "   ");
+
+        Assert.Equal(TripErrors.VehicleUnitRequired, result.Error);
+    }
+
+    [Fact]
     public void Finish_on_a_clientless_trip_completes_it_and_raises_the_completed_event()
     {
         var trip = TestPlanning.ScheduleTrip().Value; // no client — community/walk-up shape
@@ -109,7 +142,7 @@ public class TripLifecycleTests
         // Built the way real deadheads are — off a client trip — so the leg carries the
         // client, the pairing key, and IsEmptyLeg exactly as production data would.
         var outbound = TestPlanning.ScheduleTrip(clientId: Guid.NewGuid()).Value;
-        var deadhead = outbound.CreateDeadheadReturn("TR-1002").Value;
+        var deadhead = outbound.DeadheadReturn("TR-1002").Value;
         deadhead.ClearDomainEvents();
 
         // No inspection recorded, no driver, still Scheduled: the empty leg is exempt from the
@@ -481,7 +514,7 @@ public class TripLifecycleTests
         var result = trip.AssignVehicle(Guid.NewGuid(), "U-07", seatingCapacity: 24);
 
         Assert.Equal(TripErrors.VehicleCapacityBelowConfirmed, result.Error);
-        Assert.Null(trip.VehicleId); // the assignment never landed
+        Assert.Equal(TestPlanning.VehicleId, trip.VehicleId); // the swap never landed
         Assert.Equal(30, trip.SeatsCapacity);
     }
 
@@ -494,8 +527,10 @@ public class TripLifecycleTests
         Assert.True(Replan(withVehicle, seatsCapacity: 10).IsSuccess);
         Assert.Equal(24, withVehicle.SeatsCapacity);
 
-        // Without one, the manual capacity edit applies as before.
+        // Without one (the creation-time vehicle was since unassigned), the manual
+        // capacity edit applies as before.
         var withoutVehicle = TestPlanning.ScheduleTrip(seatsCapacity: 12).Value;
+        Assert.True(withoutVehicle.AssignVehicle(null, null, null).IsSuccess);
         Assert.True(Replan(withoutVehicle, seatsCapacity: 10).IsSuccess);
         Assert.Equal(10, withoutVehicle.SeatsCapacity);
     }

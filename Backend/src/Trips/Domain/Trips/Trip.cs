@@ -155,8 +155,13 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         };
 
     /// <summary>
-    /// The single creation path — used by the wizard (ad-hoc) and the generation worker
-    /// (template-materialized, which passes the template provenance fields).
+    /// The single creation path — used by the wizard (ad-hoc), the generation worker
+    /// (template-materialized, which passes the template provenance fields), and
+    /// <see cref="CreateDeadheadReturn"/>. A trip is never born unassigned: a driver
+    /// (id + name snapshot) and a fleet vehicle (id + unit-number snapshot) are required
+    /// — callers validate both against the lookup replicas before calling. Reassignment
+    /// and unassignment after creation still move through
+    /// <see cref="AssignDriver"/>/<see cref="UnassignDriver"/>/<see cref="AssignVehicle"/>.
     /// </summary>
     public static Result<Trip> Schedule(
         Guid tenantId,
@@ -178,10 +183,10 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         Guid? clientId,
         string? clientName,
         string? poNumber,
-        Guid? driverId,
-        string? driverName,
-        Guid? vehicleId,
-        string? vehicleUnit,
+        Guid driverId,
+        string driverName,
+        Guid vehicleId,
+        string vehicleUnit,
         int? seatsCapacity,
         int? seatsMinimum)
     {
@@ -196,9 +201,24 @@ public sealed class Trip : AggregateRoot, ITenantScoped
             return Result.Failure<Trip>(validation.Error);
         }
 
-        if (driverId is not null && string.IsNullOrWhiteSpace(driverName))
+        if (driverId == Guid.Empty)
+        {
+            return Result.Failure<Trip>(TripErrors.DriverRequired);
+        }
+
+        if (string.IsNullOrWhiteSpace(driverName))
         {
             return Result.Failure<Trip>(TripErrors.DriverNameRequired);
+        }
+
+        if (vehicleId == Guid.Empty)
+        {
+            return Result.Failure<Trip>(TripErrors.VehicleRequired);
+        }
+
+        if (string.IsNullOrWhiteSpace(vehicleUnit))
+        {
+            return Result.Failure<Trip>(TripErrors.VehicleUnitRequired);
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -224,9 +244,9 @@ public sealed class Trip : AggregateRoot, ITenantScoped
             ClientName = Normalize(clientName),
             PoNumber = Normalize(poNumber),
             DriverId = driverId,
-            DriverName = driverId is null ? null : driverName!.Trim(),
+            DriverName = driverName.Trim(),
             VehicleId = vehicleId,
-            VehicleUnit = Normalize(vehicleUnit),
+            VehicleUnit = vehicleUnit.Trim(),
             SeatsCapacity = seatsCapacity,
             SeatsConfirmed = 0,
             SeatsMinimum = seatsMinimum,
@@ -689,12 +709,19 @@ public sealed class Trip : AggregateRoot, ITenantScoped
     /// Creates the empty repositioning leg for a client trip with no return: a NEW
     /// Scheduled trip on the reversed corridor (stops reversed and renumbered), same
     /// service date/client/distance/service type, departing at this trip's
-    /// <see cref="WindowEnd"/> (or <see cref="WindowStart"/> when open-ended), no
-    /// driver/vehicle/seats, <see cref="IsEmptyLeg"/> true and Inbound — while this trip
-    /// becomes the Outbound leg of a fresh shared "merge:" <see cref="RoundTripKey"/>.
+    /// <see cref="WindowEnd"/> (or <see cref="WindowStart"/> when open-ended), no seats,
+    /// <see cref="IsEmptyLeg"/> true and Inbound — while this trip becomes the Outbound
+    /// leg of a fresh shared "merge:" <see cref="RoundTripKey"/>. Someone drives the unit
+    /// back, so the leg carries a driver and vehicle like every trip — usually this trip's
+    /// own, but the handler may pass a different pair (validated against the lookups).
     /// The caller mints <paramref name="tripNumber"/> from the per-tenant sequence.
     /// </summary>
-    public Result<Trip> CreateDeadheadReturn(string tripNumber)
+    public Result<Trip> CreateDeadheadReturn(
+        string tripNumber,
+        Guid driverId,
+        string driverName,
+        Guid vehicleId,
+        string vehicleUnit)
     {
         if (ClientId is null)
         {
@@ -749,10 +776,10 @@ public sealed class Trip : AggregateRoot, ITenantScoped
             ClientId,
             ClientName,
             PoNumber,
-            driverId: null,
-            driverName: null,
-            vehicleId: null,
-            vehicleUnit: null,
+            driverId,
+            driverName,
+            vehicleId,
+            vehicleUnit,
             seatsCapacity: null,
             seatsMinimum: null);
 

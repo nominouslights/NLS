@@ -70,7 +70,7 @@ public class AssignTripCommandHandlerTests
             new AssignTripCommand(trip.Id, driverId, null, null), CancellationToken.None);
 
         Assert.Equal(TripErrors.DriverNotActive, result.Error);
-        Assert.Null(trip.DriverId);
+        Assert.Equal(TestPlanning.DriverId, trip.DriverId); // the creation-time assignment stands
     }
 
     [Fact]
@@ -101,7 +101,7 @@ public class AssignTripCommandHandlerTests
             new AssignTripCommand(trip.Id, null, vehicleId, null), CancellationToken.None);
 
         Assert.Equal(TripErrors.VehicleNotActive, result.Error);
-        Assert.Null(trip.VehicleId);
+        Assert.Equal(TestPlanning.VehicleId, trip.VehicleId); // the creation-time assignment stands
         Assert.Equal(0, _trips.SaveCount);
     }
 
@@ -138,7 +138,7 @@ public class AssignTripCommandHandlerTests
             new AssignTripCommand(trip.Id, null, vehicleId, null), CancellationToken.None);
 
         Assert.Equal(TripErrors.VehicleCapacityBelowConfirmed, result.Error);
-        Assert.Null(trip.VehicleId);
+        Assert.Equal(TestPlanning.VehicleId, trip.VehicleId); // the creation-time assignment stands
         Assert.Equal(30, trip.SeatsCapacity);
         Assert.Equal(0, _trips.SaveCount);
     }

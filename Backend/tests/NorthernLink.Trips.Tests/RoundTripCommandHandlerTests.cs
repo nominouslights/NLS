@@ -1,4 +1,5 @@
 using NorthernLink.Trips.Application.Abstractions;
+using NorthernLink.Trips.Application.Integration;
 using NorthernLink.Trips.Application.Trips.CreateDeadheadReturn;
 using NorthernLink.Trips.Application.Trips.MergeRoundTrip;
 using NorthernLink.Trips.Application.Trips.UnpairRoundTrip;
@@ -199,14 +200,23 @@ public class RoundTripCommandHandlerTests
         Assert.Equal(0, _trips.SaveCount);
     }
 
+    private readonly FakeDriverLookupRepository _drivers = new();
+    private readonly FakeVehicleLookupRepository _vehicles = new();
+
+    private CreateDeadheadReturnCommandHandler DeadheadHandler() =>
+        new(_trips, _drivers, _vehicles, new FakeTripNumberGenerator());
+
+    private static CreateDeadheadReturnCommand DeadheadCommand(
+        Guid tripId, Guid? driverId = null, Guid? vehicleId = null) =>
+        new(tripId, driverId, vehicleId);
+
     [Fact]
     public async Task Deadhead_return_mints_a_trip_number_adds_the_new_leg_and_returns_its_id()
     {
         var source = TestPlanning.ScheduleTrip(tripNumber: "TR-2001", clientId: ClientId).Value;
         _trips.Add(source);
-        var handler = new CreateDeadheadReturnCommandHandler(_trips, new FakeTripNumberGenerator());
 
-        var result = await handler.Handle(new CreateDeadheadReturnCommand(source.Id), CancellationToken.None);
+        var result = await DeadheadHandler().Handle(DeadheadCommand(source.Id), CancellationToken.None);
 
         Assert.True(result.IsSuccess);
         Assert.Equal(2, _trips.Trips.Count);
@@ -218,11 +228,92 @@ public class RoundTripCommandHandlerTests
     }
 
     [Fact]
+    public async Task Deadhead_return_inherits_the_source_trips_driver_and_vehicle_by_default()
+    {
+        var source = TestPlanning.ScheduleTrip(tripNumber: "TR-2001", clientId: ClientId).Value;
+        _trips.Add(source);
+
+        var result = await DeadheadHandler().Handle(DeadheadCommand(source.Id), CancellationToken.None);
+
+        var deadhead = Assert.Single(_trips.Trips, t => t.Id == result.Value);
+        Assert.Equal(source.DriverId, deadhead.DriverId);
+        Assert.Equal(source.DriverName, deadhead.DriverName);
+        Assert.Equal(source.VehicleId, deadhead.VehicleId);
+        Assert.Equal(source.VehicleUnit, deadhead.VehicleUnit);
+    }
+
+    [Fact]
+    public async Task Deadhead_return_takes_a_different_driver_and_unit_when_supplied()
+    {
+        var source = TestPlanning.ScheduleTrip(tripNumber: "TR-2001", clientId: ClientId).Value;
+        _trips.Add(source);
+        var otherDriver = new DriverLookup
+        {
+            DriverId = Guid.NewGuid(),
+            TenantId = TestPlanning.TenantId,
+            Name = "S. Moody",
+            LicenceClass = "Class 4",
+            Status = DriverLookup.ActiveStatus,
+            UpdatedAtUtc = DateTimeOffset.UtcNow,
+        };
+        var otherVehicle = new VehicleLookup
+        {
+            VehicleId = Guid.NewGuid(),
+            TenantId = TestPlanning.TenantId,
+            UnitNumber = "U-07",
+            Status = VehicleLookup.ActiveStatus,
+            RequiredLicenceClass = "Class 4",
+            SeatingCapacity = 14,
+            UpdatedAtUtc = DateTimeOffset.UtcNow,
+        };
+        _drivers.Drivers.Add(otherDriver);
+        _vehicles.Vehicles.Add(otherVehicle);
+
+        var result = await DeadheadHandler().Handle(
+            DeadheadCommand(source.Id, otherDriver.DriverId, otherVehicle.VehicleId), CancellationToken.None);
+
+        var deadhead = Assert.Single(_trips.Trips, t => t.Id == result.Value);
+        Assert.Equal(otherDriver.DriverId, deadhead.DriverId);
+        Assert.Equal("S. Moody", deadhead.DriverName);
+        Assert.Equal(otherVehicle.VehicleId, deadhead.VehicleId);
+        Assert.Equal("U-07", deadhead.VehicleUnit);
+    }
+
+    [Fact]
+    public async Task Deadhead_return_with_an_unknown_override_driver_is_refused()
+    {
+        var source = TestPlanning.ScheduleTrip(tripNumber: "TR-2001", clientId: ClientId).Value;
+        _trips.Add(source);
+
+        var result = await DeadheadHandler().Handle(
+            DeadheadCommand(source.Id, driverId: Guid.NewGuid()), CancellationToken.None);
+
+        Assert.Equal(TripErrors.DriverNotFound, result.Error);
+        Assert.Single(_trips.Trips);
+        Assert.Equal(0, _trips.SaveCount);
+    }
+
+    [Fact]
+    public async Task Deadhead_return_of_an_unassigned_source_requires_the_assignment()
+    {
+        // A source can lose its driver after creation (reassignment mid-plan) — someone
+        // still has to drive the unit back, so the command is refused until a driver
+        // override is supplied.
+        var source = TestPlanning.ScheduleTrip(tripNumber: "TR-2001", clientId: ClientId).Value;
+        Assert.True(source.UnassignDriver().IsSuccess);
+        _trips.Add(source);
+
+        var result = await DeadheadHandler().Handle(DeadheadCommand(source.Id), CancellationToken.None);
+
+        Assert.Equal(TripErrors.DriverRequired, result.Error);
+        Assert.Single(_trips.Trips);
+        Assert.Equal(0, _trips.SaveCount);
+    }
+
+    [Fact]
     public async Task Deadhead_return_for_a_missing_trip_reports_not_found()
     {
-        var handler = new CreateDeadheadReturnCommandHandler(_trips, new FakeTripNumberGenerator());
-
-        var result = await handler.Handle(new CreateDeadheadReturnCommand(Guid.NewGuid()), CancellationToken.None);
+        var result = await DeadheadHandler().Handle(DeadheadCommand(Guid.NewGuid()), CancellationToken.None);
 
         Assert.Equal(TripErrors.NotFound, result.Error);
     }
@@ -232,9 +323,8 @@ public class RoundTripCommandHandlerTests
     {
         var communityRun = TestPlanning.ScheduleTrip(tripNumber: "TR-2001", clientId: null).Value;
         _trips.Add(communityRun);
-        var handler = new CreateDeadheadReturnCommandHandler(_trips, new FakeTripNumberGenerator());
 
-        var result = await handler.Handle(new CreateDeadheadReturnCommand(communityRun.Id), CancellationToken.None);
+        var result = await DeadheadHandler().Handle(DeadheadCommand(communityRun.Id), CancellationToken.None);
 
         Assert.Equal(TripErrors.RoundTripClientRequired, result.Error);
         Assert.Single(_trips.Trips);

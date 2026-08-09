@@ -217,8 +217,6 @@ internal static class TripPlanningEndpoints
             request.PoNumber,
             request.DriverId,
             request.VehicleId,
-            request.VehicleUnit,
-            request.SeatsCapacity,
             request.SeatsMinimum);
 
         var result = await sender.Send(command, cancellationToken);
@@ -358,14 +356,20 @@ internal static class TripPlanningEndpoints
     }
 
     private static async Task<IResult> CreateDeadheadReturn(
-        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+        Guid id,
+        [Microsoft.AspNetCore.Mvc.FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)]
+        CreateDeadheadReturnRequest? request,
+        ITenantContext tenantContext,
+        ISender sender,
+        CancellationToken cancellationToken)
     {
         if (tenantContext.TenantId is null)
         {
             return Results.Unauthorized();
         }
 
-        var result = await sender.Send(new CreateDeadheadReturnCommand(id), cancellationToken);
+        var result = await sender.Send(
+            new CreateDeadheadReturnCommand(id, request?.DriverId, request?.VehicleId), cancellationToken);
         return result.IsSuccess
             ? Results.Created($"/api/trips/{result.Value}", new TripCreatedResponse(result.Value))
             : EndpointResults.Problem(result.Error);
@@ -633,6 +637,14 @@ public sealed record ScheduleTemplateCreatedResponse(Guid Id);
 public sealed record StopCreatedResponse(Guid Id);
 
 /// <summary>
+/// Optional body for POST /api/trips/{id}/deadhead-return. Both fields (and the body
+/// itself) may be omitted — the return leg then inherits the source trip's own
+/// driver/vehicle. Supply either to send a different driver or unit back; each is
+/// validated against its lookup (exists + Active).
+/// </summary>
+public sealed record CreateDeadheadReturnRequest(Guid? DriverId, Guid? VehicleId);
+
+/// <summary>
 /// Request body for POST and PUT /api/trips/stops. <c>StopType</c> takes an enum name
 /// ("Hub", "Community", …) or null. <c>Active</c> is only honoured on PUT (a create is
 /// always active); toggle it afterwards via /activate and /deactivate.
@@ -653,10 +665,11 @@ public sealed record StopRequest(
 /// <summary>
 /// Request body for POST /api/trips. Enum-typed fields take enum names ("ContractCrew",
 /// "Outbound", …). Supplying <c>routeId</c> snapshots the route's corridor fields and
-/// ignores the free-form ones; the trip number is always generated server-side. Supplying
-/// <c>vehicleId</c> likewise makes <c>seatsCapacity</c> server-derived: the vehicle's
-/// seating capacity is snapshotted from vehicle_lookup and any client-supplied value is
-/// ignored — manual capacity applies only when no fleet vehicle is chosen.
+/// ignores the free-form ones; the trip number is always generated server-side.
+/// <c>driverId</c> and <c>vehicleId</c> are required — a trip is never created
+/// unassigned, and the vehicle must be a real fleet vehicle: its unit number and seating
+/// capacity are snapshotted from vehicle_lookup (there is no free-form vehicle unit or
+/// manual capacity on creation).
 /// </summary>
 public sealed record CreateTripRequest(
     DateOnly ServiceDate,
@@ -676,8 +689,6 @@ public sealed record CreateTripRequest(
     string? PoNumber,
     Guid? DriverId,
     Guid? VehicleId,
-    string? VehicleUnit,
-    int? SeatsCapacity,
     int? SeatsMinimum);
 
 /// <summary>Request body for PUT /api/trips/{id} — editable only while Scheduled.</summary>
