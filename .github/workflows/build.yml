@@ -1,11 +1,11 @@
 name: build
 
-# Builds and pushes the four deployable images to GHCR. CommunityMobile/ is excluded (Flutter
-# design mockup, not a server workload) and AppHost/ is excluded on purpose — it is the local
-# dev orchestrator, and its AppHost.cs is gitignored, so it does not exist in a CI checkout.
-#
-# Deployment stays manual for now: `kubectl apply -k k8s/overlays/<env>`. Auto-deploy needs
-# cluster credentials in repository secrets, which is its own decision.
+# Publishes the four deployable images to GHCR — that is this workflow's whole job, by the
+# owner's decision: CI ends at the package registry, and deployment happens outside CI from
+# those images. No deploy steps belong here, and no test gate either (run `dotnet test` and
+# Budgeting's `npm test` locally before pushing). CommunityMobile/ is excluded (Flutter design
+# mockup, not a server workload) and AppHost/ is excluded on purpose — it is the local dev
+# orchestrator, and its AppHost.cs is gitignored, so it does not exist in a CI checkout.
 
 on:
   push:
@@ -23,41 +23,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-dotnet@v6
-        with:
-          global-json-file: Backend/global.json
-
-      # The solution deliberately excludes AppHost/, so this is the whole buildable .NET
-      # surface. Warnings are errors platform-wide (Directory.Build.props).
-      - name: Backend build + test
-        run: dotnet test Backend/NorthernLink.slnx --configuration Release
-        # Integration tests spin up Postgres via Testcontainers; ubuntu-latest has Docker.
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: Budgeting/package-lock.json
-
-      # Budgeting is the only frontend with a test suite (Vitest, a pilot for that app).
-      - name: Budgeting tests
-        working-directory: Budgeting
-        run: |
-          npm ci
-          npm test
-
-      # `npm run lint` is deliberately NOT here yet. Dispatcher and Budgeting share 3
-      # pre-existing ESLint errors in copied design-system files (lib/useToday.ts) — see
-      # Budgeting/CLAUDE.md. Fixing them is a real behavioural change to a shipped screen and
-      # belongs in its own story; gating deploys on it now would just get the job disabled.
-
   images:
-    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read

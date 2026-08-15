@@ -15,7 +15,6 @@ frontend or backend.**
 | `Budgeting/` | Zero-Based Budgeting console (Track 6) — real auth + role gate; budget periods and codes are live against the API, allocations/actuals/variance still mock. Deliberately holds **copies** of Dispatcher's design system — see its own `CLAUDE.md` | Next.js 16, React 19 |
 | `CommunityMobile/` | Community Mobile passenger app — design mockup only: 11 screens on hardcoded mock data (`lib/data/mock_data.dart`), no API/auth wiring, not orchestrated by `aspire run` | Flutter 3.29, Dart 3.7 |
 | `AppHost/` | Local dev orchestrator — starts Postgres, RabbitMQ, the API, and Dispatcher together. Platform-level, not part of Backend — it depends on Backend and Dispatcher, not the other way around | .NET 10, Aspire |
-| `k8s/` | Deployment manifests for the four container images (API + three frontends) — `base/` plus `overlays/{staging,production}`. Read `k8s/README.md` before changing anything in here | Kustomize |
 
 Future app folders (Driver Field App, Client Web App/Alamos, Owner Desktop)
 will be added as siblings, and `AppHost/` will grow to orchestrate them too.
@@ -157,30 +156,35 @@ server workload, and `AppHost/` stays a local-dev orchestrator: neither is conta
 - `docker build -t northernlink-dispatcher Dispatcher/` (likewise `Website/`, `Budgeting/`) —
   each app's own directory is its context; there is no npm workspace and each has its own
   lockfile.
-- `.github/workflows/build.yml` runs `dotnet test`, Budgeting's Vitest suite, then builds and
-  pushes all four to `ghcr.io/<owner>/northernlink-*`. Deployment stays manual:
-  `kubectl apply -k k8s/overlays/<env>`.
+- `.github/workflows/build.yml` does exactly one thing, by the owner's decision: builds and
+  pushes all four images to `ghcr.io/<owner>/northernlink-*`. No test gate, no deploy step — CI
+  ends at the package registry, and the owner deploys from those images outside CI (a Kubernetes
+  setup was tried and torn down for cost in Aug 2026; the replacement managed container-app
+  service is still being chosen). Run `dotnet test` and Budgeting's `npm test` locally before
+  pushing.
 
-Four things that will bite whoever touches this next:
+Four things that will bite whoever deploys these images, on any host:
 
 - **Frontend images are configured at build time, not at runtime.** `next build` resolves
   rewrites into `routes-manifest.json` and inlines every `NEXT_PUBLIC_*` into the client bundle,
   so `API_PROXY_TARGET` set on a running container does nothing. The images bake
-  `http://northernlink-api:8080`; per-environment resolution comes from Kubernetes DNS, since a
-  bare Service name resolves inside the pod's own namespace. That is why the frontend Deployments
-  carry no `env:` block at all.
-- **The API's Service is ClusterIP and must never gain an Ingress rule.** There is no CORS
-  configuration anywhere in the stack by design — browsers reach the API only through a
-  frontend's own origin via the server-side `/api/*` proxy.
-- **The API runs one replica, `strategy: Recreate`.** Each pod hosts eight `OutboxDispatcher`
-  background services plus `TripGenerationWorker`, and `OutboxDispatcher` still has no
-  `FOR UPDATE SKIP LOCKED` (its doc comment says so). Two replicas double-publish events and
-  duplicate generated trips.
+  `http://northernlink-api:8080` as the proxy target, so the host must make the API resolvable
+  under the name `northernlink-api` (container-network DNS/alias) — or the frontend images must
+  be rebuilt with a different `API_PROXY_TARGET` build arg.
+- **The API must never be exposed publicly.** There is no CORS configuration anywhere in the
+  stack by design — browsers reach the API only through a frontend's own origin via the
+  server-side `/api/*` proxy. Whatever the host, only the three frontends get public ingress;
+  the API stays on the private network.
+- **Run exactly ONE API instance.** Each instance hosts eight `OutboxDispatcher` background
+  services plus `TripGenerationWorker`, and `OutboxDispatcher` still has no
+  `FOR UPDATE SKIP LOCKED` (its doc comment says so). Two instances double-publish events and
+  duplicate generated trips — disable replicas/autoscaling for the API container.
 - **`Migrations__RunOnStartup` defaults to `false`, deliberately.** `ModuleMigrationRunner`
   (`Backend/src/Shared/Persistence/Migrations/`) applies all eight module schemas under one
-  Postgres advisory lock, but only when switched on — the k8s ConfigMap does, local runs do not,
-  because every environment shares the one DigitalOcean database and a feature branch must not be
-  able to migrate it. A failure is logged and leaves the pod permanently unready rather than
-  crash-looping. `/health` (readiness, migrations + database) and `/alive` (liveness, pure
-  process check) now map in **every** environment — they used to be development-only, which would
-  have made both a 404 exactly where probes need them.
+  Postgres advisory lock, but only when switched on — set it `true` on the deployed API
+  container only, never locally, because every environment shares the one DigitalOcean database
+  and a feature branch must not be able to migrate it. A failure is logged and leaves the
+  process permanently unready rather than crash-looping. `/health` (readiness, migrations +
+  database) and `/alive` (liveness, pure process check) map in **every** environment — point the
+  host's health probes at them. And remember the DB's Trusted Sources firewall: any new compute
+  (container-app egress IPs, clusters) must be added there or the API hangs unready on connect.

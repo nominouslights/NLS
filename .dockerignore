@@ -14,7 +14,6 @@ Website/
 Budgeting/
 CommunityMobile/
 AppHost/
-k8s/
 
 # .NET build output
 **/bin/
