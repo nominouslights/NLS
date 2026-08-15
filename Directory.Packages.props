@@ -38,7 +38,12 @@
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.0.2" />
     <PackageVersion Include="NetArchTest.Rules" Version="1.3.2" />
-    <PackageVersion Include="Testcontainers.PostgreSql" Version="4.13.0" />
+    <!-- 4.14.0, not 4.13.0: 4.13.0 pulls SSH.NET 2025.1.0 transitively, which carries a high
+         severity advisory (GHSA-q939-rpr3-3284, ScpClient arbitrary file write). With
+         TreatWarningsAsErrors the NU1903 audit warning fails restore outright. 4.14.0 depends on
+         SSH.NET 2026.0.0 — the advisory's first patched version — so the fix is a bump rather
+         than an audit suppression or a transitive pin. -->
+    <PackageVersion Include="Testcontainers.PostgreSql" Version="4.14.0" />
   </ItemGroup>
 
 </Project>
