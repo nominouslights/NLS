@@ -44,9 +44,13 @@ public static class IdentityServiceCollectionExtensions
                     npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", SchemaName))
                 .AddInterceptors(serviceProvider.GetRequiredService<TenantSessionInterceptor>()));
 
-        // 2. Persistence + auth services. No IIntegrationEventMapper is registered yet — no
-        //    Identity domain event has a public integration-event contract today — so the
-        //    outbox dispatcher just polls an always-empty table, same as every other module.
+        // 2. Persistence + auth services. The mapper is registered as its concrete type — every
+        //    module has its own IIntegrationEventMapper, so the interface can't be a single DI
+        //    registration. It translates user creation into identity.user-changed, which
+        //    Budgeting's user_lookup replica consumes; before it existed this outbox was
+        //    permanently empty, and anything relying on that history must backfill (see
+        //    Budgeting's BackfillBudgetingUserLookup migration).
+        services.AddScoped<IdentityIntegrationEventMapper>();
         services.AddHostedService<OutboxDispatcher<IdentityDbContext>>();
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();

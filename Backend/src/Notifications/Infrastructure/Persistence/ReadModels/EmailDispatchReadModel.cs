@@ -20,6 +20,7 @@ public sealed class EmailDispatchReadModel
     public Guid TemplateId { get; set; }
     public string TemplateName { get; set; } = null!;
     public string ServiceType { get; set; } = null!;
+    public Guid? ClientId { get; set; }
     public string? ClientName { get; set; }
     public string Status { get; set; } = null!;
     public DateTimeOffset SentAtUtc { get; set; }
@@ -43,6 +44,7 @@ public sealed class EmailDispatchReadModelConfiguration : IEntityTypeConfigurati
         builder.Property(d => d.TemplateId).HasColumnName("template_id");
         builder.Property(d => d.TemplateName).HasColumnName("template_name");
         builder.Property(d => d.ServiceType).HasColumnName("service_type");
+        builder.Property(d => d.ClientId).HasColumnName("client_id");
         builder.Property(d => d.ClientName).HasColumnName("client_name");
         builder.Property(d => d.Status).HasColumnName("status");
         builder.Property(d => d.SentAtUtc).HasColumnName("sent_at_utc");

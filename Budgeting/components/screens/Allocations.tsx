@@ -4,7 +4,8 @@ import { colors, fonts, rowSurface } from "@/lib/theme";
 import { MonoTag } from "@/components/ui/Chip";
 import { MetricTile } from "@/components/ui/MetricTile";
 import { formatCad } from "@/lib/api/format";
-import { allocations, budgetCodes, periods } from "@/lib/data";
+import type { BudgetPeriod } from "@/lib/types";
+import { allocations, budgetCodes } from "@/lib/data";
 import {
   EmptyNote,
   MockTag,
@@ -20,10 +21,12 @@ import {
 // be justified into a code, so a non-zero remainder is work outstanding, not slack.
 
 export default function Allocations({
+  periods,
   periodId,
   onSelectPeriod,
   onOpenCode,
 }: {
+  periods: BudgetPeriod[];
   periodId: string;
   onSelectPeriod: (id: string) => void;
   onOpenCode: (id: string) => void;
@@ -37,9 +40,9 @@ export default function Allocations({
 
   return (
     <Screen
-      eyebrow={`Planning · ${periodLabel(periodId)}`}
+      eyebrow={`Planning · ${periodLabel(periods, periodId)}`}
       title="Allocations"
-      right={<PeriodPicker periodId={periodId} onSelect={onSelectPeriod} />}
+      right={<PeriodPicker periods={periods} periodId={periodId} onSelect={onSelectPeriod} />}
     >
       <div
         style={{
@@ -92,7 +95,7 @@ export default function Allocations({
 
       {rows.length === 0 ? (
         <EmptyNote>
-          Nothing allocated in {periodLabel(periodId)} yet — this period is still a draft.
+          Nothing allocated in {periodLabel(periods, periodId)} yet — this period is still a draft.
         </EmptyNote>
       ) : (
         <>

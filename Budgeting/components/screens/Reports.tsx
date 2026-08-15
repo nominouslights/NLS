@@ -4,6 +4,7 @@ import { colors, fonts } from "@/lib/theme";
 import { Panel, SectionLabel } from "@/components/ui/Panel";
 import { StatusChip } from "@/components/ui/Chip";
 import { formatCad } from "@/lib/api/format";
+import type { BudgetPeriod } from "@/lib/types";
 import { actuals, budgetCodes, varianceKind } from "@/lib/data";
 import { MockTag, Num, Screen, periodLabel } from "@/components/screens/shared";
 
@@ -20,7 +21,13 @@ const MIX_BENCHMARK: { code: string; low: number; high: number }[] = [
   { code: "ZBB-COMM-01", low: 2, high: 5 },
 ];
 
-export default function Reports({ periodId }: { periodId: string }) {
+export default function Reports({
+  periods,
+  periodId,
+}: {
+  periods: BudgetPeriod[];
+  periodId: string;
+}) {
   const revenueCodes = new Set(
     budgetCodes.filter((c) => c.category === "Revenue").map((c) => c.code),
   );
@@ -28,7 +35,7 @@ export default function Reports({ periodId }: { periodId: string }) {
   const totalRevenue = revenueLines.reduce((sum, r) => sum + r.actual, 0);
 
   return (
-    <Screen eyebrow={`Performance · ${periodLabel(periodId)}`} title="Reports" right={<MockTag />}>
+    <Screen eyebrow={`Performance · ${periodLabel(periods, periodId)}`} title="Reports" right={<MockTag />}>
       <Panel style={{ marginBottom: 12 }}>
         <SectionLabel>Revenue mix vs. benchmark</SectionLabel>
         <div

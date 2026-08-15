@@ -10,4 +10,11 @@ public sealed class ProjectionOptions
 
     /// <summary>Journal rows fetched per poll.</summary>
     public int BatchSize { get; init; } = 200;
+
+    /// <summary>
+    /// Cap on how far the poll loop backs off while consecutive polls keep failing
+    /// (<c>PollBackoff</c>). A projection that cannot reach the database gains nothing by
+    /// asking again every <see cref="PollInterval"/>; the journal is durable and waits.
+    /// </summary>
+    public int MaxPollBackoffSeconds { get; init; } = 60;
 }

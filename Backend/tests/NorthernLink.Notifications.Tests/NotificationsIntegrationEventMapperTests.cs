@@ -41,6 +41,7 @@ public class NotificationsIntegrationEventMapperTests
             "Community pickup",
             NotificationServiceType.Community,
             null,
+            null,
             [new DispatchRecipient { Email = "a@example.com", PassengerName = "A", Status = DispatchRecipientStatus.Sent }]).Value;
 
         Assert.Null(_mapper.Map(new EmailDispatchRecordedDomainEvent(dispatch.Id, dispatch.TenantId), dispatch));

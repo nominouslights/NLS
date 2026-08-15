@@ -1,28 +1,74 @@
 "use client";
 
+import { useState } from "react";
 import { colors, fonts, rowSurface, statusMeta } from "@/lib/theme";
+import type { BudgetPeriod } from "@/lib/types";
 import { StatusChip } from "@/components/ui/Chip";
+import { ActionButton } from "@/components/ui/Button";
 import { formatCad } from "@/lib/api/format";
 import { formatUtcDate } from "@/lib/api/format";
-import { periods } from "@/lib/data";
-import { Num, Screen, MockTag } from "@/components/screens/shared";
+import type { BudgetPeriodRecord } from "@/lib/api/budgeting";
+import { ErrorNotice } from "@/components/ErrorNotice";
+import BudgetPeriodFormModal from "@/components/BudgetPeriodFormModal";
+import { EmptyNote, Num, Screen } from "@/components/screens/shared";
 
-// Budget periods and where each one stands. Draft → Open → Locked, mapped onto the shared
-// status kinds: a locked period is finished ("off"), an open one is the live plan ("ontime"),
-// a draft is informational until someone opens it ("info"). Each row's kind is carried in the
-// data (BudgetPeriod.pk), so this screen never picks a colour itself.
+// Budget periods and where each one stands — the first screen on real data
+// (GET /api/budgeting/periods; Console owns the fetch). Draft → Open → Locked, mapped onto the
+// shared status kinds: a locked period is finished ("off"), an open one is the live plan
+// ("ontime"), a draft is informational until someone opens it ("info"). Each row's kind is
+// carried on the row (BudgetPeriod.pk, derived in lib/api/budgeting.ts), so this screen never
+// picks a colour itself.
+//
+// Planned/Allocated figures are honest zeros until the allocations slice of Stage 6.1 lands —
+// the wire has no such fields yet.
 
 export default function BudgetPeriods({
+  periods,
+  error,
+  onRetry,
   periodId,
   onSelectPeriod,
+  onCreated,
 }: {
+  /** null while the first load is in flight. */
+  periods: BudgetPeriod[] | null;
+  error: { message: string; code: string } | null;
+  onRetry: () => void;
   periodId: string;
   onSelectPeriod: (id: string) => void;
+  onCreated: (records: BudgetPeriodRecord[], id: string) => void;
 }) {
+  const [showCreate, setShowCreate] = useState(false);
+
   return (
-    <Screen eyebrow="Planning" title="Budget Periods" right={<MockTag />}>
+    <Screen
+      eyebrow="Planning"
+      title="Budget Periods"
+      right={
+        <ActionButton variant="primary" onClick={() => setShowCreate(true)}>
+          + NEW PERIOD
+        </ActionButton>
+      }
+    >
+      {error && (
+        <div style={{ marginBottom: 12 }}>
+          <ErrorNotice title="Couldn't load budget periods" message={error.message} code={error.code} />
+          <div style={{ marginTop: 9 }}>
+            <ActionButton onClick={onRetry}>RETRY</ActionButton>
+          </div>
+        </div>
+      )}
+
+      {periods === null && !error && (
+        <EmptyNote>Loading budget periods…</EmptyNote>
+      )}
+
+      {periods !== null && periods.length === 0 && !error && (
+        <EmptyNote>No budget periods yet — create one to start planning.</EmptyNote>
+      )}
+
       <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-        {periods.map((p) => {
+        {(periods ?? []).map((p) => {
           const active = p.id === periodId;
           const m = statusMeta(p.pk);
           const unallocated = p.planned - p.allocated;
@@ -76,6 +122,10 @@ export default function BudgetPeriods({
           );
         })}
       </div>
+
+      {showCreate && (
+        <BudgetPeriodFormModal onClose={() => setShowCreate(false)} onSaved={onCreated} />
+      )}
     </Screen>
   );
 }

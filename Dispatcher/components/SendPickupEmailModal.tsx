@@ -95,20 +95,25 @@ export default function SendPickupEmailModal({
   const [lastResult, setLastResult] = useState<EmailDispatchRecord | null>(null);
 
   // Active templates + this trip's dispatch history, loaded together on mount.
-  // Default template: first active for the trip's client → else first active
-  // for the trip's service type → else none (gold notice below the select).
+  // The dropdown offers only COMPATIBLE templates (same service type, and either
+  // service-wide or pinned to this trip's client) — an incompatible choice now
+  // 400s server-side, so it is never offered here.
   useEffect(() => {
     let active = true;
     Promise.all([listEmailTemplates(), listTripEmailDispatches(trip.id)]).then(
       ([tpls, hist]) => {
         if (!active) return;
-        const activeTpls = tpls.filter((t) => t.isActive);
-        setTemplates(activeTpls);
+        const compatible = tpls.filter(
+          (t) => t.isActive && t.serviceType === trip.serviceType && (!t.clientId || t.clientId === trip.clientId),
+        );
+        setTemplates(compatible);
         setHistory(hist);
         setLoadError(null);
-        const byClient = trip.clientId ? activeTpls.find((t) => t.clientId === trip.clientId) : undefined;
-        const byService = activeTpls.find((t) => t.serviceType === trip.serviceType);
-        setTemplateId((byClient ?? byService)?.id ?? "");
+        // Default pick only — the dispatcher can override in the dropdown.
+        // Rule: client-pinned beats service-wide; within each group the most
+        // recently updated template wins (updatedAtUtc desc).
+        const newestFirst = [...compatible].sort((a, b) => b.updatedAtUtc.localeCompare(a.updatedAtUtc));
+        setTemplateId((newestFirst.find((t) => t.clientId) ?? newestFirst[0])?.id ?? "");
       },
       (e) => {
         if (active) setLoadError(e instanceof ApiError ? e.message : "Failed to load templates and send history.");
@@ -203,6 +208,7 @@ export default function SendPickupEmailModal({
         tripDate: shortDateLabel(trip.serviceDate),
         pickupTime: hhmm(trip.windowStart),
         route: trip.routeName || corridorLabel(trip),
+        clientId: trip.clientId ?? null, // validated server-side against the template's client pin
         clientName: trip.clientName,
         recipients: recipients.map((p) => ({
           email: (p.contact ?? "").trim(),

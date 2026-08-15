@@ -52,5 +52,13 @@ public static class Roles
     /// </summary>
     public static readonly string[] BudgetAccess = [Owner, Accountant];
 
+    /// <summary>
+    /// Dispatch-capable internal staff — the roles behind the <c>/api/notifications</c>
+    /// boundary (email templates and passenger pickup emails). Deliberately excludes
+    /// Accountant, BoardMember, Driver, and <see cref="LegacyAdmin"/>, for the same reason as
+    /// <see cref="BudgetAccess"/>: widening access must be a deliberate edit to this list.
+    /// </summary>
+    public static readonly string[] DispatchAccess = [Owner, Dispatcher, Supervisor];
+
     public static bool IsKnown(string role) => Array.IndexOf(Internal, role) >= 0;
 }

@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using NorthernLink.Shared.EventBus;
+using NorthernLink.Shared.Hosting;
 
 namespace NorthernLink.Shared.Persistence.Auditing;
 
@@ -33,6 +34,9 @@ public sealed class OutboxDispatcher<TDbContext>(
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        var backoff = new PollBackoff(
+            options.PollInterval, TimeSpan.FromSeconds(options.MaxPollBackoffSeconds));
+
         while (!stoppingToken.IsCancellationRequested)
         {
             // Delay BEFORE the first poll, not after — one interval of head start so
@@ -40,9 +44,10 @@ public sealed class OutboxDispatcher<TDbContext>(
             // The old silent-loss consequence of losing that race is gone (publishes are
             // now mandatory + confirmed, so an unroutable message throws and retries),
             // but the head start still spares the first events a pointless failed attempt.
+            // After a failure this is the backed-off delay instead of the interval.
             try
             {
-                await Task.Delay(options.PollInterval, stoppingToken);
+                await Task.Delay(backoff.NextDelay, stoppingToken);
             }
             catch (OperationCanceledException)
             {
@@ -52,6 +57,13 @@ public sealed class OutboxDispatcher<TDbContext>(
             try
             {
                 await DispatchPendingAsync(stoppingToken);
+
+                if (backoff.RecordSuccess() is { } recoveredAfter)
+                {
+                    logger.LogInformation(
+                        "Outbox poll for {DbContext} recovered after {Failures} consecutive failures",
+                        typeof(TDbContext).Name, recoveredAfter);
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -59,7 +71,12 @@ public sealed class OutboxDispatcher<TDbContext>(
             }
             catch (Exception exception)
             {
-                logger.LogError(exception, "Outbox poll for {DbContext} failed; retrying next interval", typeof(TDbContext).Name);
+                var failure = backoff.RecordFailure();
+                logger.Log(
+                    failure.Level,
+                    exception,
+                    "Outbox poll for {DbContext} failed {Failures}x consecutively; retrying in {RetryDelay}",
+                    typeof(TDbContext).Name, failure.ConsecutiveFailures, failure.RetryDelay);
             }
         }
     }

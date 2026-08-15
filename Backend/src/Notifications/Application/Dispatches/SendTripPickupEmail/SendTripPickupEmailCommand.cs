@@ -8,9 +8,11 @@ namespace NorthernLink.Notifications.Application.Dispatches.SendTripPickupEmail;
 /// per-recipient outcomes as history. <paramref name="DispatchId"/> is client-generated —
 /// replaying the same id returns the stored dispatch without re-sending. Trip context
 /// (<paramref name="TripId"/>, <paramref name="TripNumber"/>, <paramref name="ManifestId"/>,
-/// <paramref name="ClientName"/>, the formatted <paramref name="TripDate"/> /
-/// <paramref name="PickupTime"/> / <paramref name="Route"/>) arrives as opaque snapshots
-/// composed by the dispatcher's screen — Notifications never queries Trips or Clients.
+/// <paramref name="ClientId"/>, <paramref name="ClientName"/>, the formatted
+/// <paramref name="TripDate"/> / <paramref name="PickupTime"/> / <paramref name="Route"/>)
+/// arrives as opaque snapshots composed by the dispatcher's screen — Notifications never
+/// queries Trips or Clients. <paramref name="ClientId"/> (null = client-less trip) is
+/// validated against the template's client pin before anything is sent.
 /// </summary>
 public sealed record SendTripPickupEmailCommand(
     Guid TenantId,
@@ -23,6 +25,7 @@ public sealed record SendTripPickupEmailCommand(
     string TripDate,
     string PickupTime,
     string Route,
+    Guid? ClientId,
     string? ClientName,
     IReadOnlyList<RecipientInput> Recipients) : ICommand<EmailDispatchResponse>;
 

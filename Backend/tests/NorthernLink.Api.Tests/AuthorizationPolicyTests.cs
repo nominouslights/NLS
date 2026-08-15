@@ -74,6 +74,33 @@ public class AuthorizationPolicyTests
         Assert.False(await Allows(AuthorizationPolicies.BudgetAccess, Roles.LegacyAdmin));
     }
 
+    [Theory]
+    [InlineData(Roles.Owner)]
+    [InlineData(Roles.Dispatcher)]
+    [InlineData(Roles.Supervisor)]
+    public async Task DispatchAccess_admits_the_dispatch_capable_roles(string role) =>
+        Assert.True(await Allows(AuthorizationPolicies.DispatchAccess, role));
+
+    /// <summary>
+    /// The /api/notifications boundary: templates and passenger emails are dispatch work.
+    /// The remaining internal roles are enumerated so that widening DispatchAccess is a
+    /// deliberate edit to this list rather than a silent side effect.
+    /// </summary>
+    [Theory]
+    [InlineData(Roles.Accountant)]
+    [InlineData(Roles.BoardMember)]
+    [InlineData(Roles.Driver)]
+    public async Task DispatchAccess_denies_every_other_role(string role) =>
+        Assert.False(await Allows(AuthorizationPolicies.DispatchAccess, role));
+
+    [Fact]
+    public async Task DispatchAccess_never_accepts_the_legacy_Admin_literal()
+    {
+        // The notifications group gained this policy after RenameAdminRoleToOwner ran, so
+        // unlike AdminOnly there is no transitional window to honour here.
+        Assert.False(await Allows(AuthorizationPolicies.DispatchAccess, Roles.LegacyAdmin));
+    }
+
     [Fact]
     public async Task AdminOnly_admits_Owner() =>
         Assert.True(await Allows(AuthorizationPolicies.AdminOnly, Roles.Owner));
@@ -97,6 +124,7 @@ public class AuthorizationPolicyTests
     [Theory]
     [InlineData(AuthorizationPolicies.AdminOnly)]
     [InlineData(AuthorizationPolicies.BudgetAccess)]
+    [InlineData(AuthorizationPolicies.DispatchAccess)]
     public async Task Unauthenticated_principals_satisfy_nothing(string policy)
     {
         var anonymous = new ClaimsPrincipal(new ClaimsIdentity());
@@ -109,6 +137,7 @@ public class AuthorizationPolicyTests
     [Theory]
     [InlineData(AuthorizationPolicies.AdminOnly)]
     [InlineData(AuthorizationPolicies.BudgetAccess)]
+    [InlineData(AuthorizationPolicies.DispatchAccess)]
     public void Every_policy_name_constant_resolves_to_a_registered_policy(string policy)
     {
         // A name constant with no matching AddPolicy call throws only when a request first hits

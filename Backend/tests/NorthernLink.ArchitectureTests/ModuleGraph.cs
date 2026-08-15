@@ -13,7 +13,7 @@ public static class ModuleGraph
     public static readonly string[] DomainNames =
     [
         "Identity", "Trips", "Drivers", "Fleet", "Clients",
-        "Billing", "Incidents", "Notifications", "Grocery",
+        "Billing", "Incidents", "Notifications", "Grocery", "Budgeting",
     ];
 
     /// <summary>src/ folders that are not domain libraries.</summary>

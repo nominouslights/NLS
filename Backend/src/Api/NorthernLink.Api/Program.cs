@@ -7,24 +7,35 @@ using NorthernLink.Api.Tenancy;
 using NorthernLink.Shared;
 using NorthernLink.Api.HostDefaults;
 using NorthernLink.Shared.Kernel;
+using NorthernLink.Shared.Persistence.Migrations;
 using NorthernLink.Shared.Tenancy;
 using NorthernLink.Billing.Infrastructure;
 using NorthernLink.Billing.Infrastructure.Endpoints;
+using NorthernLink.Billing.Infrastructure.Persistence;
+using NorthernLink.Budgeting.Infrastructure;
+using NorthernLink.Budgeting.Infrastructure.Endpoints;
+using NorthernLink.Budgeting.Infrastructure.Persistence;
 using NorthernLink.Clients.Infrastructure;
 using NorthernLink.Clients.Infrastructure.Endpoints;
+using NorthernLink.Clients.Infrastructure.Persistence;
 using NorthernLink.Drivers.Infrastructure;
 using NorthernLink.Drivers.Infrastructure.Endpoints;
+using NorthernLink.Drivers.Infrastructure.Persistence;
 using NorthernLink.Fleet.Infrastructure;
 using NorthernLink.Fleet.Infrastructure.Endpoints;
+using NorthernLink.Fleet.Infrastructure.Persistence;
 using NorthernLink.Grocery.Infrastructure;
 using NorthernLink.Identity.Infrastructure;
 using NorthernLink.Identity.Infrastructure.Auth;
 using NorthernLink.Identity.Infrastructure.Endpoints;
+using NorthernLink.Identity.Infrastructure.Persistence;
 using NorthernLink.Incidents.Infrastructure;
 using NorthernLink.Notifications.Infrastructure;
 using NorthernLink.Notifications.Infrastructure.Endpoints;
+using NorthernLink.Notifications.Infrastructure.Persistence;
 using NorthernLink.Trips.Infrastructure;
 using NorthernLink.Trips.Infrastructure.Endpoints;
+using NorthernLink.Trips.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -43,6 +54,10 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 // real mechanism, not a dev hack.
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ITenantContext, JwtTenantContext>();
+
+// The "who" beside the "which tenant" — read from the signed token, never from a request body,
+// so an audit column cannot be forged by its own caller. See ICurrentActor.
+builder.Services.AddScoped<ICurrentActor, JwtCurrentActor>();
 
 var jwtSigningKey = RequiredEnvironmentVariable.Get("Identity__JwtSigningKey");
 
@@ -77,9 +92,25 @@ builder.Services
     .AddFleet(builder.Configuration)
     .AddClients(builder.Configuration)
     .AddBilling(builder.Configuration)
+    .AddBudgeting(builder.Configuration)
     .AddIncidents(builder.Configuration)
     .AddNotifications(builder.Configuration)
     .AddGrocery(builder.Configuration);
+
+// Schema migrations, applied under one advisory lock before any module's outbox dispatcher
+// starts polling. Registered here rather than per-module: which schemas exist and in what order
+// they migrate is a host concern, and hosted services start in registration order. Off unless
+// Migrations:RunOnStartup says otherwise — see MigrationOptions for why the default is false.
+builder.Services.AddModuleMigrations(
+    builder.Configuration,
+    typeof(IdentityDbContext),
+    typeof(TripsDbContext),
+    typeof(DriversDbContext),
+    typeof(FleetDbContext),
+    typeof(ClientsDbContext),
+    typeof(BillingDbContext),
+    typeof(BudgetingDbContext),
+    typeof(NotificationsDbContext));
 
 var app = builder.Build();
 
@@ -97,6 +128,7 @@ app.MapTripsEndpoints();
 app.MapDriversEndpoints();
 app.MapClientsEndpoints();
 app.MapBillingEndpoints();
+app.MapBudgetingEndpoints();
 app.MapNotificationsEndpoints();
 
 await app.RunAsync();

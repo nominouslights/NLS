@@ -2,9 +2,9 @@
 
 import type { ReactNode } from "react";
 import { chipStyle, colors, fonts, statusMeta, type StatusKind } from "@/lib/theme";
+import type { BudgetPeriod } from "@/lib/types";
 import { PageHeader } from "@/components/ui/Panel";
 import { StatusChip } from "@/components/ui/Chip";
-import { periods } from "@/lib/data";
 
 // The page-shell convention every screen in both consoles follows: a fixed header block at
 // 20px 26px 14px, then a scrolling body at 0 26px 26px that owns the overflow. The
@@ -37,14 +37,17 @@ export function Screen({
 
 /**
  * Period switcher for the header's right slot. A row of pills rather than ui/PeriodNav's
- * ‹ / › stepper, because budget periods are a short fixed list to pick from, not an unbounded
+ * ‹ / › stepper, because budget periods are a short list to pick from, not an unbounded
  * calendar to step through. Reuses PeriodNav's pill treatment so it still reads as the same
- * control family.
+ * control family. The list comes from the caller — Console fetches it from the real API and
+ * threads it down — so this file no longer imports the mock layer.
  */
 export function PeriodPicker({
+  periods,
   periodId,
   onSelect,
 }: {
+  periods: BudgetPeriod[];
   periodId: string;
   onSelect: (id: string) => void;
 }) {
@@ -77,9 +80,9 @@ export function PeriodPicker({
   );
 }
 
-/** A period's display label, for headers and empty states. */
-export function periodLabel(periodId: string): string {
-  return periods.find((p) => p.id === periodId)?.label ?? periodId;
+/** A period's display label, for headers and empty states. "—" when nothing is selected yet. */
+export function periodLabel(periods: BudgetPeriod[], periodId: string): string {
+  return periods.find((p) => p.id === periodId)?.label ?? (periodId || "—");
 }
 
 /**
@@ -198,7 +201,7 @@ export function MockTag() {
         color: colors.textDim,
         letterSpacing: ".04em",
       }}
-      title="Mock data — the Budgeting API lands in Stage 6.1"
+      title="Mock data — replaced as Stage 6.1 endpoints land (periods are already real)"
     >
       MOCK
     </span>

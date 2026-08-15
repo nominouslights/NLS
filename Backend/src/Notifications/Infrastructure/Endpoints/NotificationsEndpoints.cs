@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Shared.Tenancy;
 using NorthernLink.Notifications.Application.Dispatches.GetTripEmailHistory;
@@ -27,7 +28,10 @@ public static class NotificationsEndpoints
 {
     public static IEndpointRouteBuilder MapNotificationsEndpoints(this IEndpointRouteBuilder app)
     {
-        var notifications = app.MapGroup("/api/notifications").RequireAuthorization();
+        // DispatchAccess (Owner, Dispatcher, Supervisor): authoring templates and emailing
+        // passengers is dispatch work — registered gateway-side in AuthorizationPolicyRegistration.
+        var notifications = app.MapGroup("/api/notifications")
+            .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
 
         // Templates.
         notifications.MapGet("templates", GetTemplates);
@@ -182,6 +186,7 @@ public static class NotificationsEndpoints
             request.TripDate ?? string.Empty,
             request.PickupTime ?? string.Empty,
             request.Route ?? string.Empty,
+            request.ClientId,
             request.ClientName,
             (request.Recipients ?? [])
                 .Select(r => new RecipientInput(
@@ -233,7 +238,8 @@ public sealed record PreviewEmailTemplateRequest(
 /// <summary>
 /// Request body for POST /api/notifications/emails/trip-pickup. DispatchId is a
 /// client-generated GUID — the idempotency key; replaying it returns the stored dispatch
-/// without re-sending. Trip fields are opaque snapshots composed by the dispatcher's screen.
+/// without re-sending. Trip fields are opaque snapshots composed by the dispatcher's screen;
+/// ClientId (null = client-less trip) is validated against the template's client pin.
 /// Recipients: 1–16.
 /// </summary>
 public sealed record SendTripPickupEmailRequest(
@@ -246,6 +252,7 @@ public sealed record SendTripPickupEmailRequest(
     string? TripDate,
     string? PickupTime,
     string? Route,
+    Guid? ClientId,
     string? ClientName,
     List<RecipientRequest>? Recipients);
 
