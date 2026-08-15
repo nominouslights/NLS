@@ -1,0 +1,33 @@
+# Root build context — used only by Backend/Dockerfile, which needs Directory.*.props plus
+# Backend/. Everything else in the workspace is excluded so the context stays small and a
+# frontend's node_modules never ends up in the API image's build cache key.
+
+.git
+.github
+.claude
+.vscode
+.idea
+
+# Sibling apps: each has its own Dockerfile and its own build context.
+Dispatcher/
+Website/
+Budgeting/
+CommunityMobile/
+AppHost/
+k8s/
+
+# .NET build output
+**/bin/
+**/obj/
+**/TestResults/
+
+# Secrets and local-only files
+**/.env
+**/.env.*
+**/*.local.json
+CREDENTIALS.local.md
+**/launchSettings.json
+
+*.md
+*.pdf
+aspire.config.json

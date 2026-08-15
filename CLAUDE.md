@@ -12,10 +12,12 @@ frontend or backend.**
 | `Backend/` | The one shared API — one class library per domain, composed by the API gateway | .NET 10, CQRS/DDD, PostgreSQL (DigitalOcean managed, no local instance), RabbitMQ |
 | `Dispatcher/` | Admin Web App (Dispatch Console) — currently a frontend-only prototype on mock data | Next.js 16, React 19 |
 | `Website/` | Public marketing site (northernlink shuttle & cargo) — static/prototype, no API calls yet | Next.js 16, React 19 |
-| `Budgeting/` | Zero-Based Budgeting console (Track 6) — real auth + role gate, mock data until Stage 6.1. Deliberately holds **copies** of Dispatcher's design system — see its own `CLAUDE.md` | Next.js 16, React 19 |
+| `Budgeting/` | Zero-Based Budgeting console (Track 6) — real auth + role gate; budget periods and codes are live against the API, allocations/actuals/variance still mock. Deliberately holds **copies** of Dispatcher's design system — see its own `CLAUDE.md` | Next.js 16, React 19 |
+| `CommunityMobile/` | Community Mobile passenger app — design mockup only: 11 screens on hardcoded mock data (`lib/data/mock_data.dart`), no API/auth wiring, not orchestrated by `aspire run` | Flutter 3.29, Dart 3.7 |
 | `AppHost/` | Local dev orchestrator — starts Postgres, RabbitMQ, the API, and Dispatcher together. Platform-level, not part of Backend — it depends on Backend and Dispatcher, not the other way around | .NET 10, Aspire |
+| `k8s/` | Deployment manifests for the four container images (API + three frontends) — `base/` plus `overlays/{staging,production}`. Read `k8s/README.md` before changing anything in here | Kustomize |
 
-Future app folders (Driver Field App, Client Web App/Alamos, Community Mobile, Owner Desktop)
+Future app folders (Driver Field App, Client Web App/Alamos, Owner Desktop)
 will be added as siblings, and `AppHost/` will grow to orchestrate them too.
 
 File-level index: the `code-map` skill (`.claude/skills/code-map/`) — read the reference file for
@@ -128,3 +130,57 @@ invents endpoint shapes.
 - Scoped to **Owner and Accountant**. The client-side gate is a UX gate — the security boundary
   is the `BudgetAccess` policy, registered in the gateway and attached to budgeting endpoints
   when Stage 6.1 creates them. Read `Budgeting/CLAUDE.md` before working in here.
+
+### CommunityMobile (`CommunityMobile/`)
+- `flutter run -d chrome` (or an iOS/Android simulator) — the only app not started by `aspire run`
+  (Aspire has no Flutter primitive, and the mockup has no API to wait for). `flutter analyze` and
+  `flutter build web` are the CI-style checks; warnings are treated as the bar, same as Backend.
+- Design mockup only: every value on screen comes from `lib/data/mock_data.dart` (the Flutter
+  equivalent of `Dispatcher/lib/data.ts`), theme tokens live in `lib/theme/nl_theme.dart` — the
+  palette is the supplied mobile design's (`#005493` primary, `#E8A020` gold), deliberately NOT a
+  copy of Dispatcher's `theme.ts`, but the four protected status hexes and the
+  color+icon+label rule apply unchanged (`lib/widgets/status_chip.dart`).
+- Barlow fonts are bundled as TTF assets (`assets/fonts/`) rather than fetched at runtime, so the
+  app renders identically offline. Text avoids glyphs Barlow lacks (e.g. `→` is an `Icon`, see
+  `lib/widgets/route_text.dart`).
+
+## Containers & Deployment
+
+Four deployable images — the API and the three Next.js frontends. `CommunityMobile/` is not a
+server workload, and `AppHost/` stays a local-dev orchestrator: neither is containerized, and
+`AppHost.cs` being gitignored means CI could not build it anyway.
+
+- `docker build -f Backend/Dockerfile -t northernlink-api .` — **build context is this root**,
+  not `Backend/`: MSBuild walks up to find `Directory.Build.props`/`Directory.Packages.props`,
+  which live here. The Dockerfile publishes the API csproj alone (Shared + the ten domain
+  libraries, no test projects) and never the solution or the root.
+- `docker build -t northernlink-dispatcher Dispatcher/` (likewise `Website/`, `Budgeting/`) —
+  each app's own directory is its context; there is no npm workspace and each has its own
+  lockfile.
+- `.github/workflows/build.yml` runs `dotnet test`, Budgeting's Vitest suite, then builds and
+  pushes all four to `ghcr.io/<owner>/northernlink-*`. Deployment stays manual:
+  `kubectl apply -k k8s/overlays/<env>`.
+
+Four things that will bite whoever touches this next:
+
+- **Frontend images are configured at build time, not at runtime.** `next build` resolves
+  rewrites into `routes-manifest.json` and inlines every `NEXT_PUBLIC_*` into the client bundle,
+  so `API_PROXY_TARGET` set on a running container does nothing. The images bake
+  `http://northernlink-api:8080`; per-environment resolution comes from Kubernetes DNS, since a
+  bare Service name resolves inside the pod's own namespace. That is why the frontend Deployments
+  carry no `env:` block at all.
+- **The API's Service is ClusterIP and must never gain an Ingress rule.** There is no CORS
+  configuration anywhere in the stack by design — browsers reach the API only through a
+  frontend's own origin via the server-side `/api/*` proxy.
+- **The API runs one replica, `strategy: Recreate`.** Each pod hosts eight `OutboxDispatcher`
+  background services plus `TripGenerationWorker`, and `OutboxDispatcher` still has no
+  `FOR UPDATE SKIP LOCKED` (its doc comment says so). Two replicas double-publish events and
+  duplicate generated trips.
+- **`Migrations__RunOnStartup` defaults to `false`, deliberately.** `ModuleMigrationRunner`
+  (`Backend/src/Shared/Persistence/Migrations/`) applies all eight module schemas under one
+  Postgres advisory lock, but only when switched on — the k8s ConfigMap does, local runs do not,
+  because every environment shares the one DigitalOcean database and a feature branch must not be
+  able to migrate it. A failure is logged and leaves the pod permanently unready rather than
+  crash-looping. `/health` (readiness, migrations + database) and `/alive` (liveness, pure
+  process check) now map in **every** environment — they used to be development-only, which would
+  have made both a 404 exactly where probes need them.

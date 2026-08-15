@@ -31,6 +31,7 @@ public sealed class EmailDispatchConfiguration : IEntityTypeConfiguration<EmailD
             .HasConversion<string>()
             .HasMaxLength(32);
 
+        builder.Property(d => d.ClientId).HasColumnName("client_id");
         builder.Property(d => d.ClientName).HasColumnName("client_name").HasMaxLength(200);
 
         builder.Property(d => d.Status)

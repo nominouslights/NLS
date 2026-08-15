@@ -30,6 +30,7 @@ public static class TripsEndpoints
         manifests.MapPut("{id:guid}", UpdateManifest);
 
         app.MapTripPlanningEndpoints();
+        app.MapShipmentEndpoints();
 
         return app;
     }

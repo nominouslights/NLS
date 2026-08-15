@@ -14,6 +14,7 @@ public sealed record EmailDispatchResponse(
     Guid TemplateId,
     string TemplateName,
     string ServiceType,
+    Guid? ClientId,
     string Status,
     DateTimeOffset SentAtUtc,
     List<RecipientResult> Recipients);

@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Unit tests for the Budgeting library's Domain and Application layers — in-memory
+       fakes, no EF/Postgres, no HTTP. Infrastructure is exercised end-to-end against the
+       real database instead. -->
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Budgeting\NorthernLink.Budgeting.csproj" />
+  </ItemGroup>
+
+</Project>

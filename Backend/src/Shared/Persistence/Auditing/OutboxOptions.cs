@@ -16,4 +16,11 @@ public sealed class OutboxOptions
     /// from polling, visible to operators. There is no dead-letter table yet.
     /// </summary>
     public int MaxAttempts { get; init; } = 8;
+
+    /// <summary>
+    /// Cap on how far the poll loop backs off while consecutive polls keep failing
+    /// (<c>PollBackoff</c>). This is about the loop, not a row: a broker or database outage
+    /// fails every poll, and retrying it every <see cref="PollInterval"/> only floods the log.
+    /// </summary>
+    public int MaxPollBackoffSeconds { get; init; } = 60;
 }

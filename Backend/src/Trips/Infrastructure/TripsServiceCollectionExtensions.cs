@@ -52,6 +52,21 @@ using NorthernLink.Trips.Domain.Manifests.Events;
 using NorthernLink.Trips.Infrastructure.Generation;
 using NorthernLink.Trips.Infrastructure.Persistence;
 using NorthernLink.Trips.Infrastructure.Persistence.Projections;
+using NorthernLink.Trips.Application.Shipments;
+using NorthernLink.Trips.Application.Shipments.AddLeg;
+using NorthernLink.Trips.Application.Shipments.BulkAssign;
+using NorthernLink.Trips.Application.Shipments.Cancel;
+using NorthernLink.Trips.Application.Shipments.CloseWithoutBilling;
+using NorthernLink.Trips.Application.Shipments.GetById;
+using NorthernLink.Trips.Application.Shipments.GetShipments;
+using NorthernLink.Trips.Application.Shipments.RecordDelivery;
+using NorthernLink.Trips.Application.Shipments.RecordLegDrop;
+using NorthernLink.Trips.Application.Shipments.RecordLegPickup;
+using NorthernLink.Trips.Application.Shipments.Register;
+using NorthernLink.Trips.Application.Shipments.RemoveLeg;
+using NorthernLink.Trips.Application.Shipments.SetBilling;
+using NorthernLink.Trips.Application.Shipments.SetSecured;
+using NorthernLink.Trips.Application.Shipments.Update;
 
 namespace NorthernLink.Trips.Infrastructure;
 
@@ -102,6 +117,9 @@ public static class TripsServiceCollectionExtensions
         services.AddScoped<IClientLookupRepository, ClientLookupRepository>();
         services.AddScoped<ITripBillingRepository, TripBillingRepository>();
         services.AddScoped<ITripNumberGenerator, TripNumberGenerator>();
+        services.AddScoped<IShipmentRepository, ShipmentRepository>();
+        services.AddScoped<IShipmentReadService, ShipmentReadService>();
+        services.AddScoped<IShipmentNumberGenerator, ShipmentNumberGenerator>();
 
         // 3. Command/query handlers — registered explicitly, one line per handler.
         services.AddScoped<ICommandHandler<CreateTripManifestCommand, Guid>, CreateTripManifestCommandHandler>();
@@ -122,6 +140,20 @@ public static class TripsServiceCollectionExtensions
         services.AddScoped<IQueryHandler<GetTripsQuery, IReadOnlyList<TripResponse>>, GetTripsQueryHandler>();
         services.AddScoped<IQueryHandler<GetTripByIdQuery, TripResponse>, GetTripByIdQueryHandler>();
         services.AddScoped<IQueryHandler<GetTripActivityQuery, IReadOnlyList<TripActivityEntryResponse>>, GetTripActivityQueryHandler>();
+        services.AddScoped<ICommandHandler<RegisterShipmentCommand, Guid>, RegisterShipmentCommandHandler>();
+        services.AddScoped<ICommandHandler<UpdateShipmentCommand>, UpdateShipmentCommandHandler>();
+        services.AddScoped<ICommandHandler<AddShipmentLegCommand>, AddShipmentLegCommandHandler>();
+        services.AddScoped<ICommandHandler<RemoveShipmentLegCommand>, RemoveShipmentLegCommandHandler>();
+        services.AddScoped<ICommandHandler<BulkAssignShipmentsCommand, BulkAssignResult>, BulkAssignShipmentsCommandHandler>();
+        services.AddScoped<ICommandHandler<RecordShipmentLegPickupCommand>, RecordShipmentLegPickupCommandHandler>();
+        services.AddScoped<ICommandHandler<RecordShipmentLegDropCommand>, RecordShipmentLegDropCommandHandler>();
+        services.AddScoped<ICommandHandler<RecordShipmentDeliveryCommand>, RecordShipmentDeliveryCommandHandler>();
+        services.AddScoped<ICommandHandler<SetShipmentBillingCommand>, SetShipmentBillingCommandHandler>();
+        services.AddScoped<ICommandHandler<SetShipmentSecuredCommand>, SetShipmentSecuredCommandHandler>();
+        services.AddScoped<ICommandHandler<CancelShipmentCommand>, CancelShipmentCommandHandler>();
+        services.AddScoped<ICommandHandler<CloseShipmentWithoutBillingCommand>, CloseShipmentWithoutBillingCommandHandler>();
+        services.AddScoped<IQueryHandler<GetShipmentsQuery, ShipmentPageResponse>, GetShipmentsQueryHandler>();
+        services.AddScoped<IQueryHandler<GetShipmentByIdQuery, ShipmentResponse>, GetShipmentByIdQueryHandler>();
         services.AddScoped<ICommandHandler<CreateRouteCommand, Guid>, CreateRouteCommandHandler>();
         services.AddScoped<ICommandHandler<UpdateRouteCommand>, UpdateRouteCommandHandler>();
         services.AddScoped<IQueryHandler<GetRoutesQuery, IReadOnlyList<RouteResponse>>, GetRoutesQueryHandler>();
@@ -152,6 +184,7 @@ public static class TripsServiceCollectionExtensions
         services.AddProjections<TripsDbContext>(SchemaName, registry => registry
             .Project(new TripManifestProjection())
             .Project(new TripProjection())
+            .Project(new ShipmentProjection())
             .Project(new RouteProjection())
             .Project(new StopProjection())
             .Project(new ScheduleTemplateProjection())

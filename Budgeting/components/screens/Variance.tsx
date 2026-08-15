@@ -4,6 +4,7 @@ import { colors, fonts, rowSurface, statusMeta } from "@/lib/theme";
 import { MonoTag } from "@/components/ui/Chip";
 import { DetailRow, Panel, SectionLabel } from "@/components/ui/Panel";
 import { formatCad } from "@/lib/api/format";
+import type { BudgetPeriod } from "@/lib/types";
 import {
   budgetCodes,
   formatDeltaCad,
@@ -32,10 +33,12 @@ import {
 // baseline where planned is zero.
 
 export default function Variance({
+  periods,
   periodId,
   onSelectPeriod,
   onOpenCode,
 }: {
+  periods: BudgetPeriod[];
   periodId: string;
   onSelectPeriod: (id: string) => void;
   onOpenCode: (id: string) => void;
@@ -49,9 +52,9 @@ export default function Variance({
 
   return (
     <Screen
-      eyebrow={`Performance · ${periodLabel(periodId)}`}
+      eyebrow={`Performance · ${periodLabel(periods, periodId)}`}
       title="Variance"
-      right={<PeriodPicker periodId={periodId} onSelect={onSelectPeriod} />}
+      right={<PeriodPicker periods={periods} periodId={periodId} onSelect={onSelectPeriod} />}
     >
       <Panel style={{ marginBottom: 16 }}>
         <SectionLabel>Thresholds</SectionLabel>
@@ -78,7 +81,7 @@ export default function Variance({
       </div>
 
       {rows.length === 0 ? (
-        <EmptyNote>No variance to report for {periodLabel(periodId)}.</EmptyNote>
+        <EmptyNote>No variance to report for {periodLabel(periods, periodId)}.</EmptyNote>
       ) : (
         <>
           <TableHead

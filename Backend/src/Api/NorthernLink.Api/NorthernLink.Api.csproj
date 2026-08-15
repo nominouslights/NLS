@@ -12,6 +12,7 @@
     <ProjectReference Include="..\..\Fleet\NorthernLink.Fleet.csproj" />
     <ProjectReference Include="..\..\Clients\NorthernLink.Clients.csproj" />
     <ProjectReference Include="..\..\Billing\NorthernLink.Billing.csproj" />
+    <ProjectReference Include="..\..\Budgeting\NorthernLink.Budgeting.csproj" />
     <ProjectReference Include="..\..\Incidents\NorthernLink.Incidents.csproj" />
     <ProjectReference Include="..\..\Notifications\NorthernLink.Notifications.csproj" />
     <ProjectReference Include="..\..\Grocery\NorthernLink.Grocery.csproj" />
@@ -20,7 +21,12 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.ServiceDiscovery" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" />
+    <!-- Design-time only: `dotnet ef` needs it in the startup project, the running app does not.
+         PrivateAssets keeps the Roslyn design-time assemblies out of the published container. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
   </ItemGroup>
 
 </Project>

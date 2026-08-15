@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using NorthernLink.Shared.Messaging;
+using NorthernLink.Shared.Hosting;
 using NorthernLink.Shared.Persistence.Auditing;
 using NorthernLink.Shared.Tenancy;
 
@@ -32,14 +33,18 @@ public sealed class ProjectionWorker<TDbContext>(
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        var backoff = new PollBackoff(
+            options.PollInterval, TimeSpan.FromSeconds(options.MaxPollBackoffSeconds));
+
         while (!stoppingToken.IsCancellationRequested)
         {
             // Delay BEFORE the first poll — same boot-race reasoning as OutboxDispatcher:
             // every module's hosted services start together, and there is nothing to gain
-            // from racing the first journal read against a cold database.
+            // from racing the first journal read against a cold database. After a failure
+            // this is the backed-off delay instead of the interval.
             try
             {
-                await Task.Delay(options.PollInterval, stoppingToken);
+                await Task.Delay(backoff.NextDelay, stoppingToken);
             }
             catch (OperationCanceledException)
             {
@@ -49,6 +54,13 @@ public sealed class ProjectionWorker<TDbContext>(
             try
             {
                 await ProcessOnceAsync(stoppingToken);
+
+                if (backoff.RecordSuccess() is { } recoveredAfter)
+                {
+                    logger.LogInformation(
+                        "Projection poll for {Schema} ({DbContext}) recovered after {Failures} consecutive failures",
+                        registry.Schema, typeof(TDbContext).Name, recoveredAfter);
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -56,10 +68,12 @@ public sealed class ProjectionWorker<TDbContext>(
             }
             catch (Exception exception)
             {
-                logger.LogError(
+                var failure = backoff.RecordFailure();
+                logger.Log(
+                    failure.Level,
                     exception,
-                    "Projection poll for {Schema} ({DbContext}) failed; retrying next interval",
-                    registry.Schema, typeof(TDbContext).Name);
+                    "Projection poll for {Schema} ({DbContext}) failed {Failures}x consecutively; retrying in {RetryDelay}",
+                    registry.Schema, typeof(TDbContext).Name, failure.ConsecutiveFailures, failure.RetryDelay);
             }
         }
     }

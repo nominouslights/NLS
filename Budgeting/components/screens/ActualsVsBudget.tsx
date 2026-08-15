@@ -4,6 +4,7 @@ import { colors, fonts, rowSurface } from "@/lib/theme";
 import { MonoTag } from "@/components/ui/Chip";
 import { MetricTile } from "@/components/ui/MetricTile";
 import { formatCad } from "@/lib/api/format";
+import type { BudgetPeriod } from "@/lib/types";
 import { actuals, budgetCodes, formatDeltaCad, varianceKind } from "@/lib/data";
 import {
   EmptyNote,
@@ -23,9 +24,11 @@ import { StatusBadge } from "@/components/ui/Chip";
 // Actuals will come from QuickBooks reconciliation once Stage 6.1 lands; today they are mock.
 
 export default function ActualsVsBudget({
+  periods,
   periodId,
   onSelectPeriod,
 }: {
+  periods: BudgetPeriod[];
   periodId: string;
   onSelectPeriod: (id: string) => void;
 }) {
@@ -39,9 +42,9 @@ export default function ActualsVsBudget({
 
   return (
     <Screen
-      eyebrow={`Performance · ${periodLabel(periodId)}`}
+      eyebrow={`Performance · ${periodLabel(periods, periodId)}`}
       title="Actuals vs Budget"
-      right={<PeriodPicker periodId={periodId} onSelect={onSelectPeriod} />}
+      right={<PeriodPicker periods={periods} periodId={periodId} onSelect={onSelectPeriod} />}
     >
       <div
         style={{
@@ -103,7 +106,7 @@ export default function ActualsVsBudget({
       </div>
 
       {rows.length === 0 ? (
-        <EmptyNote>No actuals recorded for {periodLabel(periodId)}.</EmptyNote>
+        <EmptyNote>No actuals recorded for {periodLabel(periods, periodId)}.</EmptyNote>
       ) : (
         <>
           <TableHead

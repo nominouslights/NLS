@@ -13,9 +13,16 @@ public static class AuthorizationPolicies
     public const string AdminOnly = "AdminOnly";
 
     /// <summary>
-    /// Budget and financial control — Owner and Accountant only. Registered now so Stage 6.1's
-    /// <c>/api/budgeting/*</c> group attaches an existing policy instead of inventing one; no
-    /// endpoint carries it yet.
+    /// Budget and financial control — Owner and Accountant only. Carried by the whole
+    /// <c>/api/budgeting</c> group (periods and codes today); every endpoint added there must
+    /// join that group or attach this policy itself.
     /// </summary>
     public const string BudgetAccess = "BudgetAccess";
+
+    /// <summary>
+    /// Dispatch operations — Owner, Dispatcher, and Supervisor only. Carried by the whole
+    /// <c>/api/notifications</c> group (templates, sends, and history today); every endpoint
+    /// added there must join that group or attach this policy itself.
+    /// </summary>
+    public const string DispatchAccess = "DispatchAccess";
 }

@@ -8,6 +8,11 @@ import type { StatusKind } from "./theme";
 /** Draft → Open → Locked. A locked period is closed to new allocations. */
 export type PeriodState = "Draft" | "Open" | "Locked";
 
+/**
+ * The view shape the screens render. Periods are real data (lib/api/budgeting.ts maps the wire
+ * record to this): pk is derived client-side from state, and planned/allocated are not on the
+ * wire yet — they stay zeros until the allocations slice of Stage 6.1 lands.
+ */
 export interface BudgetPeriod {
   id: string;
   label: string;
@@ -22,19 +27,62 @@ export interface BudgetPeriod {
   allocated: number;
 }
 
-/** Zero-based budgeting works bottom-up, so a code is justified every period, not inherited. */
+/** Which side of the ledger a code governs. Mirrors C# BudgetCodeCategory. */
 export type BudgetCodeCategory = "Revenue" | "Expense";
 
+/**
+ * Mirrors C# BudgetServiceLine. The first six are byte-identical to the backend's
+ * TripServiceType, which is what lets revenue-mix reporting join on the value Trips and Billing
+ * already emit — do not "tidy" `Nihb` into `NIHB`. The last three are overhead categories with
+ * no counterpart anywhere else on the platform.
+ */
+export type BudgetServiceLine =
+  | "ContractCrew"
+  | "Community"
+  | "Nihb"
+  | "Charter"
+  | "Cargo"
+  | "Grocery"
+  | "Fleet"
+  | "Administrative"
+  | "Apprenticeship";
+
+/** Mirrors C# BudgetTaxTreatment. GST 5% is the only tax in play (no PST on transport in MB). */
+export type BudgetTaxTreatment = "GstApplicable" | "ZeroRated" | "Exempt" | "NotApplicable";
+
+/** Mirrors C# BudgetReviewFrequency. Required on every code; the server defaults it to Quarterly. */
+export type BudgetReviewFrequency = "Monthly" | "Quarterly" | "Annual";
+
+/**
+ * The view shape the Budget Codes screen renders. Codes are real data — lib/api/budgeting.ts's
+ * toBudgetCode maps the wire record to this, renaming only `isActive` → `active`.
+ *
+ * The `parentCode`/`parentName`/`…Email` companions to the id fields are resolved server-side on
+ * every read, so a screen can render a parent or an owner without a second round trip and they
+ * cannot go stale.
+ */
 export interface BudgetCode {
   id: string;
   code: string;
   name: string;
+  /** What this code covers. Optional — the per-period justification lives on the allocation. */
+  description: string | null;
   category: BudgetCodeCategory;
-  /** Free-text owner — no user directory in the mock layer. */
-  owner: string;
+  serviceLine: BudgetServiceLine | null;
+  costCentre: string | null;
+  /** One-level rollup. A code with a parent can never itself be a parent. */
+  parentCodeId: string | null;
+  parentCode: string | null;
+  parentName: string | null;
+  /** Free text — entered manually, never checked against QuickBooks. */
+  glAccountCode: string | null;
+  taxTreatment: BudgetTaxTreatment | null;
+  budgetOwnerUserId: string | null;
+  budgetOwnerEmail: string | null;
+  reviewFrequency: BudgetReviewFrequency;
   active: boolean;
-  /** Why this code exists at all — the ZBB justification, re-confirmed each period. */
-  justification: string;
+  createdByEmail: string | null;
+  modifiedByEmail: string | null;
 }
 
 export interface Allocation {

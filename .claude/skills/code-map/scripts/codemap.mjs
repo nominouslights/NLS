@@ -23,7 +23,7 @@ const stateDir = path.join(repoRoot, '.claude', 'state');
 const pendingLog = path.join(stateDir, 'codemap-pending.log');
 
 const TERRITORIES = ['Backend/', 'Dispatcher/', 'Budgeting/', 'Website/', 'AppHost/'];
-const KNOWN_TOP = new Set(['Backend', 'Dispatcher', 'Budgeting', 'Website', 'AppHost', '.github']);
+const KNOWN_TOP = new Set(['Backend', 'Dispatcher', 'Budgeting', 'Website', 'AppHost', 'CommunityMobile', '.github']);
 const REF_FILES = ['backend.md', 'dispatcher.md', 'budgeting.md', 'website-apphost.md'];
 const MIGRATIONS_WARNING =
   'Migrations: DO NOT READ files under Infrastructure/Persistence/Migrations/ — generated 1,600–2,000-line Designer files. The map records count + latest name only.';

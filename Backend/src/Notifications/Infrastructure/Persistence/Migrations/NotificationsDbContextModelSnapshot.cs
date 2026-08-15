@@ -29,6 +29,10 @@ namespace NorthernLink.Notifications.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<Guid?>("ClientId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("client_id");
+
                     b.Property<string>("ClientName")
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)")
@@ -165,6 +169,10 @@ namespace NorthernLink.Notifications.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id");
+
+                    b.Property<Guid?>("ClientId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("client_id");
 
                     b.Property<string>("ClientName")
                         .HasColumnType("text")

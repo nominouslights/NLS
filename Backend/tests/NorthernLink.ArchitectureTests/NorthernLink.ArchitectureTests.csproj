@@ -21,6 +21,7 @@
     <ProjectReference Include="..\..\src\Incidents\NorthernLink.Incidents.csproj" />
     <ProjectReference Include="..\..\src\Notifications\NorthernLink.Notifications.csproj" />
     <ProjectReference Include="..\..\src\Grocery\NorthernLink.Grocery.csproj" />
+    <ProjectReference Include="..\..\src\Budgeting\NorthernLink.Budgeting.csproj" />
   </ItemGroup>
 
 </Project>

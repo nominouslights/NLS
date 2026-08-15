@@ -668,6 +668,310 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                     b.ToTable("schedule_templates", "trips");
                 });
 
+            modelBuilder.Entity("NorthernLink.Trips.Domain.Shipments.Shipment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("CancelledReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("cancelled_reason");
+
+                    b.Property<decimal?>("ChargeCad")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("charge_cad");
+
+                    b.Property<Guid?>("ClientId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("client_id");
+
+                    b.Property<string>("ClientName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("client_name");
+
+                    b.Property<string>("ConsigneeContact")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("consignee_contact");
+
+                    b.Property<string>("ConsigneeName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("consignee_name");
+
+                    b.Property<string>("ConsignorContact")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("consignor_contact");
+
+                    b.Property<string>("ConsignorName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("consignor_name");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<decimal?>("DeclaredValueCad")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("declared_value_cad");
+
+                    b.Property<DateTimeOffset?>("DeliveredAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("delivered_at_utc");
+
+                    b.Property<string>("DeliveryNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("delivery_note");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("description");
+
+                    b.Property<string>("DestinationName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("destination_name");
+
+                    b.Property<Guid?>("DestinationStopId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("destination_stop_id");
+
+                    b.Property<string>("EnteredBy")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("entered_by");
+
+                    b.Property<bool>("Hazmat")
+                        .HasColumnType("boolean")
+                        .HasColumnName("hazmat");
+
+                    b.Property<decimal?>("HeightCm")
+                        .HasPrecision(8, 2)
+                        .HasColumnType("numeric(8,2)")
+                        .HasColumnName("height_cm");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("kind");
+
+                    b.Property<decimal?>("LengthCm")
+                        .HasPrecision(8, 2)
+                        .HasColumnType("numeric(8,2)")
+                        .HasColumnName("length_cm");
+
+                    b.Property<string>("OriginName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("origin_name");
+
+                    b.Property<Guid?>("OriginStopId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("origin_stop_id");
+
+                    b.Property<DateTimeOffset?>("PaymentCollectedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("payment_collected_at_utc");
+
+                    b.Property<string>("PaymentMethod")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("payment_method");
+
+                    b.Property<int>("Pieces")
+                        .HasColumnType("integer")
+                        .HasColumnName("pieces");
+
+                    b.Property<string>("PoNumber")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("po_number");
+
+                    b.Property<DateOnly?>("ReadyDate")
+                        .HasColumnType("date")
+                        .HasColumnName("ready_date");
+
+                    b.Property<string>("ReceivedBy")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("received_by");
+
+                    b.Property<DateOnly?>("RequiredByDate")
+                        .HasColumnType("date")
+                        .HasColumnName("required_by_date");
+
+                    b.Property<bool>("Secured")
+                        .HasColumnType("boolean")
+                        .HasColumnName("secured");
+
+                    b.Property<string>("ShipmentNumber")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("shipment_number");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("source");
+
+                    b.Property<string>("SpecialHandling")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("special_handling");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.Property<decimal?>("WeightKg")
+                        .HasPrecision(8, 2)
+                        .HasColumnType("numeric(8,2)")
+                        .HasColumnName("weight_kg");
+
+                    b.Property<decimal?>("WidthCm")
+                        .HasPrecision(8, 2)
+                        .HasColumnType("numeric(8,2)")
+                        .HasColumnName("width_cm");
+
+                    b.Property<string>("WrittenOffReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("written_off_reason");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "ClientId");
+
+                    b.HasIndex("TenantId", "ShipmentNumber")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "Status");
+
+                    b.ToTable("shipments", "trips");
+                });
+
+            modelBuilder.Entity("NorthernLink.Trips.Domain.Shipments.ShipmentLeg", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("AssignedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("assigned_at_utc");
+
+                    b.Property<DateTimeOffset?>("DroppedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("dropped_at_utc");
+
+                    b.Property<string>("DroppedBy")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("dropped_by");
+
+                    b.Property<string>("FromName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("from_name");
+
+                    b.Property<Guid?>("FromStopId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("from_stop_id");
+
+                    b.Property<DateTimeOffset?>("PickedUpAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("picked_up_at_utc");
+
+                    b.Property<string>("PickedUpBy")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("picked_up_by");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("integer")
+                        .HasColumnName("sequence");
+
+                    b.Property<Guid>("ShipmentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("shipment_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("ToName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("to_name");
+
+                    b.Property<Guid?>("ToStopId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("to_stop_id");
+
+                    b.Property<Guid>("TripId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("trip_id");
+
+                    b.Property<string>("TripNumber")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("trip_number");
+
+                    b.Property<DateOnly>("TripServiceDate")
+                        .HasColumnType("date")
+                        .HasColumnName("trip_service_date");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ShipmentId", "Sequence")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "TripId");
+
+                    b.HasIndex("TenantId", "TripNumber");
+
+                    b.ToTable("shipment_legs", "trips");
+                });
+
             modelBuilder.Entity("NorthernLink.Trips.Domain.Stops.Stop", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1062,6 +1366,371 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                     b.ToTable("rm_schedule_templates", "trips");
                 });
 
+            modelBuilder.Entity("NorthernLink.Trips.Infrastructure.Persistence.ReadModels.ShipmentLegReadModel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("AssignedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("assigned_at_utc");
+
+                    b.Property<decimal?>("ChargeCad")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("charge_cad");
+
+                    b.Property<Guid?>("ClientId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("client_id");
+
+                    b.Property<string>("ClientName")
+                        .HasColumnType("text")
+                        .HasColumnName("client_name");
+
+                    b.Property<string>("ConsigneeName")
+                        .HasColumnType("text")
+                        .HasColumnName("consignee_name");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("description");
+
+                    b.Property<DateTimeOffset?>("DroppedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("dropped_at_utc");
+
+                    b.Property<string>("DroppedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("dropped_by");
+
+                    b.Property<string>("FromName")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("from_name");
+
+                    b.Property<Guid?>("FromStopId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("from_stop_id");
+
+                    b.Property<bool>("Hazmat")
+                        .HasColumnType("boolean")
+                        .HasColumnName("hazmat");
+
+                    b.Property<bool>("IsFinalLeg")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_final_leg");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("kind");
+
+                    b.Property<string>("OnwardTripNumber")
+                        .HasColumnType("text")
+                        .HasColumnName("onward_trip_number");
+
+                    b.Property<DateTimeOffset?>("PickedUpAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("picked_up_at_utc");
+
+                    b.Property<string>("PickedUpBy")
+                        .HasColumnType("text")
+                        .HasColumnName("picked_up_by");
+
+                    b.Property<int>("Pieces")
+                        .HasColumnType("integer")
+                        .HasColumnName("pieces");
+
+                    b.Property<bool>("Secured")
+                        .HasColumnType("boolean")
+                        .HasColumnName("secured");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("integer")
+                        .HasColumnName("sequence");
+
+                    b.Property<Guid>("ShipmentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("shipment_id");
+
+                    b.Property<string>("ShipmentNumber")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("shipment_number");
+
+                    b.Property<string>("ShipmentStatus")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("shipment_status");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("ToName")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("to_name");
+
+                    b.Property<Guid?>("ToStopId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("to_stop_id");
+
+                    b.Property<Guid>("TripId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("trip_id");
+
+                    b.Property<string>("TripNumber")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("trip_number");
+
+                    b.Property<DateOnly>("TripServiceDate")
+                        .HasColumnType("date")
+                        .HasColumnName("trip_service_date");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.Property<decimal?>("WeightKg")
+                        .HasPrecision(8, 2)
+                        .HasColumnType("numeric(8,2)")
+                        .HasColumnName("weight_kg");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ShipmentId", "Sequence")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "TripId");
+
+                    b.HasIndex("TenantId", "TripNumber");
+
+                    b.ToTable("rm_shipment_legs", "trips");
+                });
+
+            modelBuilder.Entity("NorthernLink.Trips.Infrastructure.Persistence.ReadModels.ShipmentReadModel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("AwaitingTransfer")
+                        .HasColumnType("boolean")
+                        .HasColumnName("awaiting_transfer");
+
+                    b.Property<string>("CancelledReason")
+                        .HasColumnType("text")
+                        .HasColumnName("cancelled_reason");
+
+                    b.Property<decimal?>("ChargeCad")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("charge_cad");
+
+                    b.Property<Guid?>("ClientId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("client_id");
+
+                    b.Property<string>("ClientName")
+                        .HasColumnType("text")
+                        .HasColumnName("client_name");
+
+                    b.Property<string>("ConsigneeContact")
+                        .HasColumnType("text")
+                        .HasColumnName("consignee_contact");
+
+                    b.Property<string>("ConsigneeName")
+                        .HasColumnType("text")
+                        .HasColumnName("consignee_name");
+
+                    b.Property<string>("ConsignorContact")
+                        .HasColumnType("text")
+                        .HasColumnName("consignor_contact");
+
+                    b.Property<string>("ConsignorName")
+                        .HasColumnType("text")
+                        .HasColumnName("consignor_name");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<Guid?>("CurrentTripId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("current_trip_id");
+
+                    b.Property<string>("CurrentTripNumber")
+                        .HasColumnType("text")
+                        .HasColumnName("current_trip_number");
+
+                    b.Property<decimal?>("DeclaredValueCad")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("declared_value_cad");
+
+                    b.Property<DateTimeOffset?>("DeliveredAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("delivered_at_utc");
+
+                    b.Property<string>("DeliveryNote")
+                        .HasColumnType("text")
+                        .HasColumnName("delivery_note");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("description");
+
+                    b.Property<string>("DestinationName")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("destination_name");
+
+                    b.Property<Guid?>("DestinationStopId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("destination_stop_id");
+
+                    b.Property<string>("EnteredBy")
+                        .HasColumnType("text")
+                        .HasColumnName("entered_by");
+
+                    b.Property<bool>("Hazmat")
+                        .HasColumnType("boolean")
+                        .HasColumnName("hazmat");
+
+                    b.Property<decimal?>("HeightCm")
+                        .HasPrecision(8, 2)
+                        .HasColumnType("numeric(8,2)")
+                        .HasColumnName("height_cm");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("kind");
+
+                    b.Property<DateOnly?>("LastServiceDate")
+                        .HasColumnType("date")
+                        .HasColumnName("last_service_date");
+
+                    b.Property<int>("LegCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("leg_count");
+
+                    b.Property<decimal?>("LengthCm")
+                        .HasPrecision(8, 2)
+                        .HasColumnType("numeric(8,2)")
+                        .HasColumnName("length_cm");
+
+                    b.Property<string>("OriginName")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("origin_name");
+
+                    b.Property<Guid?>("OriginStopId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("origin_stop_id");
+
+                    b.Property<DateTimeOffset?>("PaymentCollectedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("payment_collected_at_utc");
+
+                    b.Property<string>("PaymentMethod")
+                        .HasColumnType("text")
+                        .HasColumnName("payment_method");
+
+                    b.Property<int>("Pieces")
+                        .HasColumnType("integer")
+                        .HasColumnName("pieces");
+
+                    b.Property<string>("PoNumber")
+                        .HasColumnType("text")
+                        .HasColumnName("po_number");
+
+                    b.Property<DateOnly?>("ReadyDate")
+                        .HasColumnType("date")
+                        .HasColumnName("ready_date");
+
+                    b.Property<string>("ReceivedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("received_by");
+
+                    b.Property<DateOnly?>("RequiredByDate")
+                        .HasColumnType("date")
+                        .HasColumnName("required_by_date");
+
+                    b.Property<bool>("Secured")
+                        .HasColumnType("boolean")
+                        .HasColumnName("secured");
+
+                    b.Property<string>("ShipmentNumber")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("shipment_number");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("source");
+
+                    b.Property<string>("SpecialHandling")
+                        .HasColumnType("text")
+                        .HasColumnName("special_handling");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.Property<decimal?>("WeightKg")
+                        .HasPrecision(8, 2)
+                        .HasColumnType("numeric(8,2)")
+                        .HasColumnName("weight_kg");
+
+                    b.Property<decimal?>("WidthCm")
+                        .HasPrecision(8, 2)
+                        .HasColumnType("numeric(8,2)")
+                        .HasColumnName("width_cm");
+
+                    b.Property<string>("WrittenOffReason")
+                        .HasColumnType("text")
+                        .HasColumnName("written_off_reason");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "ShipmentNumber")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "Status");
+
+                    b.HasIndex("TenantId", "ClientId", "Status");
+
+                    b.ToTable("rm_shipments", "trips");
+                });
+
             modelBuilder.Entity("NorthernLink.Trips.Infrastructure.Persistence.ReadModels.StopReadModel", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1373,6 +2042,21 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                     b.ToTable("rm_trips", "trips");
                 });
 
+            modelBuilder.Entity("NorthernLink.Trips.Infrastructure.Persistence.ShipmentNumberCounter", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<long>("NextValue")
+                        .HasColumnType("bigint")
+                        .HasColumnName("next_value");
+
+                    b.HasKey("TenantId");
+
+                    b.ToTable("shipment_number_counters", "trips");
+                });
+
             modelBuilder.Entity("NorthernLink.Trips.Infrastructure.Persistence.TripNumberCounter", b =>
                 {
                     b.Property<Guid>("TenantId")
@@ -1501,6 +2185,15 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                         });
 
                     b.Navigation("Stops");
+                });
+
+            modelBuilder.Entity("NorthernLink.Trips.Domain.Shipments.ShipmentLeg", b =>
+                {
+                    b.HasOne("NorthernLink.Trips.Domain.Shipments.Shipment", null)
+                        .WithMany("Legs")
+                        .HasForeignKey("ShipmentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("NorthernLink.Trips.Domain.Stops.Stop", b =>
@@ -1753,6 +2446,11 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                         });
 
                     b.Navigation("Stops");
+                });
+
+            modelBuilder.Entity("NorthernLink.Trips.Domain.Shipments.Shipment", b =>
+                {
+                    b.Navigation("Legs");
                 });
 #pragma warning restore 612, 618
         }

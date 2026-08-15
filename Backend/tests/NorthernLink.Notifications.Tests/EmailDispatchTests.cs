@@ -29,6 +29,7 @@ public class EmailDispatchTests
             Guid.NewGuid(),
             "Community pickup",
             NotificationServiceType.Community,
+            Guid.NewGuid(),
             "Marcel Colomb First Nation",
             recipients);
 
@@ -101,6 +102,7 @@ public class EmailDispatchTests
             "Community pickup",
             NotificationServiceType.Community,
             null,
+            null,
             [Recipient("a@example.com", DispatchRecipientStatus.Sent)]);
 
         Assert.True(result.IsSuccess);
@@ -108,5 +110,29 @@ public class EmailDispatchTests
         var recorded = Assert.IsType<EmailDispatchRecordedDomainEvent>(Assert.Single(result.Value.DomainEvents));
         Assert.Equal(dispatchId, recorded.DispatchId);
         Assert.Equal(TestNotifications.TenantId, recorded.TenantId);
+    }
+
+    [Theory]
+    [InlineData("dddddddd-dddd-dddd-dddd-dddddddddddd")]
+    [InlineData(null)]
+    public void Record_snapshots_the_client_id(string? clientId)
+    {
+        var expected = clientId is null ? (Guid?)null : Guid.Parse(clientId);
+
+        var result = EmailDispatch.Record(
+            Guid.NewGuid(),
+            TestNotifications.TenantId,
+            Guid.NewGuid(),
+            "NL-1042",
+            null,
+            Guid.NewGuid(),
+            "Community pickup",
+            NotificationServiceType.Community,
+            expected,
+            expected is null ? null : "Marcel Colomb First Nation",
+            [Recipient("a@example.com", DispatchRecipientStatus.Sent)]);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(expected, result.Value.ClientId);
     }
 }
