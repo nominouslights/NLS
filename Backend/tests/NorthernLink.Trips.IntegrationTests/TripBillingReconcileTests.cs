@@ -234,10 +234,10 @@ public class TripBillingReconcileTests(PostgresFixture fixture)
             clientId: Guid.NewGuid(),
             clientName: "Alamos Gold",
             poNumber: null,
-            driverId: null,
-            driverName: null,
-            vehicleId: null,
-            vehicleUnit: null,
+            driverId: Guid.NewGuid(),
+            driverName: "R. Ballantyne",
+            vehicleId: Guid.NewGuid(),
+            vehicleUnit: "U-04",
             seatsCapacity: null,
             seatsMinimum: null);
         Assert.True(trip.IsSuccess, trip.IsFailure ? trip.Error.Code : "");
@@ -354,7 +354,8 @@ public class TripBillingReconcileTests(PostgresFixture fixture)
                     DateOnly.FromDateTime(DateTime.UtcNow.Date), new TimeOnly(8, 0), null,
                     TripServiceType.ContractCrew, null, "Thompson – Lynn Lake", "Thompson", "Lynn Lake",
                     Array.Empty<RouteStop>(), 320, null, null, null, false,
-                    Guid.NewGuid(), "Alamos Gold", null, null, null, null, null, null, null).Value;
+                    Guid.NewGuid(), "Alamos Gold", null,
+                    Guid.NewGuid(), "R. Ballantyne", Guid.NewGuid(), "U-04", null, null).Value;
                 Assert.True(trip.Cancel("Weather").IsSuccess);
                 context.Trips.Add(trip);
                 await context.SaveChangesAsync();

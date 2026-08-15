@@ -31,7 +31,7 @@ public class FinishTripOperationsCommandHandlerTests
         // (Fleet logs one against the trip the vehicle actually worked) and goes straight from
         // Scheduled to ReadyForBilling so the round trip can be invoiced.
         var outbound = TestPlanning.ScheduleTrip(clientId: Guid.NewGuid()).Value;
-        var deadhead = outbound.CreateDeadheadReturn("TR-1002").Value;
+        var deadhead = outbound.DeadheadReturn("TR-1002").Value;
         _trips.Add(deadhead);
 
         var result = await Handler.Handle(new FinishTripOperationsCommand(deadhead.Id), CancellationToken.None);

@@ -40,47 +40,43 @@ public sealed class CreateTripCommandHandler(
             distanceKm = route.DistanceKm;
         }
 
-        // Driver snapshot: assignment at creation goes through the same lookup validation
-        // as POST /assign — the driver must exist and be Active in driver_lookup.
-        string? driverName = null;
-        if (command.DriverId is { } driverId)
+        // Driver snapshot: a trip is never created unassigned — the driver is required and
+        // goes through the same lookup validation as POST /assign (exists + Active in
+        // driver_lookup).
+        if (command.DriverId is not { } driverId)
         {
-            var driver = await driverLookup.GetAsync(driverId, cancellationToken);
-            if (driver is null)
-            {
-                return Result.Failure<Guid>(TripErrors.DriverNotFound);
-            }
-
-            if (!driver.IsActive)
-            {
-                return Result.Failure<Guid>(TripErrors.DriverNotActive);
-            }
-
-            driverName = driver.Name;
+            return Result.Failure<Guid>(TripErrors.DriverRequired);
         }
 
-        // Vehicle snapshot: assignment at creation goes through the same lookup validation
-        // as POST /assign — the vehicle must exist and be Active in vehicle_lookup, and its
-        // unit number AND seating capacity are snapshotted from the lookup (the derived
-        // capacity wins over any client-supplied value). A free-form unit with no id passes,
-        // keeping the manual capacity.
-        var vehicleUnit = command.VehicleUnit;
-        var seatsCapacity = command.SeatsCapacity;
-        if (command.VehicleId is { } vehicleId)
+        var driver = await driverLookup.GetAsync(driverId, cancellationToken);
+        if (driver is null)
         {
-            var vehicle = await vehicleLookup.GetAsync(vehicleId, cancellationToken);
-            if (vehicle is null)
-            {
-                return Result.Failure<Guid>(TripErrors.VehicleNotFound);
-            }
+            return Result.Failure<Guid>(TripErrors.DriverNotFound);
+        }
 
-            if (!vehicle.IsActive)
-            {
-                return Result.Failure<Guid>(TripErrors.VehicleNotActive);
-            }
+        if (!driver.IsActive)
+        {
+            return Result.Failure<Guid>(TripErrors.DriverNotActive);
+        }
 
-            vehicleUnit = vehicle.UnitNumber;
-            seatsCapacity = vehicle.SeatingCapacity;
+        // Vehicle snapshot: likewise required, and it must be a real fleet vehicle — the
+        // free-form unit-with-no-id path is gone (it let ghost units like "U-99" onto the
+        // board). The unit number AND seating capacity are snapshotted from vehicle_lookup;
+        // the derived capacity always wins over any client-supplied value.
+        if (command.VehicleId is not { } vehicleId)
+        {
+            return Result.Failure<Guid>(TripErrors.VehicleRequired);
+        }
+
+        var vehicle = await vehicleLookup.GetAsync(vehicleId, cancellationToken);
+        if (vehicle is null)
+        {
+            return Result.Failure<Guid>(TripErrors.VehicleNotFound);
+        }
+
+        if (!vehicle.IsActive)
+        {
+            return Result.Failure<Guid>(TripErrors.VehicleNotActive);
         }
 
         var tripNumber = await tripNumberGenerator.NextAsync(command.TenantId, cancellationToken);
@@ -105,11 +101,11 @@ public sealed class CreateTripCommandHandler(
             command.ClientId,
             command.ClientName,
             command.PoNumber,
-            command.DriverId,
-            driverName,
-            command.VehicleId,
-            vehicleUnit,
-            seatsCapacity,
+            driverId,
+            driver.Name,
+            vehicleId,
+            vehicle.UnitNumber,
+            vehicle.SeatingCapacity,
             command.SeatsMinimum);
 
         if (tripResult.IsFailure)

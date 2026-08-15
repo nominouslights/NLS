@@ -29,8 +29,17 @@ public static class TripErrors
     public static readonly Error VehicleCapacityBelowConfirmed = Error.Validation(
         "Trips.Trip.VehicleCapacityBelowConfirmed", "The vehicle's seating capacity is below the seats already confirmed on this trip.");
 
+    public static readonly Error DriverRequired = Error.Validation(
+        "Trips.Trip.DriverRequired", "A trip cannot be created without an assigned driver.");
+
+    public static readonly Error VehicleRequired = Error.Validation(
+        "Trips.Trip.VehicleRequired", "A trip cannot be created without an assigned fleet vehicle.");
+
     public static readonly Error DriverNameRequired = Error.Validation(
         "Trips.Trip.DriverNameRequired", "Assigning a driver requires the driver's name snapshot.");
+
+    public static readonly Error VehicleUnitRequired = Error.Validation(
+        "Trips.Trip.VehicleUnitRequired", "Assigning a vehicle requires the vehicle's unit-number snapshot.");
 
     public static readonly Error DriverNotFound = Error.NotFound(
         "Trips.Trip.DriverNotFound", "The driver to assign was not found.");
