@@ -39,8 +39,8 @@ ENV ASPNETCORE_ENVIRONMENT=Production \
 
 # No port is pinned here and no EXPOSE is declared. This API is cluster-internal — it is
 # reached only by the Next.js servers' /api/* proxy, never from a browser — so which port it
-# listens on is a deployment decision, set with ASPNETCORE_HTTP_PORTS from the ConfigMap
-# (k8s/base/api-config.yaml). The aspnet base image already defaults to 8080, so the image
+# listens on is a deployment decision, set with the ASPNETCORE_HTTP_PORTS env var on the
+# container at deploy time. The aspnet base image already defaults to 8080, so the image
 # still runs standalone with no configuration at all.
 
 # No HEALTHCHECK instruction either: /health (readiness) and /alive (liveness) are mapped

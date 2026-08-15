@@ -23,11 +23,6 @@ TestResults/
 .env.*
 CREDENTIALS.local.md
 
-# Filled-in Kubernetes Secrets. Only the template (k8s/base/secret.example.yaml) is tracked;
-# real connection strings and signing keys are applied out of band.
-k8s/**/secret.yaml
-k8s/**/secrets.yaml
-
 # AppHost.cs carries local-dev/orchestration secrets (DB connection string, JWT signing key,
 # RabbitMQ credentials) as literal WithEnvironment(...) values — never commit it. A fresh
 # clone needs a local copy recreated by hand; see CLAUDE.md.
