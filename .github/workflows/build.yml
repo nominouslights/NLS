@@ -31,11 +31,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # No build-args here. The frontends' /api/* proxy target is an ARG in each Dockerfile
-        # already defaulting to http://northernlink-api:8080, and a bare Service name resolves
-        # inside the pod's own namespace — so one image serves every environment and CI has
-        # nothing to decide. (It still has to be a build-time ARG rather than pod env: next
-        # build resolves rewrites into routes-manifest.json.)
+        # The /api/* proxy target needs no build-arg: each Dockerfile already defaults to
+        # http://northernlink-api:8080, which resolves on the deployment's private network (on
+        # App Platform: a component named northernlink-api with internal_ports: [8080] — see
+        # .do/app.yaml), so one value serves every environment.
+        #
+        # BASE_PATH does need one. The three frontends share a single hostname on App Platform
+        # and are separated by path prefix, and a Next.js basePath is compiled into every asset
+        # URL at build time — so these images are mounted-location-specific by construction.
+        # Change a prefix here and the matching ingress rule in .do/app.yaml has to change with
+        # it, or the app 404s on its own JavaScript. NEXT_PUBLIC_API_BASE_URL must always equal
+        # BASE_PATH: it is what redirects browser fetches to /dispatch/api/* instead of /api/*,
+        # which would otherwise hit whichever component owns "/". Website has neither — it owns
+        # the root and makes no API calls.
         include:
           # The API's build context is the REPOSITORY ROOT: Directory.Build.props and
           # Directory.Packages.props live above Backend/ and MSBuild walks up to find them.
@@ -45,12 +53,18 @@ jobs:
           - name: dispatcher
             context: Dispatcher
             dockerfile: Dispatcher/Dockerfile
+            build_args: |
+              BASE_PATH=/dispatch
+              NEXT_PUBLIC_API_BASE_URL=/dispatch
           - name: website
             context: Website
             dockerfile: Website/Dockerfile
           - name: budgeting
             context: Budgeting
             dockerfile: Budgeting/Dockerfile
+            build_args: |
+              BASE_PATH=/budget
+              NEXT_PUBLIC_API_BASE_URL=/budget
     steps:
       - uses: actions/checkout@v7
 
@@ -79,6 +93,7 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
+          build-args: ${{ matrix.build_args }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
