@@ -31,19 +31,25 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The /api/* proxy target needs no build-arg: each Dockerfile already defaults to
+        # No build-args are passed today, and the images are root-mounted as a result.
+        #
+        # The /api/* proxy target needs none: each Dockerfile already defaults to
         # http://northernlink-api:8080, which resolves on the deployment's private network (on
         # App Platform: a component named northernlink-api with internal_ports: [8080] — see
         # .do/app.yaml), so one value serves every environment.
         #
-        # BASE_PATH does need one. The three frontends share a single hostname on App Platform
-        # and are separated by path prefix, and a Next.js basePath is compiled into every asset
-        # URL at build time — so these images are mounted-location-specific by construction.
-        # Change a prefix here and the matching ingress rule in .do/app.yaml has to change with
-        # it, or the app 404s on its own JavaScript. NEXT_PUBLIC_API_BASE_URL must always equal
-        # BASE_PATH: it is what redirects browser fetches to /dispatch/api/* instead of /api/*,
-        # which would otherwise hit whichever component owns "/". Website has neither — it owns
-        # the root and makes no API calls.
+        # BASE_PATH is the one that will need args, and it is left unset ON PURPOSE. A Next.js
+        # basePath is compiled into every asset URL at build time, so an image built with
+        # BASE_PATH=/dispatch only works when the ingress actually mounts it there. Passing it
+        # here would make `latest` mount-specific, and since every App Platform component
+        # tracks `latest`, the next unrelated redeploy would silently serve a /dispatch image
+        # under a "/" route and 404 on its own JavaScript.
+        #
+        # So the prefix flip is a coupled change, made in one sitting, never half:
+        #   1. add build_args here (BASE_PATH + NEXT_PUBLIC_API_BASE_URL, always equal)
+        #   2. add preserve_path_prefix: true to the matching ingress rule in .do/app.yaml
+        #   3. point each console's health_check http_path at its basePath — "/" now 404s
+        # Website never gets any of this: it owns the root and makes no API calls.
         include:
           # The API's build context is the REPOSITORY ROOT: Directory.Build.props and
           # Directory.Packages.props live above Backend/ and MSBuild walks up to find them.
@@ -53,18 +59,12 @@ jobs:
           - name: dispatcher
             context: Dispatcher
             dockerfile: Dispatcher/Dockerfile
-            build_args: |
-              BASE_PATH=/dispatch
-              NEXT_PUBLIC_API_BASE_URL=/dispatch
           - name: website
             context: Website
             dockerfile: Website/Dockerfile
           - name: budgeting
             context: Budgeting
             dockerfile: Budgeting/Dockerfile
-            build_args: |
-              BASE_PATH=/budget
-              NEXT_PUBLIC_API_BASE_URL=/budget
     steps:
       - uses: actions/checkout@v7
 
