@@ -1,6 +1,7 @@
 import { request } from "./transport";
 import type { StatusKind } from "../theme";
 import type { BillingFrequency } from "./clients";
+import { describeLineTrips, legText, type TripDetailMap } from "../billing/tripDetail";
 
 // ---------------------------------------------------------------------------
 // Billing API client — contract owned by Backend/ (Billing module,
@@ -308,22 +309,113 @@ export function directionMeta(
 }
 
 // ---------------------------------------------------------------------------
+// Entry record — the QuickBooks-side facts (status, QBO reference, payment,
+// write-off) as labelled fields. Shared by the printed prep sheet's grid and
+// the clipboard header so the two can never describe the same invoice
+// differently. Status wording comes from invoiceChip, the one place it lives.
+// ---------------------------------------------------------------------------
+
+export interface LabelledField {
+  label: string;
+  value: string;
+  /** Render in the monospace face (identifiers, dates, amounts). */
+  mono?: boolean;
+}
+
+/** "2026-07-14" from an ISO instant — sliced, not parsed, so the printed date
+ *  never shifts a day against the DateOnly fields beside it. */
+function issuedDate(inv: InvoiceDetailRecord): string {
+  return inv.issuedAtUtc.slice(0, 10);
+}
+
+export function entryRecordFields(inv: InvoiceDetailRecord): LabelledField[] {
+  const fields: LabelledField[] = [
+    { label: "Status", value: invoiceChip(inv).label },
+    { label: "Issued", value: issuedDate(inv), mono: true },
+  ];
+
+  if (inv.status === "Draft") {
+    fields.push({ label: "QuickBooks entry", value: "Not yet entered" });
+    return fields;
+  }
+  if (inv.status === "Void") {
+    fields.push({ label: "QuickBooks entry", value: "Void — nothing to enter" });
+    return fields;
+  }
+
+  fields.push({ label: "QBO invoice #", value: inv.qboInvoiceId ?? "—", mono: true });
+  fields.push({ label: "QBO entered", value: inv.qboEnteredDate ?? "—", mono: true });
+
+  if (inv.status === "Paid") {
+    fields.push({ label: "Payment", value: `Confirmed ${inv.paymentConfirmedDate ?? "—"}` });
+  } else if (inv.status === "WrittenOff") {
+    fields.push({ label: "Payment", value: "Written off — not collected" });
+  } else {
+    fields.push({ label: "Payment", value: "Outstanding — not yet confirmed" });
+    fields.push({ label: "Outstanding", value: formatInvoiceCad(inv.outstandingCad), mono: true });
+  }
+  return fields;
+}
+
+/** The write-off record's amount and date; null unless the invoice is written
+ *  off. The reason is long prose — read it from inv.writtenOffReason. */
+export function writeOffFields(inv: InvoiceDetailRecord): LabelledField[] | null {
+  if (inv.status !== "WrittenOff") return null;
+  return [
+    {
+      label: "Amount written off",
+      value: inv.writtenOffAmountCad != null ? formatInvoiceCad(inv.writtenOffAmountCad) : "—",
+      mono: true,
+    },
+    { label: "Effective date", value: inv.writtenOffDate ?? "—", mono: true },
+  ];
+}
+
+// ---------------------------------------------------------------------------
 // Clipboard export — a clean, paste-friendly block for keying an invoice into
 // QuickBooks Online by hand. Header lines, then one tab-delimited row per line
 // (paste straight into a QBO line grid), then totals. Money via formatInvoiceCad.
+// Given the loaded trip detail it also appends the same per-line trip &
+// passenger notes the printed prep sheet carries — one set of facts, whichever
+// way the dispatcher takes them to QuickBooks.
 // ---------------------------------------------------------------------------
 
 function lineRef(l: InvoiceLineRecord): string {
   return [l.tripNumber, l.serviceDate].filter(Boolean).join(" · ");
 }
 
-export function invoiceClipboardText(inv: InvoiceDetailRecord): string {
+/**
+ * Per-line notes for keying into QuickBooks: the line's amounts plus one row
+ * per trip with its date, direction, and the passengers actually taken
+ * (boarded), with no-shows listed separately. Deadhead legs are called out
+ * explicitly — they ran empty by design, not because passenger data is missing.
+ */
+export function lineClipboardText(l: InvoiceLineRecord, details: TripDetailMap): string {
+  const out: string[] = [
+    l.description,
+    `Qty ${l.quantity} × ${formatInvoiceCad(l.unitPriceCad)} = ${formatInvoiceCad(l.amountCad)}`,
+  ];
+
+  if (l.tripIds.length === 0) {
+    if (l.serviceDate) out.push(`Service date: ${l.serviceDate}`);
+    return out.join("\n");
+  }
+
+  for (const leg of describeLineTrips(l, details)) out.push(legText(leg));
+  return out.join("\n");
+}
+
+export function invoiceClipboardText(inv: InvoiceDetailRecord, details?: TripDetailMap): string {
   const out: string[] = [];
   out.push(`Client: ${inv.clientName}`);
   out.push(`Billing period: ${periodLabel(inv)}`);
   out.push(`PO #: ${inv.poNumber ?? "—"}`);
   out.push(`Budget code: ${inv.budgetCode ?? "—"}`);
   out.push(`Net terms: Net ${inv.netTermsDays}`);
+  for (const f of entryRecordFields(inv)) out.push(`${f.label}: ${f.value}`);
+  if (inv.status === "WrittenOff") {
+    out.push(`Write-off reason: ${inv.writtenOffReason ?? "none recorded"}`);
+  }
   out.push("");
   out.push(["Description", "Trip # / Service date", "Qty", "Unit (CAD)", "Amount (CAD)"].join("\t"));
   for (const l of inv.lines) {
@@ -343,6 +435,19 @@ export function invoiceClipboardText(inv: InvoiceDetailRecord): string {
     out.push(`GST (${Math.round(inv.gstRate * 1000) / 10}%): ${formatInvoiceCad(inv.gstCad)}`);
   }
   out.push(`Total (CAD): ${formatInvoiceCad(inv.totalCad)}`);
+
+  // Trip & passenger detail — only when the caller has the loaded trips and at
+  // least one line actually references a trip.
+  if (details && inv.lines.some((l) => l.tripIds.length > 0)) {
+    out.push("");
+    out.push("TRIP & PASSENGER DETAIL");
+    inv.lines.forEach((l, i) => {
+      out.push("");
+      // lineClipboardText is multi-line; the "Line N" prefix lands on its
+      // first line (the description), the amounts and legs follow beneath.
+      out.push(`Line ${i + 1} · ${lineClipboardText(l, details)}`);
+    });
+  }
   return out.join("\n");
 }
 

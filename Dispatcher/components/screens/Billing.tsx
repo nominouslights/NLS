@@ -11,6 +11,7 @@ import {
   getInvoice,
   invoiceChip,
   invoiceClipboardText,
+  lineClipboardText,
   listBillableTrips,
   listInvoices,
   markInvoiceEntered,
@@ -30,14 +31,8 @@ import {
 } from "@/lib/api/billing";
 import { copyToClipboard } from "@/lib/clipboard";
 import { printInvoicePrepSheet } from "@/lib/documents/invoicePdf";
-import {
-  getTrip,
-  getTripManifest,
-  shortDateLabel,
-  type ManifestPassenger,
-  type TripManifest,
-  type TripRecord,
-} from "@/lib/api/trips";
+import type { LoadedTrip, TripDetailMap } from "@/lib/billing/tripDetail";
+import { getTrip, getTripManifest, shortDateLabel, type ManifestPassenger } from "@/lib/api/trips";
 import { getClient, listClients, type ClientRecord } from "@/lib/api/clients";
 import { PageHeader, Panel, SectionLabel } from "@/components/ui/Panel";
 import { StatusBadge, StatusChip } from "@/components/ui/Chip";
@@ -119,16 +114,10 @@ function DirectionTag({ direction }: { direction: BillableTripRecord["direction"
 // ---------------------------------------------------------------------------
 // Live trip + passenger detail (InvoiceDetail) — read from the Trips API, not
 // snapshotted onto the invoice. One entry per trip id referenced by a line.
+// The LoadedTrip shape and the derivations over it live in
+// lib/billing/tripDetail, shared with the clipboard exports and the printed
+// prep sheet so all three describe a trip identically.
 // ---------------------------------------------------------------------------
-
-interface LoadedTrip {
-  trip: TripRecord | null;
-  manifest: TripManifest | null;
-  /** true = the trip fetch itself failed (trip unknown/unavailable). */
-  error: boolean;
-  /** true = trip loaded but its manifest fetch failed (passengers unavailable). */
-  manifestError: boolean;
-}
 
 /** Boarded on/off indicator — colour + glyph + text label per the accessible
  *  status-colour rule. Confirmed = teal ✓; pending renders in pendingKind
@@ -261,59 +250,6 @@ function TripDetailBlock({ tripId, loaded }: { tripId: string; loaded: LoadedTri
       )}
     </div>
   );
-}
-
-/**
- * Per-line clipboard notes for keying into QuickBooks: the line's amounts plus
- * one row per trip with its date, direction, and the passengers actually taken
- * (boarded), with no-shows listed separately. Deadhead legs are called out
- * explicitly — they ran empty by design, not because passenger data is missing.
- */
-function lineClipboardText(
-  l: InvoiceDetailRecord["lines"][number],
-  tripDetails: Record<string, LoadedTrip>,
-): string {
-  const out: string[] = [
-    l.description,
-    `Qty ${l.quantity} × ${formatInvoiceCad(l.unitPriceCad)} = ${formatInvoiceCad(l.amountCad)}`,
-  ];
-
-  if (l.tripIds.length === 0) {
-    if (l.serviceDate) out.push(`Service date: ${l.serviceDate}`);
-    return out.join("\n");
-  }
-
-  for (const tid of l.tripIds) {
-    const d = tripDetails[tid];
-    const t = d?.trip;
-    if (!t) {
-      out.push("- trip details unavailable");
-      continue;
-    }
-
-    const head = `- ${t.tripNumber}${t.direction ? ` ${t.direction.toLowerCase()}` : ""} · ${t.serviceDate}`;
-    if (t.isEmptyLeg) {
-      out.push(`${head} — DEADHEAD (ran empty, no passengers)`);
-      continue;
-    }
-
-    const pax = d.manifest?.passengers ?? [];
-    if (d.manifestError) {
-      out.push(`${head} — passengers unavailable`);
-    } else if (!t.manifestId) {
-      out.push(`${head} — no manifest recorded`);
-    } else if (pax.length === 0) {
-      out.push(`${head} — manifest has no passengers`);
-    } else {
-      const taken = pax.filter((p) => p.boardedOn);
-      const noShows = pax.filter((p) => !p.boardedOn);
-      let row = `${head} — passengers (${taken.length}): ${taken.map((p) => p.name).join(", ") || "none boarded"}`;
-      if (noShows.length > 0) row += ` · did not board: ${noShows.map((p) => p.name).join(", ")}`;
-      out.push(row);
-    }
-  }
-
-  return out.join("\n");
 }
 
 /**
@@ -619,7 +555,7 @@ function MarkEnteredModal({
       <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textSecondary, lineHeight: 1.6, marginBottom: 14 }}>
         {mode === "edit"
           ? `Correct the QuickBooks reference recorded for ${inv.invoiceNumber}.`
-          : `Key ${inv.invoiceNumber} (${formatInvoiceCad(inv.totalCad)}) into QuickBooks Online first — use COPY FOR QUICKBOOKS or PRINT PREP SHEET — then record its QBO invoice number and entered date here.`}
+          : `Key ${inv.invoiceNumber} (${formatInvoiceCad(inv.totalCad)}) into QuickBooks Online first — COPY FOR QUICKBOOKS and PRINT PREP SHEET both carry the lines plus the trips and passengers behind them — then record its QBO invoice number and entered date here.`}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         <TextField label="QBO invoice number" value={qboNumber} onChange={setQboNumber} mono placeholder="1042" />
@@ -1324,7 +1260,7 @@ function InvoiceDetail({
   // Live trip + passenger detail, keyed by trip id, fetched from the Trips API
   // (never snapshotted onto the invoice). Cached for this mount; the component
   // remounts per invoice (key={id}), and refetches when the line set changes.
-  const [tripDetails, setTripDetails] = useState<Record<string, LoadedTrip>>({});
+  const [tripDetails, setTripDetails] = useState<TripDetailMap>({});
   const [expandedLines, setExpandedLines] = useState<Record<string, boolean>>({});
 
   // Distinct trip ids across all lines, as a stable comma-joined key so a
@@ -1335,6 +1271,15 @@ function InvoiceDetail({
       .sort()
       .join(",");
   }, [inv]);
+
+  // Every referenced trip has landed (loaded OR failed — a failed fetch still
+  // has an entry and prints as "trip details unavailable"), so the copy and the
+  // prep sheet will carry complete notes. A dead Trips API delays these by one
+  // round trip; it can never wedge them.
+  const detailsReady = useMemo(() => {
+    const ids = tripIdsKey ? tripIdsKey.split(",") : [];
+    return ids.every((tid) => tripDetails[tid]);
+  }, [tripIdsKey, tripDetails]);
 
   useEffect(() => {
     const ids = tripIdsKey ? tripIdsKey.split(",") : [];
@@ -1437,8 +1382,8 @@ function InvoiceDetail({
   }
 
   async function handleCopy() {
-    if (!inv) return;
-    const ok = await copyToClipboard(invoiceClipboardText(inv));
+    if (!inv || !detailsReady) return;
+    const ok = await copyToClipboard(invoiceClipboardText(inv, tripDetails));
     setCopyState(ok ? "ok" : "fail");
     setTimeout(() => setCopyState("idle"), ok ? 2000 : 4500);
   }
@@ -1493,6 +1438,21 @@ function InvoiceDetail({
   const isWrittenOff = inv.status === "WrittenOff";
   // Entered but unpaid is what "outstanding" means everywhere in this screen.
   const isOutstanding = isEntered;
+
+  // Both exports carry the same facts — the QBO entry record and the per-line
+  // trip & passenger detail — so it never matters which one the dispatcher
+  // keys from. Both wait on the trip fetches: half-loaded passenger notes are
+  // worse than a moment's delay when the numbers are going into the books.
+  const exportButtons = (
+    <>
+      <ActionButton onClick={handleCopy} disabled={!detailsReady}>
+        {!detailsReady ? "PREPARING…" : copyState === "ok" ? "COPIED ✓" : "COPY FOR QUICKBOOKS"}
+      </ActionButton>
+      <ActionButton onClick={() => printInvoicePrepSheet(inv, tripDetails)} disabled={!detailsReady}>
+        {detailsReady ? "PRINT PREP SHEET" : "PREPARING…"}
+      </ActionButton>
+    </>
+  );
 
   return (
     <div className="detailfade" key={inv.id}>
@@ -1825,10 +1785,7 @@ function InvoiceDetail({
       <div style={{ display: "flex", gap: 9, flexWrap: "wrap", alignItems: "center" }}>
         {isDraft && (
           <>
-            <ActionButton onClick={handleCopy}>
-              {copyState === "ok" ? "COPIED ✓" : "COPY FOR QUICKBOOKS"}
-            </ActionButton>
-            <ActionButton onClick={() => printInvoicePrepSheet(inv)}>PRINT PREP SHEET</ActionButton>
+            {exportButtons}
             <ActionButton variant="primary" onClick={() => setMarkMode("enter")}>
               MARK ENTERED IN QUICKBOOKS
             </ActionButton>
@@ -1839,10 +1796,7 @@ function InvoiceDetail({
         )}
         {isEntered && (
           <>
-            <ActionButton onClick={handleCopy}>
-              {copyState === "ok" ? "COPIED ✓" : "COPY FOR QUICKBOOKS"}
-            </ActionButton>
-            <ActionButton onClick={() => printInvoicePrepSheet(inv)}>PRINT PREP SHEET</ActionButton>
+            {exportButtons}
             <ActionButton onClick={() => setMarkMode("edit")}>EDIT QBO REFERENCE</ActionButton>
             <ActionButton variant="success" onClick={() => setPaymentOpen(true)}>
               CONFIRM PAYMENT
@@ -1854,18 +1808,12 @@ function InvoiceDetail({
         )}
         {isWrittenOff && (
           <>
-            <ActionButton onClick={handleCopy}>
-              {copyState === "ok" ? "COPIED ✓" : "COPY FOR QUICKBOOKS"}
-            </ActionButton>
-            <ActionButton onClick={() => printInvoicePrepSheet(inv)}>PRINT PREP SHEET</ActionButton>
+            {exportButtons}
           </>
         )}
         {isPaid && (
           <>
-            <ActionButton onClick={handleCopy}>
-              {copyState === "ok" ? "COPIED ✓" : "COPY FOR QUICKBOOKS"}
-            </ActionButton>
-            <ActionButton onClick={() => printInvoicePrepSheet(inv)}>PRINT PREP SHEET</ActionButton>
+            {exportButtons}
             <ActionButton onClick={() => setMarkMode("edit")}>EDIT QBO REFERENCE</ActionButton>
             {/* No REOPEN here: the backend refuses to reopen a paid invoice until the
                 payment confirmation is cleared, so offering it would only ever 409. */}
@@ -1874,7 +1822,7 @@ function InvoiceDetail({
         )}
         {copyState === "fail" && (
           <span style={{ fontFamily: fonts.body, fontSize: 11.5, color: statusMeta("over").t }}>
-            Copy failed — select the prep sheet text to copy manually.
+            Copy failed — use PRINT PREP SHEET and select the text there instead; it carries the same detail.
           </span>
         )}
       </div>

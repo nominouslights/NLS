@@ -46,6 +46,33 @@ export const INVOICE_PREP_STYLES = `
 .inv table tfoot td.lbl2 { text-align: right; text-transform: uppercase; font-size: 8.5px; letter-spacing: .04em; color: #333; }
 .inv table tfoot tr.total td { font-size: 11px; color: #102A43; background: #eef2f6; }
 
+/* Trip & passenger detail — the backup behind each billed line. Each line
+   block stays whole across a page break: a passenger list split from its own
+   line header is worse than a short page. */
+.inv .detail { border: 1px solid #333; border-top: 0; padding: 8px 9px 4px; }
+.inv .lineblk { break-inside: avoid; page-break-inside: avoid; margin-bottom: 9px; }
+.inv .lineblk:last-child { margin-bottom: 4px; }
+.inv .lhd { display: flex; align-items: baseline; gap: 7px; margin-bottom: 3px; }
+.inv .lhd .ln {
+  flex: none; background: #eef2f6; border: 1px solid #c3cedb; border-radius: 3px;
+  padding: 1px 5px; font-size: 8px; font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; color: #102A43;
+}
+.inv .lhd .ldesc { font-size: 10.5px; font-weight: 600; color: #1a1a1a; }
+.inv .lhd .lamt {
+  margin-left: auto; flex: none; font-size: 9.5px; color: #444;
+  font-family: "Cascadia Mono", Consolas, ui-monospace, monospace; white-space: nowrap;
+}
+
+.inv table.sub { margin-top: 0; }
+.inv table.sub th, .inv table.sub td { border: 1px solid #c3cedb; padding: 3px 6px; font-size: 9px; }
+.inv table.sub th { background: #f5f7fa; font-size: 7.5px; }
+.inv table.sub td.dead { font-weight: 700; color: #7a4f00; background: #fbf3e0; }
+.inv table.sub td.note { font-style: italic; color: #555; }
+
+.inv .reason { border: 1px solid #333; border-top: 0; padding: 6px 9px; font-size: 10px; line-height: 1.45; color: #333; }
+.inv .detail .reason { border: 0; padding: 0 0 2px; font-style: italic; color: #555; }
+
 .inv .foot { margin-top: 12px; font-size: 8px; color: #666; line-height: 1.5; border-top: 1px solid #ccc; padding-top: 6px; }
 .inv .foot b { color: #333; }
 `;
