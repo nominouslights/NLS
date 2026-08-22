@@ -5,6 +5,7 @@ using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Shared.Tenancy;
 using NorthernLink.Notifications.Application.Dispatches.GetTripEmailHistory;
+using NorthernLink.Notifications.Application.Dispatches.PreviewTripPickupReport;
 using NorthernLink.Notifications.Application.Dispatches.SendTripPickupEmail;
 using NorthernLink.Notifications.Application.Templates.Activate;
 using NorthernLink.Notifications.Application.Templates.Create;
@@ -42,8 +43,9 @@ public static class NotificationsEndpoints
         notifications.MapPost("templates/{id:guid}/activate", ActivateTemplate);
         notifications.MapPost("templates/{id:guid}/deactivate", DeactivateTemplate);
 
-        // Emails — send + per-trip history.
+        // Emails — send + report preview + per-trip history.
         notifications.MapPost("emails/trip-pickup", SendTripPickupEmail);
+        notifications.MapPost("emails/trip-pickup/report-preview", PreviewTripPickupReport);
         notifications.MapGet("emails", GetTripEmailHistory);
 
         return app;
@@ -200,6 +202,38 @@ public static class NotificationsEndpoints
         return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
     }
 
+    private static async Task<IResult> PreviewTripPickupReport(
+        PreviewTripPickupReportRequest request, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var query = new PreviewTripPickupReportQuery(
+            tenantId,
+            request.TemplateId,
+            request.TripId,
+            request.TripNumber ?? string.Empty,
+            request.ManifestId,
+            request.ServiceType,
+            request.TripDate ?? string.Empty,
+            request.PickupTime ?? string.Empty,
+            request.DropoffTime ?? string.Empty,
+            request.Route ?? string.Empty,
+            request.ClientId,
+            request.ClientName,
+            (request.Recipients ?? [])
+                .Select(r => new RecipientInput(
+                    r.Email ?? string.Empty, r.PassengerName ?? string.Empty,
+                    r.PickupStop, r.PickupAddress, r.DropoffStop, r.DropoffStopAddress))
+                .ToList(),
+            request.ReportRecipients ?? []);
+
+        var result = await sender.Query(query, cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
     private static async Task<IResult> GetTripEmailHistory(
         Guid tripId, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
     {
@@ -249,6 +283,28 @@ public sealed record PreviewEmailTemplateRequest(
 /// </summary>
 public sealed record SendTripPickupEmailRequest(
     Guid DispatchId,
+    Guid TemplateId,
+    Guid TripId,
+    string? TripNumber,
+    Guid? ManifestId,
+    NotificationServiceType ServiceType,
+    string? TripDate,
+    string? PickupTime,
+    string? DropoffTime,
+    string? Route,
+    Guid? ClientId,
+    string? ClientName,
+    List<RecipientRequest>? Recipients,
+    IReadOnlyList<string>? ReportRecipients);
+
+/// <summary>
+/// Request body for POST /api/notifications/emails/trip-pickup/report-preview. Mirrors
+/// <see cref="SendTripPickupEmailRequest"/> minus <c>DispatchId</c> — a preview records nothing,
+/// so there is no idempotency key. Renders the pickup emails and composes the report (summary +
+/// PDF) with the exact send-time composition and returns it without sending anything.
+/// ReportRecipients are echoed back (valid + distinct) for display only.
+/// </summary>
+public sealed record PreviewTripPickupReportRequest(
     Guid TemplateId,
     Guid TripId,
     string? TripNumber,

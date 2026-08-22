@@ -19,11 +19,13 @@ import {
   listEmailTemplates,
   listTripEmailDispatches,
   previewEmailTemplate,
+  previewTripPickupReport,
   sendTripPickupEmail,
   type EmailDispatchRecord,
   type EmailPreviewResult,
   type EmailRecipientResult,
   type EmailTemplateRecord,
+  type PickupReportPreviewResult,
 } from "@/lib/api/notifications";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { SelectField } from "@/components/ui/Field";
@@ -102,6 +104,11 @@ export default function SendPickupEmailModal({
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<EmailDispatchRecord | null>(null);
+  // Report preview (crew-only) — what the flagged report contact would receive.
+  // Populated on demand by the PREVIEW REPORT button; sends nothing.
+  const [reportPreview, setReportPreview] = useState<PickupReportPreviewResult | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [reportPreviewError, setReportPreviewError] = useState<string | null>(null);
 
   // Active templates + this trip's dispatch history, loaded together on mount.
   // The dropdown offers only COMPATIBLE templates (same service type, and either
@@ -283,6 +290,53 @@ export default function SendPickupEmailModal({
     }
   }
 
+  // Build a preview of the crew-trip report — identical composition to send()
+  // but WITHOUT dispatchId (nothing is sent). Reflects the CURRENT modal state.
+  async function previewReport() {
+    if (previewLoading) return;
+    if (!template) {
+      setReportPreviewError("Pick a template first.");
+      return;
+    }
+    const recipients = passengers.filter((p, i) => selected[i] && eligible[i]);
+    if (recipients.length === 0) {
+      setReportPreviewError("Select at least one recipient with an email address.");
+      return;
+    }
+    setPreviewLoading(true);
+    setReportPreviewError(null);
+    try {
+      const result = await previewTripPickupReport({
+        templateId: template.id,
+        tripId: trip.id,
+        tripNumber: trip.tripNumber,
+        manifestId: manifest.id,
+        serviceType: trip.serviceType,
+        tripDate: shortDateLabel(trip.serviceDate),
+        pickupTime: hhmm(trip.windowStart),
+        dropoffTime: trip.windowEnd ? hhmm(trip.windowEnd) : "",
+        route: trip.routeName || corridorLabel(trip),
+        clientId: trip.clientId ?? null,
+        clientName: trip.clientName,
+        recipients: recipients.map((p) => ({
+          email: (p.email ?? "").trim(),
+          passengerName: p.name,
+          pickupStop: p.pickupStopName ?? trip.origin,
+          dropoffStop: p.dropoffStopName ?? trip.destination,
+          pickupAddress: addressFor(p.pickupStopId),
+          dropoffStopAddress: addressFor(p.dropoffStopId),
+        })),
+        reportRecipients: reportRecipients.map((r) => r.email),
+      });
+      setReportPreview(result);
+    } catch (e) {
+      setReportPreview(null);
+      setReportPreviewError(e instanceof ApiError ? e.message : "Failed to render preview — please try again.");
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
+
   const templateOptions = [
     { value: "", label: "— Select a template —" },
     ...(templates ?? []).map((t) => ({
@@ -301,6 +355,15 @@ export default function SendPickupEmailModal({
       footer={
         <>
           <ActionButton onClick={onClose}>CLOSE</ActionButton>
+          {trip.serviceType === "ContractCrew" && (
+            <ActionButton
+              variant="secondary"
+              onClick={previewReport}
+              disabled={previewLoading || !template || selectedCount === 0}
+            >
+              {previewLoading ? "RENDERING…" : "PREVIEW REPORT"}
+            </ActionButton>
+          )}
           <ActionButton
             variant="primary"
             onClick={send}
@@ -450,6 +513,110 @@ export default function SendPickupEmailModal({
                   background: "#FFFFFF",
                 }}
               />
+            </>
+          )}
+        </div>
+      )}
+
+      {/* crew-trip report preview — content only, nothing has been sent */}
+      {trip.serviceType === "ContractCrew" && (reportPreview || previewLoading || reportPreviewError) && (
+        <div style={{ marginTop: 16 }}>
+          <SectionLabel>Report preview — what the flagged contact will receive</SectionLabel>
+          <div
+            style={{
+              fontFamily: fonts.body,
+              fontSize: 11.5,
+              color: colors.textDim,
+              lineHeight: 1.5,
+              marginBottom: 8,
+            }}
+          >
+            This is a content preview only — nothing has been sent. Counts and per-recipient statuses show as
+            pending (&ldquo;0 sent&rdquo;, tagged &ldquo;(Preview)&rdquo;) because no email has gone out yet.
+          </div>
+          {reportPreviewError ? (
+            <StatusChip kind="over" label={reportPreviewError} />
+          ) : previewLoading || reportPreview === null ? (
+            <span style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textDim }}>Rendering preview…</span>
+          ) : (
+            <>
+              <div
+                style={{
+                  fontFamily: fonts.body,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: colors.textPrimary,
+                  marginBottom: 8,
+                }}
+              >
+                {reportPreview.subject}
+              </div>
+              {/* summary body — untrusted rendered HTML, fully sandboxed */}
+              <iframe
+                sandbox=""
+                srcDoc={reportPreview.htmlBody}
+                title="Report summary preview"
+                style={{
+                  width: "100%",
+                  height: 240,
+                  border: `1px solid ${colors.borderStrong}`,
+                  borderRadius: 9,
+                  background: "#FFFFFF",
+                }}
+              />
+              {/* attached PDF — our own generated document, so not sandboxed */}
+              <div style={{ marginTop: 10 }}>
+                <SectionLabel>Attached report PDF</SectionLabel>
+                <iframe
+                  title="Report PDF"
+                  src={`data:application/pdf;base64,${reportPreview.pdfBase64}`}
+                  style={{
+                    width: "100%",
+                    height: 420,
+                    border: `1px solid ${colors.borderStrong}`,
+                    borderRadius: 9,
+                    background: "#FFFFFF",
+                  }}
+                />
+                <div style={{ marginTop: 6 }}>
+                  <a
+                    href={`data:application/pdf;base64,${reportPreview.pdfBase64}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{
+                      fontFamily: fonts.condensed,
+                      fontWeight: 700,
+                      fontSize: 12,
+                      letterSpacing: ".03em",
+                      color: colors.blue,
+                      textDecoration: "none",
+                    }}
+                  >
+                    Open PDF in new tab ↗
+                  </a>
+                </div>
+              </div>
+              {/* report recipients line */}
+              <div
+                style={{
+                  marginTop: 10,
+                  fontFamily: fonts.body,
+                  fontSize: 11.5,
+                  color: colors.textSecondary,
+                  lineHeight: 1.5,
+                }}
+              >
+                {reportPreview.reportRecipients.length > 0 ? (
+                  <>
+                    Will be emailed to:{" "}
+                    <span style={{ fontFamily: fonts.mono, color: colors.textDim }}>
+                      {reportPreview.reportRecipients.join(", ")}
+                    </span>
+                  </>
+                ) : (
+                  "No report contact flagged for this client — the report won't be sent (this is a content preview only)."
+                )}
+              </div>
             </>
           )}
         </div>
