@@ -39,19 +39,25 @@ const SERVICE_TYPE_OPTIONS = (Object.keys(SERVICE_TYPE_LABELS) as ClientServiceT
 
 export default function EmailTemplateModal({
   existing,
+  lockedClient,
   onClose,
   onSaved,
 }: {
   /** null = create a new template. */
   existing: EmailTemplateRecord | null;
+  /** When set AND creating, pin the template to this client — the free client
+   *  select is replaced by a locked display. Ignored when editing. */
+  lockedClient?: { id: string; name: string };
   onClose: () => void;
   /** Called after any mutation (create / update / activate / deactivate) —
    *  the parent refetches until the projection reflects the change. */
   onSaved: (id: string) => Promise<void>;
 }) {
+  // Locking only applies in create mode; editing keeps the stored client.
+  const isLocked = !existing && !!lockedClient;
   const [name, setName] = useState(existing?.name ?? "");
   const [serviceType, setServiceType] = useState<ClientServiceType>(existing?.serviceType ?? "Community");
-  const [clientId, setClientId] = useState(existing?.clientId ?? "");
+  const [clientId, setClientId] = useState(existing?.clientId ?? (isLocked ? lockedClient!.id : ""));
   const [subject, setSubject] = useState(existing?.subject ?? "");
   const [htmlBody, setHtmlBody] = useState(existing?.htmlBody ?? "");
   // Client-type orgs from the Clients API — null while loading, [] on failure.
@@ -65,7 +71,15 @@ export default function EmailTemplateModal({
     let active = true;
     listClients().then(
       (rows) => {
-        if (active) setClients(rows.filter((c) => c.type === "Client"));
+        if (!active) return;
+        const clientRows = rows.filter((c) => c.type === "Client");
+        setClients(clientRows);
+        // Locked create: prefill the service type from the pinned client, the
+        // same way onClientChange would for a manual pick.
+        if (isLocked) {
+          const locked = clientRows.find((c) => c.id === lockedClient!.id);
+          if (locked?.serviceType) setServiceType(locked.serviceType);
+        }
       },
       () => {
         if (active) setClients([]); // best-effort — the "None" option still works
@@ -74,6 +88,7 @@ export default function EmailTemplateModal({
     return () => {
       active = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /** Resolve the clientName snapshot for the selected client id. */
@@ -81,6 +96,9 @@ export default function EmailTemplateModal({
     if (!id) return null;
     const fromList = clients?.find((c) => c.id === id)?.name ?? null;
     if (fromList) return fromList;
+    // Locked create: fall back to the pinned client's name even if the client
+    // list hasn't resolved.
+    if (isLocked && id === lockedClient!.id) return lockedClient!.name;
     // Editing a client-specific template while the client list is unavailable —
     // keep the stored snapshot.
     if (existing && existing.clientId === id) return existing.clientName;
@@ -231,18 +249,31 @@ export default function EmailTemplateModal({
           onChange={(v) => setServiceType(v as ClientServiceType)}
           options={SERVICE_TYPE_OPTIONS}
         />
-        <SelectField
-          label="Client (optional)"
-          hint={
-            <span style={{ color: colors.textDim }}>
-              — client-specific templates win over service-type ones
-            </span>
-          }
-          value={clientId}
-          onChange={onClientChange}
-          options={clientOptions}
-          disabled={clients === null}
-        />
+        {isLocked ? (
+          <SelectField
+            label="Client"
+            hint={
+              <span style={{ color: colors.textDim }}>— pinned to this client</span>
+            }
+            value={lockedClient!.id}
+            onChange={() => {}}
+            options={[{ value: lockedClient!.id, label: lockedClient!.name }]}
+            disabled
+          />
+        ) : (
+          <SelectField
+            label="Client (optional)"
+            hint={
+              <span style={{ color: colors.textDim }}>
+                — client-specific templates win over service-type ones
+              </span>
+            }
+            value={clientId}
+            onChange={onClientChange}
+            options={clientOptions}
+            disabled={clients === null}
+          />
+        )}
         <TextField label="Subject" value={subject} onChange={setSubject} placeholder="Your Northern Link pickup — {{TripDate}}" maxLength={300} />
       </div>
 

@@ -6,7 +6,7 @@ import type { InteractionType } from "@/lib/types";
 // presentational helpers) so Clients.tsx, ClientDetail, and the tab components
 // agree.
 
-export const CLIENT_TABS = ["Overview & POs", "Contacts", "Interactions"];
+export const CLIENT_TABS = ["Overview & POs", "Contacts", "Interactions", "Email templates"];
 export const VENDOR_TABS = ["Overview & POs"];
 
 /** The CRM roster + interaction log apply to Client-type organizations only.
