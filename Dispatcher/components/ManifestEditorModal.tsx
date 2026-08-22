@@ -33,6 +33,7 @@ import {
   type StopOption,
 } from "@/components/manifest/manifestRows";
 import PassengerCsvImport from "@/components/manifest/PassengerCsvImport";
+import RiderPickerModal from "@/components/manifest/RiderPickerModal";
 
 // Inline manifest editor — the slim passenger + cargo manifest for a trip.
 // Create or edit, always source "Dispatcher" (with the dispatcher label as
@@ -81,6 +82,7 @@ export default function ManifestEditorModal({
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [riderPickerOpen, setRiderPickerOpen] = useState(false);
 
   // Passenger cap tracks the assigned unit's seat capacity (snapshotted onto the
   // trip), falling back to the default 8 when the trip carries no capacity.
@@ -212,15 +214,28 @@ export default function ManifestEditorModal({
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
         <SectionLabel>Passengers</SectionLabel>
         {!readOnly && (
-          <PassengerCsvImport
-            stops={stops}
-            capacity={trip.seatsCapacity}
-            existingCount={contentPax}
-            trip={{ clientName: trip.clientName, serviceDate: trip.serviceDate, direction }}
-            onApply={applyImport}
-          />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <ActionButton onClick={() => setRiderPickerOpen(true)}>＋ ADD FROM RIDERS</ActionButton>
+            <PassengerCsvImport
+              stops={stops}
+              capacity={trip.seatsCapacity}
+              existingCount={contentPax}
+              trip={{ clientName: trip.clientName, serviceDate: trip.serviceDate, direction }}
+              onApply={applyImport}
+            />
+          </div>
         )}
       </div>
+      {riderPickerOpen && !readOnly && (
+        <RiderPickerModal
+          stops={stops}
+          capacity={trip.seatsCapacity}
+          existingCount={contentPax}
+          defaultServiceType={trip.serviceType}
+          onApply={(rows) => applyImport(rows, { direction: null })}
+          onClose={() => setRiderPickerOpen(false)}
+        />
+      )}
       <div style={{ marginBottom: 8 }}>
         <PassengerRowsEditor rows={passengers} stops={stops} onChange={setPassengers} maxRows={maxPax} readOnly={readOnly} />
       </div>

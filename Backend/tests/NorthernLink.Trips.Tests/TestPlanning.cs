@@ -116,14 +116,15 @@ internal static class TestPlanning
         TimeOnly? windowStart = null,
         string origin = "Thompson",
         string destination = "Lynn Lake",
-        bool isEmptyLeg = false) =>
+        bool isEmptyLeg = false,
+        TripServiceType serviceType = TripServiceType.ContractCrew) =>
         Trip.Schedule(
             tenantId ?? TenantId,
             tripNumber,
             serviceDate: serviceDate ?? new DateOnly(2026, 7, 21),
             windowStart: windowStart ?? new TimeOnly(6, 30),
             windowEnd: new TimeOnly(8, 15),
-            TripServiceType.ContractCrew,
+            serviceType,
             routeId: null,
             routeName: "Thompson ↔ Lynn Lake",
             origin: origin,
