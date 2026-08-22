@@ -20,6 +20,9 @@ public static partial class MergeFields
     /// <summary>The trip's pickup-window start time.</summary>
     public const string PickupTime = "PickupTime";
 
+    /// <summary>The trip's dropoff / arrival time.</summary>
+    public const string DropoffTime = "DropoffTime";
+
     /// <summary>The trip's route name.</summary>
     public const string Route = "Route";
 
@@ -44,7 +47,7 @@ public static partial class MergeFields
     /// <summary>Every valid token name, in display order.</summary>
     public static readonly IReadOnlyList<string> All =
     [
-        PassengerName, TripDate, PickupTime, Route, PickupStop, PickupAddress, DropoffStop, DropoffStopAddress, TripNumber, ClientName,
+        PassengerName, TripDate, PickupTime, DropoffTime, Route, PickupStop, PickupAddress, DropoffStop, DropoffStopAddress, TripNumber, ClientName,
     ];
 
     private static readonly HashSet<string> AllSet = new(All, StringComparer.Ordinal);

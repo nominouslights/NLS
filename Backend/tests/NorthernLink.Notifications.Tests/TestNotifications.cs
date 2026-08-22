@@ -14,7 +14,7 @@ internal static class TestNotifications
         Guid? clientId = null,
         string? clientName = null,
         string subject = "Pickup {{TripDate}} — {{TripNumber}}",
-        string htmlBody = "<p>Hi {{PassengerName}},</p><p>Pickup at {{PickupStop}} at {{PickupTime}}.</p>")
+        string htmlBody = "<p>Hi {{PassengerName}},</p><p>Pickup at {{PickupStop}} at {{PickupTime}}.</p><p>Arrival at {{DropoffTime}}.</p>")
     {
         var result = EmailTemplate.Create(TenantId, name, serviceType, clientId, clientName, subject, htmlBody);
         if (result.IsFailure)

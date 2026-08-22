@@ -30,6 +30,7 @@ public class SendTripPickupEmailCommandHandlerTests
         NotificationServiceType.Community,
         "Tuesday, August 4, 2026",
         "8:30 AM",
+        "11:15 AM",
         "Thompson – Lynn Lake",
         clientId,
         "Marcel Colomb First Nation",
@@ -220,6 +221,7 @@ public class SendTripPickupEmailCommandHandlerTests
         Assert.Equal("Pickup Tuesday, August 4, 2026 — NL-1042", email.Subject);
         Assert.Contains("Hi Alex Moody,", email.HtmlBody);
         Assert.Contains("Pickup at Thompson Terminal at 8:30 AM.", email.HtmlBody);
+        Assert.Contains("Arrival at 11:15 AM.", email.HtmlBody);
         Assert.DoesNotContain("{{", email.HtmlBody);
         Assert.Contains("Hi Alex Moody,", email.TextBody);
         Assert.DoesNotContain("<p>", email.TextBody);

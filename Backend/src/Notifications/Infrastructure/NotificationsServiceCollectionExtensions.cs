@@ -23,6 +23,7 @@ using NorthernLink.Notifications.Application.Templates.Update;
 using NorthernLink.Notifications.Infrastructure.Email;
 using NorthernLink.Notifications.Infrastructure.Persistence;
 using NorthernLink.Notifications.Infrastructure.Persistence.Projections;
+using NorthernLink.Notifications.Infrastructure.Rendering;
 
 namespace NorthernLink.Notifications.Infrastructure;
 
@@ -62,6 +63,10 @@ public static class NotificationsServiceCollectionExtensions
         services.AddScoped<IEmailTemplateReadService, EmailTemplateReadService>();
         services.AddScoped<IEmailDispatchRepository, EmailDispatchRepository>();
         services.AddScoped<IEmailDispatchReadService, EmailDispatchReadService>();
+
+        // Allowlist HTML sanitizer for stored/sent template bodies. Singleton: the underlying
+        // Ganss HtmlSanitizer is configured once and each Sanitize call is a self-contained parse.
+        services.AddSingleton<IEmailHtmlSanitizer, GanssEmailHtmlSanitizer>();
 
         // 3. Postmark sender over IHttpClientFactory (Microsoft.Extensions.Http ships in the
         //    AspNetCore framework reference — no extra package, no Polly, no SDK). Options are

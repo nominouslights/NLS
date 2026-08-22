@@ -24,6 +24,7 @@ public sealed record SendTripPickupEmailCommand(
     NotificationServiceType ServiceType,
     string TripDate,
     string PickupTime,
+    string DropoffTime,
     string Route,
     Guid? ClientId,
     string? ClientName,

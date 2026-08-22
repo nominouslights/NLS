@@ -19,6 +19,7 @@ public static partial class MergeFieldRenderer
             [MergeFields.PassengerName] = "Alex Moody",
             [MergeFields.TripDate] = "Tuesday, August 4, 2026",
             [MergeFields.PickupTime] = "8:30 AM",
+            [MergeFields.DropoffTime] = "11:15 AM",
             [MergeFields.Route] = "Thompson – Lynn Lake",
             [MergeFields.PickupStop] = "Thompson Terminal",
             [MergeFields.PickupAddress] = "12 Station Rd, Thompson, MB R8N 0A1",

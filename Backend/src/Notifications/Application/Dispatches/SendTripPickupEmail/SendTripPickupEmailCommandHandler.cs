@@ -141,6 +141,7 @@ public sealed partial class SendTripPickupEmailCommandHandler(
             [MergeFields.PassengerName] = recipient.PassengerName,
             [MergeFields.TripDate] = command.TripDate,
             [MergeFields.PickupTime] = command.PickupTime,
+            [MergeFields.DropoffTime] = command.DropoffTime,
             [MergeFields.Route] = command.Route,
             [MergeFields.PickupStop] = recipient.PickupStop ?? string.Empty,
             [MergeFields.PickupAddress] = recipient.PickupAddress ?? string.Empty,
