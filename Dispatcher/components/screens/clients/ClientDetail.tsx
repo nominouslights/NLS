@@ -24,6 +24,7 @@ import { StatusChip } from "@/components/ui/Chip";
 import { ActionButton } from "@/components/ui/Button";
 import ContractFormModal from "@/components/ContractFormModal";
 import ContactRoster from "./ContactRoster";
+import ClientEmailTemplates from "./ClientEmailTemplates";
 import InteractionTimeline from "./InteractionTimeline";
 import ClientPoDashboard from "./ClientPoDashboard";
 import { CLIENT_TABS, isClientType, VENDOR_TABS } from "./shared";
@@ -390,6 +391,9 @@ export default function ClientDetail({
 
       {/* Interactions (client-type only — prototype-CRM mock store) */}
       {clientType && activeTab === 2 && <InteractionTimeline clientId={mockCrmId} clientName={client.name} />}
+
+      {/* Email templates (client-type only — real Notifications API, client-scoped) */}
+      {clientType && activeTab === 3 && <ClientEmailTemplates clientId={client.id} clientName={client.name} />}
 
       {modal === "new-contract" && (
         <ContractFormModal
