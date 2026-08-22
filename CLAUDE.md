@@ -99,8 +99,13 @@ invents endpoint shapes.
   from the shell; orchestrated runs (`aspire run`) have `AppHost/NorthernLink.AppHost/AppHost.cs`
   read them from its own environment (failing fast with the missing name if unset) and forward
   them to the API resource; a real deployment sets them directly on the host/container. No file
-  anywhere carries a secret literal. Everything else (RabbitMQ host/port/exchange, logging,
-  `AllowedHosts`) is non-secret and still config-bound in `appsettings.json` as normal.
+  anywhere carries a secret literal. The **whole** RabbitMQ block is environment-only too, not
+  just the credential pair: `RabbitMq__HostName`, `RabbitMq__Port` and `RabbitMq__ExchangeName`
+  are optional overrides read by `RabbitMqOptions.FromEnvironment()`, falling back in code to
+  `localhost`, `5672` and `northernlink.events` — there is no `RabbitMq` section in
+  `appsettings.json` to bind, so a broker address can never be committed. Everything else
+  (logging, `AllowedHosts`, `Migrations`, `Notifications` from/stream) is non-secret and still
+  config-bound in `appsettings.json` as normal.
 - **Both `AppHost/NorthernLink.AppHost/AppHost.cs` and
   `Backend/src/Api/NorthernLink.Api/Properties/launchSettings.json` are gitignored** — neither
   contains secrets anymore (AppHost.cs only reads and forwards environment variables;
@@ -159,9 +164,16 @@ server workload, and `AppHost/` stays a local-dev orchestrator: neither is conta
 - `.github/workflows/build.yml` does exactly one thing, by the owner's decision: builds and
   pushes all four images to `ghcr.io/<owner>/northernlink-*`. No test gate, no deploy step — CI
   ends at the package registry, and the owner deploys from those images outside CI (a Kubernetes
-  setup was tried and torn down for cost in Aug 2026; the replacement managed container-app
-  service is still being chosen). Run `dotnet test` and Budgeting's `npm test` locally before
-  pushing.
+  setup was tried and torn down for cost in Aug 2026; the replacement is **DigitalOcean App
+  Platform**, spec at `.do/app.yaml` — written but not yet deployed). Run `dotnet test` and
+  Budgeting's `npm test` locally before pushing.
+- `.do/app.yaml` is the App Platform spec: `doctl apps create --spec .do/app.yaml`, then
+  `doctl apps update <app-id> --spec .do/app.yaml`. All four containers are components of **one**
+  app because App Platform's private network is per-app — a component's name is its hostname on
+  that LAN, so the API component must be named `northernlink-api` with `internal_ports: [8080]`
+  for the frontends' baked `http://northernlink-api:8080` to resolve. It carries no `http_port`
+  and no ingress rule, which is what keeps the API off the public internet. Secrets in that file
+  are placeholders — set the real values in the DO control panel, never in the committed spec.
 
 Four things that will bite whoever deploys these images, on any host:
 

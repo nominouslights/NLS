@@ -23,19 +23,9 @@ public static class SharedServiceCollectionExtensions
     {
         services.AddScoped<ISender, Sender>();
 
-        // Host/port/exchange are non-secret and stay config-bound; the credential pair is
-        // always sourced from the environment, never appsettings.json.
-        var boundRabbitMqOptions = configuration.GetSection(RabbitMqOptions.SectionName).Get<RabbitMqOptions>()
-            ?? new RabbitMqOptions();
-        var rabbitMqOptions = new RabbitMqOptions
-        {
-            HostName = boundRabbitMqOptions.HostName,
-            Port = boundRabbitMqOptions.Port,
-            UserName = RequiredEnvironmentVariable.Get("RabbitMq__UserName"),
-            Password = RequiredEnvironmentVariable.Get("RabbitMq__Password"),
-            ExchangeName = boundRabbitMqOptions.ExchangeName,
-        };
-        services.AddSingleton(rabbitMqOptions);
+        // Every broker setting — address included, not just the credentials — comes from the
+        // environment; there is no RabbitMq section in appsettings.json to bind.
+        services.AddSingleton(RabbitMqOptions.FromEnvironment());
         services.AddSingleton<RabbitMqIntegrationEventBus>();
         services.AddSingleton<IIntegrationEventBus>(sp => sp.GetRequiredService<RabbitMqIntegrationEventBus>());
         services.AddSingleton<IOutboxTransport>(sp => sp.GetRequiredService<RabbitMqIntegrationEventBus>());

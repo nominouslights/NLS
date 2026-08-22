@@ -1,0 +1,239 @@
+# Northern Link — DigitalOcean App Platform spec for the `nls-api` app
+# (c31ce923-34fc-42bd-bdd0-c6711ac37fb5, region tor).
+#
+#   doctl apps spec get c31ce923-34fc-42bd-bdd0-c6711ac37fb5 > current.yaml   # what is live now
+#   doctl apps update  c31ce923-34fc-42bd-bdd0-c6711ac37fb5 --spec .do/app.yaml
+#
+# This spec matches images built with no build args — the Dispatch Console is mounted at "/".
+# Adding the other two consoles means moving to path prefixes, which is a coupled change
+# described at the bottom of this file. Until then, images and spec are independent: a rebuild
+# can be deployed at any time without touching routing.
+#
+# ---------------------------------------------------------------------------------------
+# TWO RULES THIS FILE EXISTS TO ENFORCE
+#
+# 1. The API component is named `northernlink-api` and speaks on 8080. App Platform resolves
+#    a component's *name* as a hostname on the app's private LAN, and every frontend image has
+#    http://northernlink-api:8080 baked into routes-manifest.json by `next build`. The app once
+#    named it `nominouslights-northernlink-api`, and the proxy failed with
+#    `getaddrinfo ENOTFOUND northernlink-api` until it was renamed.
+#
+# 2. There is NO public ingress rule for the API. It carries `internal_ports` and no
+#    `http_port`, so App Platform gives it no public route at all. Routing /api to it publicly
+#    both exposes the API and breaks every call: App Platform strips a matched prefix unless
+#    preserve_path_prefix is set, so /api/identity/auth/login arrives as /identity/auth/login
+#    and 404s. Browsers reach the API only through a frontend's own origin — which is why
+#    there is no CORS configuration anywhere in the stack.
+# ---------------------------------------------------------------------------------------
+
+name: nls-api
+region: tor
+
+alerts:
+  - rule: DEPLOYMENT_FAILED
+  - rule: DOMAIN_FAILED
+
+features:
+  - buildpack-stack=ubuntu-22
+
+services:
+  # -------------------------------------------------------------------------------------
+  # API — internal only.
+  # -------------------------------------------------------------------------------------
+  - name: northernlink-api
+    image:
+      registry_type: GHCR
+      registry: nominouslights
+      repository: northernlink-api
+      tag: latest
+      # KEEP THE LIVE VALUE. `doctl apps spec get` returns this as an EV[1:...] blob that can
+      # be resubmitted verbatim; a placeholder here would break the pull of a private package.
+      registry_credentials: EV[REPLACE_WITH_THE_LIVE_EV_BLOB]
+
+    # No http_port. This is the private-LAN address the frontends proxy to.
+    internal_ports:
+      - 8080
+
+    # EXACTLY ONE. Each instance runs eight OutboxDispatcher background services plus
+    # TripGenerationWorker, and OutboxDispatcher has no FOR UPDATE SKIP LOCKED — a second
+    # instance double-publishes events and duplicates generated trips. Never scale this up,
+    # and never enable autoscaling on it.
+    instance_count: 1
+    # 512 MB for .NET plus nine background services is tight; if the component starts
+    # restarting under load, memory is the first thing to check.
+    instance_size_slug: basic-xxs
+
+    # /health is readiness (migrations + database), /alive is liveness. Without this, App
+    # Platform falls back to a bare port check and a database-unreachable API still reads as
+    # healthy. The default response writer emits only "Healthy"/"Unhealthy" — no detail leaks.
+    health_check:
+      http_path: /health
+      port: 8080
+      initial_delay_seconds: 30
+      period_seconds: 15
+      timeout_seconds: 5
+      failure_threshold: 5
+
+    envs:
+      # ---------------------------------------------------------------------------------
+      # THE FOUR SECRETS BELOW ARE PLAINTEXT `GENERAL` VARS IN THE LIVE APP, INCLUDING THE
+      # doadmin CLUSTER-ADMIN PASSWORD. Rotation is scheduled separately. When it happens,
+      # set the new values as type: SECRET so DigitalOcean stores them encrypted (EV[1:...]).
+      # scope is RUN_TIME, not RUN_AND_BUILD_TIME: these are prebuilt images, nothing builds.
+      # ---------------------------------------------------------------------------------
+
+      # Npgsql does not parse postgres:// URIs, so this cannot be ${db.DATABASE_URL} — it must
+      # be the keyword form, against the `northernlink` database, not `defaultdb`.
+      - key: ConnectionStrings__Postgres
+        scope: RUN_TIME
+        type: SECRET
+        value: "Host=db-postgresql-tor1-71774-do-user-37476504-0.e.db.ondigitalocean.com;Port=25060;Database=northernlink;Username=doadmin;Password=REPLACE;SSL Mode=Require"
+
+      - key: Identity__JwtSigningKey
+        scope: RUN_TIME
+        type: SECRET
+        value: "REPLACE"
+
+      # `rabbitmq` is the sibling component's name on the same private LAN. The live app sets
+      # neither, so the API is looking for a broker on localhost:5672 and never reaches the
+      # component at all.
+      - key: RabbitMq__HostName
+        scope: RUN_TIME
+        value: rabbitmq
+      - key: RabbitMq__Port
+        scope: RUN_TIME
+        value: "5672"
+      # NOT guest/guest: RabbitMQ restricts the guest account to loopback connections, so those
+      # credentials cannot authenticate from another container no matter what else is right.
+      - key: RabbitMq__UserName
+        scope: RUN_TIME
+        type: SECRET
+        value: "REPLACE"
+      - key: RabbitMq__Password
+        scope: RUN_TIME
+        type: SECRET
+        value: "REPLACE"
+
+      # TRUE HERE AND NOWHERE ELSE. Every environment shares this one database, so only the
+      # deployed API may migrate it. Unset (the live state) means future migrations never
+      # apply — the schema only looks current because it was migrated by an earlier run.
+      - key: Migrations__RunOnStartup
+        scope: RUN_TIME
+        value: "true"
+
+      # Fail lazily on first use — safe to leave until media upload / email is actually needed.
+      # - key: ObjectStorage__AccessKey
+      # - key: ObjectStorage__SecretKey
+      # - key: Notifications__PostmarkApiKey
+
+  # -------------------------------------------------------------------------------------
+  # Broker — internal only. Routing /rabbitmq publicly (as the app once did) puts the
+  # management UI on the open internet.
+  #
+  # CAVEAT: App Platform containers have no persistent volume, so queues do not survive a
+  # restart or redeploy. Acceptable only because BusPublicationRegistry is empty — every
+  # integration event today is storing/projecting and consumed in-database by each module's
+  # OutboxPollingConsumer, so nothing actually flows through RabbitMQ. The first chain-reaction
+  # event makes durability real and this component has to move to a Droplet or managed broker.
+  # -------------------------------------------------------------------------------------
+  - name: rabbitmq
+    image:
+      registry_type: DOCKER_HUB
+      registry: library
+      repository: rabbitmq
+      tag: "4.3.4-management"
+    internal_ports:
+      - 5672
+      - 15672
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    # Probe the management UI over HTTP, not the AMQP port — an HTTP GET against 5672 is not a
+    # meaningful check.
+    health_check:
+      http_path: /
+      port: 15672
+      initial_delay_seconds: 30
+      period_seconds: 15
+      failure_threshold: 5
+    envs:
+      - key: RABBITMQ_DEFAULT_USER
+        scope: RUN_TIME
+        type: SECRET
+        value: "REPLACE"   # must equal the API's RabbitMq__UserName
+      - key: RABBITMQ_DEFAULT_PASS
+        scope: RUN_TIME
+        type: SECRET
+        value: "REPLACE"   # must equal the API's RabbitMq__Password
+
+  # -------------------------------------------------------------------------------------
+  # Dispatch Console — the only component with public ingress, mounted at the root.
+  #
+  # http_port 3000 matches EXPOSE in the Dockerfile. App Platform injects PORT=http_port, so
+  # any value works as long as the two agree — Next reads PORT either way.
+  # -------------------------------------------------------------------------------------
+  - name: dispatcher
+    image:
+      registry_type: GHCR
+      registry: nominouslights
+      repository: northernlink-dispatcher
+      tag: latest
+      registry_credentials: EV[REPLACE_WITH_THE_LIVE_EV_BLOB]
+    http_port: 3000
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    health_check:
+      http_path: /
+      initial_delay_seconds: 15
+
+ingress:
+  rules:
+    - match:
+        path:
+          prefix: /
+      component:
+        name: dispatcher
+
+# Attaching the cluster is what keeps the app on the database's Trusted Sources list.
+databases:
+  - name: db-postgresql-tor1-71774
+    cluster_name: db-postgresql-tor1-71774
+    db_name: northernlink
+    db_user: doadmin
+    engine: PG
+    production: true
+
+# -----------------------------------------------------------------------------------------
+# ADDING THE BUDGETING CONSOLE AND THE MARKETING SITE
+#
+# Three frontends cannot share one hostname at the root, so they get path prefixes — and a
+# Next.js basePath is compiled into every asset URL at BUILD time. That makes this a single
+# coupled change; half of it deploys a console that 404s on its own JavaScript.
+#
+#   1. .github/workflows/build.yml — add per-app build args. BASE_PATH and
+#      NEXT_PUBLIC_API_BASE_URL must always be equal: basePath moves the assets,
+#      NEXT_PUBLIC_API_BASE_URL moves the browser's fetches (lib/api/transport.ts sends an
+#      absolute /api/... that Next does not rewrite, so without it the calls leave the prefix
+#      and land on whichever component owns "/"). Website gets neither — it owns the root.
+#
+#        dispatcher: BASE_PATH=/dispatch, NEXT_PUBLIC_API_BASE_URL=/dispatch
+#        budgeting:  BASE_PATH=/budget,   NEXT_PUBLIC_API_BASE_URL=/budget
+#
+#   2. Wait for CI to publish the rebuilt images. Applying the spec first serves the
+#      still-root-mounted images under a prefix.
+#
+#   3. Here: add `budgeting` and `website` service blocks (same shape as `dispatcher`), and
+#      replace the single ingress rule above with three — catch-all LAST:
+#
+#        - match: {path: {prefix: /dispatch}}
+#          component: {name: dispatcher, preserve_path_prefix: true}
+#        - match: {path: {prefix: /budget}}
+#          component: {name: budgeting,  preserve_path_prefix: true}
+#        - match: {path: {prefix: /}}
+#          component: {name: website}
+#
+#      preserve_path_prefix is REQUIRED: without it App Platform strips the prefix and a
+#      console with basePath "/dispatch" 404s on the bare "/" it then receives.
+#
+#   4. Point each prefixed console's health_check http_path at its basePath. "/" 404s once a
+#      basePath is set, and a 404 fails the check.
+# -----------------------------------------------------------------------------------------
