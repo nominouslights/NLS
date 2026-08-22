@@ -261,7 +261,7 @@ export function invoiceChip(inv: { status: InvoiceStatus }): { kind: StatusKind;
     case "Paid":
       return { kind: "ontime", label: "Paid" };
     case "EnteredInQbo":
-      return { kind: "info", label: "Entered in QBO — outstanding" };
+      return { kind: "info", label: "Outstanding" };
     case "WrittenOff":
       return { kind: "over", label: "Written off" };
     case "Void":

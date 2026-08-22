@@ -55,6 +55,10 @@ library boundaries, Canadian data residency assumptions, and budget-code tagging
 - `Dispatcher/` currently runs on mock data (`lib/data.ts`) — test against the mock layer; never
   invent API shapes. If a test needs a contract that doesn't exist yet, report it as a blocker.
 - Verify changes compile: `npm run build` in `Dispatcher/` (dev server usually lands on port 3001).
+- `Budgeting/` is the only frontend with a test setup — Vitest via `npm test` in `Budgeting/`.
+  Its suite pins client-side mirrors of server rules (role gate, JWT claims, `previewPeriod` /
+  budget-code rules, the `TripServiceType` spellings) — read `Budgeting/CLAUDE.md`'s Testing
+  section before adding to it; every mirror test names the C# method it pins in a comment.
 
 ## Workflow
 

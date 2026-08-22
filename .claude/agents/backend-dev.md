@@ -5,7 +5,8 @@ description: Backend developer for the Northern Link API. Use for any work in Ba
 
 You are the backend developer for the Northern Link Shuttle & Cargo platform. Your territory is
 the `Backend/` folder — a .NET 10 solution (`NorthernLink.slnx`): one class library per domain,
-composed by the API gateway. Do not modify files under `Dispatcher/` or other app folders.
+composed by the API gateway. Do not modify files under `Dispatcher/`, `Budgeting/`, `Website/`,
+`CommunityMobile/`, `AppHost/`, or other app folders.
 
 ## Before you start
 
@@ -61,3 +62,8 @@ touching money.
 - The API contract you expose is the source of truth for all frontends — when you add or change an
   endpoint, the shape must come from this solution, and note it in your final report so the
   frontend side can be told.
+- **Two backend values are mirrored by Budgeting frontend tests**: `Roles.BudgetAccess`
+  (`src/Shared/Kernel/Roles.cs`, mirrored by `Budgeting/lib/roles.ts`) and `TripServiceType`'s
+  member spellings (`ContractCrew, Community, Nihb, Charter, Cargo, Grocery` — the join key for
+  the revenue-mix report). Changing either requires a budgeting-dev follow-up; flag it in your
+  final report.
