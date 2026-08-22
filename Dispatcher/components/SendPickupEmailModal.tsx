@@ -80,7 +80,7 @@ export default function SendPickupEmailModal({
   onClose: () => void;
 }) {
   const passengers = manifest.passengers;
-  const eligible = passengers.map((p) => isEmailContact(p.contact));
+  const eligible = passengers.map((p) => isEmailContact(p.email));
 
   const [templates, setTemplates] = useState<EmailTemplateRecord[] | null>(null);
   const [history, setHistory] = useState<EmailDispatchRecord[] | null>(null);
@@ -91,7 +91,7 @@ export default function SendPickupEmailModal({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [templateId, setTemplateId] = useState("");
   // Eligible recipients are preselected; ineligible rows can never be checked.
-  const [selected, setSelected] = useState<boolean[]>(() => passengers.map((p) => isEmailContact(p.contact)));
+  const [selected, setSelected] = useState<boolean[]>(() => passengers.map((p) => isEmailContact(p.email)));
   const [preview, setPreview] = useState<EmailPreviewResult | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string[]>([]);
@@ -239,7 +239,7 @@ export default function SendPickupEmailModal({
         clientId: trip.clientId ?? null, // validated server-side against the template's client pin
         clientName: trip.clientName,
         recipients: recipients.map((p) => ({
-          email: (p.contact ?? "").trim(),
+          email: (p.email ?? "").trim(),
           passengerName: p.name,
           pickupStop: p.pickupStopName ?? trip.origin,
           dropoffStop: p.dropoffStopName ?? trip.destination,
@@ -316,9 +316,9 @@ export default function SendPickupEmailModal({
             const ok = eligible[i];
             const reason = ok
               ? null
-              : !p.contact?.trim()
-                ? "No contact on manifest"
-                : "Contact is not an email address";
+              : !p.email?.trim()
+                ? "No email on manifest"
+                : "Not a valid email address";
             return (
               <div
                 key={`${p.name}-${i}`}
@@ -348,7 +348,7 @@ export default function SendPickupEmailModal({
                 </span>
                 {ok ? (
                   <span style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.textMuted }}>
-                    {(p.contact ?? "").trim()}
+                    {(p.email ?? "").trim()}
                   </span>
                 ) : (
                   <span style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim, fontStyle: "italic" }}>

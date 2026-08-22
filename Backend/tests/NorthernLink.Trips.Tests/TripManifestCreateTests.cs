@@ -1,4 +1,5 @@
 using NorthernLink.Shared.Kernel;
+using NorthernLink.Trips.Application.Manifests;
 using NorthernLink.Trips.Domain.Manifests;
 using NorthernLink.Trips.Domain.Manifests.Events;
 using Xunit;
@@ -77,6 +78,81 @@ public class TripManifestCreateTests
         var stored = Assert.Single(manifest.Passengers);
         Assert.Null(stored.PickupStopId);
         Assert.Null(stored.DropoffStopId);
+    }
+
+    [Theory]
+    [InlineData("rider@example.ca", null)]           // email-only
+    [InlineData(null, "204-555-0134")]               // phone-only
+    [InlineData("rider@example.ca", "204-555-0134")] // both set
+    public void Passenger_email_and_phone_round_trip_onto_the_aggregate(string? email, string? phone)
+    {
+        var passenger = new ManifestPassenger
+        {
+            Name = "R. Spence",
+            Email = email,
+            Phone = phone,
+            BoardedOn = true,
+        };
+
+        var manifest = TestManifests.Create(passengers: [passenger]).Value;
+
+        var stored = Assert.Single(manifest.Passengers);
+        Assert.Equal(email, stored.Email);
+        Assert.Equal(phone, stored.Phone);
+    }
+
+    [Theory]
+    [InlineData("rider@example.ca", null)]           // email-only
+    [InlineData(null, "204-555-0134")]               // phone-only
+    [InlineData("rider@example.ca", "204-555-0134")] // both set
+    public void Passenger_email_and_phone_survive_the_response_mapper(string? email, string? phone)
+    {
+        var passenger = new ManifestPassenger
+        {
+            Name = "R. Spence",
+            Email = email,
+            Phone = phone,
+            BoardedOn = true,
+        };
+        var manifest = TestManifests.Create(passengers: [passenger]).Value;
+
+        var response = TripManifestResponseMapper.ToResponse(manifest);
+
+        var mapped = Assert.Single(response.Passengers);
+        Assert.Equal(email, mapped.Email);
+        Assert.Equal(phone, mapped.Phone);
+    }
+
+    [Fact]
+    public void Update_carries_the_new_email_and_phone_fields_onto_the_aggregate()
+    {
+        var manifest = TestManifests.Create().Value;
+
+        var revised = new ManifestPassenger
+        {
+            Name = "J. Linklater",
+            Email = "j.linklater@example.ca",
+            Phone = "204-555-0199",
+            BoardedOn = true,
+        };
+
+        var result = manifest.Update(
+            manifest.TripDate,
+            manifest.TripNumber,
+            manifest.Route,
+            manifest.Direction,
+            manifest.Client,
+            [revised],
+            manifest.AllSeatbeltsVerified,
+            manifest.Cargo,
+            manifest.AllCargoSecured,
+            ManifestSource.Dispatcher,
+            enteredBy: "Dispatch — R. Ballantyne");
+
+        Assert.True(result.IsSuccess);
+        var stored = Assert.Single(manifest.Passengers);
+        Assert.Equal("j.linklater@example.ca", stored.Email);
+        Assert.Equal("204-555-0199", stored.Phone);
     }
 
     [Fact]

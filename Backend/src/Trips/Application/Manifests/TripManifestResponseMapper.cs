@@ -14,7 +14,8 @@ public static class TripManifestResponseMapper
         manifest.Client,
         manifest.Passengers.Select(p => new PassengerResponse(
             p.Name,
-            p.Contact,
+            p.Email,
+            p.Phone,
             p.PickupStopId,
             p.PickupStopName,
             p.DropoffStopId,

@@ -30,7 +30,8 @@ export interface StopOption {
 
 export interface PaxRow {
   name: string;
-  contact: string;
+  email: string;
+  phone: string;
   /** Index into the stop options ("" = none). */
   pickupIdx: string;
   dropoffIdx: string;
@@ -56,7 +57,8 @@ export interface CargoRow {
 
 export const emptyPax = (): PaxRow => ({
   name: "",
-  contact: "",
+  email: "",
+  phone: "",
   pickupIdx: "",
   dropoffIdx: "",
   idVerified: false,
@@ -92,7 +94,8 @@ export function paxRowsFromManifest(passengers: ManifestPassenger[], stops: Stop
   };
   return passengers.map((p) => ({
     name: p.name,
-    contact: p.contact ?? "",
+    email: p.email ?? "",
+    phone: p.phone ?? "",
     pickupIdx: idxFor(p.pickupStopId, p.pickupStopName),
     dropoffIdx: idxFor(p.dropoffStopId, p.dropoffStopName),
     idVerified: p.idVerified,
@@ -136,7 +139,8 @@ export function paxRowsToWire(
       const amount = p.fareAmount.trim() === "" ? null : Number(p.fareAmount);
       return {
         name: p.name.trim(),
-        contact: p.contact.trim() || null,
+        email: p.email.trim() || null,
+        phone: p.phone.trim() || null,
         pickupStopId: pickup?.stopId ?? null,
         pickupStopName: pickup?.name ?? null,
         dropoffStopId: dropoff?.stopId ?? null,
@@ -247,10 +251,11 @@ export function PassengerRowsEditor({
           key={i}
           style={{ border: `1px solid ${colors.borderSubtle}`, borderRadius: 9, padding: "11px 12px", marginBottom: 8 }}
         >
-          <div style={{ display: "grid", gridTemplateColumns: "24px 1.4fr 1.2fr", gap: 10, alignItems: "end" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "24px 1.4fr 1fr 1fr", gap: 10, alignItems: "end" }}>
             <div style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.textDim, paddingBottom: 12 }}>{i + 1}</div>
             <TextField label="Passenger name" value={p.name} onChange={(v) => patch(i, { name: v })} disabled={readOnly} />
-            <TextField label="Email / phone" value={p.contact} onChange={(v) => patch(i, { contact: v })} disabled={readOnly} />
+            <TextField label="Email" value={p.email} onChange={(v) => patch(i, { email: v })} disabled={readOnly} />
+            <TextField label="Phone" value={p.phone} onChange={(v) => patch(i, { phone: v })} disabled={readOnly} />
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto auto", gap: 10, marginTop: 9, alignItems: "end" }}>
             <SelectField

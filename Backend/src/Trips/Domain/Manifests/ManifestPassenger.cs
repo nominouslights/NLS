@@ -12,7 +12,8 @@ namespace NorthernLink.Trips.Domain.Manifests;
 public sealed record ManifestPassenger
 {
     public required string Name { get; init; }
-    public string? Contact { get; init; }
+    public string? Email { get; init; }
+    public string? Phone { get; init; }
 
     /// <summary>Catalog stop this passenger boarded at — null for free-form trips.</summary>
     public Guid? PickupStopId { get; init; }
