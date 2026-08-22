@@ -15,7 +15,7 @@ public sealed class NotificationsOptions
     /// sender signature once a real server token is in use — Postmark rejects sends from
     /// unverified addresses with ErrorCode 400.
     /// </summary>
-    public string FromAddress { get; init; } = "dispatch@northernlinkshuttle.ca";
+    public string FromAddress { get; init; } = "emelio.campbell@northernlinkshuttleandcargo.com";
 
     /// <summary>The Postmark message stream to send through.</summary>
     public string MessageStream { get; init; } = "outbound";
