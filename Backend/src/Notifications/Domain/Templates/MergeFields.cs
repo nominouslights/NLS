@@ -26,8 +26,14 @@ public static partial class MergeFields
     /// <summary>The passenger's pickup stop (falls back to the trip origin upstream).</summary>
     public const string PickupStop = "PickupStop";
 
+    /// <summary>The passenger's pickup stop address (opaque string supplied by the caller).</summary>
+    public const string PickupAddress = "PickupAddress";
+
     /// <summary>The passenger's dropoff stop (falls back to the trip destination upstream).</summary>
     public const string DropoffStop = "DropoffStop";
+
+    /// <summary>The passenger's dropoff/final stop address (opaque string supplied by the caller).</summary>
+    public const string DropoffStopAddress = "DropoffStopAddress";
 
     /// <summary>The trip's human-readable trip number.</summary>
     public const string TripNumber = "TripNumber";
@@ -38,7 +44,7 @@ public static partial class MergeFields
     /// <summary>Every valid token name, in display order.</summary>
     public static readonly IReadOnlyList<string> All =
     [
-        PassengerName, TripDate, PickupTime, Route, PickupStop, DropoffStop, TripNumber, ClientName,
+        PassengerName, TripDate, PickupTime, Route, PickupStop, PickupAddress, DropoffStop, DropoffStopAddress, TripNumber, ClientName,
     ];
 
     private static readonly HashSet<string> AllSet = new(All, StringComparer.Ordinal);

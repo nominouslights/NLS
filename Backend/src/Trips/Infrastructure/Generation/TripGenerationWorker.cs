@@ -226,7 +226,14 @@ internal sealed class TripGenerationWorker(
             var returnStops = outboundStops
                 .AsEnumerable()
                 .Reverse()
-                .Select((stop, index) => new RouteStop { Name = stop.Name, Order = index })
+                .Select((stop, index) => new RouteStop
+                {
+                    StopId = stop.StopId,
+                    Name = stop.Name,
+                    Order = index,
+                    Latitude = stop.Latitude,
+                    Longitude = stop.Longitude,
+                })
                 .ToList();
 
             var added = 0;

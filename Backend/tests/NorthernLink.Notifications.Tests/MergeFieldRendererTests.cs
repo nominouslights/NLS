@@ -14,7 +14,9 @@ public class MergeFieldRendererTests
         [MergeFields.PickupTime] = "8:30 AM",
         [MergeFields.Route] = "Thompson – Lynn Lake",
         [MergeFields.PickupStop] = "Thompson Terminal",
+        [MergeFields.PickupAddress] = "12 Station Rd, Thompson, MB R8N 0A1",
         [MergeFields.DropoffStop] = "Lynn Lake Co-op",
+        [MergeFields.DropoffStopAddress] = "5 Co-op Lane, Lynn Lake, MB R0B 0W0",
         [MergeFields.TripNumber] = "NL-1042",
         [MergeFields.ClientName] = "Marcel Colomb First Nation",
     };

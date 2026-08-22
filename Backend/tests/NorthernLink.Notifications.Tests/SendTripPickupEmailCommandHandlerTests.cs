@@ -33,7 +33,10 @@ public class SendTripPickupEmailCommandHandlerTests
         "Thompson – Lynn Lake",
         clientId,
         "Marcel Colomb First Nation",
-        recipients ?? [new RecipientInput("alex@example.com", "Alex Moody", "Thompson Terminal", "Lynn Lake Co-op")]);
+        recipients ?? [new RecipientInput(
+            "alex@example.com", "Alex Moody",
+            "Thompson Terminal", "12 Station Rd, Thompson, MB R8N 0A1",
+            "Lynn Lake Co-op", "5 Co-op Lane, Lynn Lake, MB R0B 0W0")]);
 
     [Fact]
     public async Task Unknown_template_returns_NotFound()
@@ -167,7 +170,7 @@ public class SendTripPickupEmailCommandHandlerTests
         _templates.Templates.Add(template);
 
         var result = await Handler().Handle(
-            Command(template.Id, recipients: [new RecipientInput("867-5309", "Jenny", null, null)]),
+            Command(template.Id, recipients: [new RecipientInput("867-5309", "Jenny", null, null, null, null)]),
             CancellationToken.None);
 
         Assert.True(result.IsFailure);
@@ -226,6 +229,38 @@ public class SendTripPickupEmailCommandHandlerTests
         Assert.Equal(EmailDispatchStatus.Sent, stored.Status);
         Assert.Equal(template.Id, stored.TemplateId);
         Assert.Equal(template.Name, stored.TemplateName);
+    }
+
+    [Fact]
+    public async Task Pickup_and_dropoff_addresses_are_rendered_from_the_recipient()
+    {
+        var template = TestNotifications.CreateTemplate(
+            htmlBody: "<p>From {{PickupAddress}} to {{DropoffStopAddress}}.</p>");
+        _templates.Templates.Add(template);
+
+        var result = await Handler().Handle(Command(template.Id), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        var email = Assert.Single(Assert.Single(_sender.Batches));
+        Assert.Contains("From 12 Station Rd, Thompson, MB R8N 0A1 to 5 Co-op Lane, Lynn Lake, MB R0B 0W0.", email.HtmlBody);
+    }
+
+    [Fact]
+    public async Task Null_pickup_and_dropoff_addresses_render_empty_never_the_raw_token()
+    {
+        var template = TestNotifications.CreateTemplate(
+            htmlBody: "<p>From {{PickupAddress}} to {{DropoffStopAddress}}.</p>");
+        _templates.Templates.Add(template);
+        var command = Command(
+            template.Id,
+            recipients: [new RecipientInput("alex@example.com", "Alex Moody", null, null, null, null)]);
+
+        var result = await Handler().Handle(command, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        var email = Assert.Single(Assert.Single(_sender.Batches));
+        Assert.Contains("From  to .", email.HtmlBody);
+        Assert.DoesNotContain("{{", email.HtmlBody);
     }
 
     [Fact]

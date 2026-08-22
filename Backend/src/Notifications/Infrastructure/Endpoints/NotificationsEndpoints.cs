@@ -190,7 +190,8 @@ public static class NotificationsEndpoints
             request.ClientName,
             (request.Recipients ?? [])
                 .Select(r => new RecipientInput(
-                    r.Email ?? string.Empty, r.PassengerName ?? string.Empty, r.PickupStop, r.DropoffStop))
+                    r.Email ?? string.Empty, r.PassengerName ?? string.Empty,
+                    r.PickupStop, r.PickupAddress, r.DropoffStop, r.DropoffStopAddress))
                 .ToList());
 
         var result = await sender.Send(command, cancellationToken);
@@ -261,4 +262,6 @@ public sealed record RecipientRequest(
     string? Email,
     string? PassengerName,
     string? PickupStop,
-    string? DropoffStop);
+    string? PickupAddress,
+    string? DropoffStop,
+    string? DropoffStopAddress);
