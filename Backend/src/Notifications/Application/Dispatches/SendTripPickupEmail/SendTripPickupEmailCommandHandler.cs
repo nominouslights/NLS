@@ -1,11 +1,8 @@
-using System.Net;
-using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Notifications.Application.Abstractions;
-using NorthernLink.Notifications.Application.Rendering;
 using NorthernLink.Notifications.Domain;
 using NorthernLink.Notifications.Domain.Dispatches;
 using NorthernLink.Notifications.Domain.Templates;
@@ -82,15 +79,15 @@ public sealed partial class SendTripPickupEmailCommandHandler(
             }
         }
 
-        var outgoing = command.Recipients
-            .Select(recipient =>
-            {
-                var values = BuildValues(command, recipient);
-                var subject = MergeFieldRenderer.RenderSubject(template.Subject, values);
-                var htmlBody = MergeFieldRenderer.RenderHtml(template.HtmlBody, values);
-                return new OutgoingEmail(recipient.Email.Trim(), subject, htmlBody, MergeFieldRenderer.RenderText(htmlBody));
-            })
-            .ToList();
+        var outgoing = PickupEmailRenderer.Render(
+            template,
+            command.TripDate,
+            command.PickupTime,
+            command.DropoffTime,
+            command.Route,
+            command.TripNumber,
+            command.ClientName,
+            command.Recipients);
 
         var outcomes = await emailSender.SendBatchAsync(outgoing, cancellationToken);
 
@@ -192,28 +189,25 @@ public sealed partial class SendTripPickupEmailCommandHandler(
             var sentCount = outcomes.Count(outcome => outcome.Sent);
             var failedCount = outcomes.Count - sentCount;
 
-            var report = new PickupEmailReport(
-                command.TripNumber,
-                command.Route,
-                command.TripDate,
-                templateName,
-                DateTimeOffset.UtcNow,
-                sentCount,
-                failedCount,
-                items);
+            var composition = PickupEmailReportComposer.Compose(
+                new PickupReportContext(
+                    command.TripNumber,
+                    command.Route,
+                    command.TripDate,
+                    templateName,
+                    DateTimeOffset.UtcNow,
+                    sentCount,
+                    failedCount,
+                    items),
+                reportPdf);
 
-            var pdf = reportPdf.Build(report);
             var attachment = new EmailAttachment(
                 $"pickup-emails-{command.TripNumber}.pdf",
-                Convert.ToBase64String(pdf),
+                Convert.ToBase64String(composition.PdfBytes),
                 "application/pdf");
 
-            var subject = $"Pickup email report — {command.TripNumber} — {command.TripDate}";
-            var htmlBody = BuildReportHtmlBody(command, items, sentCount);
-            var textBody = MergeFieldRenderer.RenderText(htmlBody);
-
             var reportEmails = reportRecipients
-                .Select(to => new OutgoingEmail(to, subject, htmlBody, textBody, [attachment]))
+                .Select(to => new OutgoingEmail(to, composition.Subject, composition.HtmlBody, composition.TextBody, [attachment]))
                 .ToList();
 
             await emailSender.SendBatchAsync(reportEmails, cancellationToken);
@@ -229,44 +223,6 @@ public sealed partial class SendTripPickupEmailCommandHandler(
                 command.DispatchId);
         }
     }
-
-    private static string BuildReportHtmlBody(
-        SendTripPickupEmailCommand command,
-        IReadOnlyList<PickupEmailReportItem> items,
-        int sentCount)
-    {
-        var recipientList = string.Join(
-            ", ",
-            items.Select(item =>
-                $"{WebUtility.HtmlEncode(item.PassengerName)} &lt;{WebUtility.HtmlEncode(item.Email)}&gt; ({WebUtility.HtmlEncode(item.Status)})"));
-
-        var builder = new StringBuilder();
-        builder.Append("<p>");
-        builder.Append($"{sentCount} pickup email{(sentCount == 1 ? string.Empty : "s")} sent for ");
-        builder.Append($"{WebUtility.HtmlEncode(command.Route)} on {WebUtility.HtmlEncode(command.TripDate)}.");
-        builder.Append("</p>");
-        builder.Append($"<p>Sent to: {recipientList}.</p>");
-        builder.Append("<p>A PDF copy of each email is attached.</p>");
-        return builder.ToString();
-    }
-
-    private static Dictionary<string, string> BuildValues(
-        SendTripPickupEmailCommand command,
-        RecipientInput recipient) =>
-        new(StringComparer.Ordinal)
-        {
-            [MergeFields.PassengerName] = recipient.PassengerName,
-            [MergeFields.TripDate] = command.TripDate,
-            [MergeFields.PickupTime] = command.PickupTime,
-            [MergeFields.DropoffTime] = command.DropoffTime,
-            [MergeFields.Route] = command.Route,
-            [MergeFields.PickupStop] = recipient.PickupStop ?? string.Empty,
-            [MergeFields.PickupAddress] = recipient.PickupAddress ?? string.Empty,
-            [MergeFields.DropoffStop] = recipient.DropoffStop ?? string.Empty,
-            [MergeFields.DropoffStopAddress] = recipient.DropoffStopAddress ?? string.Empty,
-            [MergeFields.TripNumber] = command.TripNumber,
-            [MergeFields.ClientName] = command.ClientName ?? string.Empty,
-        };
 
     // RFC-lite, mirroring the frontend's isEmailContact gate: something@something.tld,
     // no whitespace. Deliberately loose — Postmark is the real arbiter.

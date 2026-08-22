@@ -103,6 +103,25 @@ export interface SendTripPickupEmailInput {
   reportRecipients: string[];
 }
 
+/** POST /api/notifications/emails/trip-pickup/report-preview body — mirrors the
+ *  send request MINUS dispatchId. Composed frontend-side from the same modal
+ *  state as a send, so the preview reflects exactly what a send would produce. */
+export type PickupReportPreviewInput = Omit<SendTripPickupEmailInput, "dispatchId">;
+
+/** Response of the report preview. At preview time NOTHING has been sent, so the
+ *  summary body reads "0 pickup emails sent…" and each recipient is tagged
+ *  "(Preview)" — this is a content preview of what the report WILL contain, not
+ *  sent history. Render htmlBody/textBody as a preview only; pdfBase64 is our
+ *  generated PDF (base64, no data: prefix). */
+export interface PickupReportPreviewResult {
+  subject: string;
+  htmlBody: string;
+  textBody: string;
+  pdfBase64: string;
+  recipientCount: number;
+  reportRecipients: string[];
+}
+
 /** Per-recipient outcome embedded on the dispatch (RecipientResult). */
 export interface EmailRecipientResult {
   email: string;
@@ -190,6 +209,17 @@ export function previewEmailTemplate(input: EmailPreviewInput): Promise<EmailPre
  *  (Notifications.Template.ServiceTypeMismatch, .ClientMismatch). */
 export function sendTripPickupEmail(input: SendTripPickupEmailInput): Promise<EmailDispatchRecord> {
   return request<EmailDispatchRecord>("/api/notifications/emails/trip-pickup", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+/** POST → 200 { subject, htmlBody, textBody, pdfBase64, recipientCount,
+ *  reportRecipients }. Renders exactly what the crew-trip report email would
+ *  contain WITHOUT sending anything (no dispatch is created). Same auth as the
+ *  send; same 4xx template/recipient validation. */
+export function previewTripPickupReport(input: PickupReportPreviewInput): Promise<PickupReportPreviewResult> {
+  return request<PickupReportPreviewResult>("/api/notifications/emails/trip-pickup/report-preview", {
     method: "POST",
     body: JSON.stringify(input),
   });

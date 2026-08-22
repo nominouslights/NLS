@@ -11,6 +11,7 @@ using NorthernLink.Notifications.Application;
 using NorthernLink.Notifications.Application.Abstractions;
 using NorthernLink.Notifications.Application.Dispatches;
 using NorthernLink.Notifications.Application.Dispatches.GetTripEmailHistory;
+using NorthernLink.Notifications.Application.Dispatches.PreviewTripPickupReport;
 using NorthernLink.Notifications.Application.Dispatches.SendTripPickupEmail;
 using NorthernLink.Notifications.Application.Templates;
 using NorthernLink.Notifications.Application.Templates.Activate;
@@ -98,6 +99,7 @@ public static class NotificationsServiceCollectionExtensions
         services.AddScoped<IQueryHandler<GetEmailTemplateByIdQuery, EmailTemplateResponse>, GetEmailTemplateByIdQueryHandler>();
         services.AddScoped<IQueryHandler<PreviewEmailTemplateQuery, EmailTemplatePreviewResponse>, PreviewEmailTemplateQueryHandler>();
         services.AddScoped<ICommandHandler<SendTripPickupEmailCommand, EmailDispatchResponse>, SendTripPickupEmailCommandHandler>();
+        services.AddScoped<IQueryHandler<PreviewTripPickupReportQuery, PickupReportPreviewResponse>, PreviewTripPickupReportQueryHandler>();
         services.AddScoped<IQueryHandler<GetTripEmailHistoryQuery, IReadOnlyList<EmailDispatchResponse>>, GetTripEmailHistoryQueryHandler>();
 
         // 5. Integration event consumers — none: Notifications neither publishes nor consumes
