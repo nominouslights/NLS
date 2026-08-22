@@ -28,12 +28,13 @@ import {
 } from "@/lib/api/trips";
 import { listClients, SERVICE_TYPE_LABELS, type ClientRecord } from "@/lib/api/clients";
 import { listDrivers, type DriverRecord } from "@/lib/api/drivers";
-import { listStops, type StopRecord } from "@/lib/api/stops";
+import { createStop, listStops, refetchUntil as refetchStopsUntil, type StopInput, type StopRecord } from "@/lib/api/stops";
 import { PageHeader, Panel, SectionLabel, DetailRow } from "@/components/ui/Panel";
 import { ServiceChip, StatusChip } from "@/components/ui/Chip";
 import { ActionButton } from "@/components/ui/Button";
 import { CorridorStepper } from "@/components/ui/CorridorStepper";
 import { ModalShell } from "@/components/ui/ModalShell";
+import { StopFormModal } from "@/components/StopFormModal";
 import { DateField, FieldLabel, NumberField, SelectField, TextField, TimeField } from "@/components/ui/Field";
 
 // Routes & Schedules — corridor routes and recurring schedule templates from
@@ -111,6 +112,9 @@ function RouteFormModal({
       : [],
   );
   const [addPick, setAddPick] = useState("");
+  // Inline "New stop" creation — opens the shared StopFormModal in create mode so
+  // a dispatcher can add a catalog stop (with address) without leaving the route.
+  const [showNewStop, setShowNewStop] = useState(false);
 
   // Legacy free-text stops (no stopId) can't be resolved to catalog ids — shown
   // read-only and excluded from the new list, forcing re-selection before save.
@@ -166,6 +170,24 @@ function RouteFormModal({
     });
   }
 
+  // StopFormModal.onSaved for the inline "+ NEW STOP" flow: the modal supplies the
+  // validated StopInput, we create the catalog stop here (surfacing the new id),
+  // refresh the active-only catalog so it's selectable/labeled, and append it to
+  // the route in corridor order. New stops are created active, so the refetch
+  // should see it — but if it times out we still append the id (addStop resolves
+  // the label from the route's own selection once the catalog catches up).
+  async function saveNewStop(input: StopInput) {
+    const newId = await createStop(input);
+    try {
+      const rows = await refetchStopsUntil(listStops, (r) => r.some((s) => s.id === newId));
+      setStops(rows.filter((s) => s.active));
+    } catch {
+      // Catalog refetch failed — proceed; the new stop is still added to the route
+      // and the picker will recover its label on the next successful load.
+    }
+    addStop(newId);
+  }
+
   async function submit() {
     if (busy) return;
     if (!name.trim()) return setError("Enter the route name.");
@@ -202,6 +224,7 @@ function RouteFormModal({
   }
 
   return (
+    <>
     <ModalShell
       eyebrow="Operations · Corridor routes"
       title={editing ? "Edit Route" : "New Route"}
@@ -300,22 +323,31 @@ function RouteFormModal({
           ))}
         </div>
 
-        <SelectField
-          label="Add stop"
-          value={addPick}
-          onChange={addStop}
-          hint={
-            stops === null ? (
-              <span style={{ color: colors.textFaint }}>· loading catalog…</span>
-            ) : available.length === 0 ? (
-              <span style={{ color: colors.textFaint }}>· no more active stops available</span>
-            ) : undefined
-          }
-          options={[
-            { value: "", label: stops === null ? "Loading stops…" : "— select a stop to append —" },
-            ...available.map((s) => ({ value: s.id, label: `${s.name} · ${s.city}, ${s.province}` })),
-          ]}
-        />
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 10 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <SelectField
+              label="Add stop"
+              value={addPick}
+              onChange={addStop}
+              hint={
+                stops === null ? (
+                  <span style={{ color: colors.textFaint }}>· loading catalog…</span>
+                ) : available.length === 0 ? (
+                  <span style={{ color: colors.textFaint }}>· pick one below, or create a new stop</span>
+                ) : (
+                  <span style={{ color: colors.textFaint }}>· or create a new catalog stop</span>
+                )
+              }
+              options={[
+                { value: "", label: stops === null ? "Loading stops…" : "— select a stop to append —" },
+                ...available.map((s) => ({ value: s.id, label: `${s.name} · ${s.city}, ${s.province}` })),
+              ]}
+            />
+          </div>
+          <ActionButton onClick={() => setShowNewStop(true)} style={{ height: 40, flex: "none" }}>
+            + NEW STOP
+          </ActionButton>
+        </div>
 
         {stopIds.length >= 1 && (
           <div style={{ fontFamily: fonts.mono, fontSize: 11.5, color: colors.textDim, marginTop: 9 }}>
@@ -337,6 +369,14 @@ function RouteFormModal({
         </div>
       )}
     </ModalShell>
+    {showNewStop && (
+      <StopFormModal
+        existing={null}
+        onClose={() => setShowNewStop(false)}
+        onSaved={saveNewStop}
+      />
+    )}
+    </>
   );
 }
 

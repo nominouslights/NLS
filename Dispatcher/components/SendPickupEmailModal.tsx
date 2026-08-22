@@ -12,6 +12,7 @@ import {
   type TripRecord,
 } from "@/lib/api/trips";
 import { SERVICE_TYPE_LABELS } from "@/lib/api/clients";
+import { listStops, stopAddressLine, type StopRecord } from "@/lib/api/stops";
 import {
   dispatchChip,
   isEmailContact,
@@ -83,6 +84,10 @@ export default function SendPickupEmailModal({
 
   const [templates, setTemplates] = useState<EmailTemplateRecord[] | null>(null);
   const [history, setHistory] = useState<EmailDispatchRecord[] | null>(null);
+  // Stops catalog keyed by id — resolves each passenger's per-recipient stop
+  // addresses ({{PickupAddress}}/{{DropoffStopAddress}}). Best-effort: if the
+  // list fails it stays empty and addresses render blank, never a raw token.
+  const [stopMap, setStopMap] = useState<Map<string, StopRecord>>(() => new Map());
   const [loadError, setLoadError] = useState<string | null>(null);
   const [templateId, setTemplateId] = useState("");
   // Eligible recipients are preselected; ineligible rows can never be checked.
@@ -100,14 +105,21 @@ export default function SendPickupEmailModal({
   // 400s server-side, so it is never offered here.
   useEffect(() => {
     let active = true;
-    Promise.all([listEmailTemplates(), listTripEmailDispatches(trip.id)]).then(
-      ([tpls, hist]) => {
+    // Stops are best-effort: a failure resolves to [] so it can never block the
+    // templates/history load — addresses just render empty in that case.
+    Promise.all([
+      listEmailTemplates(),
+      listTripEmailDispatches(trip.id),
+      listStops().catch(() => [] as StopRecord[]),
+    ]).then(
+      ([tpls, hist, stops]) => {
         if (!active) return;
         const compatible = tpls.filter(
           (t) => t.isActive && t.serviceType === trip.serviceType && (!t.clientId || t.clientId === trip.clientId),
         );
         setTemplates(compatible);
         setHistory(hist);
+        setStopMap(new Map(stops.map((s) => [s.id, s])));
         setLoadError(null);
         // Default pick only — the dispatcher can override in the dropdown.
         // Rule: client-pinned beats service-wide; within each group the most
@@ -128,6 +140,18 @@ export default function SendPickupEmailModal({
   const firstSelectedIdx = selected.findIndex((s, i) => s && eligible[i]);
   const selectedCount = selected.reduce((n, s, i) => n + (s && eligible[i] ? 1 : 0), 0);
 
+  // Resolve a stop id to its one-line street address. Empty string when the id
+  // is null or unknown (still-loading / missing catalog entry) — a missing
+  // address must render empty, never a raw {{token}}.
+  const addressFor = useCallback(
+    (stopId: string | null | undefined): string => {
+      if (!stopId) return "";
+      const s = stopMap.get(stopId);
+      return s ? stopAddressLine(s) : "";
+    },
+    [stopMap],
+  );
+
   /** Real merge values for one passenger — mirrors the backend MergeFields set. */
   const mergeValues = useCallback(
     (p: ManifestPassenger): Record<string, string> => ({
@@ -136,11 +160,13 @@ export default function SendPickupEmailModal({
       PickupTime: hhmm(trip.windowStart),
       Route: trip.routeName || corridorLabel(trip),
       PickupStop: p.pickupStopName ?? trip.origin,
+      PickupAddress: addressFor(p.pickupStopId),
       DropoffStop: p.dropoffStopName ?? trip.destination,
+      DropoffStopAddress: addressFor(p.dropoffStopId),
       TripNumber: trip.tripNumber,
       ClientName: trip.clientName ?? "",
     }),
-    [trip],
+    [trip, addressFor],
   );
 
   // Live preview for the FIRST selected recipient — recomputed when the
@@ -215,6 +241,8 @@ export default function SendPickupEmailModal({
           passengerName: p.name,
           pickupStop: p.pickupStopName ?? trip.origin,
           dropoffStop: p.dropoffStopName ?? trip.destination,
+          pickupAddress: addressFor(p.pickupStopId),
+          dropoffStopAddress: addressFor(p.dropoffStopId),
         })),
       });
       // Response is authoritative — render outcomes and prepend to history.

@@ -34,4 +34,6 @@ public sealed record RecipientInput(
     string Email,
     string PassengerName,
     string? PickupStop,
-    string? DropoffStop);
+    string? PickupAddress,
+    string? DropoffStop,
+    string? DropoffStopAddress);

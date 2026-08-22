@@ -74,6 +74,8 @@ export interface SendRecipientInput {
   passengerName: string;
   pickupStop?: string | null;
   dropoffStop?: string | null;
+  pickupAddress?: string | null;
+  dropoffStopAddress?: string | null;
 }
 
 /** POST /api/notifications/emails/trip-pickup body (SendTripPickupEmailRequest).
@@ -213,7 +215,9 @@ export const MERGE_FIELDS: { token: string; description: string }[] = [
   { token: "{{PickupTime}}", description: "Departure window start" },
   { token: "{{Route}}", description: "Route / corridor name" },
   { token: "{{PickupStop}}", description: "Passenger's pickup stop (falls back to trip origin)" },
+  { token: "{{PickupAddress}}", description: "The passenger's pickup stop street address" },
   { token: "{{DropoffStop}}", description: "Passenger's dropoff stop (falls back to trip destination)" },
+  { token: "{{DropoffStopAddress}}", description: "The passenger's dropoff (final) stop street address" },
   { token: "{{TripNumber}}", description: "Trip number" },
   { token: "{{ClientName}}", description: "Client name (empty when the trip has no client)" },
 ];
