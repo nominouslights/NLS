@@ -86,13 +86,13 @@ export default function ManifestEditorModal({
   // trip), falling back to the default 8 when the trip carries no capacity.
   const maxPax = passengerCapFor(trip.seatsCapacity);
   const namedPax = passengers.filter((p) => p.name.trim()).length;
-  const contentPax = passengers.filter((p) => p.name.trim() || p.contact.trim()).length;
+  const contentPax = passengers.filter((p) => p.name.trim() || p.email.trim() || p.phone.trim()).length;
 
   // Merge imported rows onto the existing content rows (clamped to the cap) and
   // adopt the sheet's direction when the manifest doesn't already have one.
   function applyImport(rows: PaxRow[], detected: { direction: ManifestDirection | null }) {
     setPassengers((prev) => {
-      const kept = prev.filter((p) => p.name.trim() || p.contact.trim());
+      const kept = prev.filter((p) => p.name.trim() || p.email.trim() || p.phone.trim());
       const merged = [...kept, ...rows].slice(0, maxPax);
       return merged.length > 0 ? merged : [emptyPax()];
     });

@@ -7,8 +7,8 @@
 //
 // This module turns that sheet into editable PaxRow[] for the manifest editors
 // (no backend/contract change — it only fills the existing passenger model).
-// Names arrive "Last, First" and are normalised to "First Last"; email + phone
-// merge into the one contact field; each Location is matched to one of the
+// Names arrive "Last, First" and are normalised to "First Last"; email and
+// phone map to their own passenger fields; each Location is matched to one of the
 // trip's route stops and assigned as the pickup (Outbound) or drop-off (Inbound)
 // end per the trip-direction convention (see lib/api/billing.ts).
 
@@ -21,8 +21,10 @@ export interface ParsedPassenger {
   name: string;
   /** As it appeared in the sheet (kept so the preview can flag reformatting). */
   rawName: string;
-  /** Email + phone merged into the single manifest contact field. */
-  contact: string;
+  /** Contact email from the sheet. */
+  email: string;
+  /** Contact phone from the sheet. */
+  phone: string;
   direction: ManifestDirection | null;
   /** Raw date/contractor cells — surfaced for consistency checks, not stored. */
   date: string;
@@ -176,10 +178,6 @@ function normalizeDirection(raw: string): ManifestDirection | null {
   return null;
 }
 
-function mergeContact(email: string, phone: string): string {
-  return [email.trim(), phone.trim()].filter(Boolean).join(" · ");
-}
-
 /** Loosely compare a CSV location to a stop name — case-insensitive, ignoring a
  *  trailing province suffix (", MB" / ", Manitoba") and collapsed whitespace. */
 function normalizeLocation(s: string): string {
@@ -242,7 +240,8 @@ export function parsePassengerCsv(text: string, stops: StopOption[]): ParsedMani
     passengers.push({
       name,
       rawName: rawName.trim(),
-      contact: mergeContact(at(r, map.email), at(r, map.phone)),
+      email: at(r, map.email).trim(),
+      phone: at(r, map.phone).trim(),
       direction: normalizeDirection(at(r, map.direction)),
       date: at(r, map.date).trim(),
       contractor: at(r, map.contractor).trim(),
@@ -279,7 +278,8 @@ export function buildPaxRow(p: ParsedPassenger, stops: StopOption[], direction: 
   // recorded by dispatch after the run.
   const row = emptyPax();
   row.name = p.name;
-  row.contact = p.contact;
+  row.email = p.email;
+  row.phone = p.phone;
 
   const community = p.matchedStopIdx;
   if (community === null) return row;

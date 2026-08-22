@@ -186,12 +186,12 @@ export default function CreateTripWizard({
   // seats capacity, else the default 8. Different units seat different numbers.
   const paxCap = vehicle?.seatingCapacity ?? (seatsCapacity ? Number(seatsCapacity) : null);
   const maxPax = passengerCapFor(paxCap);
-  const contentPax = passengers.filter((p) => p.name.trim() || p.contact.trim()).length;
+  const contentPax = passengers.filter((p) => p.name.trim() || p.email.trim() || p.phone.trim()).length;
 
   // Merge an imported passenger sheet onto the current rows, clamped to the cap.
   function applyImport(rows: PaxRow[]) {
     setPassengers((prev) => {
-      const kept = prev.filter((p) => p.name.trim() || p.contact.trim());
+      const kept = prev.filter((p) => p.name.trim() || p.email.trim() || p.phone.trim());
       return [...kept, ...rows].slice(0, maxPax);
     });
   }

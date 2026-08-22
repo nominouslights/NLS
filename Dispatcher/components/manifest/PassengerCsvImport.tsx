@@ -41,7 +41,7 @@ export default function PassengerCsvImport({
   stops: StopOption[];
   /** Assigned unit's seat capacity (null when unknown → falls back to 8). */
   capacity: number | null;
-  /** Passenger rows already carrying content (name/contact). */
+  /** Passenger rows already carrying content (name/email/phone). */
   existingCount: number;
   trip: TripContext;
   onApply: (rows: PaxRow[], detected: { direction: ManifestDirection | null }) => void;
@@ -235,7 +235,8 @@ function PreviewTable({
           <tr>
             <th style={{ ...th, width: 22 }}>#</th>
             <th style={th}>Passenger</th>
-            <th style={th}>Contact</th>
+            <th style={th}>Email</th>
+            <th style={th}>Phone</th>
             <th style={th}>Location → stop</th>
             <th style={{ ...th, textAlign: "right" }}>Status</th>
           </tr>
@@ -301,7 +302,10 @@ function PreviewRow({
         )}
       </td>
       <td style={{ ...cell, fontFamily: fonts.mono, fontSize: 11.5, color: willImport ? colors.textSecondary : colors.textDim }}>
-        {p.contact || "—"}
+        {p.email || "—"}
+      </td>
+      <td style={{ ...cell, fontFamily: fonts.mono, fontSize: 11.5, color: willImport ? colors.textSecondary : colors.textDim }}>
+        {p.phone || "—"}
       </td>
       <td style={cell}>
         {p.location || "—"}

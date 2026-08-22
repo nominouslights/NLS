@@ -30,7 +30,8 @@ public sealed record TripManifestResponse(
 /// <summary>§5 row. Pickup/dropoff are snapshot references to the trip's route stops.</summary>
 public sealed record PassengerResponse(
     string Name,
-    string? Contact,
+    string? Email,
+    string? Phone,
     Guid? PickupStopId,
     string? PickupStopName,
     Guid? DropoffStopId,

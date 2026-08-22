@@ -94,7 +94,7 @@ export function passengerManifestBlock(m: TripManifest | null): string {
     return `<tr>
       <td class="num">${i + 1}</td>
       <td>${esc(p?.name) || "&nbsp;"}</td>
-      <td>${esc(p?.contact) || "&nbsp;"}</td>
+      <td>${esc([p?.email, p?.phone].filter(Boolean).join(" · ")) || "&nbsp;"}</td>
       <td>${esc(p?.pickupStopName) || "&nbsp;"}</td>
       <td>${esc(p?.dropoffStopName) || "&nbsp;"}</td>
       <td class="ck">${box(p?.idVerified ?? false)}</td>

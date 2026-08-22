@@ -798,7 +798,8 @@ export type FarePaymentMethod = "Cash" | "Online" | "Waived";
  *  recorded per passenger just after the run — not reconciled to QuickBooks. */
 export interface ManifestPassenger {
   name: string;
-  contact?: string | null;
+  email?: string | null;
+  phone?: string | null;
   pickupStopId: string | null;
   pickupStopName?: string | null;
   dropoffStopId: string | null;

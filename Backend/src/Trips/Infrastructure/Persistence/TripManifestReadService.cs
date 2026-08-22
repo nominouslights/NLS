@@ -51,7 +51,8 @@ internal sealed class TripManifestReadService(TripsDbContext context) : ITripMan
         m.Client,
         m.Passengers.Select(p => new PassengerResponse(
             p.Name,
-            p.Contact,
+            p.Email,
+            p.Phone,
             p.PickupStopId,
             p.PickupStopName,
             p.DropoffStopId,
