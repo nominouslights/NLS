@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using NorthernLink.Shared.Events;
+using NorthernLink.Shared.Hosting;
 using NorthernLink.Shared.Persistence;
 using NorthernLink.Shared.Persistence.Auditing;
 using NorthernLink.Shared.Tenancy;
@@ -50,14 +51,19 @@ public sealed class OutboxPollingConsumer<TDbContext>(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        var backoff = new PollBackoff(
+            options.PollInterval, TimeSpan.FromSeconds(options.MaxPollBackoffSeconds));
+
         while (!stoppingToken.IsCancellationRequested)
         {
             // Delay BEFORE the first poll — same boot reasoning as ProjectionWorker: all
             // hosted services start together and there is nothing to gain from racing the
-            // first read against a cold database.
+            // first read against a cold database. After a failure this is the backed-off
+            // delay instead of the interval, which matters most here: at a 1s interval this
+            // is the noisiest worker on the platform when the database is unreachable.
             try
             {
-                await Task.Delay(options.PollInterval, stoppingToken);
+                await Task.Delay(backoff.NextDelay, stoppingToken);
             }
             catch (OperationCanceledException)
             {
@@ -67,6 +73,13 @@ public sealed class OutboxPollingConsumer<TDbContext>(
             try
             {
                 await ProcessOnceAsync(stoppingToken);
+
+                if (backoff.RecordSuccess() is { } recoveredAfter)
+                {
+                    logger.LogInformation(
+                        "Outbox polling for {Module} ({DbContext}) recovered after {Failures} consecutive failures",
+                        subscriptions.ModuleName, typeof(TDbContext).Name, recoveredAfter);
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -74,10 +87,12 @@ public sealed class OutboxPollingConsumer<TDbContext>(
             }
             catch (Exception exception)
             {
-                logger.LogError(
+                var failure = backoff.RecordFailure();
+                logger.Log(
+                    failure.Level,
                     exception,
-                    "Outbox polling for {Module} ({DbContext}) failed; retrying next interval",
-                    subscriptions.ModuleName, typeof(TDbContext).Name);
+                    "Outbox polling for {Module} ({DbContext}) failed {Failures}x consecutively; retrying in {RetryDelay}",
+                    subscriptions.ModuleName, typeof(TDbContext).Name, failure.ConsecutiveFailures, failure.RetryDelay);
             }
         }
     }

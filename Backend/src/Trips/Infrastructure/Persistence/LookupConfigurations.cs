@@ -54,6 +54,34 @@ public sealed class VehicleLookupConfiguration : IEntityTypeConfiguration<Vehicl
 }
 
 /// <summary>
+/// Maps the billing replica (reconciled from
+/// <c>billing.invoice-billing-state-changed</c> events) to trips.trip_billing. Plain keyed
+/// rows — no audit pipeline, no concurrency token. The (tenant, invoice) index serves the
+/// reconcile, which sweeps every trip still pointing at an invoice to find released ones.
+/// </summary>
+public sealed class TripBillingConfiguration : IEntityTypeConfiguration<TripBilling>
+{
+    public void Configure(EntityTypeBuilder<TripBilling> builder)
+    {
+        builder.ToTable("trip_billing");
+
+        builder.HasKey(b => b.TripId);
+        builder.Property(b => b.TripId).HasColumnName("trip_id").ValueGeneratedNever();
+        builder.Property(b => b.TenantId).HasColumnName("tenant_id");
+        builder.Property(b => b.InvoiceId).HasColumnName("invoice_id");
+        builder.Property(b => b.InvoiceNumber).HasColumnName("invoice_number").HasMaxLength(64);
+        builder.Property(b => b.State).HasColumnName("state").HasMaxLength(16);
+        builder.Property(b => b.QboInvoiceId).HasColumnName("qbo_invoice_id").HasMaxLength(64);
+        builder.Property(b => b.QboEnteredDate).HasColumnName("qbo_entered_date");
+        builder.Property(b => b.PaymentConfirmedDate).HasColumnName("payment_confirmed_date");
+        builder.Property(b => b.WrittenOffReason).HasColumnName("written_off_reason").HasMaxLength(500);
+        builder.Property(b => b.UpdatedAtUtc).HasColumnName("updated_at_utc");
+
+        builder.HasIndex(b => new { b.TenantId, b.InvoiceId });
+    }
+}
+
+/// <summary>
 /// Maps the client replica (upserted from <c>clients.client-changed</c> events) to
 /// trips.client_lookup. Plain keyed rows — no audit pipeline, no concurrency token.
 /// </summary>

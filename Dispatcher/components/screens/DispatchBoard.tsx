@@ -60,7 +60,7 @@ export default function DispatchBoard({ onOpenTrip }: { onOpenTrip: (id: string)
   const load = useCallback(async () => {
     try {
       const fresh = await listTrips({ date: todayIso() });
-      setRows(sortTrips(fresh));
+      setRows(sortTrips(fresh.items));
       setLoadError(null);
     } catch (e) {
       setRows(null);
@@ -73,7 +73,7 @@ export default function DispatchBoard({ onOpenTrip }: { onOpenTrip: (id: string)
     listTrips({ date: todayIso() }).then(
       (fresh) => {
         if (active) {
-          setRows(sortTrips(fresh));
+          setRows(sortTrips(fresh.items));
           setLoadError(null);
         }
       },

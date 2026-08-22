@@ -22,4 +22,16 @@ public static class TripManifestErrors
 
     public static readonly Error EnteredByRequired = Error.Validation(
         "Trips.Manifest.EnteredByRequired", "A dispatcher-entered manifest must record who entered it.");
+
+    public static readonly Error InvalidFareAmount = Error.Validation(
+        "Trips.Manifest.InvalidFareAmount", "A fare cannot be negative and is recorded to the cent.");
+
+    public static readonly Error FarePaymentMethodRequired = Error.Validation(
+        "Trips.Manifest.FarePaymentMethodRequired", "Recording a fare requires how it was paid — cash, online, or waived.");
+
+    public static readonly Error FareAmountRequired = Error.Validation(
+        "Trips.Manifest.FareAmountRequired", "A cash or online fare needs an amount.");
+
+    public static readonly Error WaivedFareMustBeZero = Error.Validation(
+        "Trips.Manifest.WaivedFareMustBeZero", "A waived fare cannot also carry an amount.");
 }

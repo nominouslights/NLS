@@ -10,7 +10,8 @@ namespace NorthernLink.Notifications.Application.Dispatches.SendTripPickupEmail;
 
 /// <summary>
 /// Handles <see cref="SendTripPickupEmailCommand"/>: replay check by dispatch id → load and
-/// gate the template (must exist and be active) → validate recipients (1–16, RFC-lite email)
+/// gate the template (must exist, be active, and match the trip's service type and client
+/// pin) → validate recipients (1–16, RFC-lite email)
 /// → render subject/HTML/text per recipient → one provider batch call → record the outcomes
 /// as an <see cref="EmailDispatch"/>. Always returns the dispatch response on success paths —
 /// including total provider failure, which is history the dispatcher must see (HTTP 200).
@@ -42,6 +43,18 @@ public sealed partial class SendTripPickupEmailCommandHandler(
         if (!template.IsActive)
         {
             return Result.Failure<EmailDispatchResponse>(EmailTemplateErrors.Inactive);
+        }
+
+        if (template.ServiceType != command.ServiceType)
+        {
+            return Result.Failure<EmailDispatchResponse>(EmailTemplateErrors.ServiceTypeMismatch);
+        }
+
+        // A service-wide template (null ClientId) is valid for any trip of its service type;
+        // a client-pinned one only for that exact client (a client-less trip never matches).
+        if (template.ClientId is not null && template.ClientId != command.ClientId)
+        {
+            return Result.Failure<EmailDispatchResponse>(EmailTemplateErrors.ClientMismatch);
         }
 
         if (command.Recipients.Count == 0)
@@ -105,6 +118,7 @@ public sealed partial class SendTripPickupEmailCommandHandler(
             template.Id,
             template.Name,
             command.ServiceType,
+            command.ClientId,
             command.ClientName,
             results);
 

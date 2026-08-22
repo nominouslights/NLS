@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using NorthernLink.Trips.Application.Abstractions;
+using NorthernLink.Trips.Application.Integration;
 using NorthernLink.Trips.Application.Trips;
 using NorthernLink.Trips.Infrastructure.Persistence.ReadModels;
 
@@ -12,11 +13,11 @@ namespace NorthernLink.Trips.Infrastructure.Persistence;
 /// </summary>
 internal sealed class TripReadService(TripsDbContext context) : ITripReadService
 {
-    public async Task<IReadOnlyList<TripResponse>> GetTripsAsync(
+    public async Task<(IReadOnlyList<TripResponse> Items, int TotalCount)> GetTripsAsync(
         TripFilter filter,
         CancellationToken cancellationToken = default)
     {
-        var query = context.TripReadModels.AsNoTracking();
+        IQueryable<TripReadModel> query = context.TripReadModels.AsNoTracking();
 
         if (filter.Date is { } date)
         {
@@ -61,13 +62,36 @@ internal sealed class TripReadService(TripsDbContext context) : ITripReadService
             query = query.Where(t => t.Status == scheduled && t.DriverId == null);
         }
 
-        var trips = await query
+        if (filter.AssignedOnly)
+        {
+            query = query.Where(t => t.DriverId != null);
+        }
+
+        if (filter.ExcludeCancelled)
+        {
+            var cancelled = Domain.Trips.TripStatus.Cancelled.ToString();
+            query = query.Where(t => t.Status != cancelled);
+        }
+
+        // Counted before paging — the total describes the filtered set, not the page.
+        var totalCount = await query.CountAsync(cancellationToken);
+
+        // Deterministic ordering is a paging correctness requirement, not a preference:
+        // TripNumber is the unique tiebreaker that keeps consecutive pages from overlapping.
+        query = query
             .OrderBy(t => t.ServiceDate)
             .ThenBy(t => t.WindowStart)
-            .ThenBy(t => t.TripNumber)
-            .ToListAsync(cancellationToken);
+            .ThenBy(t => t.TripNumber);
 
-        return trips.Select(ToResponse).ToList();
+        if (filter is { Page: { } page, PageSize: { } pageSize })
+        {
+            query = query.Skip((page - 1) * pageSize).Take(pageSize);
+        }
+
+        var trips = await query.ToListAsync(cancellationToken);
+        var billing = await BillingForAsync(trips.Select(t => t.Id).ToList(), cancellationToken);
+
+        return (trips.Select(t => ToResponse(t, billing.GetValueOrDefault(t.Id))).ToList(), totalCount);
     }
 
     public async Task<TripResponse?> GetTripAsync(Guid tripId, CancellationToken cancellationToken = default)
@@ -76,10 +100,37 @@ internal sealed class TripReadService(TripsDbContext context) : ITripReadService
             .AsNoTracking()
             .FirstOrDefaultAsync(t => t.Id == tripId, cancellationToken);
 
-        return trip is null ? null : ToResponse(trip);
+        if (trip is null)
+        {
+            return null;
+        }
+
+        var billing = await BillingForAsync([tripId], cancellationToken);
+        return ToResponse(trip, billing.GetValueOrDefault(tripId));
     }
 
-    private static TripResponse ToResponse(TripReadModel t) => new(
+    /// <summary>
+    /// Billing state for the page's trips, fetched separately rather than joined: the replica
+    /// is maintained by an integration handler on its own schedule, and keeping it out of the
+    /// main query leaves the paging query's ordering and OFFSET plan untouched. One extra
+    /// round trip over at most a page of ids.
+    /// </summary>
+    private async Task<Dictionary<Guid, TripBilling>> BillingForAsync(
+        IReadOnlyList<Guid> tripIds,
+        CancellationToken cancellationToken)
+    {
+        if (tripIds.Count == 0)
+        {
+            return [];
+        }
+
+        return await context.TripBillings
+            .AsNoTracking()
+            .Where(b => tripIds.Contains(b.TripId))
+            .ToDictionaryAsync(b => b.TripId, cancellationToken);
+    }
+
+    private static TripResponse ToResponse(TripReadModel t, TripBilling? billing) => new(
         t.Id,
         t.TripNumber,
         t.ServiceDate,
@@ -110,8 +161,19 @@ internal sealed class TripReadService(TripsDbContext context) : ITripReadService
         t.Status,
         t.ManifestId,
         t.HasPostTripInspection,
+        t.OperationsFinishedAtUtc,
         t.CompletedAtUtc,
         t.CancelledReason,
+        t.WrittenOffReason,
         t.CreatedAtUtc,
-        t.UpdatedAtUtc);
+        t.UpdatedAtUtc,
+        billing is null
+            ? null
+            : new TripBillingResponse(
+                billing.State,
+                billing.InvoiceId,
+                billing.InvoiceNumber,
+                billing.QboInvoiceId,
+                billing.QboEnteredDate,
+                billing.PaymentConfirmedDate));
 }

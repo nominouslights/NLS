@@ -1,0 +1,86 @@
+name: build
+
+# Publishes the four deployable images to GHCR — that is this workflow's whole job, by the
+# owner's decision: CI ends at the package registry, and deployment happens outside CI from
+# those images. No deploy steps belong here, and no test gate either (run `dotnet test` and
+# Budgeting's `npm test` locally before pushing). CommunityMobile/ is excluded (Flutter design
+# mockup, not a server workload) and AppHost/ is excluded on purpose — it is the local dev
+# orchestrator, and its AppHost.cs is gitignored, so it does not exist in a CI checkout.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        # No build-args here. The frontends' /api/* proxy target is an ARG in each Dockerfile
+        # already defaulting to http://northernlink-api:8080, and a bare Service name resolves
+        # inside the pod's own namespace — so one image serves every environment and CI has
+        # nothing to decide. (It still has to be a build-time ARG rather than pod env: next
+        # build resolves rewrites into routes-manifest.json.)
+        include:
+          # The API's build context is the REPOSITORY ROOT: Directory.Build.props and
+          # Directory.Packages.props live above Backend/ and MSBuild walks up to find them.
+          - name: api
+            context: .
+            dockerfile: Backend/Dockerfile
+          - name: dispatcher
+            context: Dispatcher
+            dockerfile: Dispatcher/Dockerfile
+          - name: website
+            context: Website
+            dockerfile: Website/Dockerfile
+          - name: budgeting
+            context: Budgeting
+            dockerfile: Budgeting/Dockerfile
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        # Pull requests get built but not pushed — a fork PR has no package write token.
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/northernlink-${{ matrix.name }}
+          tags: |
+            type=sha,format=long
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}

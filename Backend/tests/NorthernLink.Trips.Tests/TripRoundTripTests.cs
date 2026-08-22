@@ -95,14 +95,14 @@ public class TripRoundTripTests
     }
 
     [Fact]
-    public void Merge_of_completed_trips_succeeds()
+    public void Merge_of_finished_trips_succeeds()
     {
         var outbound = Outbound();
         var inbound = Inbound();
         outbound.RecordPostTripInspection();
-        outbound.Complete();
+        outbound.FinishOperations();
         inbound.RecordPostTripInspection();
-        inbound.Complete();
+        inbound.FinishOperations();
 
         Assert.True(Trip.MergeRoundTrip(outbound, inbound).IsSuccess);
         Assert.Equal(outbound.RoundTripKey, inbound.RoundTripKey);
@@ -182,7 +182,7 @@ public class TripRoundTripTests
         var inbound = Inbound();
         inbound.Cancel("Weather");
 
-        Assert.Equal(TripErrors.RoundTripCancelled, Trip.MergeRoundTrip(outbound, inbound).Error);
+        Assert.Equal(TripErrors.RoundTripFinal, Trip.MergeRoundTrip(outbound, inbound).Error);
     }
 
     [Fact]
@@ -293,7 +293,7 @@ public class TripRoundTripTests
         inbound.Cancel("Weather");
 
         Assert.Equal(
-            TripErrors.RoundTripCancelled,
+            TripErrors.RoundTripFinal,
             Trip.MergeRoundTrip(outbound, inbound, allowMismatch: true).Error);
     }
 
@@ -344,7 +344,7 @@ public class TripRoundTripTests
         var source = Outbound();
         source.ClearDomainEvents();
 
-        var result = source.CreateDeadheadReturn("TR-3001");
+        var result = source.DeadheadReturn("TR-3001");
 
         Assert.True(result.IsSuccess);
         var deadhead = result.Value;
@@ -368,11 +368,12 @@ public class TripRoundTripTests
         Assert.Equal(source.PoNumber, deadhead.PoNumber);
         Assert.Equal("TR-3001", deadhead.TripNumber);
 
-        // Empty repositioning leg: nobody assigned, nothing sold.
+        // Empty repositioning leg: nothing sold, but someone drives the unit back.
         Assert.True(deadhead.IsEmptyLeg);
-        Assert.Null(deadhead.DriverId);
-        Assert.Null(deadhead.VehicleId);
-        Assert.Null(deadhead.VehicleUnit);
+        Assert.Equal(TestPlanning.DriverId, deadhead.DriverId);
+        Assert.Equal(TestPlanning.DriverName, deadhead.DriverName);
+        Assert.Equal(TestPlanning.VehicleId, deadhead.VehicleId);
+        Assert.Equal(TestPlanning.VehicleUnit, deadhead.VehicleUnit);
         Assert.Null(deadhead.SeatsCapacity);
         Assert.Equal(TripStatus.Scheduled, deadhead.Status);
         Assert.Null(deadhead.ScheduleTemplateId);
@@ -398,7 +399,7 @@ public class TripRoundTripTests
             source.PoNumber, source.SeatsCapacity, source.SeatsMinimum).IsSuccess);
         Assert.Null(source.WindowEnd);
 
-        var deadhead = source.CreateDeadheadReturn("TR-3001").Value;
+        var deadhead = source.DeadheadReturn("TR-3001").Value;
 
         Assert.Equal(new TimeOnly(6, 30), deadhead.WindowStart);
     }
@@ -408,7 +409,7 @@ public class TripRoundTripTests
     {
         var communityRun = TestPlanning.ScheduleTrip(clientId: null).Value;
 
-        Assert.Equal(TripErrors.RoundTripClientRequired, communityRun.CreateDeadheadReturn("TR-3001").Error);
+        Assert.Equal(TripErrors.RoundTripClientRequired, communityRun.DeadheadReturn("TR-3001").Error);
     }
 
     [Fact]
@@ -417,7 +418,7 @@ public class TripRoundTripTests
         var source = Outbound();
         source.AssignRoundTrip("merge:existing", TripDirection.Outbound);
 
-        Assert.Equal(TripErrors.RoundTripAlreadyPaired, source.CreateDeadheadReturn("TR-3001").Error);
+        Assert.Equal(TripErrors.RoundTripAlreadyPaired, source.DeadheadReturn("TR-3001").Error);
     }
 
     [Fact]
@@ -426,7 +427,7 @@ public class TripRoundTripTests
         var source = Outbound();
         source.Cancel(null);
 
-        Assert.Equal(TripErrors.RoundTripCancelled, source.CreateDeadheadReturn("TR-3001").Error);
+        Assert.Equal(TripErrors.RoundTripFinal, source.DeadheadReturn("TR-3001").Error);
     }
 
     [Fact]
@@ -434,7 +435,7 @@ public class TripRoundTripTests
     {
         var emptyLeg = TestPlanning.ScheduleTrip(clientId: ClientId, isEmptyLeg: true).Value;
 
-        Assert.Equal(TripErrors.DeadheadReturnOfEmptyLeg, emptyLeg.CreateDeadheadReturn("TR-3001").Error);
+        Assert.Equal(TripErrors.DeadheadReturnOfEmptyLeg, emptyLeg.DeadheadReturn("TR-3001").Error);
         Assert.Null(emptyLeg.RoundTripKey);
     }
 }

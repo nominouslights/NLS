@@ -10,9 +10,11 @@ namespace NorthernLink.Trips.Application.Trips.Create;
 /// per-tenant sequence, never supplied. When <see cref="RouteId"/> is set the route's
 /// name/stops/origin/destination/distance are snapshotted from the route and the
 /// free-form fields are ignored; otherwise the free-form fields describe the corridor.
-/// A supplied <see cref="DriverId"/> is validated against driver_lookup and the name
-/// snapshotted from it; likewise a supplied <see cref="VehicleId"/> is validated against
-/// vehicle_lookup and the unit-number snapshotted from it.
+/// A trip is never created unassigned: <see cref="DriverId"/> and <see cref="VehicleId"/>
+/// are required (nullable only so the handler can refuse with a domain error instead of a
+/// binding failure). The driver is validated against driver_lookup and the name
+/// snapshotted from it; the vehicle must be a real fleet vehicle in vehicle_lookup, whose
+/// unit number and seating capacity are snapshotted — there is no free-form vehicle path.
 /// </summary>
 public sealed record CreateTripCommand(
     Guid TenantId,
@@ -33,6 +35,4 @@ public sealed record CreateTripCommand(
     string? PoNumber,
     Guid? DriverId,
     Guid? VehicleId,
-    string? VehicleUnit,
-    int? SeatsCapacity,
     int? SeatsMinimum) : ICommand<Guid>;

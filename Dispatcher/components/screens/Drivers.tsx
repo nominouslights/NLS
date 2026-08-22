@@ -224,8 +224,8 @@ export default function Drivers({
     // Trip history is best-effort — an unreachable Trips API leaves the
     // calendar empty without blocking the compliance records.
     listTrips({ driverId }).then(
-      (rows) => {
-        if (active) setTripState({ driverId, rows: sortTrips(rows) });
+      (res) => {
+        if (active) setTripState({ driverId, rows: sortTrips(res.items) });
       },
       () => {
         if (active) setTripState({ driverId, rows: [] });

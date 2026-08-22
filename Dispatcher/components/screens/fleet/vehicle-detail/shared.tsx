@@ -21,6 +21,13 @@ export const tabIndex = (name: string) => {
   return i < 0 ? 0 : i;
 };
 
+/** One selectable vehicle: real id for API calls, unit + label for display. */
+export interface VehicleOption {
+  id: string;
+  unit: string;
+  label: string;
+}
+
 export type PromptKind = "oos" | "odometer" | "retire" | "sell" | "recycle" | null;
 
 export type ModalKind = "register" | "edit" | "workorder" | "shops" | null;

@@ -33,7 +33,7 @@ public class VehicleInspectionRecordedIntegrationEventHandlerTests
 
         Assert.True(trip.HasPostTripInspection);
         Assert.Equal(1, _trips.SaveCount);
-        Assert.True(trip.Complete().IsSuccess); // gate is now cleared
+        Assert.True(trip.FinishOperations().IsSuccess); // gate is now cleared
     }
 
     [Fact]

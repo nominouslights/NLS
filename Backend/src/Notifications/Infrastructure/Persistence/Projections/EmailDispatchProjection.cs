@@ -23,6 +23,7 @@ internal sealed class EmailDispatchProjection : NotificationsProjection<EmailDis
         row.TemplateId = source.TemplateId;
         row.TemplateName = source.TemplateName;
         row.ServiceType = source.ServiceType.ToString();
+        row.ClientId = source.ClientId;
         row.ClientName = source.ClientName;
         row.Status = source.Status.ToString();
         row.SentAtUtc = source.SentAtUtc;

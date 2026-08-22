@@ -11,6 +11,14 @@ public static class EmailTemplateErrors
     public static readonly Error Inactive = Error.Validation(
         "Notifications.Template.Inactive", "The email template is inactive and cannot be used to send.");
 
+    public static readonly Error ServiceTypeMismatch = Error.Validation(
+        "Notifications.Template.ServiceTypeMismatch",
+        "The selected template is for a different service type than this trip.");
+
+    public static readonly Error ClientMismatch = Error.Validation(
+        "Notifications.Template.ClientMismatch",
+        "The selected template is pinned to a different client than this trip.");
+
     public static readonly Error NameRequired = Error.Validation(
         "Notifications.Template.NameRequired", "A template name is required.");
 

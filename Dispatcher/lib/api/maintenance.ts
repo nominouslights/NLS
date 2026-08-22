@@ -35,6 +35,7 @@ export interface VehicleInspection {
   type: InspectionType;
   source: InspectionSourceWire;
   tripNumber: string | null;
+  manifestId: string | null;
   vehicleId: string | null;
   unit: string;
   driverName: string;
@@ -59,6 +60,7 @@ export interface VehicleInspection {
   fuelAdded: boolean;
   fuelLitres: number | null;
   fuelCostCad: number | null;
+  generatedWorkOrderId: string | null;
   createdAtUtc: string;
 }
 

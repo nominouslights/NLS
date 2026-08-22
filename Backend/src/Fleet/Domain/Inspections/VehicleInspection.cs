@@ -236,12 +236,23 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
     /// </summary>
     public void MarkRemoved() => Raise(new VehicleInspectionRemovedDomainEvent(Id, TenantId));
 
-    /// <summary>Links the work order generated from this inspection's defects.</summary>
-    public void LinkWorkOrder(Guid workOrderId)
+    /// <summary>
+    /// Links the work order generated from this inspection's defects. One generation per
+    /// inspection: fails once <see cref="GeneratedWorkOrderId"/> is set — deliberately even if
+    /// that earlier work order was cancelled (the cancelled-WO escape hatch needs a
+    /// cross-aggregate read and is a documented follow-up).
+    /// </summary>
+    public Result LinkWorkOrder(Guid workOrderId)
     {
+        if (GeneratedWorkOrderId is not null)
+        {
+            return NorthernLink.Shared.Kernel.Result.Failure(InspectionErrors.WorkOrderAlreadyGenerated);
+        }
+
         GeneratedWorkOrderId = workOrderId;
 
         Raise(new VehicleInspectionWorkOrderLinkedDomainEvent(Id, workOrderId));
+        return NorthernLink.Shared.Kernel.Result.Success();
     }
 
     /// <summary>The derivation rule: Pass / PassWithDefects (all Minor) / Fail (any Major or OutOfService).</summary>

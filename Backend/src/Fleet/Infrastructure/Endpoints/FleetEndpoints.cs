@@ -38,7 +38,7 @@ public static partial class FleetEndpoints
         // Work orders — per-vehicle listing plus a fleet-wide group.
         vehicles.MapGet("{vehicleId:guid}/work-orders", GetVehicleWorkOrders);
 
-        var workOrders = app.MapGroup("/api/fleet/work-orders");
+        var workOrders = app.MapGroup("/api/fleet/work-orders").RequireAuthorization();
         workOrders.MapGet("", GetAllWorkOrders);
         workOrders.MapPost("", CreateWorkOrder);
         workOrders.MapPost("{id:guid}/status", ChangeWorkOrderStatus);
@@ -47,7 +47,7 @@ public static partial class FleetEndpoints
         // Inspections: list DVIRs, and enter a pre-/post-trip inspection directly from the
         // trip workflow (or, later, the Driver Field App). The reading advances the vehicle
         // odometer intra-Fleet.
-        var inspections = app.MapGroup("/api/fleet/inspections");
+        var inspections = app.MapGroup("/api/fleet/inspections").RequireAuthorization();
 
         inspections.MapGet("", GetInspections);
         inspections.MapPost("", EnterInspection);
@@ -55,10 +55,10 @@ public static partial class FleetEndpoints
         inspections.MapDelete("{id:guid}", RemoveInspection);
 
         // Fleet-wide compliance documents (dashboard compliance watch).
-        app.MapGet("/api/fleet/documents", GetAllDocuments);
+        app.MapGet("/api/fleet/documents", GetAllDocuments).RequireAuthorization();
 
         // Shops / parts partners — fleet-wide reference data reused on work orders.
-        var shops = app.MapGroup("/api/fleet/shops");
+        var shops = app.MapGroup("/api/fleet/shops").RequireAuthorization();
 
         shops.MapGet("", GetShops);
         shops.MapPost("", RegisterShop);

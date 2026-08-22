@@ -16,8 +16,16 @@ namespace NorthernLink.Trips.Domain.Trips;
 /// Route and client fields are denormalized snapshots: editing a route or
 /// template never rewrites history. Lifecycle is the <see cref="TripStatus"/> matrix;
 /// "open — needs coverage" and "empty leg" are frontend derivations, not statuses.
-/// Completion (explicit or via an attached manifest) raises
-/// <see cref="TripCompletedDomainEvent"/>, Billing's feed.
+/// <para>
+/// The lifecycle is billing-driven past the point the bus stops.
+/// <see cref="FinishOperations"/> is the dispatcher's "the run is over" signal; it lands a
+/// client trip in <see cref="TripStatus.ReadyForBilling"/> (raising
+/// <see cref="TripReadyForBillingDomainEvent"/>, Billing's feed) and a clientless one —
+/// community runs and walk-up charters, whose fare was already taken — straight in
+/// <see cref="TripStatus.Completed"/>. From there <see cref="MarkInvoiced"/>,
+/// <see cref="MarkPaid"/>, and <see cref="WriteOff"/> are driven only by Billing's invoice
+/// events, never by hand.
+/// </para>
 /// </summary>
 public sealed class Trip : AggregateRoot, ITenantScoped
 {
@@ -77,30 +85,83 @@ public sealed class Trip : AggregateRoot, ITenantScoped
     /// <summary>
     /// Set true once a post-trip vehicle inspection has been logged for this trip (Fleet's
     /// <c>fleet.vehicle-inspection-recorded</c> event, matched by trip number). Gates
-    /// <see cref="Complete"/>.
+    /// <see cref="FinishOperations"/>.
     /// </summary>
     public bool HasPostTripInspection { get; private set; }
 
+    /// <summary>
+    /// When the run itself ended — stamped by <see cref="FinishOperations"/> regardless of which
+    /// status it lands in. Distinct from <see cref="CompletedAtUtc"/>, which now tracks payment:
+    /// for a client trip the two are days or weeks apart, and this is the one that means
+    /// "the bus got back".
+    /// </summary>
+    public DateTimeOffset? OperationsFinishedAtUtc { get; private set; }
+
+    /// <summary>
+    /// When the trip reached <see cref="TripStatus.Completed"/> — for a client trip that is the
+    /// date payment was confirmed, for a clientless run the moment the run ended. Cleared by
+    /// <see cref="MarkInvoiced"/> when a payment confirmation is undone, so it never claims a
+    /// completion that has been walked back.
+    /// </summary>
     public DateTimeOffset? CompletedAtUtc { get; private set; }
+
     public string? CancelledReason { get; private set; }
+
+    /// <summary>Why the trip will never be billed — required by <see cref="CloseWithoutBilling"/>,
+    /// and copied from the invoice's reason when Billing writes one off.</summary>
+    public string? WrittenOffReason { get; private set; }
 
     public DateTimeOffset CreatedAtUtc { get; private set; }
     public DateTimeOffset UpdatedAtUtc { get; private set; }
 
-    public bool IsTerminal => Status is TripStatus.Completed or TripStatus.Cancelled;
+    /// <summary>
+    /// The run has happened (or been called off), so driver, vehicle, and demand are history.
+    /// Replaces the old <c>IsTerminal</c>, which is no longer meaningful now that Completed can
+    /// go back to Invoiced — "the bus is done with it" and "nothing can change" are different
+    /// questions, and every assignment guard wants this one.
+    /// </summary>
+    public bool IsOperationallyClosed =>
+        Status is not (TripStatus.Scheduled or TripStatus.InProgress);
 
-    /// <summary>The lifecycle transition matrix. Diagonal (same status) is not a transition.</summary>
+    /// <summary>Genuinely final — no outgoing transitions at all.</summary>
+    public bool IsFinal => Status is TripStatus.Cancelled or TripStatus.WrittenOff;
+
+    /// <summary>
+    /// The lifecycle transition matrix. Diagonal (same status) is not a transition.
+    /// <para>
+    /// Scheduled and InProgress both reach ReadyForBilling <em>and</em> Completed because
+    /// <see cref="FinishOperations"/> picks the landing status from <see cref="ClientId"/>; the
+    /// direct Scheduled → finish edges survive because dispatchers forget to press START and the
+    /// real guard on finishing is the post-trip inspection, not the intermediate status.
+    /// </para>
+    /// <para>
+    /// Completed → Invoiced is legal (a payment confirmation cleared in error), which makes this
+    /// matrix insufficient on its own to stop a stale replay from un-completing a paid trip —
+    /// <c>InvoiceBillingStateChangedIntegrationEventHandler</c> carries a high-water mark for
+    /// that. Invoiced → ReadyForBilling is deliberately absent: once a worksheet is in
+    /// QuickBooks it can be adjusted or written off, never un-sent.
+    /// </para>
+    /// </summary>
     public static bool CanTransition(TripStatus from, TripStatus to) =>
         (from, to) switch
         {
-            (TripStatus.Scheduled, TripStatus.InProgress or TripStatus.Completed or TripStatus.Cancelled) => true,
-            (TripStatus.InProgress, TripStatus.Completed or TripStatus.Cancelled) => true,
+            (TripStatus.Scheduled, TripStatus.InProgress) => true,
+            (TripStatus.Scheduled or TripStatus.InProgress,
+                TripStatus.ReadyForBilling or TripStatus.Completed or TripStatus.Cancelled) => true,
+            (TripStatus.ReadyForBilling, TripStatus.Invoiced or TripStatus.WrittenOff) => true,
+            (TripStatus.Invoiced, TripStatus.Completed or TripStatus.WrittenOff) => true,
+            (TripStatus.Completed, TripStatus.Invoiced) => true,
             _ => false,
         };
 
     /// <summary>
-    /// The single creation path — used by the wizard (ad-hoc) and the generation worker
-    /// (template-materialized, which passes the template provenance fields).
+    /// The single creation path — used by the wizard (ad-hoc), the generation worker
+    /// (template-materialized, which passes the template provenance fields), and
+    /// <see cref="CreateDeadheadReturn"/>. A trip is never born unassigned: a driver
+    /// (id + name snapshot) and a fleet vehicle (id + unit-number snapshot) are required
+    /// — callers validate both against the lookup replicas before calling. Reassignment
+    /// and unassignment after creation still move through
+    /// <see cref="AssignDriver"/>/<see cref="UnassignDriver"/>/<see cref="AssignVehicle"/>.
     /// </summary>
     public static Result<Trip> Schedule(
         Guid tenantId,
@@ -122,10 +183,10 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         Guid? clientId,
         string? clientName,
         string? poNumber,
-        Guid? driverId,
-        string? driverName,
-        Guid? vehicleId,
-        string? vehicleUnit,
+        Guid driverId,
+        string driverName,
+        Guid vehicleId,
+        string vehicleUnit,
         int? seatsCapacity,
         int? seatsMinimum)
     {
@@ -140,9 +201,24 @@ public sealed class Trip : AggregateRoot, ITenantScoped
             return Result.Failure<Trip>(validation.Error);
         }
 
-        if (driverId is not null && string.IsNullOrWhiteSpace(driverName))
+        if (driverId == Guid.Empty)
+        {
+            return Result.Failure<Trip>(TripErrors.DriverRequired);
+        }
+
+        if (string.IsNullOrWhiteSpace(driverName))
         {
             return Result.Failure<Trip>(TripErrors.DriverNameRequired);
+        }
+
+        if (vehicleId == Guid.Empty)
+        {
+            return Result.Failure<Trip>(TripErrors.VehicleRequired);
+        }
+
+        if (string.IsNullOrWhiteSpace(vehicleUnit))
+        {
+            return Result.Failure<Trip>(TripErrors.VehicleUnitRequired);
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -168,9 +244,9 @@ public sealed class Trip : AggregateRoot, ITenantScoped
             ClientName = Normalize(clientName),
             PoNumber = Normalize(poNumber),
             DriverId = driverId,
-            DriverName = driverId is null ? null : driverName!.Trim(),
+            DriverName = driverName.Trim(),
             VehicleId = vehicleId,
-            VehicleUnit = Normalize(vehicleUnit),
+            VehicleUnit = vehicleUnit.Trim(),
             SeatsCapacity = seatsCapacity,
             SeatsConfirmed = 0,
             SeatsMinimum = seatsMinimum,
@@ -233,7 +309,9 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         ClientId = clientId;
         ClientName = Normalize(clientName);
         PoNumber = Normalize(poNumber);
-        SeatsCapacity = seatsCapacity;
+        // Manual capacity applies only to trips without a fleet vehicle — an assigned
+        // vehicle's snapshotted capacity is server-authoritative and survives plan edits.
+        SeatsCapacity = VehicleId is null ? seatsCapacity : SeatsCapacity;
         SeatsMinimum = seatsMinimum;
         UpdatedAtUtc = DateTimeOffset.UtcNow;
 
@@ -244,9 +322,9 @@ public sealed class Trip : AggregateRoot, ITenantScoped
     /// <summary>Assigns a driver (existence + Active are validated against driver_lookup by the handler).</summary>
     public Result AssignDriver(Guid driverId, string driverName)
     {
-        if (IsTerminal)
+        if (IsOperationallyClosed)
         {
-            return Result.Failure(TripErrors.TerminalStatus(Status));
+            return Result.Failure(TripErrors.OperationallyClosed(Status));
         }
 
         if (string.IsNullOrWhiteSpace(driverName))
@@ -264,9 +342,9 @@ public sealed class Trip : AggregateRoot, ITenantScoped
 
     public Result UnassignDriver()
     {
-        if (IsTerminal)
+        if (IsOperationallyClosed)
         {
-            return Result.Failure(TripErrors.TerminalStatus(Status));
+            return Result.Failure(TripErrors.OperationallyClosed(Status));
         }
 
         DriverId = null;
@@ -280,14 +358,29 @@ public sealed class Trip : AggregateRoot, ITenantScoped
     /// <summary>
     /// Sets (or, with nulls, clears) the vehicle working this trip. A supplied
     /// <paramref name="vehicleId"/> is validated against vehicle_lookup (exists + Active)
-    /// by the handler, which passes the unit-number snapshot from the lookup as
-    /// <paramref name="vehicleUnit"/>. A free-form unit with no id is still allowed.
+    /// by the handler, which passes the unit-number and seating-capacity snapshots from the
+    /// lookup as <paramref name="vehicleUnit"/>/<paramref name="seatingCapacity"/> — so a
+    /// fleet vehicle stamps <see cref="SeatsCapacity"/> the way it stamps the unit number
+    /// (snapshot semantics; later Fleet edits never ripple back). Assignment is refused when
+    /// the vehicle seats fewer than <see cref="SeatsConfirmed"/>. A free-form unit with no id
+    /// is still allowed and — like an unassign — leaves <see cref="SeatsCapacity"/> alone:
+    /// demand may already be booked against the last-known capacity.
     /// </summary>
-    public Result AssignVehicle(Guid? vehicleId, string? vehicleUnit)
+    public Result AssignVehicle(Guid? vehicleId, string? vehicleUnit, int? seatingCapacity)
     {
-        if (IsTerminal)
+        if (IsOperationallyClosed)
         {
-            return Result.Failure(TripErrors.TerminalStatus(Status));
+            return Result.Failure(TripErrors.OperationallyClosed(Status));
+        }
+
+        if (vehicleId is not null)
+        {
+            if (seatingCapacity is { } capacity && SeatsConfirmed > capacity)
+            {
+                return Result.Failure(TripErrors.VehicleCapacityBelowConfirmed);
+            }
+
+            SeatsCapacity = seatingCapacity;
         }
 
         VehicleId = vehicleId;
@@ -312,14 +405,140 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         return Result.Success();
     }
 
-    public Result Complete()
+    /// <summary>
+    /// The dispatcher's "the run is over" signal, and the only path out of the operational half
+    /// of the lifecycle. Where it lands depends on whether anyone will be invoiced:
+    /// a client trip goes to <see cref="TripStatus.ReadyForBilling"/> and raises
+    /// <see cref="TripReadyForBillingDomainEvent"/> (which Billing turns into a billable-trip
+    /// row); a trip with no client — a community run or walk-up charter, whose fare was already
+    /// collected at booking or by the dispatcher — goes straight to
+    /// <see cref="TripStatus.Completed"/> and never enters the billing arc at all.
+    /// <para>
+    /// This is a command in its own right rather than a status target, because the caller cannot
+    /// know which status it produces. The post-trip inspection gate is unchanged and is checked
+    /// first, so finishing is refused via any path (including a direct Scheduled → finish).
+    /// </para>
+    /// </summary>
+    public Result FinishOperations()
     {
-        // Business rule: a trip can never reach Completed without a logged post-trip
-        // inspection — checked before the transition so completion is refused via any path
-        // (including a direct Scheduled → Completed).
-        if (!HasPostTripInspection)
+        // Business rule: a trip can never leave the operational phase without a logged
+        // post-trip inspection — checked before the transition so it is refused via any path.
+        // Deadheads are exempt: an inspection is logged (by trip number) against the trip the
+        // vehicle actually worked, and an empty repositioning leg never gets its own — the same
+        // reasoning that exempts them from the passenger-manifest gate on Start. Without this,
+        // an empty leg could never reach ReadyForBilling and its round trip could never bill.
+        if (!HasPostTripInspection && !IsEmptyLeg)
         {
             return Result.Failure(TripErrors.PostTripInspectionRequired);
+        }
+
+        var target = ClientId is null ? TripStatus.Completed : TripStatus.ReadyForBilling;
+        if (!CanTransition(Status, target))
+        {
+            return Result.Failure(TripErrors.InvalidStatusTransition(Status, target));
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        Status = target;
+        OperationsFinishedAtUtc = now;
+        UpdatedAtUtc = now;
+
+        if (target == TripStatus.Completed)
+        {
+            // No invoice will ever settle this one, so the run ending is the completion.
+            CompletedAtUtc = now;
+            Raise(new TripCompletedDomainEvent(Id));
+        }
+        else
+        {
+            Raise(new TripReadyForBillingDomainEvent(Id));
+        }
+
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// The dispatcher's escape for a run that will never be invoiced — a client with no active
+    /// contract, a goodwill trip, a job written off before a worksheet was ever drafted. Without
+    /// it <see cref="TripStatus.ReadyForBilling"/> would be a state with no exit, since every
+    /// other way out of it is driven by an invoice that is never going to exist.
+    /// <para>
+    /// Lands in the same <see cref="TripStatus.WrittenOff"/> as an invoice write-off; the
+    /// required reason is what distinguishes the two in the audit trail.
+    /// </para>
+    /// </summary>
+    public Result CloseWithoutBilling(string reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return Result.Failure(TripErrors.WriteOffReasonRequired);
+        }
+
+        if (!CanTransition(Status, TripStatus.WrittenOff))
+        {
+            return Result.Failure(TripErrors.InvalidStatusTransition(Status, TripStatus.WrittenOff));
+        }
+
+        Status = TripStatus.WrittenOff;
+        WrittenOffReason = reason.Trim();
+        UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        // Not TripWrittenOffDomainEvent: this write-off originates here, so Billing has to be
+        // told to drop the trip from its billable pool — the mapper publishes exactly this event.
+        Raise(new TripClosedWithoutBillingDomainEvent(Id));
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Records that the trip's worksheet has been keyed into QuickBooks. Driven only by Billing's
+    /// <c>billing.invoice-billing-state-changed</c> event — never settable by hand.
+    /// <para>
+    /// Also the path back from <see cref="TripStatus.Completed"/> when a payment confirmation is
+    /// cleared in error, which is why it clears <see cref="CompletedAtUtc"/>. Idempotent: a
+    /// re-delivery while already Invoiced is a no-op success raising nothing.
+    /// </para>
+    /// </summary>
+    public Result MarkInvoiced()
+    {
+        if (Status == TripStatus.Invoiced)
+        {
+            return Result.Success();
+        }
+
+        var guard = GuardBillingDriven();
+        if (guard.IsFailure)
+        {
+            return guard;
+        }
+
+        if (!CanTransition(Status, TripStatus.Invoiced))
+        {
+            return Result.Failure(TripErrors.InvalidStatusTransition(Status, TripStatus.Invoiced));
+        }
+
+        Status = TripStatus.Invoiced;
+        CompletedAtUtc = null;
+        UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        Raise(new TripInvoicedDomainEvent(Id));
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Payment against the trip's QuickBooks invoice has been confirmed — the trip is finally
+    /// Completed. Driven only by Billing. Idempotent, like its siblings.
+    /// </summary>
+    public Result MarkPaid()
+    {
+        if (Status == TripStatus.Completed)
+        {
+            return Result.Success();
+        }
+
+        var guard = GuardBillingDriven();
+        if (guard.IsFailure)
+        {
+            return guard;
         }
 
         if (!CanTransition(Status, TripStatus.Completed))
@@ -334,6 +553,47 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         Raise(new TripCompletedDomainEvent(Id));
         return Result.Success();
     }
+
+    /// <summary>
+    /// The invoice carrying this trip was written off — the money is not coming. Driven only by
+    /// Billing. Final; the claim on the trip is deliberately never released, so a written-off
+    /// trip can never be re-billed. Idempotent.
+    /// </summary>
+    public Result WriteOff(string? reason)
+    {
+        if (Status == TripStatus.WrittenOff)
+        {
+            return Result.Success();
+        }
+
+        var guard = GuardBillingDriven();
+        if (guard.IsFailure)
+        {
+            return guard;
+        }
+
+        if (!CanTransition(Status, TripStatus.WrittenOff))
+        {
+            return Result.Failure(TripErrors.InvalidStatusTransition(Status, TripStatus.WrittenOff));
+        }
+
+        Status = TripStatus.WrittenOff;
+        WrittenOffReason = Normalize(reason);
+        CompletedAtUtc = null;
+        UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        Raise(new TripWrittenOffDomainEvent(Id));
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// A clientless run never enters the billing arc, so no invoice can ever speak for it —
+    /// a billing-driven transition arriving for one means a claim set has gone wrong upstream.
+    /// </summary>
+    private Result GuardBillingDriven() =>
+        ClientId is null
+            ? Result.Failure(TripErrors.BillingStateOnClientlessTrip)
+            : Result.Success();
 
     public Result Cancel(string? reason)
     {
@@ -411,9 +671,11 @@ public sealed class Trip : AggregateRoot, ITenantScoped
             }
         }
 
-        if (first.Status == TripStatus.Cancelled || second.Status == TripStatus.Cancelled)
+        // Completed and ReadyForBilling legs merge fine — that is the point. Final legs do not:
+        // re-keying a written-off or cancelled leg would rewrite a settled pairing.
+        if (first.IsFinal || second.IsFinal)
         {
-            return Result.Failure(TripErrors.RoundTripCancelled);
+            return Result.Failure(TripErrors.RoundTripFinal);
         }
 
         if (first.RoundTripKey is not null || second.RoundTripKey is not null)
@@ -447,12 +709,19 @@ public sealed class Trip : AggregateRoot, ITenantScoped
     /// Creates the empty repositioning leg for a client trip with no return: a NEW
     /// Scheduled trip on the reversed corridor (stops reversed and renumbered), same
     /// service date/client/distance/service type, departing at this trip's
-    /// <see cref="WindowEnd"/> (or <see cref="WindowStart"/> when open-ended), no
-    /// driver/vehicle/seats, <see cref="IsEmptyLeg"/> true and Inbound — while this trip
-    /// becomes the Outbound leg of a fresh shared "merge:" <see cref="RoundTripKey"/>.
+    /// <see cref="WindowEnd"/> (or <see cref="WindowStart"/> when open-ended), no seats,
+    /// <see cref="IsEmptyLeg"/> true and Inbound — while this trip becomes the Outbound
+    /// leg of a fresh shared "merge:" <see cref="RoundTripKey"/>. Someone drives the unit
+    /// back, so the leg carries a driver and vehicle like every trip — usually this trip's
+    /// own, but the handler may pass a different pair (validated against the lookups).
     /// The caller mints <paramref name="tripNumber"/> from the per-tenant sequence.
     /// </summary>
-    public Result<Trip> CreateDeadheadReturn(string tripNumber)
+    public Result<Trip> CreateDeadheadReturn(
+        string tripNumber,
+        Guid driverId,
+        string driverName,
+        Guid vehicleId,
+        string vehicleUnit)
     {
         if (ClientId is null)
         {
@@ -464,9 +733,9 @@ public sealed class Trip : AggregateRoot, ITenantScoped
             return Result.Failure<Trip>(TripErrors.RoundTripAlreadyPaired);
         }
 
-        if (Status == TripStatus.Cancelled)
+        if (IsFinal)
         {
-            return Result.Failure<Trip>(TripErrors.RoundTripCancelled);
+            return Result.Failure<Trip>(TripErrors.RoundTripFinal);
         }
 
         if (IsEmptyLeg)
@@ -507,10 +776,10 @@ public sealed class Trip : AggregateRoot, ITenantScoped
             ClientId,
             ClientName,
             PoNumber,
-            driverId: null,
-            driverName: null,
-            vehicleId: null,
-            vehicleUnit: null,
+            driverId,
+            driverName,
+            vehicleId,
+            vehicleUnit,
             seatsCapacity: null,
             seatsMinimum: null);
 
@@ -526,7 +795,7 @@ public sealed class Trip : AggregateRoot, ITenantScoped
     /// <summary>
     /// Stamps a round-trip pairing onto an existing trip — reachable only through
     /// <see cref="MergeRoundTrip"/>/<see cref="CreateDeadheadReturn"/>'s validation, but
-    /// re-guards its own invariants (unpaired, not Cancelled) for defence in depth.
+    /// re-guards its own invariants (unpaired, not final) for defence in depth.
     /// </summary>
     public Result AssignRoundTrip(string roundTripKey, TripDirection direction)
     {
@@ -535,9 +804,9 @@ public sealed class Trip : AggregateRoot, ITenantScoped
             return Result.Failure(TripErrors.RoundTripKeyRequired);
         }
 
-        if (Status == TripStatus.Cancelled)
+        if (IsFinal)
         {
-            return Result.Failure(TripErrors.RoundTripCancelled);
+            return Result.Failure(TripErrors.RoundTripFinal);
         }
 
         if (RoundTripKey is not null)
@@ -576,9 +845,9 @@ public sealed class Trip : AggregateRoot, ITenantScoped
     /// <summary>Records confirmed demand (Manifests screen; guaranteed = "gift-a-seat" pledge).</summary>
     public Result RecordDemand(int seatsConfirmed, bool demandGuaranteed)
     {
-        if (IsTerminal)
+        if (IsOperationallyClosed)
         {
-            return Result.Failure(TripErrors.TerminalStatus(Status));
+            return Result.Failure(TripErrors.OperationallyClosed(Status));
         }
 
         if (seatsConfirmed < 0)

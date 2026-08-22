@@ -19,7 +19,8 @@ public class SendTripPickupEmailCommandHandlerTests
     private static SendTripPickupEmailCommand Command(
         Guid templateId,
         Guid? dispatchId = null,
-        IReadOnlyList<RecipientInput>? recipients = null) => new(
+        IReadOnlyList<RecipientInput>? recipients = null,
+        Guid? clientId = null) => new(
         TestNotifications.TenantId,
         dispatchId ?? Guid.NewGuid(),
         templateId,
@@ -30,6 +31,7 @@ public class SendTripPickupEmailCommandHandlerTests
         "Tuesday, August 4, 2026",
         "8:30 AM",
         "Thompson – Lynn Lake",
+        clientId,
         "Marcel Colomb First Nation",
         recipients ?? [new RecipientInput("alex@example.com", "Alex Moody", "Thompson Terminal", "Lynn Lake Co-op")]);
 
@@ -56,6 +58,93 @@ public class SendTripPickupEmailCommandHandlerTests
         Assert.Equal(EmailTemplateErrors.Inactive, result.Error);
         Assert.Empty(_sender.Batches);
         Assert.Empty(_dispatches.Dispatches);
+    }
+
+    [Fact]
+    public async Task Template_for_a_different_service_type_is_rejected_and_nothing_is_sent()
+    {
+        var template = TestNotifications.CreateTemplate(serviceType: NotificationServiceType.Charter);
+        _templates.Templates.Add(template);
+
+        var result = await Handler().Handle(Command(template.Id), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(EmailTemplateErrors.ServiceTypeMismatch, result.Error);
+        Assert.Empty(_sender.Batches);
+        Assert.Empty(_dispatches.Dispatches);
+    }
+
+    [Fact]
+    public async Task Client_pinned_template_rejects_a_different_trip_client_and_nothing_is_sent()
+    {
+        var template = TestNotifications.CreateTemplate(
+            clientId: Guid.NewGuid(), clientName: "Marcel Colomb First Nation");
+        _templates.Templates.Add(template);
+
+        var result = await Handler().Handle(
+            Command(template.Id, clientId: Guid.NewGuid()), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(EmailTemplateErrors.ClientMismatch, result.Error);
+        Assert.Empty(_sender.Batches);
+        Assert.Empty(_dispatches.Dispatches);
+    }
+
+    [Fact]
+    public async Task Client_pinned_template_rejects_a_client_less_trip()
+    {
+        var template = TestNotifications.CreateTemplate(
+            clientId: Guid.NewGuid(), clientName: "Marcel Colomb First Nation");
+        _templates.Templates.Add(template);
+
+        var result = await Handler().Handle(Command(template.Id, clientId: null), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(EmailTemplateErrors.ClientMismatch, result.Error);
+        Assert.Empty(_sender.Batches);
+    }
+
+    [Fact]
+    public async Task Client_pinned_template_sends_for_the_matching_client()
+    {
+        var clientId = Guid.NewGuid();
+        var template = TestNotifications.CreateTemplate(
+            clientId: clientId, clientName: "Marcel Colomb First Nation");
+        _templates.Templates.Add(template);
+
+        var result = await Handler().Handle(Command(template.Id, clientId: clientId), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Single(_sender.Batches);
+    }
+
+    [Fact]
+    public async Task Service_wide_template_sends_for_any_trip_client()
+    {
+        var template = TestNotifications.CreateTemplate(); // no client pin
+        _templates.Templates.Add(template);
+
+        var result = await Handler().Handle(
+            Command(template.Id, clientId: Guid.NewGuid()), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Single(_sender.Batches);
+    }
+
+    [Fact]
+    public async Task Dispatch_persists_the_trip_client_id()
+    {
+        var clientId = Guid.NewGuid();
+        var template = TestNotifications.CreateTemplate(
+            clientId: clientId, clientName: "Marcel Colomb First Nation");
+        _templates.Templates.Add(template);
+
+        var result = await Handler().Handle(Command(template.Id, clientId: clientId), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(clientId, result.Value.ClientId);
+        var stored = Assert.Single(_dispatches.Dispatches);
+        Assert.Equal(clientId, stored.ClientId);
     }
 
     [Fact]

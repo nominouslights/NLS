@@ -6,6 +6,7 @@ using NorthernLink.Trips.Application.Manifests;
 using NorthernLink.Trips.Domain.Manifests;
 using NorthernLink.Trips.Domain.Routes;
 using NorthernLink.Trips.Domain.Schedules;
+using NorthernLink.Trips.Domain.Shipments;
 using NorthernLink.Trips.Domain.Stops;
 using NorthernLink.Trips.Domain.Trips;
 using NorthernLink.Trips.Infrastructure.Persistence.ReadModels;
@@ -28,6 +29,15 @@ public sealed class TripsDbContext(
 {
     public DbSet<TripManifest> Manifests => Set<TripManifest>();
     public DbSet<Trip> Trips => Set<Trip>();
+    public DbSet<Shipment> Shipments => Set<Shipment>();
+
+    /// <summary>
+    /// Legs are part of the Shipment aggregate and are normally reached through it — this set
+    /// exists for the count/lookup queries that would otherwise load whole aggregates to answer
+    /// "how much is booked on this run".
+    /// </summary>
+    public DbSet<ShipmentLeg> ShipmentLegs => Set<ShipmentLeg>();
+
     public DbSet<Route> Routes => Set<Route>();
     public DbSet<Stop> Stops => Set<Stop>();
     public DbSet<ScheduleTemplate> ScheduleTemplates => Set<ScheduleTemplate>();
@@ -36,13 +46,19 @@ public sealed class TripsDbContext(
     public DbSet<DriverLookup> DriverLookups => Set<DriverLookup>();
     public DbSet<VehicleLookup> VehicleLookups => Set<VehicleLookup>();
     public DbSet<ClientLookup> ClientLookups => Set<ClientLookup>();
+    public DbSet<TripBilling> TripBillings => Set<TripBilling>();
 
     /// <summary>Per-tenant "TR-####" sequence rows — only touched by <see cref="TripNumberGenerator"/>.</summary>
     public DbSet<TripNumberCounter> TripNumberCounters => Set<TripNumberCounter>();
 
+    /// <summary>Per-tenant "SH-####" sequence rows — only touched by <see cref="ShipmentNumberGenerator"/>.</summary>
+    public DbSet<ShipmentNumberCounter> ShipmentNumberCounters => Set<ShipmentNumberCounter>();
+
     /// <summary>Read-side projection tables (worker-maintained rm_* rows).</summary>
     public DbSet<TripManifestReadModel> ManifestReadModels => Set<TripManifestReadModel>();
     public DbSet<TripReadModel> TripReadModels => Set<TripReadModel>();
+    public DbSet<ShipmentReadModel> ShipmentReadModels => Set<ShipmentReadModel>();
+    public DbSet<ShipmentLegReadModel> ShipmentLegReadModels => Set<ShipmentLegReadModel>();
     public DbSet<RouteReadModel> RouteReadModels => Set<RouteReadModel>();
     public DbSet<StopReadModel> StopReadModels => Set<StopReadModel>();
     public DbSet<ScheduleTemplateReadModel> ScheduleTemplateReadModels => Set<ScheduleTemplateReadModel>();
@@ -51,15 +67,21 @@ public sealed class TripsDbContext(
     {
         modelBuilder.ApplyConfiguration(new TripManifestConfiguration());
         modelBuilder.ApplyConfiguration(new TripConfiguration());
+        modelBuilder.ApplyConfiguration(new ShipmentConfiguration());
+        modelBuilder.ApplyConfiguration(new ShipmentLegConfiguration());
         modelBuilder.ApplyConfiguration(new RouteConfiguration());
         modelBuilder.ApplyConfiguration(new StopConfiguration());
         modelBuilder.ApplyConfiguration(new ScheduleTemplateConfiguration());
         modelBuilder.ApplyConfiguration(new DriverLookupConfiguration());
         modelBuilder.ApplyConfiguration(new VehicleLookupConfiguration());
         modelBuilder.ApplyConfiguration(new ClientLookupConfiguration());
+        modelBuilder.ApplyConfiguration(new TripBillingConfiguration());
         modelBuilder.ApplyConfiguration(new TripNumberCounterConfiguration());
+        modelBuilder.ApplyConfiguration(new ShipmentNumberCounterConfiguration());
         modelBuilder.ApplyConfiguration(new TripManifestReadModelConfiguration());
         modelBuilder.ApplyConfiguration(new TripReadModelConfiguration());
+        modelBuilder.ApplyConfiguration(new ShipmentReadModelConfiguration());
+        modelBuilder.ApplyConfiguration(new ShipmentLegReadModelConfiguration());
         modelBuilder.ApplyConfiguration(new RouteReadModelConfiguration());
         modelBuilder.ApplyConfiguration(new StopReadModelConfiguration());
         modelBuilder.ApplyConfiguration(new ScheduleTemplateReadModelConfiguration());
@@ -67,15 +89,21 @@ public sealed class TripsDbContext(
         // Tenant isolation, API half. Never remove: RLS is the backstop, not the substitute.
         modelBuilder.Entity<TripManifest>().HasQueryFilter(m => m.TenantId == TenantId);
         modelBuilder.Entity<Trip>().HasQueryFilter(t => t.TenantId == TenantId);
+        modelBuilder.Entity<Shipment>().HasQueryFilter(s => s.TenantId == TenantId);
+        modelBuilder.Entity<ShipmentLeg>().HasQueryFilter(l => l.TenantId == TenantId);
         modelBuilder.Entity<Route>().HasQueryFilter(r => r.TenantId == TenantId);
         modelBuilder.Entity<Stop>().HasQueryFilter(s => s.TenantId == TenantId);
         modelBuilder.Entity<ScheduleTemplate>().HasQueryFilter(t => t.TenantId == TenantId);
         modelBuilder.Entity<DriverLookup>().HasQueryFilter(d => d.TenantId == TenantId);
         modelBuilder.Entity<VehicleLookup>().HasQueryFilter(v => v.TenantId == TenantId);
         modelBuilder.Entity<ClientLookup>().HasQueryFilter(c => c.TenantId == TenantId);
+        modelBuilder.Entity<TripBilling>().HasQueryFilter(b => b.TenantId == TenantId);
         modelBuilder.Entity<TripNumberCounter>().HasQueryFilter(c => c.TenantId == TenantId);
+        modelBuilder.Entity<ShipmentNumberCounter>().HasQueryFilter(c => c.TenantId == TenantId);
         modelBuilder.Entity<TripManifestReadModel>().HasQueryFilter(m => m.TenantId == TenantId);
         modelBuilder.Entity<TripReadModel>().HasQueryFilter(t => t.TenantId == TenantId);
+        modelBuilder.Entity<ShipmentReadModel>().HasQueryFilter(s => s.TenantId == TenantId);
+        modelBuilder.Entity<ShipmentLegReadModel>().HasQueryFilter(l => l.TenantId == TenantId);
         modelBuilder.Entity<RouteReadModel>().HasQueryFilter(r => r.TenantId == TenantId);
         modelBuilder.Entity<StopReadModel>().HasQueryFilter(s => s.TenantId == TenantId);
         modelBuilder.Entity<ScheduleTemplateReadModel>().HasQueryFilter(t => t.TenantId == TenantId);

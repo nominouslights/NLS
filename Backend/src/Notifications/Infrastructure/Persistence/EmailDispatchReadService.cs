@@ -32,6 +32,7 @@ internal sealed class EmailDispatchReadService(NotificationsDbContext context) :
         dispatch.TemplateId,
         dispatch.TemplateName,
         dispatch.ServiceType,
+        dispatch.ClientId,
         dispatch.Status,
         dispatch.SentAtUtc,
         dispatch.Recipients

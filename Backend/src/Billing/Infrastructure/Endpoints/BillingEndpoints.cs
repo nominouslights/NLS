@@ -5,9 +5,11 @@ using NorthernLink.Billing.Application.BillableTrips.GetBillableTrips;
 using NorthernLink.Billing.Application.Invoices.GenerateDraft;
 using NorthernLink.Billing.Application.Invoices.GetById;
 using NorthernLink.Billing.Application.Invoices.GetInvoices;
+using NorthernLink.Billing.Application.Invoices.ClearPayment;
+using NorthernLink.Billing.Application.Invoices.ConfirmPayment;
 using NorthernLink.Billing.Application.Invoices.MarkEntered;
 using NorthernLink.Billing.Application.Invoices.ReplaceLines;
-using NorthernLink.Billing.Application.Invoices.Reopen;
+using NorthernLink.Billing.Application.Invoices.WriteOff;
 using NorthernLink.Billing.Application.Invoices.UpdateQboReference;
 using NorthernLink.Billing.Application.Invoices.Void;
 using NorthernLink.Billing.Domain.Invoices;
@@ -33,7 +35,9 @@ public static class BillingEndpoints
         invoices.MapPut("{id:guid}/lines", ReplaceLines);
         invoices.MapPost("{id:guid}/mark-entered", MarkEntered);
         invoices.MapPost("{id:guid}/qbo-reference", UpdateQboReference);
-        invoices.MapPost("{id:guid}/reopen", ReopenInvoice);
+        invoices.MapPost("{id:guid}/confirm-payment", ConfirmPayment);
+        invoices.MapPost("{id:guid}/clear-payment", ClearPayment);
+        invoices.MapPost("{id:guid}/write-off", WriteOffInvoice);
         invoices.MapPost("{id:guid}/void", VoidInvoice);
 
         // The billable-trip pool the drafts draw from (uninvoiced view for manual lines).
@@ -54,15 +58,20 @@ public static class BillingEndpoints
             return Results.Unauthorized();
         }
 
+        // Matched against member names (case-insensitively, as before) rather than parsed:
+        // Enum.TryParse also accepts "2"-style ordinals, which would silently rebind if the
+        // enum ever gained a member.
         InvoiceStatus? statusFilter = null;
         if (!string.IsNullOrWhiteSpace(status))
         {
-            if (!Enum.TryParse<InvoiceStatus>(status, ignoreCase: true, out var parsed))
+            var name = Enum.GetNames<InvoiceStatus>()
+                .FirstOrDefault(n => n.Equals(status, StringComparison.OrdinalIgnoreCase));
+            if (name is null)
             {
                 return EndpointResults.Problem(InvoiceErrors.InvalidStatusFilter);
             }
 
-            statusFilter = parsed;
+            statusFilter = Enum.Parse<InvoiceStatus>(name);
         }
 
         var result = await sender.Query(new GetInvoicesQuery(tenantId, statusFilter, clientId), cancellationToken);
@@ -146,7 +155,25 @@ public static class BillingEndpoints
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
-    private static async Task<IResult> ReopenInvoice(
+    private static async Task<IResult> ConfirmPayment(
+        Guid id,
+        ConfirmPaymentRequest request,
+        ITenantContext tenantContext,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(
+            new ConfirmInvoicePaymentCommand(tenantId, id, request.ConfirmedDate),
+            cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> ClearPayment(
         Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
     {
         if (tenantContext.TenantId is not { } tenantId)
@@ -154,7 +181,29 @@ public static class BillingEndpoints
             return Results.Unauthorized();
         }
 
-        var result = await sender.Send(new ReopenInvoiceCommand(tenantId, id), cancellationToken);
+        var result = await sender.Send(new ClearInvoicePaymentCommand(tenantId, id), cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>
+    /// Writes off an outstanding worksheet (EnteredInQbo → WrittenOff). The claimed trips stay
+    /// claimed — they were billed once — and each moves to its own terminal WrittenOff.
+    /// </summary>
+    private static async Task<IResult> WriteOffInvoice(
+        Guid id,
+        WriteOffInvoiceRequest request,
+        ITenantContext tenantContext,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(
+            new WriteOffInvoiceCommand(tenantId, id, request.AmountCad, request.WrittenOffDate, request.Reason),
+            cancellationToken);
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
@@ -225,4 +274,9 @@ public static class BillingEndpoints
     public sealed record MarkEnteredRequest(string QboInvoiceNumber, DateOnly EnteredDate);
 
     public sealed record QboReferenceRequest(string QboInvoiceNumber, DateOnly EnteredDate);
+
+    public sealed record ConfirmPaymentRequest(DateOnly ConfirmedDate);
+
+    /// <summary>Body for POST /{id}/write-off. Reason is required, not decorative.</summary>
+    public sealed record WriteOffInvoiceRequest(decimal AmountCad, DateOnly WrittenOffDate, string Reason);
 }

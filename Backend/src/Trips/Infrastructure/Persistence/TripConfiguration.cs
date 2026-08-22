@@ -64,13 +64,16 @@ public sealed class TripConfiguration : IEntityTypeConfiguration<Trip>
             .HasMaxLength(16);
         builder.Property(t => t.ManifestId).HasColumnName("manifest_id");
         builder.Property(t => t.HasPostTripInspection).HasColumnName("has_post_trip_inspection");
+        builder.Property(t => t.OperationsFinishedAtUtc).HasColumnName("operations_finished_at_utc");
         builder.Property(t => t.CompletedAtUtc).HasColumnName("completed_at_utc");
         builder.Property(t => t.CancelledReason).HasColumnName("cancelled_reason").HasMaxLength(500);
+        builder.Property(t => t.WrittenOffReason).HasColumnName("written_off_reason").HasMaxLength(500);
 
         builder.Property(t => t.CreatedAtUtc).HasColumnName("created_at_utc");
         builder.Property(t => t.UpdatedAtUtc).HasColumnName("updated_at_utc");
 
-        builder.Ignore(t => t.IsTerminal);
+        builder.Ignore(t => t.IsOperationallyClosed);
+        builder.Ignore(t => t.IsFinal);
 
         builder.HasIndex(t => new { t.TenantId, t.TripNumber }).IsUnique();
         builder.HasIndex(t => new { t.TenantId, t.ScheduleTemplateId, t.ServiceDate, t.Direction }).IsUnique();

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using NorthernLink.Trips.Application.Abstractions;
 using NorthernLink.Trips.Application.Manifests;
+using NorthernLink.Trips.Domain.Manifests;
 using NorthernLink.Trips.Infrastructure.Persistence.ReadModels;
 
 namespace NorthernLink.Trips.Infrastructure.Persistence;
@@ -57,7 +58,10 @@ internal sealed class TripManifestReadService(TripsDbContext context) : ITripMan
             p.DropoffStopName,
             p.IdVerified,
             p.BoardedOn,
-            p.BoardedOff)).ToList(),
+            p.BoardedOff,
+            p.FareAmountCad,
+            p.FarePaymentMethod?.ToString(),
+            p.FarePaidAtUtc)).ToList(),
         m.AllSeatbeltsVerified,
         m.Cargo.Select(c => new CargoItemResponse(
             c.Description,
@@ -70,5 +74,18 @@ internal sealed class TripManifestReadService(TripsDbContext context) : ITripMan
         m.Source,
         m.EnteredBy,
         m.EnteredAt,
-        m.CreatedAtUtc);
+        m.CreatedAtUtc,
+        // Computed off the deserialized rows rather than stored — the read model already
+        // carries the full passengers jsonb, so a stored rollup could only ever drift from it.
+        FaresCollectedCad(m.Passengers),
+        m.Passengers.Count(p => p.FarePaymentMethod
+            is FarePaymentMethod.Cash or FarePaymentMethod.Online),
+        m.Passengers.Count(p => p.FarePaymentMethod is FarePaymentMethod.Waived));
+
+    private static decimal FaresCollectedCad(IEnumerable<ManifestPassenger> passengers) =>
+        Math.Round(
+            passengers
+                .Where(p => p.FarePaymentMethod is FarePaymentMethod.Cash or FarePaymentMethod.Online)
+                .Sum(p => p.FareAmountCad ?? 0m),
+            2);
 }

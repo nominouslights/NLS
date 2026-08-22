@@ -3,7 +3,10 @@
 import { useState } from "react";
 import { colors, fonts } from "@/lib/theme";
 import type { ServiceCategory } from "@/lib/types";
-import { addService, updateWorkOrder } from "@/lib/maintenanceStore";
+import { addService } from "@/lib/maintenanceStore";
+import { ApiError } from "@/lib/api";
+import { completeWorkOrder } from "@/lib/api/maintenance";
+import { CATEGORY_WIRE } from "@/lib/workOrderDisplay";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { NumberField, SelectField, TextAreaField, TextField } from "@/components/ui/Field";
 import { ActionButton } from "@/components/ui/Button";
@@ -11,64 +14,79 @@ import { ActionButton } from "@/components/ui/Button";
 const CATEGORIES: ServiceCategory[] = ["Preventive", "Repair", "Inspection Fix", "Recall"];
 
 // Log a service record — WHO did the job, WHAT was changed, WHY it was changed.
-// When opened from a work order (closeWorkOrderId), saving also flips that work
-// order to Completed and links the two records.
+// When opened from a work order (closeWorkOrder), the live API completes that
+// work order and creates the resolving service record in one call; standalone
+// (Service History tab), it writes to the mock store as before.
 
 export default function ServiceRecordModal({
   unit,
   odometerKm,
-  closeWorkOrderId,
-  closeWorkOrderTitle,
+  closeWorkOrder,
   onClose,
   onSaved,
 }: {
   unit: string;
   odometerKm: number;
-  closeWorkOrderId?: string;
-  closeWorkOrderTitle?: string;
+  closeWorkOrder?: { id: string; number: string; title: string };
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [performedBy, setPerformedBy] = useState("");
-  const [category, setCategory] = useState<ServiceCategory>(closeWorkOrderId ? "Repair" : "Preventive");
+  const [category, setCategory] = useState<ServiceCategory>(closeWorkOrder ? "Repair" : "Preventive");
   const [odo, setOdo] = useState(String(odometerKm));
   const [items, setItems] = useState("");
   const [reason, setReason] = useState("");
   const [parts, setParts] = useState("");
   const [laborHours, setLaborHours] = useState("");
   const [cost, setCost] = useState("");
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function submit() {
+  async function submit() {
+    if (busy) return;
     const who = performedBy.trim();
     const itemsChanged = items.split("\n").map((s) => s.trim()).filter(Boolean);
     if (!who) return setError("Enter who performed the service.");
     if (itemsChanged.length === 0) return setError("List at least one item that was changed.");
     if (!reason.trim()) return setError("Enter the reason the work was done.");
 
-    const rec = addService({
-      unit,
-      date: new Date().toISOString().slice(0, 10),
-      performedBy: who,
-      category,
-      odometerKm: parseInt(odo, 10) || odometerKm,
-      itemsChanged,
-      reason: reason.trim(),
-      partsUsed: parts
-        .split("\n")
-        .map((s) => s.trim())
-        .filter(Boolean)
-        .map((sku) => ({ sku, qty: 1 })),
-      laborHours: laborHours ? parseFloat(laborHours) : undefined,
-      costCad: cost ? parseFloat(cost) : undefined,
-      workOrderId: closeWorkOrderId,
-    });
+    const partsUsed = parts
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((sku) => ({ sku, qty: 1 }));
 
-    if (closeWorkOrderId) {
-      updateWorkOrder(closeWorkOrderId, {
-        status: "Completed",
-        completedAt: rec.date,
-        resolvingServiceId: rec.id,
+    if (closeWorkOrder) {
+      setBusy(true);
+      setError(null);
+      try {
+        await completeWorkOrder(closeWorkOrder.id, {
+          performedBy: who,
+          category: CATEGORY_WIRE[category],
+          odometerKm: parseInt(odo, 10) || odometerKm,
+          itemsChanged,
+          reason: reason.trim(),
+          partsUsed,
+          laborHours: laborHours ? parseFloat(laborHours) : null,
+          costCad: cost ? parseFloat(cost) : null,
+        });
+      } catch (e) {
+        setBusy(false);
+        setError(e instanceof ApiError ? e.message : "Failed to complete the work order — please try again.");
+        return;
+      }
+    } else {
+      addService({
+        unit,
+        date: new Date().toISOString().slice(0, 10),
+        performedBy: who,
+        category,
+        odometerKm: parseInt(odo, 10) || odometerKm,
+        itemsChanged,
+        reason: reason.trim(),
+        partsUsed,
+        laborHours: laborHours ? parseFloat(laborHours) : undefined,
+        costCad: cost ? parseFloat(cost) : undefined,
       });
     }
 
@@ -79,22 +97,24 @@ export default function ServiceRecordModal({
   return (
     <ModalShell
       eyebrow={`Fleet & Maintenance · ${unit} · Service history`}
-      title={closeWorkOrderId ? "Complete Work Order — Log Service" : "Log Service"}
+      title={closeWorkOrder ? "Complete Work Order — Log Service" : "Log Service"}
       onClose={onClose}
       error={error}
       footer={
         <>
-          <ActionButton onClick={onClose}>CANCEL</ActionButton>
-          <ActionButton variant="primary" onClick={submit}>
-            {closeWorkOrderId ? "LOG SERVICE & CLOSE WO" : "LOG SERVICE"}
+          <ActionButton onClick={onClose} disabled={busy}>
+            CANCEL
+          </ActionButton>
+          <ActionButton variant="primary" onClick={submit} disabled={busy}>
+            {closeWorkOrder ? (busy ? "CLOSING…" : "LOG SERVICE & CLOSE WO") : "LOG SERVICE"}
           </ActionButton>
         </>
       }
     >
-      {closeWorkOrderId && (
+      {closeWorkOrder && (
         <div style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textMuted, marginBottom: 14 }}>
-          Closing <span style={{ fontFamily: fonts.mono, color: colors.skyBlue }}>{closeWorkOrderId}</span>
-          {closeWorkOrderTitle ? ` — ${closeWorkOrderTitle}` : ""}.
+          Closing <span style={{ fontFamily: fonts.mono, color: colors.skyBlue }}>{closeWorkOrder.number}</span>
+          {closeWorkOrder.title ? ` — ${closeWorkOrder.title}` : ""}.
         </div>
       )}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>

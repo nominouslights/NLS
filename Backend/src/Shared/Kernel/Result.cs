@@ -40,13 +40,27 @@ public class Result<TValue> : Result
 {
     private readonly TValue? _value;
 
-    internal Result(TValue? value, bool isSuccess, Error error)
+    internal Result(TValue? value, bool isSuccess, Error error, PageInfo? pageInfo = null)
         : base(isSuccess, error)
     {
         _value = value;
+        PageInfo = pageInfo;
     }
 
     public TValue Value => IsSuccess
         ? _value!
         : throw new InvalidOperationException("Cannot access the value of a failed result.");
+
+    /// <summary>
+    /// Set when <see cref="Value"/> is one page of a larger set; null for whole-set results.
+    /// </summary>
+    public PageInfo? PageInfo { get; }
+
+    /// <summary>
+    /// Attaches paging metadata to a successful result. A no-op on failure — a failed result
+    /// has no value to page.
+    /// </summary>
+    public Result<TValue> WithPage(PageInfo pageInfo) => IsSuccess
+        ? new Result<TValue>(_value, true, Error.None, pageInfo)
+        : this;
 }

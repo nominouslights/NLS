@@ -121,8 +121,10 @@ internal sealed class TripProjection : IProjection<TripsDbContext>
         row.Status = source.Status.ToString();
         row.ManifestId = source.ManifestId;
         row.HasPostTripInspection = source.HasPostTripInspection;
+        row.OperationsFinishedAtUtc = source.OperationsFinishedAtUtc;
         row.CompletedAtUtc = source.CompletedAtUtc;
         row.CancelledReason = source.CancelledReason;
+        row.WrittenOffReason = source.WrittenOffReason;
 
         row.CreatedAtUtc = source.CreatedAtUtc;
         row.UpdatedAtUtc = source.UpdatedAtUtc;

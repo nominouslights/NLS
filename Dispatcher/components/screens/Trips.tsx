@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { colors, fonts, rowSurface, statusMeta, svcMeta } from "@/lib/theme";
 import {
   ApiError,
@@ -15,20 +15,23 @@ import {
 import {
   assignTrip,
   changeTripStatus,
+  closeTripWithoutBilling,
   corridorLabel,
+  finishTripOperations,
   getTrip,
   hasClearanceFor,
   hhmm,
   isOpenTrip,
-  isoDaysFromToday,
+  isOperationallyClosed,
   listTrips,
   refetchUntil,
   seatsLabel,
   shortDateLabel,
-  sortTrips,
   stopNames,
   svcForTrip,
+  tripBillingChip,
   tripChip,
+  tripStatusLabel,
   tripWindowLabel,
   updateTrip,
   type TripRecord,
@@ -48,7 +51,10 @@ import { CorridorStepper } from "@/components/ui/CorridorStepper";
 import { Panel, SectionLabel, DetailRow } from "@/components/ui/Panel";
 import { ActionButton } from "@/components/ui/Button";
 import { ModalShell } from "@/components/ui/ModalShell";
-import { DateField, NumberField, SelectField, TextAreaField, TextField, TimeField } from "@/components/ui/Field";
+import { DateField, FieldLabel, NumberField, SelectField, TextAreaField, TextField, TimeField } from "@/components/ui/Field";
+import { PeriodNav } from "@/components/ui/PeriodNav";
+import { Pager } from "@/components/ui/Pager";
+import { periodContaining, periodContains, periodLabel, type Period } from "@/lib/period";
 import ManifestEditorModal from "@/components/ManifestEditorModal";
 import TripInspectionModal from "@/components/TripInspectionModal";
 import SendPickupEmailModal from "@/components/SendPickupEmailModal";
@@ -60,13 +66,15 @@ const DISPATCHER_LABEL = "Dispatch";
 const PASSENGER_MANIFEST_REQUIRED = "Trips.Trip.PassengerManifestRequired";
 const POST_TRIP_INSPECTION_REQUIRED = "Trips.Trip.PostTripInspectionRequired";
 
-// Trips — master list + detail from the real Trips API (GET /api/trips over a
-// ±1-week window). "Open — needs coverage" / "Empty leg available" are frontend
-// derivations (lib/api/trips.ts), never persisted statuses.
+// Trips — master list + detail from the real Trips API (GET /api/trips over the
+// selected month or quarter, one page at a time). Every filter is applied
+// server-side so the page and its total always agree; nothing is filtered or
+// re-sorted client-side, which would scramble the paging order.
+// "Open — needs coverage" / "Empty leg available" are frontend derivations
+// (lib/api/trips.ts), never persisted statuses.
 
 const FILTERS = ["All trips", "Open only", "Assigned"] as const;
-const WINDOW_DAYS_BACK = 7;
-const WINDOW_DAYS_AHEAD = 7;
+const PAGE_SIZE = 50;
 
 function fmtUtcDateTime(iso: string | null): string {
   if (!iso) return "—";
@@ -241,6 +249,15 @@ function AssignModal({
     };
   }, []);
 
+  // The selected vehicle, when it comes from the Active list. The stale-vehicle
+  // fallback option (current vehicle no longer Active) is deliberately not
+  // matched here — it carries no seatingCapacity, so no hint/warning can show.
+  const selectedVehicle = (vehicles ?? []).find((v) => v.id === vehicleId) ?? null;
+  // The server refuses a vehicle seating fewer than the seats already confirmed
+  // (Trips.Trip.VehicleCapacityBelowConfirmed) — warn before the round trip.
+  const capacityBelowConfirmed =
+    selectedVehicle !== null && trip.seatsConfirmed > selectedVehicle.seatingCapacity;
+
   async function submit() {
     if (busy) return;
     setBusy(true);
@@ -278,7 +295,7 @@ function AssignModal({
             { value: "", label: vehicles === null ? "Loading vehicles…" : "— unassigned —" },
             ...(vehicles ?? []).map((v) => ({
               value: v.id,
-              label: `${v.unitNumber} · ${v.make} ${v.model} · ${v.requiredLicenceClass}`,
+              label: `${v.unitNumber} · ${v.make} ${v.model} · ${v.seatingCapacity} seats · ${v.requiredLicenceClass}`,
             })),
             // Keep a stale-but-selected current vehicle visible in the list.
             ...(trip.vehicleId && !(vehicles ?? []).some((v) => v.id === trip.vehicleId)
@@ -287,6 +304,36 @@ function AssignModal({
           ]}
           hint={<span style={{ color: colors.textFaint }}>· only Active vehicles are assignable; blank clears</span>}
         />
+        {selectedVehicle && !capacityBelowConfirmed && (
+          <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim, marginTop: 6 }}>
+            Trip capacity will be set to {selectedVehicle.seatingCapacity} seats from {selectedVehicle.unitNumber}.
+          </div>
+        )}
+        {capacityBelowConfirmed && selectedVehicle && (
+          <div
+            style={{
+              marginTop: 8,
+              padding: "11px 14px",
+              background: statusMeta("soon").bg,
+              border: `1px solid ${statusMeta("soon").bd}`,
+              borderRadius: 10,
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 9,
+              fontFamily: fonts.body,
+              fontSize: 12.5,
+              fontWeight: 600,
+              color: statusMeta("soon").t,
+              lineHeight: 1.5,
+            }}
+          >
+            <StatusBadge kind="soon" />
+            <span>
+              {trip.seatsConfirmed} seat{trip.seatsConfirmed === 1 ? "" : "s"} already confirmed — this vehicle only
+              seats {selectedVehicle.seatingCapacity}; the server will refuse this assignment.
+            </span>
+          </div>
+        )}
       </div>
       <SectionLabel>Driver · Active roster</SectionLabel>
       {roster === null && !rosterError && (
@@ -382,9 +429,12 @@ function EditTripModal({
     if (!windowStart) return setError("Enter the departure window start.");
     const km = Number(distanceKm);
     if (!Number.isInteger(km) || km < 0) return setError("Distance must be a whole number of km.");
-    const cap = seatsCapacity === "" ? null : Number(seatsCapacity);
+    // With a fleet vehicle assigned, capacity is vehicle-derived — pass the
+    // trip's existing snapshot through unchanged (reassigning is how it moves).
+    const cap = trip.vehicleId ? trip.seatsCapacity : seatsCapacity === "" ? null : Number(seatsCapacity);
     const min = seatsMinimum === "" ? null : Number(seatsMinimum);
-    if (cap !== null && (!Number.isInteger(cap) || cap < 0)) return setError("Seats capacity must be a whole number.");
+    if (!trip.vehicleId && cap !== null && (!Number.isInteger(cap) || cap < 0))
+      return setError("Seats capacity must be a whole number.");
     if (min !== null && (!Number.isInteger(min) || min < 0)) return setError("Seats minimum must be a whole number.");
 
     const input: TripUpdateInput = {
@@ -439,7 +489,35 @@ function EditTripModal({
         <TimeField label="Window end (optional)" value={windowEnd} onChange={setWindowEnd} />
         <TextField label="PO number (optional)" value={poNumber} onChange={setPoNumber} mono placeholder="PO-AG-2261" />
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-          <NumberField label="Seats capacity" value={seatsCapacity} onChange={setSeatsCapacity} min={0} step={1} />
+          {trip.vehicleId ? (
+            // Capacity is snapshotted from the assigned vehicle — read-only here.
+            <div>
+              <FieldLabel>Seats capacity</FieldLabel>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  height: 40,
+                  boxSizing: "border-box",
+                  padding: "0 13px",
+                  background: colors.cardBg,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 9,
+                  fontFamily: fonts.mono,
+                  fontSize: 13,
+                  fontVariantNumeric: "tabular-nums",
+                  color: colors.textPrimary,
+                }}
+              >
+                {trip.seatsCapacity != null ? `${trip.seatsCapacity} seats` : "—"}
+              </div>
+              <div style={{ fontFamily: fonts.body, fontSize: 10.5, color: colors.textDim, marginTop: 4 }}>
+                derived from assigned vehicle — reassign to change
+              </div>
+            </div>
+          ) : (
+            <NumberField label="Seats capacity" value={seatsCapacity} onChange={setSeatsCapacity} min={0} step={1} />
+          )}
           <NumberField label="Seats minimum" value={seatsMinimum} onChange={setSeatsMinimum} min={0} step={1} />
         </div>
       </div>
@@ -502,6 +580,74 @@ function CancelTripModal({
         onChange={setReason}
         rows={3}
         placeholder="Road closure PR-391 · rescheduled to tomorrow"
+      />
+    </ModalShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Close-without-billing modal — POST /close-without-billing with a REQUIRED
+// reason. Only legal from ReadyForBilling; the backend refuses (409) when a
+// billing worksheet already claims the trip. Lands the trip in WrittenOff.
+// ---------------------------------------------------------------------------
+
+function CloseWithoutBillingModal({
+  trip,
+  onClose,
+  onConfirmed,
+}: {
+  trip: TripRecord;
+  onClose: () => void;
+  onConfirmed: (reason: string) => Promise<void>;
+}) {
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    if (busy) return;
+    const trimmed = reason.trim();
+    if (!trimmed) {
+      setError("A reason is required — it is recorded on the written-off trip.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await onConfirmed(trimmed);
+      onClose();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Failed to close the trip — please try again.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ModalShell
+      eyebrow={`Operations · ${trip.tripNumber} · ${corridorLabel(trip)}`}
+      title="Close Without Billing"
+      onClose={onClose}
+      error={error}
+      footer={
+        <>
+          <ActionButton onClick={onClose}>KEEP FOR BILLING</ActionButton>
+          <ActionButton variant="destructive" onClick={submit} disabled={busy}>
+            {busy ? "CLOSING…" : "CLOSE WITHOUT BILLING"}
+          </ActionButton>
+        </>
+      }
+    >
+      <div style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textSecondary, lineHeight: 1.6, marginBottom: 12 }}>
+        This writes the trip off — it will never be billed. Use it only when the run can never be invoiced (e.g. a
+        goodwill run, or the client relationship ended). If a billing worksheet already claims this trip, the backend
+        will refuse.
+      </div>
+      <TextAreaField
+        label="Reason (required — recorded on the trip)"
+        value={reason}
+        onChange={setReason}
+        rows={3}
+        placeholder="Goodwill run for the community · never billable"
       />
     </ModalShell>
   );
@@ -575,22 +721,29 @@ export default function Trips({
   selectedId,
   setSelectedId,
   onNewTrip,
-  createdId,
+  period,
+  setPeriod,
+  page,
+  setPage,
 }: {
   selectedId: string | null;
   setSelectedId: (id: string | null) => void;
   onNewTrip: () => void;
-  /** Id of a just-created trip — triggers a list reload so it appears in the
-   *  master list (the list is otherwise only loaded on mount). */
-  createdId?: string | null;
+  /** Period and page live in Console so they survive navigating away and back. */
+  period: Period;
+  setPeriod: (next: Period) => void;
+  page: number;
+  setPage: (next: number) => void;
 }) {
   const [filter, setFilter] = useState(0);
   const [showCancelled, setShowCancelled] = useState(false);
   const [rows, setRows] = useState<TripRecord[] | null>(null);
+  const [totalCount, setTotalCount] = useState(0);
+  const [cancelledCount, setCancelledCount] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // A selected trip that isn't in the list window yet (e.g. just created and
-  // the projection is trailing) is fetched directly.
+  // A selected trip that isn't on the current page (a different period, or a
+  // just-created trip whose projection is trailing) is fetched directly.
   const [extraTrip, setExtraTrip] = useState<TripRecord | null>(null);
 
   // Per-selected-trip auxiliary data, keyed by trip id (Drivers.tsx pattern).
@@ -600,7 +753,7 @@ export default function Trips({
   const [inspectionsState, setInspectionsState] = useState<{ tripId: string; rows: VehicleInspection[] } | null>(null);
   const [activityState, setActivityState] = useState<{ tripId: string; rows: TripActivityEntry[] } | null>(null);
 
-  const [modal, setModal] = useState<null | "assign" | "edit" | "cancel" | "manifest" | "sendEmail">(null);
+  const [modal, setModal] = useState<null | "assign" | "edit" | "cancel" | "closeWithoutBilling" | "manifest" | "sendEmail">(null);
   // Inspection modal opens for either create (inspectionType set, editing null)
   // or edit (editingInspection set). removingInspection drives the delete confirm.
   const [inspectionType, setInspectionType] = useState<"PreTrip" | "PostTrip" | null>(null);
@@ -609,35 +762,49 @@ export default function Trips({
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const openOnly = filter === 1;
+  const periodStart = period.start;
+  const periodEnd = period.end;
 
+  // Every narrowing goes to the server, so the returned page and its total always
+  // describe the same set. Filtering a page client-side would leave the count
+  // describing one set and the rows another.
   const fetchList = useCallback(() => {
     return listTrips({
-      from: isoDaysFromToday(-WINDOW_DAYS_BACK),
-      to: isoDaysFromToday(WINDOW_DAYS_AHEAD),
-      openOnly: openOnly || undefined,
+      from: periodStart,
+      to: periodEnd,
+      openOnly: filter === 1 || undefined,
+      assignedOnly: filter === 2 || undefined,
+      excludeCancelled: !showCancelled || undefined,
+      page,
+      pageSize: PAGE_SIZE,
     });
-  }, [openOnly]);
+  }, [periodStart, periodEnd, filter, showCancelled, page]);
+
+  const applyPage = useCallback(
+    (fresh: Awaited<ReturnType<typeof fetchList>>) => {
+      // The server's order IS the paging order — re-sorting a page here would
+      // interleave it wrongly with the pages either side of it.
+      setRows(fresh.items);
+      setTotalCount(fresh.totalCount);
+      setLoadError(null);
+    },
+    [],
+  );
 
   const load = useCallback(async () => {
     try {
-      const fresh = await fetchList();
-      setRows(sortTrips(fresh));
-      setLoadError(null);
+      applyPage(await fetchList());
     } catch (e) {
       setRows(null);
       setLoadError(e instanceof ApiError ? e.message : "Failed to load trips.");
     }
-  }, [fetchList]);
+  }, [fetchList, applyPage]);
 
   useEffect(() => {
     let active = true;
     fetchList().then(
       (fresh) => {
-        if (active) {
-          setRows(sortTrips(fresh));
-          setLoadError(null);
-        }
+        if (active) applyPage(fresh);
       },
       (e) => {
         if (active) {
@@ -649,51 +816,81 @@ export default function Trips({
     return () => {
       active = false;
     };
-  }, [fetchList]);
+  }, [fetchList, applyPage]);
 
-  // After a trip is created, reload the list until the new trip shows up
-  // (reads are eventually consistent, so a plain reload can miss it).
+  // A filter can shrink the set under a dispatcher who is deep in the pages —
+  // fall back to the last page that still has rows rather than showing nothing.
   useEffect(() => {
-    if (!createdId) return;
+    if (rows === null || rows.length > 0 || totalCount === 0 || page <= 1) return;
+    setPage(Math.max(1, Math.ceil(totalCount / PAGE_SIZE)));
+  }, [rows, totalCount, page, setPage]);
+
+  // The cancelled badge counts the whole period, not the page — a separate
+  // count-only call (one row over the wire) rather than a scan of the page.
+  useEffect(() => {
     let active = true;
-    refetchUntil(fetchList, (list) => list.some((r) => r.id === createdId)).then(
-      (fresh) => {
-        if (active) setRows(sortTrips(fresh));
+    listTrips({ from: periodStart, to: periodEnd, status: "Cancelled", page: 1, pageSize: 1 }).then(
+      (res) => {
+        if (active) setCancelledCount(res.totalCount);
       },
       () => {
-        /* leave the current list in place on failure */
+        if (active) setCancelledCount(0); // best-effort — the badge just loses its count
       },
     );
     return () => {
       active = false;
     };
-  }, [createdId, fetchList]);
+  }, [periodStart, periodEnd]);
 
-  // "Assigned" is a client-side driver-presence filter; "Open only" already
-  // came filtered from the API (openOnly=true). Cancelled trips are hidden
-  // across all tabs unless the "Show cancelled" toggle is on.
-  const afterTab = rows === null ? null : filter === 2 ? rows.filter((r) => r.driverId !== null) : rows;
-  const visible =
-    afterTab === null ? null : showCancelled ? afterTab : afterTab.filter((r) => r.status !== "Cancelled");
-  const cancelledCount = rows?.reduce((n, r) => n + (r.status === "Cancelled" ? 1 : 0), 0) ?? 0;
+  const visible = rows;
 
   const fromList = rows?.find((r) => r.id === selectedId) ?? null;
   const t = fromList ?? (extraTrip && extraTrip.id === selectedId ? extraTrip : null) ?? visible?.[0] ?? null;
 
-  // Selected trip missing from the window — fetch it directly (tolerating the
-  // projection lag right after creation).
+  // Selections that arrive from OUTSIDE the list — the dispatch board hand-off, a
+  // trip the wizard just created — are handled exactly once each, tracked here.
+  //
+  // "Once each" is the whole point: a selected trip is off-page every time the
+  // dispatcher steps to another period, and snapping on that would drag them
+  // straight back to the trip's own month, making the ‹ › arrows unusable.
+  const handledSelection = useRef<string | null>(null);
+
   useEffect(() => {
-    if (!selectedId || rows === null || fromList) return;
+    if (!selectedId || rows === null) return;
+    if (fromList) {
+      // Already on the page — nothing to chase, and remember it so stepping away
+      // from this period later is not mistaken for a fresh hand-off.
+      handledSelection.current = selectedId;
+      return;
+    }
+    if (handledSelection.current === selectedId) return;
+    handledSelection.current = selectedId;
+
     let active = true;
+    // Poll the trip itself: it may be dated into another period, or be a just-created
+    // trip whose projection is still trailing, so waiting for it to turn up in a page
+    // would wait on something that may never happen.
     refetchUntil(
       () => getTrip(selectedId).catch(() => null),
       (v) => v !== null,
     ).then((trip) => {
-      if (active && trip) setExtraTrip(trip);
+      if (!active || !trip) return;
+      setExtraTrip(trip);
+      if (!periodContains(period, trip.serviceDate)) {
+        setPeriod(periodContaining(trip.serviceDate, period.granularity));
+        setPage(1);
+      } else {
+        // In this period but not on the page yet — the projection was trailing when
+        // the page was fetched. One refresh brings the row in.
+        void load();
+      }
     });
     return () => {
       active = false;
     };
+    // period and the setters are read here, not tracked: re-running on every period
+    // change is exactly the yank-back this effect exists to avoid.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, rows, fromList]);
 
   // Auxiliary detail fetches for the selected trip.
@@ -782,13 +979,17 @@ export default function Trips({
     }
   }
 
-  /** Refetch the list until the selected trip satisfies a predicate (reads are
-   *  eventually consistent projections). */
+  /** Poll the mutated trip until it satisfies a predicate (reads are eventually
+   *  consistent projections), then refresh the page around it.
+   *
+   *  Deliberately polls the trip itself rather than the list: a mutation can move
+   *  it off the current page entirely — a new service date, or a cancellation
+   *  while cancelled rows are hidden — and a page-based predicate would then
+   *  never satisfy, burning the full retry budget before settling. */
   async function reloadUntil(id: string, satisfied: (trip: TripRecord | undefined) => boolean) {
-    const fresh = await refetchUntil(fetchList, (list) => satisfied(list.find((r) => r.id === id)));
-    setRows(sortTrips(fresh));
-    const updated = fresh.find((r) => r.id === id);
+    const updated = await refetchUntil(() => getTrip(id).catch(() => undefined), satisfied);
     if (updated) setExtraTrip(updated);
+    await load();
   }
 
   async function onAssignSaved(id: string, driverId: string | null, vehicleId: string | null) {
@@ -877,7 +1078,7 @@ export default function Trips({
     }
   }
 
-  function onChangeStatus(id: string, status: TripRecord["status"], reason?: string | null) {
+  function onChangeStatus(id: string, status: "InProgress" | "Cancelled", reason?: string | null) {
     return runAction(async () => {
       try {
         await changeTripStatus(id, status, reason);
@@ -890,17 +1091,34 @@ export default function Trips({
             e.status,
           );
         }
-        // Friendly inline message for the completion post-trip-inspection guard.
+        throw e;
+      }
+      await reloadUntil(id, (trip) => trip !== undefined && trip.status === status);
+    });
+  }
+
+  /** FINISH TRIP — ends the run via POST /finish. The landing status is
+   *  data-dependent (ReadyForBilling with a client, Completed without), so the
+   *  reload polls for either. */
+  function onFinishTrip(id: string) {
+    return runAction(async () => {
+      try {
+        await finishTripOperations(id);
+      } catch (e) {
+        // Friendly inline message for the finish post-trip-inspection guard.
         if (e instanceof ApiError && e.code === POST_TRIP_INSPECTION_REQUIRED) {
           throw new ApiError(
             e.code,
-            "This trip needs a post-trip inspection logged before it can be completed. Enter the post-trip inspection first.",
+            "This trip needs a post-trip inspection logged before it can be finished. Enter the post-trip inspection first.",
             e.status,
           );
         }
         throw e;
       }
-      await reloadUntil(id, (trip) => trip !== undefined && trip.status === status);
+      await reloadUntil(
+        id,
+        (trip) => trip !== undefined && (trip.status === "ReadyForBilling" || trip.status === "Completed"),
+      );
     });
   }
 
@@ -946,11 +1164,23 @@ export default function Trips({
           <span style={{ fontSize: 15, lineHeight: 1 }}>+</span> NEW TRIP
         </div>
       </div>
+      <div style={{ marginBottom: 10 }}>
+        <PeriodNav
+          period={period}
+          onChange={(next) => {
+            setPeriod(next);
+            setPage(1);
+          }}
+        />
+      </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
         {FILTERS.map((label, i) => (
           <span
             key={label}
-            onClick={() => setFilter(i)}
+            onClick={() => {
+              setFilter(i);
+              setPage(1);
+            }}
             style={{
               fontFamily: fonts.body,
               fontWeight: filter === i ? 600 : 500,
@@ -967,7 +1197,10 @@ export default function Trips({
           </span>
         ))}
         <span
-          onClick={() => setShowCancelled((v) => !v)}
+          onClick={() => {
+            setShowCancelled((v) => !v);
+            setPage(1);
+          }}
           style={{
             fontFamily: fonts.body,
             fontWeight: showCancelled ? 600 : 500,
@@ -1022,30 +1255,52 @@ export default function Trips({
   // manifestState — use whichever tells us there's a passenger manifest.
   const manifestPaxCount = manifest ? manifest.passengers.length : 0;
   const hasPassengerManifest = manifestPaxCount >= 1;
-  // A completed (or cancelled) trip is read-only: its fields, manifest, and
-  // inspections can be viewed and printed but no longer edited.
-  const tripEditable = !!t && (t.status === "Scheduled" || t.status === "InProgress");
+  // Once the run already happened (or was cancelled), the trip's fields and
+  // inspections are read-only — they can be viewed and printed but not edited.
+  const tripEditable = !!t && !isOperationallyClosed(t);
+  // The manifest stays editable a bit longer: through ReadyForBilling, because
+  // fares get recorded just after the run. Read-only from Invoiced onward (and
+  // for Cancelled/WrittenOff/Completed).
+  const manifestEditable = tripEditable || t?.status === "ReadyForBilling";
   // Pickup emails need a loaded manifest with ≥1 passenger; a cancelled trip
   // never sends (completed trips may — e.g. a return-leg reminder).
   const canSendPickupEmail = !!t && manifest !== null && manifest.passengers.length > 0 && t.status !== "Cancelled";
   // START gate: a driver AND a linked manifest with ≥1 passenger (mirrors the
   // backend en-route guard). Vehicle assignment is encouraged but not blocking.
+  // Deadheads skip the manifest half — one can't even be created for an empty
+  // leg — but still need a driver to actually go en route.
   const startBlockReason =
     !t || t.status !== "Scheduled"
       ? null
       : t.driverId === null
         ? "Needs a driver"
-        : !hasPassengerManifest
+        : !t.isEmptyLeg && !hasPassengerManifest
           ? "Needs a passenger manifest (≥1 passenger)"
           : null;
 
-  // COMPLETE gate: an in-progress trip needs a post-trip inspection logged
-  // before it can be completed. Gate on the server's HasPostTripInspection flag
-  // (set once Trips consumes Fleet's inspection event) so the button enables
-  // exactly when the backend would allow completion — no "enabled but 409" gap.
-  const completeBlockReason =
-    !t || t.status !== "InProgress" ? null : !t.hasPostTripInspection ? "Needs a post-trip inspection logged" : null;
+  // FINISH: an in-progress trip needs a post-trip inspection logged before the
+  // run can be finished — gated on the server's HasPostTripInspection flag so
+  // the button enables exactly when the backend would allow it (no "enabled but
+  // 409" gap). Deadheads are exempt (the inspection belongs to the trip the
+  // vehicle actually worked) and finishable straight from Scheduled: an empty
+  // leg has no driver or manifest to start with, and the only reason to finish
+  // it is to hand the round trip to Billing.
+  const finishable =
+    !!t &&
+    (t.status === "InProgress" || (t.status === "Scheduled" && t.isEmptyLeg));
+  const finishBlockReason =
+    !t || !finishable || t.isEmptyLeg
+      ? null
+      : !t.hasPostTripInspection
+        ? "Needs a post-trip inspection logged"
+        : null;
 
+  // Billing runs on its own axis from the operational status — see tripBillingChip.
+  const billingChip = t ? tripBillingChip(t) : null;
+
+  // Timeline — operational steps first (run finished = operationsFinishedAtUtc),
+  // then the billing-driven ones. "Completed" is the paid/final step only:
+  // completedAtUtc now means "the money arrived" (or run end for clientless trips).
   const timeline = t
     ? [
         { label: "Created", time: fmtUtcDateTime(t.createdAtUtc), state: "done" as const },
@@ -1057,8 +1312,38 @@ export default function Trips({
         ...(t.status === "InProgress"
           ? [{ label: "Trip started", time: "in progress", state: "active" as const }]
           : []),
+        ...(t.operationsFinishedAtUtc
+          ? [{ label: "Run finished", time: fmtUtcDateTime(t.operationsFinishedAtUtc), state: "done" as const }]
+          : []),
+        ...(t.status === "ReadyForBilling"
+          ? [{ label: "Ready for billing — awaiting worksheet", time: "", state: "active" as const }]
+          : []),
+        ...(t.status === "Invoiced"
+          ? [
+              {
+                label: t.billing ? `Invoiced · ${t.billing.invoiceNumber}` : "Invoiced",
+                time: t.billing?.qboEnteredDate ?? "",
+                state: "active" as const,
+              },
+            ]
+          : []),
         ...(t.status === "Completed"
-          ? [{ label: "Completed", time: fmtUtcDateTime(t.completedAtUtc), state: "done" as const }]
+          ? [
+              {
+                label: t.clientId ? "Completed — payment confirmed" : "Completed",
+                time: fmtUtcDateTime(t.completedAtUtc),
+                state: "done" as const,
+              },
+            ]
+          : []),
+        ...(t.status === "WrittenOff"
+          ? [
+              {
+                label: t.writtenOffReason ? `Written off — ${t.writtenOffReason}` : "Written off",
+                time: fmtUtcDateTime(t.updatedAtUtc),
+                state: "done" as const,
+              },
+            ]
           : []),
         ...(t.status === "Cancelled"
           ? [
@@ -1077,88 +1362,100 @@ export default function Trips({
       {header}
 
       <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "42% 1fr", gap: 0, borderTop: `1px solid ${colors.border}` }}>
-        {/* MASTER */}
-        <div style={{ minHeight: 0, overflowY: "auto", padding: "16px 18px", borderRight: `1px solid ${colors.border}` }}>
-          <div
-            style={{
-              fontFamily: fonts.semiCondensed,
-              fontSize: 9.5,
-              letterSpacing: ".14em",
-              textTransform: "uppercase",
-              color: colors.textFaint,
-              marginBottom: 10,
-            }}
-          >
-            {visible.length} trip{visible.length === 1 ? "" : "s"} · {shortDateLabel(isoDaysFromToday(-WINDOW_DAYS_BACK))} →{" "}
-            {shortDateLabel(isoDaysFromToday(WINDOW_DAYS_AHEAD))}
-          </div>
-          {visible.length === 0 && (
-            <Panel>
-              <SectionLabel>No trips in this window</SectionLabel>
-              <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textMuted, lineHeight: 1.6 }}>
-                Nothing matches the current filter. New trips come from the Create Trip wizard or are generated from
-                active schedule templates (Routes &amp; Schedules).
-              </div>
-            </Panel>
-          )}
-          {visible.map((row) => {
-            const svc = svcForTrip(row.serviceType);
-            const rsc = svcMeta(svc);
-            const rowChip = tripChip(row);
-            const open = isOpenTrip(row);
-            const active = t !== null && row.id === t.id;
-            return (
-              <div
-                key={row.id}
-                onClick={() => setSelectedId(row.id)}
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 7,
-                  padding: "12px 14px",
-                  marginBottom: 5,
-                  ...rowSurface(active, rsc.accent),
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                  <ServiceChip svc={svc} />
-                  <span style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.skyBlue }}>{row.tripNumber}</span>
+        {/* MASTER — rows scroll, the pager stays pinned to the bottom of the column */}
+        <div
+          style={{
+            minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
+            borderRight: `1px solid ${colors.border}`,
+          }}
+        >
+          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "16px 18px" }}>
+            <div
+              style={{
+                fontFamily: fonts.semiCondensed,
+                fontSize: 9.5,
+                letterSpacing: ".14em",
+                textTransform: "uppercase",
+                color: colors.textFaint,
+                marginBottom: 10,
+              }}
+            >
+              {totalCount} trip{totalCount === 1 ? "" : "s"} · {periodLabel(period)}
+            </div>
+            {visible.length === 0 && (
+              <Panel>
+                <SectionLabel>No trips in {periodLabel(period)}</SectionLabel>
+                <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textMuted, lineHeight: 1.6 }}>
+                  Nothing matches the current filter in this period. Step to another month or quarter with the arrows
+                  above — or create a trip from the Create Trip wizard; trips are also generated from active schedule
+                  templates (Routes &amp; Schedules).
                 </div>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div
-                      style={{
-                        fontFamily: fonts.body,
-                        fontSize: 13,
-                        fontWeight: 600,
-                        color: colors.textPrimary,
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                      }}
-                    >
-                      {corridorLabel(row)}
-                    </div>
-                    <div style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textDim, marginTop: 2 }}>
-                      {shortDateLabel(row.serviceDate)} · {tripWindowLabel(row)} · {row.distanceKm} km
-                    </div>
-                  </div>
-                  <StatusChip kind={rowChip.kind} label={rowChip.label} />
-                </div>
+              </Panel>
+            )}
+            {visible.map((row) => {
+              const svc = svcForTrip(row.serviceType);
+              const rsc = svcMeta(svc);
+              const rowChip = tripChip(row);
+              const rowBilling = tripBillingChip(row);
+              const open = isOpenTrip(row);
+              const active = t !== null && row.id === t.id;
+              return (
                 <div
+                  key={row.id}
+                  onClick={() => setSelectedId(row.id)}
                   style={{
-                    fontFamily: fonts.body,
-                    fontSize: 12.5,
-                    fontWeight: open ? 600 : 500,
-                    color: open ? colors.amberText : colors.textSecondary,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 7,
+                    padding: "12px 14px",
+                    marginBottom: 5,
+                    ...rowSurface(active, rsc.accent),
                   }}
                 >
-                  {row.driverName ?? "OPEN — needs coverage"} ·{" "}
-                  <span style={{ color: colors.textDim, fontWeight: 400 }}>{row.vehicleUnit ?? "unassigned"}</span>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                    <ServiceChip svc={svc} />
+                    <span style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.skyBlue }}>{row.tripNumber}</span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontFamily: fonts.body,
+                          fontSize: 13,
+                          fontWeight: 600,
+                          color: colors.textPrimary,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {corridorLabel(row)}
+                      </div>
+                      <div style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textDim, marginTop: 2 }}>
+                        {shortDateLabel(row.serviceDate)} · {tripWindowLabel(row)} · {row.distanceKm} km
+                      </div>
+                    </div>
+                    <StatusChip kind={rowChip.kind} label={rowChip.label} />
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: fonts.body,
+                      fontSize: 12.5,
+                      fontWeight: open ? 600 : 500,
+                      color: open ? colors.amberText : colors.textSecondary,
+                    }}
+                  >
+                    {row.driverName ?? "OPEN — needs coverage"} ·{" "}
+                    <span style={{ color: colors.textDim, fontWeight: 400 }}>{row.vehicleUnit ?? "unassigned"}</span>
+                  </div>
+                  {rowBilling && <StatusChip kind={rowBilling.kind} label={rowBilling.label} />}
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
+          <Pager page={page} pageSize={PAGE_SIZE} totalCount={totalCount} onPage={setPage} />
         </div>
 
         {/* DETAIL */}
@@ -1252,9 +1549,10 @@ export default function Trips({
                         )
                       }
                     />
-                    {/* Editable while Scheduled/InProgress; a completed trip's
-                        manifest is view-only (cancelled trips show nothing). */}
-                    {tripEditable ? (
+                    {/* Editable while Scheduled/InProgress/ReadyForBilling (fares
+                        get recorded just after the run); view-only from Invoiced
+                        onward (cancelled trips show nothing). */}
+                    {manifestEditable ? (
                       <div style={{ marginTop: 2 }}>
                         {t.manifestId && !manifest ? (
                           <span style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textDim }}>Loading manifest…</span>
@@ -1265,7 +1563,7 @@ export default function Trips({
                         )}
                       </div>
                     ) : (
-                      t.status === "Completed" &&
+                      t.status !== "Cancelled" &&
                       t.manifestId && (
                         <div style={{ marginTop: 2 }}>
                           {manifest ? (
@@ -1354,8 +1652,8 @@ export default function Trips({
                             {insp.odometerKm != null ? ` · ${insp.odometerKm.toLocaleString("en-CA")} km` : ""}
                             {` · ${fmtUtcDateTime(insp.performedAt)}`}
                           </span>
-                          {/* Edit / remove only while the trip is not terminal. */}
-                          {t.status !== "Completed" && t.status !== "Cancelled" && (
+                          {/* Edit / remove only while the run hasn't happened yet. */}
+                          {!isOperationallyClosed(t) && (
                             <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
                               <ActionButton onClick={() => setEditingInspection(insp)}>EDIT</ActionButton>
                               <ActionButton variant="destructive" onClick={() => setRemovingInspection(insp)}>
@@ -1391,12 +1689,50 @@ export default function Trips({
                     </div>
                   </div>
                   <div>
-                    <div style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim, marginBottom: 2 }}>Invoice</div>
-                    <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: statusMeta("soon").t, fontWeight: 500 }}>
-                      Not yet drafted
+                    <div style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim, marginBottom: 2 }}>Status</div>
+                    {/* Lead with the trip's own (billing-driven) status … */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 5, alignItems: "flex-start" }}>
+                      <StatusChip kind={tripChip(t).kind} label={tripStatusLabel(t.status)} />
+                      {/* … then the worksheet detail chip when one claims it,
+                          else a status-aware line about what happens next. */}
+                      {billingChip ? (
+                        <StatusChip kind={billingChip.kind} label={billingChip.label} />
+                      ) : (
+                        <div style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textDim, lineHeight: 1.4 }}>
+                          {!t.clientId
+                            ? "No client — nothing to bill"
+                            : t.status === "Scheduled" || t.status === "InProgress"
+                              ? "Run not finished yet"
+                              : t.status === "ReadyForBilling"
+                                ? "Awaiting worksheet"
+                                : t.status === "WrittenOff"
+                                  ? t.writtenOffReason ?? "Written off"
+                                  : "—"}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
+                {t.billing && (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: 18,
+                      marginTop: 12,
+                      paddingTop: 10,
+                      borderTop: `1px solid ${colors.borderSubtle}`,
+                      fontFamily: fonts.mono,
+                      fontSize: 11.5,
+                      color: colors.textMuted,
+                    }}
+                  >
+                    <span>Worksheet {t.billing.invoiceNumber}</span>
+                    {t.billing.qboInvoiceId && <span>QBO {t.billing.qboInvoiceId}</span>}
+                    {t.billing.qboEnteredDate && <span>Entered {t.billing.qboEnteredDate}</span>}
+                    {t.billing.paymentConfirmedDate && <span>Paid {t.billing.paymentConfirmedDate}</span>}
+                  </div>
+                )}
               </Panel>
 
               {/* timeline */}
@@ -1474,8 +1810,8 @@ export default function Trips({
 
               {/* actions */}
               <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 9 }}>
-                {t.status === "Completed" && (
-                  <StatusChip kind="ontime" label="Completed · read-only" />
+                {(t.status === "Invoiced" || t.status === "Completed" || t.status === "WrittenOff") && (
+                  <StatusChip kind={chip?.kind ?? "off"} label={`${tripStatusLabel(t.status)} · read-only`} />
                 )}
                 {t.status === "Scheduled" && (
                   <ActionButton variant="primary" onClick={() => setModal("edit")}>
@@ -1499,18 +1835,23 @@ export default function Trips({
                       {busy ? "WORKING…" : "START TRIP"}
                     </ActionButton>
                   ))}
-                {t.status === "InProgress" &&
-                  (completeBlockReason ? (
-                    <StatusChip kind="soon" label={`Can't complete — ${completeBlockReason}`} />
+                {finishable &&
+                  (finishBlockReason ? (
+                    <StatusChip kind="soon" label={`Can't finish — ${finishBlockReason}`} />
                   ) : (
                     <ActionButton
                       variant="success"
-                      onClick={() => onChangeStatus(t.id, "Completed")}
+                      onClick={() => onFinishTrip(t.id)}
                       disabled={busy}
                     >
-                      {busy ? "WORKING…" : "COMPLETE TRIP"}
+                      {busy ? "WORKING…" : "FINISH TRIP"}
                     </ActionButton>
                   ))}
+                {t.status === "ReadyForBilling" && (
+                  <ActionButton variant="destructive" onClick={() => setModal("closeWithoutBilling")}>
+                    CLOSE WITHOUT BILLING
+                  </ActionButton>
+                )}
                 {/* Always printable: the loaded manifest when one exists, else the
                     blank NL-TM-01 form (printTripManifest handles null). */}
                 <ActionButton onClick={() => printTripManifest(manifest)}>
@@ -1537,7 +1878,7 @@ export default function Trips({
                   enteredBy={DISPATCHER_LABEL}
                   onClose={() => setModal(null)}
                   onSaved={(manifestId) => onManifestSaved(t.id, manifestId)}
-                  readOnly={!tripEditable}
+                  readOnly={!manifestEditable}
                 />
               )}
               {modal === "sendEmail" && manifest && (
@@ -1580,6 +1921,16 @@ export default function Trips({
                   onConfirmed={async (reason) => {
                     await changeTripStatus(t.id, "Cancelled", reason);
                     await reloadUntil(t.id, (trip) => trip !== undefined && trip.status === "Cancelled");
+                  }}
+                />
+              )}
+              {modal === "closeWithoutBilling" && (
+                <CloseWithoutBillingModal
+                  trip={t}
+                  onClose={() => setModal(null)}
+                  onConfirmed={async (reason) => {
+                    await closeTripWithoutBilling(t.id, reason);
+                    await reloadUntil(t.id, (trip) => trip !== undefined && trip.status === "WrittenOff");
                   }}
                 />
               )}

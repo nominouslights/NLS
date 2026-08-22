@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using NorthernLink.Shared.EventBus;
+using NorthernLink.Shared.IntegrationEvents.Billing;
 using NorthernLink.Shared.IntegrationEvents.Clients;
 using NorthernLink.Shared.IntegrationEvents.Drivers;
 using NorthernLink.Shared.IntegrationEvents.Fleet;
@@ -36,6 +37,8 @@ using NorthernLink.Trips.Application.Trips;
 using NorthernLink.Trips.Application.Trips.Assign;
 using NorthernLink.Trips.Application.Trips.AttachManifest;
 using NorthernLink.Trips.Application.Trips.ChangeStatus;
+using NorthernLink.Trips.Application.Trips.CloseWithoutBilling;
+using NorthernLink.Trips.Application.Trips.FinishOperations;
 using NorthernLink.Trips.Application.Trips.Create;
 using NorthernLink.Trips.Application.Trips.CreateDeadheadReturn;
 using NorthernLink.Trips.Application.Trips.GetActivity;
@@ -49,6 +52,21 @@ using NorthernLink.Trips.Domain.Manifests.Events;
 using NorthernLink.Trips.Infrastructure.Generation;
 using NorthernLink.Trips.Infrastructure.Persistence;
 using NorthernLink.Trips.Infrastructure.Persistence.Projections;
+using NorthernLink.Trips.Application.Shipments;
+using NorthernLink.Trips.Application.Shipments.AddLeg;
+using NorthernLink.Trips.Application.Shipments.BulkAssign;
+using NorthernLink.Trips.Application.Shipments.Cancel;
+using NorthernLink.Trips.Application.Shipments.CloseWithoutBilling;
+using NorthernLink.Trips.Application.Shipments.GetById;
+using NorthernLink.Trips.Application.Shipments.GetShipments;
+using NorthernLink.Trips.Application.Shipments.RecordDelivery;
+using NorthernLink.Trips.Application.Shipments.RecordLegDrop;
+using NorthernLink.Trips.Application.Shipments.RecordLegPickup;
+using NorthernLink.Trips.Application.Shipments.Register;
+using NorthernLink.Trips.Application.Shipments.RemoveLeg;
+using NorthernLink.Trips.Application.Shipments.SetBilling;
+using NorthernLink.Trips.Application.Shipments.SetSecured;
+using NorthernLink.Trips.Application.Shipments.Update;
 
 namespace NorthernLink.Trips.Infrastructure;
 
@@ -97,7 +115,11 @@ public static class TripsServiceCollectionExtensions
         services.AddScoped<IDriverLookupRepository, DriverLookupRepository>();
         services.AddScoped<IVehicleLookupRepository, VehicleLookupRepository>();
         services.AddScoped<IClientLookupRepository, ClientLookupRepository>();
+        services.AddScoped<ITripBillingRepository, TripBillingRepository>();
         services.AddScoped<ITripNumberGenerator, TripNumberGenerator>();
+        services.AddScoped<IShipmentRepository, ShipmentRepository>();
+        services.AddScoped<IShipmentReadService, ShipmentReadService>();
+        services.AddScoped<IShipmentNumberGenerator, ShipmentNumberGenerator>();
 
         // 3. Command/query handlers — registered explicitly, one line per handler.
         services.AddScoped<ICommandHandler<CreateTripManifestCommand, Guid>, CreateTripManifestCommandHandler>();
@@ -108,6 +130,8 @@ public static class TripsServiceCollectionExtensions
         services.AddScoped<ICommandHandler<UpdateTripCommand>, UpdateTripCommandHandler>();
         services.AddScoped<ICommandHandler<AssignTripCommand>, AssignTripCommandHandler>();
         services.AddScoped<ICommandHandler<ChangeTripStatusCommand>, ChangeTripStatusCommandHandler>();
+        services.AddScoped<ICommandHandler<FinishTripOperationsCommand>, FinishTripOperationsCommandHandler>();
+        services.AddScoped<ICommandHandler<CloseTripWithoutBillingCommand>, CloseTripWithoutBillingCommandHandler>();
         services.AddScoped<ICommandHandler<RecordTripDemandCommand>, RecordTripDemandCommandHandler>();
         services.AddScoped<ICommandHandler<AttachManifestToTripCommand>, AttachManifestToTripCommandHandler>();
         services.AddScoped<ICommandHandler<MergeRoundTripCommand>, MergeRoundTripCommandHandler>();
@@ -116,6 +140,20 @@ public static class TripsServiceCollectionExtensions
         services.AddScoped<IQueryHandler<GetTripsQuery, IReadOnlyList<TripResponse>>, GetTripsQueryHandler>();
         services.AddScoped<IQueryHandler<GetTripByIdQuery, TripResponse>, GetTripByIdQueryHandler>();
         services.AddScoped<IQueryHandler<GetTripActivityQuery, IReadOnlyList<TripActivityEntryResponse>>, GetTripActivityQueryHandler>();
+        services.AddScoped<ICommandHandler<RegisterShipmentCommand, Guid>, RegisterShipmentCommandHandler>();
+        services.AddScoped<ICommandHandler<UpdateShipmentCommand>, UpdateShipmentCommandHandler>();
+        services.AddScoped<ICommandHandler<AddShipmentLegCommand>, AddShipmentLegCommandHandler>();
+        services.AddScoped<ICommandHandler<RemoveShipmentLegCommand>, RemoveShipmentLegCommandHandler>();
+        services.AddScoped<ICommandHandler<BulkAssignShipmentsCommand, BulkAssignResult>, BulkAssignShipmentsCommandHandler>();
+        services.AddScoped<ICommandHandler<RecordShipmentLegPickupCommand>, RecordShipmentLegPickupCommandHandler>();
+        services.AddScoped<ICommandHandler<RecordShipmentLegDropCommand>, RecordShipmentLegDropCommandHandler>();
+        services.AddScoped<ICommandHandler<RecordShipmentDeliveryCommand>, RecordShipmentDeliveryCommandHandler>();
+        services.AddScoped<ICommandHandler<SetShipmentBillingCommand>, SetShipmentBillingCommandHandler>();
+        services.AddScoped<ICommandHandler<SetShipmentSecuredCommand>, SetShipmentSecuredCommandHandler>();
+        services.AddScoped<ICommandHandler<CancelShipmentCommand>, CancelShipmentCommandHandler>();
+        services.AddScoped<ICommandHandler<CloseShipmentWithoutBillingCommand>, CloseShipmentWithoutBillingCommandHandler>();
+        services.AddScoped<IQueryHandler<GetShipmentsQuery, ShipmentPageResponse>, GetShipmentsQueryHandler>();
+        services.AddScoped<IQueryHandler<GetShipmentByIdQuery, ShipmentResponse>, GetShipmentByIdQueryHandler>();
         services.AddScoped<ICommandHandler<CreateRouteCommand, Guid>, CreateRouteCommandHandler>();
         services.AddScoped<ICommandHandler<UpdateRouteCommand>, UpdateRouteCommandHandler>();
         services.AddScoped<IQueryHandler<GetRoutesQuery, IReadOnlyList<RouteResponse>>, GetRoutesQueryHandler>();
@@ -137,7 +175,8 @@ public static class TripsServiceCollectionExtensions
             .On<VehicleChangedIntegrationEvent, VehicleChangedIntegrationEventHandler>()
             .On<VehicleInspectionRecordedIntegrationEvent, VehicleInspectionRecordedIntegrationEventHandler>()
             .On<VehicleInspectionRemovedIntegrationEvent, VehicleInspectionRemovedIntegrationEventHandler>()
-            .On<ClientChangedIntegrationEvent, ClientChangedIntegrationEventHandler>());
+            .On<ClientChangedIntegrationEvent, ClientChangedIntegrationEventHandler>()
+            .On<InvoiceBillingStateChangedIntegrationEvent, InvoiceBillingStateChangedIntegrationEventHandler>());
 
         // 5. Read-side projections — one worker upserts trips.rm_* from the journal, and a
         //    newly created manifest triggers the idempotent link-to-trip reaction (same-module
@@ -145,6 +184,7 @@ public static class TripsServiceCollectionExtensions
         services.AddProjections<TripsDbContext>(SchemaName, registry => registry
             .Project(new TripManifestProjection())
             .Project(new TripProjection())
+            .Project(new ShipmentProjection())
             .Project(new RouteProjection())
             .Project(new StopProjection())
             .Project(new ScheduleTemplateProjection())

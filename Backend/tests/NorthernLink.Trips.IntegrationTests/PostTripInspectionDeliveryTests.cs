@@ -100,10 +100,10 @@ public class PostTripInspectionDeliveryTests(PostgresFixture fixture)
             clientId: null,
             clientName: null,
             poNumber: null,
-            driverId: null,
-            driverName: null,
-            vehicleId: null,
-            vehicleUnit: null,
+            driverId: Guid.NewGuid(),
+            driverName: "R. Ballantyne",
+            vehicleId: Guid.NewGuid(),
+            vehicleUnit: "U-04",
             seatsCapacity: null,
             seatsMinimum: null);
         Assert.True(trip.IsSuccess, trip.IsFailure ? trip.Error.Code : "");
@@ -187,6 +187,15 @@ public class PostTripInspectionDeliveryTests(PostgresFixture fixture)
             string roundTripKey, CancellationToken cancellationToken = default) =>
             await context.Trips
                 .Where(t => t.RoundTripKey == roundTripKey)
+                .ToListAsync(cancellationToken);
+
+        public async Task<IReadOnlyList<Trip>> GetByIdsAsync(
+            Guid tenantId,
+            IReadOnlyCollection<Guid> tripIds,
+            CancellationToken cancellationToken = default) =>
+            await context.Trips
+                .IgnoreQueryFilters()
+                .Where(t => t.TenantId == tenantId && tripIds.Contains(t.Id))
                 .ToListAsync(cancellationToken);
 
         public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>

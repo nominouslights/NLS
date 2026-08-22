@@ -8,8 +8,8 @@ namespace NorthernLink.Notifications.Domain.Dispatches;
 /// when they reopen the send dialog. The aggregate id IS the client-generated dispatch id,
 /// which is what makes the send endpoint idempotent: a replayed POST finds this row and
 /// returns it instead of emailing everyone twice. Trip context (trip id/number, manifest id,
-/// client name) and the template (id + name) are opaque snapshots — Notifications never
-/// references Trips or Clients. Per-recipient outcomes are embedded as jsonb via
+/// client id + name) and the template (id + name) are opaque snapshots from the caller —
+/// Notifications never queries Trips or Clients. Per-recipient outcomes are embedded as jsonb via
 /// <see cref="DispatchRecipient"/>; <see cref="Status"/> is derived from them, never stored
 /// independently.
 /// </summary>
@@ -40,6 +40,7 @@ public sealed class EmailDispatch : AggregateRoot, ITenantScoped
     public Guid TemplateId { get; private set; }
     public string TemplateName { get; private set; }
     public NotificationServiceType ServiceType { get; private set; }
+    public Guid? ClientId { get; private set; }
     public string? ClientName { get; private set; }
     public EmailDispatchStatus Status { get; private set; }
     public DateTimeOffset SentAtUtc { get; private set; }
@@ -59,6 +60,7 @@ public sealed class EmailDispatch : AggregateRoot, ITenantScoped
         Guid templateId,
         string templateName,
         NotificationServiceType serviceType,
+        Guid? clientId,
         string? clientName,
         IReadOnlyList<DispatchRecipient> recipients)
     {
@@ -81,6 +83,7 @@ public sealed class EmailDispatch : AggregateRoot, ITenantScoped
             TemplateId = templateId,
             TemplateName = templateName,
             ServiceType = serviceType,
+            ClientId = clientId,
             ClientName = string.IsNullOrWhiteSpace(clientName) ? null : clientName.Trim(),
             Status = DeriveStatus(recipients),
             SentAtUtc = DateTimeOffset.UtcNow,

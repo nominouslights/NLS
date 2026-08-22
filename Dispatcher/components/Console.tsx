@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { colors } from "@/lib/theme";
 import type { ScreenId } from "@/lib/nav";
+import { currentPeriod, type Period } from "@/lib/period";
 import NavRail from "@/components/NavRail";
 import TopBar from "@/components/TopBar";
 import CreateTripWizard from "@/components/CreateTripWizard";
@@ -26,11 +27,13 @@ export default function Console() {
   const [screen, setScreen] = useState<ScreenId>("dispatch");
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
-  // Id of the most recently created trip — handed to the Trips screen so it
-  // reloads its list (which is otherwise loaded once on mount) after creation.
-  const [createdTripId, setCreatedTripId] = useState<string | null>(null);
 
   const [tripSelId, setTripSelId] = useState<string | null>(null); // Trips API Guid
+  // The Trips list's period and page live here, not in the screen: switching
+  // screens unmounts it, and a dispatcher who steps back three months should not
+  // lose that on a detour to the Fleet screen.
+  const [tripPeriod, setTripPeriod] = useState<Period>(() => currentPeriod("month"));
+  const [tripPage, setTripPage] = useState(1);
   const [driverSel, setDriverSel] = useState(0);
   const [fleetSelId, setFleetSelId] = useState<string | null>(null);
   const [clientSel, setClientSel] = useState<string | null>(null); // Clients API Guid
@@ -76,7 +79,10 @@ export default function Console() {
               selectedId={tripSelId}
               setSelectedId={setTripSelId}
               onNewTrip={() => setWizardOpen(true)}
-              createdId={createdTripId}
+              period={tripPeriod}
+              setPeriod={setTripPeriod}
+              page={tripPage}
+              setPage={setTripPage}
             />
           )}
           {screen === "drivers" && <Drivers driverSel={driverSel} setDriverSel={setDriverSel} />}
@@ -101,7 +107,8 @@ export default function Console() {
           onClose={() => setWizardOpen(false)}
           onCreated={(tripId) => {
             setWizardOpen(false);
-            setCreatedTripId(tripId);
+            // Selecting the new trip is all the Trips screen needs: it polls for the
+            // trip (reads trail writes), brings its period into view, and refreshes.
             openTrip(tripId);
           }}
         />

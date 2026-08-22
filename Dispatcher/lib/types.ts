@@ -178,17 +178,6 @@ export interface WorkOrder {
   dateRequiredOrOos?: string;
 }
 
-/** Seed values for a new work order, e.g. generated from an inspection's defects. */
-export interface WorkOrderPrefill {
-  source: WorkOrderSource;
-  sourceRef?: string;
-  title?: string;
-  description?: string;
-  lineItems?: string[];
-  priority?: WorkOrderPriority;
-  inspectionId?: string; // link back once the WO is created
-}
-
 /** A shop or partner the dispatcher registers once and reuses on work orders. */
 export interface Shop {
   id: string; // "SHOP-01"
@@ -204,41 +193,9 @@ export interface Shop {
   notes?: string;
 }
 
-export type InspectionType = "Pre-Trip" | "Post-Trip";
-export type InspectionSource = "Driver App" | "Dispatcher Entry (paper backup)";
-export type DefectSeverity = "Minor" | "Major" | "Out-of-Service";
-export type InspectionResult = "Pass" | "Pass with defects" | "Fail";
-
-export interface InspectionDefect {
-  item: string;
-  severity: DefectSeverity;
-  note?: string;
-}
-
-/** One line of the full DVIR checklist — lets the detail view show passes too. */
-export interface InspectionChecklistItem {
-  item: string;
-  status: "Pass" | "Defect";
-  severity?: DefectSeverity;
-  note?: string;
-}
-
-export interface Inspection {
-  id: string; // "DVIR-2210"
-  unit: string;
-  type: InspectionType;
-  driver: string;
-  performedAt: string; // ISO date
-  source: InspectionSource;
-  enteredBy?: string; // dispatcher name when a paper-backup entry
-  tripId?: string;
-  odometerKm: number;
-  result: InspectionResult;
-  k: StatusKind;
-  defects: InspectionDefect[]; // failed items (derived from checklist)
-  checklist?: InspectionChecklistItem[]; // full pass/fail record
-  generatedWorkOrderId?: string;
-}
+// Inspections now come from the real Fleet API (lib/api/maintenance.ts) — the
+// mock DVIR types are gone. WorkOrder/Shop above stay as the display-typed
+// shapes the NL-WO-01 print adapters (lib/workOrderDisplay.ts) produce.
 
 // Client CRM — contact roster + interaction (touchpoint) log. Prototype/mock
 // only (no backend CRM domain yet); the mutable records live in a module

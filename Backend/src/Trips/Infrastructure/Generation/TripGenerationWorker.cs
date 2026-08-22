@@ -179,19 +179,47 @@ internal sealed class TripGenerationWorker(
                 return;
             }
 
-            // Default driver prefill — only when the driver is still Active in the replica.
-            Guid? driverId = null;
-            string? driverName = null;
-            if (template.DefaultDriverId is { } defaultDriverId)
+            // A trip is never created unassigned, so a template can only materialize when
+            // its defaults resolve to a real, Active driver and fleet vehicle. A template
+            // that can't (no default set, driver deactivated, unit renamed or not in the
+            // fleet) is skipped with a warning until a dispatcher fixes it — a paused
+            // template beats another ghost-unit board (the "U-99" cleanup of Aug 2026).
+            if (template.DefaultDriverId is not { } defaultDriverId)
             {
-                var driver = await context.DriverLookups
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(d => d.DriverId == defaultDriverId, cancellationToken);
-                if (driver is { IsActive: true })
-                {
-                    driverId = driver.DriverId;
-                    driverName = driver.Name;
-                }
+                logger.LogWarning(
+                    "Template {TemplateId} ({TemplateName}) has no default driver; a trip is never created unassigned — skipping generation until one is set",
+                    template.Id, template.Name);
+                return;
+            }
+
+            var driver = await context.DriverLookups
+                .AsNoTracking()
+                .FirstOrDefaultAsync(d => d.DriverId == defaultDriverId, cancellationToken);
+            if (driver is not { IsActive: true })
+            {
+                logger.LogWarning(
+                    "Template {TemplateId} ({TemplateName}) default driver {DriverId} is missing or inactive; skipping generation",
+                    template.Id, template.Name, defaultDriverId);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(template.DefaultVehicleUnit))
+            {
+                logger.LogWarning(
+                    "Template {TemplateId} ({TemplateName}) has no default vehicle unit; a trip is never created unassigned — skipping generation until one is set",
+                    template.Id, template.Name);
+                return;
+            }
+
+            var vehicle = await context.VehicleLookups
+                .AsNoTracking()
+                .FirstOrDefaultAsync(v => v.UnitNumber == template.DefaultVehicleUnit, cancellationToken);
+            if (vehicle is not { IsActive: true })
+            {
+                logger.LogWarning(
+                    "Template {TemplateId} ({TemplateName}) default vehicle unit {UnitNumber} is not an Active fleet vehicle; skipping generation",
+                    template.Id, template.Name, template.DefaultVehicleUnit);
+                return;
             }
 
             var outboundStops = route.Stops.OrderBy(s => s.Order).ToList();
@@ -227,11 +255,13 @@ internal sealed class TripGenerationWorker(
                     template.ClientId,
                     template.ClientName,
                     poNumber: null,
-                    driverId,
-                    driverName,
-                    vehicleId: null,
-                    template.DefaultVehicleUnit,
-                    template.SeatsCapacity,
+                    driver.DriverId,
+                    driver.Name,
+                    vehicle.VehicleId,
+                    vehicle.UnitNumber,
+                    // The fleet vehicle's capacity is server-authoritative, exactly as on
+                    // ad-hoc creation — the template's manual figure no longer applies.
+                    vehicle.SeatingCapacity,
                     template.SeatsMinimum);
 
                 if (tripResult.IsFailure)

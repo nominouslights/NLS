@@ -38,7 +38,11 @@ public sealed class BootstrapAdminCommandHandler(
             return Result.Failure<Guid>(UserErrors.InvalidBootstrapToken);
         }
 
-        var userResult = User.Create(SeedTenant.Id, command.Email, passwordHasher.Hash(command.Password), "Admin");
+        // The role is fixed when the invite is minted, not chosen by whoever redeems it — the
+        // redeemer is anonymous, so letting the request name its own role would be a
+        // privilege-escalation hole. GenerateBootstrapTokenCommandHandler validated it already.
+        var userResult = User.Create(
+            SeedTenant.Id, command.Email, passwordHasher.Hash(command.Password), activeToken.Role);
         if (userResult.IsFailure)
         {
             return Result.Failure<Guid>(userResult.Error);

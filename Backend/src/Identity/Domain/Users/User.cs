@@ -5,8 +5,10 @@ namespace NorthernLink.Identity.Domain.Users;
 
 /// <summary>
 /// A platform user who can authenticate — the aggregate root behind the interim bespoke
-/// JWT login flow. Today every user is Role "Admin" (Internal tenant); richer roles land
-/// once the client apps beyond the Dispatch Console need their own accounts.
+/// JWT login flow. <see cref="Role"/> is one of <see cref="Roles.Internal"/> (Internal tenant);
+/// Client, Vendor/Partner and Consumer roles land once those apps need their own accounts.
+/// The role travels verbatim in the access token's "role" claim, so it is validated here at
+/// creation rather than being trusted at authorization time.
 /// </summary>
 public sealed class User : AggregateRoot, ITenantScoped
 {
@@ -37,7 +39,11 @@ public sealed class User : AggregateRoot, ITenantScoped
             return Result.Failure<User>(UserErrors.InvalidPasswordHash);
         }
 
-        if (string.IsNullOrWhiteSpace(role))
+        // Ordinal, case-sensitive — RequireRole compares the same way, so "owner" has to fail
+        // here rather than authenticate fine and then 403 every request. Roles.LegacyAdmin is
+        // deliberately not in Roles.Internal: no new user may be created as "Admin".
+        var normalizedRole = role?.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedRole) || !Roles.IsKnown(normalizedRole))
         {
             return Result.Failure<User>(UserErrors.InvalidRole);
         }
@@ -48,7 +54,7 @@ public sealed class User : AggregateRoot, ITenantScoped
             TenantId = tenantId,
             Email = normalizedEmail,
             PasswordHash = passwordHash,
-            Role = role.Trim(),
+            Role = normalizedRole,
             CreatedAtUtc = now,
         };
 

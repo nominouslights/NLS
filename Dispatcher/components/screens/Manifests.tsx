@@ -56,7 +56,7 @@ export default function Manifests() {
       from: isoDaysFromToday(-WINDOW_DAYS),
       to: isoDaysFromToday(WINDOW_DAYS),
     });
-    return sortTrips(all.filter((t) => DEMAND_SERVICE_TYPES.has(t.serviceType) && t.status !== "Cancelled"));
+    return sortTrips(all.items.filter((t) => DEMAND_SERVICE_TYPES.has(t.serviceType) && t.status !== "Cancelled"));
   }, []);
 
   const load = useCallback(async () => {

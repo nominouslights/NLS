@@ -78,7 +78,9 @@ export interface SendRecipientInput {
 
 /** POST /api/notifications/emails/trip-pickup body (SendTripPickupEmailRequest).
  *  dispatchId is a CLIENT-generated GUID: replaying the same id returns the
- *  stored dispatch without re-sending (idempotency). 1–16 recipients. */
+ *  stored dispatch without re-sending (idempotency). 1–16 recipients.
+ *  clientId (null = client-less trip) is validated server-side against the
+ *  template's client pin. */
 export interface SendTripPickupEmailInput {
   dispatchId: string;
   templateId: string;
@@ -89,6 +91,7 @@ export interface SendTripPickupEmailInput {
   tripDate: string;
   pickupTime: string;
   route: string;
+  clientId: string | null;
   clientName: string | null;
   recipients: SendRecipientInput[];
 }
@@ -114,6 +117,7 @@ export interface EmailDispatchRecord {
   templateId: string;
   templateName: string;
   serviceType: NotificationServiceType;
+  clientId: string | null;
   status: EmailDispatchStatus;
   sentAtUtc: string;
   recipients: EmailRecipientResult[];
@@ -175,7 +179,8 @@ export function previewEmailTemplate(input: EmailPreviewInput): Promise<EmailPre
 
 /** POST → 200 EmailDispatchResponse (also on partial/total failure — the
  *  response is authoritative, no polling needed). 404 unknown template;
- *  400 inactive template / bad recipients. */
+ *  400 inactive template / bad recipients / template–trip mismatch
+ *  (Notifications.Template.ServiceTypeMismatch, .ClientMismatch). */
 export function sendTripPickupEmail(input: SendTripPickupEmailInput): Promise<EmailDispatchRecord> {
   return request<EmailDispatchRecord>("/api/notifications/emails/trip-pickup", {
     method: "POST",

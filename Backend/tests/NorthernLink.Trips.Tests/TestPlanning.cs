@@ -11,6 +11,12 @@ internal static class TestPlanning
 {
     public static readonly Guid TenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
 
+    /// <summary>Baseline assignment — a trip is never created unassigned, so the helper always has one.</summary>
+    public static readonly Guid DriverId = Guid.Parse("00000000-0000-0000-0000-0000000000d1");
+    public const string DriverName = "R. Ballantyne";
+    public static readonly Guid VehicleId = Guid.Parse("00000000-0000-0000-0000-0000000000e1");
+    public const string VehicleUnit = "U-04";
+
     /// <summary>Monday, 20 July 2026 — a fixed "today" for generator tests.</summary>
     public static readonly DateOnly Monday = new(2026, 7, 20);
 
@@ -89,12 +95,17 @@ internal static class TestPlanning
             defaultDriverId: null,
             generationHorizonDays: generationHorizonDays);
 
-    /// <summary>A valid scheduled trip; override the arguments a test cares about.</summary>
+    /// <summary>
+    /// A valid scheduled trip; override the arguments a test cares about. Null
+    /// driver/vehicle arguments fall back to the baseline assignment — creation without
+    /// one is a domain error, exercised directly in the lifecycle tests.
+    /// </summary>
     public static Result<Trip> ScheduleTrip(
         string tripNumber = "TR-1001",
         Guid? driverId = null,
         string? driverName = null,
         Guid? vehicleId = null,
+        string? vehicleUnit = null,
         int? seatsCapacity = 12,
         Guid? scheduleTemplateId = null,
         string? roundTripKey = null,
@@ -126,10 +137,14 @@ internal static class TestPlanning
             clientId: clientId,
             clientName: "Alamos Gold",
             poNumber: "PO-2026-118",
-            driverId: driverId,
-            driverName: driverName,
-            vehicleId: vehicleId,
-            vehicleUnit: "U-04",
+            driverId: driverId ?? DriverId,
+            driverName: driverName ?? DriverName,
+            vehicleId: vehicleId ?? VehicleId,
+            vehicleUnit: vehicleUnit ?? VehicleUnit,
             seatsCapacity: seatsCapacity,
             seatsMinimum: null);
+
+    /// <summary>Deadhead return with the baseline assignment driving the unit back.</summary>
+    public static Result<Trip> DeadheadReturn(this Trip source, string tripNumber) =>
+        source.CreateDeadheadReturn(tripNumber, DriverId, DriverName, VehicleId, VehicleUnit);
 }

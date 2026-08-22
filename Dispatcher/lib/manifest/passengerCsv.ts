@@ -274,6 +274,9 @@ export function parsePassengerCsv(text: string, stops: StopOption[]): ParsedMani
  *  site): matched stop is the pickup. Inbound (site → community): it's the
  *  drop-off. Unknown direction → treat the matched stop as the pickup. */
 export function buildPaxRow(p: ParsedPassenger, stops: StopOption[], direction: ManifestDirection | null): PaxRow {
+  // Starts from emptyPax(), so the fare fields (fareAmount/fareMethod/
+  // farePaidAtUtc) stay unset — client sheets never carry fares; they're
+  // recorded by dispatch after the run.
   const row = emptyPax();
   row.name = p.name;
   row.contact = p.contact;

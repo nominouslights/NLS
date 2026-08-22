@@ -34,6 +34,11 @@ internal sealed class InvoiceProjection : BillingProjection<Invoice, InvoiceRead
         row.IssuedAtUtc = source.IssuedAtUtc;
         row.QboInvoiceId = source.QboInvoiceId;
         row.QboEnteredDate = source.QboEnteredDate;
+        row.PaymentConfirmedDate = source.PaymentConfirmedDate;
+        row.WrittenOffAmountCad = source.WrittenOffAmountCad;
+        row.WrittenOffDate = source.WrittenOffDate;
+        row.WrittenOffReason = source.WrittenOffReason;
+        row.OutstandingCad = source.OutstandingCad;
         row.Version = source.Version;
 
         // Derived — the aggregate is the only implementation.

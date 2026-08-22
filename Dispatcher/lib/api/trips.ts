@@ -1,4 +1,4 @@
-import { request } from "./transport";
+import { ApiError, request } from "./transport";
 import type { ServiceType, StatusKind } from "../theme";
 import { svcForServiceType, type ClientServiceType } from "./clients";
 import type { DriverClearanceRecord } from "./drivers";
@@ -17,7 +17,14 @@ import type { DriverClearanceRecord } from "./drivers";
 /** Same enum as the Clients module's ServiceType (declared per-module backend-side). */
 export type TripServiceType = ClientServiceType;
 
-export type TripStatus = "Scheduled" | "InProgress" | "Completed" | "Cancelled";
+export type TripStatus =
+  | "Scheduled"
+  | "InProgress"
+  | "ReadyForBilling"
+  | "Invoiced"
+  | "Completed"
+  | "Cancelled"
+  | "WrittenOff";
 export type TripDirection = "Outbound" | "Inbound";
 
 /** One ordered stop on a trip's route snapshot (TripStopResponse / RouteStop).
@@ -66,10 +73,30 @@ export interface TripRecord {
   status: TripStatus;
   manifestId: string | null;
   hasPostTripInspection: boolean;
+  /** When the run itself ended (the old meaning of completedAtUtc). */
+  operationsFinishedAtUtc: string | null;
+  /** Now means "the money arrived" (payment confirmed) — or run end for clientless trips. */
   completedAtUtc: string | null;
   cancelledReason: string | null;
+  /** Reason recorded when the trip was written off (closed without billing / invoice written off). */
+  writtenOffReason: string | null;
   createdAtUtc: string;
   updatedAtUtc: string;
+  /** Billing state replicated from the Billing module; null when no worksheet claims it. */
+  billing: TripBilling | null;
+}
+
+/** Wire values of TripBillingResponse.state (backend TripBillingStates). */
+export type TripBillingState = "OnWorksheet" | "Invoiced" | "Paid" | "WrittenOff";
+
+/** Mirrors the backend TripBillingResponse — a trip's claim by a billing worksheet. */
+export interface TripBilling {
+  state: TripBillingState;
+  invoiceId: string;
+  invoiceNumber: string;
+  qboInvoiceId: string | null;
+  qboEnteredDate: string | null;
+  paymentConfirmedDate: string | null;
 }
 
 /** GET /api/trips query filters (TripFilter). */
@@ -82,6 +109,24 @@ export interface TripListParams {
   clientId?: string;
   driverId?: string;
   openOnly?: boolean;
+  /** A driver is on the trip — the counterpart of openOnly. */
+  assignedOnly?: boolean;
+  excludeCancelled?: boolean;
+  /** 1-based. Paging is all-or-nothing: send both page and pageSize, or neither. */
+  page?: number;
+  pageSize?: number;
+}
+
+/**
+ * The `GET /api/trips` envelope (backend `PagedResponse<TripResponse>`).
+ * `page`/`pageSize` are null when the caller did not ask for a page — `items` is
+ * then the complete match and `totalCount` is simply its length.
+ */
+export interface TripPage {
+  items: TripRecord[];
+  page: number | null;
+  pageSize: number | null;
+  totalCount: number;
 }
 
 /** POST /api/trips body (CreateTripRequest). Supplying routeId snapshots the
@@ -106,6 +151,9 @@ export interface TripInput {
   driverId?: string | null;
   /** Validated Fleet vehicle reference; the backend snapshots the unit number. */
   vehicleId?: string | null;
+  /** Ignored when vehicleId is set — the server snapshots the vehicle's
+   *  seating capacity onto the trip instead. Manual capacity applies only to
+   *  trips created without a fleet vehicle. */
   seatsCapacity?: number | null;
   seatsMinimum?: number | null;
 }
@@ -134,7 +182,9 @@ export interface TripUpdateInput {
 // Trip endpoints
 // ---------------------------------------------------------------------------
 
-export function listTrips(params?: TripListParams): Promise<TripRecord[]> {
+/** Omitting page/pageSize returns every match in the same envelope — the server
+ *  never applies a default page size, so whole-set callers are not truncated. */
+export async function listTrips(params?: TripListParams): Promise<TripPage> {
   const q = new URLSearchParams();
   if (params?.date) q.set("date", params.date);
   if (params?.from) q.set("from", params.from);
@@ -144,8 +194,25 @@ export function listTrips(params?: TripListParams): Promise<TripRecord[]> {
   if (params?.clientId) q.set("clientId", params.clientId);
   if (params?.driverId) q.set("driverId", params.driverId);
   if (params?.openOnly) q.set("openOnly", "true");
+  if (params?.assignedOnly) q.set("assignedOnly", "true");
+  if (params?.excludeCancelled) q.set("excludeCancelled", "true");
+  if (params?.page) q.set("page", String(params.page));
+  if (params?.pageSize) q.set("pageSize", String(params.pageSize));
   const qs = q.toString();
-  return request<TripRecord[]>(`/api/trips${qs ? `?${qs}` : ""}`);
+  const res = await request<TripPage>(`/api/trips${qs ? `?${qs}` : ""}`);
+
+  // Validate the envelope at the boundary rather than letting a wrong shape reach
+  // a screen, where it surfaces as an undefined-length crash with no clue why.
+  // The shape this catches in practice is a bare array — an API process still
+  // running a build from before the paged list contract.
+  if (!res || !Array.isArray(res.items)) {
+    throw new ApiError(
+      "Trips.List.UnexpectedShape",
+      "The trips API returned an unexpected response. If it is running from an older build, restart it.",
+      500,
+    );
+  }
+  return res;
 }
 
 export function getTrip(id: string): Promise<TripRecord> {
@@ -170,7 +237,11 @@ export function updateTrip(id: string, input: TripUpdateInput): Promise<void> {
 }
 
 /** POST /api/trips/{id}/assign — null driverId unassigns, null vehicleId clears
- *  the vehicle (the server snapshots the unit number from the looked-up vehicle). */
+ *  the vehicle (the server snapshots the unit number from the looked-up vehicle).
+ *  Assigning a vehicle also re-snapshots the trip's seats capacity from the
+ *  vehicle; one seating fewer than the seats already confirmed is rejected
+ *  ("Trips.Trip.VehicleCapacityBelowConfirmed"). Unassigning keeps the
+ *  last-known capacity. */
 export function assignTrip(
   id: string,
   driverId: string | null,
@@ -182,10 +253,32 @@ export function assignTrip(
   });
 }
 
-export function changeTripStatus(id: string, status: TripStatus, reason?: string | null): Promise<void> {
+/** POST /api/trips/{id}/status — the backend accepts ONLY these two transitions
+ *  here; "Completed" now 409s (completion is billing-driven — see finishTripOperations). */
+export function changeTripStatus(
+  id: string,
+  status: "InProgress" | "Cancelled",
+  reason?: string | null,
+): Promise<void> {
   return request<void>(`/api/trips/${id}/status`, {
     method: "POST",
     body: JSON.stringify({ status, reason: reason ?? null }),
+  });
+}
+
+/** POST /api/trips/{id}/finish → 204 (no body). Ends the run: lands in
+ *  ReadyForBilling when the trip has a client, straight in Completed when not. */
+export function finishTripOperations(id: string): Promise<void> {
+  return request<void>(`/api/trips/${id}/finish`, { method: "POST" });
+}
+
+/** POST /api/trips/{id}/close-without-billing → 204. Reason is required; only
+ *  legal from ReadyForBilling, and refused with a 409 problem if a billing
+ *  worksheet already claims the trip. Lands in WrittenOff. */
+export function closeTripWithoutBilling(id: string, reason: string): Promise<void> {
+  return request<void>(`/api/trips/${id}/close-without-billing`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
   });
 }
 
@@ -431,30 +524,105 @@ export function isOpenTrip(t: TripRecord): boolean {
   return t.status === "Scheduled" && t.driverId === null;
 }
 
-/** Status chip (kind + label travel together), matching the prototype's chip
- *  semantics: open → gold, empty leg → gray, in progress → blue, completed →
- *  teal, cancelled → gray. */
+/** Human label for every persisted trip status — screens must never render (or
+ *  lowercase) a raw enum name. */
+export function tripStatusLabel(s: TripStatus): string {
+  switch (s) {
+    case "Scheduled":
+      return "Scheduled";
+    case "InProgress":
+      return "In progress";
+    case "ReadyForBilling":
+      return "Ready for billing";
+    case "Invoiced":
+      return "Invoiced";
+    case "Completed":
+      return "Completed";
+    case "Cancelled":
+      return "Cancelled";
+    case "WrittenOff":
+      return "Written off";
+    default:
+      return s satisfies never;
+  }
+}
+
+/** True once the run itself is over (or never ran) — everything except
+ *  Scheduled and InProgress. "The run already happened" gates, not billing. */
+export function isOperationallyClosed(t: TripRecord): boolean {
+  return t.status !== "Scheduled" && t.status !== "InProgress";
+}
+
+/**
+ * Billing worksheet chip — the SECOND axis alongside {@link tripChip}. Operational status
+ * ("where is the bus / the money") and worksheet detail ("which invoice claims it") are
+ * deliberately separate. Ready-for-billing is a real persisted trip status now, covered by
+ * the operational chip — this one only speaks when a worksheet claims the trip. Returns
+ * null when t.billing is null, so callers render no chip.
+ */
+export function tripBillingChip(t: TripRecord): { kind: StatusKind; label: string } | null {
+  if (!t.billing) return null;
+  switch (t.billing.state) {
+    case "Paid":
+      return { kind: "ontime", label: `Paid · ${t.billing.invoiceNumber}` };
+    case "Invoiced":
+      return { kind: "info", label: `Invoiced · ${t.billing.qboInvoiceId ?? t.billing.invoiceNumber}` };
+    case "WrittenOff":
+      return { kind: "over", label: `Written off · ${t.billing.invoiceNumber}` };
+    case "OnWorksheet":
+    default:
+      return { kind: "soon", label: `On worksheet ${t.billing.invoiceNumber}` };
+  }
+}
+
+/** True when invoicing this trip again would double-bill it. Keyed on the trip's
+ *  own status now that the lifecycle is billing-driven; a Completed client trip
+ *  is one whose payment already arrived. */
+export function isTripBilled(t: TripRecord): boolean {
+  return (
+    t.status === "Invoiced" ||
+    t.status === "WrittenOff" ||
+    (t.status === "Completed" && t.clientId !== null)
+  );
+}
+
+/** Status chip (kind + label travel together): open → gold, empty leg → gray,
+ *  in progress → blue, ready for billing → gold, invoiced → blue, completed →
+ *  teal, cancelled → gray, written off → vermillion. */
 export function tripChip(t: TripRecord): { kind: StatusKind; label: string } {
   switch (t.status) {
     case "InProgress":
       return { kind: "info", label: "In progress" };
+    case "ReadyForBilling":
+      return { kind: "soon", label: "Ready for billing" };
+    case "Invoiced":
+      return { kind: "info", label: "Invoiced" };
     case "Completed":
       return { kind: "ontime", label: "Completed" };
     case "Cancelled":
       return { kind: "off", label: "Cancelled" };
+    case "WrittenOff":
+      return { kind: "over", label: "Written off" };
     case "Scheduled":
-    default:
       if (t.driverId === null) return { kind: "soon", label: "Open — needs coverage" };
       if (t.isEmptyLeg) return { kind: "off", label: "Empty leg available" };
       return { kind: "ontime", label: "Scheduled" };
+    default:
+      // An unknown status must show itself, never masquerade as another state.
+      return { kind: "off", label: t.status };
   }
 }
 
 /** UI mirror of the backend's round-trip pairing eligibility: a client trip,
- *  not cancelled, not already paired. Gates MERGE INTO ROUND TRIP and (with an
- *  extra !isEmptyLeg check) CREATE DEADHEAD RETURN. */
+ *  not cancelled or written off, not already paired. Gates MERGE INTO ROUND
+ *  TRIP and (with an extra !isEmptyLeg check) CREATE DEADHEAD RETURN. */
 export function canPairRoundTrip(t: TripRecord): boolean {
-  return t.clientId !== null && t.roundTripKey === null && t.status !== "Cancelled";
+  return (
+    t.clientId !== null &&
+    t.roundTripKey === null &&
+    t.status !== "Cancelled" &&
+    t.status !== "WrittenOff"
+  );
 }
 
 const normPlace = (s: string) => s.trim().toLowerCase();
@@ -610,15 +778,6 @@ export function sortTrips(rows: TripRecord[]): TripRecord[] {
   });
 }
 
-/**
- * Most-recent-first ordering for the Trips screen's master list. The exact
- * reverse of {@link sortTrips}, which the forward-looking chronological views
- * (dispatch board, driver roster, manifests) keep.
- */
-export function sortTripsRecentFirst(rows: TripRecord[]): TripRecord[] {
-  return sortTrips(rows).reverse();
-}
-
 // ---------------------------------------------------------------------------
 // Trip Manifest contract (Backend Trips module — TripManifestResponse /
 // TripManifestInput, TripsEndpoints.cs). The manifest is now a SLIM, editable
@@ -632,9 +791,11 @@ export function sortTripsRecentFirst(rows: TripRecord[]): TripRecord[] {
 export type ManifestSource = "App" | "Dispatcher";
 export type ManifestDirection = "Inbound" | "Outbound";
 export type ManifestCargoSecured = "Yes" | "NotApplicable";
+export type FarePaymentMethod = "Cash" | "Online" | "Waived";
 
 /** A manifest passenger. Pickup/dropoff reference the trip's route stops by id
- *  (with a snapshot name); free-form trips leave the ids null. */
+ *  (with a snapshot name); free-form trips leave the ids null. Fare fields are
+ *  recorded per passenger just after the run — not reconciled to QuickBooks. */
 export interface ManifestPassenger {
   name: string;
   contact?: string | null;
@@ -645,6 +806,9 @@ export interface ManifestPassenger {
   idVerified: boolean;
   boardedOn: boolean;
   boardedOff: boolean;
+  fareAmountCad: number | null;
+  farePaymentMethod: FarePaymentMethod | null;
+  farePaidAtUtc: string | null;
 }
 
 export interface ManifestCargo {
@@ -674,11 +838,15 @@ export interface TripManifestInput {
   enteredBy: string | null;
 }
 
-/** TripManifestResponse = the input fields + id / enteredAt / createdAtUtc. */
+/** TripManifestResponse = the input fields + id / enteredAt / createdAtUtc,
+ *  plus server-computed fare rollups (recorded amounts — not reconciled to QBO). */
 export interface TripManifest extends TripManifestInput {
   id: string;
   enteredAt: string | null;
   createdAtUtc: string;
+  faresCollectedCad: number;
+  faresPaidCount: number;
+  faresWaivedCount: number;
 }
 
 /** POST → 201 { id } (Trips module — ManifestCreatedResponse). */

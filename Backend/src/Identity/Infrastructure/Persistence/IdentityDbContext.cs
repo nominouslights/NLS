@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using NorthernLink.Identity.Application.Auth;
 using NorthernLink.Identity.Domain.Users;
 using NorthernLink.Identity.Infrastructure.Persistence.Configurations;
 using NorthernLink.Shared.Persistence;
@@ -17,8 +18,9 @@ namespace NorthernLink.Identity.Infrastructure.Persistence;
 /// </summary>
 public sealed class IdentityDbContext(
     DbContextOptions<IdentityDbContext> options,
-    ITenantContext tenantContext)
-    : ModuleDbContext(options, IdentityServiceCollectionExtensions.SchemaName, tenantContext)
+    ITenantContext tenantContext,
+    IdentityIntegrationEventMapper? integrationEventMapper = null)
+    : ModuleDbContext(options, IdentityServiceCollectionExtensions.SchemaName, tenantContext, integrationEventMapper)
 {
     public DbSet<User> Users => Set<User>();
 
