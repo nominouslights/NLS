@@ -31,7 +31,22 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
     public TripServiceType ServiceType { get; private set; }
     public Guid? ClientId { get; private set; }
     public string? ClientName { get; private set; }
+
+    /// <summary>Which of the three recurrence models this template uses; only the matching fields below are populated.</summary>
+    public ScheduleRecurrenceKind RecurrenceKind { get; private set; }
+
+    /// <summary>DaysOfWeek recurrence: emit on each listed weekday. Empty for other kinds.</summary>
     public List<DayOfWeek> DaysOfWeek { get; private set; } = [];
+
+    /// <summary>EveryNDays recurrence: the interval in days (1..365). Null for other kinds.</summary>
+    public int? IntervalDays { get; private set; }
+
+    /// <summary>EveryNDays recurrence: the date the interval is counted from. Null for other kinds.</summary>
+    public DateOnly? AnchorDate { get; private set; }
+
+    /// <summary>MonthlyDays recurrence: calendar days (1..31), clamped to month-end. Empty for other kinds.</summary>
+    public List<int> DaysOfMonth { get; private set; } = [];
+
     public TimeOnly DepartureTime { get; private set; }
 
     /// <summary>Non-null ⇒ each occurrence generates an outbound + return leg pair sharing a RoundTripKey.</summary>
@@ -57,7 +72,11 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
         TripServiceType serviceType,
         Guid? clientId,
         string? clientName,
+        ScheduleRecurrenceKind recurrenceKind,
         IReadOnlyList<DayOfWeek> daysOfWeek,
+        int? intervalDays,
+        DateOnly? anchorDate,
+        IReadOnlyList<int> daysOfMonth,
         TimeOnly departureTime,
         TimeOnly? returnDepartureTime,
         int seatsCapacity,
@@ -68,8 +87,8 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
         string? cutoffNote = null)
     {
         var validation = Validate(
-            name, routeId, daysOfWeek, departureTime, returnDepartureTime,
-            seatsCapacity, seatsMinimum, generationHorizonDays);
+            name, routeId, recurrenceKind, daysOfWeek, intervalDays, anchorDate, daysOfMonth,
+            departureTime, returnDepartureTime, seatsCapacity, seatsMinimum, generationHorizonDays);
         if (validation.IsFailure)
         {
             return Result.Failure<ScheduleTemplate>(validation.Error);
@@ -84,7 +103,6 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
             ServiceType = serviceType,
             ClientId = clientId,
             ClientName = Normalize(clientName),
-            DaysOfWeek = NormalizeDays(daysOfWeek),
             DepartureTime = departureTime,
             ReturnDepartureTime = returnDepartureTime,
             SeatsCapacity = seatsCapacity,
@@ -97,6 +115,7 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
             CreatedAtUtc = now,
             UpdatedAtUtc = now,
         };
+        template.ApplyRecurrence(recurrenceKind, daysOfWeek, intervalDays, anchorDate, daysOfMonth);
 
         template.Raise(new ScheduleTemplateCreatedDomainEvent(template.Id));
         return Result.Success(template);
@@ -109,7 +128,11 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
         TripServiceType serviceType,
         Guid? clientId,
         string? clientName,
+        ScheduleRecurrenceKind recurrenceKind,
         IReadOnlyList<DayOfWeek> daysOfWeek,
+        int? intervalDays,
+        DateOnly? anchorDate,
+        IReadOnlyList<int> daysOfMonth,
         TimeOnly departureTime,
         TimeOnly? returnDepartureTime,
         int seatsCapacity,
@@ -120,8 +143,8 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
         string? cutoffNote)
     {
         var validation = Validate(
-            name, routeId, daysOfWeek, departureTime, returnDepartureTime,
-            seatsCapacity, seatsMinimum, generationHorizonDays);
+            name, routeId, recurrenceKind, daysOfWeek, intervalDays, anchorDate, daysOfMonth,
+            departureTime, returnDepartureTime, seatsCapacity, seatsMinimum, generationHorizonDays);
         if (validation.IsFailure)
         {
             return validation;
@@ -132,7 +155,7 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
         ServiceType = serviceType;
         ClientId = clientId;
         ClientName = Normalize(clientName);
-        DaysOfWeek = NormalizeDays(daysOfWeek);
+        ApplyRecurrence(recurrenceKind, daysOfWeek, intervalDays, anchorDate, daysOfMonth);
         DepartureTime = departureTime;
         ReturnDepartureTime = returnDepartureTime;
         SeatsCapacity = seatsCapacity;
@@ -170,7 +193,11 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
     private static Result Validate(
         string name,
         Guid routeId,
+        ScheduleRecurrenceKind recurrenceKind,
         IReadOnlyList<DayOfWeek> daysOfWeek,
+        int? intervalDays,
+        DateOnly? anchorDate,
+        IReadOnlyList<int> daysOfMonth,
         TimeOnly departureTime,
         TimeOnly? returnDepartureTime,
         int seatsCapacity,
@@ -187,9 +214,26 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
             return Result.Failure(ScheduleTemplateErrors.RouteRequired);
         }
 
-        if (daysOfWeek.Count == 0)
+        var recurrenceValidation = recurrenceKind switch
         {
-            return Result.Failure(ScheduleTemplateErrors.AtLeastOneDay);
+            ScheduleRecurrenceKind.DaysOfWeek => daysOfWeek.Count == 0
+                ? Result.Failure(ScheduleTemplateErrors.AtLeastOneDay)
+                : Result.Success(),
+            ScheduleRecurrenceKind.EveryNDays => intervalDays is not { } interval || interval is < 1 or > 365
+                ? Result.Failure(ScheduleTemplateErrors.InvalidInterval)
+                : anchorDate is null
+                    ? Result.Failure(ScheduleTemplateErrors.AnchorRequired)
+                    : Result.Success(),
+            ScheduleRecurrenceKind.MonthlyDays => daysOfMonth.Count == 0
+                ? Result.Failure(ScheduleTemplateErrors.AtLeastOneDayOfMonth)
+                : daysOfMonth.Any(day => day is < 1 or > 31)
+                    ? Result.Failure(ScheduleTemplateErrors.InvalidDayOfMonth)
+                    : Result.Success(),
+            _ => Result.Success(),
+        };
+        if (recurrenceValidation.IsFailure)
+        {
+            return recurrenceValidation;
         }
 
         if (seatsCapacity <= 0 || seatsMinimum is { } minimum && (minimum <= 0 || minimum > seatsCapacity))
@@ -210,8 +254,47 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
         return Result.Success();
     }
 
+    /// <summary>
+    /// Assigns the recurrence fields for <paramref name="recurrenceKind"/>, keeping only that
+    /// kind's fields populated and clearing the others — so a template never carries stale
+    /// data from a previously-selected kind. Validation runs first, so inputs are known good.
+    /// </summary>
+    private void ApplyRecurrence(
+        ScheduleRecurrenceKind recurrenceKind,
+        IReadOnlyList<DayOfWeek> daysOfWeek,
+        int? intervalDays,
+        DateOnly? anchorDate,
+        IReadOnlyList<int> daysOfMonth)
+    {
+        RecurrenceKind = recurrenceKind;
+        switch (recurrenceKind)
+        {
+            case ScheduleRecurrenceKind.DaysOfWeek:
+                DaysOfWeek = NormalizeDays(daysOfWeek);
+                IntervalDays = null;
+                AnchorDate = null;
+                DaysOfMonth = [];
+                break;
+            case ScheduleRecurrenceKind.EveryNDays:
+                DaysOfWeek = [];
+                IntervalDays = intervalDays;
+                AnchorDate = anchorDate;
+                DaysOfMonth = [];
+                break;
+            case ScheduleRecurrenceKind.MonthlyDays:
+                DaysOfWeek = [];
+                IntervalDays = null;
+                AnchorDate = null;
+                DaysOfMonth = NormalizeDaysOfMonth(daysOfMonth);
+                break;
+        }
+    }
+
     private static List<DayOfWeek> NormalizeDays(IReadOnlyList<DayOfWeek> daysOfWeek) =>
         [.. daysOfWeek.Distinct().OrderBy(day => day)];
+
+    private static List<int> NormalizeDaysOfMonth(IReadOnlyList<int> daysOfMonth) =>
+        [.. daysOfMonth.Distinct().OrderBy(day => day)];
 
     private static string? Normalize(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();

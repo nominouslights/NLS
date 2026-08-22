@@ -17,6 +17,18 @@ public static class ScheduleTemplateErrors
     public static readonly Error AtLeastOneDay = Error.Validation(
         "Trips.ScheduleTemplate.AtLeastOneDay", "A template must run on at least one day of the week.");
 
+    public static readonly Error InvalidInterval = Error.Validation(
+        "Trips.ScheduleTemplate.InvalidInterval", "The recurrence interval must be between 1 and 365 days.");
+
+    public static readonly Error AnchorRequired = Error.Validation(
+        "Trips.ScheduleTemplate.AnchorRequired", "An every-N-days template must have an anchor date.");
+
+    public static readonly Error AtLeastOneDayOfMonth = Error.Validation(
+        "Trips.ScheduleTemplate.AtLeastOneDayOfMonth", "A monthly template must run on at least one day of the month.");
+
+    public static readonly Error InvalidDayOfMonth = Error.Validation(
+        "Trips.ScheduleTemplate.InvalidDayOfMonth", "Each day of the month must be between 1 and 31.");
+
     public static readonly Error InvalidSeats = Error.Validation(
         "Trips.ScheduleTemplate.InvalidSeats", "Seat capacity must be positive and the minimum cannot exceed it.");
 

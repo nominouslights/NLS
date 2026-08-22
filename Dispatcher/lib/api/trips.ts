@@ -318,6 +318,18 @@ export const DAY_SHORT: Record<DayName, string> = {
   Sunday: "SUN",
 };
 
+/** How a schedule template recurs (backend RecurrenceKind enum, PascalCase names).
+ *  Only the selected kind's fields are read server-side; the rest ride as empty/
+ *  null defaults (daysOfWeek:[], intervalDays:null, anchorDate:null, daysOfMonth:[]). */
+export type ScheduleRecurrenceKind = "DaysOfWeek" | "EveryNDays" | "MonthlyDays";
+
+/** Frequency-picker labels — the human-facing names for each recurrence kind. */
+export const RECURRENCE_LABELS: Record<ScheduleRecurrenceKind, string> = {
+  DaysOfWeek: "Specific days of week",
+  EveryNDays: "Every N days",
+  MonthlyDays: "Monthly (day of month)",
+};
+
 /** Mirrors ScheduleTemplateResponse. */
 export interface ScheduleTemplateRecord {
   id: string;
@@ -327,7 +339,15 @@ export interface ScheduleTemplateRecord {
   serviceType: TripServiceType;
   clientId: string | null;
   clientName: string | null;
+  /** How this template recurs; gates which of the fields below are meaningful. */
+  recurrenceKind: ScheduleRecurrenceKind;
   daysOfWeek: DayName[];
+  /** EveryNDays: interval between generated trips; null for other kinds. */
+  intervalDays: number | null;
+  /** EveryNDays: DateOnly "yyyy-MM-dd" the interval counts from; null otherwise. */
+  anchorDate: string | null;
+  /** MonthlyDays: days of month (1–31, month-end clamps); [] for other kinds. */
+  daysOfMonth: number[];
   departureTime: string; // TimeOnly, "06:30:00"
   returnDepartureTime: string | null;
   seatsCapacity: number;
@@ -349,7 +369,16 @@ export interface ScheduleTemplateInput {
   serviceType: TripServiceType;
   clientId?: string | null;
   clientName?: string | null;
+  /** Selected recurrence kind; only this kind's fields are read server-side. */
+  recurrenceKind: ScheduleRecurrenceKind;
+  /** DaysOfWeek: the selected weekdays. Send [] for other kinds. */
   daysOfWeek: DayName[];
+  /** EveryNDays: interval ≥ 1. Send null for other kinds. */
+  intervalDays?: number | null;
+  /** EveryNDays: start date "yyyy-MM-dd". Send null for other kinds. */
+  anchorDate?: string | null;
+  /** MonthlyDays: days of month (1–31). Send [] for other kinds. */
+  daysOfMonth: number[];
   departureTime: string; // "HH:mm"
   returnDepartureTime?: string | null;
   seatsCapacity: number;
@@ -472,6 +501,35 @@ export function roundTripManualCandidates(trip: TripRecord, all: TripRecord[]): 
   return sortTrips(
     all.filter((c) => c.id !== trip.id && canPairRoundTrip(c) && c.clientId === trip.clientId),
   );
+}
+
+/** Human cadence line for a template, switching on its recurrence kind:
+ *  - DaysOfWeek → weekday shorts in calendar order, e.g. "MON / WED / FRI".
+ *  - EveryNDays → "Every 3 days from 2026-08-24" (singular "day" at 1).
+ *  - MonthlyDays → "Monthly on 1, 15, 31" (a 31 clamps to month-end backend-side). */
+export function recurrenceSummary(
+  t: Pick<
+    ScheduleTemplateRecord,
+    "recurrenceKind" | "daysOfWeek" | "intervalDays" | "anchorDate" | "daysOfMonth"
+  >,
+): string {
+  switch (t.recurrenceKind) {
+    case "EveryNDays": {
+      const n = t.intervalDays ?? 0;
+      const unit = n === 1 ? "day" : "days";
+      const from = t.anchorDate ? ` from ${t.anchorDate}` : "";
+      return n > 0 ? `Every ${n} ${unit}${from}` : "Every N days — interval not set";
+    }
+    case "MonthlyDays": {
+      const days = [...t.daysOfMonth].sort((a, b) => a - b);
+      return days.length > 0 ? `Monthly on ${days.join(", ")}` : "Monthly — no days selected";
+    }
+    case "DaysOfWeek":
+    default: {
+      const ordered = WEEK_DAYS.filter((d) => t.daysOfWeek.includes(d)).map((d) => DAY_SHORT[d]);
+      return ordered.length > 0 ? ordered.join(" / ") : "—";
+    }
+  }
 }
 
 /** Backend ServiceType enum → the console's theme service key (svcMeta). */

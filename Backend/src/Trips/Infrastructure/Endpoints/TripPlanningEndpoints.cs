@@ -452,7 +452,11 @@ internal static class TripPlanningEndpoints
             request.ServiceType,
             request.ClientId,
             request.ClientName,
+            request.RecurrenceKind,
             request.DaysOfWeek ?? [],
+            request.IntervalDays,
+            request.AnchorDate,
+            request.DaysOfMonth ?? [],
             request.DepartureTime,
             request.ReturnDepartureTime,
             request.SeatsCapacity,
@@ -485,7 +489,11 @@ internal static class TripPlanningEndpoints
             request.ServiceType,
             request.ClientId,
             request.ClientName,
+            request.RecurrenceKind,
             request.DaysOfWeek ?? [],
+            request.IntervalDays,
+            request.AnchorDate,
+            request.DaysOfMonth ?? [],
             request.DepartureTime,
             request.ReturnDepartureTime,
             request.SeatsCapacity,
@@ -639,9 +647,12 @@ public sealed record UpdateRouteRequest(
     bool Active);
 
 /// <summary>
-/// Request body for POST /api/trips/schedule-templates. Days take day names
-/// ("Monday", …); a non-null returnDepartureTime makes each occurrence a paired
-/// outbound + return leg.
+/// Request body for POST /api/trips/schedule-templates. <c>RecurrenceKind</c> takes an
+/// enum name ("DaysOfWeek" | "EveryNDays" | "MonthlyDays") and selects which of the
+/// recurrence fields apply: DaysOfWeek uses <c>daysOfWeek</c> (day names "Monday", …);
+/// EveryNDays uses <c>intervalDays</c> + <c>anchorDate</c>; MonthlyDays uses
+/// <c>daysOfMonth</c> (1–31, clamped to month-end). Fields for other kinds are ignored.
+/// A non-null returnDepartureTime makes each occurrence a paired outbound + return leg.
 /// </summary>
 public sealed record CreateScheduleTemplateRequest(
     string? Name,
@@ -649,7 +660,11 @@ public sealed record CreateScheduleTemplateRequest(
     TripServiceType ServiceType,
     Guid? ClientId,
     string? ClientName,
+    ScheduleRecurrenceKind RecurrenceKind,
     IReadOnlyList<DayOfWeek>? DaysOfWeek,
+    int? IntervalDays,
+    DateOnly? AnchorDate,
+    IReadOnlyList<int>? DaysOfMonth,
     TimeOnly DepartureTime,
     TimeOnly? ReturnDepartureTime,
     int SeatsCapacity,
@@ -659,14 +674,18 @@ public sealed record CreateScheduleTemplateRequest(
     int? GenerationHorizonDays,
     string? CutoffNote);
 
-/// <summary>Request body for PUT /api/trips/schedule-templates/{id} (full row; active via /activate, /deactivate).</summary>
+/// <summary>Request body for PUT /api/trips/schedule-templates/{id} (full row; active via /activate, /deactivate). See the create request for how <c>recurrenceKind</c> selects the recurrence fields.</summary>
 public sealed record UpdateScheduleTemplateRequest(
     string? Name,
     Guid RouteId,
     TripServiceType ServiceType,
     Guid? ClientId,
     string? ClientName,
+    ScheduleRecurrenceKind RecurrenceKind,
     IReadOnlyList<DayOfWeek>? DaysOfWeek,
+    int? IntervalDays,
+    DateOnly? AnchorDate,
+    IReadOnlyList<int>? DaysOfMonth,
     TimeOnly DepartureTime,
     TimeOnly? ReturnDepartureTime,
     int SeatsCapacity,

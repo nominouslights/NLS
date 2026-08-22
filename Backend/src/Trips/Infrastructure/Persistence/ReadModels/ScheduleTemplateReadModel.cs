@@ -1,4 +1,6 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace NorthernLink.Trips.Infrastructure.Persistence.ReadModels;
@@ -20,7 +22,11 @@ public sealed class ScheduleTemplateReadModel
     public string ServiceType { get; set; } = null!;
     public Guid? ClientId { get; set; }
     public string? ClientName { get; set; }
+    public string RecurrenceKind { get; set; } = null!;
     public List<string> DaysOfWeek { get; set; } = [];
+    public int? IntervalDays { get; set; }
+    public DateOnly? AnchorDate { get; set; }
+    public List<int> DaysOfMonth { get; set; } = [];
     public TimeOnly DepartureTime { get; set; }
     public TimeOnly? ReturnDepartureTime { get; set; }
     public int SeatsCapacity { get; set; }
@@ -37,6 +43,8 @@ public sealed class ScheduleTemplateReadModel
 
 public sealed class ScheduleTemplateReadModelConfiguration : IEntityTypeConfiguration<ScheduleTemplateReadModel>
 {
+    private static readonly JsonSerializerOptions JsonOptions = JsonSerializerOptions.Default;
+
     public void Configure(EntityTypeBuilder<ScheduleTemplateReadModel> builder)
     {
         builder.HasKey(t => t.Id);
@@ -50,7 +58,20 @@ public sealed class ScheduleTemplateReadModelConfiguration : IEntityTypeConfigur
         builder.Property(t => t.ServiceType).HasColumnName("service_type");
         builder.Property(t => t.ClientId).HasColumnName("client_id");
         builder.Property(t => t.ClientName).HasColumnName("client_name");
+        builder.Property(t => t.RecurrenceKind).HasColumnName("recurrence_kind");
         builder.PrimitiveCollection(t => t.DaysOfWeek).HasColumnName("days_of_week");
+        builder.Property(t => t.IntervalDays).HasColumnName("interval_days");
+        builder.Property(t => t.AnchorDate).HasColumnName("anchor_date");
+        builder.Property(t => t.DaysOfMonth)
+            .HasColumnName("days_of_month")
+            .HasColumnType("jsonb")
+            .HasConversion(
+                days => JsonSerializer.Serialize(days, JsonOptions),
+                json => JsonSerializer.Deserialize<List<int>>(json, JsonOptions)!,
+                new ValueComparer<List<int>>(
+                    (left, right) => left!.SequenceEqual(right!),
+                    days => days.Aggregate(0, (hash, day) => HashCode.Combine(hash, day)),
+                    days => days.ToList()));
         builder.Property(t => t.DepartureTime).HasColumnName("departure_time");
         builder.Property(t => t.ReturnDepartureTime).HasColumnName("return_departure_time");
         builder.Property(t => t.SeatsCapacity).HasColumnName("seats_capacity");
