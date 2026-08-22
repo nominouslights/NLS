@@ -306,7 +306,7 @@ export function PassengerRowsEditor({
             </div>
             {p.farePaidAtUtc && (
               <div style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textDim, paddingBottom: 12, textAlign: "right" }}>
-                recorded {new Date(p.farePaidAtUtc).toLocaleString("en-CA", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}
+                recorded {new Date(p.farePaidAtUtc).toLocaleString("en-CA", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: true })}
               </div>
             )}
           </div>

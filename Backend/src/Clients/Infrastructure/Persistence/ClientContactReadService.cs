@@ -29,6 +29,7 @@ internal sealed class ClientContactReadService(ClientsDbContext context) : IClie
         contact.Phone,
         contact.Notes,
         contact.IsPrimary,
+        contact.ReceivesEmailReports,
         contact.CreatedAtUtc,
         contact.UpdatedAtUtc);
 }

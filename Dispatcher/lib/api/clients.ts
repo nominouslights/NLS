@@ -72,6 +72,7 @@ export interface ClientContactRecord {
   phone: string | null;
   notes: string | null;
   isPrimary: boolean;
+  receivesEmailReports: boolean;
   createdAtUtc: string;
   updatedAtUtc: string;
 }
@@ -84,6 +85,7 @@ export interface ClientContactInput {
   phone?: string | null;
   notes?: string | null;
   isPrimary: boolean;
+  receivesEmailReports: boolean;
 }
 
 export interface ContractRecord {

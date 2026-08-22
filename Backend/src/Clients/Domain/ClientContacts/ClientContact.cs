@@ -28,6 +28,7 @@ public sealed class ClientContact : AggregateRoot, ITenantScoped
     public string? Phone { get; private set; }
     public string? Notes { get; private set; }
     public bool IsPrimary { get; private set; }
+    public bool ReceivesEmailReports { get; private set; }
     public DateTimeOffset CreatedAtUtc { get; private set; }
     public DateTimeOffset UpdatedAtUtc { get; private set; }
 
@@ -39,7 +40,8 @@ public sealed class ClientContact : AggregateRoot, ITenantScoped
         string? email,
         string? phone,
         string? notes,
-        bool isPrimary)
+        bool isPrimary,
+        bool receivesEmailReports = false)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -62,6 +64,7 @@ public sealed class ClientContact : AggregateRoot, ITenantScoped
             Phone = Clean(phone),
             Notes = Clean(notes),
             IsPrimary = isPrimary,
+            ReceivesEmailReports = receivesEmailReports,
             CreatedAtUtc = now,
             UpdatedAtUtc = now,
         };

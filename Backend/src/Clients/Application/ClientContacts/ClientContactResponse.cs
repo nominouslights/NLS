@@ -13,5 +13,6 @@ public sealed record ClientContactResponse(
     string? Phone,
     string? Notes,
     bool IsPrimary,
+    bool ReceivesEmailReports,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc);

@@ -37,7 +37,19 @@ public sealed class PostmarkEmailSender(HttpClient httpClient, NotificationsOpti
         {
             var messages = emails
                 .Select(email => new PostmarkMessage(
-                    options.FromAddress, email.To, email.Subject, email.HtmlBody, email.TextBody, options.MessageStream))
+                    options.FromAddress,
+                    email.To,
+                    email.Subject,
+                    email.HtmlBody,
+                    email.TextBody,
+                    options.MessageStream,
+                    // Null (not empty) when there are no attachments so the property is omitted
+                    // entirely — the attachment-free pickup batch stays byte-for-byte unchanged.
+                    email.Attachments is { Count: > 0 } attachments
+                        ? attachments
+                            .Select(a => new PostmarkAttachment(a.Name, a.Base64Content, a.ContentType))
+                            .ToList()
+                        : null))
                 .ToList();
 
             using var request = new HttpRequestMessage(HttpMethod.Post, "/email/batch");
@@ -108,7 +120,14 @@ public sealed class PostmarkEmailSender(HttpClient httpClient, NotificationsOpti
         string Subject,
         string HtmlBody,
         string TextBody,
-        string MessageStream);
+        string MessageStream,
+        // Omitted from the payload entirely when null (the no-attachment case), so a plain
+        // pickup send serializes exactly as before this feature existed.
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        IReadOnlyList<PostmarkAttachment>? Attachments);
+
+    /// <summary>Postmark's attachment shape: Content is the Base64-encoded file bytes.</summary>
+    private sealed record PostmarkAttachment(string Name, string Content, string ContentType);
 
     /// <summary>One entry of Postmark's batch response, in submission order.</summary>
     public sealed record PostmarkMessageResult(

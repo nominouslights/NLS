@@ -1,8 +1,12 @@
+using System.Net;
+using System.Text;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
 using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Notifications.Application.Abstractions;
 using NorthernLink.Notifications.Application.Rendering;
+using NorthernLink.Notifications.Domain;
 using NorthernLink.Notifications.Domain.Dispatches;
 using NorthernLink.Notifications.Domain.Templates;
 
@@ -19,7 +23,9 @@ namespace NorthernLink.Notifications.Application.Dispatches.SendTripPickupEmail;
 public sealed partial class SendTripPickupEmailCommandHandler(
     IEmailTemplateRepository templateRepository,
     IEmailDispatchRepository dispatchRepository,
-    IEmailSender emailSender)
+    IEmailSender emailSender,
+    IPickupEmailReportPdf reportPdf,
+    ILogger<SendTripPickupEmailCommandHandler> logger)
     : ICommandHandler<SendTripPickupEmailCommand, EmailDispatchResponse>
 {
     public async Task<Result<EmailDispatchResponse>> Handle(
@@ -130,7 +136,118 @@ public sealed partial class SendTripPickupEmailCommandHandler(
         dispatchRepository.Add(dispatchResult.Value);
         await dispatchRepository.SaveChangesAsync(cancellationToken);
 
-        return Result.Success(EmailDispatchResponseMapper.ToResponse(dispatchResult.Value));
+        // The pickup result is now fixed. Anything below is best-effort and must never change it.
+        var response = EmailDispatchResponseMapper.ToResponse(dispatchResult.Value);
+
+        await TrySendPickupReportAsync(command, template.Name, outgoing, outcomes, cancellationToken);
+
+        return Result.Success(response);
+    }
+
+    /// <summary>
+    /// Best-effort report step: for a ContractCrew trip with at least one valid report recipient,
+    /// build a PDF of every sent pickup email and email it to those recipients. Wrapped entirely in
+    /// try/catch — a report failure is logged and swallowed so the pickup send's result is returned
+    /// unchanged. Never recorded as an <see cref="EmailDispatch"/>.
+    /// </summary>
+    private async Task TrySendPickupReportAsync(
+        SendTripPickupEmailCommand command,
+        string templateName,
+        IReadOnlyList<OutgoingEmail> outgoing,
+        IReadOnlyList<EmailSendOutcome> outcomes,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (command.ServiceType != NotificationServiceType.ContractCrew)
+            {
+                return;
+            }
+
+            var reportRecipients = command.ReportRecipients
+                .Select(address => address?.Trim() ?? string.Empty)
+                .Where(address => EmailRegex().IsMatch(address))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (reportRecipients.Count == 0)
+            {
+                return;
+            }
+
+            var items = command.Recipients
+                .Select((recipient, index) =>
+                {
+                    var sent = index < outcomes.Count && outcomes[index].Sent;
+                    var email = outgoing[index];
+                    return new PickupEmailReportItem(
+                        recipient.PassengerName.Trim(),
+                        recipient.Email.Trim(),
+                        sent ? "Sent" : "Failed",
+                        email.Subject,
+                        email.TextBody);
+                })
+                .ToList();
+
+            var sentCount = outcomes.Count(outcome => outcome.Sent);
+            var failedCount = outcomes.Count - sentCount;
+
+            var report = new PickupEmailReport(
+                command.TripNumber,
+                command.Route,
+                command.TripDate,
+                templateName,
+                DateTimeOffset.UtcNow,
+                sentCount,
+                failedCount,
+                items);
+
+            var pdf = reportPdf.Build(report);
+            var attachment = new EmailAttachment(
+                $"pickup-emails-{command.TripNumber}.pdf",
+                Convert.ToBase64String(pdf),
+                "application/pdf");
+
+            var subject = $"Pickup email report — {command.TripNumber} — {command.TripDate}";
+            var htmlBody = BuildReportHtmlBody(command, items, sentCount);
+            var textBody = MergeFieldRenderer.RenderText(htmlBody);
+
+            var reportEmails = reportRecipients
+                .Select(to => new OutgoingEmail(to, subject, htmlBody, textBody, [attachment]))
+                .ToList();
+
+            await emailSender.SendBatchAsync(reportEmails, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            // Report delivery is best-effort — the pickup send already succeeded and its result
+            // stands. Log and move on rather than surface a failure to the caller.
+            logger.LogWarning(
+                exception,
+                "Pickup-email report step failed for trip {TripNumber} (dispatch {DispatchId}); the pickup send is unaffected.",
+                command.TripNumber,
+                command.DispatchId);
+        }
+    }
+
+    private static string BuildReportHtmlBody(
+        SendTripPickupEmailCommand command,
+        IReadOnlyList<PickupEmailReportItem> items,
+        int sentCount)
+    {
+        var recipientList = string.Join(
+            ", ",
+            items.Select(item =>
+                $"{WebUtility.HtmlEncode(item.PassengerName)} &lt;{WebUtility.HtmlEncode(item.Email)}&gt; ({WebUtility.HtmlEncode(item.Status)})"));
+
+        var builder = new StringBuilder();
+        builder.Append("<p>");
+        builder.Append($"{sentCount} pickup email{(sentCount == 1 ? string.Empty : "s")} sent for ");
+        builder.Append($"{WebUtility.HtmlEncode(command.Route)} on {WebUtility.HtmlEncode(command.TripDate)}.");
+        builder.Append("</p>");
+        builder.Append($"<p>Sent to: {recipientList}.</p>");
+        builder.Append("<p>A PDF copy of each email is attached.</p>");
+        return builder.ToString();
     }
 
     private static Dictionary<string, string> BuildValues(

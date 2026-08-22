@@ -23,6 +23,7 @@ internal sealed class ClientContactProjection : ClientsProjection<ClientContact,
         row.Phone = source.Phone;
         row.Notes = source.Notes;
         row.IsPrimary = source.IsPrimary;
+        row.ReceivesEmailReports = source.ReceivesEmailReports;
         row.CreatedAtUtc = source.CreatedAtUtc;
         row.UpdatedAtUtc = source.UpdatedAtUtc;
         row.Version = source.Version;

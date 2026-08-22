@@ -97,6 +97,10 @@ export interface SendTripPickupEmailInput {
   clientId: string | null;
   clientName: string | null;
   recipients: SendRecipientInput[];
+  /** Pre-resolved contact emails (contacts flagged receivesEmailReports).
+   *  Backend emails them a report — but only for ContractCrew trips. Empty
+   *  otherwise. */
+  reportRecipients: string[];
 }
 
 /** Per-recipient outcome embedded on the dispatch (RecipientResult). */

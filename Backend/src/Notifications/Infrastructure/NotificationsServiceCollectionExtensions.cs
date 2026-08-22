@@ -24,6 +24,8 @@ using NorthernLink.Notifications.Infrastructure.Email;
 using NorthernLink.Notifications.Infrastructure.Persistence;
 using NorthernLink.Notifications.Infrastructure.Persistence.Projections;
 using NorthernLink.Notifications.Infrastructure.Rendering;
+using NorthernLink.Notifications.Infrastructure.Reporting;
+using QuestPDF.Infrastructure;
 
 namespace NorthernLink.Notifications.Infrastructure;
 
@@ -67,6 +69,12 @@ public static class NotificationsServiceCollectionExtensions
         // Allowlist HTML sanitizer for stored/sent template bodies. Singleton: the underlying
         // Ganss HtmlSanitizer is configured once and each Sanitize call is a self-contained parse.
         services.AddSingleton<IEmailHtmlSanitizer, GanssEmailHtmlSanitizer>();
+
+        // Pickup-email report PDF (QuestPDF). The Community license must be set once, process-wide,
+        // before any document is generated — a static assignment here guarantees it runs before the
+        // first report build. Singleton: the renderer holds no mutable state (each Build is self-contained).
+        QuestPDF.Settings.License = LicenseType.Community;
+        services.AddSingleton<IPickupEmailReportPdf, QuestPickupEmailReportPdf>();
 
         // 3. Postmark sender over IHttpClientFactory (Microsoft.Extensions.Http ships in the
         //    AspNetCore framework reference — no extra package, no Polly, no SDK). Options are
