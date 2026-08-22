@@ -42,23 +42,16 @@ internal static class TestPlanning
         TimeOnly? returnDepartureTime = null,
         int generationHorizonDays = 7,
         bool active = true,
-        Guid? routeId = null)
+        Guid? routeId = null,
+        ScheduleRecurrenceKind recurrenceKind = ScheduleRecurrenceKind.DaysOfWeek,
+        int? intervalDays = null,
+        DateOnly? anchorDate = null,
+        IReadOnlyList<int>? daysOfMonth = null)
     {
-        var template = ScheduleTemplate.Create(
-            TenantId,
-            "Alamos crew shuttle",
-            routeId ?? Guid.NewGuid(),
-            TripServiceType.ContractCrew,
-            clientId: null,
-            clientName: "Alamos Gold",
-            daysOfWeek ?? [DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday],
-            departureTime ?? new TimeOnly(6, 30),
-            returnDepartureTime,
-            seatsCapacity: 12,
-            seatsMinimum: null,
-            defaultVehicleUnit: "U-04",
-            defaultDriverId: null,
-            generationHorizonDays).Value;
+        var result = CreateTemplateResult(
+            daysOfWeek, departureTime, returnDepartureTime, generationHorizonDays,
+            routeId, recurrenceKind, intervalDays, anchorDate, daysOfMonth);
+        var template = result.Value;
 
         if (!active)
         {
@@ -67,6 +60,40 @@ internal static class TestPlanning
 
         return template;
     }
+
+    /// <summary>
+    /// Builds a template <see cref="Result{T}"/> without unwrapping it — for validation tests that
+    /// assert on the failure <see cref="Error"/> rather than a materialized aggregate.
+    /// </summary>
+    public static Result<ScheduleTemplate> CreateTemplateResult(
+        IReadOnlyList<DayOfWeek>? daysOfWeek = null,
+        TimeOnly? departureTime = null,
+        TimeOnly? returnDepartureTime = null,
+        int generationHorizonDays = 7,
+        Guid? routeId = null,
+        ScheduleRecurrenceKind recurrenceKind = ScheduleRecurrenceKind.DaysOfWeek,
+        int? intervalDays = null,
+        DateOnly? anchorDate = null,
+        IReadOnlyList<int>? daysOfMonth = null) =>
+        ScheduleTemplate.Create(
+            TenantId,
+            "Alamos crew shuttle",
+            routeId ?? Guid.NewGuid(),
+            TripServiceType.ContractCrew,
+            clientId: null,
+            clientName: "Alamos Gold",
+            recurrenceKind: recurrenceKind,
+            daysOfWeek: daysOfWeek ?? [DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday],
+            intervalDays: intervalDays,
+            anchorDate: anchorDate,
+            daysOfMonth: daysOfMonth ?? [],
+            departureTime: departureTime ?? new TimeOnly(6, 30),
+            returnDepartureTime: returnDepartureTime,
+            seatsCapacity: 12,
+            seatsMinimum: null,
+            defaultVehicleUnit: "U-04",
+            defaultDriverId: null,
+            generationHorizonDays: generationHorizonDays);
 
     /// <summary>
     /// A valid scheduled trip; override the arguments a test cares about. Null

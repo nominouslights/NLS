@@ -1,4 +1,5 @@
 using NorthernLink.Shared.Messaging;
+using NorthernLink.Trips.Domain.Schedules;
 using NorthernLink.Trips.Domain.Trips;
 
 namespace NorthernLink.Trips.Application.Schedules.Update;
@@ -14,7 +15,11 @@ public sealed record UpdateScheduleTemplateCommand(
     TripServiceType ServiceType,
     Guid? ClientId,
     string? ClientName,
+    ScheduleRecurrenceKind RecurrenceKind,
     IReadOnlyList<DayOfWeek> DaysOfWeek,
+    int? IntervalDays,
+    DateOnly? AnchorDate,
+    IReadOnlyList<int> DaysOfMonth,
     TimeOnly DepartureTime,
     TimeOnly? ReturnDepartureTime,
     int SeatsCapacity,

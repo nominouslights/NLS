@@ -108,7 +108,11 @@ internal sealed class ScheduleTemplateProjection : IProjection<TripsDbContext>
         row.ServiceType = source.ServiceType.ToString();
         row.ClientId = source.ClientId;
         row.ClientName = source.ClientName;
+        row.RecurrenceKind = source.RecurrenceKind.ToString();
         row.DaysOfWeek = [.. source.DaysOfWeek.Select(day => day.ToString())];
+        row.IntervalDays = source.IntervalDays;
+        row.AnchorDate = source.AnchorDate;
+        row.DaysOfMonth = [.. source.DaysOfMonth];
         row.DepartureTime = source.DepartureTime;
         row.ReturnDepartureTime = source.ReturnDepartureTime;
         row.SeatsCapacity = source.SeatsCapacity;

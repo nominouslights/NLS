@@ -32,6 +32,11 @@ public sealed class ScheduleTemplateConfiguration : IEntityTypeConfiguration<Sch
         builder.Property(t => t.ClientId).HasColumnName("client_id");
         builder.Property(t => t.ClientName).HasColumnName("client_name").HasMaxLength(200);
 
+        builder.Property(t => t.RecurrenceKind)
+            .HasColumnName("recurrence_kind")
+            .HasConversion<string>()
+            .HasMaxLength(32);
+
         builder.Property(t => t.DaysOfWeek)
             .HasColumnName("days_of_week")
             .HasColumnType("jsonb")
@@ -41,6 +46,20 @@ public sealed class ScheduleTemplateConfiguration : IEntityTypeConfiguration<Sch
                     .Select(name => Enum.Parse<DayOfWeek>(name))
                     .ToList(),
                 new ValueComparer<List<DayOfWeek>>(
+                    (left, right) => left!.SequenceEqual(right!),
+                    days => days.Aggregate(0, (hash, day) => HashCode.Combine(hash, day)),
+                    days => days.ToList()));
+
+        builder.Property(t => t.IntervalDays).HasColumnName("interval_days");
+        builder.Property(t => t.AnchorDate).HasColumnName("anchor_date");
+
+        builder.Property(t => t.DaysOfMonth)
+            .HasColumnName("days_of_month")
+            .HasColumnType("jsonb")
+            .HasConversion(
+                days => JsonSerializer.Serialize(days, JsonOptions),
+                json => JsonSerializer.Deserialize<List<int>>(json, JsonOptions)!,
+                new ValueComparer<List<int>>(
                     (left, right) => left!.SequenceEqual(right!),
                     days => days.Aggregate(0, (hash, day) => HashCode.Combine(hash, day)),
                     days => days.ToList()));

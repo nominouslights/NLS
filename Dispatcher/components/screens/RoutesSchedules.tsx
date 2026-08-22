@@ -10,6 +10,8 @@ import {
   hhmm,
   listRoutes,
   listScheduleTemplates,
+  RECURRENCE_LABELS,
+  recurrenceSummary,
   refetchUntil,
   setScheduleTemplateActive,
   svcForTrip,
@@ -19,6 +21,7 @@ import {
   type DayName,
   type RouteInput,
   type RouteRecord,
+  type ScheduleRecurrenceKind,
   type ScheduleTemplateInput,
   type ScheduleTemplateRecord,
   type TripServiceType,
@@ -31,7 +34,7 @@ import { ServiceChip, StatusChip } from "@/components/ui/Chip";
 import { ActionButton } from "@/components/ui/Button";
 import { CorridorStepper } from "@/components/ui/CorridorStepper";
 import { ModalShell } from "@/components/ui/ModalShell";
-import { FieldLabel, NumberField, SelectField, TextField, TimeField } from "@/components/ui/Field";
+import { DateField, FieldLabel, NumberField, SelectField, TextField, TimeField } from "@/components/ui/Field";
 
 // Routes & Schedules — corridor routes and recurring schedule templates from
 // the real Trips API (GET /api/trips/routes, /api/trips/schedule-templates).
@@ -344,6 +347,20 @@ function RouteFormModal({
 
 const SERVICE_TYPES = Object.keys(SERVICE_TYPE_LABELS) as TripServiceType[];
 
+const RECURRENCE_KINDS = Object.keys(RECURRENCE_LABELS) as ScheduleRecurrenceKind[];
+
+// 1–31 for the monthly day-of-month chip grid.
+const MONTH_DAYS = Array.from({ length: 31 }, (_, i) => i + 1);
+
+// Backend recurrence validation codes → friendly inline messages. Anything not
+// listed falls back to the ApiError.message, mirroring the other modals here.
+const RECURRENCE_ERROR_MESSAGES: Record<string, string> = {
+  "Trips.ScheduleTemplate.InvalidInterval": "Enter an interval of at least 1 day for an every-N-days schedule.",
+  "Trips.ScheduleTemplate.AnchorRequired": "Pick a start date — an every-N-days schedule counts its interval from that day.",
+  "Trips.ScheduleTemplate.AtLeastOneDayOfMonth": "Select at least one day of the month.",
+  "Trips.ScheduleTemplate.InvalidDayOfMonth": "Days of the month must be between 1 and 31.",
+};
+
 function TemplateFormModal({
   existing,
   routes,
@@ -360,7 +377,15 @@ function TemplateFormModal({
   const [routeId, setRouteId] = useState(existing?.routeId ?? routes[0]?.id ?? "");
   const [serviceType, setServiceType] = useState<TripServiceType>(existing?.serviceType ?? "Community");
   const [clientId, setClientId] = useState(existing?.clientId ?? "");
+  const [recurrenceKind, setRecurrenceKind] = useState<ScheduleRecurrenceKind>(
+    existing?.recurrenceKind ?? "DaysOfWeek",
+  );
   const [days, setDays] = useState<DayName[]>(existing?.daysOfWeek ?? []);
+  const [intervalDays, setIntervalDays] = useState(
+    existing?.intervalDays != null ? String(existing.intervalDays) : "",
+  );
+  const [anchorDate, setAnchorDate] = useState(existing?.anchorDate ?? "");
+  const [daysOfMonth, setDaysOfMonth] = useState<number[]>(existing?.daysOfMonth ?? []);
   const [departure, setDeparture] = useState(existing ? hhmm(existing.departureTime) : "");
   const [returnDeparture, setReturnDeparture] = useState(
     existing?.returnDepartureTime ? hhmm(existing.returnDepartureTime) : "",
@@ -404,11 +429,27 @@ function TemplateFormModal({
     setDays((cur) => (cur.includes(day) ? cur.filter((d) => d !== day) : [...cur, day]));
   }
 
+  function toggleDayOfMonth(dom: number) {
+    setDaysOfMonth((cur) => (cur.includes(dom) ? cur.filter((d) => d !== dom) : [...cur, dom]));
+  }
+
   async function submit() {
     if (busy) return;
     if (!name.trim()) return setError("Enter the template name.");
     if (!routeId) return setError("Pick the route this template runs on.");
-    if (days.length === 0) return setError("Pick at least one day of the week.");
+
+    // Per-mode recurrence validation — only the selected kind's fields matter.
+    const interval = intervalDays === "" ? null : Number(intervalDays);
+    if (recurrenceKind === "DaysOfWeek") {
+      if (days.length === 0) return setError("Pick at least one day of the week.");
+    } else if (recurrenceKind === "EveryNDays") {
+      if (interval === null || !Number.isInteger(interval) || interval < 1)
+        return setError("Enter an interval of at least 1 day.");
+      if (!anchorDate) return setError("Pick the start date the interval counts from.");
+    } else if (recurrenceKind === "MonthlyDays") {
+      if (daysOfMonth.length === 0) return setError("Pick at least one day of the month.");
+    }
+
     if (!departure) return setError("Enter the departure time.");
     const cap = Number(seatsCapacity);
     if (!Number.isInteger(cap) || cap <= 0) return setError("Seats capacity must be a whole number.");
@@ -424,7 +465,13 @@ function TemplateFormModal({
       serviceType,
       clientId: client?.id ?? null,
       clientName: client?.name ?? null,
-      daysOfWeek: WEEK_DAYS.filter((d) => days.includes(d)),
+      recurrenceKind,
+      // Only the selected kind's fields are populated; the rest ride as
+      // empty/null defaults so the backend reads them harmlessly.
+      daysOfWeek: recurrenceKind === "DaysOfWeek" ? WEEK_DAYS.filter((d) => days.includes(d)) : [],
+      intervalDays: recurrenceKind === "EveryNDays" ? interval : null,
+      anchorDate: recurrenceKind === "EveryNDays" ? anchorDate : null,
+      daysOfMonth: recurrenceKind === "MonthlyDays" ? [...daysOfMonth].sort((a, b) => a - b) : [],
       departureTime: departure,
       returnDepartureTime: returnDeparture || null,
       seatsCapacity: cap,
@@ -441,7 +488,11 @@ function TemplateFormModal({
       await onSaved(input, existing?.id ?? null);
       onClose();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Failed to save the template — please try again.");
+      if (e instanceof ApiError) {
+        setError(RECURRENCE_ERROR_MESSAGES[e.code] ?? e.message);
+      } else {
+        setError("Failed to save the template — please try again.");
+      }
       setBusy(false);
     }
   }
@@ -488,42 +539,117 @@ function TemplateFormModal({
       </div>
 
       <div style={{ marginTop: 14 }}>
-        <div
-          style={{
-            fontFamily: fonts.body,
-            fontSize: 11.5,
-            color: colors.textLabel,
-            marginBottom: 5,
-          }}
-        >
-          Days of week
-        </div>
-        <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
-          {WEEK_DAYS.map((day) => {
-            const on = days.includes(day);
-            return (
-              <span
-                key={day}
-                onClick={() => toggleDay(day)}
-                style={{
-                  fontFamily: fonts.body,
-                  fontWeight: on ? 600 : 500,
-                  fontSize: 12,
-                  padding: "5px 12px",
-                  borderRadius: 7,
-                  background: on ? colors.cardBgActive : colors.cardBg,
-                  border: `1px solid ${on ? colors.borderActive : colors.border}`,
-                  color: on ? colors.headingBright : colors.textMuted,
-                  cursor: "pointer",
-                  userSelect: "none",
-                }}
-              >
-                {on ? "☒" : "☐"} {DAY_SHORT[day]}
-              </span>
-            );
-          })}
-        </div>
+        <SelectField
+          label="Frequency"
+          value={recurrenceKind}
+          onChange={(v) => setRecurrenceKind(v as ScheduleRecurrenceKind)}
+          options={RECURRENCE_KINDS.map((k) => ({ value: k, label: RECURRENCE_LABELS[k] }))}
+        />
       </div>
+
+      {recurrenceKind === "DaysOfWeek" && (
+        <div style={{ marginTop: 14 }}>
+          <div
+            style={{
+              fontFamily: fonts.body,
+              fontSize: 11.5,
+              color: colors.textLabel,
+              marginBottom: 5,
+            }}
+          >
+            Days of week
+          </div>
+          <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
+            {WEEK_DAYS.map((day) => {
+              const on = days.includes(day);
+              return (
+                <span
+                  key={day}
+                  onClick={() => toggleDay(day)}
+                  style={{
+                    fontFamily: fonts.body,
+                    fontWeight: on ? 600 : 500,
+                    fontSize: 12,
+                    padding: "5px 12px",
+                    borderRadius: 7,
+                    background: on ? colors.cardBgActive : colors.cardBg,
+                    border: `1px solid ${on ? colors.borderActive : colors.border}`,
+                    color: on ? colors.headingBright : colors.textMuted,
+                    cursor: "pointer",
+                    userSelect: "none",
+                  }}
+                >
+                  {on ? "☒" : "☐"} {DAY_SHORT[day]}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {recurrenceKind === "EveryNDays" && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <NumberField label="Every N days" value={intervalDays} onChange={setIntervalDays} min={1} step={1} />
+            <DateField label="Start date" value={anchorDate} onChange={setAnchorDate} />
+          </div>
+          <div
+            style={{
+              marginTop: 8,
+              fontFamily: fonts.body,
+              fontSize: 11.5,
+              color: colors.textDim,
+              lineHeight: 1.5,
+            }}
+          >
+            Trips generate every {intervalDays || "N"} day(s) counting from the start date. How far ahead they
+            materialize is governed by the Generation horizon below.
+          </div>
+        </div>
+      )}
+
+      {recurrenceKind === "MonthlyDays" && (
+        <div style={{ marginTop: 14 }}>
+          <div
+            style={{
+              fontFamily: fonts.body,
+              fontSize: 11.5,
+              color: colors.textLabel,
+              marginBottom: 5,
+            }}
+          >
+            Days of month{" "}
+            <span style={{ color: colors.textFaint }}>· 31 clamps to month-end on shorter months</span>
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {MONTH_DAYS.map((dom) => {
+              const on = daysOfMonth.includes(dom);
+              return (
+                <span
+                  key={dom}
+                  onClick={() => toggleDayOfMonth(dom)}
+                  style={{
+                    fontFamily: fonts.body,
+                    fontWeight: on ? 600 : 500,
+                    fontSize: 12,
+                    minWidth: 38,
+                    textAlign: "center",
+                    padding: "5px 9px",
+                    borderRadius: 7,
+                    background: on ? colors.cardBgActive : colors.cardBg,
+                    border: `1px solid ${on ? colors.borderActive : colors.border}`,
+                    color: on ? colors.headingBright : colors.textMuted,
+                    cursor: "pointer",
+                    userSelect: "none",
+                  }}
+                >
+                  {on ? "☒" : "☐"} {dom}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 14, marginTop: 14 }}>
         <TimeField label="Departure" value={departure} onChange={setDeparture} />
@@ -742,12 +868,22 @@ export default function RoutesSchedules() {
     );
   }
 
-  // Weekly grid for a route: active templates on that route, by day.
+  // Weekly grid for a route: active DaysOfWeek templates on that route, by day.
+  // EveryNDays / MonthlyDays templates don't map onto a Mon–Sun grid, so they're
+  // excluded here and surfaced as a cadence note beneath the grid instead.
   function gridFor(r: RouteRecord) {
     return WEEK_DAYS.map((day) => ({
       day,
-      templates: (templates ?? []).filter((t) => t.routeId === r.id && t.active && t.daysOfWeek.includes(day)),
+      templates: (templates ?? []).filter(
+        (t) => t.routeId === r.id && t.active && t.recurrenceKind === "DaysOfWeek" && t.daysOfWeek.includes(day),
+      ),
     }));
+  }
+
+  // Active non-weekly templates on a route — shown as cadence chips below the
+  // weekly grid so they aren't silently dropped.
+  function nonWeeklyFor(r: RouteRecord) {
+    return (templates ?? []).filter((t) => t.routeId === r.id && t.active && t.recurrenceKind !== "DaysOfWeek");
   }
 
   return frame(
@@ -935,6 +1071,43 @@ export default function RoutesSchedules() {
                   );
                 })}
               </div>
+
+              {nonWeeklyFor(effectiveRoute).length > 0 && (
+                <div style={{ marginTop: 12, borderTop: `1px solid ${colors.borderSubtle}`, paddingTop: 11 }}>
+                  <div
+                    style={{
+                      fontFamily: fonts.semiCondensed,
+                      fontSize: 9.5,
+                      letterSpacing: ".12em",
+                      textTransform: "uppercase",
+                      color: colors.textFaint,
+                      marginBottom: 8,
+                    }}
+                  >
+                    Interval / monthly templates · not on the weekly grid — see cadence
+                  </div>
+                  <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
+                    {nonWeeklyFor(effectiveRoute).map((t) => (
+                      <span
+                        key={t.id}
+                        style={{
+                          fontFamily: fonts.body,
+                          fontSize: 11,
+                          padding: "4px 10px",
+                          borderRadius: 7,
+                          background: colors.cardBg,
+                          border: `1px solid ${colors.border}`,
+                          color: colors.textMuted,
+                        }}
+                      >
+                        <span style={{ fontWeight: 600, color: colors.textPrimary }}>{t.name}</span>
+                        {" · "}
+                        {recurrenceSummary(t)} · {hhmm(t.departureTime)}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div
@@ -981,7 +1154,8 @@ export default function RoutesSchedules() {
               <Panel>
                 <SectionLabel>Cadence</SectionLabel>
                 <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-                  <DetailRow label="Days" value={template.daysOfWeek.map((d) => DAY_SHORT[d]).join(" · ") || "—"} />
+                  <DetailRow label="Frequency" value={RECURRENCE_LABELS[template.recurrenceKind]} />
+                  <DetailRow label="Recurs" value={recurrenceSummary(template)} />
                   <DetailRow label="Departure" value={hhmm(template.departureTime)} valueStyle={{ fontFamily: fonts.mono }} />
                   <DetailRow
                     label="Return leg"
