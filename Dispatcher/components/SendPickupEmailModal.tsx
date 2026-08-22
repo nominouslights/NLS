@@ -158,6 +158,7 @@ export default function SendPickupEmailModal({
       PassengerName: p.name,
       TripDate: shortDateLabel(trip.serviceDate),
       PickupTime: hhmm(trip.windowStart),
+      DropoffTime: trip.windowEnd ? hhmm(trip.windowEnd) : "",
       Route: trip.routeName || corridorLabel(trip),
       PickupStop: p.pickupStopName ?? trip.origin,
       PickupAddress: addressFor(p.pickupStopId),
@@ -233,6 +234,7 @@ export default function SendPickupEmailModal({
         serviceType: trip.serviceType,
         tripDate: shortDateLabel(trip.serviceDate),
         pickupTime: hhmm(trip.windowStart),
+        dropoffTime: trip.windowEnd ? hhmm(trip.windowEnd) : "",
         route: trip.routeName || corridorLabel(trip),
         clientId: trip.clientId ?? null, // validated server-side against the template's client pin
         clientName: trip.clientName,

@@ -92,6 +92,7 @@ export interface SendTripPickupEmailInput {
   serviceType: NotificationServiceType;
   tripDate: string;
   pickupTime: string;
+  dropoffTime: string;
   route: string;
   clientId: string | null;
   clientName: string | null;
@@ -213,6 +214,7 @@ export const MERGE_FIELDS: { token: string; description: string }[] = [
   { token: "{{PassengerName}}", description: "Passenger's name from the manifest" },
   { token: "{{TripDate}}", description: "Trip service date" },
   { token: "{{PickupTime}}", description: "Departure window start" },
+  { token: "{{DropoffTime}}", description: "Dropoff / arrival time (trip window end)" },
   { token: "{{Route}}", description: "Route / corridor name" },
   { token: "{{PickupStop}}", description: "Passenger's pickup stop (falls back to trip origin)" },
   { token: "{{PickupAddress}}", description: "The passenger's pickup stop street address" },

@@ -6,11 +6,15 @@ using NorthernLink.Notifications.Domain.Templates;
 namespace NorthernLink.Notifications.Application.Templates.Create;
 
 /// <summary>Handles <see cref="CreateEmailTemplateCommand"/>.</summary>
-public sealed class CreateEmailTemplateCommandHandler(IEmailTemplateRepository repository)
+public sealed class CreateEmailTemplateCommandHandler(
+    IEmailTemplateRepository repository,
+    IEmailHtmlSanitizer htmlSanitizer)
     : ICommandHandler<CreateEmailTemplateCommand, Guid>
 {
     public async Task<Result<Guid>> Handle(CreateEmailTemplateCommand command, CancellationToken cancellationToken)
     {
+        // Allowlist-sanitize the raw template body before it is stored/sent (defense-in-depth;
+        // merge tokens survive as text nodes). Subject stays untouched — plain text, not an HTML sink.
         var templateResult = EmailTemplate.Create(
             command.TenantId,
             command.Name,
@@ -18,7 +22,7 @@ public sealed class CreateEmailTemplateCommandHandler(IEmailTemplateRepository r
             command.ClientId,
             command.ClientName,
             command.Subject,
-            command.HtmlBody);
+            htmlSanitizer.Sanitize(command.HtmlBody));
 
         if (templateResult.IsFailure)
         {
