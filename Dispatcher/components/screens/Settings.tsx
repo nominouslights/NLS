@@ -40,7 +40,7 @@ const auditLog = [
 function formatInviteExpiry(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit" });
+  return d.toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit", hour12: true });
 }
 
 export default function Settings() {

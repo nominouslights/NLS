@@ -11,4 +11,5 @@ public sealed record CreateClientContactCommand(
     string? Email,
     string? Phone,
     string? Notes,
-    bool IsPrimary) : ICommand<Guid>;
+    bool IsPrimary,
+    bool ReceivesEmailReports) : ICommand<Guid>;

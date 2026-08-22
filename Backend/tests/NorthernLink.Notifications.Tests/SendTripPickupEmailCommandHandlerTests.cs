@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging.Abstractions;
+using NorthernLink.Notifications.Application.Abstractions;
 using NorthernLink.Notifications.Application.Dispatches;
 using NorthernLink.Notifications.Application.Dispatches.SendTripPickupEmail;
 using NorthernLink.Notifications.Domain;
@@ -13,21 +15,29 @@ public class SendTripPickupEmailCommandHandlerTests
     private readonly InMemoryEmailTemplateRepository _templates = new();
     private readonly InMemoryEmailDispatchRepository _dispatches = new();
     private readonly FakeEmailSender _sender = new();
+    private readonly FakePickupEmailReportPdf _reportPdf = new();
 
-    private SendTripPickupEmailCommandHandler Handler() => new(_templates, _dispatches, _sender);
+    private SendTripPickupEmailCommandHandler Handler() => new(
+        _templates,
+        _dispatches,
+        _sender,
+        _reportPdf,
+        NullLogger<SendTripPickupEmailCommandHandler>.Instance);
 
     private static SendTripPickupEmailCommand Command(
         Guid templateId,
         Guid? dispatchId = null,
         IReadOnlyList<RecipientInput>? recipients = null,
-        Guid? clientId = null) => new(
+        Guid? clientId = null,
+        NotificationServiceType serviceType = NotificationServiceType.Community,
+        IReadOnlyList<string>? reportRecipients = null) => new(
         TestNotifications.TenantId,
         dispatchId ?? Guid.NewGuid(),
         templateId,
         Guid.NewGuid(),
         "NL-1042",
         Guid.NewGuid(),
-        NotificationServiceType.Community,
+        serviceType,
         "Tuesday, August 4, 2026",
         "8:30 AM",
         "11:15 AM",
@@ -37,7 +47,8 @@ public class SendTripPickupEmailCommandHandlerTests
         recipients ?? [new RecipientInput(
             "alex@example.com", "Alex Moody",
             "Thompson Terminal", "12 Station Rd, Thompson, MB R8N 0A1",
-            "Lynn Lake Co-op", "5 Co-op Lane, Lynn Lake, MB R0B 0W0")]);
+            "Lynn Lake Co-op", "5 Co-op Lane, Lynn Lake, MB R0B 0W0")],
+        reportRecipients ?? []);
 
     [Fact]
     public async Task Unknown_template_returns_NotFound()
@@ -279,5 +290,219 @@ public class SendTripPickupEmailCommandHandlerTests
         var recipient = Assert.Single(result.Value.Recipients);
         Assert.Equal("Postmark.Unauthorized", recipient.ErrorCode);
         Assert.Single(_dispatches.Dispatches);
+    }
+
+    // ---- Pickup-email report step (ContractCrew-only, best-effort) --------------------------
+
+    private void AddContractCrewTemplate(out EmailTemplate template)
+    {
+        template = TestNotifications.CreateTemplate(serviceType: NotificationServiceType.ContractCrew);
+        _templates.Templates.Add(template);
+    }
+
+    [Fact]
+    public async Task ContractCrew_with_valid_report_recipients_sends_one_report_email_per_recipient_with_a_pdf_attachment()
+    {
+        AddContractCrewTemplate(out var template);
+        var command = Command(
+            template.Id,
+            serviceType: NotificationServiceType.ContractCrew,
+            reportRecipients: ["reports@crew.example.com", "ops@crew.example.com"]);
+
+        var result = await Handler().Handle(command, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+
+        // Two provider calls: [0] the pickup batch, [1] the report batch.
+        Assert.Equal(2, _sender.Batches.Count);
+
+        // The report PDF was built exactly once from the pickup outgoing/outcomes.
+        var builtReport = Assert.Single(_reportPdf.Built);
+        Assert.Equal(command.TripNumber, builtReport.TripNumber);
+        Assert.Equal(command.Route, builtReport.Route);
+        Assert.Equal(template.Name, builtReport.TemplateName);
+        Assert.Equal(1, builtReport.SentCount);
+        Assert.Equal(0, builtReport.FailedCount);
+
+        var reportBatch = _sender.Batches[1];
+        Assert.Equal(2, reportBatch.Count); // one per report recipient
+        Assert.Equal(
+            new[] { "reports@crew.example.com", "ops@crew.example.com" },
+            reportBatch.Select(email => email.To).ToArray());
+
+        foreach (var reportEmail in reportBatch)
+        {
+            var attachment = Assert.Single(reportEmail.Attachments!);
+            Assert.Equal("application/pdf", attachment.ContentType);
+            Assert.EndsWith(".pdf", attachment.Name);
+            Assert.False(string.IsNullOrEmpty(attachment.Base64Content));
+        }
+    }
+
+    [Fact]
+    public async Task Report_step_leaves_the_pickup_response_unchanged()
+    {
+        AddContractCrewTemplate(out var template);
+        var command = Command(
+            template.Id,
+            serviceType: NotificationServiceType.ContractCrew,
+            reportRecipients: ["reports@crew.example.com"]);
+
+        var result = await Handler().Handle(command, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        var response = result.Value;
+        Assert.Equal(command.DispatchId, response.Id);
+        Assert.Equal("Sent", response.Status);
+        var recipient = Assert.Single(response.Recipients);
+        Assert.Equal("alex@example.com", recipient.Email);
+        Assert.Equal("Sent", recipient.Status);
+        Assert.Equal("msg-0", recipient.PostmarkMessageId);
+
+        // The report is not recorded as a dispatch — only the pickup send is persisted.
+        Assert.Single(_dispatches.Dispatches);
+    }
+
+    [Fact]
+    public async Task Report_pdf_build_failure_is_swallowed_and_the_pickup_send_still_succeeds()
+    {
+        _templates.Templates.Add(
+            TestNotifications.CreateTemplate(serviceType: NotificationServiceType.ContractCrew));
+        var template = _templates.Templates[0];
+
+        var handler = new SendTripPickupEmailCommandHandler(
+            _templates, _dispatches, _sender,
+            new ThrowingPickupEmailReportPdf(),
+            NullLogger<SendTripPickupEmailCommandHandler>.Instance);
+
+        var command = Command(
+            template.Id,
+            serviceType: NotificationServiceType.ContractCrew,
+            reportRecipients: ["reports@crew.example.com"]);
+
+        var result = await handler.Handle(command, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("Sent", result.Value.Status);
+        Assert.Single(_dispatches.Dispatches);
+        Assert.Single(_sender.Batches); // pickup batch only — the report never got built/sent
+    }
+
+    [Fact]
+    public async Task Report_send_failure_is_swallowed_and_the_pickup_send_still_succeeds()
+    {
+        var template = TestNotifications.CreateTemplate(serviceType: NotificationServiceType.ContractCrew);
+        _templates.Templates.Add(template);
+
+        var sender = new SecondBatchThrowsEmailSender();
+        var handler = new SendTripPickupEmailCommandHandler(
+            _templates, _dispatches, sender, _reportPdf,
+            NullLogger<SendTripPickupEmailCommandHandler>.Instance);
+
+        var command = Command(
+            template.Id,
+            serviceType: NotificationServiceType.ContractCrew,
+            reportRecipients: ["reports@crew.example.com"]);
+
+        var result = await handler.Handle(command, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("Sent", result.Value.Status);
+        Assert.Single(_dispatches.Dispatches);
+        Assert.Equal(2, sender.CallCount); // pickup succeeded, report call attempted then threw
+    }
+
+    [Fact]
+    public async Task No_report_for_a_non_ContractCrew_service_type_even_with_report_recipients()
+    {
+        var template = TestNotifications.CreateTemplate(); // Community
+        _templates.Templates.Add(template);
+
+        var result = await Handler().Handle(
+            Command(template.Id, reportRecipients: ["reports@crew.example.com"]),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Single(_sender.Batches); // pickup only
+        Assert.Empty(_reportPdf.Built);
+    }
+
+    [Fact]
+    public async Task No_report_when_report_recipients_is_empty()
+    {
+        AddContractCrewTemplate(out var template);
+
+        var result = await Handler().Handle(
+            Command(template.Id, serviceType: NotificationServiceType.ContractCrew, reportRecipients: []),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Single(_sender.Batches);
+        Assert.Empty(_reportPdf.Built);
+    }
+
+    [Fact]
+    public async Task No_report_when_every_report_recipient_fails_the_email_regex()
+    {
+        AddContractCrewTemplate(out var template);
+
+        var result = await Handler().Handle(
+            Command(
+                template.Id,
+                serviceType: NotificationServiceType.ContractCrew,
+                reportRecipients: ["not-an-email", "also bad", "@nope"]),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Single(_sender.Batches); // pickup only; no report attempted
+        Assert.Empty(_reportPdf.Built);
+    }
+}
+
+/// <summary>
+/// Test double for <see cref="IPickupEmailReportPdf"/> — records the reports it was asked to
+/// render and returns fixed bytes, so tests never invoke QuestPDF (or need its license).
+/// </summary>
+internal sealed class FakePickupEmailReportPdf : IPickupEmailReportPdf
+{
+    public List<PickupEmailReport> Built { get; } = [];
+
+    public byte[] Build(PickupEmailReport report)
+    {
+        Built.Add(report);
+        return [1, 2, 3];
+    }
+}
+
+/// <summary>A report PDF builder that always throws — for the best-effort try/catch tests.</summary>
+internal sealed class ThrowingPickupEmailReportPdf : IPickupEmailReportPdf
+{
+    public byte[] Build(PickupEmailReport report) =>
+        throw new InvalidOperationException("PDF rendering blew up.");
+}
+
+/// <summary>
+/// An <see cref="IEmailSender"/> that succeeds on the first batch (the pickup send) and throws on
+/// every batch after it (the report send) — proves a throwing report call is swallowed while the
+/// pickup send still returns normally. Violates the "never throw" contract on purpose.
+/// </summary>
+internal sealed class SecondBatchThrowsEmailSender : IEmailSender
+{
+    public int CallCount { get; private set; }
+
+    public Task<IReadOnlyList<EmailSendOutcome>> SendBatchAsync(
+        IReadOnlyList<OutgoingEmail> emails,
+        CancellationToken cancellationToken = default)
+    {
+        CallCount++;
+        if (CallCount > 1)
+        {
+            throw new InvalidOperationException("Report send blew up.");
+        }
+
+        IReadOnlyList<EmailSendOutcome> outcomes = emails
+            .Select((_, index) => new EmailSendOutcome(true, null, null, $"msg-{index}"))
+            .ToList();
+        return Task.FromResult(outcomes);
     }
 }

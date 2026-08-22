@@ -18,6 +18,8 @@
   <ItemGroup>
     <!-- Vetted allowlist HTML sanitizer for stored email-template bodies (Ganss.Xss). -->
     <PackageReference Include="HtmlSanitizer" />
+    <!-- QuestPDF (Community license) — renders the pickup-email report PDF attachment. -->
+    <PackageReference Include="QuestPDF" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
       <PrivateAssets>all</PrivateAssets>

@@ -11,7 +11,7 @@ import {
   type TripManifest,
   type TripRecord,
 } from "@/lib/api/trips";
-import { SERVICE_TYPE_LABELS } from "@/lib/api/clients";
+import { SERVICE_TYPE_LABELS, listContacts, type ClientContactRecord } from "@/lib/api/clients";
 import { listStops, stopAddressLine, type StopRecord } from "@/lib/api/stops";
 import {
   dispatchChip,
@@ -47,7 +47,7 @@ function fmtUtcDateTime(iso: string): string {
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
-    hour12: false,
+    hour12: true,
   });
 }
 
@@ -88,6 +88,10 @@ export default function SendPickupEmailModal({
   // addresses ({{PickupAddress}}/{{DropoffStopAddress}}). Best-effort: if the
   // list fails it stays empty and addresses render blank, never a raw token.
   const [stopMap, setStopMap] = useState<Map<string, StopRecord>>(() => new Map());
+  // Client contacts flagged receivesEmailReports — the backend emails them a
+  // report, but ONLY for ContractCrew trips, so this stays empty otherwise.
+  // Resolved on mount (best-effort) and passed as reportRecipients on send.
+  const [reportRecipients, setReportRecipients] = useState<{ name: string; email: string }[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [templateId, setTemplateId] = useState("");
   // Eligible recipients are preselected; ineligible rows can never be checked.
@@ -105,14 +109,21 @@ export default function SendPickupEmailModal({
   // 400s server-side, so it is never offered here.
   useEffect(() => {
     let active = true;
+    // Report recipients only apply to ContractCrew trips with a client; for
+    // anything else there is nothing to fetch. Best-effort, like stops.
+    const contactsFetch: Promise<ClientContactRecord[]> =
+      trip.serviceType === "ContractCrew" && trip.clientId
+        ? listContacts(trip.clientId).catch(() => [] as ClientContactRecord[])
+        : Promise.resolve([] as ClientContactRecord[]);
     // Stops are best-effort: a failure resolves to [] so it can never block the
     // templates/history load — addresses just render empty in that case.
     Promise.all([
       listEmailTemplates(),
       listTripEmailDispatches(trip.id),
       listStops().catch(() => [] as StopRecord[]),
+      contactsFetch,
     ]).then(
-      ([tpls, hist, stops]) => {
+      ([tpls, hist, stops, contacts]) => {
         if (!active) return;
         const compatible = tpls.filter(
           (t) => t.isActive && t.serviceType === trip.serviceType && (!t.clientId || t.clientId === trip.clientId),
@@ -120,6 +131,17 @@ export default function SendPickupEmailModal({
         setTemplates(compatible);
         setHistory(hist);
         setStopMap(new Map(stops.map((s) => [s.id, s])));
+        // Contacts flagged for reports, with a real email — deduped by email.
+        const seen = new Set<string>();
+        const reports: { name: string; email: string }[] = [];
+        for (const c of contacts) {
+          if (!c.receivesEmailReports || !c.email) continue;
+          const email = c.email.trim();
+          if (!email || seen.has(email)) continue;
+          seen.add(email);
+          reports.push({ name: c.name, email });
+        }
+        setReportRecipients(reports);
         setLoadError(null);
         // Default pick only — the dispatcher can override in the dropdown.
         // Rule: client-pinned beats service-wide; within each group the most
@@ -246,6 +268,9 @@ export default function SendPickupEmailModal({
           pickupAddress: addressFor(p.pickupStopId),
           dropoffStopAddress: addressFor(p.dropoffStopId),
         })),
+        // Pre-resolved report-recipient emails (crew-only; empty otherwise).
+        // The backend only acts on these for ContractCrew trips.
+        reportRecipients: reportRecipients.map((r) => r.email),
       });
       // Response is authoritative — render outcomes and prepend to history.
       setLastResult(result);
@@ -359,6 +384,36 @@ export default function SendPickupEmailModal({
             );
           })}
         </div>
+
+        {reportRecipients.length > 0 && (
+          <div
+            style={{
+              marginTop: 8,
+              padding: "8px 11px",
+              borderRadius: 8,
+              background: colors.cardBgActive,
+              border: `1px solid ${colors.borderSubtle}`,
+              display: "flex",
+              gap: 8,
+              alignItems: "flex-start",
+              fontFamily: fonts.body,
+              fontSize: 11.5,
+              color: colors.textSecondary,
+              lineHeight: 1.5,
+            }}
+          >
+            <span aria-hidden style={{ flex: "none" }}>📄</span>
+            <span>
+              A report will be emailed to:{" "}
+              {reportRecipients.map((r, i) => (
+                <span key={r.email}>
+                  {i > 0 ? ", " : ""}
+                  {r.name} <span style={{ fontFamily: fonts.mono, color: colors.textDim }}>&lt;{r.email}&gt;</span>
+                </span>
+              ))}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* live preview for the first selected recipient */}

@@ -229,7 +229,8 @@ public static class ClientsEndpoints
             request.Email,
             request.Phone,
             request.Notes,
-            request.IsPrimary);
+            request.IsPrimary,
+            request.ReceivesEmailReports);
 
         var result = await sender.Send(command, cancellationToken);
         return result.IsSuccess
@@ -346,7 +347,8 @@ public sealed record ClientContactRequest(
     string? Email,
     string? Phone,
     string? Notes,
-    bool IsPrimary);
+    bool IsPrimary,
+    bool ReceivesEmailReports);
 
 /// <summary>Request body for POST/PUT /api/clients/{id}/purchase-orders.</summary>
 public sealed record PurchaseOrderRequest(

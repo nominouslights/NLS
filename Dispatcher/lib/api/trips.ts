@@ -716,10 +716,15 @@ export function corridorLabel(t: { stops: TripStop[]; origin: string; destinatio
   return stopNames(t).join("  →  ");
 }
 
-/** "06:30:00" → "06:30" (tolerates "06:30" input). */
+/** "06:30:00" → "6:30 AM" (12-hour; tolerates "06:30" input). */
 export function hhmm(time: string | null): string {
   if (!time) return "—";
-  return time.slice(0, 5);
+  const [h, m] = time.split(":");
+  const hour = Number(h);
+  if (Number.isNaN(hour)) return time.slice(0, 5);
+  const period = hour < 12 ? "AM" : "PM";
+  const h12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${h12}:${(m ?? "00").padStart(2, "0")} ${period}`;
 }
 
 /** "06:30 → 09:55" (or just the start when no end window). */

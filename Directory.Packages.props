@@ -39,6 +39,12 @@
     <PackageVersion Include="HtmlSanitizer" Version="9.2.995" />
   </ItemGroup>
 
+  <ItemGroup Label="PDF generation">
+    <!-- QuestPDF (Community license) — used by the Notifications module to render the
+         pickup-email report PDF attached to ContractCrew report emails. -->
+    <PackageVersion Include="QuestPDF" Version="2026.7.3" />
+  </ItemGroup>
+
   <ItemGroup Label="Testing">
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />

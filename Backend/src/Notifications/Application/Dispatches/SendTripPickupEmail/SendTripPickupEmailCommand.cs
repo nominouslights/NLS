@@ -28,7 +28,8 @@ public sealed record SendTripPickupEmailCommand(
     string Route,
     Guid? ClientId,
     string? ClientName,
-    IReadOnlyList<RecipientInput> Recipients) : ICommand<EmailDispatchResponse>;
+    IReadOnlyList<RecipientInput> Recipients,
+    IReadOnlyList<string> ReportRecipients) : ICommand<EmailDispatchResponse>;
 
 /// <summary>One selected manifest passenger: address plus the passenger's merge values.</summary>
 public sealed record RecipientInput(

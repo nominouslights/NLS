@@ -27,6 +27,7 @@ export default function ClientContactFormModal({
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [notes, setNotes] = useState("");
+  const [receivesEmailReports, setReceivesEmailReports] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,6 +47,7 @@ export default function ClientContactFormModal({
         phone: phone.trim() || undefined,
         notes: notes.trim() || undefined,
         isPrimary: false, // New contacts from this form are never primary (first contact was during onboarding).
+        receivesEmailReports,
       };
 
       await createContact(clientId, input);
@@ -119,6 +121,32 @@ export default function ClientContactFormModal({
           </div>
         </div>
       </div>
+
+      <label
+        style={{
+          marginTop: 14,
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 11,
+          cursor: "pointer",
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={receivesEmailReports}
+          onChange={(e) => setReceivesEmailReports(e.target.checked)}
+          style={{ accentColor: colors.blue, cursor: "pointer", marginTop: 2 }}
+        />
+        <div>
+          <div style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: 600, color: colors.textPrimary }}>
+            Receives email reports
+          </div>
+          <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim }}>
+            Gets a report (with a PDF of each email) when pickup emails are sent for this client&rsquo;s
+            crew trips.
+          </div>
+        </div>
+      </label>
     </ModalShell>
   );
 }

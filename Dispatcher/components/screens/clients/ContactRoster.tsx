@@ -127,6 +127,22 @@ export default function ContactRoster({ clientId, clientName }: { clientId: stri
                       Primary
                     </span>
                   )}
+                  {c.receivesEmailReports && (
+                    <span
+                      style={{
+                        fontFamily: fonts.semiCondensed,
+                        fontSize: 9,
+                        letterSpacing: ".1em",
+                        textTransform: "uppercase",
+                        color: "#FFFFFF",
+                        background: colors.skyBlue,
+                        padding: "2px 6px",
+                        borderRadius: 5,
+                      }}
+                    >
+                      Reports
+                    </span>
+                  )}
                 </div>
                 <div
                   style={{

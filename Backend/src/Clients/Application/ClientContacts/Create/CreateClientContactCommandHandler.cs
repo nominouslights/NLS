@@ -38,7 +38,8 @@ public sealed class CreateClientContactCommandHandler(
             command.Email,
             command.Phone,
             command.Notes,
-            command.IsPrimary);
+            command.IsPrimary,
+            command.ReceivesEmailReports);
 
         if (contactResult.IsFailure)
         {

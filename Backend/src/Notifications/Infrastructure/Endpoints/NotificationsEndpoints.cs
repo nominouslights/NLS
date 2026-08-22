@@ -193,7 +193,8 @@ public static class NotificationsEndpoints
                 .Select(r => new RecipientInput(
                     r.Email ?? string.Empty, r.PassengerName ?? string.Empty,
                     r.PickupStop, r.PickupAddress, r.DropoffStop, r.DropoffStopAddress))
-                .ToList());
+                .ToList(),
+            request.ReportRecipients ?? []);
 
         var result = await sender.Send(command, cancellationToken);
         return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
@@ -242,7 +243,9 @@ public sealed record PreviewEmailTemplateRequest(
 /// client-generated GUID — the idempotency key; replaying it returns the stored dispatch
 /// without re-sending. Trip fields are opaque snapshots composed by the dispatcher's screen;
 /// ClientId (null = client-less trip) is validated against the template's client pin.
-/// Recipients: 1–16.
+/// Recipients: 1–16. ReportRecipients are the pre-resolved contact email addresses (supplied
+/// by the frontend) that receive the best-effort report email with a PDF of each sent pickup
+/// email attached — only acted on for ContractCrew trips; omit or empty to skip the report.
 /// </summary>
 public sealed record SendTripPickupEmailRequest(
     Guid DispatchId,
@@ -257,7 +260,8 @@ public sealed record SendTripPickupEmailRequest(
     string? Route,
     Guid? ClientId,
     string? ClientName,
-    List<RecipientRequest>? Recipients);
+    List<RecipientRequest>? Recipients,
+    IReadOnlyList<string>? ReportRecipients);
 
 /// <summary>One selected manifest passenger: address plus per-passenger merge values.</summary>
 public sealed record RecipientRequest(

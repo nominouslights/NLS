@@ -14,7 +14,19 @@ public interface IEmailSender
 }
 
 /// <summary>One fully rendered email ready for the provider.</summary>
-public sealed record OutgoingEmail(string To, string Subject, string HtmlBody, string TextBody);
+public sealed record OutgoingEmail(
+    string To,
+    string Subject,
+    string HtmlBody,
+    string TextBody,
+    IReadOnlyList<EmailAttachment>? Attachments = null);
+
+/// <summary>
+/// One file attached to an outgoing email. <paramref name="Base64Content"/> is the raw file
+/// bytes already Base64-encoded (Postmark's wire format); <paramref name="ContentType"/> is
+/// the MIME type (e.g. <c>application/pdf</c>).
+/// </summary>
+public sealed record EmailAttachment(string Name, string Base64Content, string ContentType);
 
 /// <summary>
 /// The provider's verdict for one email. <paramref name="ErrorCode"/> is a stable machine
