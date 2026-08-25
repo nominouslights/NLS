@@ -10,8 +10,15 @@ internal sealed class WorkOrderRepository(FleetDbContext context) : IWorkOrderRe
     public Task<WorkOrder?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         context.WorkOrders.FirstOrDefaultAsync(w => w.Id == id, cancellationToken);
 
-    public Task<bool> ExistsAsync(Guid id, CancellationToken cancellationToken = default) =>
-        context.WorkOrders.AnyAsync(w => w.Id == id, cancellationToken);
+    public async Task<Guid?> FindVehicleIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var vehicleId = await context.WorkOrders
+            .Where(w => w.Id == id)
+            .Select(w => w.VehicleId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return vehicleId == Guid.Empty ? null : vehicleId;
+    }
 
     public Task<bool> VehicleExistsAsync(Guid vehicleId, CancellationToken cancellationToken = default) =>
         context.Vehicles.AnyAsync(v => v.Id == vehicleId, cancellationToken);

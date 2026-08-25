@@ -15,8 +15,8 @@ internal sealed class InMemoryWorkOrderRepository : IWorkOrderRepository
     public Task<WorkOrder?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         Task.FromResult(WorkOrders.FirstOrDefault(w => w.Id == id));
 
-    public Task<bool> ExistsAsync(Guid id, CancellationToken cancellationToken = default) =>
-        Task.FromResult(WorkOrders.Any(w => w.Id == id));
+    public Task<Guid?> FindVehicleIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+        Task.FromResult<Guid?>(WorkOrders.FirstOrDefault(w => w.Id == id)?.VehicleId);
 
     public Task<bool> VehicleExistsAsync(Guid vehicleId, CancellationToken cancellationToken = default) =>
         Task.FromResult(KnownVehicleIds.Contains(vehicleId));

@@ -90,6 +90,20 @@ public static class MaintenanceErrors
     public static readonly Error InvalidLeadDays = Error.Validation(
         "Fleet.MaintenancePlan.InvalidLeadDays", "A due-soon lead override in days must be greater than zero.");
 
+    public static readonly Error LeadKmNotBelowInterval = Error.Validation(
+        "Fleet.MaintenancePlan.LeadKmNotBelowInterval",
+        "A due-soon lead in km must be smaller than the line's km interval — a lead at or past the interval would keep the line due-soon forever.");
+
+    public static readonly Error LeadDaysNotBelowInterval = Error.Validation(
+        "Fleet.MaintenancePlan.LeadDaysNotBelowInterval",
+        "A due-soon lead in days must be smaller than the line's calendar interval (months × 28 days) — a lead at or past the interval would keep the line due-soon forever.");
+
+    public static readonly Error ItemTierRequired = Error.Validation(
+        "Fleet.MaintenancePlan.ItemTierRequired", "Every maintenance item needs a component tier.");
+
+    public static readonly Error ItemTaskRequired = Error.Validation(
+        "Fleet.MaintenancePlan.ItemTaskRequired", "Every maintenance item needs the task performed on it.");
+
     public static readonly Error AssignmentNotFound = Error.NotFound(
         "Fleet.PlanAssignment.NotFound", "The vehicle has no maintenance plan assigned.");
 
@@ -125,6 +139,10 @@ public static class MaintenanceErrors
 
     public static readonly Error InvalidCompletionKind = Error.Validation(
         "Fleet.PmCompletion.InvalidKind", "A completion's kind must be Item or Overhaul.");
+
+    public static readonly Error CompletionWorkOrderNotForVehicle = Error.Validation(
+        "Fleet.PmCompletion.WorkOrderNotForVehicle",
+        "The linked work order belongs to a different vehicle.");
 
     public static readonly Error InvalidOdometer = Error.Validation(
         "Fleet.PmCompletion.InvalidOdometer", "A completion's odometer reading cannot be negative.");

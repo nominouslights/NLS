@@ -15,9 +15,11 @@ using NorthernLink.Fleet.Application.Maintenance;
 using NorthernLink.Fleet.Application.Maintenance.Assignments.Assign;
 using NorthernLink.Fleet.Application.Maintenance.Assignments.Unassign;
 using NorthernLink.Fleet.Application.Maintenance.Completions.Log;
+using NorthernLink.Fleet.Application.Maintenance.Completions.PropagateOdometer;
 using NorthernLink.Fleet.Application.Maintenance.Plans.Create;
 using NorthernLink.Fleet.Application.Maintenance.Plans.GetAll;
 using NorthernLink.Fleet.Application.Maintenance.Plans.GetById;
+using NorthernLink.Fleet.Application.Maintenance.Plans.SeedDefaults;
 using NorthernLink.Fleet.Application.Maintenance.Plans.Update;
 using NorthernLink.Fleet.Application.Maintenance.Status.GetDue;
 using NorthernLink.Fleet.Application.Maintenance.Status.GetFleetDue;
@@ -56,6 +58,7 @@ using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Persistence.Auditing;
 using NorthernLink.Shared.Persistence.Projections;
 using NorthernLink.Fleet.Domain.Inspections.Events;
+using NorthernLink.Fleet.Domain.Maintenance.Events;
 using NorthernLink.Fleet.Domain.Vehicles.Events;
 using NorthernLink.Fleet.Infrastructure.Persistence;
 using NorthernLink.Fleet.Infrastructure.Persistence.Projections;
@@ -140,11 +143,13 @@ public static class FleetServiceCollectionExtensions
         services.AddScoped<IQueryHandler<GetAllWorkOrdersQuery, IReadOnlyList<WorkOrderResponse>>, GetAllWorkOrdersQueryHandler>();
         services.AddScoped<ICommandHandler<CreateMaintenancePlanCommand, Guid>, CreateMaintenancePlanCommandHandler>();
         services.AddScoped<ICommandHandler<UpdateMaintenancePlanCommand>, UpdateMaintenancePlanCommandHandler>();
+        services.AddScoped<ICommandHandler<SeedDefaultMaintenancePlanCommand, Guid>, SeedDefaultMaintenancePlanCommandHandler>();
         services.AddScoped<IQueryHandler<GetMaintenancePlansQuery, IReadOnlyList<MaintenancePlanSummaryResponse>>, GetMaintenancePlansQueryHandler>();
         services.AddScoped<IQueryHandler<GetMaintenancePlanByIdQuery, MaintenancePlanResponse>, GetMaintenancePlanByIdQueryHandler>();
         services.AddScoped<ICommandHandler<AssignMaintenancePlanCommand>, AssignMaintenancePlanCommandHandler>();
         services.AddScoped<ICommandHandler<UnassignMaintenancePlanCommand>, UnassignMaintenancePlanCommandHandler>();
         services.AddScoped<ICommandHandler<LogPmCompletionCommand, Guid>, LogPmCompletionCommandHandler>();
+        services.AddScoped<ICommandHandler<PropagatePmOdometerCommand>, PropagatePmOdometerCommandHandler>();
         services.AddScoped<IQueryHandler<GetVehiclePmStatusQuery, VehiclePmStatusResponse>, GetVehiclePmStatusQueryHandler>();
         services.AddScoped<IQueryHandler<GetPmDueQuery, PmDueResponse>, GetPmDueQueryHandler>();
         services.AddScoped<IQueryHandler<GetPmOverhaulsQuery, PmOverhaulsResponse>, GetPmOverhaulsQueryHandler>();
@@ -178,7 +183,13 @@ public static class FleetServiceCollectionExtensions
             // will not roll the vehicle back — acceptable: the inspection remains the record of
             // what was actually read.
             .OnEvent<VehicleInspectionAmendedDomainEvent>(entry =>
-                new PropagateInspectionOdometerCommand(entry.TenantId, entry.AggregateId)));
+                new PropagateInspectionOdometerCommand(entry.TenantId, entry.AggregateId))
+            // A PM completion's odometer reading advances the vehicle exactly as inspection
+            // readings do (monotonic — a historical entry below the current reading no-ops),
+            // so a fresh completion cannot leave the master odometer stale and deflate every
+            // other line's due math.
+            .OnEvent<PmCompletionLoggedDomainEvent>(entry =>
+                new PropagatePmOdometerCommand(entry.TenantId, entry.AggregateId)));
 
         return services;
     }

@@ -225,6 +225,22 @@ public class LogPmCompletionCommandHandlerTests
     }
 
     [Fact]
+    public async Task A_work_order_belonging_to_another_vehicle_fails()
+    {
+        var (handler, completions, _, _, workOrders, _, vehicleId) = Setup();
+        // A real work order — but raised against a different unit entirely.
+        var foreignWorkOrder = CreateWorkOrder(vehicleId: Guid.NewGuid());
+        workOrders.Add(foreignWorkOrder);
+
+        var result = await handler.Handle(
+            Command(vehicleId, workOrderId: foreignWorkOrder.Id), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(MaintenanceErrors.CompletionWorkOrderNotForVehicle, result.Error);
+        Assert.Empty(completions.Completions);
+    }
+
+    [Fact]
     public async Task A_known_work_order_links_to_the_completion()
     {
         var (handler, completions, _, _, workOrders, _, vehicleId) = Setup();
@@ -256,5 +272,28 @@ public class LogPmCompletionCommandHandlerTests
         var stored = Assert.Single(completions.Completions);
         Assert.Equal(workOrder.Value.Id, stored.WorkOrderId);
         Assert.Equal("5.5 mm pads", stored.Measurement);
+    }
+
+    private static WorkOrder CreateWorkOrder(Guid vehicleId)
+    {
+        var workOrder = WorkOrder.Create(
+            TestVehicles.TenantId,
+            vehicleId,
+            "WO-2",
+            "PM shop visit",
+            "Certify due PM items",
+            WorkOrderPriority.Medium,
+            WorkOrderSource.PmReminder,
+            sourceRef: null,
+            createdBy: "Dispatch",
+            assignedTo: null,
+            dueDate: null,
+            lineItems: ["PM-E-001 — Engine oil & filter"],
+            shopId: null,
+            authorizedLimitCad: null,
+            budgetCode: null,
+            dateRequiredOrOos: null);
+        Assert.True(workOrder.IsSuccess, $"Test work order creation failed: {workOrder.Error.Code}");
+        return workOrder.Value;
     }
 }

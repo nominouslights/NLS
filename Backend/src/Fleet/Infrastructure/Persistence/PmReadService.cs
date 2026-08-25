@@ -8,22 +8,22 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence;
 
 /// <summary>
 /// Read side of preventative maintenance — folds rm_pm_completions to the latest row per
-/// (code, kind) and runs <see cref="PmSchedule.Compute"/> per plan line, in C# (250 items ×
-/// fleet size is trivial, and it keeps the one-calculator rule); the fold reads only the
-/// columns due math needs, never whole completion rows. The vehicle's current odometer
-/// (rm_vehicles) and today's UTC date are resolved in one place here — the single source
-/// every PM computation shares. Completions are folded per vehicle across plan switches:
-/// codes are the identity, so a reassignment does not erase the history of lines both plans
-/// share.
+/// (code, kind) and runs <see cref="PmSchedule.Compute"/> per plan line, in C#. The fold
+/// deliberately stays client-side: it reads only the narrow columns due math needs
+/// (<see cref="CompletionFacts"/>, never whole rows), and fleet sizes make 250 items ×
+/// fleet size trivial — but it does transfer every completion row of the queried vehicles,
+/// so if the ledger ever grows to many thousands of rows per vehicle, revisit with a
+/// server-side DISTINCT ON fold. One loader (<see cref="LoadPmBatchAsync"/>) assembles the
+/// per-vehicle inputs for the single-vehicle views AND the fleet dashboard, so the
+/// fold/projection can never drift between them. The vehicle's current odometer comes from
+/// rm_vehicles; "today" is <see cref="PmSchedule.TodayUtc"/> — the single source every PM
+/// computation shares. Completions are folded per vehicle across plan switches: codes are
+/// the identity, so a reassignment does not erase the history of lines both plans share.
+/// Disposed vehicles: per-vehicle views stay readable (auditing a sold unit is legitimate);
+/// plan assigned-counts and the fleet dashboard exclude them — see <see cref="IPmReadService"/>.
 /// </summary>
 internal sealed class PmReadService(FleetDbContext context) : IPmReadService
 {
-    /// <summary>The system heading overhaul entries are grouped under (items carry their own).</summary>
-    private const string OverhaulsSystem = "Overhauls";
-
-    /// <summary>Hard ceiling on a caller-supplied history limit.</summary>
-    private const int MaxHistoryLimit = 1000;
-
     public async Task<IReadOnlyList<MaintenancePlanSummaryResponse>> GetPlansAsync(
         CancellationToken cancellationToken = default)
     {
@@ -46,8 +46,11 @@ internal sealed class PmReadService(FleetDbContext context) : IPmReadService
             })
             .ToListAsync(cancellationToken);
 
+        // Disposed vehicles drop out of the count — a plan "assigned to 3 vehicles" means
+        // three units still in the fleet, matching the fleet dashboard's scope.
         var assignedCounts = await context.PlanAssignmentReadModels
             .AsNoTracking()
+            .Where(a => context.VehicleReadModels.Any(v => v.Id == a.VehicleId && v.DisposedAtUtc == null))
             .GroupBy(a => a.PlanId)
             .Select(g => new { PlanId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(g => g.PlanId, g => g.Count, cancellationToken);
@@ -97,7 +100,7 @@ internal sealed class PmReadService(FleetDbContext context) : IPmReadService
             pm.Plan.Name,
             pm.AssignedAtUtc,
             pm.OdometerKm,
-            ComputeEntries(pm, Today()));
+            ComputeEntries(pm, PmSchedule.TodayUtc()));
     }
 
     public async Task<PmDueResponse?> GetDueAsync(Guid vehicleId, CancellationToken cancellationToken = default)
@@ -113,7 +116,7 @@ internal sealed class PmReadService(FleetDbContext context) : IPmReadService
             return new PmDueResponse(false, null, null, pm.OdometerKm, 0, [], []);
         }
 
-        var entries = ComputeEntries(pm, Today());
+        var entries = ComputeEntries(pm, PmSchedule.TodayUtc());
 
         var due = DueOnly(entries);
 
@@ -153,14 +156,15 @@ internal sealed class PmReadService(FleetDbContext context) : IPmReadService
         }
 
         var itemsByCode = pm.Plan.Items.ToDictionary(i => i.Code, StringComparer.Ordinal);
-        var today = Today();
+
+        // The computed half comes from the same ComputeEntries output every other view uses
+        // — never a private re-run of the due loop; the mapper joins it to the spec fields.
+        var overhaulEntriesByCode = ComputeEntries(pm, PmSchedule.TodayUtc())
+            .Where(e => e.Kind == nameof(PmEntryKind.Overhaul))
+            .ToDictionary(e => e.Code, StringComparer.Ordinal);
 
         var overhauls = pm.Plan.Overhauls.Select(overhaul =>
         {
-            var (lastDone, status) = ComputeLine(
-                pm, today, overhaul.Code, PmEntryKind.Overhaul,
-                overhaul.IntervalKm, overhaul.IntervalMonths, overhaul.LeadKm, overhaul.LeadDays);
-
             var relatedMeasurements = overhaul.RelatedItemCodes.Select(code =>
             {
                 var latest = LatestFor(pm.LatestCompletions, code, PmEntryKind.Item);
@@ -172,30 +176,15 @@ internal sealed class PmReadService(FleetDbContext context) : IPmReadService
                     latest?.OdometerKm);
             }).ToList();
 
-            return new OverhaulStatusResponse(
-                overhaul.Code,
-                overhaul.Component,
-                overhaul.IntervalKm,
-                overhaul.IntervalMonths,
-                overhaul.LabourHours,
-                overhaul.PartsCad,
-                overhaul.Scope,
-                overhaul.ConditionTriggers,
-                lastDone?.OdometerKm,
-                lastDone?.PerformedAt,
-                status.NextDueKm,
-                status.NextDueDate,
-                status.KmRemaining,
-                status.DaysRemaining,
-                status.State.ToString(),
-                relatedMeasurements);
+            return MaintenanceResponseMapper.ToOverhaulStatus(
+                overhaul, overhaulEntriesByCode[overhaul.Code], relatedMeasurements);
         }).ToList();
 
         return new PmOverhaulsResponse(true, pm.Plan.Id, pm.Plan.Name, pm.OdometerKm, overhauls);
     }
 
     public async Task<IReadOnlyList<PmCompletionResponse>?> GetHistoryAsync(
-        Guid vehicleId, int limit = 200, CancellationToken cancellationToken = default)
+        Guid vehicleId, int limit = IPmReadService.DefaultHistoryLimit, CancellationToken cancellationToken = default)
     {
         // An unknown vehicle is a 404, same as the sibling vehicle-scoped views — probe
         // existence only, never the whole row.
@@ -213,7 +202,7 @@ internal sealed class PmReadService(FleetDbContext context) : IPmReadService
             .Where(c => c.VehicleId == vehicleId)
             .OrderByDescending(c => c.PerformedAt)
             .ThenByDescending(c => c.CreatedAtUtc)
-            .Take(Math.Clamp(limit, 1, MaxHistoryLimit))
+            .Take(Math.Clamp(limit, 1, IPmReadService.MaxHistoryLimit))
             .ToListAsync(cancellationToken);
 
         return completions
@@ -235,89 +224,59 @@ internal sealed class PmReadService(FleetDbContext context) : IPmReadService
 
     public async Task<FleetPmDueResponse> GetFleetDueAsync(CancellationToken cancellationToken = default)
     {
-        // One query per table; the fold and due math run in C# (fleet sizes are small).
-        var assignments = await context.PlanAssignmentReadModels
-            .AsNoTracking()
-            .ToListAsync(cancellationToken);
-
-        if (assignments.Count == 0)
-        {
-            return new FleetPmDueResponse([]);
-        }
-
+        // Live (non-disposed) vehicles first, so a dead vehicle's assignment and completion
+        // ledger are never fetched at all; the shared batch loader does the rest.
         var vehicles = await context.VehicleReadModels
             .AsNoTracking()
             .Where(v => v.DisposedAtUtc == null)
             .Select(v => new { v.Id, v.UnitNumber, v.OdometerKm })
             .ToListAsync(cancellationToken);
-        var vehiclesById = vehicles.ToDictionary(v => v.Id);
 
-        var planIds = assignments.Select(a => a.PlanId).Distinct().ToList();
-        var plansById = await context.MaintenancePlanReadModels
-            .AsNoTracking()
-            .Where(p => planIds.Contains(p.Id))
-            .ToDictionaryAsync(p => p.Id, cancellationToken);
-
-        var assignedVehicleIds = assignments.Select(a => a.VehicleId).ToList();
-        var completionsByVehicle = (await context.PmCompletionReadModels
-            .AsNoTracking()
-            .Where(c => assignedVehicleIds.Contains(c.VehicleId))
-            .Select(c => new VehicleCompletionFacts(
-                c.VehicleId,
-                new CompletionFacts(c.ItemCode, c.Kind, c.PerformedAt, c.CreatedAtUtc, c.OdometerKm, c.Measurement)))
-            .ToListAsync(cancellationToken))
-            .GroupBy(c => c.VehicleId)
-            .ToDictionary(g => g.Key, g => g.Select(c => c.Facts));
-
-        var today = Today();
-        var rows = new List<FleetVehiclePmDueResponse>(assignments.Count);
-        foreach (var assignment in assignments)
+        if (vehicles.Count == 0)
         {
-            // A disposed vehicle drops out here; a missing vehicle or plan row is
-            // projection lag and reads as "not on the dashboard yet" rather than erroring.
-            if (!vehiclesById.TryGetValue(assignment.VehicleId, out var vehicle)
-                || !plansById.TryGetValue(assignment.PlanId, out var plan))
+            return new FleetPmDueResponse([]);
+        }
+
+        var pmByVehicle = await LoadPmBatchAsync(
+            vehicles.Select(v => new VehicleOdometer(v.Id, v.OdometerKm)).ToList(), cancellationToken);
+
+        var today = PmSchedule.TodayUtc();
+        var rows = new List<FleetVehiclePmDueResponse>();
+        foreach (var vehicle in vehicles)
+        {
+            // No plan resolved = unassigned (not on the dashboard), or the plan row lagging
+            // its projection — reads as "not on the dashboard yet" rather than erroring.
+            var pm = pmByVehicle[vehicle.Id];
+            if (pm.Plan is null)
             {
                 continue;
             }
 
-            var pm = new VehiclePm(
-                vehicle.OdometerKm,
-                assignment.AssignedAtUtc,
-                plan,
-                FoldLatest(completionsByVehicle.GetValueOrDefault(assignment.VehicleId) ?? []));
-
-            var due = DueOnly(ComputeEntries(pm, today));
+            var entries = ComputeEntries(pm, today);
+            var due = DueOnly(entries);
 
             rows.Add(new FleetVehiclePmDueResponse(
                 vehicle.Id,
                 vehicle.UnitNumber,
                 vehicle.OdometerKm,
-                plan.Id,
-                plan.Name,
+                pm.Plan.Id,
+                pm.Plan.Name,
                 due.Count(e => e.State == nameof(PmDueState.DueSoon)),
                 due.Count(e => e.State == nameof(PmDueState.Overdue)),
+                entries.Count(e => e.State == nameof(PmDueState.NotYetRecorded)),
                 due));
         }
 
-        return new FleetPmDueResponse(rows
-            .OrderByDescending(r => r.OverdueCount)
-            .ThenByDescending(r => r.DueSoonCount)
-            .ThenBy(r => r.UnitNumber, StringComparer.Ordinal)
-            .ToList());
+        return new FleetPmDueResponse(FleetPmDueResponse.OrderByUrgency(rows));
     }
-
-    /// <summary>The single source of "today" every due computation uses.</summary>
-    private static DateOnly Today() => DateOnly.FromDateTime(DateTime.UtcNow);
 
     /// <summary>The DueSoon/Overdue subset of a computed entry list, plan order preserved.</summary>
     private static List<PmEntryStatusResponse> DueOnly(IEnumerable<PmEntryStatusResponse> entries) =>
         [.. entries.Where(e => e.State is nameof(PmDueState.DueSoon) or nameof(PmDueState.Overdue))];
 
     /// <summary>
-    /// Loads everything one vehicle's PM computations need — three round trips: the odometer,
-    /// the assignment left-joined to its plan (tolerant of the plan row lagging the
-    /// projection), and the folded completion columns. Null when the vehicle does not exist;
+    /// Loads everything one vehicle's PM computations need — the odometer probe plus the
+    /// shared batch loader for a single id. Null when the vehicle does not exist;
     /// <c>Plan</c> null when it has no (resolvable) assignment.
     /// </summary>
     private async Task<VehiclePm?> LoadVehiclePmAsync(Guid vehicleId, CancellationToken cancellationToken)
@@ -333,31 +292,77 @@ internal sealed class PmReadService(FleetDbContext context) : IPmReadService
             return null;
         }
 
-        // Assignment and plan in one query: a correlated FirstOrDefault translates to a
-        // left join, so a projection-lag gap (assignment landed, plan row not yet) reads as
-        // unassigned for a moment rather than erroring.
-        var assignment = await context.PlanAssignmentReadModels
+        var pmByVehicle = await LoadPmBatchAsync(
+            [new VehicleOdometer(vehicleId, vehicle.OdometerKm)], cancellationToken);
+
+        return pmByVehicle[vehicleId];
+    }
+
+    /// <summary>
+    /// The one assembly path for <see cref="VehiclePm"/> — used by the single-vehicle views
+    /// and the fleet dashboard alike, so the fold and column projection can never drift
+    /// between them. Three deliberately simple queries (assignments, plans by id, folded
+    /// completion columns): each is a plain single-table scan, never a correlated
+    /// jsonb-entity subquery, so translation holds on real Postgres. Completions are
+    /// fetched only for vehicles that actually have an assignment. Every input vehicle gets
+    /// a result entry; <c>Plan</c> is null when it has no assignment or the plan row lags
+    /// its projection.
+    /// </summary>
+    private async Task<Dictionary<Guid, VehiclePm>> LoadPmBatchAsync(
+        IReadOnlyList<VehicleOdometer> vehicles, CancellationToken cancellationToken)
+    {
+        var vehicleIds = vehicles.Select(v => v.Id).ToList();
+
+        var assignments = await context.PlanAssignmentReadModels
             .AsNoTracking()
-            .Where(a => a.VehicleId == vehicleId)
-            .Select(a => new
-            {
-                a.AssignedAtUtc,
-                Plan = context.MaintenancePlanReadModels.FirstOrDefault(p => p.Id == a.PlanId),
-            })
-            .FirstOrDefaultAsync(cancellationToken);
+            .Where(a => vehicleIds.Contains(a.VehicleId))
+            .Select(a => new AssignmentFacts(a.VehicleId, a.PlanId, a.AssignedAtUtc))
+            .ToListAsync(cancellationToken);
 
-        // The completions query does not depend on the plan having resolved — only on an
-        // assignment existing at all (no assignment means no due math to feed).
-        var latestCompletions = assignment is null
-            ? []
-            : FoldLatest(await context.PmCompletionReadModels
+        // TryAdd, not ToDictionary: the write side guarantees one assignment per vehicle,
+        // but the projection table carries no unique index — tolerate a transient double.
+        var assignmentsByVehicle = new Dictionary<Guid, AssignmentFacts>();
+        foreach (var assignment in assignments)
+        {
+            assignmentsByVehicle.TryAdd(assignment.VehicleId, assignment);
+        }
+
+        var planIds = assignmentsByVehicle.Values.Select(a => a.PlanId).Distinct().ToList();
+        var plansById = planIds.Count == 0
+            ? new Dictionary<Guid, MaintenancePlanReadModel>()
+            : await context.MaintenancePlanReadModels
                 .AsNoTracking()
-                .Where(c => c.VehicleId == vehicleId)
-                .Select(c => new CompletionFacts(
-                    c.ItemCode, c.Kind, c.PerformedAt, c.CreatedAtUtc, c.OdometerKm, c.Measurement))
-                .ToListAsync(cancellationToken));
+                .Where(p => planIds.Contains(p.Id))
+                .ToDictionaryAsync(p => p.Id, cancellationToken);
 
-        return new VehiclePm(vehicle.OdometerKm, assignment?.AssignedAtUtc, assignment?.Plan, latestCompletions);
+        // Only assigned vehicles have due math to feed — unassigned ledgers are not fetched.
+        var assignedVehicleIds = assignmentsByVehicle.Keys.ToList();
+        var completionsByVehicle = assignedVehicleIds.Count == 0
+            ? []
+            : (await context.PmCompletionReadModels
+                .AsNoTracking()
+                .Where(c => assignedVehicleIds.Contains(c.VehicleId))
+                .Select(c => new VehicleCompletionFacts(
+                    c.VehicleId,
+                    new CompletionFacts(c.ItemCode, c.Kind, c.PerformedAt, c.CreatedAtUtc, c.OdometerKm, c.Measurement)))
+                .ToListAsync(cancellationToken))
+                .GroupBy(c => c.VehicleId)
+                .ToDictionary(g => g.Key, g => g.Select(c => c.Facts));
+
+        var result = new Dictionary<Guid, VehiclePm>(vehicles.Count);
+        foreach (var vehicle in vehicles)
+        {
+            var assignment = assignmentsByVehicle.GetValueOrDefault(vehicle.Id);
+            var plan = assignment is null ? null : plansById.GetValueOrDefault(assignment.PlanId);
+            var latestCompletions = assignment is null
+                ? []
+                : FoldLatest(completionsByVehicle.GetValueOrDefault(vehicle.Id) ?? []);
+
+            result[vehicle.Id] = new VehiclePm(
+                vehicle.OdometerKm, assignment?.AssignedAtUtc, plan, latestCompletions);
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -423,23 +428,8 @@ internal sealed class PmReadService(FleetDbContext context) : IPmReadService
                 pm, today, item.Code, PmEntryKind.Item,
                 item.IntervalKm, item.IntervalMonths, item.LeadKm, item.LeadDays);
 
-            entries.Add(new PmEntryStatusResponse(
-                item.Code,
-                nameof(PmEntryKind.Item),
-                item.System,
-                item.Component,
-                item.Tier.ToString(),
-                item.Task.ToString(),
-                item.IntervalKm,
-                item.IntervalMonths,
-                item.ShopMinutes,
-                lastDone?.OdometerKm,
-                lastDone?.PerformedAt,
-                status.NextDueKm,
-                status.NextDueDate,
-                status.KmRemaining,
-                status.DaysRemaining,
-                status.State.ToString()));
+            entries.Add(MaintenanceResponseMapper.ToEntryStatus(
+                item, lastDone?.OdometerKm, lastDone?.PerformedAt, status));
         }
 
         foreach (var overhaul in pm.Plan.Overhauls)
@@ -448,31 +438,12 @@ internal sealed class PmReadService(FleetDbContext context) : IPmReadService
                 pm, today, overhaul.Code, PmEntryKind.Overhaul,
                 overhaul.IntervalKm, overhaul.IntervalMonths, overhaul.LeadKm, overhaul.LeadDays);
 
-            entries.Add(new PmEntryStatusResponse(
-                overhaul.Code,
-                nameof(PmEntryKind.Overhaul),
-                OverhaulsSystem,
-                overhaul.Component,
-                Tier: null,
-                Task: null,
-                overhaul.IntervalKm,
-                overhaul.IntervalMonths,
-                OverhaulShopMinutes(overhaul.LabourHours),
-                lastDone?.OdometerKm,
-                lastDone?.PerformedAt,
-                status.NextDueKm,
-                status.NextDueDate,
-                status.KmRemaining,
-                status.DaysRemaining,
-                status.State.ToString()));
+            entries.Add(MaintenanceResponseMapper.ToEntryStatus(
+                overhaul, lastDone?.OdometerKm, lastDone?.PerformedAt, status));
         }
 
         return entries;
     }
-
-    /// <summary>An overhaul's contribution to shop time — its labour hours in minutes.</summary>
-    private static int OverhaulShopMinutes(decimal labourHours) =>
-        (int)Math.Round(labourHours * 60m, MidpointRounding.AwayFromZero);
 
     private static MaintenancePlanResponse ToPlanResponse(MaintenancePlanReadModel plan) => new(
         plan.Id,
@@ -484,6 +455,12 @@ internal sealed class PmReadService(FleetDbContext context) : IPmReadService
         plan.Overhauls.Select(MaintenanceResponseMapper.ToResponse).ToList(),
         plan.CreatedAtUtc,
         plan.UpdatedAtUtc);
+
+    /// <summary>One vehicle's id + current odometer — the caller-supplied half of <see cref="VehiclePm"/>.</summary>
+    private sealed record VehicleOdometer(Guid Id, int OdometerKm);
+
+    /// <summary>The assignment columns the loader needs — never the whole row.</summary>
+    private sealed record AssignmentFacts(Guid VehicleId, Guid PlanId, DateTimeOffset AssignedAtUtc);
 
     /// <summary>One vehicle's PM inputs: odometer, assignment time (+plan), folded completions.</summary>
     private sealed record VehiclePm(
@@ -501,6 +478,6 @@ internal sealed class PmReadService(FleetDbContext context) : IPmReadService
         int OdometerKm,
         string? Measurement);
 
-    /// <summary>A <see cref="CompletionFacts"/> tagged with its vehicle, for the fleet-wide fold.</summary>
+    /// <summary>A <see cref="CompletionFacts"/> tagged with its vehicle, for the batch fold.</summary>
     private sealed record VehicleCompletionFacts(Guid VehicleId, CompletionFacts Facts);
 }

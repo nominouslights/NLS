@@ -175,13 +175,6 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                 columns: new[] { "tenant_id", "name" });
 
             migrationBuilder.CreateIndex(
-                name: "IX_rm_pm_completions_tenant_id_vehicle_id_item_code_performed_~",
-                schema: "fleet",
-                table: "rm_pm_completions",
-                columns: new[] { "tenant_id", "vehicle_id", "item_code", "performed_at" },
-                descending: new[] { false, false, false, true });
-
-            migrationBuilder.CreateIndex(
                 name: "IX_rm_pm_completions_tenant_id_vehicle_id_performed_at",
                 schema: "fleet",
                 table: "rm_pm_completions",

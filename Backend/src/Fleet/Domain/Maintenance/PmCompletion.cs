@@ -124,7 +124,7 @@ public sealed class PmCompletion : AggregateRoot, ITenantScoped
 
         // One day of grace absorbs the shop being a timezone ahead of UTC; anything further
         // out is a typo, not a completion.
-        var todayUtc = DateOnly.FromDateTime(DateTimeOffset.UtcNow.UtcDateTime);
+        var todayUtc = PmSchedule.TodayUtc();
         if (performedAt > todayUtc.AddDays(1))
         {
             return Result.Failure<PmCompletion>(MaintenanceErrors.PerformedAtInFuture);

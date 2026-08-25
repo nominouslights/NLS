@@ -23,4 +23,11 @@ public sealed record OverhaulSpec
     public required string Scope { get; init; }
     public List<string> ConditionTriggers { get; init; } = [];
     public List<string> RelatedItemCodes { get; init; } = [];
+
+    /// <summary>
+    /// The overhaul's contribution to shop time — its labour hours in minutes, rounded away
+    /// from zero. Computed (get-only), so EF's jsonb mapping ignores it and it can never
+    /// drift from <see cref="LabourHours"/>.
+    /// </summary>
+    public int ShopMinutes => (int)Math.Round(LabourHours * 60m, MidpointRounding.AwayFromZero);
 }

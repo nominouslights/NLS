@@ -16,10 +16,12 @@ public sealed record VehiclePmStatusResponse(
 
 /// <summary>
 /// One plan line (item or overhaul) with its computed due status on one vehicle.
-/// <c>Kind</c> is "Item" or "Overhaul"; overhaul entries carry <c>System</c> "Overhauls",
-/// no tier/task, and their labour hours converted to <c>ShopMinutes</c>. <c>State</c> is the
-/// PmDueState name (NotYetRecorded / Ok / DueSoon / Overdue). Last-done and due fields are
-/// null when never recorded or when that interval arm does not apply.
+/// <c>Kind</c> is "Item" or "Overhaul"; overhaul entries carry <c>System</c>
+/// <see cref="OverhaulsSystemName"/>, no tier/task, and their labour hours converted to
+/// <c>ShopMinutes</c>. <c>LeadKm</c>/<c>LeadDays</c> are the line's due-soon lead overrides
+/// (null = the plan-wide defaults apply). <c>State</c> is the PmDueState name
+/// (NotYetRecorded / Ok / DueSoon / Overdue). Last-done and due fields are null when never
+/// recorded or when that interval arm does not apply.
 /// </summary>
 public sealed record PmEntryStatusResponse(
     string Code,
@@ -30,6 +32,8 @@ public sealed record PmEntryStatusResponse(
     string? Task,
     int? IntervalKm,
     int? IntervalMonths,
+    int? LeadKm,
+    int? LeadDays,
     int ShopMinutes,
     int? LastDoneKm,
     DateOnly? LastDoneDate,
@@ -37,4 +41,12 @@ public sealed record PmEntryStatusResponse(
     DateOnly? NextDueDate,
     int? KmRemaining,
     int? DaysRemaining,
-    string State);
+    string State)
+{
+    /// <summary>
+    /// The synthetic <c>System</c> heading overhaul entries are grouped under (items carry
+    /// their own system). Lives on the response contract because it is part of the API shape
+    /// the frontends group by, not a domain concept.
+    /// </summary>
+    public const string OverhaulsSystemName = "Overhauls";
+}

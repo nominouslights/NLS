@@ -7,7 +7,7 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence;
 /// <summary>
 /// Maps the PmCompletion aggregate to fleet.pm_completions. Append-only rows with no query
 /// indexes: every "latest completion per item code" read goes through rm_pm_completions,
-/// which carries the descending composite index for that lookup.
+/// whose vehicle-scoped descending index serves the fetch the C# fold runs over.
 /// </summary>
 public sealed class PmCompletionConfiguration : IEntityTypeConfiguration<PmCompletion>
 {

@@ -10,9 +10,22 @@ namespace NorthernLink.Fleet.Application.Abstractions;
 /// odometer, and today's UTC date — never stored. The vehicle-scoped methods return null
 /// when the vehicle does not exist; an existing vehicle with no plan returns the
 /// "assigned: false" shape instead.
+/// <para>
+/// Disposed-vehicle posture: the per-vehicle views (status, due, overhauls, history) stay
+/// readable for a disposed vehicle — auditing a sold or recycled unit's PM record is
+/// legitimate. Only the aggregate views exclude disposed units: a plan's
+/// <c>AssignedVehicleCount</c> counts non-disposed vehicles, and the fleet dashboard
+/// (<see cref="GetFleetDueAsync"/>) lists non-disposed vehicles only.
+/// </para>
 /// </summary>
 public interface IPmReadService
 {
+    /// <summary>Newest history entries returned when the caller supplies no limit.</summary>
+    public const int DefaultHistoryLimit = 200;
+
+    /// <summary>Hard ceiling on a caller-supplied history limit.</summary>
+    public const int MaxHistoryLimit = 1000;
+
     Task<IReadOnlyList<MaintenancePlanSummaryResponse>> GetPlansAsync(CancellationToken cancellationToken = default);
 
     Task<MaintenancePlanResponse?> GetPlanByIdAsync(Guid planId, CancellationToken cancellationToken = default);
@@ -32,11 +45,11 @@ public interface IPmReadService
     /// not exist — same contract as the sibling vehicle-scoped methods).
     /// </summary>
     Task<IReadOnlyList<PmCompletionResponse>?> GetHistoryAsync(
-        Guid vehicleId, int limit = 200, CancellationToken cancellationToken = default);
+        Guid vehicleId, int limit = DefaultHistoryLimit, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// The fleet-wide dashboard view — every assigned, non-disposed vehicle with its
-    /// DueSoon/Overdue counts and due entries, most urgent fleet first.
+    /// DueSoon/Overdue/NotYetRecorded counts and due entries, most urgent fleet first.
     /// </summary>
     Task<FleetPmDueResponse> GetFleetDueAsync(CancellationToken cancellationToken = default);
 }

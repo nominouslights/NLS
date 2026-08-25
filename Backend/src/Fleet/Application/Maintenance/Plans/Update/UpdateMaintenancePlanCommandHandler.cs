@@ -17,9 +17,10 @@ public sealed class UpdateMaintenancePlanCommandHandler(IMaintenancePlanReposito
         }
 
         // Renaming onto another plan's name must be a domain conflict, not a 23505 500 —
-        // excluding this very plan keeps the no-rename (or case-tweak) path fine. Stored
-        // names are trimmed by the aggregate, so probe with the trimmed name too.
-        if (await repository.ExistsByNameAsync(command.Name.Trim(), plan.Id, cancellationToken))
+        // a hit on this very plan's own id keeps the no-rename path fine. Stored names are
+        // trimmed by the aggregate, so probe with the trimmed name too.
+        var nameHolderId = await repository.FindIdByNameAsync(command.Name.Trim(), cancellationToken);
+        if (nameHolderId is not null && nameHolderId != plan.Id)
         {
             return Result.Failure(MaintenanceErrors.NameTaken);
         }

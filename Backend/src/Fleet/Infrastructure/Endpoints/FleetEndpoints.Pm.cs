@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using NorthernLink.Fleet.Application.Abstractions;
 using NorthernLink.Fleet.Application.Maintenance.Assignments.Assign;
 using NorthernLink.Fleet.Application.Maintenance.Assignments.Unassign;
 using NorthernLink.Fleet.Application.Maintenance.Completions.Log;
@@ -10,8 +11,10 @@ using NorthernLink.Fleet.Application.Maintenance.Status.GetFleetDue;
 using NorthernLink.Fleet.Application.Maintenance.Status.GetHistory;
 using NorthernLink.Fleet.Application.Maintenance.Status.GetOverhauls;
 using NorthernLink.Fleet.Application.Maintenance.Status.GetVehicleStatus;
+using NorthernLink.Fleet.Application.Maintenance.Plans.SeedDefaults;
 using NorthernLink.Fleet.Application.Maintenance.Plans.Update;
 using NorthernLink.Fleet.Domain.Maintenance;
+using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Shared.Tenancy;
 
@@ -57,6 +60,11 @@ public static partial class FleetEndpoints
             return Results.Unauthorized();
         }
 
+        if (FindPlanRequestBindingError(request) is { } bindingError)
+        {
+            return EndpointResults.Problem(bindingError);
+        }
+
         var command = new CreateMaintenancePlanCommand(
             tenantId,
             request.Name ?? string.Empty,
@@ -80,6 +88,11 @@ public static partial class FleetEndpoints
             return Results.Unauthorized();
         }
 
+        if (FindPlanRequestBindingError(request) is { } bindingError)
+        {
+            return EndpointResults.Problem(bindingError);
+        }
+
         var command = new UpdateMaintenancePlanCommand(
             tenantId,
             id,
@@ -94,6 +107,23 @@ public static partial class FleetEndpoints
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
+    private static async Task<IResult> SeedDefaultPmPlan(
+        ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(new SeedDefaultMaintenancePlanCommand(tenantId), cancellationToken);
+        // Always 200: the command is idempotent and returns the same plan id whether this
+        // run created the plan or found it already seeded — it does not surface which, so a
+        // first-run 201 would need extra plumbing for no caller benefit.
+        return result.IsSuccess
+            ? Results.Ok(new EntityCreatedResponse(result.Value))
+            : EndpointResults.Problem(result.Error);
+    }
+
     private static async Task<IResult> AssignPmPlan(
         Guid vehicleId, AssignPmPlanRequest request, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
     {
@@ -102,8 +132,15 @@ public static partial class FleetEndpoints
             return Results.Unauthorized();
         }
 
+        // Nullable so an omitted planId cannot silently bind to Guid.Empty and surface as a
+        // misleading "plan not found" — the missing field is a 400, not a 404.
+        if (request.PlanId is not { } planId)
+        {
+            return EndpointResults.Problem(MaintenanceErrors.PlanRequired);
+        }
+
         var result = await sender.Send(
-            new AssignMaintenancePlanCommand(tenantId, vehicleId, request.PlanId), cancellationToken);
+            new AssignMaintenancePlanCommand(tenantId, vehicleId, planId), cancellationToken);
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
@@ -198,7 +235,9 @@ public static partial class FleetEndpoints
             return Results.Unauthorized();
         }
 
-        var result = await sender.Query(new GetPmHistoryQuery(tenantId, vehicleId, limit ?? 200), cancellationToken);
+        var result = await sender.Query(
+            new GetPmHistoryQuery(tenantId, vehicleId, limit ?? IPmReadService.DefaultHistoryLimit),
+            cancellationToken);
         return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
     }
 
@@ -214,13 +253,39 @@ public static partial class FleetEndpoints
         return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
     }
 
+    /// <summary>
+    /// The binding gaps JSON deserialization cannot reject on its own: Tier and Task are
+    /// nullable on the request purely so an OMITTED field is caught here instead of
+    /// silently binding to the first enum member (a wholesale PUT would otherwise rewrite
+    /// every line's task to Inspect). Values present but out of range still fall through to
+    /// the aggregate's Enum.IsDefined validation.
+    /// </summary>
+    private static Error? FindPlanRequestBindingError(PmPlanRequest request)
+    {
+        foreach (var item in request.Items ?? [])
+        {
+            if (item.Tier is null)
+            {
+                return MaintenanceErrors.ItemTierRequired;
+            }
+
+            if (item.Task is null)
+            {
+                return MaintenanceErrors.ItemTaskRequired;
+            }
+        }
+
+        return null;
+    }
+
     private static MaintenanceItem ToItem(PmPlanItemRequest request) => new()
     {
         Code = request.Code ?? string.Empty,
         System = request.System ?? string.Empty,
         Component = request.Component ?? string.Empty,
-        Tier = request.Tier,
-        Task = request.Task,
+        // Null-forgiving is safe: FindPlanRequestBindingError runs first on every path.
+        Tier = request.Tier!.Value,
+        Task = request.Task!.Value,
         IntervalKm = request.IntervalKm,
         IntervalMonths = request.IntervalMonths,
         ShopMinutes = request.ShopMinutes,
@@ -254,13 +319,17 @@ public sealed record PmPlanRequest(
     IReadOnlyList<PmPlanItemRequest>? Items,
     IReadOnlyList<PmPlanOverhaulRequest>? Overhauls);
 
-/// <summary>One routine maintenance line of a plan request. Null leads keep the defaults.</summary>
+/// <summary>
+/// One routine maintenance line of a plan request. Null leads keep the defaults. Tier and
+/// Task are nullable so an omitted field is rejected explicitly (TierRequired/TaskRequired)
+/// instead of silently binding to the first enum member.
+/// </summary>
 public sealed record PmPlanItemRequest(
     string? Code,
     string? System,
     string? Component,
-    ComponentTier Tier,
-    MaintenanceTask Task,
+    ComponentTier? Tier,
+    MaintenanceTask? Task,
     int? IntervalKm,
     int? IntervalMonths,
     int ShopMinutes,
@@ -282,8 +351,11 @@ public sealed record PmPlanOverhaulRequest(
     IReadOnlyList<string>? ConditionTriggers,
     IReadOnlyList<string>? RelatedItemCodes);
 
-/// <summary>Request body for POST /api/fleet/vehicles/{vehicleId}/pm/assign.</summary>
-public sealed record AssignPmPlanRequest(Guid PlanId);
+/// <summary>
+/// Request body for POST /api/fleet/vehicles/{vehicleId}/pm/assign. PlanId is nullable so
+/// an omitted field is a 400 PlanRequired instead of Guid.Empty masquerading as a 404.
+/// </summary>
+public sealed record AssignPmPlanRequest(Guid? PlanId);
 
 /// <summary>
 /// Request body for POST /api/fleet/vehicles/{vehicleId}/pm/completions. OdometerKm is

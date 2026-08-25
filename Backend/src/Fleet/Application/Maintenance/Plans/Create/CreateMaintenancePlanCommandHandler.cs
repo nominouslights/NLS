@@ -13,7 +13,7 @@ public sealed class CreateMaintenancePlanCommandHandler(IMaintenancePlanReposito
         // Application-level duplicate probe so a taken name is a domain conflict, not a
         // 23505 bubbling up as a 500; the unique (tenant_id, name) index stays the backstop.
         // Stored names are trimmed by the aggregate, so probe with the trimmed name too.
-        if (await repository.ExistsByNameAsync(command.Name.Trim(), cancellationToken: cancellationToken))
+        if (await repository.FindIdByNameAsync(command.Name.Trim(), cancellationToken) is not null)
         {
             return Result.Failure<Guid>(MaintenanceErrors.NameTaken);
         }

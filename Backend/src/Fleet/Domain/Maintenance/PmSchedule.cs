@@ -15,6 +15,12 @@ public static class PmSchedule
     public const int DefaultLeadDays = 30;
 
     /// <summary>
+    /// Today's UTC date — the single "today" every PM computation and guard shares
+    /// (<see cref="Compute"/> callers and <see cref="PmCompletion.Log"/>'s future-date guard).
+    /// </summary>
+    public static DateOnly TodayUtc() => DateOnly.FromDateTime(DateTime.UtcNow);
+
+    /// <summary>
     /// Computes the due status of one code. <paramref name="leadKm"/>/<paramref name="leadDays"/>
     /// are the per-line due-soon lead overrides (MaintenanceItem/OverhaulSpec.LeadKm/LeadDays);
     /// null falls back to the defaults. A <paramref name="lastDone"/> with neither interval arm

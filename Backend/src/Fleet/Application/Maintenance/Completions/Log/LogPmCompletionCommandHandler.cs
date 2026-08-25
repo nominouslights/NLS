@@ -64,7 +64,13 @@ public sealed class LogPmCompletionCommandHandler(
             return Result.Failure<Guid>(MaintenanceErrors.OdometerImplausible(vehicle.OdometerKm));
         }
 
-        var plan = await plans.GetByIdAsync(assignment.PlanId, cancellationToken);
+        // Read-only load: the plan document (260 jsonb lines) is only probed for code
+        // membership, so it must not enter the change tracker — a tracked copy would make
+        // the completion save's DetectChanges sweep the whole document for nothing.
+        // (A server-side code-membership query over the ToJson collections would be leaner
+        // still, but Npgsql's translation of predicates into owned-JSON collections isn't
+        // dependable — the untracked load is the safe form.)
+        var plan = await plans.GetByIdReadOnlyAsync(assignment.PlanId, cancellationToken);
         if (plan is null)
         {
             return Result.Failure<Guid>(MaintenanceErrors.PlanNotFound);
@@ -81,11 +87,20 @@ public sealed class LogPmCompletionCommandHandler(
             return Result.Failure<Guid>(MaintenanceErrors.CompletionCodeNotInPlan);
         }
 
-        // The work-order link is optional, but a given id must be real.
-        if (command.WorkOrderId is { } workOrderId
-            && !await workOrders.ExistsAsync(workOrderId, cancellationToken))
+        // The work-order link is optional, but a given id must be real AND belong to this
+        // vehicle — one probe distinguishes the two failures.
+        if (command.WorkOrderId is { } workOrderId)
         {
-            return Result.Failure<Guid>(WorkOrderErrors.NotFound);
+            var workOrderVehicleId = await workOrders.FindVehicleIdAsync(workOrderId, cancellationToken);
+            if (workOrderVehicleId is null)
+            {
+                return Result.Failure<Guid>(WorkOrderErrors.NotFound);
+            }
+
+            if (workOrderVehicleId != command.VehicleId)
+            {
+                return Result.Failure<Guid>(MaintenanceErrors.CompletionWorkOrderNotForVehicle);
+            }
         }
 
         completions.Add(completion);

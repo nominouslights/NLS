@@ -145,7 +145,13 @@ public sealed class PostgresFixture : IAsyncLifetime
             provider.GetRequiredService<ILogger<ProjectionWorker<FleetDbContext>>>());
     }
 
-    /// <summary>The same projection registry FleetServiceCollectionExtensions composes.</summary>
+    /// <summary>
+    /// Mirrors the projection list FleetServiceCollectionExtensions composes — every
+    /// production projection must appear here (PM read models included), or integration
+    /// tests would silently exercise a narrower read side than the API runs. Of the
+    /// production OnEvent reactions, only the retirement-certificate one is wired; the
+    /// odometer-propagation commands need the full handler set the API registers.
+    /// </summary>
     private static IProjectionRegistry<FleetDbContext> BuildFleetRegistry() =>
         new ProjectionRegistryBuilder<FleetDbContext>(FleetServiceCollectionExtensions.SchemaName)
             .Project(new VehicleProjection())
@@ -155,6 +161,9 @@ public sealed class PostgresFixture : IAsyncLifetime
             .Project(new ServiceRecordProjection())
             .Project(new WorkOrderProjection())
             .Project(new VehicleInspectionProjection())
+            .Project(new MaintenancePlanProjection())
+            .Project(new PlanAssignmentProjection())
+            .Project(new PmCompletionProjection())
             .OnEvent<VehicleReachedEndOfLifeDomainEvent>(entry =>
                 new EnsureRetirementCertificateCommand(entry.AggregateId))
             .Build();

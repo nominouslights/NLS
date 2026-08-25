@@ -42,19 +42,8 @@ public sealed class MaintenancePlanReadModelConfiguration : IEntityTypeConfigura
         builder.Property(p => p.UpdatedAtUtc).HasColumnName("updated_at_utc");
         builder.Property(p => p.Version).HasColumnName("version");
 
-        builder.OwnsMany(p => p.Items, item =>
-        {
-            item.ToJson("items");
-            item.Property(i => i.Tier).HasConversion<string>();
-            item.Property(i => i.Task).HasConversion<string>();
-        });
-
-        builder.OwnsMany(p => p.Overhauls, overhaul =>
-        {
-            overhaul.ToJson("overhauls");
-            overhaul.Property(o => o.LabourHours).HasPrecision(8, 2);
-            overhaul.Property(o => o.PartsCad).HasPrecision(12, 2);
-        });
+        // Shared with the maintenance_plans aggregate table — one jsonb mapping, no drift.
+        MaintenancePlanDocumentMapping.MapItemsAndOverhauls(builder, p => p.Items, p => p.Overhauls);
 
         // Follows the write table's natural key, so name lookups on the read side are also
         // an index probe. Deliberately NOT unique — uniqueness lives on the write table

@@ -58,6 +58,9 @@ public static partial class FleetEndpoints
         pmPlans.MapGet("{id:guid}", GetPmPlanById);
         pmPlans.MapPost("", CreatePmPlan);
         pmPlans.MapPut("{id:guid}", UpdatePmPlan);
+        // Idempotent: installs the default Transit T-150 severe-service plan (and assigns
+        // NL-01 when unassigned); reruns return the same plan id with no changes.
+        pmPlans.MapPost("seed-defaults", SeedDefaultPmPlan);
 
         var workOrders = app.MapGroup("/api/fleet/work-orders").RequireAuthorization();
         workOrders.MapGet("", GetAllWorkOrders);

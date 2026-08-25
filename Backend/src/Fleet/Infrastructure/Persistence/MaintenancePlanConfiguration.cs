@@ -26,23 +26,8 @@ public sealed class MaintenancePlanConfiguration : IEntityTypeConfiguration<Main
         builder.Property(p => p.CreatedAtUtc).HasColumnName("created_at_utc");
         builder.Property(p => p.UpdatedAtUtc).HasColumnName("updated_at_utc");
 
-        builder.OwnsMany(p => p.Items, item =>
-        {
-            item.ToJson("items");
-
-            // Explicit, because EF serializes an enum inside owned JSON as an integer by
-            // default (same reasoning as TripManifest.Passengers): a jsonb payload gets read
-            // by people and hand-written SQL, and an opaque 0/1/2 in there is a trap.
-            item.Property(i => i.Tier).HasConversion<string>();
-            item.Property(i => i.Task).HasConversion<string>();
-        });
-
-        builder.OwnsMany(p => p.Overhauls, overhaul =>
-        {
-            overhaul.ToJson("overhauls");
-            overhaul.Property(o => o.LabourHours).HasPrecision(8, 2);
-            overhaul.Property(o => o.PartsCad).HasPrecision(12, 2);
-        });
+        // Shared with the rm_maintenance_plans mirror — one jsonb mapping, no drift.
+        MaintenancePlanDocumentMapping.MapItemsAndOverhauls(builder, p => p.Items, p => p.Overhauls);
 
         builder.HasIndex(p => new { p.TenantId, p.Name }).IsUnique();
     }

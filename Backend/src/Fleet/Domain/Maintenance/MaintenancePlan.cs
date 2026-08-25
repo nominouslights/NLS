@@ -292,6 +292,20 @@ public sealed class MaintenancePlan : AggregateRoot, ITenantScoped
             return MaintenanceErrors.InvalidLeadDays;
         }
 
+        // A lead at or past its own interval arm would pin the line to DueSoon forever —
+        // the moment a completion lands, the next one is already "due soon".
+        if (leadKm >= intervalKm)
+        {
+            return MaintenanceErrors.LeadKmNotBelowInterval;
+        }
+
+        // 28 days is the conservative month floor: a lead shorter than intervalMonths×28
+        // can never cover the whole calendar interval, whatever the actual month lengths.
+        if (leadDays >= intervalMonths * 28)
+        {
+            return MaintenanceErrors.LeadDaysNotBelowInterval;
+        }
+
         return null;
     }
 

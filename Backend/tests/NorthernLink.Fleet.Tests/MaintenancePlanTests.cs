@@ -180,6 +180,52 @@ public class MaintenancePlanTests
     }
 
     [Fact]
+    public void Create_rejects_a_lead_km_at_or_past_the_km_interval()
+    {
+        // Item() defaults to a 10,000 km interval — a 10,000 km lead pins it DueSoon forever.
+        var result = Create([Item(leadKm: 10_000)]);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(MaintenanceErrors.LeadKmNotBelowInterval, result.Error);
+    }
+
+    [Fact]
+    public void Create_rejects_a_lead_days_at_or_past_the_calendar_interval()
+    {
+        // Item() defaults to 6 months; 6 × 28 = 168 days is the conservative floor.
+        var result = Create([Item(leadDays: 168)]);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(MaintenanceErrors.LeadDaysNotBelowInterval, result.Error);
+    }
+
+    [Fact]
+    public void Create_rejects_an_overhaul_lead_at_or_past_its_interval()
+    {
+        // Overhaul() defaults to a 320,000 km interval.
+        var result = Create([Item()], [Overhaul(leadKm: 320_000)]);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(MaintenanceErrors.LeadKmNotBelowInterval, result.Error);
+    }
+
+    [Fact]
+    public void A_large_lead_is_fine_when_that_interval_axis_is_absent()
+    {
+        // Calendar-only line: any km lead is inert but harmless; days lead under 12×28.
+        var result = Create([Item(intervalKm: null, intervalMonths: 12, leadKm: 50_000, leadDays: 60)]);
+
+        Assert.True(result.IsSuccess);
+    }
+
+    [Fact]
+    public void Overhaul_shop_minutes_are_labour_hours_in_minutes_rounded_away_from_zero()
+    {
+        Assert.Equal(2400, Overhaul().ShopMinutes); // 40.00 h
+        Assert.Equal(91, (Overhaul() with { LabourHours = 1.51m }).ShopMinutes); // 90.6 → 91
+    }
+
+    [Fact]
     public void Create_rejects_an_item_with_no_interval_on_either_axis()
     {
         var result = Create([Item(intervalKm: null, intervalMonths: null)]);

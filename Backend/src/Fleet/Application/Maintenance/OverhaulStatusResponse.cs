@@ -14,13 +14,16 @@ public sealed record PmOverhaulsResponse(
 
 /// <summary>
 /// One overhaul's computed status. <c>State</c> is the PmDueState name; the interval/spec
-/// fields come from the plan, the last-done/next-due fields from the latest completion.
+/// fields (leads included) come from the plan, the last-done/next-due fields from the
+/// latest completion.
 /// </summary>
 public sealed record OverhaulStatusResponse(
     string Code,
     string Component,
     int? IntervalKm,
     int? IntervalMonths,
+    int? LeadKm,
+    int? LeadDays,
     decimal LabourHours,
     decimal PartsCad,
     string Scope,

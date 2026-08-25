@@ -48,11 +48,10 @@ public sealed class PmCompletionReadModelConfiguration : IEntityTypeConfiguratio
         builder.Property(c => c.CreatedAtUtc).HasColumnName("created_at_utc");
         builder.Property(c => c.Version).HasColumnName("version");
 
-        // Same "latest completion per item code" access path as the write table.
-        builder.HasIndex(c => new { c.TenantId, c.VehicleId, c.ItemCode, c.PerformedAt })
-            .IsDescending(false, false, false, true);
-
-        // The history view's sort: a vehicle's completions newest-first.
+        // One index serves both access paths: the history view's newest-first sort AND the
+        // read service's per-vehicle fetch for the latest-per-(code, kind) fold — the fold
+        // itself runs in C# over a narrow column projection (see PmReadService), so its
+        // query is a plain vehicle-scoped scan and a per-code index would go unused.
         builder.HasIndex(c => new { c.TenantId, c.VehicleId, c.PerformedAt })
             .IsDescending(false, false, true);
     }

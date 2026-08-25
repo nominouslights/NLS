@@ -1040,9 +1040,6 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                     b.HasIndex("TenantId", "VehicleId", "PerformedAt")
                         .IsDescending(false, false, true);
 
-                    b.HasIndex("TenantId", "VehicleId", "ItemCode", "PerformedAt")
-                        .IsDescending(false, false, false, true);
-
                     b.ToTable("rm_pm_completions", "fleet");
                 });
 
