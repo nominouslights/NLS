@@ -54,6 +54,28 @@ public class PmCompletionTests
     }
 
     [Fact]
+    public void Log_rejects_an_undefined_kind()
+    {
+        // JsonStringEnumConverter admits raw numbers, so an out-of-range integer can reach
+        // the domain — it must not be stored.
+        var result = PmCompletion.Log(
+            TenantId,
+            VehicleId,
+            PlanId,
+            "PM-E-001",
+            (PmEntryKind)99,
+            new DateOnly(2026, 8, 22),
+            odometerKm: 42_000,
+            performedBy: "Northern Link Shop",
+            workOrderId: null,
+            measurement: null,
+            notes: null);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(MaintenanceErrors.InvalidCompletionKind, result.Error);
+    }
+
+    [Fact]
     public void Log_rejects_an_empty_code()
     {
         var result = Log(itemCode: " ");

@@ -12,6 +12,9 @@ public static class MaintenanceErrors
     public static readonly Error PlanNotFound = Error.NotFound(
         "Fleet.MaintenancePlan.NotFound", "The maintenance plan was not found.");
 
+    public static readonly Error NameTaken = Error.Conflict(
+        "Fleet.MaintenancePlan.NameTaken", "A maintenance plan with this name already exists.");
+
     public static readonly Error NameRequired = Error.Validation(
         "Fleet.MaintenancePlan.NameRequired", "A maintenance plan name is required.");
 
@@ -44,6 +47,18 @@ public static class MaintenanceErrors
 
     public static readonly Error ItemIntervalRequired = Error.Validation(
         "Fleet.MaintenancePlan.ItemIntervalRequired", "Every maintenance item needs at least one interval, and any interval given must be greater than zero.");
+
+    public static readonly Error InvalidComponentTier = Error.Validation(
+        "Fleet.MaintenancePlan.InvalidComponentTier", "A maintenance item's component tier is not a recognized value.");
+
+    public static readonly Error InvalidMaintenanceTask = Error.Validation(
+        "Fleet.MaintenancePlan.InvalidMaintenanceTask", "A maintenance item's task is not a recognized value.");
+
+    public static readonly Error IntervalKmTooLarge = Error.Validation(
+        "Fleet.MaintenancePlan.IntervalKmTooLarge", $"An interval in km cannot exceed {MaintenancePlan.MaxIntervalKm:N0} km.");
+
+    public static readonly Error IntervalMonthsTooLarge = Error.Validation(
+        "Fleet.MaintenancePlan.IntervalMonthsTooLarge", $"An interval in months cannot exceed {MaintenancePlan.MaxIntervalMonths} months.");
 
     public static readonly Error InvalidShopMinutes = Error.Validation(
         "Fleet.MaintenancePlan.InvalidShopMinutes", "Every maintenance item needs estimated shop minutes greater than zero.");
@@ -78,6 +93,9 @@ public static class MaintenanceErrors
     public static readonly Error AssignmentNotFound = Error.NotFound(
         "Fleet.PlanAssignment.NotFound", "The vehicle has no maintenance plan assigned.");
 
+    public static readonly Error AssignmentConflict = Error.Conflict(
+        "Fleet.PlanAssignment.Conflict", "The vehicle's plan assignment changed at the same time — retry the assignment.");
+
     public static readonly Error VehicleRequired = Error.Validation(
         "Fleet.PlanAssignment.VehicleRequired", "A plan assignment needs a vehicle.");
 
@@ -86,6 +104,9 @@ public static class MaintenanceErrors
 
     public static readonly Error CompletionCodeRequired = Error.Validation(
         "Fleet.PmCompletion.CodeRequired", "A completion needs the maintenance item or overhaul code it certifies.");
+
+    public static readonly Error CompletionCodeNotInPlan = Error.Validation(
+        "Fleet.PmCompletion.CodeNotInPlan", "The code does not exist in the vehicle's assigned maintenance plan for that kind (item vs overhaul).");
 
     public static readonly Error CompletionCodeTooLong = Error.Validation(
         "Fleet.PmCompletion.CodeTooLong", $"A completion's item or overhaul code cannot exceed {MaintenancePlan.CodeMaxLength} characters.");
@@ -102,8 +123,18 @@ public static class MaintenanceErrors
     public static readonly Error CompletionNotesTooLong = Error.Validation(
         "Fleet.PmCompletion.NotesTooLong", $"Completion notes cannot exceed {PmCompletion.NotesMaxLength} characters.");
 
+    public static readonly Error InvalidCompletionKind = Error.Validation(
+        "Fleet.PmCompletion.InvalidKind", "A completion's kind must be Item or Overhaul.");
+
     public static readonly Error InvalidOdometer = Error.Validation(
         "Fleet.PmCompletion.InvalidOdometer", "A completion's odometer reading cannot be negative.");
+
+    public static readonly Error CompletionOdometerRequired = Error.Validation(
+        "Fleet.PmCompletion.OdometerRequired", "A completion needs the odometer reading at the time of service.");
+
+    public static Error OdometerImplausible(int vehicleOdometerKm) => Error.Validation(
+        "Fleet.PmCompletion.OdometerImplausible",
+        $"The completion's odometer reading is more than {PmCompletion.MaxOdometerAheadKm:N0} km ahead of the vehicle's current recorded odometer ({vehicleOdometerKm:N0} km) — check for a typo, or record the vehicle's odometer first.");
 
     public static readonly Error PerformedAtRequired = Error.Validation(
         "Fleet.PmCompletion.PerformedAtRequired", "A completion needs the date the work was performed.");

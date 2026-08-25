@@ -25,6 +25,13 @@ public sealed class PmCompletion : AggregateRoot, ITenantScoped
     /// <summary>DB column cap on <see cref="Notes"/> (pm_completions.notes).</summary>
     public const int NotesMaxLength = 2000;
 
+    /// <summary>
+    /// Plausibility bound the handler enforces: a completion's odometer may not run more
+    /// than this far AHEAD of the vehicle's current recorded odometer. Readings below the
+    /// vehicle's are legal — historical entries are expected.
+    /// </summary>
+    public const int MaxOdometerAheadKm = 25_000;
+
     private PmCompletion()
     {
         // EF Core materialization only.
@@ -66,6 +73,13 @@ public sealed class PmCompletion : AggregateRoot, ITenantScoped
         if (planId == Guid.Empty)
         {
             return Result.Failure<PmCompletion>(MaintenanceErrors.PlanRequired);
+        }
+
+        // JsonStringEnumConverter still admits raw numbers, so an out-of-range integer
+        // binds silently — reject anything not a declared member (Budgeting precedent).
+        if (!Enum.IsDefined(kind))
+        {
+            return Result.Failure<PmCompletion>(MaintenanceErrors.InvalidCompletionKind);
         }
 
         if (string.IsNullOrWhiteSpace(itemCode))

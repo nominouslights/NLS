@@ -10,13 +10,15 @@ internal sealed class MaintenancePlanRepository(FleetDbContext context) : IMaint
     public Task<MaintenancePlan?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         context.MaintenancePlans.FirstOrDefaultAsync(p => p.Id == id, cancellationToken);
 
-    public Task<MaintenancePlan?> GetByNameAsync(string name, CancellationToken cancellationToken = default)
-    {
-        // Stored names are trimmed by the aggregate, so trim the probe too — an untrimmed
-        // input must still find its match.
-        var trimmed = name.Trim();
-        return context.MaintenancePlans.FirstOrDefaultAsync(p => p.Name == trimmed, cancellationToken);
-    }
+    public Task<bool> ExistsAsync(Guid id, CancellationToken cancellationToken = default) =>
+        context.MaintenancePlans.AnyAsync(p => p.Id == id, cancellationToken);
+
+    public Task<bool> ExistsByNameAsync(
+        string name, Guid? excludePlanId = null, CancellationToken cancellationToken = default) =>
+        // Dumb equality — trim ownership sits with the caller, matching what the aggregate stores.
+        context.MaintenancePlans.AnyAsync(
+            p => p.Name == name && (excludePlanId == null || p.Id != excludePlanId),
+            cancellationToken);
 
     public void Add(MaintenancePlan plan) => context.MaintenancePlans.Add(plan);
 

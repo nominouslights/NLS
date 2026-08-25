@@ -31,10 +31,12 @@ public sealed class PlanAssignmentReadModelConfiguration : IEntityTypeConfigurat
         builder.Property(a => a.AssignedAtUtc).HasColumnName("assigned_at_utc");
         builder.Property(a => a.Version).HasColumnName("version");
 
-        // Reads happen here, not on the write table: the vehicle lookup mirrors the write
+        // Reads happen here, not on the write table: the vehicle lookup follows the write
         // table's one-plan-per-vehicle key, and (tenant_id, plan_id) serves "which vehicles
-        // follow this plan".
-        builder.HasIndex(a => new { a.TenantId, a.VehicleId }).IsUnique();
+        // follow this plan". Deliberately NOT unique — uniqueness lives on the write table
+        // only; a unique index on an eventually-consistent projection can wedge the
+        // projection worker when a delete+insert lands in the same batch.
+        builder.HasIndex(a => new { a.TenantId, a.VehicleId });
         builder.HasIndex(a => new { a.TenantId, a.PlanId });
     }
 }

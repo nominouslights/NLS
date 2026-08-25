@@ -56,8 +56,10 @@ public sealed class MaintenancePlanReadModelConfiguration : IEntityTypeConfigura
             overhaul.Property(o => o.PartsCad).HasPrecision(12, 2);
         });
 
-        // Mirrors the write table's natural key, so name lookups on the read side are also
-        // an index probe.
-        builder.HasIndex(p => new { p.TenantId, p.Name }).IsUnique();
+        // Follows the write table's natural key, so name lookups on the read side are also
+        // an index probe. Deliberately NOT unique — uniqueness lives on the write table
+        // only; a unique index on an eventually-consistent projection can wedge the
+        // projection worker when a delete+insert lands in the same batch.
+        builder.HasIndex(p => new { p.TenantId, p.Name });
     }
 }

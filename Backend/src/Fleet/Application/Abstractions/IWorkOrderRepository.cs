@@ -7,6 +7,9 @@ public interface IWorkOrderRepository
 {
     Task<WorkOrder?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
+    /// <summary>True when the work order exists — for link validation without materializing the aggregate.</summary>
+    Task<bool> ExistsAsync(Guid id, CancellationToken cancellationToken = default);
+
     Task<bool> VehicleExistsAsync(Guid vehicleId, CancellationToken cancellationToken = default);
 
     void Add(WorkOrder workOrder);

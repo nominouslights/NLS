@@ -13,7 +13,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(FleetDbContext))]
-    [Migration("20260823141149_AddPreventiveMaintenance")]
+    [Migration("20260825075235_AddPreventiveMaintenance")]
     partial class AddPreventiveMaintenance
     {
         /// <inheritdoc />
@@ -935,8 +935,7 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("TenantId", "Name")
-                        .IsUnique();
+                    b.HasIndex("TenantId", "Name");
 
                     b.ToTable("rm_maintenance_plans", "fleet");
                 });
@@ -972,8 +971,7 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("TenantId", "PlanId");
 
-                    b.HasIndex("TenantId", "VehicleId")
-                        .IsUnique();
+                    b.HasIndex("TenantId", "VehicleId");
 
                     b.ToTable("rm_pm_plan_assignments", "fleet");
                 });
@@ -1041,6 +1039,9 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                         .HasColumnName("work_order_id");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "VehicleId", "PerformedAt")
+                        .IsDescending(false, false, true);
 
                     b.HasIndex("TenantId", "VehicleId", "ItemCode", "PerformedAt")
                         .IsDescending(false, false, false, true);

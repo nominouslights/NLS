@@ -38,6 +38,27 @@ public static partial class FleetEndpoints
         // Work orders — per-vehicle listing plus a fleet-wide group.
         vehicles.MapGet("{vehicleId:guid}/work-orders", GetVehicleWorkOrders);
 
+        // Preventative maintenance, per vehicle: computed status/due/overhauls/history,
+        // plan assignment, and the append-only completion log.
+        vehicles.MapGet("{vehicleId:guid}/pm", GetVehiclePmStatus);
+        vehicles.MapPost("{vehicleId:guid}/pm/assign", AssignPmPlan);
+        vehicles.MapDelete("{vehicleId:guid}/pm", UnassignPmPlan);
+        vehicles.MapPost("{vehicleId:guid}/pm/completions", LogPmCompletion);
+        vehicles.MapGet("{vehicleId:guid}/pm/due", GetVehiclePmDue);
+        vehicles.MapGet("{vehicleId:guid}/pm/overhauls", GetVehiclePmOverhauls);
+        vehicles.MapGet("{vehicleId:guid}/pm/history", GetVehiclePmHistory);
+
+        // Fleet-wide PM dashboard: every assigned, non-disposed vehicle with its due picture.
+        app.MapGet("/api/fleet/pm/due", GetFleetPmDue).RequireAuthorization();
+
+        // Preventative-maintenance plans — fleet-wide reference data assigned to vehicles.
+        var pmPlans = app.MapGroup("/api/fleet/pm-plans").RequireAuthorization();
+
+        pmPlans.MapGet("", GetPmPlans);
+        pmPlans.MapGet("{id:guid}", GetPmPlanById);
+        pmPlans.MapPost("", CreatePmPlan);
+        pmPlans.MapPut("{id:guid}", UpdatePmPlan);
+
         var workOrders = app.MapGroup("/api/fleet/work-orders").RequireAuthorization();
         workOrders.MapGet("", GetAllWorkOrders);
         workOrders.MapPost("", CreateWorkOrder);

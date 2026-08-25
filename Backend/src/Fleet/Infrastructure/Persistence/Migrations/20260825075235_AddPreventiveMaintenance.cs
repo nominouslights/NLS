@@ -11,6 +11,8 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
     /// RLS is hand-appended at the end of Up with a per-table shape: tenant policies on the
     /// write tables, an append-only shape on pm_completions, system read where the projection
     /// worker needs it, and the two-arm write policy only on the rm_* tables it writes.
+    /// The rm_* indexes are deliberately non-unique (uniqueness lives on the write tables
+    /// only — a unique index on an eventually-consistent projection can wedge the worker).
     /// </summary>
     public partial class AddPreventiveMaintenance : Migration
     {
@@ -170,8 +172,7 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                 name: "IX_rm_maintenance_plans_tenant_id_name",
                 schema: "fleet",
                 table: "rm_maintenance_plans",
-                columns: new[] { "tenant_id", "name" },
-                unique: true);
+                columns: new[] { "tenant_id", "name" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_rm_pm_completions_tenant_id_vehicle_id_item_code_performed_~",
@@ -179,6 +180,13 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                 table: "rm_pm_completions",
                 columns: new[] { "tenant_id", "vehicle_id", "item_code", "performed_at" },
                 descending: new[] { false, false, false, true });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_rm_pm_completions_tenant_id_vehicle_id_performed_at",
+                schema: "fleet",
+                table: "rm_pm_completions",
+                columns: new[] { "tenant_id", "vehicle_id", "performed_at" },
+                descending: new[] { false, false, true });
 
             migrationBuilder.CreateIndex(
                 name: "IX_rm_pm_plan_assignments_tenant_id_plan_id",
@@ -190,8 +198,7 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                 name: "IX_rm_pm_plan_assignments_tenant_id_vehicle_id",
                 schema: "fleet",
                 table: "rm_pm_plan_assignments",
-                columns: new[] { "tenant_id", "vehicle_id" },
-                unique: true);
+                columns: new[] { "tenant_id", "vehicle_id" });
 
             // ---- Tenant isolation, DB half — hand-appended, same idiom as the rest of the
             // module (NULLIF guards the pooled-connection case where the session variable is

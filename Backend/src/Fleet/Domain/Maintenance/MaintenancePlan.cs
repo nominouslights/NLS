@@ -31,6 +31,16 @@ public sealed class MaintenancePlan : AggregateRoot, ITenantScoped
     /// </summary>
     public const int CodeMaxLength = 32;
 
+    /// <summary>
+    /// Sanity cap on km intervals — the seed data tops out at 320,000 km, so anything past a
+    /// million km is a typo, and the cap keeps <see cref="PmSchedule"/>'s next-due km math
+    /// far from <see cref="int.MaxValue"/>.
+    /// </summary>
+    public const int MaxIntervalKm = 1_000_000;
+
+    /// <summary>Sanity cap on month intervals (50 years; the seed data tops out at 180 months).</summary>
+    public const int MaxIntervalMonths = 600;
+
     private MaintenancePlan()
     {
         // EF Core materialization only.
@@ -168,6 +178,18 @@ public sealed class MaintenancePlan : AggregateRoot, ITenantScoped
         var itemCodes = new HashSet<string>(StringComparer.Ordinal);
         foreach (var item in items)
         {
+            // JsonStringEnumConverter still admits raw numbers, so an out-of-range integer
+            // binds silently — reject anything not a declared member (Budgeting precedent).
+            if (!Enum.IsDefined(item.Tier))
+            {
+                return MaintenanceErrors.InvalidComponentTier;
+            }
+
+            if (!Enum.IsDefined(item.Task))
+            {
+                return MaintenanceErrors.InvalidMaintenanceTask;
+            }
+
             var error = ValidateEntry(
                 item.Code,
                 item.IntervalKm,
@@ -243,6 +265,16 @@ public sealed class MaintenancePlan : AggregateRoot, ITenantScoped
         if (!HasValidInterval(intervalKm, intervalMonths))
         {
             return errors.IntervalRequired;
+        }
+
+        if (intervalKm > MaxIntervalKm)
+        {
+            return MaintenanceErrors.IntervalKmTooLarge;
+        }
+
+        if (intervalMonths > MaxIntervalMonths)
+        {
+            return MaintenanceErrors.IntervalMonthsTooLarge;
         }
 
         if (!effortIsPositive)

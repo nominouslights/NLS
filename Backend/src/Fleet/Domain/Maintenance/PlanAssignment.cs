@@ -45,12 +45,20 @@ public sealed class PlanAssignment : AggregateRoot, ITenantScoped
         return Result.Success(assignment);
     }
 
-    /// <summary>Switches the vehicle to a different plan, restarting the assignment clock.</summary>
+    /// <summary>
+    /// Switches the vehicle to a different plan, restarting the assignment clock. Reassigning
+    /// the plan it already follows is a no-op — no clock restart, no event.
+    /// </summary>
     public Result Reassign(Guid planId)
     {
         if (planId == Guid.Empty)
         {
             return Result.Failure(MaintenanceErrors.PlanRequired);
+        }
+
+        if (planId == PlanId)
+        {
+            return Result.Success();
         }
 
         PlanId = planId;

@@ -43,6 +43,21 @@ public class PlanAssignmentTests
     }
 
     [Fact]
+    public void Reassigning_the_same_plan_is_a_noop_no_clock_restart_no_event()
+    {
+        var assignment = PlanAssignment.Assign(TenantId, VehicleId, PlanId).Value;
+        assignment.ClearDomainEvents();
+        var assignedAt = assignment.AssignedAtUtc;
+
+        var result = assignment.Reassign(PlanId);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(PlanId, assignment.PlanId);
+        Assert.Equal(assignedAt, assignment.AssignedAtUtc);
+        Assert.Empty(assignment.DomainEvents);
+    }
+
+    [Fact]
     public void MarkRemoved_raises_the_unassigned_event()
     {
         var assignment = PlanAssignment.Assign(TenantId, VehicleId, PlanId).Value;

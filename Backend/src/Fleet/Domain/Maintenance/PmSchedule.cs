@@ -36,7 +36,7 @@ public static class PmSchedule
             return new PmDueStatus(null, null, null, null, PmDueState.NotYetRecorded);
         }
 
-        int? nextDueKm = intervalKm is > 0 ? lastDone.OdometerKm + intervalKm.Value : null;
+        int? nextDueKm = intervalKm is > 0 ? AddKmClamped(lastDone.OdometerKm, intervalKm.Value) : null;
         DateOnly? nextDueDate = intervalMonths is > 0
             ? AddMonthsClamped(lastDone.Date, intervalMonths.Value)
             : null;
@@ -58,6 +58,18 @@ public static class PmSchedule
         }
 
         return new PmDueStatus(nextDueKm, nextDueDate, kmRemaining, daysRemaining, state);
+    }
+
+    /// <summary>
+    /// The km twin of <see cref="AddMonthsClamped"/>: computed in <see cref="long"/> so a
+    /// huge last-done odometer plus a huge interval cannot wrap negative, clamping to
+    /// <see cref="int.MaxValue"/> (permanently "not due yet" on the km arm — the honest
+    /// reading of an interval that runs off the odometer).
+    /// </summary>
+    private static int AddKmClamped(int lastDoneKm, int intervalKm)
+    {
+        var nextDue = (long)lastDoneKm + intervalKm;
+        return nextDue > int.MaxValue ? int.MaxValue : (int)nextDue;
     }
 
     /// <summary>

@@ -2,51 +2,13 @@ using NorthernLink.Fleet.Domain.Maintenance;
 using NorthernLink.Fleet.Domain.Maintenance.Events;
 using NorthernLink.Shared.Kernel;
 using Xunit;
+using static NorthernLink.Fleet.Tests.TestMaintenancePlans;
 
 namespace NorthernLink.Fleet.Tests;
 
 public class MaintenancePlanTests
 {
     private static readonly Guid TenantId = Guid.NewGuid();
-
-    private static MaintenanceItem Item(
-        string code = "PM-E-001",
-        int? intervalKm = 10_000,
-        int? intervalMonths = 6,
-        int shopMinutes = 45,
-        int? leadKm = null,
-        int? leadDays = null) => new()
-    {
-        Code = code,
-        System = "Engine",
-        Component = "Engine oil & filter",
-        Tier = ComponentTier.Primary,
-        Task = MaintenanceTask.Replace,
-        IntervalKm = intervalKm,
-        IntervalMonths = intervalMonths,
-        ShopMinutes = shopMinutes,
-        LeadKm = leadKm,
-        LeadDays = leadDays,
-    };
-
-    private static OverhaulSpec Overhaul(
-        string code = "OH-01",
-        IReadOnlyList<string>? relatedItemCodes = null,
-        decimal partsCad = 6_500m,
-        int? leadDays = null,
-        IReadOnlyList<string>? conditionTriggers = null) => new()
-    {
-        Code = code,
-        Component = "Engine (3.7L Ti-VCT V6)",
-        IntervalKm = 320_000,
-        IntervalMonths = 180,
-        LabourHours = 40m,
-        PartsCad = partsCad,
-        LeadDays = leadDays,
-        Scope = "Teardown inspection or reman long-block.",
-        ConditionTriggers = [.. conditionTriggers ?? ["Compression <85% of spec"]],
-        RelatedItemCodes = [.. relatedItemCodes ?? []],
-    };
 
     private static Result<MaintenancePlan> Create(
         IReadOnlyList<MaintenanceItem>? items = null,
@@ -233,6 +195,55 @@ public class MaintenancePlanTests
 
         Assert.True(result.IsFailure);
         Assert.Equal(MaintenanceErrors.InvalidShopMinutes, result.Error);
+    }
+
+    [Fact]
+    public void Create_rejects_an_undefined_component_tier()
+    {
+        // JsonStringEnumConverter admits raw numbers, so an out-of-range integer can reach
+        // the domain — it must not be stored.
+        var result = Create([Item() with { Tier = (ComponentTier)99 }]);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(MaintenanceErrors.InvalidComponentTier, result.Error);
+    }
+
+    [Fact]
+    public void Create_rejects_an_undefined_maintenance_task()
+    {
+        var result = Create([Item() with { Task = (MaintenanceTask)99 }]);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(MaintenanceErrors.InvalidMaintenanceTask, result.Error);
+    }
+
+    [Fact]
+    public void Create_rejects_an_item_interval_km_over_the_cap()
+    {
+        var result = Create([Item(intervalKm: MaintenancePlan.MaxIntervalKm + 1)]);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(MaintenanceErrors.IntervalKmTooLarge, result.Error);
+    }
+
+    [Fact]
+    public void Create_rejects_an_overhaul_interval_months_over_the_cap()
+    {
+        var result = Create(
+            [Item()],
+            [Overhaul(intervalMonths: MaintenancePlan.MaxIntervalMonths + 1)]);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(MaintenanceErrors.IntervalMonthsTooLarge, result.Error);
+    }
+
+    [Fact]
+    public void Create_accepts_intervals_at_the_caps()
+    {
+        var result = Create(
+            [Item(intervalKm: MaintenancePlan.MaxIntervalKm, intervalMonths: MaintenancePlan.MaxIntervalMonths)]);
+
+        Assert.True(result.IsSuccess);
     }
 
     [Fact]

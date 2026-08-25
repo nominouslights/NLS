@@ -51,5 +51,9 @@ public sealed class PmCompletionReadModelConfiguration : IEntityTypeConfiguratio
         // Same "latest completion per item code" access path as the write table.
         builder.HasIndex(c => new { c.TenantId, c.VehicleId, c.ItemCode, c.PerformedAt })
             .IsDescending(false, false, false, true);
+
+        // The history view's sort: a vehicle's completions newest-first.
+        builder.HasIndex(c => new { c.TenantId, c.VehicleId, c.PerformedAt })
+            .IsDescending(false, false, true);
     }
 }

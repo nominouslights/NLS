@@ -181,4 +181,20 @@ public class PmScheduleTests
         Assert.Equal(new DateOnly(2026, 6, 1).DayNumber - Today.DayNumber, status.DaysRemaining);
         Assert.True(status.DaysRemaining < 0);
     }
+
+    [Fact]
+    public void A_next_due_km_past_int_max_clamps_instead_of_overflowing()
+    {
+        // A last-done odometer near int.MaxValue plus a large interval must not wrap
+        // negative (which would read as instantly overdue) — it clamps to int.MaxValue,
+        // the km-arm twin of the AddMonths calendar clamp.
+        var status = PmSchedule.Compute(
+            1_000_000, intervalMonths: null,
+            new PmLastDone(int.MaxValue - 10, new DateOnly(2026, 6, 1)),
+            currentOdometerKm: 500_000, Today);
+
+        Assert.Equal(int.MaxValue, status.NextDueKm);
+        Assert.Equal(int.MaxValue - 500_000, status.KmRemaining);
+        Assert.Equal(PmDueState.Ok, status.State);
+    }
 }
