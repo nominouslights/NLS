@@ -62,9 +62,10 @@ public sealed class PlanAssignment : AggregateRoot, ITenantScoped
 
     /// <summary>
     /// Flags this assignment for hard removal. Raised just before the repository deletes the
-    /// row so the unassignment is carried to consumers (the mapper only ever sees real domain
-    /// events; the synthetic aggregate-deleted journal row is not mapped). Read-model deletion
-    /// is driven separately by that synthetic journal row.
+    /// row so the unassignment lands in the event journal as a real domain event — an
+    /// audit/journal record only: no integration-event mapper arm exists for it and none is
+    /// planned. Read-model deletion is driven separately by the synthetic aggregate-deleted
+    /// journal row.
     /// </summary>
     public void MarkRemoved() => Raise(new PlanUnassignedDomainEvent(Id, VehicleId, TenantId));
 }

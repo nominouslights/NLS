@@ -15,18 +15,22 @@ public class PmCompletionTests
         string itemCode = "PM-E-001",
         DateOnly? performedAt = null,
         int odometerKm = 42_000,
-        string performedBy = "Northern Link Shop") => PmCompletion.Log(
+        string performedBy = "Northern Link Shop",
+        Guid? vehicleId = null,
+        Guid? planId = null,
+        string? measurement = "Pad thickness 6 mm",
+        string? notes = null) => PmCompletion.Log(
             TenantId,
-            VehicleId,
-            PlanId,
+            vehicleId ?? VehicleId,
+            planId ?? PlanId,
             itemCode,
             PmEntryKind.Item,
             performedAt ?? new DateOnly(2026, 8, 22),
             odometerKm,
             performedBy,
             workOrderId: null,
-            measurement: "Pad thickness 6 mm",
-            notes: null);
+            measurement,
+            notes);
 
     [Fact]
     public void Log_records_the_completion_and_raises_the_logged_event()
@@ -83,5 +87,86 @@ public class PmCompletionTests
 
         Assert.True(result.IsFailure);
         Assert.Equal(MaintenanceErrors.PerformedAtRequired, result.Error);
+    }
+
+    [Fact]
+    public void Log_rejects_an_empty_vehicle_id()
+    {
+        var result = Log(vehicleId: Guid.Empty);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(MaintenanceErrors.VehicleRequired, result.Error);
+    }
+
+    [Fact]
+    public void Log_rejects_an_empty_plan_id()
+    {
+        var result = Log(planId: Guid.Empty);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(MaintenanceErrors.PlanRequired, result.Error);
+    }
+
+    [Fact]
+    public void Log_rejects_a_performed_date_more_than_a_day_in_the_future()
+    {
+        var result = Log(performedAt: DateOnly.FromDateTime(DateTimeOffset.UtcNow.UtcDateTime).AddDays(2));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(MaintenanceErrors.PerformedAtInFuture, result.Error);
+    }
+
+    [Fact]
+    public void Log_accepts_a_performed_date_of_tomorrow()
+    {
+        // One day of grace absorbs a shop clock running a timezone ahead of UTC.
+        var result = Log(performedAt: DateOnly.FromDateTime(DateTimeOffset.UtcNow.UtcDateTime).AddDays(1));
+
+        Assert.True(result.IsSuccess);
+    }
+
+    [Fact]
+    public void Log_trims_the_item_code_to_match_the_plan_side_natural_key()
+    {
+        var result = Log(itemCode: " PM-E-001 ");
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("PM-E-001", result.Value.ItemCode);
+    }
+
+    [Fact]
+    public void Log_rejects_an_item_code_over_the_cap()
+    {
+        var result = Log(itemCode: new string('x', MaintenancePlan.CodeMaxLength + 1));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(MaintenanceErrors.CompletionCodeTooLong, result.Error);
+    }
+
+    [Fact]
+    public void Log_rejects_a_performed_by_over_the_cap()
+    {
+        var result = Log(performedBy: new string('x', PmCompletion.PerformedByMaxLength + 1));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(MaintenanceErrors.PerformedByTooLong, result.Error);
+    }
+
+    [Fact]
+    public void Log_rejects_a_measurement_over_the_cap()
+    {
+        var result = Log(measurement: new string('x', PmCompletion.MeasurementMaxLength + 1));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(MaintenanceErrors.MeasurementTooLong, result.Error);
+    }
+
+    [Fact]
+    public void Log_rejects_notes_over_the_cap()
+    {
+        var result = Log(notes: new string('x', PmCompletion.NotesMaxLength + 1));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(MaintenanceErrors.CompletionNotesTooLong, result.Error);
     }
 }

@@ -91,6 +91,9 @@ public static class FleetServiceCollectionExtensions
         services.AddScoped<IServiceRecordReadService, ServiceRecordReadService>();
         services.AddScoped<IWorkOrderRepository, WorkOrderRepository>();
         services.AddScoped<IWorkOrderReadService, WorkOrderReadService>();
+        services.AddScoped<IMaintenancePlanRepository, MaintenancePlanRepository>();
+        services.AddScoped<IPlanAssignmentRepository, PlanAssignmentRepository>();
+        services.AddScoped<IPmCompletionRepository, PmCompletionRepository>();
 
         // 3. Command/query handlers — registered explicitly, one line per handler.
         services.AddScoped<ICommandHandler<RegisterVehicleCommand, Guid>, RegisterVehicleCommandHandler>();
@@ -137,6 +140,9 @@ public static class FleetServiceCollectionExtensions
             .Project(new ServiceRecordProjection())
             .Project(new WorkOrderProjection())
             .Project(new VehicleInspectionProjection())
+            .Project(new MaintenancePlanProjection())
+            .Project(new PlanAssignmentProjection())
+            .Project(new PmCompletionProjection())
             .OnEvent<VehicleReachedEndOfLifeDomainEvent>(entry =>
                 new EnsureRetirementCertificateCommand(entry.AggregateId))
             .OnEvent<VehicleInspectionCreatedDomainEvent>(entry =>

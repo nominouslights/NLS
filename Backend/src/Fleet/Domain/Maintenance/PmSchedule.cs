@@ -14,12 +14,22 @@ public static class PmSchedule
     /// <summary>Days before the calendar arm at which a code turns <see cref="PmDueState.DueSoon"/>.</summary>
     public const int DefaultLeadDays = 30;
 
+    /// <summary>
+    /// Computes the due status of one code. <paramref name="leadKm"/>/<paramref name="leadDays"/>
+    /// are the per-line due-soon lead overrides (MaintenanceItem/OverhaulSpec.LeadKm/LeadDays);
+    /// null falls back to the defaults. A <paramref name="lastDone"/> with neither interval arm
+    /// set returns <see cref="PmDueState.Ok"/> with no due math — by design: plan validation
+    /// guarantees every item and overhaul has at least one arm, so that input cannot come from
+    /// a stored plan.
+    /// </summary>
     public static PmDueStatus Compute(
         int? intervalKm,
         int? intervalMonths,
         PmLastDone? lastDone,
         int currentOdometerKm,
-        DateOnly today)
+        DateOnly today,
+        int? leadKm = null,
+        int? leadDays = null)
     {
         if (lastDone is null)
         {
@@ -27,21 +37,41 @@ public static class PmSchedule
         }
 
         int? nextDueKm = intervalKm is > 0 ? lastDone.OdometerKm + intervalKm.Value : null;
-        DateOnly? nextDueDate = intervalMonths is > 0 ? lastDone.Date.AddMonths(intervalMonths.Value) : null;
+        DateOnly? nextDueDate = intervalMonths is > 0
+            ? AddMonthsClamped(lastDone.Date, intervalMonths.Value)
+            : null;
 
         int? kmRemaining = nextDueKm - currentOdometerKm;
         int? daysRemaining = nextDueDate is { } dueDate ? dueDate.DayNumber - today.DayNumber : null;
+
+        var effectiveLeadKm = leadKm ?? DefaultLeadKm;
+        var effectiveLeadDays = leadDays ?? DefaultLeadDays;
 
         var state = PmDueState.Ok;
         if (kmRemaining is <= 0 || daysRemaining is <= 0)
         {
             state = PmDueState.Overdue;
         }
-        else if (kmRemaining is <= DefaultLeadKm || daysRemaining is <= DefaultLeadDays)
+        else if (kmRemaining <= effectiveLeadKm || daysRemaining <= effectiveLeadDays)
         {
             state = PmDueState.DueSoon;
         }
 
         return new PmDueStatus(nextDueKm, nextDueDate, kmRemaining, daysRemaining, state);
+    }
+
+    /// <summary>
+    /// <see cref="DateOnly.AddMonths"/> throws past <see cref="DateOnly.MaxValue"/>; a
+    /// far-future completion date must not make Compute throw, so anything beyond the
+    /// calendar's end clamps to <see cref="DateOnly.MaxValue"/> (permanently "not due yet" on
+    /// that arm, which is the honest reading of an interval that runs off the calendar).
+    /// </summary>
+    private static DateOnly AddMonthsClamped(DateOnly date, int months)
+    {
+        // Zero-based month index since year 1; DateOnly.MaxValue is 9999-12-31, index 12*9999-1.
+        var targetMonthIndex = (long)(date.Year - 1) * 12 + (date.Month - 1) + months;
+        return targetMonthIndex >= 12L * DateOnly.MaxValue.Year
+            ? DateOnly.MaxValue
+            : date.AddMonths(months);
     }
 }

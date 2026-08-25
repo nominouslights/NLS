@@ -13,7 +13,9 @@ public class MaintenancePlanTests
         string code = "PM-E-001",
         int? intervalKm = 10_000,
         int? intervalMonths = 6,
-        int shopMinutes = 45) => new()
+        int shopMinutes = 45,
+        int? leadKm = null,
+        int? leadDays = null) => new()
     {
         Code = code,
         System = "Engine",
@@ -23,20 +25,26 @@ public class MaintenancePlanTests
         IntervalKm = intervalKm,
         IntervalMonths = intervalMonths,
         ShopMinutes = shopMinutes,
+        LeadKm = leadKm,
+        LeadDays = leadDays,
     };
 
     private static OverhaulSpec Overhaul(
         string code = "OH-01",
-        IReadOnlyList<string>? relatedItemCodes = null) => new()
+        IReadOnlyList<string>? relatedItemCodes = null,
+        decimal partsCad = 6_500m,
+        int? leadDays = null,
+        IReadOnlyList<string>? conditionTriggers = null) => new()
     {
         Code = code,
         Component = "Engine (3.7L Ti-VCT V6)",
         IntervalKm = 320_000,
         IntervalMonths = 180,
         LabourHours = 40m,
-        PartsCad = 6_500m,
+        PartsCad = partsCad,
+        LeadDays = leadDays,
         Scope = "Teardown inspection or reman long-block.",
-        ConditionTriggers = ["Compression <85% of spec"],
+        ConditionTriggers = [.. conditionTriggers ?? ["Compression <85% of spec"]],
         RelatedItemCodes = [.. relatedItemCodes ?? []],
     };
 
@@ -78,6 +86,135 @@ public class MaintenancePlanTests
 
         Assert.True(result.IsFailure);
         Assert.Equal(MaintenanceErrors.DuplicateItemCode, result.Error);
+    }
+
+    [Fact]
+    public void Create_normalizes_item_and_overhaul_text_before_storing()
+    {
+        var result = Create(
+            [Item(" PM-E-001 ") with { System = " Engine ", Component = " Oil filter ", Notes = "   " }],
+            [Overhaul(" OH-01 ", conditionTriggers: ["  Compression <85%  ", " ", ""])]);
+
+        Assert.True(result.IsSuccess);
+        var item = Assert.Single(result.Value.Items);
+        Assert.Equal("PM-E-001", item.Code);
+        Assert.Equal("Engine", item.System);
+        Assert.Equal("Oil filter", item.Component);
+        Assert.Null(item.Notes);
+        var overhaul = Assert.Single(result.Value.Overhauls);
+        Assert.Equal("OH-01", overhaul.Code);
+        Assert.Equal(new[] { "Compression <85%" }, overhaul.ConditionTriggers);
+    }
+
+    [Fact]
+    public void Duplicate_detection_runs_on_trimmed_codes()
+    {
+        var result = Create([Item("PM-1"), Item("PM-1 ")]);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(MaintenanceErrors.DuplicateItemCode, result.Error);
+    }
+
+    [Fact]
+    public void Related_item_codes_match_after_trimming()
+    {
+        var result = Create(
+            [Item("PM-E-001 ")],
+            [Overhaul("OH-01", [" PM-E-001 "])]);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(new[] { "PM-E-001" }, Assert.Single(result.Value.Overhauls).RelatedItemCodes);
+    }
+
+    [Fact]
+    public void Create_rejects_a_plan_name_over_the_cap()
+    {
+        var result = MaintenancePlan.Create(
+            TenantId,
+            new string('x', MaintenancePlan.NameMaxLength + 1),
+            "2016 Ford Transit T-150",
+            "severe",
+            notes: null,
+            [Item()],
+            []);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(MaintenanceErrors.NameTooLong, result.Error);
+    }
+
+    [Fact]
+    public void Create_rejects_notes_over_the_cap()
+    {
+        var result = MaintenancePlan.Create(
+            TenantId,
+            "2016 Ford Transit T-150 / severe",
+            "2016 Ford Transit T-150",
+            "severe",
+            new string('x', MaintenancePlan.NotesMaxLength + 1),
+            [Item()],
+            []);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(MaintenanceErrors.NotesTooLong, result.Error);
+    }
+
+    [Fact]
+    public void Create_rejects_an_item_code_over_the_cap()
+    {
+        var result = Create([Item(new string('x', MaintenancePlan.CodeMaxLength + 1))]);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(MaintenanceErrors.ItemCodeTooLong, result.Error);
+    }
+
+    [Fact]
+    public void Create_rejects_an_overhaul_code_over_the_cap()
+    {
+        var result = Create(
+            [Item()],
+            [Overhaul(new string('x', MaintenancePlan.CodeMaxLength + 1))]);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(MaintenanceErrors.OverhaulCodeTooLong, result.Error);
+    }
+
+    [Fact]
+    public void Create_rejects_a_negative_parts_estimate()
+    {
+        var result = Create([Item()], [Overhaul(partsCad: -1m)]);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(MaintenanceErrors.InvalidPartsCad, result.Error);
+    }
+
+    [Fact]
+    public void Create_rejects_a_zero_lead_km_override()
+    {
+        var result = Create([Item(leadKm: 0)]);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(MaintenanceErrors.InvalidLeadKm, result.Error);
+    }
+
+    [Fact]
+    public void Create_rejects_a_zero_lead_days_override_on_an_overhaul()
+    {
+        var result = Create([Item()], [Overhaul(leadDays: 0)]);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(MaintenanceErrors.InvalidLeadDays, result.Error);
+    }
+
+    [Fact]
+    public void Create_accepts_positive_lead_overrides()
+    {
+        var result = Create([Item(leadKm: 500, leadDays: 7)], [Overhaul(leadDays: 90)]);
+
+        Assert.True(result.IsSuccess);
+        var item = Assert.Single(result.Value.Items);
+        Assert.Equal(500, item.LeadKm);
+        Assert.Equal(7, item.LeadDays);
+        Assert.Equal(90, Assert.Single(result.Value.Overhauls).LeadDays);
     }
 
     [Fact]

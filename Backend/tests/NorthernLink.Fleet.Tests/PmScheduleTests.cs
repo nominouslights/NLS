@@ -127,6 +127,50 @@ public class PmScheduleTests
     }
 
     [Fact]
+    public void A_calendar_arm_past_the_end_of_the_calendar_clamps_instead_of_throwing()
+    {
+        var status = PmSchedule.Compute(
+            intervalKm: null, 12, new PmLastDone(40_000, new DateOnly(9999, 6, 1)), 41_000, Today);
+
+        Assert.Equal(DateOnly.MaxValue, status.NextDueDate);
+        Assert.Equal(PmDueState.Ok, status.State);
+    }
+
+    [Fact]
+    public void A_lead_km_override_narrows_the_due_soon_window()
+    {
+        // 1,000 km remaining: DueSoon under the 2,000 km default, still Ok with a 500 km lead.
+        var status = PmSchedule.Compute(
+            5_000, intervalMonths: null, new PmLastDone(40_000, new DateOnly(2026, 8, 1)),
+            44_000, Today, leadKm: 500);
+
+        Assert.Equal(1_000, status.KmRemaining);
+        Assert.Equal(PmDueState.Ok, status.State);
+    }
+
+    [Fact]
+    public void A_lead_km_override_governs_when_the_window_is_entered()
+    {
+        var status = PmSchedule.Compute(
+            5_000, intervalMonths: null, new PmLastDone(40_000, new DateOnly(2026, 8, 1)),
+            44_500, Today, leadKm: 500);
+
+        Assert.Equal(500, status.KmRemaining);
+        Assert.Equal(PmDueState.DueSoon, status.State);
+    }
+
+    [Fact]
+    public void A_lead_days_override_widens_the_due_soon_window()
+    {
+        // Due 2026-12-01, 101 days out: Ok under the 30-day default, DueSoon with a 120-day lead.
+        var status = PmSchedule.Compute(
+            intervalKm: null, 6, new PmLastDone(40_000, new DateOnly(2026, 6, 1)), 41_000, Today,
+            leadDays: 120);
+
+        Assert.Equal(PmDueState.DueSoon, status.State);
+    }
+
+    [Fact]
     public void Remaining_values_go_negative_once_overdue()
     {
         var status = PmSchedule.Compute(

@@ -4,7 +4,11 @@ namespace NorthernLink.Fleet.Domain.Maintenance;
 /// A long-interval major-component overhaul of a <see cref="MaintenancePlan"/> — its scope,
 /// labour/parts estimate, the condition findings that justify overhauling early, and the
 /// Test items (<see cref="RelatedItemCodes"/>) whose latest measurements inform that
-/// decision. <see cref="Code"/> ("OH-01", …) is the stable natural key. Persisted as jsonb.
+/// decision. <see cref="Code"/> ("OH-01", …) is the stable natural key.
+/// <see cref="LeadKm"/>/<see cref="LeadDays"/> optionally override the
+/// <see cref="PmSchedule"/> due-soon leads for this overhaul (null = the plan-wide default) —
+/// a 320,000 km overhaul warrants far more warning than a routine service line.
+/// Persisted as jsonb.
 /// </summary>
 public sealed record OverhaulSpec
 {
@@ -14,6 +18,8 @@ public sealed record OverhaulSpec
     public int? IntervalMonths { get; init; }
     public decimal LabourHours { get; init; }
     public decimal PartsCad { get; init; }
+    public int? LeadKm { get; init; }
+    public int? LeadDays { get; init; }
     public required string Scope { get; init; }
     public List<string> ConditionTriggers { get; init; } = [];
     public List<string> RelatedItemCodes { get; init; } = [];

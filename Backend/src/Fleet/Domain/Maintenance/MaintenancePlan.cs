@@ -13,6 +13,24 @@ namespace NorthernLink.Fleet.Domain.Maintenance;
 /// </summary>
 public sealed class MaintenancePlan : AggregateRoot, ITenantScoped
 {
+    /// <summary>DB column cap on <see cref="Name"/> (maintenance_plans.name).</summary>
+    public const int NameMaxLength = 200;
+
+    /// <summary>DB column cap on <see cref="VehicleModel"/> (maintenance_plans.vehicle_model).</summary>
+    public const int VehicleModelMaxLength = 200;
+
+    /// <summary>DB column cap on <see cref="ServiceClass"/> (maintenance_plans.service_class).</summary>
+    public const int ServiceClassMaxLength = 64;
+
+    /// <summary>DB column cap on <see cref="Notes"/> (maintenance_plans.notes).</summary>
+    public const int NotesMaxLength = 2000;
+
+    /// <summary>
+    /// Cap on item and overhaul codes — the natural key completions reference, so it matches
+    /// the pm_completions.item_code column (varchar(32)).
+    /// </summary>
+    public const int CodeMaxLength = 32;
+
     private MaintenancePlan()
     {
         // EF Core materialization only.
@@ -40,7 +58,13 @@ public sealed class MaintenancePlan : AggregateRoot, ITenantScoped
         IReadOnlyList<MaintenanceItem> items,
         IReadOnlyList<OverhaulSpec> overhauls)
     {
-        var error = Validate(name, vehicleModel, serviceClass, items, overhauls);
+        // Normalize before validating, so duplicate detection, the related-code cross-check,
+        // and the stored natural keys all operate on the trimmed values — aligned with
+        // PmCompletion.ItemCode, which is trimmed the same way.
+        var normalizedItems = items.Select(Normalize).ToList();
+        var normalizedOverhauls = overhauls.Select(Normalize).ToList();
+
+        var error = Validate(name, vehicleModel, serviceClass, notes, normalizedItems, normalizedOverhauls);
         if (error is not null)
         {
             return Result.Failure<MaintenancePlan>(error);
@@ -54,8 +78,8 @@ public sealed class MaintenancePlan : AggregateRoot, ITenantScoped
             VehicleModel = vehicleModel.Trim(),
             ServiceClass = serviceClass.Trim(),
             Notes = Clean(notes),
-            Items = [.. items],
-            Overhauls = [.. overhauls],
+            Items = normalizedItems,
+            Overhauls = normalizedOverhauls,
             CreatedAtUtc = now,
             UpdatedAtUtc = now,
         };
@@ -77,7 +101,10 @@ public sealed class MaintenancePlan : AggregateRoot, ITenantScoped
         IReadOnlyList<MaintenanceItem> items,
         IReadOnlyList<OverhaulSpec> overhauls)
     {
-        var error = Validate(name, vehicleModel, serviceClass, items, overhauls);
+        var normalizedItems = items.Select(Normalize).ToList();
+        var normalizedOverhauls = overhauls.Select(Normalize).ToList();
+
+        var error = Validate(name, vehicleModel, serviceClass, notes, normalizedItems, normalizedOverhauls);
         if (error is not null)
         {
             return Result.Failure(error);
@@ -87,8 +114,8 @@ public sealed class MaintenancePlan : AggregateRoot, ITenantScoped
         VehicleModel = vehicleModel.Trim();
         ServiceClass = serviceClass.Trim();
         Notes = Clean(notes);
-        Items = [.. items];
-        Overhauls = [.. overhauls];
+        Items = normalizedItems;
+        Overhauls = normalizedOverhauls;
         UpdatedAtUtc = DateTimeOffset.UtcNow;
 
         Raise(new MaintenancePlanUpdatedDomainEvent(Id, TenantId));
@@ -99,6 +126,7 @@ public sealed class MaintenancePlan : AggregateRoot, ITenantScoped
         string name,
         string vehicleModel,
         string serviceClass,
+        string? notes,
         IReadOnlyList<MaintenanceItem> items,
         IReadOnlyList<OverhaulSpec> overhauls)
     {
@@ -107,9 +135,19 @@ public sealed class MaintenancePlan : AggregateRoot, ITenantScoped
             return MaintenanceErrors.NameRequired;
         }
 
+        if (name.Trim().Length > NameMaxLength)
+        {
+            return MaintenanceErrors.NameTooLong;
+        }
+
         if (string.IsNullOrWhiteSpace(vehicleModel))
         {
             return MaintenanceErrors.VehicleModelRequired;
+        }
+
+        if (vehicleModel.Trim().Length > VehicleModelMaxLength)
+        {
+            return MaintenanceErrors.VehicleModelTooLong;
         }
 
         if (string.IsNullOrWhiteSpace(serviceClass))
@@ -117,51 +155,54 @@ public sealed class MaintenancePlan : AggregateRoot, ITenantScoped
             return MaintenanceErrors.ServiceClassRequired;
         }
 
+        if (serviceClass.Trim().Length > ServiceClassMaxLength)
+        {
+            return MaintenanceErrors.ServiceClassTooLong;
+        }
+
+        if (notes?.Trim().Length > NotesMaxLength)
+        {
+            return MaintenanceErrors.NotesTooLong;
+        }
+
         var itemCodes = new HashSet<string>(StringComparer.Ordinal);
         foreach (var item in items)
         {
-            if (string.IsNullOrWhiteSpace(item.Code))
+            var error = ValidateEntry(
+                item.Code,
+                item.IntervalKm,
+                item.IntervalMonths,
+                effortIsPositive: item.ShopMinutes > 0,
+                item.LeadKm,
+                item.LeadDays,
+                itemCodes,
+                ItemEntryErrors);
+            if (error is not null)
             {
-                return MaintenanceErrors.ItemCodeRequired;
-            }
-
-            if (!itemCodes.Add(item.Code))
-            {
-                return MaintenanceErrors.DuplicateItemCode;
-            }
-
-            if (!HasValidInterval(item.IntervalKm, item.IntervalMonths))
-            {
-                return MaintenanceErrors.ItemIntervalRequired;
-            }
-
-            if (item.ShopMinutes <= 0)
-            {
-                return MaintenanceErrors.InvalidShopMinutes;
+                return error;
             }
         }
 
         var overhaulCodes = new HashSet<string>(StringComparer.Ordinal);
         foreach (var overhaul in overhauls)
         {
-            if (string.IsNullOrWhiteSpace(overhaul.Code))
+            var error = ValidateEntry(
+                overhaul.Code,
+                overhaul.IntervalKm,
+                overhaul.IntervalMonths,
+                effortIsPositive: overhaul.LabourHours > 0,
+                overhaul.LeadKm,
+                overhaul.LeadDays,
+                overhaulCodes,
+                OverhaulEntryErrors);
+            if (error is not null)
             {
-                return MaintenanceErrors.OverhaulCodeRequired;
+                return error;
             }
 
-            if (!overhaulCodes.Add(overhaul.Code))
+            if (overhaul.PartsCad < 0)
             {
-                return MaintenanceErrors.DuplicateOverhaulCode;
-            }
-
-            if (!HasValidInterval(overhaul.IntervalKm, overhaul.IntervalMonths))
-            {
-                return MaintenanceErrors.OverhaulIntervalRequired;
-            }
-
-            if (overhaul.LabourHours <= 0)
-            {
-                return MaintenanceErrors.InvalidLabourHours;
+                return MaintenanceErrors.InvalidPartsCad;
             }
 
             if (overhaul.RelatedItemCodes.Any(code => !itemCodes.Contains(code)))
@@ -173,16 +214,102 @@ public sealed class MaintenancePlan : AggregateRoot, ITenantScoped
         return null;
     }
 
-    /// <summary>At least one interval axis present, and any axis given must be positive.</summary>
-    private static bool HasValidInterval(int? intervalKm, int? intervalMonths)
+    /// <summary>The per-line checks items and overhauls share; the caller adds any kind-specific extras.</summary>
+    private static Error? ValidateEntry(
+        string code,
+        int? intervalKm,
+        int? intervalMonths,
+        bool effortIsPositive,
+        int? leadKm,
+        int? leadDays,
+        HashSet<string> seenCodes,
+        EntryErrors errors)
     {
-        if (intervalKm is <= 0 || intervalMonths is <= 0)
+        if (string.IsNullOrWhiteSpace(code))
         {
-            return false;
+            return errors.CodeRequired;
         }
 
-        return intervalKm is not null || intervalMonths is not null;
+        if (code.Length > CodeMaxLength)
+        {
+            return errors.CodeTooLong;
+        }
+
+        if (!seenCodes.Add(code))
+        {
+            return errors.DuplicateCode;
+        }
+
+        if (!HasValidInterval(intervalKm, intervalMonths))
+        {
+            return errors.IntervalRequired;
+        }
+
+        if (!effortIsPositive)
+        {
+            return errors.InvalidEffort;
+        }
+
+        if (leadKm is <= 0)
+        {
+            return MaintenanceErrors.InvalidLeadKm;
+        }
+
+        if (leadDays is <= 0)
+        {
+            return MaintenanceErrors.InvalidLeadDays;
+        }
+
+        return null;
     }
+
+    private sealed record EntryErrors(
+        Error CodeRequired,
+        Error CodeTooLong,
+        Error DuplicateCode,
+        Error IntervalRequired,
+        Error InvalidEffort);
+
+    private static readonly EntryErrors ItemEntryErrors = new(
+        MaintenanceErrors.ItemCodeRequired,
+        MaintenanceErrors.ItemCodeTooLong,
+        MaintenanceErrors.DuplicateItemCode,
+        MaintenanceErrors.ItemIntervalRequired,
+        MaintenanceErrors.InvalidShopMinutes);
+
+    private static readonly EntryErrors OverhaulEntryErrors = new(
+        MaintenanceErrors.OverhaulCodeRequired,
+        MaintenanceErrors.OverhaulCodeTooLong,
+        MaintenanceErrors.DuplicateOverhaulCode,
+        MaintenanceErrors.OverhaulIntervalRequired,
+        MaintenanceErrors.InvalidLabourHours);
+
+    /// <summary>At least one interval axis present, and any axis given must be positive.</summary>
+    private static bool HasValidInterval(int? intervalKm, int? intervalMonths) =>
+        intervalKm is null or > 0
+        && intervalMonths is null or > 0
+        && (intervalKm is not null || intervalMonths is not null);
+
+    private static MaintenanceItem Normalize(MaintenanceItem item) => item with
+    {
+        Code = item.Code?.Trim()!,
+        System = item.System?.Trim()!,
+        Component = item.Component?.Trim()!,
+        Notes = Clean(item.Notes),
+    };
+
+    private static OverhaulSpec Normalize(OverhaulSpec overhaul) => overhaul with
+    {
+        Code = overhaul.Code?.Trim()!,
+        Component = overhaul.Component?.Trim()!,
+        Scope = overhaul.Scope?.Trim()!,
+        ConditionTriggers = NormalizeList(overhaul.ConditionTriggers),
+        RelatedItemCodes = NormalizeList(overhaul.RelatedItemCodes),
+    };
+
+    /// <summary>Trims every entry and drops the blank ones.</summary>
+    private static List<string> NormalizeList(IEnumerable<string> values) =>
+        [.. values.Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v.Trim())];
 
     private static string? Clean(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
