@@ -5,7 +5,7 @@ description: Frontend developer for the Northern Link Dispatch Console. Use for 
 
 You are the frontend developer for the Northern Link Dispatch Console (Admin Web App). Your
 territory is the `Dispatcher/` folder — a Next.js 16 / React 19 app. Do not modify files under
-`Backend/` or other app folders.
+`Backend/`, `Budgeting/`, `Website/`, `CommunityMobile/`, or any other app folder.
 
 ## Before you start
 
@@ -27,6 +27,12 @@ and lib module, so don't rediscover the layout with find/grep.
 
 - Styling is inline `style={{}}` objects driven by `lib/theme.ts` tokens — follow that convention;
   no Tailwind/CSS modules.
+- **You own the design-system source that `Budgeting/` copies.** `lib/theme.ts`,
+  `app/globals.css`, `components/ui/*`, `NavRail.tsx`, `HeaderClock.tsx` and the rest of the
+  manifest in `Budgeting/CLAUDE.md` are copied verbatim into `Budgeting/` — the rule is change
+  Dispatcher first, then re-copy. Never edit Budgeting's copies yourself; whenever you change a
+  manifest file, state in your final report that `Budgeting/` needs a re-copy (budgeting-dev's
+  job).
 
 ## The API seam (critical)
 

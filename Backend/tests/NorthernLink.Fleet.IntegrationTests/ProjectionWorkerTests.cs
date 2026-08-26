@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 using NorthernLink.Shared.Persistence.Auditing;
 using NorthernLink.Fleet.Domain.Vehicles;
 using Xunit;
@@ -21,6 +20,14 @@ public class ProjectionWorkerTests(PostgresFixture fixture)
     {
         var worker = fixture.BuildFleetProjectionWorker();
 
+        // Other test classes in this collection can leave the journal AHEAD of the checkpoint:
+        // a poll's secondary commands (odometer propagation, retirement certificates) run after
+        // that poll's checkpoint write, and any aggregate they mutate appends new journal rows
+        // the finished poll does not cover. Drain to quiescence first so the strict
+        // "checkpoint == max(position)" and "second poll is a no-op" assertions below measure
+        // only this test's own append, with no implicit cross-class ordering invariant.
+        await fixture.DrainFleetProjectionsAsync();
+
         var vehicle = TestVehicleFactory.Create(PostgresFixture.TenantA, odometerKm: 100_000, endOfLifeKm: 500_000);
         await using (var writer = fixture.CreateContext(PostgresFixture.TenantA))
         {
@@ -39,19 +46,25 @@ public class ProjectionWorkerTests(PostgresFixture fixture)
             Assert.Equal(vehicle.LifeUsedPct, projected.LifeUsedPct);
         }
 
-        var checkpoint = await ReadCheckpointAsync();
-        Assert.Equal(await ReadGlobalJournalMaxAsync(), checkpoint);
+        // Registering a vehicle triggers no OnEvent reaction (it is nowhere near end of life),
+        // so after the drained baseline this poll's checkpoint lands exactly on the journal head.
+        var checkpoint = await fixture.ReadFleetProjectionCheckpointAsync();
+        Assert.Equal(await fixture.ReadFleetJournalHeadAsync(), checkpoint);
         Assert.True(checkpoint > 0);
 
         // No new journal rows since the first poll — the second poll must not move the cursor.
         await worker.ProcessOnceAsync(CancellationToken.None);
-        Assert.Equal(checkpoint, await ReadCheckpointAsync());
+        Assert.Equal(checkpoint, await fixture.ReadFleetProjectionCheckpointAsync());
     }
 
     [Fact]
     public async Task Staleness_predicate_flips_on_unprojected_mutation_and_clears_after_next_poll()
     {
         var worker = fixture.BuildFleetProjectionWorker();
+
+        // Drained baseline: with no backlog, each single poll below is guaranteed to reach
+        // this test's own journal rows (one poll takes at most BatchSize rows).
+        await fixture.DrainFleetProjectionsAsync();
 
         var vehicle = TestVehicleFactory.Create(PostgresFixture.TenantA, odometerKm: 100_000, endOfLifeKm: 500_000);
         await using (var writer = fixture.CreateContext(PostgresFixture.TenantA))
@@ -82,6 +95,9 @@ public class ProjectionWorkerTests(PostgresFixture fixture)
     public async Task Deleting_the_aggregate_removes_its_read_row_on_the_next_poll()
     {
         var worker = fixture.BuildFleetProjectionWorker();
+
+        // Same drained baseline as above — single polls must reach this test's rows.
+        await fixture.DrainFleetProjectionsAsync();
 
         var vehicle = TestVehicleFactory.Create(PostgresFixture.TenantA);
         await using (var writer = fixture.CreateContext(PostgresFixture.TenantA))
@@ -131,24 +147,5 @@ public class ProjectionWorkerTests(PostgresFixture fixture)
             .Where(e => e.AggregateId == vehicleId)
             .MaxAsync(e => e.AggregateVersion);
         return journalMaxVersion > matviewVersion;
-    }
-
-    private async Task<long> ReadCheckpointAsync() => await ScalarUnderSystemAsync(
-        "SELECT coalesce((SELECT last_position FROM fleet.projection_checkpoints WHERE projection_name = 'fleet'), 0);");
-
-    private async Task<long> ReadGlobalJournalMaxAsync() => await ScalarUnderSystemAsync(
-        "SELECT coalesce(max(position), 0) FROM fleet.event_journal;");
-
-    private async Task<long> ScalarUnderSystemAsync(string sql)
-    {
-        await using var connection = new NpgsqlConnection(fixture.AppConnectionString);
-        await connection.OpenAsync();
-        await using (var system = new NpgsqlCommand("SELECT set_config('app.is_system', 'true', false);", connection))
-        {
-            await system.ExecuteNonQueryAsync();
-        }
-
-        await using var command = new NpgsqlCommand(sql, connection);
-        return (long)(await command.ExecuteScalarAsync())!;
     }
 }

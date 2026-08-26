@@ -11,6 +11,21 @@ using NorthernLink.Fleet.Application.Documents.GetAll;
 using NorthernLink.Fleet.Application.Documents.GetForVehicle;
 using NorthernLink.Fleet.Application.Documents.Remove;
 using NorthernLink.Fleet.Application.Inspections;
+using NorthernLink.Fleet.Application.Maintenance;
+using NorthernLink.Fleet.Application.Maintenance.Assignments.Assign;
+using NorthernLink.Fleet.Application.Maintenance.Assignments.Unassign;
+using NorthernLink.Fleet.Application.Maintenance.Completions.Log;
+using NorthernLink.Fleet.Application.Maintenance.Completions.PropagateOdometer;
+using NorthernLink.Fleet.Application.Maintenance.Plans.Create;
+using NorthernLink.Fleet.Application.Maintenance.Plans.GetAll;
+using NorthernLink.Fleet.Application.Maintenance.Plans.GetById;
+using NorthernLink.Fleet.Application.Maintenance.Plans.SeedDefaults;
+using NorthernLink.Fleet.Application.Maintenance.Plans.Update;
+using NorthernLink.Fleet.Application.Maintenance.Status.GetDue;
+using NorthernLink.Fleet.Application.Maintenance.Status.GetFleetDue;
+using NorthernLink.Fleet.Application.Maintenance.Status.GetHistory;
+using NorthernLink.Fleet.Application.Maintenance.Status.GetOverhauls;
+using NorthernLink.Fleet.Application.Maintenance.Status.GetVehicleStatus;
 using NorthernLink.Fleet.Application.Inspections.Enter;
 using NorthernLink.Fleet.Application.Inspections.GetInspections;
 using NorthernLink.Fleet.Application.Inspections.PropagateOdometer;
@@ -42,8 +57,6 @@ using NorthernLink.Fleet.Application.WorkOrders.GetForVehicle;
 using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Persistence.Auditing;
 using NorthernLink.Shared.Persistence.Projections;
-using NorthernLink.Fleet.Domain.Inspections.Events;
-using NorthernLink.Fleet.Domain.Vehicles.Events;
 using NorthernLink.Fleet.Infrastructure.Persistence;
 using NorthernLink.Fleet.Infrastructure.Persistence.Projections;
 
@@ -91,6 +104,10 @@ public static class FleetServiceCollectionExtensions
         services.AddScoped<IServiceRecordReadService, ServiceRecordReadService>();
         services.AddScoped<IWorkOrderRepository, WorkOrderRepository>();
         services.AddScoped<IWorkOrderReadService, WorkOrderReadService>();
+        services.AddScoped<IMaintenancePlanRepository, MaintenancePlanRepository>();
+        services.AddScoped<IPlanAssignmentRepository, PlanAssignmentRepository>();
+        services.AddScoped<IPmCompletionRepository, PmCompletionRepository>();
+        services.AddScoped<IPmReadService, PmReadService>();
 
         // 3. Command/query handlers — registered explicitly, one line per handler.
         services.AddScoped<ICommandHandler<RegisterVehicleCommand, Guid>, RegisterVehicleCommandHandler>();
@@ -121,32 +138,27 @@ public static class FleetServiceCollectionExtensions
         services.AddScoped<ICommandHandler<CompleteWorkOrderCommand, Guid>, CompleteWorkOrderCommandHandler>();
         services.AddScoped<IQueryHandler<GetVehicleWorkOrdersQuery, IReadOnlyList<WorkOrderResponse>>, GetVehicleWorkOrdersQueryHandler>();
         services.AddScoped<IQueryHandler<GetAllWorkOrdersQuery, IReadOnlyList<WorkOrderResponse>>, GetAllWorkOrdersQueryHandler>();
+        services.AddScoped<ICommandHandler<CreateMaintenancePlanCommand, Guid>, CreateMaintenancePlanCommandHandler>();
+        services.AddScoped<ICommandHandler<UpdateMaintenancePlanCommand>, UpdateMaintenancePlanCommandHandler>();
+        services.AddScoped<ICommandHandler<SeedDefaultMaintenancePlanCommand, Guid>, SeedDefaultMaintenancePlanCommandHandler>();
+        services.AddScoped<IQueryHandler<GetMaintenancePlansQuery, IReadOnlyList<MaintenancePlanSummaryResponse>>, GetMaintenancePlansQueryHandler>();
+        services.AddScoped<IQueryHandler<GetMaintenancePlanByIdQuery, MaintenancePlanResponse>, GetMaintenancePlanByIdQueryHandler>();
+        services.AddScoped<ICommandHandler<AssignMaintenancePlanCommand>, AssignMaintenancePlanCommandHandler>();
+        services.AddScoped<ICommandHandler<UnassignMaintenancePlanCommand>, UnassignMaintenancePlanCommandHandler>();
+        services.AddScoped<ICommandHandler<LogPmCompletionCommand, Guid>, LogPmCompletionCommandHandler>();
+        services.AddScoped<ICommandHandler<PropagatePmOdometerCommand>, PropagatePmOdometerCommandHandler>();
+        services.AddScoped<IQueryHandler<GetVehiclePmStatusQuery, VehiclePmStatusResponse>, GetVehiclePmStatusQueryHandler>();
+        services.AddScoped<IQueryHandler<GetPmDueQuery, PmDueResponse>, GetPmDueQueryHandler>();
+        services.AddScoped<IQueryHandler<GetPmOverhaulsQuery, PmOverhaulsResponse>, GetPmOverhaulsQueryHandler>();
+        services.AddScoped<IQueryHandler<GetPmHistoryQuery, IReadOnlyList<PmCompletionResponse>>, GetPmHistoryQueryHandler>();
+        services.AddScoped<IQueryHandler<GetFleetPmDueQuery, FleetPmDueResponse>, GetFleetPmDueQueryHandler>();
 
         // 4. Read-side projections — one worker polls fleet.event_journal, upserts the read-model
         //    rows for the aggregates the batch touched, and dispatches same-module secondary
-        //    commands. Retirement certificates are driven by vehicle events (they're created
-        //    inline during a vehicle's retirement, so they share the "vehicle" aggregate's
-        //    journal) — hence two projections keyed on the same aggregate type. A newly entered
-        //    inspection advances the linked vehicle's odometer intra-Fleet (monotonic, auto-retire
-        //    applies) — the same same-module reaction pattern.
-        services.AddProjections<FleetDbContext>(SchemaName, registry => registry
-            .Project(new VehicleProjection())
-            .Project(new RetirementCertificateProjection())
-            .Project(new ShopProjection())
-            .Project(new VehicleDocumentProjection())
-            .Project(new ServiceRecordProjection())
-            .Project(new WorkOrderProjection())
-            .Project(new VehicleInspectionProjection())
-            .OnEvent<VehicleReachedEndOfLifeDomainEvent>(entry =>
-                new EnsureRetirementCertificateCommand(entry.AggregateId))
-            .OnEvent<VehicleInspectionCreatedDomainEvent>(entry =>
-                new PropagateInspectionOdometerCommand(entry.TenantId, entry.AggregateId))
-            // A corrected odometer still flows to the vehicle. The vehicle odometer is monotonic
-            // (Vehicle.RecordOdometer no-ops a non-advancing reading), so a downward correction
-            // will not roll the vehicle back — acceptable: the inspection remains the record of
-            // what was actually read.
-            .OnEvent<VehicleInspectionAmendedDomainEvent>(entry =>
-                new PropagateInspectionOdometerCommand(entry.TenantId, entry.AggregateId)));
+        //    commands. The registry contents (every projection + OnEvent reaction) live in
+        //    FleetProjectionRegistry.Configure, shared with the integration-test fixture so the
+        //    tests always exercise exactly the read side the API composes.
+        services.AddProjections<FleetDbContext>(SchemaName, FleetProjectionRegistry.Configure);
 
         return services;
     }

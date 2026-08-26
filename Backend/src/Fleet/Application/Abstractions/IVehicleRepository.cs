@@ -13,6 +13,9 @@ public interface IVehicleRepository
     /// <summary>Loads a vehicle by its (tenant-unique) unit number — the fallback link when an inspection carries no vehicle id.</summary>
     Task<Vehicle?> GetByUnitNumberAsync(string unitNumber, CancellationToken cancellationToken = default);
 
+    /// <summary>Loads a vehicle by its VIN — the primary match when the PM seed links its plan to unit NL-01.</summary>
+    Task<Vehicle?> GetByVinAsync(Vin vin, CancellationToken cancellationToken = default);
+
     /// <summary>True when another vehicle (excluding <paramref name="excludeVehicleId"/>) already uses this VIN.</summary>
     Task<bool> ExistsByVinAsync(Vin vin, Guid? excludeVehicleId = null, CancellationToken cancellationToken = default);
 

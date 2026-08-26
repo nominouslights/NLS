@@ -1,5 +1,8 @@
 // MOCK DATA — only the domains with NO backend yet remain here: communities,
 // HOS logs & driver leave (no HOS domain), the Fleet/Maintenance preview
+// arrays (fleet, DTC alerts, parts, fuel stats), riders, and incidents.
+// Trips, drivers, clients/contracts/POs, invoices, and preventive
+// maintenance all come from the real APIs in lib/api/.
 // arrays (fleet, PM reminders, DTC alerts, parts, fuel stats), and incidents.
 // Trips, drivers, clients/contracts/POs, invoices, and riders all come from
 // the real APIs in lib/api/.
@@ -11,6 +14,7 @@ import type {
   HosLogEntry,
   Incident,
   PartItem,
+  Rider,
   PmReminder,
 } from "./types";
 
@@ -170,19 +174,6 @@ export const fleet: FleetVehicle[] = [
 // Maintenance & Asset Management previews — MOCK ONLY (no backend domain yet).
 // Keyed by unit number so per-vehicle tabs in Fleet can slice them.
 // ---------------------------------------------------------------------------
-
-export const pmReminders: PmReminder[] = [
-  { unit: "U-01", task: "Steering linkage inspection", basis: "time", due: "OVERDUE 6d", k: "over" },
-  { unit: "U-01", task: "Engine oil & filter", basis: "mileage", due: "in 1,900 km", k: "ontime" },
-  { unit: "U-02", task: "Engine oil & filter", basis: "mileage", due: "in 800 km", k: "soon" },
-  { unit: "U-02", task: "Air brake adjustment check", basis: "time", due: "in 41d", k: "ontime" },
-  { unit: "U-03", task: "Coolant flush", basis: "time", due: "in 34d", k: "ontime" },
-  { unit: "U-03", task: "Differential fluid change", basis: "mileage", due: "in 6,200 km", k: "ontime" },
-  { unit: "U-04", task: "Tire rotation", basis: "mileage", due: "in 2,400 km", k: "ontime" },
-  { unit: "U-05", task: "Transmission service", basis: "hours", due: "in 40 engine-h", k: "soon" },
-  { unit: "U-05", task: "Serpentine belt replacement", basis: "time", due: "in 12d", k: "soon" },
-  { unit: "U-06", task: "Brake pads & rotors", basis: "mileage", due: "OVERDUE 350 km", k: "over" },
-];
 
 export const dtcAlerts: DtcAlert[] = [
   { unit: "U-01", code: "C0051", desc: "Steering wheel position sensor fault", severity: "Critical", k: "over", raised: "2d ago" },

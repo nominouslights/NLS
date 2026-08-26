@@ -7,9 +7,10 @@ using NorthernLink.Shared.Messaging;
 using NorthernLink.Shared.Persistence.Projections;
 using NorthernLink.Shared.Tenancy;
 using NorthernLink.Fleet.Application.Abstractions;
+using NorthernLink.Fleet.Application.Inspections.PropagateOdometer;
+using NorthernLink.Fleet.Application.Maintenance.Completions.PropagateOdometer;
 using NorthernLink.Fleet.Application.Vehicles;
 using NorthernLink.Fleet.Application.Vehicles.EnsureRetirementCertificate;
-using NorthernLink.Fleet.Domain.Vehicles.Events;
 using NorthernLink.Fleet.Infrastructure;
 using NorthernLink.Fleet.Infrastructure.Persistence;
 using NorthernLink.Fleet.Infrastructure.Persistence.Projections;
@@ -38,6 +39,11 @@ public sealed class PostgresFixture : IAsyncLifetime
         .Build();
 
     public string AppConnectionString { get; private set; } = null!;
+
+    // One root provider for every projection worker/rebuilder the fixture hands out —
+    // built lazily (the connection string exists only after InitializeAsync) and disposed
+    // with the fixture, so no per-call ServiceProvider is ever leaked.
+    private ServiceProvider? _projectionServices;
 
     public async Task InitializeAsync()
     {
@@ -73,7 +79,15 @@ public sealed class PostgresFixture : IAsyncLifetime
         await context.Database.MigrateAsync();
     }
 
-    public Task DisposeAsync() => _container.DisposeAsync().AsTask();
+    public async Task DisposeAsync()
+    {
+        if (_projectionServices is not null)
+        {
+            await _projectionServices.DisposeAsync();
+        }
+
+        await _container.DisposeAsync();
+    }
 
     /// <summary>A real FleetDbContext exactly as the API composes it, for the given tenant.</summary>
     public FleetDbContext CreateContext(Guid? tenantId, bool withMapper = false)
@@ -120,12 +134,66 @@ public sealed class PostgresFixture : IAsyncLifetime
     /// </summary>
     public ProjectionRebuilder<FleetDbContext> BuildFleetProjectionRebuilder()
     {
-        var provider = BuildProjectionServices();
+        var provider = ProjectionServices;
 
         return new ProjectionRebuilder<FleetDbContext>(
             provider.GetRequiredService<IServiceScopeFactory>(),
             BuildFleetRegistry(),
             provider.GetRequiredService<ILogger<ProjectionRebuilder<FleetDbContext>>>());
+    }
+
+    /// <summary>
+    /// Loops <c>ProcessOnceAsync</c> until the fleet journal is quiescent. A single poll is
+    /// never guaranteed to drain it: one poll takes at most <c>BatchSize</c> rows, and the
+    /// secondary commands a poll dispatches run AFTER that poll's checkpoint write — a
+    /// reaction (odometer propagation, retirement certificate) that mutates an aggregate
+    /// appends NEW journal rows the finished poll's checkpoint does not cover. Quiescent =
+    /// a poll during which the journal head did not move and after which the checkpoint has
+    /// caught that head. Use this wherever a test assumes "the backlog is cleared".
+    /// </summary>
+    public async Task DrainFleetProjectionsAsync()
+    {
+        var worker = BuildFleetProjectionWorker();
+
+        // Reaction cascades are short (a reaction's own append triggers no further reaction
+        // in the current registry), so a bounded loop separates "still catching up" from a
+        // genuine livelock — which should fail loudly, not spin forever.
+        for (var attempt = 0; attempt < 50; attempt++)
+        {
+            var headBefore = await ReadFleetJournalHeadAsync();
+            await worker.ProcessOnceAsync(CancellationToken.None);
+
+            if (await ReadFleetJournalHeadAsync() == headBefore
+                && await ReadFleetProjectionCheckpointAsync() >= headBefore)
+            {
+                return;
+            }
+        }
+
+        throw new InvalidOperationException(
+            "fleet.event_journal did not quiesce after 50 polls — a reaction appears to append new rows on every poll.");
+    }
+
+    /// <summary>The fleet projection worker's checkpoint cursor (0 before its first poll).</summary>
+    public Task<long> ReadFleetProjectionCheckpointAsync() => ScalarUnderSystemAsync(
+        $"SELECT coalesce((SELECT last_position FROM fleet.projection_checkpoints WHERE projection_name = '{FleetServiceCollectionExtensions.SchemaName}'), 0);");
+
+    /// <summary>Max position in fleet.event_journal (0 when empty), read under the system RLS policy.</summary>
+    public Task<long> ReadFleetJournalHeadAsync() => ScalarUnderSystemAsync(
+        "SELECT coalesce(max(position), 0) FROM fleet.event_journal;");
+
+    private async Task<long> ScalarUnderSystemAsync(string sql)
+    {
+        await using var connection = new NpgsqlConnection(AppConnectionString);
+        await connection.OpenAsync();
+        await using (var system = new NpgsqlCommand(
+            "SELECT set_config('app.is_system', 'true', false);", connection))
+        {
+            await system.ExecuteNonQueryAsync();
+        }
+
+        await using var command = new NpgsqlCommand(sql, connection);
+        return (long)(await command.ExecuteScalarAsync())!;
     }
 
     /// <summary>
@@ -135,7 +203,7 @@ public sealed class PostgresFixture : IAsyncLifetime
     /// </summary>
     public ProjectionWorker<FleetDbContext> BuildFleetProjectionWorker()
     {
-        var provider = BuildProjectionServices();
+        var provider = ProjectionServices;
         var options = new ProjectionOptions { PollInterval = TimeSpan.FromMilliseconds(1), BatchSize = 500 };
 
         return new ProjectionWorker<FleetDbContext>(
@@ -145,25 +213,33 @@ public sealed class PostgresFixture : IAsyncLifetime
             provider.GetRequiredService<ILogger<ProjectionWorker<FleetDbContext>>>());
     }
 
-    /// <summary>The same projection registry FleetServiceCollectionExtensions composes.</summary>
-    private static IProjectionRegistry<FleetDbContext> BuildFleetRegistry() =>
-        new ProjectionRegistryBuilder<FleetDbContext>(FleetServiceCollectionExtensions.SchemaName)
-            .Project(new VehicleProjection())
-            .Project(new RetirementCertificateProjection())
-            .Project(new ShopProjection())
-            .Project(new VehicleDocumentProjection())
-            .Project(new ServiceRecordProjection())
-            .Project(new WorkOrderProjection())
-            .Project(new VehicleInspectionProjection())
-            .OnEvent<VehicleReachedEndOfLifeDomainEvent>(entry =>
-                new EnsureRetirementCertificateCommand(entry.AggregateId))
-            .Build();
+    /// <summary>
+    /// The production registry, verbatim: composed by the same
+    /// <see cref="FleetProjectionRegistry.Configure"/> call that
+    /// <c>FleetServiceCollectionExtensions.AddFleet</c> passes to <c>AddProjections</c>, so
+    /// the fixture can never drift to a narrower read side — or fewer OnEvent reactions —
+    /// than the API runs. Every reaction's handler is registered in the service collection
+    /// below.
+    /// </summary>
+    private static IProjectionRegistry<FleetDbContext> BuildFleetRegistry()
+    {
+        var builder = new ProjectionRegistryBuilder<FleetDbContext>(FleetServiceCollectionExtensions.SchemaName);
+        FleetProjectionRegistry.Configure(builder);
+        return builder.Build();
+    }
+
+    private ServiceProvider ProjectionServices => _projectionServices ??= BuildProjectionServices();
 
     private ServiceProvider BuildProjectionServices()
     {
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddScoped<ITenantContext>(_ => new TestTenantContext(null));
+        // Ambient-aware, mirroring JwtTenantContext's background-work fallback: null during
+        // the poll/rebuild (the system session), the journal row's tenant inside the
+        // worker's AmbientTenant.Push when a secondary command handler runs — a fixed-null
+        // context here would make every OnEvent handler see zero rows through the query
+        // filters and RLS, silently no-opping the reactions these tests exist to exercise.
+        services.AddScoped<ITenantContext, AmbientTenantContext>();
         services.AddScoped<TenantSessionInterceptor>();
         services.AddDbContext<FleetDbContext>((sp, options) => options
             .UseNpgsql(
@@ -172,7 +248,11 @@ public sealed class PostgresFixture : IAsyncLifetime
             .AddInterceptors(sp.GetRequiredService<TenantSessionInterceptor>()));
         services.AddScoped<ISender, Sender>();
         services.AddScoped<IVehicleRepository, VehicleRepository>();
+        services.AddScoped<IVehicleInspectionRepository, VehicleInspectionRepository>();
+        services.AddScoped<IPmCompletionRepository, PmCompletionRepository>();
         services.AddScoped<ICommandHandler<EnsureRetirementCertificateCommand>, EnsureRetirementCertificateCommandHandler>();
+        services.AddScoped<ICommandHandler<PropagateInspectionOdometerCommand>, PropagateInspectionOdometerCommandHandler>();
+        services.AddScoped<ICommandHandler<PropagatePmOdometerCommand>, PropagatePmOdometerCommandHandler>();
 
         return services.BuildServiceProvider();
     }
@@ -188,6 +268,18 @@ public sealed class PostgresFixture : IAsyncLifetime
         public Guid? TenantId => tenantId;
 
         public TenantType? TenantType => tenantId is null ? null : Shared.Kernel.TenantType.Internal;
+    }
+
+    /// <summary>
+    /// The projection-services tenant context: no principal in tests, so the tenant is
+    /// whatever <see cref="AmbientTenant"/> the projection worker pushed for the current
+    /// command scope (null during the poll itself) — exactly JwtTenantContext's fallback arm.
+    /// </summary>
+    private sealed class AmbientTenantContext : ITenantContext
+    {
+        public Guid? TenantId => AmbientTenant.Current;
+
+        public TenantType? TenantType => TenantId is null ? null : Shared.Kernel.TenantType.Internal;
     }
 }
 

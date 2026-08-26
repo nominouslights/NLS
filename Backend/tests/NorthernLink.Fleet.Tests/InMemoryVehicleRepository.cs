@@ -18,6 +18,9 @@ internal sealed class InMemoryVehicleRepository : IVehicleRepository
     public Task<Vehicle?> GetByUnitNumberAsync(string unitNumber, CancellationToken cancellationToken = default) =>
         Task.FromResult(Vehicles.FirstOrDefault(v => v.UnitNumber == unitNumber));
 
+    public Task<Vehicle?> GetByVinAsync(Vin vin, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Vehicles.FirstOrDefault(v => v.Vin.Value == vin.Value));
+
     public Task<bool> ExistsByVinAsync(
         Vin vin,
         Guid? excludeVehicleId = null,

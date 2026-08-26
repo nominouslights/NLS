@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { colors, fonts, rowSurface, statusMeta } from "@/lib/theme";
-import { dtcAlerts, partsInventory, pmReminders } from "@/lib/data";
+import { dtcAlerts, partsInventory } from "@/lib/data";
 import {
   ApiError,
   formatCad,
@@ -15,16 +15,18 @@ import {
   type Vehicle,
 } from "@/lib/api";
 import { listAllWorkOrders, type WorkOrderPriorityWire, type WorkOrderWire } from "@/lib/api/maintenance";
+import { listFleetPmDue, type FleetPmDueWire } from "@/lib/api/pm";
 import { OPEN_WIRE_STATUSES, WO_SOURCE_LABEL, WO_STATUS_LABEL, workOrderKindWire } from "@/lib/workOrderDisplay";
+import { PM_STATE_LABEL, pmDueLabel, pmKind } from "@/lib/pmDisplay";
 import { documents, useMaintenanceStore } from "@/lib/maintenanceStore";
 import { Panel, SectionLabel } from "@/components/ui/Panel";
-import { MonoTag, StatusChip } from "@/components/ui/Chip";
+import { MonoTag, StatusBadge, StatusChip } from "@/components/ui/Chip";
 import { MetricTile } from "@/components/ui/MetricTile";
 
 // Fleet-wide Fleet & Maintenance dashboard — shown in the detail pane until a
-// vehicle is selected. Work orders + end-of-life are real Fleet API data;
-// compliance is the merged prototype (mock store); PM / DTC / parts are mock
-// previews.
+// vehicle is selected. Work orders, preventive maintenance + end-of-life are
+// real Fleet API data; compliance is the merged prototype (mock store);
+// DTC / parts are mock previews.
 
 const PRIORITY_ORDER: Record<WorkOrderPriorityWire, number> = { Critical: 0, High: 1, Medium: 2, Low: 3 };
 
@@ -50,6 +52,8 @@ export default function FleetDashboard({
 
   const [wos, setWos] = useState<WorkOrderWire[] | null>(null);
   const [woError, setWoError] = useState<string | null>(null);
+  const [pm, setPm] = useState<FleetPmDueWire | null>(null);
+  const [pmError, setPmError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -64,6 +68,19 @@ export default function FleetDashboard({
         if (active) setWoError(e instanceof ApiError ? e.message : "Failed to load work orders.");
       },
     );
+    // PM due picture refetches on the same trigger — completing a work order
+    // often coincides with logged PM service.
+    listFleetPmDue().then(
+      (fresh) => {
+        if (active) {
+          setPm(fresh);
+          setPmError(null);
+        }
+      },
+      (e) => {
+        if (active) setPmError(e instanceof ApiError ? e.message : "Failed to load PM status.");
+      },
+    );
     return () => {
       active = false;
     };
@@ -76,8 +93,8 @@ export default function FleetDashboard({
     if (id) onOpenVehicle(id, tab);
   }
 
-  const pmSoon = pmReminders.filter((r) => r.k === "soon").length;
-  const pmOverdue = pmReminders.filter((r) => r.k === "over").length;
+  const pmSoon = pm ? pm.vehicles.reduce((n, v) => n + v.dueSoonCount, 0) : "—";
+  const pmOverdue = pm ? pm.vehicles.reduce((n, v) => n + v.overdueCount, 0) : "—";
   const openDtc = dtcAlerts.filter((r) => r.k !== "ontime").length;
   const lowStock = partsInventory.filter((p) => p.k !== "ontime");
 
@@ -179,25 +196,64 @@ export default function FleetDashboard({
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
         <Panel>
           <SectionLabel>Preventive maintenance reminders</SectionLabel>
-          <Caption mock>Preview — not yet wired to backend.</Caption>
-          {pmReminders.map((r) => (
-            <div
-              key={`${r.unit}-${r.task}`}
-              onClick={() => openUnit(r.unit, "Overview")}
-              style={{ display: "grid", gridTemplateColumns: "48px 1fr 140px", gap: 10, alignItems: "center", padding: "9px 11px", marginBottom: 5, ...rowSurface(false) }}
-            >
-              <span style={{ fontFamily: fonts.mono, fontSize: 11.5, color: colors.skyBlue }}>{r.unit}</span>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: 600, color: colors.textPrimary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {r.task}
-                </div>
-                <div style={{ fontFamily: fonts.body, fontSize: 10.5, color: colors.textDim, textTransform: "uppercase", letterSpacing: ".06em" }}>
-                  {r.basis}-based
-                </div>
-              </div>
-              <StatusChip kind={r.k} label={r.due} />
+          <Caption mock={false}>Fleet API · preventive maintenance</Caption>
+          {pmError ? (
+            <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: statusMeta("over").t, fontWeight: 600 }}>
+              ▲ {pmError}
             </div>
-          ))}
+          ) : pm === null ? (
+            <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textDim }}>Loading PM status…</div>
+          ) : pm.vehicles.length === 0 ? (
+            <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textDim }}>
+              No vehicles have an assigned maintenance plan yet.
+            </div>
+          ) : (
+            pm.vehicles.map((v) => {
+              const top = v.dueEntries.slice(0, 2);
+              const allClear = v.overdueCount === 0 && v.dueSoonCount === 0 && v.notYetRecordedCount === 0;
+              return (
+                <div
+                  key={v.vehicleId}
+                  onClick={() => onOpenVehicle(v.vehicleId, "Preventive Maintenance")}
+                  style={{ display: "grid", gridTemplateColumns: "48px 1fr auto", gap: 10, alignItems: "center", padding: "9px 11px", marginBottom: 5, ...rowSurface(false) }}
+                >
+                  <span style={{ fontFamily: fonts.mono, fontSize: 11.5, color: colors.skyBlue }}>{v.unitNumber}</span>
+                  <div style={{ minWidth: 0 }}>
+                    {top.length === 0 ? (
+                      <div style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textDim }}>
+                        Nothing due · {v.planName}
+                      </div>
+                    ) : (
+                      top.map((e) => (
+                        <div key={e.code} style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                          <StatusBadge kind={pmKind(e.state)} size={13} />
+                          <span style={{ fontFamily: fonts.body, fontSize: 12, fontWeight: 600, color: colors.textPrimary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {e.component}
+                          </span>
+                          <span style={{ fontFamily: fonts.body, fontSize: 10.5, color: colors.textDim, whiteSpace: "nowrap" }}>
+                            {pmDueLabel(e)}
+                          </span>
+                        </div>
+                      ))
+                    )}
+                    {v.dueEntries.length > 2 && (
+                      <div style={{ fontFamily: fonts.body, fontSize: 10.5, color: colors.textDim }}>
+                        +{v.dueEntries.length - 2} more due
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
+                    {v.overdueCount > 0 && <StatusChip kind="over" label={`${v.overdueCount} ${PM_STATE_LABEL.Overdue.toLowerCase()}`} />}
+                    {v.dueSoonCount > 0 && <StatusChip kind="soon" label={`${v.dueSoonCount} ${PM_STATE_LABEL.DueSoon.toLowerCase()}`} />}
+                    {v.notYetRecordedCount > 0 && (
+                      <StatusChip kind="off" label={`${v.notYetRecordedCount} ${PM_STATE_LABEL.NotYetRecorded.toLowerCase()}`} />
+                    )}
+                    {allClear && <StatusChip kind="ontime" label="All OK" />}
+                  </div>
+                </div>
+              );
+            })
+          )}
         </Panel>
 
         <Panel>
