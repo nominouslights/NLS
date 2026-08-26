@@ -19,6 +19,11 @@ using NorthernLink.Trips.Application.Manifests.Create;
 using NorthernLink.Trips.Application.Manifests.GetById;
 using NorthernLink.Trips.Application.Manifests.GetManifests;
 using NorthernLink.Trips.Application.Manifests.Update;
+using NorthernLink.Trips.Application.Riders;
+using NorthernLink.Trips.Application.Riders.GetRiders;
+using NorthernLink.Trips.Application.Riders.SetRotation;
+using NorthernLink.Trips.Application.Riders.UpsertFromManifest;
+using NorthernLink.Trips.Application.Riders.UpsertFromTrip;
 using NorthernLink.Trips.Application.Routes;
 using NorthernLink.Trips.Application.Routes.Create;
 using NorthernLink.Trips.Application.Routes.GetRoutes;
@@ -49,6 +54,7 @@ using NorthernLink.Trips.Application.Trips.RecordDemand;
 using NorthernLink.Trips.Application.Trips.UnpairRoundTrip;
 using NorthernLink.Trips.Application.Trips.Update;
 using NorthernLink.Trips.Domain.Manifests.Events;
+using NorthernLink.Trips.Domain.Trips.Events;
 using NorthernLink.Trips.Infrastructure.Generation;
 using NorthernLink.Trips.Infrastructure.Persistence;
 using NorthernLink.Trips.Infrastructure.Persistence.Projections;
@@ -120,6 +126,9 @@ public static class TripsServiceCollectionExtensions
         services.AddScoped<IShipmentRepository, ShipmentRepository>();
         services.AddScoped<IShipmentReadService, ShipmentReadService>();
         services.AddScoped<IShipmentNumberGenerator, ShipmentNumberGenerator>();
+        services.AddScoped<IRiderRepository, RiderRepository>();
+        services.AddScoped<IRiderReadService, RiderReadService>();
+        services.AddScoped<ManifestRiderUpserter>();
 
         // 3. Command/query handlers — registered explicitly, one line per handler.
         services.AddScoped<ICommandHandler<CreateTripManifestCommand, Guid>, CreateTripManifestCommandHandler>();
@@ -165,6 +174,10 @@ public static class TripsServiceCollectionExtensions
         services.AddScoped<ICommandHandler<UpdateScheduleTemplateCommand>, UpdateScheduleTemplateCommandHandler>();
         services.AddScoped<ICommandHandler<SetScheduleTemplateActiveCommand>, SetScheduleTemplateActiveCommandHandler>();
         services.AddScoped<IQueryHandler<GetScheduleTemplatesQuery, IReadOnlyList<ScheduleTemplateResponse>>, GetScheduleTemplatesQueryHandler>();
+        services.AddScoped<IQueryHandler<GetRidersQuery, IReadOnlyList<RiderResponse>>, GetRidersQueryHandler>();
+        services.AddScoped<ICommandHandler<SetRiderRotationCommand>, SetRiderRotationCommandHandler>();
+        services.AddScoped<ICommandHandler<UpsertRidersFromTripCommand>, UpsertRidersFromTripCommandHandler>();
+        services.AddScoped<ICommandHandler<UpsertRidersFromManifestCommand>, UpsertRidersFromManifestCommandHandler>();
 
         // 4. Integration event consumers — the Drivers/Fleet/Clients replicas that keep
         //    driver_lookup/vehicle_lookup/client_lookup current for assignment validation,
@@ -188,8 +201,17 @@ public static class TripsServiceCollectionExtensions
             .Project(new RouteProjection())
             .Project(new StopProjection())
             .Project(new ScheduleTemplateProjection())
+            .Project(new RiderProjection())
             .OnEvent<TripManifestCreatedDomainEvent>(entry =>
-                new AttachManifestToTripCommand(entry.AggregateId)));
+                new AttachManifestToTripCommand(entry.AggregateId))
+            // Rider-directory upserts. OnEvent is one binding per event type, so the create
+            // path chains off the link event Trip.AttachManifest raises (TripId aggregate),
+            // not off TripManifestCreatedDomainEvent (already bound above); edits re-upsert
+            // from the manifest side.
+            .OnEvent<TripManifestUpdatedDomainEvent>(entry =>
+                new UpsertRidersFromManifestCommand(entry.AggregateId))
+            .OnEvent<TripManifestLinkedDomainEvent>(entry =>
+                new UpsertRidersFromTripCommand(entry.AggregateId)));
 
         // 6. Trip generation — materializes upcoming trips from active schedule templates.
         var generationOptions = configuration.GetSection(TripGenerationOptions.SectionName).Get<TripGenerationOptions>()

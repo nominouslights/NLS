@@ -1,6 +1,7 @@
 using NorthernLink.Trips.Application.Abstractions;
 using NorthernLink.Trips.Application.Integration;
 using NorthernLink.Trips.Domain.Manifests;
+using NorthernLink.Trips.Domain.Riders;
 using NorthernLink.Trips.Domain.Routes;
 using NorthernLink.Trips.Domain.Stops;
 using NorthernLink.Trips.Domain.Trips;
@@ -191,6 +192,28 @@ internal sealed class FakeTripActivityReadService : ITripActivityReadService
         RequestedTripId = tripId;
         RequestedManifestId = manifestId;
         return Task.FromResult<IReadOnlyList<TripActivityJournalEntry>>(Entries);
+    }
+}
+
+internal sealed class FakeRiderRepository : IRiderRepository
+{
+    public List<Rider> Riders { get; } = [];
+    public int SaveCount { get; private set; }
+
+    public void Add(Rider rider) => Riders.Add(rider);
+
+    public Task<Rider?> GetByIdAsync(Guid riderId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Riders.FirstOrDefault(r => r.Id == riderId));
+
+    public Task<Rider?> GetByKeyAsync(
+        TripServiceType serviceType, string normalizedName, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Riders.FirstOrDefault(r =>
+            r.ServiceType == serviceType && r.NormalizedName == normalizedName));
+
+    public Task SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        SaveCount++;
+        return Task.CompletedTask;
     }
 }
 
