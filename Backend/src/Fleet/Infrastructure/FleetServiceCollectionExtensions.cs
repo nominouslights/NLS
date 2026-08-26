@@ -57,9 +57,6 @@ using NorthernLink.Fleet.Application.WorkOrders.GetForVehicle;
 using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Persistence.Auditing;
 using NorthernLink.Shared.Persistence.Projections;
-using NorthernLink.Fleet.Domain.Inspections.Events;
-using NorthernLink.Fleet.Domain.Maintenance.Events;
-using NorthernLink.Fleet.Domain.Vehicles.Events;
 using NorthernLink.Fleet.Infrastructure.Persistence;
 using NorthernLink.Fleet.Infrastructure.Persistence.Projections;
 
@@ -158,38 +155,10 @@ public static class FleetServiceCollectionExtensions
 
         // 4. Read-side projections — one worker polls fleet.event_journal, upserts the read-model
         //    rows for the aggregates the batch touched, and dispatches same-module secondary
-        //    commands. Retirement certificates are driven by vehicle events (they're created
-        //    inline during a vehicle's retirement, so they share the "vehicle" aggregate's
-        //    journal) — hence two projections keyed on the same aggregate type. A newly entered
-        //    inspection advances the linked vehicle's odometer intra-Fleet (monotonic, auto-retire
-        //    applies) — the same same-module reaction pattern.
-        services.AddProjections<FleetDbContext>(SchemaName, registry => registry
-            .Project(new VehicleProjection())
-            .Project(new RetirementCertificateProjection())
-            .Project(new ShopProjection())
-            .Project(new VehicleDocumentProjection())
-            .Project(new ServiceRecordProjection())
-            .Project(new WorkOrderProjection())
-            .Project(new VehicleInspectionProjection())
-            .Project(new MaintenancePlanProjection())
-            .Project(new PlanAssignmentProjection())
-            .Project(new PmCompletionProjection())
-            .OnEvent<VehicleReachedEndOfLifeDomainEvent>(entry =>
-                new EnsureRetirementCertificateCommand(entry.AggregateId))
-            .OnEvent<VehicleInspectionCreatedDomainEvent>(entry =>
-                new PropagateInspectionOdometerCommand(entry.TenantId, entry.AggregateId))
-            // A corrected odometer still flows to the vehicle. The vehicle odometer is monotonic
-            // (Vehicle.RecordOdometer no-ops a non-advancing reading), so a downward correction
-            // will not roll the vehicle back — acceptable: the inspection remains the record of
-            // what was actually read.
-            .OnEvent<VehicleInspectionAmendedDomainEvent>(entry =>
-                new PropagateInspectionOdometerCommand(entry.TenantId, entry.AggregateId))
-            // A PM completion's odometer reading advances the vehicle exactly as inspection
-            // readings do (monotonic — a historical entry below the current reading no-ops),
-            // so a fresh completion cannot leave the master odometer stale and deflate every
-            // other line's due math.
-            .OnEvent<PmCompletionLoggedDomainEvent>(entry =>
-                new PropagatePmOdometerCommand(entry.TenantId, entry.AggregateId)));
+        //    commands. The registry contents (every projection + OnEvent reaction) live in
+        //    FleetProjectionRegistry.Configure, shared with the integration-test fixture so the
+        //    tests always exercise exactly the read side the API composes.
+        services.AddProjections<FleetDbContext>(SchemaName, FleetProjectionRegistry.Configure);
 
         return services;
     }
