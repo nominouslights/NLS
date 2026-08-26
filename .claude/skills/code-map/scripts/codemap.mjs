@@ -367,9 +367,11 @@ function buildAll(all) {
 
 function parseNotes(content) {
   const notes = new Map();
-  const re = /<!-- notes:([\w-]+):start -->\n([\s\S]*?)<!-- notes:\1:end -->/g;
+  // \r?\n: git may check the reference files out with CRLF on Windows, and a
+  // marker followed by \r\n must still match or every note is silently dropped.
+  const re = /<!-- notes:([\w-]+):start -->\r?\n([\s\S]*?)<!-- notes:\1:end -->/g;
   let m;
-  while ((m = re.exec(content))) notes.set(m[1], m[2].replace(/\n$/, ''));
+  while ((m = re.exec(content))) notes.set(m[1], m[2].replace(/\r?\n$/, '').replace(/\r/g, ''));
   return notes;
 }
 
