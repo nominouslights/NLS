@@ -1,11 +1,8 @@
 // MOCK DATA — only the domains with NO backend yet remain here: communities,
 // HOS logs & driver leave (no HOS domain), the Fleet/Maintenance preview
-// arrays (fleet, DTC alerts, parts, fuel stats), riders, and incidents.
-// Trips, drivers, clients/contracts/POs, invoices, and preventive
+// arrays (fleet, DTC alerts, parts, fuel stats), and incidents.
+// Trips, drivers, clients/contracts/POs, invoices, riders, and preventive
 // maintenance all come from the real APIs in lib/api/.
-// arrays (fleet, PM reminders, DTC alerts, parts, fuel stats), and incidents.
-// Trips, drivers, clients/contracts/POs, invoices, and riders all come from
-// the real APIs in lib/api/.
 import type {
   DriverLeave,
   DtcAlert,
@@ -14,8 +11,6 @@ import type {
   HosLogEntry,
   Incident,
   PartItem,
-  Rider,
-  PmReminder,
 } from "./types";
 
 export const communities = [
