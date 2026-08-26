@@ -1,13 +1,12 @@
 "use client";
 
-import { colors, fonts, rowSurface, statusMeta } from "@/lib/theme";
-import { pmReminders } from "@/lib/data";
+import { colors, fonts, statusMeta } from "@/lib/theme";
 import { formatCad, formatKm, formatUtcDate, isDisposed, lifeKindFor, type Vehicle } from "@/lib/api";
 import { DetailRow, Panel, SectionLabel } from "@/components/ui/Panel";
-import { MonoTag, StatusChip } from "@/components/ui/Chip";
+import { StatusChip } from "@/components/ui/Chip";
 import OverviewPrompts from "./OverviewPrompts";
 import OverviewActions from "./OverviewActions";
-import { EmptyTabNote, errBadge, warnBanner, type ModalKind, type PromptKind } from "./shared";
+import { errBadge, warnBanner, type ModalKind, type PromptKind } from "./shared";
 
 export interface OverviewTabProps {
   f: Vehicle;
@@ -51,7 +50,6 @@ export default function OverviewTab({
   const lifePct = Math.min(100, Math.max(0, f.lifeUsedPct));
   const lifeKind = lifeKindFor(f.lifeUsedPct);
   const lifeMeta = statusMeta(lifeKind);
-  const unitPm = pmReminders.filter((r) => r.unit === f.unitNumber);
 
   return (
     <div>
@@ -161,39 +159,6 @@ export default function OverviewTab({
           <DetailRow label="Registered" value={formatUtcDate(f.registeredAtUtc)} />
           <DetailRow label="Last updated" value={formatUtcDate(f.updatedAtUtc)} />
         </div>
-      </Panel>
-
-      {/* Preventive maintenance — MOCK (folded from the old Maintenance tab) */}
-      <Panel style={{ marginBottom: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-          <SectionLabel>Preventive maintenance reminders</SectionLabel>
-          <MonoTag color={statusMeta("soon").t}>MOCK</MonoTag>
-        </div>
-        {unitPm.length === 0 ? (
-          <EmptyTabNote>{`No preventive-maintenance reminders on file for ${f.unitNumber}.`}</EmptyTabNote>
-        ) : (
-          unitPm.map((r) => (
-            <div
-              key={`${r.unit}-${r.task}`}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 90px 150px",
-                gap: 11,
-                alignItems: "center",
-                padding: "10px 12px",
-                marginBottom: 5,
-                ...rowSurface(false),
-                cursor: "default",
-              }}
-            >
-              <div style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: 600, color: colors.textPrimary }}>
-                {r.task}
-              </div>
-              <MonoTag>{r.basis.toUpperCase()}</MonoTag>
-              <StatusChip kind={r.k} label={r.due} />
-            </div>
-          ))
-        )}
       </Panel>
 
       {/* inline confirm-prompts (out-of-service, odometer, retire, sell, recycle) */}

@@ -9,6 +9,7 @@ export const TABS = [
   "Overview",
   "Documents & Compliance",
   "Service History",
+  "Preventive Maintenance",
   "Work Orders",
   "Inspections",
   "DTC Alerts",
@@ -30,7 +31,28 @@ export interface VehicleOption {
 
 export type PromptKind = "oos" | "odometer" | "retire" | "sell" | "recycle" | null;
 
-export type ModalKind = "register" | "edit" | "workorder" | "shops" | null;
+export type ModalKind = "register" | "edit" | "workorder" | "shops" | "pmPlans" | null;
+
+/** Inline error line (▲-prefixed) for load/action failures. */
+export const errText: CSSProperties = {
+  fontFamily: fonts.body,
+  fontSize: 12.5,
+  color: statusMeta("over").t,
+  fontWeight: 600,
+};
+
+/** Dim explanatory copy inside panels and forms. */
+export const dimText: CSSProperties = {
+  fontFamily: fonts.body,
+  fontSize: 12.5,
+  color: colors.textDim,
+};
+
+/** Compact ActionButton override for per-row actions. */
+export const smallBtn: CSSProperties = {
+  fontSize: 11.5,
+  padding: "4px 10px",
+};
 
 export const errBadge: CSSProperties = {
   width: 22,

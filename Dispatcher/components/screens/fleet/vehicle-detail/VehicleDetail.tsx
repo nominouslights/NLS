@@ -9,8 +9,9 @@ import VehicleDocuments from "@/components/screens/fleet/VehicleDocuments";
 import VehicleServiceHistory from "@/components/screens/fleet/VehicleServiceHistory";
 import VehicleWorkOrders from "@/components/screens/fleet/VehicleWorkOrders";
 import VehicleInspections from "@/components/screens/fleet/VehicleInspections";
+import VehiclePm from "@/components/screens/fleet/VehiclePm";
 import OverviewTab, { type OverviewTabProps } from "./OverviewTab";
-import { EmptyTabNote, PreviewCaption, TABS, type VehicleOption } from "./shared";
+import { EmptyTabNote, PreviewCaption, TABS, tabIndex, type VehicleOption } from "./shared";
 
 interface VehicleDetailProps extends OverviewTabProps {
   tab: number;
@@ -75,14 +76,21 @@ export default function VehicleDetail({ tab, setTab, vehicleOptions, ...overview
         ))}
       </div>
 
-      {tab === 0 && <OverviewTab {...overview} />}
-      {tab === 1 && <VehicleDocuments unit={f.unitNumber} requiresPeriodic={f.requiresPeriodicInspection} />}
-      {tab === 2 && <VehicleServiceHistory unit={f.unitNumber} odometerKm={f.odometerKm} />}
-      {tab === 3 && <VehicleWorkOrders vehicle={f} vehicles={vehicleOptions} />}
-      {tab === 4 && <VehicleInspections vehicle={f} vehicles={vehicleOptions} />}
+      {/* Panels match on tab NAME via tabIndex so an insertion into TABS can
+          never silently shift which panel a tab renders. */}
+      {tab === tabIndex("Overview") && <OverviewTab {...overview} />}
+      {tab === tabIndex("Documents & Compliance") && (
+        <VehicleDocuments unit={f.unitNumber} requiresPeriodic={f.requiresPeriodicInspection} />
+      )}
+      {tab === tabIndex("Service History") && <VehicleServiceHistory unit={f.unitNumber} odometerKm={f.odometerKm} />}
+      {tab === tabIndex("Preventive Maintenance") && (
+        <VehiclePm vehicle={f} onOpenWorkOrders={() => setTab(tabIndex("Work Orders"))} />
+      )}
+      {tab === tabIndex("Work Orders") && <VehicleWorkOrders vehicle={f} vehicles={vehicleOptions} />}
+      {tab === tabIndex("Inspections") && <VehicleInspections vehicle={f} vehicles={vehicleOptions} />}
 
       {/* DTC alerts (mock) */}
-      {tab === 5 && (
+      {tab === tabIndex("DTC Alerts") && (
         <div>
           <PreviewCaption />
           {unitDtc.length === 0 ? (
@@ -113,7 +121,7 @@ export default function VehicleDetail({ tab, setTab, vehicleOptions, ...overview
       )}
 
       {/* Parts (mock, fleet-wide) */}
-      {tab === 6 && (
+      {tab === tabIndex("Parts") && (
         <div>
           <PreviewCaption>Preview — not yet wired to backend. Parts stock is fleet-wide, not per-unit.</PreviewCaption>
           {partsInventory.map((p) => (
@@ -142,7 +150,7 @@ export default function VehicleDetail({ tab, setTab, vehicleOptions, ...overview
       )}
 
       {/* Fuel & route (mock) */}
-      {tab === 7 && (
+      {tab === tabIndex("Fuel & Route") && (
         <div>
           <PreviewCaption />
           {unitFuel.length === 0 ? (

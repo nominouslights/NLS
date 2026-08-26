@@ -55,14 +55,6 @@ export interface FleetVehicle {
 
 // --- Maintenance & Asset Management previews (mock only — no backend yet) ---
 
-export interface PmReminder {
-  unit: string;
-  task: string;
-  basis: "mileage" | "hours" | "time";
-  due: string;
-  k: StatusKind;
-}
-
 export interface DtcAlert {
   unit: string;
   code: string;
@@ -91,7 +83,7 @@ export interface FuelRouteStat {
 
 // --- Fleet & Maintenance prototype domain (mock only — no backend yet) ---
 // Keyed by `unit` (the vehicle's unitNumber) so per-vehicle tabs slice by it,
-// matching the existing pmReminders / dtcAlerts convention.
+// matching the existing dtcAlerts convention.
 
 export type DocumentType =
   | "Registration"
