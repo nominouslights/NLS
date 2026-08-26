@@ -150,6 +150,30 @@ export function pmIntervalLabel(spec: { intervalKm: number | null; intervalMonth
   return parts.length ? parts.join(" / ") : "—";
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * "yyyy-MM-dd" (backend DateOnly — performedAt, lastDoneDate, nextDueDate) →
+ * "Aug 25, 2026" without going through Date, which would parse the string as
+ * UTC midnight and shift the day in local time. The date-only sibling of
+ * formatUtcDate (which is for UTC timestamps only).
+ */
+export function formatDateOnly(iso: string | null): string {
+  if (!iso) return "—";
+  const [y, m, d] = iso.split("-").map((p) => parseInt(p, 10));
+  if (!y || !m || m > 12 || !d) return iso;
+  return `${MONTHS[m - 1]} ${d}, ${y}`;
+}
+
+/**
+ * The "km · date" fragment used by last-done / next-due lines:
+ * "82,000 km · Aug 25, 2026", either half alone when the other arm is null,
+ * "" when both are (callers guard with their own "never recorded" copy).
+ */
+export function formatKmDate(km: number | null, date: string | null): string {
+  return [km != null ? formatKm(km) : null, date ? formatDateOnly(date) : null].filter(Boolean).join(" · ");
+}
+
 /**
  * Shop-time formatter: "45 min", "2 h", "2 h 30 min"; totals read naturally
  * too ("6 h 05 min" — minutes zero-padded whenever hours are present).

@@ -9,6 +9,7 @@ import VehicleFormModal from "@/components/VehicleFormModal";
 import RetirementCertificateModal from "@/components/RetirementCertificateModal";
 import WorkOrderModal from "@/components/WorkOrderModal";
 import ShopRegistryModal from "@/components/fleet/ShopRegistryModal";
+import PmPlansModal from "@/components/fleet/PmPlansModal";
 import FleetDashboard from "@/components/screens/fleet/FleetDashboard";
 import FleetMasterList from "@/components/screens/fleet/FleetMasterList";
 import { FleetEmpty, FleetLoadError, FleetLoadingSkeleton } from "@/components/screens/fleet/FleetStates";
@@ -155,6 +156,7 @@ export default function Fleet({
 
   const headerActions = (
     <div style={{ display: "flex", gap: 9 }}>
+      <ActionButton onClick={() => setModal("pmPlans")}>PM PLANS</ActionButton>
       <ActionButton onClick={() => setModal("shops")}>SHOPS & PARTNERS</ActionButton>
       <ActionButton onClick={() => setModal("workorder")}>+ NEW WORK ORDER</ActionButton>
       <ActionButton variant="primary" onClick={() => setModal("register")}>
@@ -191,6 +193,7 @@ export default function Fleet({
           <VehicleFormModal vehicle={null} onClose={() => setModal(null)} onSaved={onRegistered} />
         )}
         {modal === "shops" && <ShopRegistryModal onClose={() => setModal(null)} />}
+        {modal === "pmPlans" && <PmPlansModal onClose={() => setModal(null)} />}
       </ScreenFrame>
     );
   }
@@ -271,6 +274,7 @@ export default function Fleet({
         />
       )}
       {modal === "shops" && <ShopRegistryModal onClose={() => setModal(null)} />}
+      {modal === "pmPlans" && <PmPlansModal onClose={() => setModal(null)} />}
       {certOpen && sel && (
         <RetirementCertificateModal vehicleId={sel.id} onClose={() => setCertOpen(false)} />
       )}

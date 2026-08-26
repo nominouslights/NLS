@@ -30,7 +30,7 @@ export const DVIR_CHECKLIST = [
 // prototype. A module-level store (not per-component state) so edits survive
 // navigating away from and back to the merged Fleet & Maintenance screen,
 // which Console.tsx unmounts on nav. Keyed by `unit` (unitNumber), matching
-// the existing pmReminders / dtcAlerts convention in lib/data.ts.
+// the existing dtcAlerts convention in lib/data.ts.
 // -----------------------------------------------------------------------------
 
 // ---- status derivation helpers ---------------------------------------------
