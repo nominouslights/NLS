@@ -38,7 +38,6 @@ export default function Console() {
   const [fleetSelId, setFleetSelId] = useState<string | null>(null);
   const [clientSel, setClientSel] = useState<string | null>(null); // Clients API Guid
   const [invoiceSelId, setInvoiceSelId] = useState<string | null>(null); // Billing API Guid
-  const [riderSel, setRiderSel] = useState(0);
   const [incidentSel, setIncidentSel] = useState(0);
 
   function openTrip(id: string | null) {
@@ -94,7 +93,7 @@ export default function Console() {
           {screen === "clients" && (
             <Clients clientSel={clientSel} setClientSel={setClientSel} onCreateTrip={() => setWizardOpen(true)} />
           )}
-          {screen === "riders" && <Riders riderSel={riderSel} setRiderSel={setRiderSel} />}
+          {screen === "riders" && <Riders />}
           {screen === "billing" && <Billing invoiceSelId={invoiceSelId} setInvoiceSelId={setInvoiceSelId} />}
           {screen === "incidents" && <Incidents incidentSel={incidentSel} setIncidentSel={setIncidentSel} />}
           {screen === "comms" && <Communications />}

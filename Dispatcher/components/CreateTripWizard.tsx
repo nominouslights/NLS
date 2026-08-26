@@ -46,6 +46,8 @@ import {
   type StopOption,
 } from "@/components/manifest/manifestRows";
 import PassengerCsvImport from "@/components/manifest/PassengerCsvImport";
+import RiderPickerModal from "@/components/manifest/RiderPickerModal";
+import { ActionButton } from "@/components/ui/Button";
 
 // Create Trip — the 6-step wizard, now a real form submitting POST /api/trips.
 // Client/rate lookups come from the Clients API (active-contract summary),
@@ -135,6 +137,7 @@ export default function CreateTripWizard({
   // row is entered).
   const [passengers, setPassengers] = useState<PaxRow[]>([]);
   const [cargo, setCargo] = useState<CargoRow[]>([]);
+  const [riderPickerOpen, setRiderPickerOpen] = useState(false);
   const [allSeatbeltsVerified, setAllSeatbeltsVerified] = useState(false);
   const [allCargoSecured, setAllCargoSecured] = useState(false);
   // The trip is created before its manifest; remember its id so a manifest-only
@@ -753,14 +756,27 @@ export default function CreateTripWizard({
 
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
                   <SectionLabel>Passengers (optional)</SectionLabel>
-                  <PassengerCsvImport
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <ActionButton onClick={() => setRiderPickerOpen(true)}>＋ ADD FROM RIDERS</ActionButton>
+                    <PassengerCsvImport
+                      stops={stopOptions}
+                      capacity={paxCap}
+                      existingCount={contentPax}
+                      trip={{ clientName: client?.name ?? null, serviceDate, direction: null }}
+                      onApply={applyImport}
+                    />
+                  </div>
+                </div>
+                {riderPickerOpen && (
+                  <RiderPickerModal
                     stops={stopOptions}
                     capacity={paxCap}
                     existingCount={contentPax}
-                    trip={{ clientName: client?.name ?? null, serviceDate, direction: null }}
+                    defaultServiceType={serviceType}
                     onApply={applyImport}
+                    onClose={() => setRiderPickerOpen(false)}
                   />
-                </div>
+                )}
                 <div style={{ marginBottom: 10 }}>
                   <PassengerRowsEditor rows={passengers} stops={stopOptions} onChange={setPassengers} maxRows={maxPax} />
                 </div>

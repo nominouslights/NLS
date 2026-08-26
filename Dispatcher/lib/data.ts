@@ -3,6 +3,9 @@
 // arrays (fleet, DTC alerts, parts, fuel stats), riders, and incidents.
 // Trips, drivers, clients/contracts/POs, invoices, and preventive
 // maintenance all come from the real APIs in lib/api/.
+// arrays (fleet, PM reminders, DTC alerts, parts, fuel stats), and incidents.
+// Trips, drivers, clients/contracts/POs, invoices, and riders all come from
+// the real APIs in lib/api/.
 import type {
   DriverLeave,
   DtcAlert,
@@ -12,6 +15,7 @@ import type {
   Incident,
   PartItem,
   Rider,
+  PmReminder,
 } from "./types";
 
 export const communities = [
@@ -199,74 +203,6 @@ export const fuelStats: FuelRouteStat[] = [
 
 // The client roster now comes from the real Clients API (lib/api/clients.ts),
 // and invoices from the real Billing API (lib/api/billing.ts).
-
-export const riders: Rider[] = [
-  {
-    id: 1,
-    name: "Eleanor Bighetty",
-    home: "South Indian Lake",
-    prog: "NIHB",
-    last: "Jul 7",
-    phone: "(204) 555-0233",
-    pc: "R0B 1N0",
-    voucher: "VCH-88041 · active",
-    escort: "1 authorized",
-    noshow: "0",
-    needs: "Wheelchair-accessible",
-  },
-  {
-    id: 2,
-    name: "Marcel Dumas",
-    home: "Leaf Rapids",
-    prog: "Community",
-    last: "Jul 2",
-    phone: "(204) 555-0288",
-    pc: "R0B 1W0",
-    voucher: "—",
-    escort: "—",
-    noshow: "1",
-    needs: "None",
-  },
-  {
-    id: 3,
-    name: "Sarah Linklater",
-    home: "Lynn Lake",
-    prog: "NIHB",
-    last: "Jun 28",
-    phone: "(204) 555-0301",
-    pc: "R0B 0W0",
-    voucher: "VCH-87990 · used",
-    escort: "—",
-    noshow: "0",
-    needs: "None",
-  },
-  {
-    id: 4,
-    name: "George Moose",
-    home: "Black Sturgeon Falls",
-    prog: "Community",
-    last: "Jun 30",
-    phone: "(204) 555-0319",
-    pc: "R8N 1P4",
-    voucher: "—",
-    escort: "—",
-    noshow: "0",
-    needs: "Mobility aid",
-  },
-  {
-    id: 5,
-    name: "Priya Sandhu",
-    home: "Thompson",
-    prog: "Community",
-    last: "Jul 5",
-    phone: "(204) 555-0344",
-    pc: "R8N 0C8",
-    voucher: "—",
-    escort: "—",
-    noshow: "2",
-    needs: "None",
-  },
-];
 
 export const incidents: Incident[] = [
   {
