@@ -43,6 +43,7 @@ public sealed class CreateScheduleTemplateCommandHandler(
             command.DaysOfMonth,
             command.DepartureTime,
             command.ReturnDepartureTime,
+            command.ReturnNextDay,
             command.SeatsCapacity,
             command.SeatsMinimum,
             command.DefaultVehicleUnit,

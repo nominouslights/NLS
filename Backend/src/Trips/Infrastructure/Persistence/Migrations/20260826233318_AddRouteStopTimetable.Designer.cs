@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using NorthernLink.Trips.Infrastructure.Persistence;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(TripsDbContext))]
-    partial class TripsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260826233318_AddRouteStopTimetable")]
+    partial class AddRouteStopTimetable
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -515,77 +518,6 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                     b.ToTable("trip_manifests", "trips");
                 });
 
-            modelBuilder.Entity("NorthernLink.Trips.Domain.Riders.Rider", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<string>("Contact")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)")
-                        .HasColumnName("contact");
-
-                    b.Property<DateTimeOffset>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at_utc");
-
-                    b.Property<DateOnly?>("LastTripDate")
-                        .HasColumnType("date")
-                        .HasColumnName("last_trip_date");
-
-                    b.Property<string>("LastTripNumber")
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)")
-                        .HasColumnName("last_trip_number");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)")
-                        .HasColumnName("name");
-
-                    b.Property<string>("NormalizedName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)")
-                        .HasColumnName("normalized_name");
-
-                    b.Property<int?>("RotationDays")
-                        .HasColumnType("integer")
-                        .HasColumnName("rotation_days");
-
-                    b.Property<string>("ServiceType")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)")
-                        .HasColumnName("service_type");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("tenant_id");
-
-                    b.Property<int>("TripCount")
-                        .HasColumnType("integer")
-                        .HasColumnName("trip_count");
-
-                    b.Property<DateTimeOffset>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at_utc");
-
-                    b.Property<int>("Version")
-                        .IsConcurrencyToken()
-                        .HasColumnType("integer")
-                        .HasColumnName("version");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TenantId", "ServiceType", "NormalizedName")
-                        .IsUnique();
-
-                    b.ToTable("riders", "trips");
-                });
-
             modelBuilder.Entity("NorthernLink.Trips.Domain.Routes.Route", b =>
                 {
                     b.Property<Guid>("Id")
@@ -717,10 +649,6 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                     b.Property<TimeOnly?>("ReturnDepartureTime")
                         .HasColumnType("time without time zone")
                         .HasColumnName("return_departure_time");
-
-                    b.Property<bool>("ReturnNextDay")
-                        .HasColumnType("boolean")
-                        .HasColumnName("return_next_day");
 
                     b.Property<Guid>("RouteId")
                         .HasColumnType("uuid")
@@ -1306,71 +1234,6 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                     b.ToTable("trips", "trips");
                 });
 
-            modelBuilder.Entity("NorthernLink.Trips.Infrastructure.Persistence.ReadModels.RiderReadModel", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<string>("Contact")
-                        .HasColumnType("text")
-                        .HasColumnName("contact");
-
-                    b.Property<DateTimeOffset>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at_utc");
-
-                    b.Property<DateOnly?>("LastTripDate")
-                        .HasColumnType("date")
-                        .HasColumnName("last_trip_date");
-
-                    b.Property<string>("LastTripNumber")
-                        .HasColumnType("text")
-                        .HasColumnName("last_trip_number");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("name");
-
-                    b.Property<string>("NormalizedName")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("normalized_name");
-
-                    b.Property<int?>("RotationDays")
-                        .HasColumnType("integer")
-                        .HasColumnName("rotation_days");
-
-                    b.Property<string>("ServiceType")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("service_type");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("tenant_id");
-
-                    b.Property<int>("TripCount")
-                        .HasColumnType("integer")
-                        .HasColumnName("trip_count");
-
-                    b.Property<DateTimeOffset>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at_utc");
-
-                    b.Property<int>("Version")
-                        .HasColumnType("integer")
-                        .HasColumnName("version");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TenantId", "ServiceType", "Name");
-
-                    b.ToTable("rm_riders", "trips");
-                });
-
             modelBuilder.Entity("NorthernLink.Trips.Infrastructure.Persistence.ReadModels.RouteReadModel", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1504,10 +1367,6 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                     b.Property<TimeOnly?>("ReturnDepartureTime")
                         .HasColumnType("time without time zone")
                         .HasColumnName("return_departure_time");
-
-                    b.Property<bool>("ReturnNextDay")
-                        .HasColumnType("boolean")
-                        .HasColumnName("return_next_day");
 
                     b.Property<Guid>("RouteId")
                         .HasColumnType("uuid")

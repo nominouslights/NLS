@@ -14,9 +14,11 @@ import {
 } from "@/lib/api";
 import {
   assignTrip,
+  canPairRoundTrip,
   changeTripStatus,
   closeTripWithoutBilling,
   corridorLabel,
+  createTrip,
   finishTripOperations,
   getTrip,
   hasClearanceFor,
@@ -24,6 +26,7 @@ import {
   isOpenTrip,
   isOperationallyClosed,
   listTrips,
+  mergeRoundTrip,
   refetchUntil,
   seatsLabel,
   shortDateLabel,
@@ -34,7 +37,9 @@ import {
   tripStatusLabel,
   tripWindowLabel,
   updateTrip,
+  type TripInput,
   type TripRecord,
+  type TripStop,
   type TripUpdateInput,
 } from "@/lib/api/trips";
 import {
@@ -530,6 +535,232 @@ function EditTripModal({
 }
 
 // ---------------------------------------------------------------------------
+// Create Return modal — POST /api/trips (reversed corridor, free-form so the
+// route snapshot doesn't win over the reversal) followed by POST
+// /merge-round-trip(allowMismatch: true). Two existing endpoints composed
+// client-side; no backend change. Service date defaults to the source trip's
+// own but is editable, which is what makes a next-day (or later) return
+// possible — same-day and cross-day both just land on canPairRoundTrip's hard
+// checks (same client, neither final, neither already paired).
+// ---------------------------------------------------------------------------
+
+/** Reverses a trip's stop list for the return leg: only Order is re-sequenced
+ *  0..n-1 — both timetable offsets stay attached to their own stop (mirrors
+ *  Trip.CreateDeadheadReturn's server-side reversal). */
+function reversedTripStops(stops: TripStop[]): TripStop[] {
+  return [...stops]
+    .sort((a, b) => b.order - a.order)
+    .map((stop, index) => ({ ...stop, order: index }));
+}
+
+function CreateReturnModal({
+  trip,
+  onClose,
+  onCreated,
+}: {
+  trip: TripRecord;
+  onClose: () => void;
+  onCreated: (input: TripInput) => Promise<void>;
+}) {
+  const [serviceDate, setServiceDate] = useState(trip.serviceDate);
+  const [windowStart, setWindowStart] = useState(hhmm(trip.windowEnd ?? trip.windowStart));
+  const [windowEnd, setWindowEnd] = useState("");
+  const [isEmptyLeg, setIsEmptyLeg] = useState(false);
+
+  const [roster, setRoster] = useState<{ driver: DriverRecord; cleared: boolean }[] | null>(null);
+  const [rosterError, setRosterError] = useState<string | null>(null);
+  const [driverId, setDriverId] = useState<string | null>(trip.driverId);
+  const [vehicles, setVehicles] = useState<Vehicle[] | null>(null);
+  const [vehicleId, setVehicleId] = useState<string>(trip.vehicleId ?? "");
+
+  const [seatsCapacity, setSeatsCapacity] = useState(trip.seatsCapacity != null ? String(trip.seatsCapacity) : "");
+  const [seatsMinimum, setSeatsMinimum] = useState(trip.seatsMinimum != null ? String(trip.seatsMinimum) : "");
+
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const drivers = (await listDrivers()).filter((d) => d.status === "Active");
+        const clearances = await Promise.all(
+          drivers.map((d) => listDriverClearances(d.id).catch(() => [] as DriverClearanceRecord[])),
+        );
+        if (active) {
+          setRoster(drivers.map((driver, i) => ({ driver, cleared: hasClearanceFor(clearances[i], trip.clientName) })));
+        }
+      } catch (e) {
+        if (active) setRosterError(e instanceof ApiError ? e.message : "Failed to load drivers.");
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [trip.clientName]);
+
+  useEffect(() => {
+    let active = true;
+    listVehicles().then(
+      (rows) => {
+        if (active) setVehicles(rows.filter((v) => v.status === "Active"));
+      },
+      () => {
+        if (active) setVehicles([]);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const selectedVehicle = (vehicles ?? []).find((v) => v.id === vehicleId) ?? null;
+
+  async function submit() {
+    if (busy) return;
+    if (!serviceDate) return setError("Enter the service date.");
+    if (!windowStart) return setError("Enter the departure window start.");
+    if (!driverId) return setError("A return trip needs a driver — pick one from the roster.");
+    if (!vehicleId) return setError("A return trip needs a vehicle — pick one from the fleet.");
+
+    const cap = vehicleId ? null : seatsCapacity === "" ? null : Number(seatsCapacity);
+    const min = seatsMinimum === "" ? null : Number(seatsMinimum);
+    if (!vehicleId && cap !== null && (!Number.isInteger(cap) || cap < 0))
+      return setError("Seats capacity must be a whole number.");
+    if (min !== null && (!Number.isInteger(min) || min < 0)) return setError("Seats minimum must be a whole number.");
+
+    const input: TripInput = {
+      serviceDate,
+      windowStart,
+      windowEnd: windowEnd || null,
+      serviceType: trip.serviceType,
+      routeId: null,
+      routeName: `${trip.destination} → ${trip.origin}`,
+      origin: trip.destination,
+      destination: trip.origin,
+      stops: reversedTripStops(trip.stops),
+      distanceKm: trip.distanceKm,
+      direction: null,
+      isEmptyLeg,
+      clientId: trip.clientId,
+      clientName: trip.clientName,
+      poNumber: trip.poNumber,
+      driverId,
+      vehicleId,
+      seatsCapacity: isEmptyLeg ? null : cap,
+      seatsMinimum: isEmptyLeg ? null : min,
+    };
+
+    setBusy(true);
+    setError(null);
+    try {
+      await onCreated(input);
+      onClose();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Failed to create the return trip — please try again.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ModalShell
+      eyebrow={`Operations · ${trip.tripNumber} · ${corridorLabel(trip)}`}
+      title="Create Return Trip"
+      onClose={onClose}
+      error={error ?? rosterError}
+      footer={
+        <>
+          <ActionButton onClick={onClose}>CANCEL</ActionButton>
+          <ActionButton variant="primary" onClick={submit} disabled={busy}>
+            {busy ? "CREATING…" : "CREATE RETURN"}
+          </ActionButton>
+        </>
+      }
+    >
+      <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textSecondary, marginBottom: 14 }}>
+        Return corridor: <strong>{trip.destination} → {trip.origin}</strong> — same client and stops as{" "}
+        {trip.tripNumber}, reversed. Paired to it as a round trip on creation.
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
+        <DateField label="Service date" value={serviceDate} onChange={setServiceDate} />
+        <div />
+        <TimeField label="Window start" value={windowStart} onChange={setWindowStart} />
+        <TimeField label="Window end (optional)" value={windowEnd} onChange={setWindowEnd} />
+      </div>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginBottom: 16 }}>
+        <input
+          type="checkbox"
+          checked={isEmptyLeg}
+          onChange={(e) => setIsEmptyLeg(e.target.checked)}
+          style={{ accentColor: colors.blue, cursor: "pointer" }}
+        />
+        <span style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: 600, color: colors.textPrimary }}>
+          Empty leg — repositioning only, no passengers
+        </span>
+      </label>
+      <div style={{ marginBottom: 16 }}>
+        <SelectField
+          label="Vehicle · Active fleet"
+          value={vehicleId}
+          onChange={setVehicleId}
+          options={[
+            { value: "", label: vehicles === null ? "Loading vehicles…" : "— select a vehicle —" },
+            ...(vehicles ?? []).map((v) => ({
+              value: v.id,
+              label: `${v.unitNumber} · ${v.make} ${v.model} · ${v.seatingCapacity} seats · ${v.requiredLicenceClass}`,
+            })),
+          ]}
+        />
+        {selectedVehicle && (
+          <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim, marginTop: 6 }}>
+            Seats capacity will be set to {selectedVehicle.seatingCapacity} from {selectedVehicle.unitNumber}.
+          </div>
+        )}
+      </div>
+      {!vehicleId && !isEmptyLeg && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
+          <NumberField label="Seats capacity" value={seatsCapacity} onChange={setSeatsCapacity} min={0} step={1} />
+          <NumberField label="Seats minimum" value={seatsMinimum} onChange={setSeatsMinimum} min={0} step={1} />
+        </div>
+      )}
+      <SectionLabel>Driver · Active roster</SectionLabel>
+      {roster === null && !rosterError && (
+        <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textDim }}>Loading drivers…</div>
+      )}
+      {roster && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflowY: "auto" }}>
+          {roster.map(({ driver, cleared }) => (
+            <div
+              key={driver.id}
+              onClick={() => setDriverId(driver.id)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "10px 13px",
+                cursor: "pointer",
+                ...rowSurface(driverId === driver.id, colors.blue),
+              }}
+            >
+              <span style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: 500, color: colors.textPrimary, flex: 1 }}>
+                {driver.name}
+              </span>
+              {trip.clientName ? (
+                cleared ? (
+                  <StatusChip kind="ontime" label={`${trip.clientName} clearance`} />
+                ) : (
+                  <StatusChip kind="soon" label={`No ${trip.clientName} clearance`} />
+                )
+              ) : null}
+            </div>
+          ))}
+        </div>
+      )}
+    </ModalShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Cancel modal — POST /status with an optional reason.
 // ---------------------------------------------------------------------------
 
@@ -753,7 +984,9 @@ export default function Trips({
   const [inspectionsState, setInspectionsState] = useState<{ tripId: string; rows: VehicleInspection[] } | null>(null);
   const [activityState, setActivityState] = useState<{ tripId: string; rows: TripActivityEntry[] } | null>(null);
 
-  const [modal, setModal] = useState<null | "assign" | "edit" | "cancel" | "closeWithoutBilling" | "manifest" | "sendEmail">(null);
+  const [modal, setModal] = useState<
+    null | "assign" | "edit" | "createReturn" | "cancel" | "closeWithoutBilling" | "manifest" | "sendEmail"
+  >(null);
   // Inspection modal opens for either create (inspectionType set, editing null)
   // or edit (editingInspection set). removingInspection drives the delete confirm.
   const [inspectionType, setInspectionType] = useState<"PreTrip" | "PostTrip" | null>(null);
@@ -1003,6 +1236,17 @@ export default function Trips({
       id,
       (trip) => trip !== undefined && trip.serviceDate === input.serviceDate && (trip.poNumber ?? null) === (input.poNumber ?? null),
     );
+  }
+
+  /** CREATE RETURN — mints the reversed-corridor trip (POST /api/trips), then
+   *  pairs it to the source leg (POST /merge-round-trip, allowMismatch: true —
+   *  the return may land on a different service date). Selects the new leg
+   *  once its pairing is visible. */
+  async function onReturnCreated(sourceId: string, input: TripInput) {
+    const newId = await createTrip(input);
+    await mergeRoundTrip(sourceId, newId, true);
+    await reloadUntil(newId, (trip) => trip !== undefined && trip.roundTripKey !== null);
+    setSelectedId(newId);
   }
 
   /** After a manifest create/edit: wait for the trip to carry a manifestId, then
@@ -1821,6 +2065,9 @@ export default function Trips({
                 {(t.status === "Scheduled" || t.status === "InProgress") && (
                   <ActionButton onClick={() => setModal("assign")}>REASSIGN</ActionButton>
                 )}
+                {!t.isEmptyLeg && canPairRoundTrip(t) && (
+                  <ActionButton onClick={() => setModal("createReturn")}>CREATE RETURN</ActionButton>
+                )}
                 {t.status === "Scheduled" &&
                   (startBlockReason ? (
                     // Pre-gate the START button with a clear reason chip (mirrors
@@ -1869,6 +2116,13 @@ export default function Trips({
                   trip={t}
                   onClose={() => setModal(null)}
                   onSaved={(driverId, vehicleId) => onAssignSaved(t.id, driverId, vehicleId)}
+                />
+              )}
+              {modal === "createReturn" && (
+                <CreateReturnModal
+                  trip={t}
+                  onClose={() => setModal(null)}
+                  onCreated={(input) => onReturnCreated(t.id, input)}
                 />
               )}
               {modal === "manifest" && (

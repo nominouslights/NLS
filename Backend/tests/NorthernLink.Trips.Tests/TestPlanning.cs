@@ -40,6 +40,7 @@ internal static class TestPlanning
         IReadOnlyList<DayOfWeek>? daysOfWeek = null,
         TimeOnly? departureTime = null,
         TimeOnly? returnDepartureTime = null,
+        bool returnNextDay = false,
         int generationHorizonDays = 7,
         bool active = true,
         Guid? routeId = null,
@@ -49,7 +50,7 @@ internal static class TestPlanning
         IReadOnlyList<int>? daysOfMonth = null)
     {
         var result = CreateTemplateResult(
-            daysOfWeek, departureTime, returnDepartureTime, generationHorizonDays,
+            daysOfWeek, departureTime, returnDepartureTime, returnNextDay, generationHorizonDays,
             routeId, recurrenceKind, intervalDays, anchorDate, daysOfMonth);
         var template = result.Value;
 
@@ -69,6 +70,7 @@ internal static class TestPlanning
         IReadOnlyList<DayOfWeek>? daysOfWeek = null,
         TimeOnly? departureTime = null,
         TimeOnly? returnDepartureTime = null,
+        bool returnNextDay = false,
         int generationHorizonDays = 7,
         Guid? routeId = null,
         ScheduleRecurrenceKind recurrenceKind = ScheduleRecurrenceKind.DaysOfWeek,
@@ -89,6 +91,7 @@ internal static class TestPlanning
             daysOfMonth: daysOfMonth ?? [],
             departureTime: departureTime ?? new TimeOnly(6, 30),
             returnDepartureTime: returnDepartureTime,
+            returnNextDay: returnNextDay,
             seatsCapacity: 12,
             seatsMinimum: null,
             defaultVehicleUnit: "U-04",

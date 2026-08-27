@@ -17,7 +17,7 @@ public sealed class UpdateRouteCommandHandler(IRouteRepository repository, IStop
             return Result.Failure(RouteErrors.NotFound);
         }
 
-        var stopsResult = await RouteStopResolver.ResolveAsync(stops, command.StopIds, cancellationToken);
+        var stopsResult = await RouteStopResolver.ResolveAsync(stops, command.Stops, cancellationToken);
         if (stopsResult.IsFailure)
         {
             return stopsResult;

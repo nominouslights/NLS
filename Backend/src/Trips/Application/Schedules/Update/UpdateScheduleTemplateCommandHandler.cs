@@ -46,6 +46,7 @@ public sealed class UpdateScheduleTemplateCommandHandler(
             command.DaysOfMonth,
             command.DepartureTime,
             command.ReturnDepartureTime,
+            command.ReturnNextDay,
             command.SeatsCapacity,
             command.SeatsMinimum,
             command.DefaultVehicleUnit,

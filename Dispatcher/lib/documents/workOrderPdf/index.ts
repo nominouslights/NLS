@@ -1,12 +1,13 @@
 // NL-WO-01 work order — composes the two-page printable HTML from the section
-// builders. Page 1 is prefilled from data; page 2 is blank for the repair shop.
+// builders. Page 1 (§1–§6) is prefilled from data; page 2 (§7–§13) is blank for
+// the repair shop — the authorization limit (§12) is emitted by that page, with
+// a one-line pointer to it left at the foot of page 1.
 
 import type { Vehicle } from "@/lib/api";
 import type { Shop, WorkOrder } from "@/lib/types";
 import type { CompanyInfo } from "@/lib/company";
 import { WORK_ORDER_STYLES } from "./styles";
 import {
-  authorizationBlock,
   carrierBlock,
   footer,
   header,
@@ -14,6 +15,7 @@ import {
   reasonBlock,
   shopBlock,
   shopCompletionPage2,
+  spendingLimitPointer,
   topStrip,
   vehicleBlock,
   workRequestedBlock,
@@ -36,8 +38,8 @@ export function workOrderHtml(
     ${vehicleBlock(vehicle)}
     ${reasonBlock(wo)}
     ${workRequestedBlock(wo)}
-    ${authorizationBlock(wo)}
     ${partsByCarrierBlock()}
+    ${spendingLimitPointer()}
     ${footer()}
     ${shopCompletionPage2(wo, vehicle)}
   </div>

@@ -13,6 +13,7 @@ import {
 } from "@/lib/api/trips";
 import { SERVICE_TYPE_LABELS, listContacts, type ClientContactRecord } from "@/lib/api/clients";
 import { listStops, stopAddressLine, type StopRecord } from "@/lib/api/stops";
+import { stopTimeOnTrip } from "@/lib/timetable";
 import {
   dispatchChip,
   isEmailContact,
@@ -40,6 +41,13 @@ import { SectionLabel } from "@/components/ui/Panel";
 // authoritative (200 even on partial/total provider failure) — outcomes render
 // inline, no polling. dispatchId is a fresh client GUID per attempt, so a
 // replayed request can never double-send.
+
+/** A resolved timetable time as a merge value: formatted like the trip-level ones, or
+ *  undefined so the backend falls back to them. Never "" — an empty string counts as a
+ *  supplied value on the wire and would blank the time out. */
+function timeMerge(time: string | null): string | undefined {
+  return time ? hhmm(time) : undefined;
+}
 
 function fmtUtcDateTime(iso: string): string {
   const d = new Date(iso);
@@ -181,22 +189,41 @@ export default function SendPickupEmailModal({
     [stopMap],
   );
 
+  // Each passenger's own times, off the route timetable snapshotted onto this trip. On a
+  // corridor run the vehicle departs the origin long before it reaches a mid-route stop, so a
+  // single trip-level time would tell most of the manifest the wrong hour. Null — no timetable,
+  // or a stop that isn't on this trip — falls back to the trip-level time, which is exactly what
+  // every passenger got before timetables existed.
+  const pickupTimeFor = useCallback(
+    (p: ManifestPassenger) => stopTimeOnTrip(trip, p.pickupStopId, p.pickupStopName),
+    [trip],
+  );
+  const dropoffTimeFor = useCallback(
+    (p: ManifestPassenger) => stopTimeOnTrip(trip, p.dropoffStopId, p.dropoffStopName),
+    [trip],
+  );
+
   /** Real merge values for one passenger — mirrors the backend MergeFields set. */
   const mergeValues = useCallback(
-    (p: ManifestPassenger): Record<string, string> => ({
-      PassengerName: p.name,
-      TripDate: shortDateLabel(trip.serviceDate),
-      PickupTime: hhmm(trip.windowStart),
-      DropoffTime: trip.windowEnd ? hhmm(trip.windowEnd) : "",
-      Route: trip.routeName || corridorLabel(trip),
-      PickupStop: p.pickupStopName ?? trip.origin,
-      PickupAddress: addressFor(p.pickupStopId),
-      DropoffStop: p.dropoffStopName ?? trip.destination,
-      DropoffStopAddress: addressFor(p.dropoffStopId),
-      TripNumber: trip.tripNumber,
-      ClientName: trip.clientName ?? "",
-    }),
-    [trip, addressFor],
+    (p: ManifestPassenger): Record<string, string> => {
+      // Same precedence as the backend's PickupEmailRenderer, so this preview can never
+      // disagree with what the send actually delivers.
+      const dropoff = dropoffTimeFor(p) ?? trip.windowEnd;
+      return {
+        PassengerName: p.name,
+        TripDate: shortDateLabel(trip.serviceDate),
+        PickupTime: hhmm(pickupTimeFor(p) ?? trip.windowStart),
+        DropoffTime: dropoff ? hhmm(dropoff) : "",
+        Route: trip.routeName || corridorLabel(trip),
+        PickupStop: p.pickupStopName ?? trip.origin,
+        PickupAddress: addressFor(p.pickupStopId),
+        DropoffStop: p.dropoffStopName ?? trip.destination,
+        DropoffStopAddress: addressFor(p.dropoffStopId),
+        TripNumber: trip.tripNumber,
+        ClientName: trip.clientName ?? "",
+      };
+    },
+    [trip, addressFor, pickupTimeFor, dropoffTimeFor],
   );
 
   // Live preview for the FIRST selected recipient — recomputed when the
@@ -274,6 +301,10 @@ export default function SendPickupEmailModal({
           dropoffStop: p.dropoffStopName ?? trip.destination,
           pickupAddress: addressFor(p.pickupStopId),
           dropoffStopAddress: addressFor(p.dropoffStopId),
+          // This passenger's own timetable times. undefined — NOT "" — when unresolved: the
+          // backend falls back to the trip-level times only on a null/blank value.
+          pickupTime: timeMerge(pickupTimeFor(p)),
+          dropoffTime: timeMerge(dropoffTimeFor(p)),
         })),
         // Pre-resolved report-recipient emails (crew-only; empty otherwise).
         // The backend only acts on these for ContractCrew trips.
@@ -325,6 +356,10 @@ export default function SendPickupEmailModal({
           dropoffStop: p.dropoffStopName ?? trip.destination,
           pickupAddress: addressFor(p.pickupStopId),
           dropoffStopAddress: addressFor(p.dropoffStopId),
+          // This passenger's own timetable times. undefined — NOT "" — when unresolved: the
+          // backend falls back to the trip-level times only on a null/blank value.
+          pickupTime: timeMerge(pickupTimeFor(p)),
+          dropoffTime: timeMerge(dropoffTimeFor(p)),
         })),
         reportRecipients: reportRecipients.map((r) => r.email),
       });
@@ -443,6 +478,26 @@ export default function SendPickupEmailModal({
                     {reason}
                   </span>
                 )}
+                {/* The time THIS passenger will be told, so a wrong timetable is caught before
+                    the send rather than in a phone call the next morning. */}
+                <span
+                  style={{
+                    marginLeft: "auto",
+                    fontFamily: fonts.mono,
+                    fontSize: 11,
+                    color: pickupTimeFor(p) ? colors.textSecondary : colors.textDim,
+                    whiteSpace: "nowrap",
+                  }}
+                  title={
+                    pickupTimeFor(p)
+                      ? "From the route timetable, for this passenger's pickup stop"
+                      : "No timetable for this stop — falls back to the trip's departure time"
+                  }
+                >
+                  {hhmm(pickupTimeFor(p) ?? trip.windowStart)}
+                  {" · "}
+                  {p.pickupStopName ?? trip.origin}
+                </span>
               </div>
             );
           })}

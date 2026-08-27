@@ -76,6 +76,13 @@ export interface SendRecipientInput {
   dropoffStop?: string | null;
   pickupAddress?: string | null;
   dropoffStopAddress?: string | null;
+  /** This passenger's OWN {{PickupTime}}/{{DropoffTime}} — resolved from the route
+   *  timetable and their boarding stop, so a mid-corridor passenger is told when the
+   *  vehicle reaches them rather than when it left the origin. Omit (undefined) to fall
+   *  back to the request's trip-level times; an empty string would not, so prefer
+   *  undefined over "". */
+  pickupTime?: string;
+  dropoffTime?: string;
 }
 
 /** POST /api/notifications/emails/trip-pickup body (SendTripPickupEmailRequest).

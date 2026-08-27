@@ -29,6 +29,7 @@ public sealed class ScheduleTemplateReadModel
     public List<int> DaysOfMonth { get; set; } = [];
     public TimeOnly DepartureTime { get; set; }
     public TimeOnly? ReturnDepartureTime { get; set; }
+    public bool ReturnNextDay { get; set; }
     public int SeatsCapacity { get; set; }
     public int? SeatsMinimum { get; set; }
     public string? DefaultVehicleUnit { get; set; }
@@ -74,6 +75,7 @@ public sealed class ScheduleTemplateReadModelConfiguration : IEntityTypeConfigur
                     days => days.ToList()));
         builder.Property(t => t.DepartureTime).HasColumnName("departure_time");
         builder.Property(t => t.ReturnDepartureTime).HasColumnName("return_departure_time");
+        builder.Property(t => t.ReturnNextDay).HasColumnName("return_next_day");
         builder.Property(t => t.SeatsCapacity).HasColumnName("seats_capacity");
         builder.Property(t => t.SeatsMinimum).HasColumnName("seats_minimum");
         builder.Property(t => t.DefaultVehicleUnit).HasColumnName("default_vehicle_unit");

@@ -77,6 +77,30 @@ public class TripGeneratorTests
     }
 
     [Fact]
+    public void ReturnNextDay_lands_the_inbound_leg_on_the_following_calendar_day()
+    {
+        var template = TestPlanning.CreateTemplate(
+            daysOfWeek: [DayOfWeek.Monday],
+            departureTime: new TimeOnly(17, 30),
+            returnDepartureTime: new TimeOnly(6, 30), // next morning
+            returnNextDay: true,
+            generationHorizonDays: 7);
+
+        var drafts = TripGenerator.Generate(template, NoExisting, TestPlanning.Monday);
+
+        Assert.Equal(2, drafts.Count);
+        var outbound = Assert.Single(drafts, draft => draft.Direction == TripDirection.Outbound);
+        var inbound = Assert.Single(drafts, draft => draft.Direction == TripDirection.Inbound);
+
+        Assert.Equal(TestPlanning.Monday, outbound.ServiceDate);
+        Assert.Equal(TestPlanning.Monday.AddDays(1), inbound.ServiceDate);
+
+        // Still one shared key, minted off the outbound's date, even though the legs
+        // land on different calendar days.
+        Assert.Equal(outbound.RoundTripKey, inbound.RoundTripKey);
+    }
+
+    [Fact]
     public void One_way_template_has_no_round_trip_key()
     {
         var template = TestPlanning.CreateTemplate(daysOfWeek: [DayOfWeek.Monday], generationHorizonDays: 7);
