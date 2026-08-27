@@ -32,6 +32,11 @@ export const WORK_ORDER_STYLES = `
 .wo .fld.mono .val { font-family: "Cascadia Mono", Consolas, ui-monospace, monospace; font-weight: 500; }
 
 .wo .chk { display: inline-block; font-size: 10px; margin: 2px 14px 2px 0; color: #222; white-space: nowrap; }
+.wo .notice {
+  font-size: 9.5px; color: #1a1a1a; line-height: 1.5; margin-top: 8px;
+  border: 1px solid #9C6500; border-left-width: 4px; background: #FDF6E7; padding: 5px 8px;
+}
+.wo .notice b { color: #7A4F00; }
 .wo .note { font-size: 9px; color: #555; padding: 5px 8px; border: 1px solid #333; border-top: 0; line-height: 1.5; }
 
 .wo table { width: 100%; border-collapse: collapse; }
