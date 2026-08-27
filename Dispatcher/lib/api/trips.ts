@@ -460,6 +460,9 @@ export interface ScheduleTemplateRecord {
   daysOfMonth: number[];
   departureTime: string; // TimeOnly, "06:30:00"
   returnDepartureTime: string | null;
+  /** True when the return leg lands the calendar day AFTER the outbound's (an overnight
+   *  route) — returnDepartureTime is then a same-or-earlier clock time by design. */
+  returnNextDay: boolean;
   seatsCapacity: number;
   seatsMinimum: number | null;
   defaultVehicleUnit: string | null;
@@ -491,6 +494,9 @@ export interface ScheduleTemplateInput {
   daysOfMonth: number[];
   departureTime: string; // "HH:mm"
   returnDepartureTime?: string | null;
+  /** True ⇒ the return leg lands the calendar day AFTER the outbound's. Only meaningful
+   *  with returnDepartureTime set — send false when there is no return leg. */
+  returnNextDay: boolean;
   seatsCapacity: number;
   seatsMinimum?: number | null;
   defaultVehicleUnit?: string | null;

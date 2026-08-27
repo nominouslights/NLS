@@ -51,10 +51,16 @@ public static class TripGenerator
                 drafts.Add(new TripDraft(date, TripDirection.Outbound, roundTripKey, template.DepartureTime));
             }
 
-            if (template.ReturnDepartureTime is { } returnTime
-                && !existingOccurrences.Contains((date, TripDirection.Inbound)))
+            if (template.ReturnDepartureTime is { } returnTime)
             {
-                drafts.Add(new TripDraft(date, TripDirection.Inbound, roundTripKey, returnTime));
+                // An overnight route's return lands on the following calendar day — the
+                // outbound and inbound legs share a RoundTripKey (minted off the outbound's
+                // date) even though their ServiceDates differ.
+                var returnDate = template.ReturnNextDay ? date.AddDays(1) : date;
+                if (!existingOccurrences.Contains((returnDate, TripDirection.Inbound)))
+                {
+                    drafts.Add(new TripDraft(returnDate, TripDirection.Inbound, roundTripKey, returnTime));
+                }
             }
         }
 

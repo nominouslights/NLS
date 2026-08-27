@@ -570,6 +570,7 @@ internal static class TripPlanningEndpoints
             request.DaysOfMonth ?? [],
             request.DepartureTime,
             request.ReturnDepartureTime,
+            request.ReturnNextDay,
             request.SeatsCapacity,
             request.SeatsMinimum,
             request.DefaultVehicleUnit,
@@ -607,6 +608,7 @@ internal static class TripPlanningEndpoints
             request.DaysOfMonth ?? [],
             request.DepartureTime,
             request.ReturnDepartureTime,
+            request.ReturnNextDay,
             request.SeatsCapacity,
             request.SeatsMinimum,
             request.DefaultVehicleUnit,
@@ -796,6 +798,9 @@ public sealed record RouteStopRequest(
 /// EveryNDays uses <c>intervalDays</c> + <c>anchorDate</c>; MonthlyDays uses
 /// <c>daysOfMonth</c> (1–31, clamped to month-end). Fields for other kinds are ignored.
 /// A non-null returnDepartureTime makes each occurrence a paired outbound + return leg.
+/// <c>returnNextDay</c> true means the return leg lands on the calendar day AFTER the
+/// outbound's (an overnight route) — the return time is then expected to be at or before
+/// the outbound's clock time, and the usual same-day ordering check is skipped.
 /// </summary>
 public sealed record CreateScheduleTemplateRequest(
     string? Name,
@@ -810,6 +815,7 @@ public sealed record CreateScheduleTemplateRequest(
     IReadOnlyList<int>? DaysOfMonth,
     TimeOnly DepartureTime,
     TimeOnly? ReturnDepartureTime,
+    bool ReturnNextDay,
     int SeatsCapacity,
     int? SeatsMinimum,
     string? DefaultVehicleUnit,
@@ -831,6 +837,7 @@ public sealed record UpdateScheduleTemplateRequest(
     IReadOnlyList<int>? DaysOfMonth,
     TimeOnly DepartureTime,
     TimeOnly? ReturnDepartureTime,
+    bool ReturnNextDay,
     int SeatsCapacity,
     int? SeatsMinimum,
     string? DefaultVehicleUnit,

@@ -656,6 +656,10 @@ const RECURRENCE_ERROR_MESSAGES: Record<string, string> = {
   "Trips.ScheduleTemplate.AnchorRequired": "Pick a start date — an every-N-days schedule counts its interval from that day.",
   "Trips.ScheduleTemplate.AtLeastOneDayOfMonth": "Select at least one day of the month.",
   "Trips.ScheduleTemplate.InvalidDayOfMonth": "Days of the month must be between 1 and 31.",
+  "Trips.ScheduleTemplate.ReturnBeforeDeparture":
+    'The return time is at or before departure — if the return is on the next calendar day, check "Return departs the next day" instead.',
+  "Trips.ScheduleTemplate.ReturnNextDayRequiresReturnDeparture":
+    '"Return departs the next day" only applies when a return departure time is set.',
 };
 
 function TemplateFormModal({
@@ -687,6 +691,7 @@ function TemplateFormModal({
   const [returnDeparture, setReturnDeparture] = useState(
     existing?.returnDepartureTime ? hhmm(existing.returnDepartureTime) : "",
   );
+  const [returnNextDay, setReturnNextDay] = useState(existing?.returnNextDay ?? false);
   const [seatsCapacity, setSeatsCapacity] = useState(existing ? String(existing.seatsCapacity) : "");
   const [seatsMinimum, setSeatsMinimum] = useState(existing?.seatsMinimum != null ? String(existing.seatsMinimum) : "");
   const [vehicleUnit, setVehicleUnit] = useState(existing?.defaultVehicleUnit ?? "");
@@ -771,6 +776,9 @@ function TemplateFormModal({
       daysOfMonth: recurrenceKind === "MonthlyDays" ? [...daysOfMonth].sort((a, b) => a - b) : [],
       departureTime: departure,
       returnDepartureTime: returnDeparture || null,
+      // Only meaningful with a return departure — a leg switched off sends false so a
+      // stale flag can't survive clearing the return time.
+      returnNextDay: returnDeparture ? returnNextDay : false,
       seatsCapacity: cap,
       seatsMinimum: min,
       defaultVehicleUnit: vehicleUnit.trim() || null,
@@ -959,6 +967,23 @@ function TemplateFormModal({
         <NumberField label="Seats capacity" value={seatsCapacity} onChange={setSeatsCapacity} min={1} step={1} />
         <NumberField label="Seats minimum" value={seatsMinimum} onChange={setSeatsMinimum} min={0} step={1} />
       </div>
+
+      {returnDeparture && (
+        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginTop: 10 }}>
+          <input
+            type="checkbox"
+            checked={returnNextDay}
+            onChange={(e) => setReturnNextDay(e.target.checked)}
+            style={{ accentColor: colors.blue, cursor: "pointer" }}
+          />
+          <span style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: 600, color: colors.textPrimary }}>
+            Return departs the next day
+          </span>
+          <span style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textFaint }}>
+            · overnight route — the return time can be earlier than the outbound&rsquo;s
+          </span>
+        </label>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14, marginTop: 14 }}>
         <TextField label="Default vehicle unit (optional)" value={vehicleUnit} onChange={setVehicleUnit} mono placeholder="U-02" />
@@ -1444,7 +1469,9 @@ export default function RoutesSchedules() {
             </h2>
             <div style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.textMuted, marginBottom: 16 }}>
               {template.routeName ?? "route"} · departs {hhmm(template.departureTime)}
-              {template.returnDepartureTime ? ` · return ${hhmm(template.returnDepartureTime)}` : ""}
+              {template.returnDepartureTime
+                ? ` · return ${hhmm(template.returnDepartureTime)}${template.returnNextDay ? " (next day)" : ""}`
+                : ""}
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
@@ -1456,7 +1483,11 @@ export default function RoutesSchedules() {
                   <DetailRow label="Departure" value={hhmm(template.departureTime)} valueStyle={{ fontFamily: fonts.mono }} />
                   <DetailRow
                     label="Return leg"
-                    value={template.returnDepartureTime ? `${hhmm(template.returnDepartureTime)} · paired round trip` : "one-way"}
+                    value={
+                      template.returnDepartureTime
+                        ? `${hhmm(template.returnDepartureTime)}${template.returnNextDay ? " next day" : ""} · paired round trip`
+                        : "one-way"
+                    }
                     valueStyle={{ fontFamily: fonts.mono }}
                   />
                   <DetailRow label="Generation horizon" value={`${template.generationHorizonDays} days ahead`} />

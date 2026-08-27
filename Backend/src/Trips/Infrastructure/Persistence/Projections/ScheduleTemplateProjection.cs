@@ -115,6 +115,7 @@ internal sealed class ScheduleTemplateProjection : IProjection<TripsDbContext>
         row.DaysOfMonth = [.. source.DaysOfMonth];
         row.DepartureTime = source.DepartureTime;
         row.ReturnDepartureTime = source.ReturnDepartureTime;
+        row.ReturnNextDay = source.ReturnNextDay;
         row.SeatsCapacity = source.SeatsCapacity;
         row.SeatsMinimum = source.SeatsMinimum;
         row.DefaultVehicleUnit = source.DefaultVehicleUnit;

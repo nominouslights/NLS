@@ -31,6 +31,7 @@ internal sealed class ScheduleTemplateReadService(TripsDbContext context) : ISch
             t.DaysOfMonth,
             t.DepartureTime,
             t.ReturnDepartureTime,
+            t.ReturnNextDay,
             t.SeatsCapacity,
             t.SeatsMinimum,
             t.DefaultVehicleUnit,

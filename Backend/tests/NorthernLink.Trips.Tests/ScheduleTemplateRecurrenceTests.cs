@@ -133,6 +133,7 @@ public class ScheduleTemplateRecurrenceTests
             daysOfMonth: [1, 2], // supplied but must be ignored/cleared
             departureTime: new TimeOnly(6, 30),
             returnDepartureTime: null,
+            returnNextDay: false,
             seatsCapacity: 12,
             seatsMinimum: null,
             defaultVehicleUnit: "U-04",
@@ -146,5 +147,42 @@ public class ScheduleTemplateRecurrenceTests
         Assert.Equal(anchor, template.AnchorDate);
         Assert.Empty(template.DaysOfWeek);
         Assert.Empty(template.DaysOfMonth);
+    }
+
+    // ----- Return departure guard -----
+
+    [Fact]
+    public void Return_at_or_before_departure_fails_with_ReturnBeforeDeparture_unless_flagged_next_day()
+    {
+        var result = TestPlanning.CreateTemplateResult(
+            departureTime: new TimeOnly(17, 30),
+            returnDepartureTime: new TimeOnly(6, 30), // earlier clock time, same calendar day
+            returnNextDay: false);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ScheduleTemplateErrors.ReturnBeforeDeparture, result.Error);
+    }
+
+    [Fact]
+    public void ReturnNextDay_allows_a_return_time_at_or_before_departure()
+    {
+        var template = TestPlanning.CreateTemplate(
+            departureTime: new TimeOnly(17, 30),
+            returnDepartureTime: new TimeOnly(6, 30), // next morning
+            returnNextDay: true);
+
+        Assert.True(template.ReturnNextDay);
+        Assert.Equal(new TimeOnly(6, 30), template.ReturnDepartureTime);
+    }
+
+    [Fact]
+    public void ReturnNextDay_without_a_return_departure_time_fails()
+    {
+        var result = TestPlanning.CreateTemplateResult(
+            returnDepartureTime: null,
+            returnNextDay: true);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ScheduleTemplateErrors.ReturnNextDayRequiresReturnDeparture, result.Error);
     }
 }
