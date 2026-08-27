@@ -37,6 +37,12 @@ export interface TripStop {
   stopId?: string;
   latitude?: number;
   longitude?: number;
+  /** Timetable: minutes after the OUTBOUND leg's departure that the vehicle reaches
+   *  this stop. Null/absent on a route with no outbound timetable. */
+  outboundOffsetMinutes?: number | null;
+  /** Timetable: minutes after the RETURN leg's departure. The return runs the corridor
+   *  backwards, so the LAST stop by order is its zero. */
+  returnOffsetMinutes?: number | null;
 }
 
 /** Mirrors TripResponse — list and detail share the same shape. */
@@ -343,12 +349,23 @@ export interface RouteRecord {
   updatedAtUtc: string;
 }
 
+/** One stop in a create/update route body, in corridor order. The two offsets are that
+ *  stop's timetable entry — minutes after the respective leg's departure. Omit both on
+ *  every stop for a route with no timetable; within one leg the backend requires
+ *  all-or-nothing, starting at 0 and increasing along that leg's direction of travel
+ *  (the return leg travels the list backwards, so its zero is the LAST stop). */
+export interface RouteStopInput {
+  stopId: string;
+  outboundOffsetMinutes?: number | null;
+  returnOffsetMinutes?: number | null;
+}
+
 /** POST /api/trips/routes body (CreateRouteRequest). Stops are selected from the
  *  Stop catalog by id, in corridor order; the backend loads each Stop, verifies
  *  it resolves and is active, then snapshots name + lat/lng into RouteRecord.stops. */
 export interface RouteInput {
   name: string;
-  stopIds: string[];
+  stops: RouteStopInput[];
   distanceKm: number;
   estimatedDurationMinutes: number;
   requiredLicenceClass?: string | null;

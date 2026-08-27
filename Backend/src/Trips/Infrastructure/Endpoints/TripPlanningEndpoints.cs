@@ -5,6 +5,7 @@ using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Shared.Tenancy;
 using NorthernLink.Trips.Application.Abstractions;
+using NorthernLink.Trips.Application.Routes;
 using NorthernLink.Trips.Application.Routes.Create;
 using NorthernLink.Trips.Application.Routes.GetRoutes;
 using NorthernLink.Trips.Application.Routes.Update;
@@ -400,7 +401,7 @@ internal static class TripPlanningEndpoints
         var command = new CreateRouteCommand(
             tenantId,
             request.Name ?? string.Empty,
-            request.StopIds ?? [],
+            ToStopInputs(request.Stops),
             request.DistanceKm,
             request.EstimatedDurationMinutes,
             request.RequiredLicenceClass);
@@ -422,7 +423,7 @@ internal static class TripPlanningEndpoints
         var command = new UpdateRouteCommand(
             id,
             request.Name ?? string.Empty,
-            request.StopIds ?? [],
+            ToStopInputs(request.Stops),
             request.DistanceKm,
             request.EstimatedDurationMinutes,
             request.RequiredLicenceClass,
@@ -431,6 +432,16 @@ internal static class TripPlanningEndpoints
         var result = await sender.Send(command, cancellationToken);
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
+
+    /// <summary>
+    /// Maps the wire stop list onto the command's inputs. A missing list becomes empty so the
+    /// aggregate's "at least two stops" rule produces the validation error, not a null deref.
+    /// </summary>
+    private static IReadOnlyList<RouteStopInput> ToStopInputs(IReadOnlyList<RouteStopRequest>? stops) =>
+        [.. (stops ?? []).Select(stop => new RouteStopInput(
+            stop.StopId,
+            stop.OutboundOffsetMinutes,
+            stop.ReturnOffsetMinutes))];
 
     // ---- Stops ----
 
@@ -753,7 +764,7 @@ public sealed record MergeRoundTripRequest(Guid OtherTripId, bool AllowMismatch 
 /// <summary>Request body for POST /api/trips/routes. Stops are chosen from the catalog by id (ordered).</summary>
 public sealed record CreateRouteRequest(
     string? Name,
-    IReadOnlyList<Guid>? StopIds,
+    IReadOnlyList<RouteStopRequest>? Stops,
     int DistanceKm,
     int EstimatedDurationMinutes,
     string? RequiredLicenceClass);
@@ -761,11 +772,22 @@ public sealed record CreateRouteRequest(
 /// <summary>Request body for PUT /api/trips/routes/{id} (full row, including active). Stops by id (ordered).</summary>
 public sealed record UpdateRouteRequest(
     string? Name,
-    IReadOnlyList<Guid>? StopIds,
+    IReadOnlyList<RouteStopRequest>? Stops,
     int DistanceKm,
     int EstimatedDurationMinutes,
     string? RequiredLicenceClass,
     bool Active);
+
+/// <summary>
+/// One stop in a create/update route body, in corridor order. Both offsets are optional — omit
+/// them on every stop for a route with no timetable. Within one leg they are all-or-nothing:
+/// supply them for every stop or none, starting at 0 and increasing along that leg's direction
+/// of travel (the return leg travels the list backwards, so its zero is the last stop).
+/// </summary>
+public sealed record RouteStopRequest(
+    Guid StopId,
+    int? OutboundOffsetMinutes,
+    int? ReturnOffsetMinutes);
 
 /// <summary>
 /// Request body for POST /api/trips/schedule-templates. <c>RecurrenceKind</c> takes an

@@ -194,7 +194,8 @@ public static class NotificationsEndpoints
             (request.Recipients ?? [])
                 .Select(r => new RecipientInput(
                     r.Email ?? string.Empty, r.PassengerName ?? string.Empty,
-                    r.PickupStop, r.PickupAddress, r.DropoffStop, r.DropoffStopAddress))
+                    r.PickupStop, r.PickupAddress, r.DropoffStop, r.DropoffStopAddress,
+                    r.PickupTime, r.DropoffTime))
                 .ToList(),
             request.ReportRecipients ?? []);
 
@@ -226,7 +227,8 @@ public static class NotificationsEndpoints
             (request.Recipients ?? [])
                 .Select(r => new RecipientInput(
                     r.Email ?? string.Empty, r.PassengerName ?? string.Empty,
-                    r.PickupStop, r.PickupAddress, r.DropoffStop, r.DropoffStopAddress))
+                    r.PickupStop, r.PickupAddress, r.DropoffStop, r.DropoffStopAddress,
+                    r.PickupTime, r.DropoffTime))
                 .ToList(),
             request.ReportRecipients ?? []);
 
@@ -319,11 +321,18 @@ public sealed record PreviewTripPickupReportRequest(
     List<RecipientRequest>? Recipients,
     IReadOnlyList<string>? ReportRecipients);
 
-/// <summary>One selected manifest passenger: address plus per-passenger merge values.</summary>
+/// <summary>
+/// One selected manifest passenger: address plus per-passenger merge values.
+/// <paramref name="PickupTime"/>/<paramref name="DropoffTime"/> are optional — supply them to
+/// give this passenger the time the vehicle reaches their own stop; omit them to fall back to
+/// the request's trip-level times.
+/// </summary>
 public sealed record RecipientRequest(
     string? Email,
     string? PassengerName,
     string? PickupStop,
     string? PickupAddress,
     string? DropoffStop,
-    string? DropoffStopAddress);
+    string? DropoffStopAddress,
+    string? PickupTime,
+    string? DropoffTime);

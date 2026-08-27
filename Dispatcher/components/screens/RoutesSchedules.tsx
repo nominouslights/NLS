@@ -29,6 +29,7 @@ import {
 import { listClients, SERVICE_TYPE_LABELS, type ClientRecord } from "@/lib/api/clients";
 import { listDrivers, type DriverRecord } from "@/lib/api/drivers";
 import { createStop, listStops, refetchUntil as refetchStopsUntil, type StopInput, type StopRecord } from "@/lib/api/stops";
+import { offsetFromReference, offsetLabel, referencePlusOffset } from "@/lib/timetable";
 import { PageHeader, Panel, SectionLabel, DetailRow } from "@/components/ui/Panel";
 import { ServiceChip, StatusChip } from "@/components/ui/Chip";
 import { ActionButton } from "@/components/ui/Button";
@@ -82,6 +83,113 @@ function ReorderButton({ label, onClick, disabled }: { label: string; onClick: (
   );
 }
 
+/** Column heading over a timetable column, naming the direction it is read in — the return
+ *  leg runs the corridor backwards, so its zero sits on the bottom row. */
+function TimetableColumnHeader({ label, note }: { label: string; note: string }) {
+  return (
+    <span style={{ width: 132, flex: "none", display: "flex", flexDirection: "column", gap: 1 }}>
+      <span style={{ fontFamily: fonts.body, fontSize: 10.5, fontWeight: 600, color: colors.textMuted, letterSpacing: 0.3 }}>
+        {label.toUpperCase()}
+      </span>
+      <span style={{ fontFamily: fonts.body, fontSize: 10, color: colors.textFaint }}>{note}</span>
+    </span>
+  );
+}
+
+/** One stop's time on one leg. Shows a clock time against that leg's reference departure,
+ *  but stores the offset it implies — which is what the route actually persists. */
+function TimetableCell({
+  value,
+  reference,
+  onChange,
+}: {
+  value: number | null;
+  reference: string;
+  onChange: (time: string) => void;
+}) {
+  return (
+    <span style={{ width: 132, flex: "none", display: "flex", alignItems: "center", gap: 7 }}>
+      <input
+        type="time"
+        className="nl-input"
+        value={value === null ? "" : (referencePlusOffset(reference, value) ?? "")}
+        onChange={(e) => onChange(e.target.value)}
+        style={{
+          width: 82,
+          padding: "5px 7px",
+          borderRadius: 7,
+          border: `1px solid ${colors.borderStrong}`,
+          background: colors.inputBg,
+          color: colors.textPrimary,
+          fontFamily: fonts.mono,
+          fontSize: 12,
+          colorScheme: "light",
+        }}
+      />
+      <span style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textFaint, whiteSpace: "nowrap" }}>
+        {offsetLabel(value)}
+      </span>
+    </span>
+  );
+}
+
+/** Switch for one leg's timetable, with the reference departure its column is read against
+ *  and any inline rule breach. */
+function LegToggle({
+  label,
+  on,
+  onToggle,
+  reference,
+  onReference,
+  referenceLabel,
+  problem,
+}: {
+  label: string;
+  on: boolean;
+  onToggle: () => void;
+  reference: string;
+  onReference: (v: string) => void;
+  referenceLabel: string;
+  problem: string | null;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 210 }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+        <input
+          type="checkbox"
+          checked={on}
+          onChange={onToggle}
+          style={{ accentColor: colors.blue, cursor: "pointer" }}
+        />
+        <span style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: 600, color: colors.textPrimary }}>{label}</span>
+      </label>
+      {on && (
+        <>
+          <div style={{ width: 150 }}>
+            <TimeField label={referenceLabel} value={reference} onChange={onReference} />
+          </div>
+          {problem && (
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 7, maxWidth: 260 }}>
+              <StatusChip kind="over" label="Check times" />
+              <span style={{ fontFamily: fonts.body, fontSize: 11, color: statusMeta("over").t, lineHeight: 1.45 }}>
+                {problem}
+              </span>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** One selected stop in the route form: the catalog stop plus its two timetable offsets
+ *  (minutes after the respective leg's departure; null = that leg is untimed). */
+interface StopRow {
+  id: string;
+  outbound: number | null;
+  return: number | null;
+}
+
 function RouteFormModal({
   existing,
   onClose,
@@ -102,15 +210,33 @@ function RouteFormModal({
 
   // Stop catalog (active stops only) for the picker; null while loading.
   const [stops, setStops] = useState<StopRecord[] | null>(null);
-  // Ordered selection primed from the existing route's snapshot by stopId.
-  const [stopIds, setStopIds] = useState<string[]>(
+  // Ordered selection primed from the existing route's snapshot by stopId, each row
+  // carrying that stop's two timetable offsets.
+  const [rows, setRows] = useState<StopRow[]>(
     existing
       ? [...existing.stops]
           .sort((a, b) => a.order - b.order)
-          .map((s) => s.stopId)
-          .filter((id): id is string => Boolean(id))
+          .filter((s) => Boolean(s.stopId))
+          .map((s) => ({
+            id: s.stopId as string,
+            outbound: s.outboundOffsetMinutes ?? null,
+            return: s.returnOffsetMinutes ?? null,
+          }))
       : [],
   );
+  const stopIds = rows.map((r) => r.id);
+
+  // A leg's timetable is all-or-nothing, so it's switched on for the whole leg rather than
+  // per stop. Primed on from whatever the route already carries.
+  const [outboundOn, setOutboundOn] = useState(rows.some((r) => r.outbound !== null));
+  const [returnOn, setReturnOn] = useState(rows.some((r) => r.return !== null));
+
+  // The route stores OFFSETS (minutes after the leg's departure) so one corridor can serve a
+  // 06:30 run and a 14:00 run. These two are a display lens only — nothing persists them —
+  // letting the dispatcher read and type real clock times instead of doing the arithmetic.
+  // Changing one re-renders that column; the stored offsets never move.
+  const [outboundRef, setOutboundRef] = useState("06:00");
+  const [returnRef, setReturnRef] = useState("16:00");
   const [addPick, setAddPick] = useState("");
   // Inline "New stop" creation — opens the shared StopFormModal in create mode so
   // a dispatcher can add a catalog stop (with address) without leaving the route.
@@ -154,14 +280,17 @@ function RouteFormModal({
 
   function addStop(id: string) {
     if (!id || stopIds.includes(id)) return;
-    setStopIds((cur) => [...cur, id]);
+    setRows((cur) => [...cur, { id, outbound: null, return: null }]);
     setAddPick("");
   }
   function removeStop(index: number) {
-    setStopIds((cur) => cur.filter((_, i) => i !== index));
+    setRows((cur) => cur.filter((_, i) => i !== index));
   }
+  // Offsets travel with their stop, so reordering genuinely re-times the route — the moved
+  // stop keeps "when we reach it", which usually breaks the increasing rule until the
+  // dispatcher re-enters the affected times. The inline check below says so.
   function move(index: number, delta: number) {
-    setStopIds((cur) => {
+    setRows((cur) => {
       const next = [...cur];
       const target = index + delta;
       if (target < 0 || target >= next.length) return cur;
@@ -169,6 +298,52 @@ function RouteFormModal({
       return next;
     });
   }
+
+  /** Writes one cell from a typed clock time, as an offset against that leg's reference. */
+  function setLegTime(index: number, leg: "outbound" | "return", time: string) {
+    setRows((cur) =>
+      cur.map((row, i) =>
+        i === index
+          ? { ...row, [leg]: time ? offsetFromReference(time, leg === "outbound" ? outboundRef : returnRef) : null }
+          : row,
+      ),
+    );
+  }
+
+  /** This leg's offsets in ITS direction of travel — the return reads the corridor backwards. */
+  function legOffsets(leg: "outbound" | "return"): (number | null)[] {
+    const values = rows.map((r) => (leg === "outbound" ? r.outbound : r.return));
+    return leg === "outbound" ? values : [...values].reverse();
+  }
+
+  /**
+   * The same all-or-nothing / starts-at-zero / strictly-increasing rule the backend enforces,
+   * checked inline so the dispatcher sees which leg is wrong before hitting save. The backend
+   * remains the authority.
+   */
+  function legProblem(leg: "outbound" | "return"): string | null {
+    const label = leg === "outbound" ? "Outbound" : "Return";
+    const offsets = legOffsets(leg);
+    if (offsets.length === 0 || offsets.every((o) => o === null)) return null;
+    if (offsets.some((o) => o === null)) return `${label}: every stop needs a time, or none do.`;
+    if (offsets[0] !== 0) {
+      const first = leg === "outbound" ? "first" : "last";
+      return `${label}: the timetable must start at the ${first} stop, where the leg departs.`;
+    }
+    for (let i = 1; i < offsets.length; i++) {
+      if ((offsets[i] as number) <= (offsets[i - 1] as number)) {
+        return `${label}: each stop must be later than the one before it, in the direction of travel.`;
+      }
+    }
+    return null;
+  }
+
+  // The last outbound offset is what the timetable implies the leg takes; the trip's window
+  // end still comes from the estimated duration, so a mismatch would make a passenger's
+  // {{DropoffTime}} disagree with the trip card. Advisory, never a blocker.
+  const impliedDuration = outboundOn ? (legOffsets("outbound").at(-1) ?? null) : null;
+  const durationMismatch =
+    impliedDuration !== null && Number(durationMin) > 0 && impliedDuration !== Number(durationMin);
 
   // StopFormModal.onSaved for the inline "+ NEW STOP" flow: the modal supplies the
   // validated StopInput, we create the catalog stop here (surfacing the new id),
@@ -202,13 +377,21 @@ function RouteFormModal({
     const mins = Number(durationMin);
     if (!Number.isInteger(mins) || mins <= 0) return setError("Estimated duration must be whole minutes.");
 
+    const problem = (outboundOn && legProblem("outbound")) || (returnOn && legProblem("return"));
+    if (problem) return setError(problem);
+
     setBusy(true);
     setError(null);
     try {
       await onSaved(
         {
           name: name.trim(),
-          stopIds,
+          // A leg switched off sends nulls, which clears any timetable it had.
+          stops: rows.map((r) => ({
+            stopId: r.id,
+            outboundOffsetMinutes: outboundOn ? r.outbound : null,
+            returnOffsetMinutes: returnOn ? r.return : null,
+          })),
           distanceKm: km,
           estimatedDurationMinutes: mins,
           requiredLicenceClass: licenceClass.trim() || null,
@@ -287,14 +470,23 @@ function RouteFormModal({
 
         {/* ordered selection */}
         <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
-          {stopIds.length === 0 && (
+          {rows.length === 0 && (
             <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textDim, padding: "4px 0" }}>
               No stops selected yet — add at least two below.
             </div>
           )}
-          {stopIds.map((id, i) => (
+          {(outboundOn || returnOn) && rows.length > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 12px" }}>
+              <span style={{ width: 20, flex: "none" }} />
+              <span style={{ flex: 1, minWidth: 0 }} />
+              {outboundOn && <TimetableColumnHeader label="Outbound" note="top → bottom" />}
+              {returnOn && <TimetableColumnHeader label="Return" note="bottom → top" />}
+              <span style={{ width: 104, flex: "none" }} />
+            </div>
+          )}
+          {rows.map((row, i) => (
             <div
-              key={id}
+              key={row.id}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -308,19 +500,84 @@ function RouteFormModal({
             >
               <span style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.textDim, width: 20, flex: "none" }}>{i + 1}</span>
               <span style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: 600, color: colors.textPrimary, flex: 1, minWidth: 0 }}>
-                {nameForStop(id)}
+                {nameForStop(row.id)}
                 {i === 0 && <span style={{ fontFamily: fonts.body, fontSize: 10.5, fontWeight: 500, color: colors.textDim, marginLeft: 7 }}>origin</span>}
-                {i === stopIds.length - 1 && i > 0 && (
+                {i === rows.length - 1 && i > 0 && (
                   <span style={{ fontFamily: fonts.body, fontSize: 10.5, fontWeight: 500, color: colors.textDim, marginLeft: 7 }}>destination</span>
                 )}
               </span>
+              {outboundOn && (
+                <TimetableCell
+                  value={row.outbound}
+                  reference={outboundRef}
+                  onChange={(time) => setLegTime(i, "outbound", time)}
+                />
+              )}
+              {returnOn && (
+                <TimetableCell
+                  value={row.return}
+                  reference={returnRef}
+                  onChange={(time) => setLegTime(i, "return", time)}
+                />
+              )}
               <div style={{ display: "flex", gap: 5, flex: "none" }}>
                 <ReorderButton label="↑" disabled={i === 0} onClick={() => move(i, -1)} />
-                <ReorderButton label="↓" disabled={i === stopIds.length - 1} onClick={() => move(i, 1)} />
+                <ReorderButton label="↓" disabled={i === rows.length - 1} onClick={() => move(i, 1)} />
                 <ReorderButton label="✕" onClick={() => removeStop(i)} />
               </div>
             </div>
           ))}
+        </div>
+
+        {/* timetable controls */}
+        <div style={{ marginBottom: 10 }}>
+          <FieldLabel
+            hint={
+              <span style={{ color: colors.textFaint }}>
+                · the route stores minutes after each leg&rsquo;s departure, so one corridor serves every
+                run on it — the reference below is only how those minutes are shown as clock times
+              </span>
+            }
+          >
+            Timetable · pickup time per stop
+          </FieldLabel>
+
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 18, alignItems: "flex-start" }}>
+            <LegToggle
+              label="Outbound leg"
+              on={outboundOn}
+              onToggle={() => setOutboundOn((v) => !v)}
+              reference={outboundRef}
+              onReference={setOutboundRef}
+              referenceLabel="Outbound departs"
+              problem={outboundOn ? legProblem("outbound") : null}
+            />
+            <LegToggle
+              label="Return leg"
+              on={returnOn}
+              onToggle={() => setReturnOn((v) => !v)}
+              reference={returnRef}
+              onReference={setReturnRef}
+              referenceLabel="Return departs"
+              problem={returnOn ? legProblem("return") : null}
+            />
+          </div>
+
+          {durationMismatch && (
+            <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 10, flexWrap: "wrap" }}>
+              <StatusChip
+                kind="soon"
+                label={`Timetable implies ${durationLabel(impliedDuration as number)}, duration says ${durationLabel(Number(durationMin))}`}
+              />
+              <span style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim }}>
+                A trip&rsquo;s arrival still comes from the estimated duration, so the two disagreeing
+                would tell a passenger riding to the last stop the wrong arrival.
+              </span>
+              <ActionButton onClick={() => setDurationMin(String(impliedDuration))}>
+                USE {String(impliedDuration)} MIN
+              </ActionButton>
+            </div>
+          )}
         </div>
 
         <div style={{ display: "flex", alignItems: "flex-end", gap: 10 }}>

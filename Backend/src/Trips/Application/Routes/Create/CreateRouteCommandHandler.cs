@@ -10,7 +10,7 @@ public sealed class CreateRouteCommandHandler(IRouteRepository repository, IStop
 {
     public async Task<Result<Guid>> Handle(CreateRouteCommand command, CancellationToken cancellationToken)
     {
-        var stopsResult = await RouteStopResolver.ResolveAsync(stops, command.StopIds, cancellationToken);
+        var stopsResult = await RouteStopResolver.ResolveAsync(stops, command.Stops, cancellationToken);
         if (stopsResult.IsFailure)
         {
             return Result.Failure<Guid>(stopsResult.Error);
