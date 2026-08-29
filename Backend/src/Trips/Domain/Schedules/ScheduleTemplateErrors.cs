@@ -37,4 +37,8 @@ public static class ScheduleTemplateErrors
 
     public static readonly Error ReturnBeforeDeparture = Error.Validation(
         "Trips.ScheduleTemplate.ReturnBeforeDeparture", "The return departure must be after the outbound departure.");
+
+    public static readonly Error ReturnNextDayRequiresReturnDeparture = Error.Validation(
+        "Trips.ScheduleTemplate.ReturnNextDayRequiresReturnDeparture",
+        "Return next day only applies when a return departure time is set.");
 }

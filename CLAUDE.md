@@ -31,12 +31,32 @@ future .NET-based app folder).
 
 ## Agents — Parallel Work Routing
 
-- **Backend work** (API, domain libraries, EF Core, database, messaging, auth) → `backend-dev` agent
-- **Frontend work** (Dispatcher screens, components, styling) → `frontend-dev` agent
+One agent per territory; route by the folder being changed:
 
-The seam between them is the API contract, owned by the backend (future OpenAPI spec). Until real
-endpoints exist, the frontend stays on mock data in `Dispatcher/lib/data.ts` — the frontend never
-invents endpoint shapes.
+| Territory | Agent |
+|---|---|
+| `Backend/` (API, domain libraries, EF Core, messaging, auth) | `backend-dev` |
+| `Dispatcher/` (Dispatch Console screens, components, design-system **source**) | `frontend-dev` |
+| `Budgeting/` (ZBB console, design-system **re-copies**, Vitest suite) | `budgeting-dev` |
+| `Website/` (public marketing site) | `website-dev` |
+| `CommunityMobile/` (Flutter passenger app) | `mobile-dev` |
+| `AppHost/`, Dockerfiles, `.do/`, `.github/`, `Directory.*.props` | `platform-ops` |
+| Tests & error paths, cross-cutting | `qa-engineer` |
+| `.claude/skills/code-map/` | `code-indexer` |
+
+Collision protocol for parallel batches:
+
+- **One agent per territory per batch.** Two agents needing the same folder run sequentially, or
+  with `isolation: worktree` if they truly must run at once.
+- **Design-system flow is one-directional:** frontend-dev changes the Dispatcher source, then
+  budgeting-dev re-copies. Never both editing copies; never editing a Budgeting copy in place.
+- **The API-contract seam:** the backend owns endpoint shapes (future OpenAPI spec). Frontends
+  never invent them — screens without a real endpoint stay on their mock layer
+  (`Dispatcher/lib/data.ts`, `Budgeting/lib/data.ts`, `CommunityMobile/lib/data/mock_data.dart`).
+- **After any multi-agent batch, run the cross-check workflow**
+  (`Workflow({name: "cross-check"})`, script at `.claude/workflows/cross-check.js`) — it audits
+  the combined diff for territory violations, design-system drift, invented endpoints, and
+  status-color breaches, then runs each touched territory's build/test gate.
 
 ## Non-Negotiables (recap — full list in the skill)
 

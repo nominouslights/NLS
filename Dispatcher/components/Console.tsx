@@ -44,7 +44,6 @@ export default function Console() {
   // lose that selection on a detour to another screen.
   const [reportClientId, setReportClientId] = useState<string | null>(null); // Clients API Guid
   const [reportPeriod, setReportPeriod] = useState<Period>(() => currentPeriod("month"));
-  const [riderSel, setRiderSel] = useState(0);
   const [incidentSel, setIncidentSel] = useState(0);
 
   function openTrip(id: string | null) {
@@ -100,7 +99,7 @@ export default function Console() {
           {screen === "clients" && (
             <Clients clientSel={clientSel} setClientSel={setClientSel} onCreateTrip={() => setWizardOpen(true)} />
           )}
-          {screen === "riders" && <Riders riderSel={riderSel} setRiderSel={setRiderSel} />}
+          {screen === "riders" && <Riders />}
           {screen === "billing" && <Billing invoiceSelId={invoiceSelId} setInvoiceSelId={setInvoiceSelId} />}
           {screen === "reports" && (
             <Reports

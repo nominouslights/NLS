@@ -1,5 +1,5 @@
 // NL-WO-01 section builders. Each returns an HTML fragment for one block of the
-// form. Page 1 (§1–§7) is prefilled from data; page 2 (§8–§13) is left blank for
+// form. Page 1 (§1–§6) is prefilled from data; page 2 (§7–§13) is left blank for
 // the repair shop to complete and certify.
 
 import type { Vehicle } from "@/lib/api";
@@ -140,24 +140,14 @@ export function workRequestedBlock(wo: WorkOrder): string {
   );
 }
 
-export function authorizationBlock(wo: WorkOrder): string {
-  const limit = wo.authorizedLimitCad != null ? `$ ${wo.authorizedLimitCad.toLocaleString("en-CA")} CAD` : "$ ____________ CAD";
-  return (
-    sectionBar("6. Authorization Limit — Read Before Starting Work") +
-    `<div class="grid" style="grid-template-columns:1fr 1.6fr">
-       <div class="fld"><div class="lbl">Approved not to exceed (before GST)</div><div class="val mono">${esc(limit)}</div></div>
-       <div class="fld"><div class="lbl">Additional work discovered</div><div class="val" style="font-size:9px;font-weight:400">Stop and call (204) 441-7724 for written approval before proceeding. Work beyond this limit without written authorization may not be paid.</div></div>
-     </div>
-     <div class="grid" style="grid-template-columns:1fr">
-       <div class="fld"><div class="lbl">Authorized signature — Northern Link</div><div class="val">X ______________________________________&nbsp;&nbsp;&nbsp;Date: ____________</div></div>
-     </div>`
-  );
+export function spendingLimitPointer(): string {
+  return `<div class="notice">&#9888; <b>Spending limit — see &sect;12, page 2.</b> Read the authorization limit and the additional-work instructions before starting work.</div>`;
 }
 
 export function partsByCarrierBlock(): string {
   const rows = Array.from({ length: 3 }, () => `<tr><td class="blank">&nbsp;</td><td></td><td></td></tr>`).join("");
   return (
-    sectionBar("7. Parts & Materials Supplied by Carrier (if any)") +
+    sectionBar("6. Parts & Materials Supplied by Carrier (if any)") +
     `<table><thead><tr><th>Item</th><th>Part / Serial No.</th><th>Qty</th></tr></thead><tbody>${rows}</tbody></table>`
   );
 }
@@ -167,6 +157,20 @@ export function footer(): string {
 }
 
 // ---- Page 2 — shop completion & certification (blank for the shop) ----------
+
+export function authorizationBlock(wo: WorkOrder): string {
+  const limit = wo.authorizedLimitCad != null ? `$ ${wo.authorizedLimitCad.toLocaleString("en-CA")} CAD` : "$ ____________ CAD";
+  return (
+    sectionBar("12. Authorization Limit — Read Before Starting Work") +
+    `<div class="grid" style="grid-template-columns:1fr 1.6fr">
+       <div class="fld"><div class="lbl">Approved not to exceed (before GST)</div><div class="val mono">${esc(limit)}</div></div>
+       <div class="fld"><div class="lbl">Additional work discovered</div><div class="val" style="font-size:9px;font-weight:400">Stop and call (204) 441-7724 for written approval before proceeding. Work beyond this limit without written authorization may not be paid.</div></div>
+     </div>
+     <div class="grid" style="grid-template-columns:1fr">
+       <div class="fld"><div class="lbl">Authorized signature — Northern Link</div><div class="val">X ______________________________________&nbsp;&nbsp;&nbsp;Date: ____________</div></div>
+     </div>`
+  );
+}
 
 export function shopCompletionPage2(wo: WorkOrder, vehicle: Vehicle): string {
   const perfRows = Array.from({ length: Math.max(wo.lineItems.length || 0, 6) }, (_, i) =>
@@ -185,19 +189,19 @@ export function shopCompletionPage2(wo: WorkOrder, vehicle: Vehicle): string {
     </div>
     <div class="rule"></div>
 
-    ${sectionBar("8. Work Performed (completed by shop)")}
+    ${sectionBar("7. Work Performed (completed by shop)")}
     <table>
       <thead><tr><th class="num">Ref</th><th>Description of work performed / cause &amp; correction</th><th>Parts used (no. &amp; qty)</th><th>Labour hrs</th><th>Technician</th><th>Repaired?</th></tr></thead>
       <tbody>${perfRows}</tbody>
     </table>
 
-    ${sectionBar("9. Deferred / Recommended Work Not Performed")}
+    ${sectionBar("8. Deferred / Recommended Work Not Performed")}
     <table><thead><tr><th>Item</th><th>Safety-related?</th><th>Recommended by (date)</th></tr></thead><tbody>${deferredRows}</tbody></table>
 
-    ${sectionBar("10. Sublet Work (if any)")}
+    ${sectionBar("9. Sublet Work (if any)")}
     <table><thead><tr><th>Sublet to (business name)</th><th>Work performed</th><th>Their invoice no.</th></tr></thead><tbody><tr><td class="blank"></td><td></td><td></td></tr></tbody></table>
 
-    ${sectionBar("11. Charges (Canadian dollars)")}
+    ${sectionBar("10. Charges (Canadian dollars)")}
     ${grid([
       field("Parts $", ""),
       field("Labour ( ___ hrs @ $ ___ /hr) $", ""),
@@ -210,7 +214,7 @@ export function shopCompletionPage2(wo: WorkOrder, vehicle: Vehicle): string {
       field("Total Due (CAD) $", ""),
     ], 3)}
 
-    ${sectionBar("12. Inspection (complete only if a mandatory inspection was performed)")}
+    ${sectionBar("11. Inspection (complete only if a mandatory inspection was performed)")}
     ${grid([
       `<div class="fld"><div class="lbl">Inspection type</div><div class="val" style="font-size:9px">☐ Periodic (annual) CVI&nbsp;&nbsp;☐ MB Safety (COI)&nbsp;&nbsp;☐ Other</div></div>`,
       `<div class="fld"><div class="lbl">Result</div><div class="val">☐ Pass&nbsp;&nbsp;☐ Fail</div></div>`,
@@ -218,8 +222,10 @@ export function shopCompletionPage2(wo: WorkOrder, vehicle: Vehicle): string {
       field("Next Inspection Due", ""),
     ])}
 
+    ${authorizationBlock(wo)}
+
     ${sectionBar("13. Certification of Repairs & Return to Service")}
-    <div class="note">I certify that the work described was performed by or under my direct supervision; that the parts and materials used are suitable for the vehicle's intended use; and that every defect marked &ldquo;Repaired — Y&rdquo; has been repaired such that the vehicle complies with the Manitoba <i>Highway Traffic Act</i>, its regulations, and National Safety Code Standard 11. Any defect not repaired is listed in Section 9 and identified to the carrier.</div>
+    <div class="note">I certify that the work described was performed by or under my direct supervision; that the parts and materials used are suitable for the vehicle's intended use; and that every defect marked &ldquo;Repaired — Y&rdquo; has been repaired such that the vehicle complies with the Manitoba <i>Highway Traffic Act</i>, its regulations, and National Safety Code Standard 11. Any defect not repaired is listed in Section 8 and identified to the carrier.</div>
     <div class="sign">
       <div class="sigline">Technician / Journeyperson (print) &nbsp; Red Seal / Cert. No. &nbsp; Signature &nbsp; Date</div>
       <div class="sigline">Accepted by — Northern Link (Emelio Campbell) &nbsp; Signature &nbsp; Date returned to service</div>

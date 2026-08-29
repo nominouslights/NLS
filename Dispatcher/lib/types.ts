@@ -55,14 +55,6 @@ export interface FleetVehicle {
 
 // --- Maintenance & Asset Management previews (mock only — no backend yet) ---
 
-export interface PmReminder {
-  unit: string;
-  task: string;
-  basis: "mileage" | "hours" | "time";
-  due: string;
-  k: StatusKind;
-}
-
 export interface DtcAlert {
   unit: string;
   code: string;
@@ -91,7 +83,7 @@ export interface FuelRouteStat {
 
 // --- Fleet & Maintenance prototype domain (mock only — no backend yet) ---
 // Keyed by `unit` (the vehicle's unitNumber) so per-vehicle tabs slice by it,
-// matching the existing pmReminders / dtcAlerts convention.
+// matching the existing dtcAlerts convention.
 
 export type DocumentType =
   | "Registration"
@@ -233,21 +225,8 @@ export interface ClientInteraction {
   followUpNote?: string;
 }
 
-// Invoice records now come from the real Billing API (lib/api/billing.ts).
-
-export interface Rider {
-  id: number;
-  name: string;
-  home: string;
-  prog: "NIHB" | "Community";
-  last: string;
-  phone: string;
-  pc: string;
-  voucher: string;
-  escort: string;
-  noshow: string;
-  needs: string;
-}
+// Invoice records now come from the real Billing API (lib/api/billing.ts),
+// and riders from the real Riders API (lib/api/riders.ts).
 
 export interface Incident {
   id: string;

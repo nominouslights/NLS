@@ -47,8 +47,12 @@ public static class PickupEmailRenderer
         {
             [MergeFields.PassengerName] = recipient.PassengerName,
             [MergeFields.TripDate] = tripDate,
-            [MergeFields.PickupTime] = pickupTime,
-            [MergeFields.DropoffTime] = dropoffTime,
+
+            // Per-recipient times win: on a timetabled route each passenger is told the time the
+            // vehicle reaches THEIR stop. The trip-level values remain the fallback for untimed
+            // routes and free-form trips, where one time genuinely applies to everyone.
+            [MergeFields.PickupTime] = Coalesce(recipient.PickupTime, pickupTime),
+            [MergeFields.DropoffTime] = Coalesce(recipient.DropoffTime, dropoffTime),
             [MergeFields.Route] = route,
             [MergeFields.PickupStop] = recipient.PickupStop ?? string.Empty,
             [MergeFields.PickupAddress] = recipient.PickupAddress ?? string.Empty,
@@ -57,4 +61,11 @@ public static class PickupEmailRenderer
             [MergeFields.TripNumber] = tripNumber,
             [MergeFields.ClientName] = clientName ?? string.Empty,
         };
+
+    /// <summary>
+    /// The per-recipient value when it carries one, else the trip-level fallback. Blank counts as
+    /// absent: a whitespace-only per-recipient time must not blank out a good trip-level one.
+    /// </summary>
+    private static string Coalesce(string? perRecipient, string tripLevel) =>
+        string.IsNullOrWhiteSpace(perRecipient) ? tripLevel : perRecipient;
 }

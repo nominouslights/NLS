@@ -4,6 +4,7 @@ using NorthernLink.Shared.Tenancy;
 using NorthernLink.Trips.Application.Integration;
 using NorthernLink.Trips.Application.Manifests;
 using NorthernLink.Trips.Domain.Manifests;
+using NorthernLink.Trips.Domain.Riders;
 using NorthernLink.Trips.Domain.Routes;
 using NorthernLink.Trips.Domain.Schedules;
 using NorthernLink.Trips.Domain.Shipments;
@@ -41,6 +42,7 @@ public sealed class TripsDbContext(
     public DbSet<Route> Routes => Set<Route>();
     public DbSet<Stop> Stops => Set<Stop>();
     public DbSet<ScheduleTemplate> ScheduleTemplates => Set<ScheduleTemplate>();
+    public DbSet<Rider> Riders => Set<Rider>();
 
     /// <summary>Replicas upserted from Drivers/Fleet/Clients integration events (never joined cross-module).</summary>
     public DbSet<DriverLookup> DriverLookups => Set<DriverLookup>();
@@ -62,6 +64,7 @@ public sealed class TripsDbContext(
     public DbSet<RouteReadModel> RouteReadModels => Set<RouteReadModel>();
     public DbSet<StopReadModel> StopReadModels => Set<StopReadModel>();
     public DbSet<ScheduleTemplateReadModel> ScheduleTemplateReadModels => Set<ScheduleTemplateReadModel>();
+    public DbSet<RiderReadModel> RiderReadModels => Set<RiderReadModel>();
 
     protected override void ConfigureModule(ModelBuilder modelBuilder)
     {
@@ -72,6 +75,7 @@ public sealed class TripsDbContext(
         modelBuilder.ApplyConfiguration(new RouteConfiguration());
         modelBuilder.ApplyConfiguration(new StopConfiguration());
         modelBuilder.ApplyConfiguration(new ScheduleTemplateConfiguration());
+        modelBuilder.ApplyConfiguration(new RiderConfiguration());
         modelBuilder.ApplyConfiguration(new DriverLookupConfiguration());
         modelBuilder.ApplyConfiguration(new VehicleLookupConfiguration());
         modelBuilder.ApplyConfiguration(new ClientLookupConfiguration());
@@ -85,6 +89,7 @@ public sealed class TripsDbContext(
         modelBuilder.ApplyConfiguration(new RouteReadModelConfiguration());
         modelBuilder.ApplyConfiguration(new StopReadModelConfiguration());
         modelBuilder.ApplyConfiguration(new ScheduleTemplateReadModelConfiguration());
+        modelBuilder.ApplyConfiguration(new RiderReadModelConfiguration());
 
         // Tenant isolation, API half. Never remove: RLS is the backstop, not the substitute.
         modelBuilder.Entity<TripManifest>().HasQueryFilter(m => m.TenantId == TenantId);
@@ -94,6 +99,7 @@ public sealed class TripsDbContext(
         modelBuilder.Entity<Route>().HasQueryFilter(r => r.TenantId == TenantId);
         modelBuilder.Entity<Stop>().HasQueryFilter(s => s.TenantId == TenantId);
         modelBuilder.Entity<ScheduleTemplate>().HasQueryFilter(t => t.TenantId == TenantId);
+        modelBuilder.Entity<Rider>().HasQueryFilter(r => r.TenantId == TenantId);
         modelBuilder.Entity<DriverLookup>().HasQueryFilter(d => d.TenantId == TenantId);
         modelBuilder.Entity<VehicleLookup>().HasQueryFilter(v => v.TenantId == TenantId);
         modelBuilder.Entity<ClientLookup>().HasQueryFilter(c => c.TenantId == TenantId);
@@ -107,5 +113,6 @@ public sealed class TripsDbContext(
         modelBuilder.Entity<RouteReadModel>().HasQueryFilter(r => r.TenantId == TenantId);
         modelBuilder.Entity<StopReadModel>().HasQueryFilter(s => s.TenantId == TenantId);
         modelBuilder.Entity<ScheduleTemplateReadModel>().HasQueryFilter(t => t.TenantId == TenantId);
+        modelBuilder.Entity<RiderReadModel>().HasQueryFilter(r => r.TenantId == TenantId);
     }
 }

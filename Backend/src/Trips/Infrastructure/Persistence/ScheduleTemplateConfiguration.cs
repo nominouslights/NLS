@@ -66,6 +66,7 @@ public sealed class ScheduleTemplateConfiguration : IEntityTypeConfiguration<Sch
 
         builder.Property(t => t.DepartureTime).HasColumnName("departure_time");
         builder.Property(t => t.ReturnDepartureTime).HasColumnName("return_departure_time");
+        builder.Property(t => t.ReturnNextDay).HasColumnName("return_next_day");
         builder.Property(t => t.SeatsCapacity).HasColumnName("seats_capacity");
         builder.Property(t => t.SeatsMinimum).HasColumnName("seats_minimum");
         builder.Property(t => t.DefaultVehicleUnit).HasColumnName("default_vehicle_unit").HasMaxLength(32);

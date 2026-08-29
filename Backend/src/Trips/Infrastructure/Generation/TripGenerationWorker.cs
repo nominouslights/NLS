@@ -223,6 +223,9 @@ internal sealed class TripGenerationWorker(
             }
 
             var outboundStops = route.Stops.OrderBy(s => s.Order).ToList();
+            // Only Order is re-sequenced: both timetable offsets stay attached to their own stop,
+            // because the leg's TripDirection — not the position in the list — decides which one
+            // applies. Swapping them here would double-reverse the return timetable.
             var returnStops = outboundStops
                 .AsEnumerable()
                 .Reverse()
@@ -233,6 +236,8 @@ internal sealed class TripGenerationWorker(
                     Order = index,
                     Latitude = stop.Latitude,
                     Longitude = stop.Longitude,
+                    OutboundOffsetMinutes = stop.OutboundOffsetMinutes,
+                    ReturnOffsetMinutes = stop.ReturnOffsetMinutes,
                 })
                 .ToList();
 

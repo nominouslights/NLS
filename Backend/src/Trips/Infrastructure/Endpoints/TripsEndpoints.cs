@@ -31,6 +31,7 @@ public static class TripsEndpoints
 
         app.MapTripPlanningEndpoints();
         app.MapShipmentEndpoints();
+        app.MapRiderEndpoints();
 
         return app;
     }

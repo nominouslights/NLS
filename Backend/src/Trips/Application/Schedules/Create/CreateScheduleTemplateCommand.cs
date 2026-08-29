@@ -23,6 +23,7 @@ public sealed record CreateScheduleTemplateCommand(
     IReadOnlyList<int> DaysOfMonth,
     TimeOnly DepartureTime,
     TimeOnly? ReturnDepartureTime,
+    bool ReturnNextDay,
     int SeatsCapacity,
     int? SeatsMinimum,
     string? DefaultVehicleUnit,

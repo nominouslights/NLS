@@ -40,6 +40,7 @@ internal static class TestPlanning
         IReadOnlyList<DayOfWeek>? daysOfWeek = null,
         TimeOnly? departureTime = null,
         TimeOnly? returnDepartureTime = null,
+        bool returnNextDay = false,
         int generationHorizonDays = 7,
         bool active = true,
         Guid? routeId = null,
@@ -49,7 +50,7 @@ internal static class TestPlanning
         IReadOnlyList<int>? daysOfMonth = null)
     {
         var result = CreateTemplateResult(
-            daysOfWeek, departureTime, returnDepartureTime, generationHorizonDays,
+            daysOfWeek, departureTime, returnDepartureTime, returnNextDay, generationHorizonDays,
             routeId, recurrenceKind, intervalDays, anchorDate, daysOfMonth);
         var template = result.Value;
 
@@ -69,6 +70,7 @@ internal static class TestPlanning
         IReadOnlyList<DayOfWeek>? daysOfWeek = null,
         TimeOnly? departureTime = null,
         TimeOnly? returnDepartureTime = null,
+        bool returnNextDay = false,
         int generationHorizonDays = 7,
         Guid? routeId = null,
         ScheduleRecurrenceKind recurrenceKind = ScheduleRecurrenceKind.DaysOfWeek,
@@ -89,6 +91,7 @@ internal static class TestPlanning
             daysOfMonth: daysOfMonth ?? [],
             departureTime: departureTime ?? new TimeOnly(6, 30),
             returnDepartureTime: returnDepartureTime,
+            returnNextDay: returnNextDay,
             seatsCapacity: 12,
             seatsMinimum: null,
             defaultVehicleUnit: "U-04",
@@ -116,14 +119,15 @@ internal static class TestPlanning
         TimeOnly? windowStart = null,
         string origin = "Thompson",
         string destination = "Lynn Lake",
-        bool isEmptyLeg = false) =>
+        bool isEmptyLeg = false,
+        TripServiceType serviceType = TripServiceType.ContractCrew) =>
         Trip.Schedule(
             tenantId ?? TenantId,
             tripNumber,
             serviceDate: serviceDate ?? new DateOnly(2026, 7, 21),
             windowStart: windowStart ?? new TimeOnly(6, 30),
             windowEnd: new TimeOnly(8, 15),
-            TripServiceType.ContractCrew,
+            serviceType,
             routeId: null,
             routeName: "Thompson ↔ Lynn Lake",
             origin: origin,

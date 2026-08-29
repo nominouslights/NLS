@@ -68,5 +68,19 @@ public sealed record TripBillingResponse(
     DateOnly? QboEnteredDate,
     DateOnly? PaymentConfirmedDate);
 
-/// <summary>One ordered stop on a trip's route snapshot.</summary>
-public sealed record TripStopResponse(string Name, int Order);
+/// <summary>
+/// One ordered stop on a trip's route snapshot. <see cref="StopId"/> and the coordinates come
+/// from the catalog stop the route was built from and are null for legacy free-text stops.
+/// The two offsets are the stop's timetable entry (minutes after the leg's departure); the
+/// caller picks the one matching the trip's <c>Direction</c> — <see cref="ReturnOffsetMinutes"/>
+/// for an Inbound leg, <see cref="OutboundOffsetMinutes"/> otherwise — and adds it to
+/// <c>WindowStart</c> to get the time this trip reaches this stop.
+/// </summary>
+public sealed record TripStopResponse(
+    string Name,
+    int Order,
+    Guid? StopId,
+    double? Latitude,
+    double? Longitude,
+    int? OutboundOffsetMinutes,
+    int? ReturnOffsetMinutes);

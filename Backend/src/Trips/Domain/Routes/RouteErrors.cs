@@ -28,4 +28,16 @@ public static class RouteErrors
 
     public static readonly Error InvalidDuration = Error.Validation(
         "Trips.Route.InvalidDuration", "The estimated duration must be greater than zero.");
+
+    public static readonly Error PartialTimetable = Error.Validation(
+        "Trips.Route.PartialTimetable",
+        "A leg's timetable must cover every stop or none — some stops have a time and others do not.");
+
+    public static readonly Error TimetableMustStartAtZero = Error.Validation(
+        "Trips.Route.TimetableMustStartAtZero",
+        "A leg's timetable must start at the leg's first stop, with an offset of zero minutes.");
+
+    public static readonly Error TimetableNotIncreasing = Error.Validation(
+        "Trips.Route.TimetableNotIncreasing",
+        "A leg's timetable must increase at every stop along the direction of travel.");
 }

@@ -6,7 +6,10 @@
 //   ./api/format      — formatCad, formatKm, formatUtcDate (cross-domain)
 //   ./api/fleet       — vehicles: types, endpoints, display helpers
 //   ./api/maintenance — inspections, shops, documents, service records, work orders
+//   ./api/pm          — preventative maintenance: plans, due status, completions
 //   ./api/trips       — trips/routes/templates AND the trip-manifest contract
+// PM display helpers live outside the barrel in ../pmDisplay — import them
+// directly, exactly like ../workOrderDisplay.
 // The trip-manifest symbols are re-exported by NAME below (no blanket
 // `export * from "./api/trips"` — trips.ts carries additional symbols that
 // were never part of lib/api's surface and could collide).
@@ -16,6 +19,7 @@ export * from "./api/transport";
 export * from "./api/format";
 export * from "./api/fleet";
 export * from "./api/maintenance";
+export * from "./api/pm";
 
 export type {
   ManifestSource,

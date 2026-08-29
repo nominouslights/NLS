@@ -52,6 +52,15 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
     /// <summary>Non-null ⇒ each occurrence generates an outbound + return leg pair sharing a RoundTripKey.</summary>
     public TimeOnly? ReturnDepartureTime { get; private set; }
 
+    /// <summary>
+    /// True ⇒ the return leg lands on the calendar day AFTER the outbound's (an overnight
+    /// route — dropped off in the evening, picked up early the next morning).
+    /// <see cref="ReturnDepartureTime"/> is then a same-or-earlier clock time than
+    /// <see cref="DepartureTime"/> by design, so the ordinary same-day ordering check is
+    /// skipped whenever this is set. Ignored (must be false) when there is no return leg.
+    /// </summary>
+    public bool ReturnNextDay { get; private set; }
+
     public int SeatsCapacity { get; private set; }
 
     /// <summary>Community-run viability threshold; surfacing it is a frontend concern.</summary>
@@ -79,6 +88,7 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
         IReadOnlyList<int> daysOfMonth,
         TimeOnly departureTime,
         TimeOnly? returnDepartureTime,
+        bool returnNextDay,
         int seatsCapacity,
         int? seatsMinimum,
         string? defaultVehicleUnit,
@@ -88,7 +98,7 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
     {
         var validation = Validate(
             name, routeId, recurrenceKind, daysOfWeek, intervalDays, anchorDate, daysOfMonth,
-            departureTime, returnDepartureTime, seatsCapacity, seatsMinimum, generationHorizonDays);
+            departureTime, returnDepartureTime, returnNextDay, seatsCapacity, seatsMinimum, generationHorizonDays);
         if (validation.IsFailure)
         {
             return Result.Failure<ScheduleTemplate>(validation.Error);
@@ -105,6 +115,7 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
             ClientName = Normalize(clientName),
             DepartureTime = departureTime,
             ReturnDepartureTime = returnDepartureTime,
+            ReturnNextDay = returnNextDay,
             SeatsCapacity = seatsCapacity,
             SeatsMinimum = seatsMinimum,
             DefaultVehicleUnit = Normalize(defaultVehicleUnit),
@@ -135,6 +146,7 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
         IReadOnlyList<int> daysOfMonth,
         TimeOnly departureTime,
         TimeOnly? returnDepartureTime,
+        bool returnNextDay,
         int seatsCapacity,
         int? seatsMinimum,
         string? defaultVehicleUnit,
@@ -144,7 +156,7 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
     {
         var validation = Validate(
             name, routeId, recurrenceKind, daysOfWeek, intervalDays, anchorDate, daysOfMonth,
-            departureTime, returnDepartureTime, seatsCapacity, seatsMinimum, generationHorizonDays);
+            departureTime, returnDepartureTime, returnNextDay, seatsCapacity, seatsMinimum, generationHorizonDays);
         if (validation.IsFailure)
         {
             return validation;
@@ -158,6 +170,7 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
         ApplyRecurrence(recurrenceKind, daysOfWeek, intervalDays, anchorDate, daysOfMonth);
         DepartureTime = departureTime;
         ReturnDepartureTime = returnDepartureTime;
+        ReturnNextDay = returnNextDay;
         SeatsCapacity = seatsCapacity;
         SeatsMinimum = seatsMinimum;
         DefaultVehicleUnit = Normalize(defaultVehicleUnit);
@@ -200,6 +213,7 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
         IReadOnlyList<int> daysOfMonth,
         TimeOnly departureTime,
         TimeOnly? returnDepartureTime,
+        bool returnNextDay,
         int seatsCapacity,
         int? seatsMinimum,
         int generationHorizonDays)
@@ -246,7 +260,15 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
             return Result.Failure(ScheduleTemplateErrors.InvalidHorizon);
         }
 
-        if (returnDepartureTime is { } returnTime && returnTime <= departureTime)
+        if (returnNextDay && returnDepartureTime is null)
+        {
+            return Result.Failure(ScheduleTemplateErrors.ReturnNextDayRequiresReturnDeparture);
+        }
+
+        // An overnight return's clock time is expected to be at or before the outbound's —
+        // that is exactly what "next day" means — so the same-day ordering check only
+        // applies when the return is NOT flagged as landing on the following calendar day.
+        if (returnDepartureTime is { } returnTime && !returnNextDay && returnTime <= departureTime)
         {
             return Result.Failure(ScheduleTemplateErrors.ReturnBeforeDeparture);
         }

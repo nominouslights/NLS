@@ -252,6 +252,167 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                     b.ToTable("vehicle_inspections", "fleet");
                 });
 
+            modelBuilder.Entity("NorthernLink.Fleet.Domain.Maintenance.MaintenancePlan", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("notes");
+
+                    b.Property<string>("ServiceClass")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("service_class");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<string>("VehicleModel")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("vehicle_model");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("maintenance_plans", "fleet");
+                });
+
+            modelBuilder.Entity("NorthernLink.Fleet.Domain.Maintenance.PlanAssignment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("AssignedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("assigned_at_utc");
+
+                    b.Property<Guid>("PlanId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("plan_id");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("VehicleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("vehicle_id");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "VehicleId")
+                        .IsUnique();
+
+                    b.ToTable("pm_plan_assignments", "fleet");
+                });
+
+            modelBuilder.Entity("NorthernLink.Fleet.Domain.Maintenance.PmCompletion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("ItemCode")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("item_code");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("kind");
+
+                    b.Property<string>("Measurement")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("measurement");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("notes");
+
+                    b.Property<int>("OdometerKm")
+                        .HasColumnType("integer")
+                        .HasColumnName("odometer_km");
+
+                    b.Property<DateOnly>("PerformedAt")
+                        .HasColumnType("date")
+                        .HasColumnName("performed_at");
+
+                    b.Property<string>("PerformedBy")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("performed_by");
+
+                    b.Property<Guid>("PlanId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("plan_id");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("VehicleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("vehicle_id");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.Property<Guid?>("WorkOrderId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("work_order_id");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("pm_completions", "fleet");
+                });
+
             modelBuilder.Entity("NorthernLink.Fleet.Domain.Services.ServiceRecord", b =>
                 {
                     b.Property<Guid>("Id")
@@ -725,6 +886,161 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                     b.HasIndex("TenantId", "VehicleId");
 
                     b.ToTable("work_orders", "fleet");
+                });
+
+            modelBuilder.Entity("NorthernLink.Fleet.Infrastructure.Persistence.ReadModels.MaintenancePlanReadModel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("text")
+                        .HasColumnName("notes");
+
+                    b.Property<string>("ServiceClass")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("service_class");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<string>("VehicleModel")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("vehicle_model");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Name");
+
+                    b.ToTable("rm_maintenance_plans", "fleet");
+                });
+
+            modelBuilder.Entity("NorthernLink.Fleet.Infrastructure.Persistence.ReadModels.PlanAssignmentReadModel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("AssignedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("assigned_at_utc");
+
+                    b.Property<Guid>("PlanId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("plan_id");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("VehicleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("vehicle_id");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "PlanId");
+
+                    b.HasIndex("TenantId", "VehicleId");
+
+                    b.ToTable("rm_pm_plan_assignments", "fleet");
+                });
+
+            modelBuilder.Entity("NorthernLink.Fleet.Infrastructure.Persistence.ReadModels.PmCompletionReadModel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("ItemCode")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("item_code");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("kind");
+
+                    b.Property<string>("Measurement")
+                        .HasColumnType("text")
+                        .HasColumnName("measurement");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("text")
+                        .HasColumnName("notes");
+
+                    b.Property<int>("OdometerKm")
+                        .HasColumnType("integer")
+                        .HasColumnName("odometer_km");
+
+                    b.Property<DateOnly>("PerformedAt")
+                        .HasColumnType("date")
+                        .HasColumnName("performed_at");
+
+                    b.Property<string>("PerformedBy")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("performed_by");
+
+                    b.Property<Guid>("PlanId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("plan_id");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("VehicleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("vehicle_id");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.Property<Guid?>("WorkOrderId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("work_order_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "VehicleId", "PerformedAt")
+                        .IsDescending(false, false, true);
+
+                    b.ToTable("rm_pm_completions", "fleet");
                 });
 
             modelBuilder.Entity("NorthernLink.Fleet.Infrastructure.Persistence.ReadModels.RetirementCertificateReadModel", b =>
@@ -1646,6 +1962,103 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                     b.Navigation("Defects");
                 });
 
+            modelBuilder.Entity("NorthernLink.Fleet.Domain.Maintenance.MaintenancePlan", b =>
+                {
+                    b.OwnsMany("NorthernLink.Fleet.Domain.Maintenance.MaintenanceItem", "Items", b1 =>
+                        {
+                            b1.Property<Guid>("MaintenancePlanId");
+
+                            b1.Property<int>("__synthesizedOrdinal")
+                                .ValueGeneratedOnAdd();
+
+                            b1.Property<string>("Code")
+                                .IsRequired();
+
+                            b1.Property<string>("Component")
+                                .IsRequired();
+
+                            b1.Property<int?>("IntervalKm");
+
+                            b1.Property<int?>("IntervalMonths");
+
+                            b1.Property<int?>("LeadDays");
+
+                            b1.Property<int?>("LeadKm");
+
+                            b1.Property<string>("Notes");
+
+                            b1.Property<int>("ShopMinutes");
+
+                            b1.Property<string>("System")
+                                .IsRequired();
+
+                            b1.Property<string>("Task")
+                                .IsRequired();
+
+                            b1.Property<string>("Tier")
+                                .IsRequired();
+
+                            b1.HasKey("MaintenancePlanId", "__synthesizedOrdinal");
+
+                            b1.ToTable("maintenance_plans", "fleet");
+
+                            b1.ToJson("items");
+
+                            b1.WithOwner()
+                                .HasForeignKey("MaintenancePlanId");
+                        });
+
+                    b.OwnsMany("NorthernLink.Fleet.Domain.Maintenance.OverhaulSpec", "Overhauls", b1 =>
+                        {
+                            b1.Property<Guid>("MaintenancePlanId");
+
+                            b1.Property<int>("__synthesizedOrdinal")
+                                .ValueGeneratedOnAdd();
+
+                            b1.Property<string>("Code")
+                                .IsRequired();
+
+                            b1.Property<string>("Component")
+                                .IsRequired();
+
+                            b1.PrimitiveCollection<string>("ConditionTriggers")
+                                .IsRequired();
+
+                            b1.Property<int?>("IntervalKm");
+
+                            b1.Property<int?>("IntervalMonths");
+
+                            b1.Property<decimal>("LabourHours")
+                                .HasPrecision(8, 2);
+
+                            b1.Property<int?>("LeadDays");
+
+                            b1.Property<int?>("LeadKm");
+
+                            b1.Property<decimal>("PartsCad")
+                                .HasPrecision(12, 2);
+
+                            b1.PrimitiveCollection<string>("RelatedItemCodes")
+                                .IsRequired();
+
+                            b1.Property<string>("Scope")
+                                .IsRequired();
+
+                            b1.HasKey("MaintenancePlanId", "__synthesizedOrdinal");
+
+                            b1.ToTable("maintenance_plans", "fleet");
+
+                            b1.ToJson("overhauls");
+
+                            b1.WithOwner()
+                                .HasForeignKey("MaintenancePlanId");
+                        });
+
+                    b.Navigation("Items");
+
+                    b.Navigation("Overhauls");
+                });
+
             modelBuilder.Entity("NorthernLink.Fleet.Domain.Services.ServiceRecord", b =>
                 {
                     b.OwnsMany("NorthernLink.Fleet.Domain.Services.ServicePart", "PartsUsed", b1 =>
@@ -1671,6 +2084,103 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                         });
 
                     b.Navigation("PartsUsed");
+                });
+
+            modelBuilder.Entity("NorthernLink.Fleet.Infrastructure.Persistence.ReadModels.MaintenancePlanReadModel", b =>
+                {
+                    b.OwnsMany("NorthernLink.Fleet.Domain.Maintenance.MaintenanceItem", "Items", b1 =>
+                        {
+                            b1.Property<Guid>("MaintenancePlanReadModelId");
+
+                            b1.Property<int>("__synthesizedOrdinal")
+                                .ValueGeneratedOnAdd();
+
+                            b1.Property<string>("Code")
+                                .IsRequired();
+
+                            b1.Property<string>("Component")
+                                .IsRequired();
+
+                            b1.Property<int?>("IntervalKm");
+
+                            b1.Property<int?>("IntervalMonths");
+
+                            b1.Property<int?>("LeadDays");
+
+                            b1.Property<int?>("LeadKm");
+
+                            b1.Property<string>("Notes");
+
+                            b1.Property<int>("ShopMinutes");
+
+                            b1.Property<string>("System")
+                                .IsRequired();
+
+                            b1.Property<string>("Task")
+                                .IsRequired();
+
+                            b1.Property<string>("Tier")
+                                .IsRequired();
+
+                            b1.HasKey("MaintenancePlanReadModelId", "__synthesizedOrdinal");
+
+                            b1.ToTable("rm_maintenance_plans", "fleet");
+
+                            b1.ToJson("items");
+
+                            b1.WithOwner()
+                                .HasForeignKey("MaintenancePlanReadModelId");
+                        });
+
+                    b.OwnsMany("NorthernLink.Fleet.Domain.Maintenance.OverhaulSpec", "Overhauls", b1 =>
+                        {
+                            b1.Property<Guid>("MaintenancePlanReadModelId");
+
+                            b1.Property<int>("__synthesizedOrdinal")
+                                .ValueGeneratedOnAdd();
+
+                            b1.Property<string>("Code")
+                                .IsRequired();
+
+                            b1.Property<string>("Component")
+                                .IsRequired();
+
+                            b1.PrimitiveCollection<string>("ConditionTriggers")
+                                .IsRequired();
+
+                            b1.Property<int?>("IntervalKm");
+
+                            b1.Property<int?>("IntervalMonths");
+
+                            b1.Property<decimal>("LabourHours")
+                                .HasPrecision(8, 2);
+
+                            b1.Property<int?>("LeadDays");
+
+                            b1.Property<int?>("LeadKm");
+
+                            b1.Property<decimal>("PartsCad")
+                                .HasPrecision(12, 2);
+
+                            b1.PrimitiveCollection<string>("RelatedItemCodes")
+                                .IsRequired();
+
+                            b1.Property<string>("Scope")
+                                .IsRequired();
+
+                            b1.HasKey("MaintenancePlanReadModelId", "__synthesizedOrdinal");
+
+                            b1.ToTable("rm_maintenance_plans", "fleet");
+
+                            b1.ToJson("overhauls");
+
+                            b1.WithOwner()
+                                .HasForeignKey("MaintenancePlanReadModelId");
+                        });
+
+                    b.Navigation("Items");
+
+                    b.Navigation("Overhauls");
                 });
 
             modelBuilder.Entity("NorthernLink.Fleet.Infrastructure.Persistence.ReadModels.ServiceRecordReadModel", b =>

@@ -20,11 +20,14 @@ public sealed record RouteResponse(
 /// <summary>
 /// One ordered stop on a route. Carries the catalog reference (<see cref="StopId"/>) and
 /// the snapshotted coordinates when built from the stop catalog; all three are null for
-/// legacy free-text stops.
+/// legacy free-text stops. The two offsets are the stop's timetable entry — minutes after the
+/// respective leg's departure — and are null throughout on a route with no timetable.
 /// </summary>
 public sealed record RouteStopResponse(
     Guid? StopId,
     string Name,
     int Order,
     double? Latitude,
-    double? Longitude);
+    double? Longitude,
+    int? OutboundOffsetMinutes,
+    int? ReturnOffsetMinutes);

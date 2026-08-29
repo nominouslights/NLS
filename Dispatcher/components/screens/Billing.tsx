@@ -1674,7 +1674,7 @@ function InvoiceDetail({
             </div>
             {isEntered || isPaid ? (
               <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
-                <StatusChip kind={isPaid ? "ontime" : "info"} label={isPaid ? "Paid" : "Entered in QBO — outstanding"} />
+                <StatusChip kind={isPaid ? "ontime" : "info"} label={isPaid ? "Paid" : "Outstanding"} />
                 <span style={{ fontFamily: fonts.mono, fontSize: 11.5, color: colors.textSecondary }}>
                   {inv.qboInvoiceId ?? "—"}
                 </span>

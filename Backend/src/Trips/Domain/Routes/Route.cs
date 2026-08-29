@@ -123,12 +123,57 @@ public sealed class Route : AggregateRoot, ITenantScoped
             return Result.Failure(RouteErrors.InvalidDuration);
         }
 
+        // Each leg's timetable is validated in its own travel order: the outbound runs in
+        // ascending Order, the return in descending (the last stop is where the return starts).
+        var ordered = stops.OrderBy(stop => stop.Order).ToList();
+
+        var outbound = ValidateLeg([.. ordered.Select(stop => stop.OutboundOffsetMinutes)]);
+        if (outbound.IsFailure)
+        {
+            return outbound;
+        }
+
+        return ValidateLeg([.. ordered.AsEnumerable().Reverse().Select(stop => stop.ReturnOffsetMinutes)]);
+    }
+
+    /// <summary>
+    /// Validates one leg's offsets, given in that leg's travel order. A leg is all-or-nothing:
+    /// either every stop is untimed (no timetable — the pre-timetable default) or every stop is
+    /// timed, starting at 0 and strictly increasing. A partial table is rejected rather than
+    /// silently half-applied, because a stop with no time falls back to the trip's departure
+    /// and would quietly tell a passenger the wrong hour.
+    /// </summary>
+    private static Result ValidateLeg(IReadOnlyList<int?> offsetsInTravelOrder)
+    {
+        if (offsetsInTravelOrder.All(offset => offset is null))
+        {
+            return Result.Success();
+        }
+
+        if (offsetsInTravelOrder.Any(offset => offset is null))
+        {
+            return Result.Failure(RouteErrors.PartialTimetable);
+        }
+
+        if (offsetsInTravelOrder[0] != 0)
+        {
+            return Result.Failure(RouteErrors.TimetableMustStartAtZero);
+        }
+
+        for (var index = 1; index < offsetsInTravelOrder.Count; index++)
+        {
+            if (offsetsInTravelOrder[index] <= offsetsInTravelOrder[index - 1])
+            {
+                return Result.Failure(RouteErrors.TimetableNotIncreasing);
+            }
+        }
+
         return Result.Success();
     }
 
     /// <summary>
     /// Re-sequences stops 0..n-1 in their given order, trimming names and carrying the
-    /// catalog reference (StopId) and coordinate snapshot through.
+    /// catalog reference (StopId), coordinate snapshot and timetable offsets through.
     /// </summary>
     private static List<RouteStop> NormalizeStops(IReadOnlyList<RouteStop> stops) =>
         [.. stops
@@ -140,6 +185,8 @@ public sealed class Route : AggregateRoot, ITenantScoped
                 Order = index,
                 Latitude = stop.Latitude,
                 Longitude = stop.Longitude,
+                OutboundOffsetMinutes = stop.OutboundOffsetMinutes,
+                ReturnOffsetMinutes = stop.ReturnOffsetMinutes,
             })];
 
     private static string? Normalize(string? value) =>
