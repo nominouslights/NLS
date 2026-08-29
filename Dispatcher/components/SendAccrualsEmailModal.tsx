@@ -15,6 +15,7 @@ import {
   type NotificationServiceType,
 } from "@/lib/api/notifications";
 import { accrualsEmailPayload, type AccrualsReport } from "@/lib/billing/accruals";
+import { getClaims } from "@/lib/auth";
 import { periodLabel } from "@/lib/period";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { ActionButton } from "@/components/ui/Button";
@@ -26,7 +27,9 @@ import { SectionLabel } from "@/components/ui/Panel";
 // report travels as pre-formatted strings (accrualsEmailPayload, the same
 // derivation the screen and printed sheet render) because Notifications never
 // reads Trips, Billing, or Clients data (integration-events-only rule).
-// Recipients are the client's contacts flagged "Receives accruals reports".
+// Recipients are the client's contacts flagged "Receives accruals reports",
+// plus an optional copy to the signed-in dispatcher (default on) so they can
+// refer back to exactly what the client received.
 // The POST response is authoritative (200 even on partial/total provider
 // failure) — outcomes render inline, no polling. Unlike the pickup modal's
 // fresh-GUID-per-attempt, dispatchId here is ONE GUID held for the modal's
@@ -123,6 +126,23 @@ export default function SendAccrualsEmailModal({
 
   const selectedRecipients = (recipients ?? []).filter((_, i) => selected[i]);
 
+  // "Send me a copy" — the signed-in dispatcher's address from the access
+  // token (unverified decode, a UX affordance; see lib/claims.ts). Captured
+  // once at mount like dispatchId, and null only if the token is unreadable.
+  const [myEmail] = useState(() => getClaims()?.email || null);
+  const [copyToSelf, setCopyToSelf] = useState(true);
+
+  // What actually goes out: the selected contacts, plus the self-copy appended
+  // LAST — if the dispatcher is also a selected contact the entry is skipped
+  // here (and the backend's case-insensitive dedupe backstops it), so the
+  // count on the SEND button never overstates the batch.
+  const selfAlreadySelected =
+    myEmail !== null && selectedRecipients.some((r) => r.email.toLowerCase() === myEmail.toLowerCase());
+  const outgoingRecipients =
+    copyToSelf && myEmail !== null && !selfAlreadySelected
+      ? [...selectedRecipients, { name: "Dispatcher copy", email: myEmail }]
+      : selectedRecipients;
+
   // Preview — on demand, composed from the CURRENT selection with the exact
   // send-time composer server-side (nothing is sent, no dispatch is created).
   const [preview, setPreview] = useState<ClientAccrualsPreviewResult | null>(null);
@@ -143,7 +163,7 @@ export default function SendAccrualsEmailModal({
         clientName: report.client.name,
         serviceType,
         report: payload,
-        recipients: selectedRecipients.map((r) => ({ email: r.email, contactName: r.name })),
+        recipients: outgoingRecipients.map((r) => ({ email: r.email, contactName: r.name })),
       });
       setPreview(result);
     } catch (e) {
@@ -173,7 +193,7 @@ export default function SendAccrualsEmailModal({
         clientName: report.client.name,
         serviceType,
         report: payload,
-        recipients: selectedRecipients.map((r) => ({ email: r.email, contactName: r.name })),
+        recipients: outgoingRecipients.map((r) => ({ email: r.email, contactName: r.name })),
       });
       // Response is authoritative — render outcomes and prepend to history.
       // The send stays done after this: replaying the stable dispatchId would
@@ -222,7 +242,7 @@ export default function SendAccrualsEmailModal({
               ? "SENT ✓"
               : sending
                 ? "SENDING…"
-                : `SEND ACCRUALS EMAIL${selectedRecipients.length > 0 ? ` (${selectedRecipients.length})` : ""}`}
+                : `SEND ACCRUALS EMAIL${outgoingRecipients.length > 0 ? ` (${outgoingRecipients.length})` : ""}`}
           </ActionButton>
         </>
       }
@@ -272,6 +292,44 @@ export default function SendAccrualsEmailModal({
               <span style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.textMuted }}>{r.email}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* self-copy — the signed-in dispatcher rides along on the client send.
+          Dashed border sets it apart from the roster rows above; it is not a
+          client contact, and on its own it never enables SEND. */}
+      {myEmail !== null && (
+        <div
+          onClick={() => !lastResult && setCopyToSelf((v) => !v)}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "8px 11px",
+            marginTop: 8,
+            borderRadius: 8,
+            background: colors.cardBg,
+            border: `1px dashed ${colors.borderStrong}`,
+            cursor: lastResult ? "default" : "pointer",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={copyToSelf}
+            disabled={lastResult !== null}
+            onChange={() => setCopyToSelf((v) => !v)}
+            onClick={(e) => e.stopPropagation()}
+            style={{ accentColor: colors.blue, cursor: lastResult ? "default" : "pointer" }}
+          />
+          <span style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: 600, color: colors.textPrimary }}>
+            Send me a copy
+          </span>
+          <span style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.textMuted }}>{myEmail}</span>
+          {selfAlreadySelected && (
+            <span style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim }}>
+              already a selected contact — sent once
+            </span>
+          )}
         </div>
       )}
 
