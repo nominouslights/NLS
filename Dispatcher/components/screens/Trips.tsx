@@ -28,6 +28,9 @@ import {
   listTrips,
   mergeRoundTrip,
   refetchUntil,
+  roundTripManualCandidates,
+  roundTripMergeCandidates,
+  roundTripMismatch,
   seatsLabel,
   shortDateLabel,
   stopNames,
@@ -36,6 +39,7 @@ import {
   tripChip,
   tripStatusLabel,
   tripWindowLabel,
+  unpairRoundTrip,
   updateTrip,
   type TripInput,
   type TripRecord,
@@ -50,6 +54,9 @@ import {
 } from "@/lib/api/drivers";
 import { listVehicles, type Vehicle } from "@/lib/api/fleet";
 import { contractRateLabel, getClient, type ActiveContractSummary } from "@/lib/api/clients";
+// Leg-direction glyph + label — the one place that mapping lives (Billing.tsx
+// renders candidate/invoice legs from the same helper).
+import { directionMeta } from "@/lib/api/billing";
 import { printTripManifest } from "@/lib/documents/tripManifestPdf";
 import { ServiceChip, StatusBadge, StatusChip } from "@/components/ui/Chip";
 import { CorridorStepper } from "@/components/ui/CorridorStepper";
@@ -761,6 +768,263 @@ function CreateReturnModal({
 }
 
 // ---------------------------------------------------------------------------
+// Pair Round Trip modal — POST /merge-round-trip against a leg the screen has
+// already loaded. Two tiers, both derived by the helpers in lib/api/trips.ts:
+//   · strict  (roundTripMergeCandidates) — same client, same service date,
+//     mirrored corridor — merged with allowMismatch: false;
+//   · manual  (roundTripManualCandidates) — same client, unpaired, non-final —
+//     merged with allowMismatch: true, with each objection the strict matcher
+//     would raise (roundTripMismatch) spelled out on the row.
+// The candidate pool is exactly the loaded page: nothing is fetched or narrowed
+// here beyond what the server already returned for the current period/filter.
+// ---------------------------------------------------------------------------
+
+/** One selectable candidate leg — corridor, trip number, date/window/direction,
+ *  its own status, its billing claim if any, and (manual tier) the specific
+ *  reasons it isn't a strict match. Every reason is colour + glyph + text. */
+function RoundTripCandidateRow({
+  candidate,
+  selected,
+  mismatch,
+  onSelect,
+}: {
+  candidate: TripRecord;
+  selected: boolean;
+  /** Null on the strict tier — a strict candidate has nothing to object to. */
+  mismatch: { differentDate: boolean; routeNotMirrored: boolean } | null;
+  onSelect: () => void;
+}) {
+  const svc = svcForTrip(candidate.serviceType);
+  const dir = directionMeta(candidate.direction);
+  const status = tripChip(candidate);
+  const billing = tripBillingChip(candidate);
+  return (
+    <div
+      onClick={onSelect}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        padding: "10px 13px",
+        ...rowSurface(selected, svcMeta(svc).accent),
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <span style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: 600, color: colors.textPrimary }}>
+          {corridorLabel(candidate)}
+        </span>
+        <span style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.skyBlue }}>{candidate.tripNumber}</span>
+      </div>
+      <div style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textDim }}>
+        {shortDateLabel(candidate.serviceDate)} · {tripWindowLabel(candidate)} ·{" "}
+        {dir ? `${dir.glyph} ${dir.label}` : "direction not set"}
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        <StatusChip kind={status.kind} label={status.label} />
+        {mismatch?.differentDate && <StatusChip kind="soon" label="Different service date" />}
+        {mismatch?.routeNotMirrored && <StatusChip kind="soon" label="Corridor not mirrored" />}
+        {billing && <StatusChip kind={billing.kind} label={billing.label} />}
+      </div>
+    </div>
+  );
+}
+
+function PairRoundTripModal({
+  trip,
+  all,
+  onClose,
+  onPaired,
+}: {
+  trip: TripRecord;
+  /** The loaded page — the candidate helpers derive both tiers from it. */
+  all: TripRecord[];
+  onClose: () => void;
+  onPaired: (otherTripId: string, allowMismatch: boolean) => Promise<void>;
+}) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const strict = roundTripMergeCandidates(trip, all);
+  const strictIds = new Set(strict.map((c) => c.id));
+  // The manual tier is the loose set minus everything the strict tier already
+  // offered — a candidate must never appear twice under two different rules.
+  const manual = roundTripManualCandidates(trip, all).filter((c) => !strictIds.has(c.id));
+
+  const selected = [...strict, ...manual].find((c) => c.id === selectedId) ?? null;
+  const allowMismatch = selected !== null && !strictIds.has(selected.id);
+  // Billing's replica refuses to re-key a trip whose row already carries an
+  // invoiceId, so a pairing that touches an invoiced leg fixes Trips only.
+  const invoicedWarning = selected !== null && (trip.billing !== null || selected.billing !== null);
+
+  async function submit() {
+    if (busy) return;
+    if (!selected) {
+      setError("Pick the leg to pair this trip with.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await onPaired(selected.id, allowMismatch);
+      onClose();
+    } catch (e) {
+      // Show the server's own message — the backend has a specific code for each
+      // refusal (already paired, client mismatch, final, direction conflict,
+      // service-date/corridor mismatch) and its wording is the accurate one.
+      setError(e instanceof ApiError ? e.message : "Failed to pair the round trip — please try again.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ModalShell
+      eyebrow={`Operations · ${trip.tripNumber} · ${corridorLabel(trip)}`}
+      title="Pair Round Trip"
+      onClose={onClose}
+      error={error}
+      footer={
+        <>
+          <ActionButton onClick={onClose}>CANCEL</ActionButton>
+          <ActionButton variant="primary" onClick={submit} disabled={busy || selected === null}>
+            {busy ? "PAIRING…" : allowMismatch ? "PAIR ANYWAY" : "PAIR ROUND TRIP"}
+          </ActionButton>
+        </>
+      }
+    >
+      <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textSecondary, lineHeight: 1.6, marginBottom: 14 }}>
+        Pairing puts both legs under one round-trip key, which is what lets Billing price them as a single round-trip
+        line. Candidates come from the trips loaded for this period — step to another month if the other leg isn&apos;t
+        listed.
+      </div>
+
+      {strict.length === 0 && manual.length === 0 ? (
+        <Panel>
+          <SectionLabel>No candidates on this page</SectionLabel>
+          <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textMuted, lineHeight: 1.6 }}>
+            Nothing loaded for this period can pair with {trip.tripNumber}. A candidate has to be for the same client (
+            {trip.clientName ?? "no client"}), not already paired to another leg, and neither cancelled nor written off.
+            Create the return leg with CREATE RETURN instead, or step to the period holding the other leg.
+          </div>
+        </Panel>
+      ) : (
+        <>
+          {strict.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <SectionLabel>Same day, mirrored corridor</SectionLabel>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {strict.map((c) => (
+                  <RoundTripCandidateRow
+                    key={c.id}
+                    candidate={c}
+                    selected={selectedId === c.id}
+                    mismatch={null}
+                    onSelect={() => setSelectedId(c.id)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+          {manual.length > 0 && (
+            <div>
+              <SectionLabel>Other unpaired trips for this client — needs an override</SectionLabel>
+              <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim, lineHeight: 1.5, marginBottom: 8 }}>
+                These fail the strict same-day / mirrored-corridor check. Pairing one skips that check; the earlier leg
+                becomes the outbound.
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {manual.map((c) => (
+                  <RoundTripCandidateRow
+                    key={c.id}
+                    candidate={c}
+                    selected={selectedId === c.id}
+                    mismatch={roundTripMismatch(trip, c)}
+                    onSelect={() => setSelectedId(c.id)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {invoicedWarning && (
+        <Panel borderColor="rgba(225,176,0,.4)" style={{ marginTop: 14 }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 9 }}>
+            <StatusChip kind="soon" label="Already invoiced" />
+            <span style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textSecondary, lineHeight: 1.5 }}>
+              Pairing updates the trip record but not the issued invoice — Billing will not re-key a trip that an
+              invoice already claims. Adjust the invoice itself if the round-trip rate needs to apply.
+            </span>
+          </div>
+        </Panel>
+      )}
+    </ModalShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Unpair confirm — POST /unpair-round-trip clears the key on BOTH legs, which
+// silently changes how Billing prices them, so it goes behind the same small
+// confirm shell as the inspection removal.
+// ---------------------------------------------------------------------------
+
+function UnpairRoundTripModal({
+  trip,
+  sibling,
+  onClose,
+  onConfirmed,
+}: {
+  trip: TripRecord;
+  /** The other leg when it's on the loaded page — null when it isn't. */
+  sibling: TripRecord | null;
+  onClose: () => void;
+  onConfirmed: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onConfirmed();
+      onClose();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Failed to unpair the round trip — please try again.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ModalShell
+      eyebrow={`Operations · ${trip.tripNumber} · ${corridorLabel(trip)}`}
+      title="Unpair Round Trip"
+      onClose={onClose}
+      error={error}
+      maxWidth={480}
+      footer={
+        <>
+          <ActionButton onClick={onClose}>KEEP PAIRING</ActionButton>
+          <ActionButton variant="destructive" onClick={submit} disabled={busy}>
+            {busy ? "UNPAIRING…" : "UNPAIR"}
+          </ActionButton>
+        </>
+      }
+    >
+      <div style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textSecondary, lineHeight: 1.6 }}>
+        This clears the round-trip key on both legs —{" "}
+        {sibling ? `${trip.tripNumber} and ${sibling.tripNumber}` : `${trip.tripNumber} and the leg paired with it`}.
+        They will be priced as two separate one-way trips instead of one round trip, and an unpaired trip is left out of
+        draft-invoice generation until it is paired again. Pair them back with PAIR ROUND TRIP.
+        {trip.billing && " An invoice already claims this trip — unpairing does not change the issued invoice."}
+      </div>
+    </ModalShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Cancel modal — POST /status with an optional reason.
 // ---------------------------------------------------------------------------
 
@@ -985,7 +1249,16 @@ export default function Trips({
   const [activityState, setActivityState] = useState<{ tripId: string; rows: TripActivityEntry[] } | null>(null);
 
   const [modal, setModal] = useState<
-    null | "assign" | "edit" | "createReturn" | "cancel" | "closeWithoutBilling" | "manifest" | "sendEmail"
+    | null
+    | "assign"
+    | "edit"
+    | "createReturn"
+    | "pairRoundTrip"
+    | "unpairRoundTrip"
+    | "cancel"
+    | "closeWithoutBilling"
+    | "manifest"
+    | "sendEmail"
   >(null);
   // Inspection modal opens for either create (inspectionType set, editing null)
   // or edit (editingInspection set). removingInspection drives the delete confirm.
@@ -1247,6 +1520,22 @@ export default function Trips({
     await mergeRoundTrip(sourceId, newId, true);
     await reloadUntil(newId, (trip) => trip !== undefined && trip.roundTripKey !== null);
     setSelectedId(newId);
+  }
+
+  /** PAIR ROUND TRIP — merges this leg with a candidate already on the page,
+   *  then waits on the same signal CREATE RETURN does: the key is only really
+   *  set once the projection shows it. allowMismatch comes from which tier the
+   *  dispatcher picked from, never from a guess about what the server allows. */
+  async function onRoundTripPaired(id: string, otherTripId: string, allowMismatch: boolean) {
+    await mergeRoundTrip(id, otherTripId, allowMismatch);
+    await reloadUntil(id, (trip) => trip !== undefined && trip.roundTripKey !== null);
+  }
+
+  /** UNPAIR — clears the key on BOTH legs; polls this one until it reads back
+   *  unkeyed. The sibling refreshes with the page load reloadUntil ends on. */
+  async function onRoundTripUnpaired(id: string) {
+    await unpairRoundTrip(id);
+    await reloadUntil(id, (trip) => trip !== undefined && trip.roundTripKey === null);
   }
 
   /** After a manifest create/edit: wait for the trip to carry a manifestId, then
@@ -1542,6 +1831,14 @@ export default function Trips({
   // Billing runs on its own axis from the operational status — see tripBillingChip.
   const billingChip = t ? tripBillingChip(t) : null;
 
+  // The other leg of the pairing, when the page happens to hold it. The trip
+  // itself carries only the shared key, so a sibling off the current page stays
+  // unnamed rather than being chased with a second fetch.
+  const pairedSibling =
+    t && t.roundTripKey !== null
+      ? ((rows ?? []).find((r) => r.id !== t.id && r.roundTripKey === t.roundTripKey) ?? null)
+      : null;
+
   // Timeline — operational steps first (run finished = operationsFinishedAtUtc),
   // then the billing-driven ones. "Completed" is the paid/final step only:
   // completedAtUtc now means "the money arrived" (or run end for clientless trips).
@@ -1714,6 +2011,19 @@ export default function Trips({
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
                 <ServiceChip svc={svcForTrip(t.serviceType)} />
                 {chip && <StatusChip kind={chip.kind} label={chip.label} />}
+                {/* Pairing is what PAIR / UNPAIR act on, so it has to be visible:
+                    the sibling by number when the page holds it, otherwise the
+                    plain fact that a key is set. */}
+                {t.roundTripKey !== null && (
+                  <StatusChip
+                    kind="info"
+                    label={
+                      pairedSibling
+                        ? `Round trip · ${directionMeta(t.direction)?.label ?? "paired"} with ${pairedSibling.tripNumber}`
+                        : "Round trip · other leg not on this page"
+                    }
+                  />
+                )}
                 <span style={{ marginLeft: "auto", fontFamily: fonts.mono, fontSize: 13, color: colors.skyBlue }}>{t.tripNumber}</span>
               </div>
               <h2 style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 26, lineHeight: 1.05, color: colors.headingBright, margin: "6px 0 4px" }}>
@@ -2068,6 +2378,16 @@ export default function Trips({
                 {!t.isEmptyLeg && canPairRoundTrip(t) && (
                   <ActionButton onClick={() => setModal("createReturn")}>CREATE RETURN</ActionButton>
                 )}
+                {/* Pair an EXISTING leg (the recovery path when a return trip was
+                    created but its merge never landed); an empty leg can pair too. */}
+                {canPairRoundTrip(t) && (
+                  <ActionButton onClick={() => setModal("pairRoundTrip")}>PAIR ROUND TRIP</ActionButton>
+                )}
+                {t.roundTripKey !== null && (
+                  <ActionButton variant="destructive" onClick={() => setModal("unpairRoundTrip")}>
+                    UNPAIR
+                  </ActionButton>
+                )}
                 {t.status === "Scheduled" &&
                   (startBlockReason ? (
                     // Pre-gate the START button with a clear reason chip (mirrors
@@ -2123,6 +2443,22 @@ export default function Trips({
                   trip={t}
                   onClose={() => setModal(null)}
                   onCreated={(input) => onReturnCreated(t.id, input)}
+                />
+              )}
+              {modal === "pairRoundTrip" && (
+                <PairRoundTripModal
+                  trip={t}
+                  all={rows ?? []}
+                  onClose={() => setModal(null)}
+                  onPaired={(otherTripId, allowMismatch) => onRoundTripPaired(t.id, otherTripId, allowMismatch)}
+                />
+              )}
+              {modal === "unpairRoundTrip" && (
+                <UnpairRoundTripModal
+                  trip={t}
+                  sibling={pairedSibling}
+                  onClose={() => setModal(null)}
+                  onConfirmed={() => onRoundTripUnpaired(t.id)}
                 />
               )}
               {modal === "manifest" && (
