@@ -15,6 +15,7 @@ import Fleet from "@/components/screens/Fleet";
 import Clients from "@/components/screens/Clients";
 import Riders from "@/components/screens/Riders";
 import Billing from "@/components/screens/Billing";
+import Reports from "@/components/screens/Reports";
 import Manifests from "@/components/screens/Manifests";
 import RoutesSchedules from "@/components/screens/RoutesSchedules";
 import Stops from "@/components/screens/Stops";
@@ -38,6 +39,11 @@ export default function Console() {
   const [fleetSelId, setFleetSelId] = useState<string | null>(null);
   const [clientSel, setClientSel] = useState<string | null>(null); // Clients API Guid
   const [invoiceSelId, setInvoiceSelId] = useState<string | null>(null); // Billing API Guid
+  // The accruals report's client + month live here for the same reason as
+  // tripPeriod: a dispatcher who built March's report for a client should not
+  // lose that selection on a detour to another screen.
+  const [reportClientId, setReportClientId] = useState<string | null>(null); // Clients API Guid
+  const [reportPeriod, setReportPeriod] = useState<Period>(() => currentPeriod("month"));
   const [incidentSel, setIncidentSel] = useState(0);
 
   function openTrip(id: string | null) {
@@ -95,6 +101,14 @@ export default function Console() {
           )}
           {screen === "riders" && <Riders />}
           {screen === "billing" && <Billing invoiceSelId={invoiceSelId} setInvoiceSelId={setInvoiceSelId} />}
+          {screen === "reports" && (
+            <Reports
+              clientId={reportClientId}
+              setClientId={setReportClientId}
+              period={reportPeriod}
+              setPeriod={setReportPeriod}
+            />
+          )}
           {screen === "incidents" && <Incidents incidentSel={incidentSel} setIncidentSel={setIncidentSel} />}
           {screen === "comms" && <Communications />}
           {screen === "settings" && <Settings />}

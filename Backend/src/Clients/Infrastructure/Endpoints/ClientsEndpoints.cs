@@ -9,6 +9,7 @@ using NorthernLink.Clients.Application.Clients.GetClients;
 using NorthernLink.Clients.Application.Clients.Update;
 using NorthernLink.Clients.Application.ClientContacts.Create;
 using NorthernLink.Clients.Application.ClientContacts.GetForClient;
+using NorthernLink.Clients.Application.ClientContacts.Update;
 using NorthernLink.Clients.Application.Contracts.Create;
 using NorthernLink.Clients.Application.Contracts.GetForClient;
 using NorthernLink.Clients.Application.Contracts.Terminate;
@@ -47,6 +48,7 @@ public static class ClientsEndpoints
         // Contacts — nested under their client.
         clients.MapGet("{id:guid}/contacts", GetClientContacts);
         clients.MapPost("{id:guid}/contacts", CreateClientContact);
+        clients.MapPut("{id:guid}/contacts/{contactId:guid}", UpdateClientContact);
 
         // Purchase orders — nested under their client.
         clients.MapGet("{id:guid}/purchase-orders", GetClientPurchaseOrders);
@@ -230,12 +232,38 @@ public static class ClientsEndpoints
             request.Phone,
             request.Notes,
             request.IsPrimary,
-            request.ReceivesEmailReports);
+            request.ReceivesEmailReports,
+            request.ReceivesAccrualsReports);
 
         var result = await sender.Send(command, cancellationToken);
         return result.IsSuccess
             ? Results.Created($"/api/clients/{id}/contacts/{result.Value}", new EntityCreatedResponse(result.Value))
             : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> UpdateClientContact(
+        Guid id, Guid contactId, ClientContactRequest request, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var command = new UpdateClientContactCommand(
+            tenantId,
+            id,
+            contactId,
+            request.Name ?? string.Empty,
+            request.Title ?? string.Empty,
+            request.Email,
+            request.Phone,
+            request.Notes,
+            request.IsPrimary,
+            request.ReceivesEmailReports,
+            request.ReceivesAccrualsReports);
+
+        var result = await sender.Send(command, cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
     private static async Task<IResult> GetClientPurchaseOrders(
@@ -340,7 +368,7 @@ public sealed record ContractRequest(
     int? NetTermsDays,
     string? DefaultPoNumber);
 
-/// <summary>Request body for POST /api/clients/{id}/contacts.</summary>
+/// <summary>Request body for POST/PUT /api/clients/{id}/contacts.</summary>
 public sealed record ClientContactRequest(
     string? Name,
     string? Title,
@@ -348,7 +376,8 @@ public sealed record ClientContactRequest(
     string? Phone,
     string? Notes,
     bool IsPrimary,
-    bool ReceivesEmailReports);
+    bool ReceivesEmailReports,
+    bool ReceivesAccrualsReports);
 
 /// <summary>Request body for POST/PUT /api/clients/{id}/purchase-orders.</summary>
 public sealed record PurchaseOrderRequest(

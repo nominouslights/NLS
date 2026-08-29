@@ -58,12 +58,11 @@ namespace NorthernLink.Notifications.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(16)")
                         .HasColumnName("status");
 
-                    b.Property<Guid>("TemplateId")
+                    b.Property<Guid?>("TemplateId")
                         .HasColumnType("uuid")
                         .HasColumnName("template_id");
 
                     b.Property<string>("TemplateName")
-                        .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)")
                         .HasColumnName("template_name");
@@ -72,12 +71,11 @@ namespace NorthernLink.Notifications.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");
 
-                    b.Property<Guid>("TripId")
+                    b.Property<Guid?>("TripId")
                         .HasColumnType("uuid")
                         .HasColumnName("trip_id");
 
                     b.Property<string>("TripNumber")
-                        .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)")
                         .HasColumnName("trip_number");
@@ -196,12 +194,11 @@ namespace NorthernLink.Notifications.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("status");
 
-                    b.Property<Guid>("TemplateId")
+                    b.Property<Guid?>("TemplateId")
                         .HasColumnType("uuid")
                         .HasColumnName("template_id");
 
                     b.Property<string>("TemplateName")
-                        .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("template_name");
 
@@ -209,12 +206,11 @@ namespace NorthernLink.Notifications.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");
 
-                    b.Property<Guid>("TripId")
+                    b.Property<Guid?>("TripId")
                         .HasColumnType("uuid")
                         .HasColumnName("trip_id");
 
                     b.Property<string>("TripNumber")
-                        .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("trip_number");
 
@@ -223,6 +219,8 @@ namespace NorthernLink.Notifications.Infrastructure.Persistence.Migrations
                         .HasColumnName("version");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "ClientId");
 
                     b.HasIndex("TenantId", "TripId");
 

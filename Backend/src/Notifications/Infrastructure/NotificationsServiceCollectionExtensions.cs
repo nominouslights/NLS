@@ -10,8 +10,11 @@ using NorthernLink.Shared.Tenancy;
 using NorthernLink.Notifications.Application;
 using NorthernLink.Notifications.Application.Abstractions;
 using NorthernLink.Notifications.Application.Dispatches;
+using NorthernLink.Notifications.Application.Dispatches.GetClientEmailHistory;
 using NorthernLink.Notifications.Application.Dispatches.GetTripEmailHistory;
+using NorthernLink.Notifications.Application.Dispatches.PreviewClientAccrualsEmail;
 using NorthernLink.Notifications.Application.Dispatches.PreviewTripPickupReport;
+using NorthernLink.Notifications.Application.Dispatches.SendClientAccrualsEmail;
 using NorthernLink.Notifications.Application.Dispatches.SendTripPickupEmail;
 using NorthernLink.Notifications.Application.Templates;
 using NorthernLink.Notifications.Application.Templates.Activate;
@@ -71,11 +74,12 @@ public static class NotificationsServiceCollectionExtensions
         // Ganss HtmlSanitizer is configured once and each Sanitize call is a self-contained parse.
         services.AddSingleton<IEmailHtmlSanitizer, GanssEmailHtmlSanitizer>();
 
-        // Pickup-email report PDF (QuestPDF). The Community license must be set once, process-wide,
+        // Report PDFs (QuestPDF). The Community license must be set once, process-wide,
         // before any document is generated — a static assignment here guarantees it runs before the
-        // first report build. Singleton: the renderer holds no mutable state (each Build is self-contained).
+        // first report build. Singletons: the renderers hold no mutable state (each Build is self-contained).
         QuestPDF.Settings.License = LicenseType.Community;
         services.AddSingleton<IPickupEmailReportPdf, QuestPickupEmailReportPdf>();
+        services.AddSingleton<IClientAccrualsReportPdf, QuestClientAccrualsReportPdf>();
 
         // 3. Postmark sender over IHttpClientFactory (Microsoft.Extensions.Http ships in the
         //    AspNetCore framework reference — no extra package, no Polly, no SDK). Options are
@@ -100,7 +104,10 @@ public static class NotificationsServiceCollectionExtensions
         services.AddScoped<IQueryHandler<PreviewEmailTemplateQuery, EmailTemplatePreviewResponse>, PreviewEmailTemplateQueryHandler>();
         services.AddScoped<ICommandHandler<SendTripPickupEmailCommand, EmailDispatchResponse>, SendTripPickupEmailCommandHandler>();
         services.AddScoped<IQueryHandler<PreviewTripPickupReportQuery, PickupReportPreviewResponse>, PreviewTripPickupReportQueryHandler>();
+        services.AddScoped<ICommandHandler<SendClientAccrualsEmailCommand, EmailDispatchResponse>, SendClientAccrualsEmailCommandHandler>();
+        services.AddScoped<IQueryHandler<PreviewClientAccrualsEmailQuery, AccrualsEmailPreviewResponse>, PreviewClientAccrualsEmailQueryHandler>();
         services.AddScoped<IQueryHandler<GetTripEmailHistoryQuery, IReadOnlyList<EmailDispatchResponse>>, GetTripEmailHistoryQueryHandler>();
+        services.AddScoped<IQueryHandler<GetClientEmailHistoryQuery, IReadOnlyList<EmailDispatchResponse>>, GetClientEmailHistoryQueryHandler>();
 
         // 5. Integration event consumers — none: Notifications neither publishes nor consumes
         //    today (the send request carries its trip context as opaque snapshots).

@@ -62,6 +62,10 @@ namespace NorthernLink.Clients.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(32)")
                         .HasColumnName("phone");
 
+                    b.Property<bool>("ReceivesAccrualsReports")
+                        .HasColumnType("boolean")
+                        .HasColumnName("receives_accruals_reports");
+
                     b.Property<bool>("ReceivesEmailReports")
                         .HasColumnType("boolean")
                         .HasColumnName("receives_email_reports");
@@ -335,6 +339,10 @@ namespace NorthernLink.Clients.Infrastructure.Persistence.Migrations
                     b.Property<string>("Phone")
                         .HasColumnType("text")
                         .HasColumnName("phone");
+
+                    b.Property<bool>("ReceivesAccrualsReports")
+                        .HasColumnType("boolean")
+                        .HasColumnName("receives_accruals_reports");
 
                     b.Property<bool>("ReceivesEmailReports")
                         .HasColumnType("boolean")

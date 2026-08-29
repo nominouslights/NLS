@@ -8,9 +8,11 @@ import type { ClientServiceType } from "./clients";
 // / EmailDispatchResponse and the request records exactly (JSON camelCase,
 // enums as PascalCase strings). Do not invent fields — extend only when the
 // backend contract changes.
-// Send requests are composed FRONTEND-SIDE: Notifications never reads Trips or
-// Clients data (integration-events-only rule), so the dispatcher's screen
-// supplies trip context + per-recipient merge values as opaque snapshots.
+// Send requests are composed FRONTEND-SIDE: Notifications never reads Trips,
+// Billing, or Clients data (integration-events-only rule), so the dispatcher's
+// screen supplies trip context + per-recipient merge values as opaque
+// snapshots — and the accruals send posts the whole report as pre-formatted
+// strings (lib/billing/accruals.ts → accrualsEmailPayload).
 // ---------------------------------------------------------------------------
 
 /** Same enum as the Clients module's ServiceType (declared per-module backend-side). */
@@ -141,19 +143,108 @@ export interface EmailRecipientResult {
 
 /** Mirrors EmailDispatchResponse — one send action with per-recipient outcomes.
  *  Returned with HTTP 200 even on partial/total provider failure: the outcomes
- *  are data the dispatcher must see. */
+ *  are data the dispatcher must see. Trip pickup dispatches carry trip/template
+ *  references; client accruals dispatches carry NONE of the four (all null) and
+ *  are anchored by clientId instead — and on those, each recipient's
+ *  passengerName field carries the CONTACT's display name. */
 export interface EmailDispatchRecord {
   id: string;
-  tripId: string;
-  tripNumber: string;
+  tripId: string | null;
+  tripNumber: string | null;
   manifestId: string | null;
-  templateId: string;
-  templateName: string;
+  templateId: string | null;
+  templateName: string | null;
   serviceType: NotificationServiceType;
   clientId: string | null;
   status: EmailDispatchStatus;
   sentAtUtc: string;
   recipients: EmailRecipientResult[];
+}
+
+// ---------------------------------------------------------------------------
+// Client accruals email — the report travels as pre-formatted strings (labels,
+// dates, amounts with any " est." markings baked in): the backend renders them
+// verbatim into the covering email + PDF, doing zero domain lookups of its own.
+// Compose the report object with accrualsEmailPayload (lib/billing/accruals.ts)
+// so it can never disagree with the Reports screen or the printed sheet.
+// ---------------------------------------------------------------------------
+
+/** One selected contact: address + the display name recorded in history. */
+export interface AccrualsRecipientInput {
+  email: string;
+  contactName: string;
+}
+
+/** Wire shape of the report (ClientAccrualsReportRequest) — strings only. */
+export interface AccrualsEmailReport {
+  clientName: string;
+  periodLabel: string;
+  preparedDate: string;
+  /** Degradation banners (manual billing, failed fetches, unpaired legs). */
+  notes: string[];
+  summary: {
+    bucketLabel: string;
+    roundTrips: string;
+    actualCad: string;
+    estimatedCad: string;
+  }[];
+  buckets: {
+    label: string;
+    rows: {
+      date: string;
+      tripNumbers: string;
+      route: string;
+      poNumber: string;
+      reference: string;
+      amountCad: string;
+    }[];
+  }[];
+  reconciliation: {
+    date: string;
+    tripNumbers: string;
+    route: string;
+    status: string;
+    reason: string;
+    amountCad: string;
+  }[];
+  invoices: {
+    invoiceNumber: string;
+    status: string;
+    subtotalCad: string;
+    gstCad: string;
+    totalCad: string;
+  }[];
+}
+
+/** POST /api/notifications/emails/client-accruals body
+ *  (SendClientAccrualsEmailRequest). dispatchId is a CLIENT-generated GUID:
+ *  replaying the same id returns the stored dispatch without re-sending
+ *  (idempotency). serviceType is the client's service category (enum name).
+ *  Recipients: validated, deduped case-insensitively, 1–16 distinct. */
+export interface SendClientAccrualsEmailInput {
+  dispatchId: string;
+  clientId: string;
+  clientName: string;
+  serviceType: NotificationServiceType;
+  report: AccrualsEmailReport;
+  recipients: AccrualsRecipientInput[];
+}
+
+/** POST /api/notifications/emails/client-accruals/preview body — the send
+ *  request MINUS dispatchId (a preview records nothing, so no idempotency
+ *  key). Same composer as the send, so the preview is byte-for-byte what a
+ *  contact would receive. */
+export type ClientAccrualsPreviewInput = Omit<SendClientAccrualsEmailInput, "dispatchId">;
+
+/** Preview response. pdfBase64 is the attached report PDF (base64, no data:
+ *  prefix); recipients echoes the deduped addresses a send would use. */
+export interface ClientAccrualsPreviewResult {
+  subject: string;
+  htmlBody: string;
+  textBody: string;
+  pdfBase64: string;
+  recipientCount: number;
+  recipients: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -232,9 +323,42 @@ export function previewTripPickupReport(input: PickupReportPreviewInput): Promis
   });
 }
 
+/** POST → 200 EmailDispatchResponse (also on partial/total provider failure —
+ *  read the per-recipient outcomes). Replaying the same dispatchId returns the
+ *  stored dispatch without re-sending. */
+export function sendClientAccrualsEmail(
+  input: SendClientAccrualsEmailInput,
+): Promise<EmailDispatchRecord> {
+  return request<EmailDispatchRecord>("/api/notifications/emails/client-accruals", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+/** POST → 200 { subject, htmlBody, textBody, pdfBase64, recipientCount,
+ *  recipients }. Renders exactly what the accruals email + PDF would contain
+ *  WITHOUT sending anything (no dispatch is created). Same recipient
+ *  validation as the send. */
+export function previewClientAccrualsEmail(
+  input: ClientAccrualsPreviewInput,
+): Promise<ClientAccrualsPreviewResult> {
+  return request<ClientAccrualsPreviewResult>("/api/notifications/emails/client-accruals/preview", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
 /** GET /api/notifications/emails?tripId={id} → dispatches, newest first. */
 export function listTripEmailDispatches(tripId: string): Promise<EmailDispatchRecord[]> {
   const q = new URLSearchParams({ tripId });
+  return request<EmailDispatchRecord[]>(`/api/notifications/emails?${q.toString()}`);
+}
+
+/** GET /api/notifications/emails?clientId={id} → the client's dispatches,
+ *  newest first — accruals sends AND any pickup sends carrying the client.
+ *  One of tripId/clientId is required by the endpoint. */
+export function listClientEmailDispatches(clientId: string): Promise<EmailDispatchRecord[]> {
+  const q = new URLSearchParams({ clientId });
   return request<EmailDispatchRecord[]>(`/api/notifications/emails?${q.toString()}`);
 }
 
