@@ -23,6 +23,7 @@ public sealed class ClientContactConfiguration : IEntityTypeConfiguration<Client
         builder.Property(c => c.Notes).HasColumnName("notes").HasMaxLength(1000);
         builder.Property(c => c.IsPrimary).HasColumnName("is_primary");
         builder.Property(c => c.ReceivesEmailReports).HasColumnName("receives_email_reports");
+        builder.Property(c => c.ReceivesAccrualsReports).HasColumnName("receives_accruals_reports");
         builder.Property(c => c.CreatedAtUtc).HasColumnName("created_at_utc");
         builder.Property(c => c.UpdatedAtUtc).HasColumnName("updated_at_utc");
 

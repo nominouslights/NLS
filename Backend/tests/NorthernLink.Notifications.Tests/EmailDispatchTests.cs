@@ -112,6 +112,99 @@ public class EmailDispatchTests
         Assert.Equal(TestNotifications.TenantId, recorded.TenantId);
     }
 
+    // ---- Client accruals recording ----------------------------------------------------------
+
+    private static Result<EmailDispatch> RecordAccruals(params DispatchRecipient[] recipients) =>
+        EmailDispatch.RecordClientAccruals(
+            Guid.NewGuid(),
+            TestNotifications.TenantId,
+            Guid.NewGuid(),
+            "Vale Manitoba Operations",
+            NotificationServiceType.ContractCrew,
+            recipients);
+
+    [Fact]
+    public void RecordClientAccruals_has_no_trip_and_no_template_but_a_required_client()
+    {
+        var dispatchId = Guid.NewGuid();
+        var clientId = Guid.NewGuid();
+        var result = EmailDispatch.RecordClientAccruals(
+            dispatchId,
+            TestNotifications.TenantId,
+            clientId,
+            "  Vale Manitoba Operations  ",
+            NotificationServiceType.ContractCrew,
+            [Recipient("a@example.com", DispatchRecipientStatus.Sent)]);
+
+        Assert.True(result.IsSuccess);
+        var dispatch = result.Value;
+        Assert.Equal(dispatchId, dispatch.Id);
+        Assert.Null(dispatch.TripId);
+        Assert.Null(dispatch.TripNumber);
+        Assert.Null(dispatch.ManifestId);
+        Assert.Null(dispatch.TemplateId);
+        Assert.Null(dispatch.TemplateName);
+        Assert.Equal(clientId, dispatch.ClientId);
+        Assert.Equal("Vale Manitoba Operations", dispatch.ClientName); // trimmed
+        var recorded = Assert.IsType<EmailDispatchRecordedDomainEvent>(Assert.Single(dispatch.DomainEvents));
+        Assert.Equal(dispatchId, recorded.DispatchId);
+    }
+
+    [Fact]
+    public void RecordClientAccruals_rejects_an_empty_client_id()
+    {
+        var result = EmailDispatch.RecordClientAccruals(
+            Guid.NewGuid(),
+            TestNotifications.TenantId,
+            Guid.Empty,
+            "Vale Manitoba Operations",
+            NotificationServiceType.ContractCrew,
+            [Recipient("a@example.com", DispatchRecipientStatus.Sent)]);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(EmailDispatchErrors.ClientRequired, result.Error);
+    }
+
+    [Fact]
+    public void RecordClientAccruals_rejects_a_blank_client_name()
+    {
+        var result = EmailDispatch.RecordClientAccruals(
+            Guid.NewGuid(),
+            TestNotifications.TenantId,
+            Guid.NewGuid(),
+            "  ",
+            NotificationServiceType.ContractCrew,
+            [Recipient("a@example.com", DispatchRecipientStatus.Sent)]);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(EmailDispatchErrors.ClientRequired, result.Error);
+    }
+
+    [Fact]
+    public void RecordClientAccruals_enforces_the_same_recipient_bounds()
+    {
+        var none = RecordAccruals();
+        Assert.True(none.IsFailure);
+        Assert.Equal(EmailDispatchErrors.NoRecipients, none.Error);
+
+        var tooMany = RecordAccruals(Enumerable.Range(0, EmailDispatch.MaxRecipients + 1)
+            .Select(i => Recipient($"p{i}@example.com", DispatchRecipientStatus.Sent))
+            .ToArray());
+        Assert.True(tooMany.IsFailure);
+        Assert.Equal(EmailDispatchErrors.TooManyRecipients, tooMany.Error);
+    }
+
+    [Fact]
+    public void RecordClientAccruals_derives_status_from_recipient_outcomes()
+    {
+        var result = RecordAccruals(
+            Recipient("a@example.com", DispatchRecipientStatus.Sent),
+            Recipient("b@example.com", DispatchRecipientStatus.Failed));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(EmailDispatchStatus.PartiallyFailed, result.Value.Status);
+    }
+
     [Theory]
     [InlineData("dddddddd-dddd-dddd-dddd-dddddddddddd")]
     [InlineData(null)]

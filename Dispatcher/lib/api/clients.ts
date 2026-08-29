@@ -8,8 +8,8 @@ import type { ServiceType, StatusKind } from "../theme";
 // ContractResponse / PurchaseOrderResponse exactly (JSON camelCase, enums as
 // PascalCase strings). Do not invent fields — extend only when the backend
 // contract changes.
-// CRM (contacts, interactions, follow-ups) has NO backend — it stays mocked
-// in lib/clientStore.ts.
+// CRM (interactions, follow-ups) has NO backend — it stays mocked in
+// lib/clientStore.ts. Contacts ARE backed (list/create/update below).
 // ---------------------------------------------------------------------------
 
 export type ClientType = "Client" | "VendorPartner";
@@ -73,11 +73,13 @@ export interface ClientContactRecord {
   notes: string | null;
   isPrimary: boolean;
   receivesEmailReports: boolean;
+  receivesAccrualsReports: boolean;
   createdAtUtc: string;
   updatedAtUtc: string;
 }
 
-/** POST /api/clients/{id}/contacts body. */
+/** POST /api/clients/{id}/contacts and PUT /{contactId} body (full-document
+ *  replace on update — every field is written, none merged). */
 export interface ClientContactInput {
   name: string;
   title: string;
@@ -86,6 +88,7 @@ export interface ClientContactInput {
   notes?: string | null;
   isPrimary: boolean;
   receivesEmailReports: boolean;
+  receivesAccrualsReports: boolean;
 }
 
 export interface ContractRecord {
@@ -207,6 +210,20 @@ export async function createContact(clientId: string, input: ClientContactInput)
     body: JSON.stringify(input),
   });
   return res.id;
+}
+
+/** PUT → 204. Full-document replace. 404 unknown / wrong-client contact;
+ *  409 Clients.ClientContact.PrimaryAlreadyExists when promoting to primary
+ *  while another primary exists; 400 blank name/title. */
+export function updateContact(
+  clientId: string,
+  contactId: string,
+  input: ClientContactInput,
+): Promise<void> {
+  return request<void>(`/api/clients/${clientId}/contacts/${contactId}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
 }
 
 export function listPurchaseOrders(clientId: string): Promise<PurchaseOrderRecord[]> {
