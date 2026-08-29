@@ -148,6 +148,7 @@ function amountCell(g: AccrualGroup): string {
   }
   if (g.amountNote === "unpaired") return `<td class="flag">UNPAIRED — NOT ESTIMATED</td>`;
   if (g.amountNote === "unavailable") return `<td class="miss">AMOUNT UNAVAILABLE</td>`;
+  if (g.amountNote === "counted") return `<td class="flag">COUNTED WITH THE PAIRED LEG</td>`;
   return `<td class="amt">—</td>`;
 }
 
