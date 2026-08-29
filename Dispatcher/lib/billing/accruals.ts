@@ -6,14 +6,25 @@
 // so an email payload mapper (Part B) can be added here without reshaping it.
 //
 // Ground rules, in order of how much they bite:
-//   - The money-bearing unit is a ROUND-TRIP GROUP (legs sharing a roundTripKey
-//     within one bucket), matching how invoice lines price trips. A pair whose
-//     legs straddle buckets or the month boundary shows as two flagged unpaired
-//     groups — totals stay conservative rather than guessing.
+//   - The money-bearing unit is a ROUND-TRIP GROUP, and what defines the group
+//     depends on whether the work has been billed yet:
+//       * BILLED (paid / invoiced / written off) → the INVOICE LINE. The line is
+//         what the client is actually billed on, and it is the only pairing that
+//         can disagree with the money. roundTripKey is set only by the merge /
+//         Create Return flow, so a pair invoiced as one $X line routinely
+//         carries no key on either leg; keying those by roundTripKey splits them
+//         into two groups that each resolve to that one line and each claim its
+//         full amount — the bucket total doubles. Group by line and the report
+//         mirrors the invoice by construction.
+//       * UNBILLED (ready / scheduled / upcoming) → roundTripKey, falling back
+//         to the trip's own id. There is no line yet, so the trip records are
+//         the only pairing signal there is; an unpaired leg stays unpaired
+//         rather than being guessed into a pair.
 //   - Real amounts (invoiced / paid / written off) come ONLY from fetched
-//     invoice lines, summed over DISTINCT lineIds per group so a line covering
-//     both legs is never counted twice. Missing invoice → "amount unavailable",
-//     excluded from totals.
+//     invoice lines, summed over DISTINCT lineIds per group, and each lineId is
+//     claimed at most ONCE per report — so a line can never be counted twice,
+//     even if its legs somehow land in different buckets. Missing invoice →
+//     "amount unavailable", excluded from totals.
 //   - Estimates (ready / scheduled / upcoming) are 1 × the contract's
 //     round-trip rate for a PAIRED group only, marked " est." everywhere. An
 //     unpaired leg is never estimated — the backend prices complete round trips
@@ -99,16 +110,20 @@ export type AccrualAmountSource = "invoice" | "estimate";
 /** Why a group carries no amount — rendered as colour + glyph + text, never
  *  colour alone. Null amountNote with null amountCad means the banner notes
  *  explain it (manual billing / no contract / no rate on the contract). */
-export type AccrualAmountNote = "unavailable" | "unpaired";
+export type AccrualAmountNote = "unavailable" | "unpaired" | "counted";
 
 export const AMOUNT_NOTE_META: Record<AccrualAmountNote, { kind: StatusKind; label: string }> = {
   unavailable: { kind: "over", label: "Amount unavailable" },
   unpaired: { kind: "soon", label: "Unpaired — not estimated" },
+  // Only reachable when one invoice line's legs land in different buckets: the
+  // first bucket carries the money, this row says so rather than repeating it.
+  counted: { kind: "info", label: "Counted with the paired leg" },
 };
 
 /** One money-bearing row: a round-trip pair, or a lone leg. */
 export interface AccrualGroup {
-  /** roundTripKey when the trip is paired; the lone trip's id otherwise. */
+  /** `line:<lineId>` for billed groups (the invoice line is the unit);
+   *  roundTripKey, or the lone trip's own id, for unbilled ones. */
   key: string;
   /** Legs in service order — two for a matched pair, one otherwise. */
   legs: TripRecord[];
@@ -164,12 +179,24 @@ export const ACCRUALS_ESTIMATE_NOTE =
 // Assembly
 // ---------------------------------------------------------------------------
 
-/** Group already-sorted trips by roundTripKey (lone trips group by their own
- *  id), preserving first-appearance order so groups stay in service order. */
-function groupByRoundTrip(sorted: TripRecord[]): { key: string; legs: TripRecord[] }[] {
+/**
+ * Group already-sorted trips into money-bearing rows, preserving
+ * first-appearance order so groups stay in service order.
+ *
+ * `lineByTripId` non-null means these trips are billed, so the invoice line is
+ * the grouping key wherever a leg resolves to one — see the header note: the
+ * line pairs legs that roundTripKey often does not, and grouping billed legs
+ * any other way double-counts the line's amount. Legs with no resolvable line
+ * (and every unbilled trip) fall back to roundTripKey, then to their own id.
+ */
+function groupTrips(
+  sorted: TripRecord[],
+  lineByTripId: Map<string, InvoiceLineRecord> | null,
+): { key: string; legs: TripRecord[] }[] {
   const byKey = new Map<string, TripRecord[]>();
   for (const t of sorted) {
-    const key = t.roundTripKey ?? t.id;
+    const line = lineByTripId?.get(t.id);
+    const key = line ? `line:${line.lineId}` : (t.roundTripKey ?? t.id);
     const legs = byKey.get(key);
     if (legs) legs.push(t);
     else byKey.set(key, [t]);
@@ -234,24 +261,39 @@ export function buildAccrualsReport(args: {
     else writtenOffTrips.push(t);
   }
 
-  // Sum the DISTINCT invoice lines the legs resolve to — a Set dedupe, so a
-  // line covering both legs of the pair is counted exactly once.
+  // Sum the DISTINCT invoice lines the legs resolve to. Billed groups are keyed
+  // by line, so in practice that is one line per group; claimedLines makes the
+  // "at most once per report" rule hold even if a line's legs land in different
+  // buckets (one leg Invoiced, its pair already Paid), where grouping alone
+  // cannot help. Buckets are built in ACCRUAL_BUCKET_ORDER, so the earlier
+  // bucket carries the money and the later row says where it went.
   const missingInvoiceIds = new Set<string>();
+  const claimedLines = new Set<string>();
   function invoiceAmount(legs: TripRecord[]): Pick<
     AccrualGroup,
     "amountCad" | "amountSource" | "amountNote"
   > {
     const lines = new Map<string, InvoiceLineRecord>();
+    let countedElsewhere = false;
     for (const leg of legs) {
       const line = lineByTripId.get(leg.id);
-      if (line) lines.set(line.lineId, line);
-      else if (leg.billing && !fetchedInvoiceIds.has(leg.billing.invoiceId)) {
+      if (line) {
+        if (claimedLines.has(line.lineId)) countedElsewhere = true;
+        else lines.set(line.lineId, line);
+      } else if (leg.billing && !fetchedInvoiceIds.has(leg.billing.invoiceId)) {
         missingInvoiceIds.add(leg.billing.invoiceId);
       }
     }
-    if (lines.size === 0) return { amountCad: null, amountSource: null, amountNote: "unavailable" };
+    if (lines.size === 0) {
+      return countedElsewhere
+        ? { amountCad: null, amountSource: null, amountNote: "counted" }
+        : { amountCad: null, amountSource: null, amountNote: "unavailable" };
+    }
     let sum = 0;
-    for (const line of lines.values()) sum += line.amountCad;
+    for (const [lineId, line] of lines) {
+      claimedLines.add(lineId);
+      sum += line.amountCad;
+    }
     return { amountCad: sum, amountSource: "invoice", amountNote: null };
   }
 
@@ -268,7 +310,7 @@ export function buildAccrualsReport(args: {
 
   function buildGroups(bucket: AccrualBucketId, trips: TripRecord[]): AccrualGroup[] {
     const realAmounts = bucket === "paid" || bucket === "invoiced";
-    return groupByRoundTrip(trips).map(({ key, legs }) => {
+    return groupTrips(trips, realAmounts ? lineByTripId : null).map(({ key, legs }) => {
       const paired = legs.length >= 2;
       const onWorksheet = legs.find((l) => l.billing?.state === "OnWorksheet")?.billing ?? null;
       return {
@@ -297,7 +339,7 @@ export function buildAccrualsReport(args: {
 
   // Written-off groups carry their real (lost) amounts + reasons — shown in
   // reconciliation only, never in bucket totals.
-  const writtenOff = groupByRoundTrip(writtenOffTrips).map(({ key, legs }) => ({
+  const writtenOff = groupTrips(writtenOffTrips, lineByTripId).map(({ key, legs }) => ({
     key,
     legs,
     paired: legs.length >= 2,
