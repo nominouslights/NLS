@@ -105,6 +105,16 @@ Collision protocol for parallel batches:
 ### Backend (`Backend/`)
 - `dotnet build` — build the whole solution (warnings are errors)
 - `dotnet test` — includes architecture tests that enforce domain-library boundaries
+- **Migrations are never applied automatically** — see the `migrations` skill
+  (`.claude/skills/migrations/`). `Migrations__RunOnStartup` is `false` in every local mode, so
+  nothing you run locally migrates the shared database; it silently lags the model until a query
+  throws `42703`/`42P01`. `node .claude/skills/migrations/scripts/migrations.mjs check` is the
+  cheap check (~6s, cached, silent when current), `explain` prints the real DDL plus the commit
+  that introduced each pending migration, and `apply <Module>` applies one module after the user
+  says yes. A PostToolUse hook runs the check after `gh pr create`, `gh pr merge`, `git pull` and
+  `git merge`; it cannot see a PR opened in the GitHub web UI, so run it by hand then. Applying a
+  **breaking** migration (drop/rename, or NOT NULL with no default) from an unmerged branch
+  breaks main and production immediately — wait for the merge.
 - `dotnet run --project src/Api/NorthernLink.Api` — run just the API standalone (no AppHost);
   secrets come from the shell environment (see next bullet), the port from
   `Properties/launchSettings.json` — this hits the same DigitalOcean Postgres as everything else
