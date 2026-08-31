@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging.Abstractions;
+using NorthernLink.Shared.Tenancy;
 using NorthernLink.Trips.Application.Abstractions;
 using NorthernLink.Trips.Application.Integration;
 using NorthernLink.Trips.Application.Trips.CreateDeadheadReturn;
@@ -21,7 +23,17 @@ public class RoundTripCommandHandlerTests
     private readonly FakeTripRepository _trips = new();
     private readonly FakeTripManifestRepository _manifests = new();
 
-    private MergeRoundTripCommandHandler MergeHandler() => new(_trips, _manifests);
+    private MergeRoundTripCommandHandler MergeHandler() =>
+        new(_trips, _manifests, new StubCurrentActor(),
+            NullLogger<MergeRoundTripCommandHandler>.Instance);
+
+    /// <summary>Stands in for the gateway's JWT-backed actor — only the audit line reads it.</summary>
+    private sealed class StubCurrentActor : ICurrentActor
+    {
+        public Guid? UserId => Guid.Parse("00000000-0000-0000-0000-0000000000a1");
+
+        public string? Email => "dispatcher@northernlink.test";
+    }
 
     /// <summary>Creates a manifest declaring <paramref name="direction"/> and links it to the trip.</summary>
     private void AttachManifest(Trip trip, TripDirection? direction)
@@ -168,6 +180,97 @@ public class RoundTripCommandHandlerTests
 
         Assert.Equal(TripErrors.NotFound, missingOther.Error);
         Assert.Equal(TripErrors.NotFound, missingTarget.Error);
+        Assert.Equal(0, _trips.SaveCount);
+    }
+
+    /// <summary>
+    /// Drives a client leg out of the operational phase into ReadyForBilling — the console's
+    /// "read-only" trip, and the case the reason guard exists for.
+    /// </summary>
+    private static void CloseOperationally(Trip trip)
+    {
+        Assert.True(trip.RecordPostTripInspection().IsSuccess);
+        Assert.True(trip.FinishOperations().IsSuccess);
+        Assert.True(trip.IsOperationallyClosed);
+    }
+
+    [Fact]
+    public async Task Merge_touching_a_closed_leg_without_a_reason_is_refused()
+    {
+        var (outbound, inbound) = AddMergeablePair();
+        CloseOperationally(inbound);
+        var handler = MergeHandler();
+
+        var result = await handler.Handle(
+            new MergeRoundTripCommand(outbound.Id, inbound.Id), CancellationToken.None);
+
+        Assert.Equal(TripErrors.RoundTripReasonRequired, result.Error);
+        Assert.Null(outbound.RoundTripKey);
+        Assert.Null(inbound.RoundTripKey);
+        Assert.Equal(0, _trips.SaveCount);
+    }
+
+    [Fact]
+    public async Task Whitespace_is_not_a_reason_for_a_closed_leg()
+    {
+        var (outbound, inbound) = AddMergeablePair();
+        CloseOperationally(inbound);
+        var handler = MergeHandler();
+
+        var result = await handler.Handle(
+            new MergeRoundTripCommand(outbound.Id, inbound.Id, Reason: "   "), CancellationToken.None);
+
+        Assert.Equal(TripErrors.RoundTripReasonRequired, result.Error);
+        Assert.Equal(0, _trips.SaveCount);
+    }
+
+    [Fact]
+    public async Task Merge_touching_a_closed_leg_with_a_reason_pairs_both_legs()
+    {
+        // The domain still permits this — only Cancelled/WrittenOff are refused. The reason is
+        // the added requirement, and it is the handler's, not the aggregate's.
+        var (outbound, inbound) = AddMergeablePair();
+        CloseOperationally(inbound);
+        var handler = MergeHandler();
+
+        var result = await handler.Handle(
+            new MergeRoundTripCommand(
+                outbound.Id, inbound.Id, Reason: "Client confirmed both legs were one booking."),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.NotNull(outbound.RoundTripKey);
+        Assert.Equal(outbound.RoundTripKey, inbound.RoundTripKey);
+        Assert.Equal(TripStatus.ReadyForBilling, inbound.Status);
+        Assert.Equal(1, _trips.SaveCount);
+    }
+
+    [Fact]
+    public async Task Merge_of_two_open_legs_needs_no_reason()
+    {
+        var (outbound, inbound) = AddMergeablePair();
+        var handler = MergeHandler();
+
+        var result = await handler.Handle(
+            new MergeRoundTripCommand(outbound.Id, inbound.Id), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(outbound.RoundTripKey, inbound.RoundTripKey);
+        Assert.Equal(1, _trips.SaveCount);
+    }
+
+    [Fact]
+    public async Task A_reason_over_500_characters_is_refused()
+    {
+        var (outbound, inbound) = AddMergeablePair();
+        CloseOperationally(inbound);
+        var handler = MergeHandler();
+
+        var result = await handler.Handle(
+            new MergeRoundTripCommand(outbound.Id, inbound.Id, Reason: new string('x', 501)),
+            CancellationToken.None);
+
+        Assert.Equal(TripErrors.RoundTripReasonTooLong, result.Error);
         Assert.Equal(0, _trips.SaveCount);
     }
 

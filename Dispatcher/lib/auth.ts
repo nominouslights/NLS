@@ -5,6 +5,7 @@
 //   POST /api/identity/auth/login    { email, password }   → { accessToken, refreshToken, expiresAtUtc }
 //   POST /api/identity/auth/refresh  { refreshToken }      → same shape; BOTH tokens rotate (old refresh revoked)
 //   POST /api/identity/auth/logout   { refreshToken }      → 204 (revokes the refresh token)
+//   POST /api/identity/auth/verify-password  (Bearer) { password } → 204 match / 401 mismatch
 //   POST /api/identity/admin/bootstrap-token  (Bearer, Admin role; no body) → { token, expiresAtUtc }
 //   POST /api/identity/admin/bootstrap  { token, email, password } → new user id (NOT tokens)
 //
@@ -133,6 +134,41 @@ export async function createFirstAdmin(email: string, password: string): Promise
   });
   storeTokens(tokens);
   notify(true);
+}
+
+// --- step-up re-authentication ---------------------------------------------
+
+/**
+ * Confirms the password of the CURRENTLY signed-in user — the step-up check in
+ * front of an action that edits already-closed work (pairing a read-only trip).
+ * Authenticated: the backend identifies the account from the bearer token, so
+ * no email is sent and nothing about the session changes. 204 on a match, 401
+ * on a mismatch, 400 on a blank password.
+ *
+ * Two details of that 401 shape the call. It is sent WITHOUT a body, so the
+ * generic parser would surface "Request failed with status 401" — the wrong
+ * password is restated here instead. And it means "wrong password", never
+ * "stale token", so the refresh-and-retry is switched off: refresh tokens are
+ * single-use, and a refresh that loses a race clears the session, which would
+ * sign a dispatcher out for one typo.
+ *
+ * Mints no tokens and stores nothing. The password belongs in component state
+ * for the life of one modal and must be cleared on close/success — it must
+ * never reach a URL, localStorage, or any log line.
+ */
+export async function verifyPassword(password: string): Promise<void> {
+  try {
+    await request<void>(
+      "/api/identity/auth/verify-password",
+      { method: "POST", body: JSON.stringify({ password }) },
+      { retryOn401: false },
+    );
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      throw new ApiError("Identity.User.InvalidCredentials", "That password is not correct.", 401);
+    }
+    throw err;
+  }
 }
 
 // --- admin invites ---------------------------------------------------------

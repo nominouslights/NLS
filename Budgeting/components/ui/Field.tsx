@@ -217,6 +217,7 @@ export function TextAreaField({
   hint,
   rows = 3,
   mono = false,
+  maxLength,
   disabled = false,
 }: {
   label: string;
@@ -226,6 +227,8 @@ export function TextAreaField({
   hint?: ReactNode;
   rows?: number;
   mono?: boolean;
+  /** Hard cap enforced by the browser — mirror the backend's own limit. */
+  maxLength?: number;
   disabled?: boolean;
 }) {
   return (
@@ -235,6 +238,7 @@ export function TextAreaField({
         className="nl-input"
         value={value}
         rows={rows}
+        maxLength={maxLength}
         placeholder={placeholder}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}

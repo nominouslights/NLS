@@ -119,6 +119,18 @@ public static class TripErrors
     public static readonly Error RoundTripKeyRequired = Error.Validation(
         "Trips.Trip.RoundTripKeyRequired", "A round-trip key is required to pair trips.");
 
+    /// <summary>
+    /// Enforced by <c>MergeRoundTripCommandHandler</c>, not by the aggregate: the domain still
+    /// allows pairing a ReadyForBilling/Invoiced/Completed leg (only genuinely final ones are
+    /// refused). The reason is what makes that act reviewable afterwards.
+    /// </summary>
+    public static readonly Error RoundTripReasonRequired = Error.Validation(
+        "Trips.Trip.RoundTripReasonRequired",
+        "Pairing a trip that is already closed or billed requires a documented reason.");
+
+    public static readonly Error RoundTripReasonTooLong = Error.Validation(
+        "Trips.Trip.RoundTripReasonTooLong", "The reason cannot exceed 500 characters.");
+
     public static readonly Error DeadheadReturnOfEmptyLeg = Error.Conflict(
         "Trips.Trip.DeadheadReturnOfEmptyLeg", "An empty leg cannot get a deadhead return of its own.");
 

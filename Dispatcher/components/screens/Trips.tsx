@@ -28,6 +28,7 @@ import {
   listTrips,
   mergeRoundTrip,
   refetchUntil,
+  ROUND_TRIP_REASON_REQUIRED,
   roundTripManualCandidates,
   roundTripMergeCandidates,
   roundTripMismatch,
@@ -53,6 +54,9 @@ import {
   type DriverRecord,
 } from "@/lib/api/drivers";
 import { listVehicles, type Vehicle } from "@/lib/api/fleet";
+// Step-up re-authentication for edits to already-closed work. Lives with the
+// token lifecycle because it is an Identity endpoint; it mints nothing.
+import { verifyPassword } from "@/lib/auth";
 import { contractRateLabel, getClient, type ActiveContractSummary } from "@/lib/api/clients";
 // Leg-direction glyph + label — the one place that mapping lives (Billing.tsx
 // renders candidate/invoice legs from the same helper).
@@ -542,6 +546,92 @@ function EditTripModal({
 }
 
 // ---------------------------------------------------------------------------
+// Step-up confirmation — shared by the two modals that can pair a leg the
+// screen shows as read-only (isOperationallyClosed: the run is over, so the
+// detail header carries the "· read-only" chip). Pairing such a leg edits
+// already-billed work, so it takes an audit reason AND the dispatcher's own
+// password, checked against POST /api/identity/auth/verify-password before the
+// merge is attempted at all.
+//
+// The password lives in the calling modal's state and nowhere else: never in a
+// URL, never in storage, never logged — cleared on close, on success, and on a
+// failed check.
+// ---------------------------------------------------------------------------
+
+/** Backend's cap on the audit reason (mirrors the merge-round-trip contract). */
+const REASON_MAX = 500;
+
+function ClosedTripStepUp({
+  closedTrips,
+  reason,
+  onReasonChange,
+  password,
+  onPasswordChange,
+  disabled,
+}: {
+  /** The leg(s) that are operationally closed — named in the explanation so the
+   *  dispatcher can see exactly which side of the pairing forced this. */
+  closedTrips: TripRecord[];
+  reason: string;
+  onReasonChange: (v: string) => void;
+  password: string;
+  onPasswordChange: (v: string) => void;
+  disabled: boolean;
+}) {
+  const names = closedTrips.map((t) => t.tripNumber);
+  const subject = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0];
+  const plural = names.length > 1;
+  // An invoice claim makes the "the record changes, the invoice does not" line
+  // literal rather than hypothetical — say which one it is.
+  const invoiced = closedTrips.some((t) => t.billing !== null);
+
+  return (
+    <Panel borderColor="rgba(213,94,0,.4)" style={{ marginTop: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <StatusChip kind="over" label={invoiced ? "Read-only · already invoiced" : "Read-only trip"} />
+        <span style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 14, color: colors.headingBright }}>
+          Confirm with your password
+        </span>
+      </div>
+      <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textSecondary, lineHeight: 1.6 }}>
+        {subject} {plural ? "are" : "is"} read-only — the run is closed
+        {invoiced ? " and an invoice already claims it" : " and out of the operating window"}. Pairing changes the trip
+        record only: an invoice that has already been issued is not re-priced or re-keyed, so the round-trip rate has to
+        be adjusted on the invoice itself if it should apply. Because this edits closed work, the reason below is
+        recorded in the audit log against your account and you have to re-enter your own password to go ahead.
+      </div>
+      <div style={{ marginTop: 14 }}>
+        <TextAreaField
+          label="Reason — recorded in the audit log"
+          value={reason}
+          onChange={onReasonChange}
+          rows={3}
+          maxLength={REASON_MAX}
+          disabled={disabled}
+          hint={
+            <span style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textDim }}>
+              {reason.length}/{REASON_MAX}
+            </span>
+          }
+          placeholder="Return leg was billed separately in error — pairing so the round-trip rate can be credited"
+        />
+      </div>
+      <div style={{ marginTop: 14 }}>
+        <TextField
+          label="Your password · the account signed in here"
+          value={password}
+          onChange={onPasswordChange}
+          type="password"
+          autoComplete="current-password"
+          disabled={disabled}
+          placeholder="Re-enter your password"
+        />
+      </div>
+    </Panel>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Create Return modal — POST /api/trips (reversed corridor, free-form so the
 // route snapshot doesn't win over the reversal) followed by POST
 // /merge-round-trip(allowMismatch: true). Two existing endpoints composed
@@ -549,6 +639,11 @@ function EditTripModal({
 // own but is editable, which is what makes a next-day (or later) return
 // possible — same-day and cross-day both just land on canPairRoundTrip's hard
 // checks (same client, neither final, neither already paired).
+//
+// The merge half inherits the closed-leg rule: when the SOURCE trip is
+// operationally closed the backend demands an audit reason, so this modal grows
+// the same step-up (reason + password) the pairing modal uses. An open source
+// trip sees none of it.
 // ---------------------------------------------------------------------------
 
 /** Reverses a trip's stop list for the return leg: only Order is re-sequenced
@@ -567,7 +662,10 @@ function CreateReturnModal({
 }: {
   trip: TripRecord;
   onClose: () => void;
-  onCreated: (input: TripInput) => Promise<void>;
+  /** `reason` rides along to the merge half of the two-call composition — the
+   *  backend demands it when the SOURCE leg is closed, even though the freshly
+   *  created return is always Scheduled. */
+  onCreated: (input: TripInput, reason?: string) => Promise<void>;
 }) {
   const [serviceDate, setServiceDate] = useState(trip.serviceDate);
   const [windowStart, setWindowStart] = useState(hhmm(trip.windowEnd ?? trip.windowStart));
@@ -582,6 +680,12 @@ function CreateReturnModal({
 
   const [seatsCapacity, setSeatsCapacity] = useState(trip.seatsCapacity != null ? String(trip.seatsCapacity) : "");
   const [seatsMinimum, setSeatsMinimum] = useState(trip.seatsMinimum != null ? String(trip.seatsMinimum) : "");
+
+  // Step-up — only when the SOURCE leg is already closed. The new return leg is
+  // Scheduled by construction, so it can never be the side that forces this.
+  const stepUpRequired = isOperationallyClosed(trip);
+  const [reason, setReason] = useState("");
+  const [password, setPassword] = useState("");
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -630,6 +734,10 @@ function CreateReturnModal({
     if (!driverId) return setError("A return trip needs a driver — pick one from the roster.");
     if (!vehicleId) return setError("A return trip needs a vehicle — pick one from the fleet.");
 
+    const trimmedReason = reason.trim();
+    if (stepUpRequired && !trimmedReason) return setError("Enter the reason — it is recorded in the audit log.");
+    if (stepUpRequired && !password) return setError("Re-enter your password to pair a read-only trip.");
+
     const cap = vehicleId ? null : seatsCapacity === "" ? null : Number(seatsCapacity);
     const min = seatsMinimum === "" ? null : Number(seatsMinimum);
     if (!vehicleId && cap !== null && (!Number.isInteger(cap) || cap < 0))
@@ -660,26 +768,50 @@ function CreateReturnModal({
 
     setBusy(true);
     setError(null);
+    // Password FIRST — a failed check must not create the return trip at all.
+    if (stepUpRequired) {
+      try {
+        await verifyPassword(password);
+      } catch (e) {
+        setPassword(""); // only the password is dropped; the typed reason survives
+        setError(e instanceof ApiError ? e.message : "Could not confirm your password — please try again.");
+        setBusy(false);
+        return;
+      }
+    }
     try {
-      await onCreated(input);
+      await onCreated(input, stepUpRequired ? trimmedReason : undefined);
+      setPassword("");
       onClose();
     } catch (e) {
+      // Server wording verbatim — including RoundTripReasonRequired, which here
+      // means the return leg WAS created and only the pairing failed: recover
+      // with PAIR ROUND TRIP on the new leg rather than pressing this again.
       setError(e instanceof ApiError ? e.message : "Failed to create the return trip — please try again.");
       setBusy(false);
     }
+  }
+
+  function close() {
+    setPassword("");
+    onClose();
   }
 
   return (
     <ModalShell
       eyebrow={`Operations · ${trip.tripNumber} · ${corridorLabel(trip)}`}
       title="Create Return Trip"
-      onClose={onClose}
+      onClose={close}
       error={error ?? rosterError}
       footer={
         <>
-          <ActionButton onClick={onClose}>CANCEL</ActionButton>
-          <ActionButton variant="primary" onClick={submit} disabled={busy}>
-            {busy ? "CREATING…" : "CREATE RETURN"}
+          <ActionButton onClick={close}>CANCEL</ActionButton>
+          <ActionButton
+            variant="primary"
+            onClick={submit}
+            disabled={busy || (stepUpRequired && (reason.trim() === "" || password === ""))}
+          >
+            {busy ? "CREATING…" : stepUpRequired ? "CONFIRM & CREATE RETURN" : "CREATE RETURN"}
           </ActionButton>
         </>
       }
@@ -763,6 +895,17 @@ function CreateReturnModal({
           ))}
         </div>
       )}
+
+      {stepUpRequired && (
+        <ClosedTripStepUp
+          closedTrips={[trip]}
+          reason={reason}
+          onReasonChange={setReason}
+          password={password}
+          onPasswordChange={setPassword}
+          disabled={busy}
+        />
+      )}
     </ModalShell>
   );
 }
@@ -839,9 +982,14 @@ function PairRoundTripModal({
   /** The loaded page — the candidate helpers derive both tiers from it. */
   all: TripRecord[];
   onClose: () => void;
-  onPaired: (otherTripId: string, allowMismatch: boolean) => Promise<void>;
+  onPaired: (otherTripId: string, allowMismatch: boolean, reason?: string) => Promise<void>;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [reason, setReason] = useState("");
+  const [password, setPassword] = useState("");
+  // Set when the server answers RoundTripReasonRequired for a pairing this
+  // screen thought was open — its copy of the status can be a page-load stale.
+  const [reasonDemanded, setReasonDemanded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -857,37 +1005,94 @@ function PairRoundTripModal({
   // invoiceId, so a pairing that touches an invoiced leg fixes Trips only.
   const invoicedWarning = selected !== null && (trip.billing !== null || selected.billing !== null);
 
+  // Step-up when EITHER leg is read-only — the merge then edits work whose run
+  // is over. Nothing extra is asked of an ordinary open-to-open pairing.
+  const closedLegs = [trip, ...(selected ? [selected] : [])].filter(isOperationallyClosed);
+  const stepUpRequired = selected !== null && (closedLegs.length > 0 || reasonDemanded);
+  // When only the SERVER knows a leg is closed, we can't tell which one — name
+  // both rather than guess.
+  const stepUpTrips = closedLegs.length > 0 ? closedLegs : selected ? [trip, selected] : [trip];
+
+  /** Selecting a different candidate can drop the step-up entirely — never keep
+   *  a typed password around once nothing is going to check it. */
+  function chooseCandidate(id: string) {
+    setSelectedId(id);
+    const candidate = [...strict, ...manual].find((c) => c.id === id);
+    if (!reasonDemanded && !isOperationallyClosed(trip) && (!candidate || !isOperationallyClosed(candidate))) {
+      setPassword("");
+    }
+  }
+
   async function submit() {
     if (busy) return;
     if (!selected) {
       setError("Pick the leg to pair this trip with.");
       return;
     }
+    const trimmedReason = reason.trim();
+    if (stepUpRequired && !trimmedReason) {
+      setError("Enter the reason — it is recorded in the audit log.");
+      return;
+    }
+    if (stepUpRequired && !password) {
+      setError("Re-enter your password to pair a read-only trip.");
+      return;
+    }
     setBusy(true);
     setError(null);
+    // Password FIRST — the merge is never attempted on a failed check.
+    if (stepUpRequired) {
+      try {
+        await verifyPassword(password);
+      } catch (e) {
+        setPassword(""); // only the password is dropped; the typed reason survives
+        setError(e instanceof ApiError ? e.message : "Could not confirm your password — please try again.");
+        setBusy(false);
+        return;
+      }
+    }
     try {
-      await onPaired(selected.id, allowMismatch);
+      await onPaired(selected.id, allowMismatch, stepUpRequired ? trimmedReason : undefined);
+      setPassword("");
       onClose();
     } catch (e) {
       // Show the server's own message — the backend has a specific code for each
       // refusal (already paired, client mismatch, final, direction conflict,
-      // service-date/corridor mismatch) and its wording is the accurate one.
+      // service-date/corridor mismatch, reason required) and its wording is the
+      // accurate one. A reason-required answer also reveals the step-up, which
+      // this page's stale status did not know to ask for.
+      if (e instanceof ApiError && e.code === ROUND_TRIP_REASON_REQUIRED) setReasonDemanded(true);
       setError(e instanceof ApiError ? e.message : "Failed to pair the round trip — please try again.");
       setBusy(false);
     }
+  }
+
+  function close() {
+    setPassword("");
+    onClose();
   }
 
   return (
     <ModalShell
       eyebrow={`Operations · ${trip.tripNumber} · ${corridorLabel(trip)}`}
       title="Pair Round Trip"
-      onClose={onClose}
+      onClose={close}
       error={error}
       footer={
         <>
-          <ActionButton onClick={onClose}>CANCEL</ActionButton>
-          <ActionButton variant="primary" onClick={submit} disabled={busy || selected === null}>
-            {busy ? "PAIRING…" : allowMismatch ? "PAIR ANYWAY" : "PAIR ROUND TRIP"}
+          <ActionButton onClick={close}>CANCEL</ActionButton>
+          <ActionButton
+            variant="primary"
+            onClick={submit}
+            disabled={busy || selected === null || (stepUpRequired && (reason.trim() === "" || password === ""))}
+          >
+            {busy
+              ? "PAIRING…"
+              : stepUpRequired
+                ? "CONFIRM & PAIR"
+                : allowMismatch
+                  ? "PAIR ANYWAY"
+                  : "PAIR ROUND TRIP"}
           </ActionButton>
         </>
       }
@@ -919,7 +1124,7 @@ function PairRoundTripModal({
                     candidate={c}
                     selected={selectedId === c.id}
                     mismatch={null}
-                    onSelect={() => setSelectedId(c.id)}
+                    onSelect={() => chooseCandidate(c.id)}
                   />
                 ))}
               </div>
@@ -939,7 +1144,7 @@ function PairRoundTripModal({
                     candidate={c}
                     selected={selectedId === c.id}
                     mismatch={roundTripMismatch(trip, c)}
-                    onSelect={() => setSelectedId(c.id)}
+                    onSelect={() => chooseCandidate(c.id)}
                   />
                 ))}
               </div>
@@ -948,7 +1153,8 @@ function PairRoundTripModal({
         </>
       )}
 
-      {invoicedWarning && (
+      {/* The step-up panel makes the same point in more words — never both. */}
+      {invoicedWarning && !stepUpRequired && (
         <Panel borderColor="rgba(225,176,0,.4)" style={{ marginTop: 14 }}>
           <div style={{ display: "flex", alignItems: "flex-start", gap: 9 }}>
             <StatusChip kind="soon" label="Already invoiced" />
@@ -958,6 +1164,17 @@ function PairRoundTripModal({
             </span>
           </div>
         </Panel>
+      )}
+
+      {stepUpRequired && (
+        <ClosedTripStepUp
+          closedTrips={stepUpTrips}
+          reason={reason}
+          onReasonChange={setReason}
+          password={password}
+          onPasswordChange={setPassword}
+          disabled={busy}
+        />
       )}
     </ModalShell>
   );
@@ -1514,10 +1731,11 @@ export default function Trips({
   /** CREATE RETURN — mints the reversed-corridor trip (POST /api/trips), then
    *  pairs it to the source leg (POST /merge-round-trip, allowMismatch: true —
    *  the return may land on a different service date). Selects the new leg
-   *  once its pairing is visible. */
-  async function onReturnCreated(sourceId: string, input: TripInput) {
+   *  once its pairing is visible. `reason` is present only when the SOURCE leg
+   *  is operationally closed, which is when the backend requires it. */
+  async function onReturnCreated(sourceId: string, input: TripInput, reason?: string) {
     const newId = await createTrip(input);
-    await mergeRoundTrip(sourceId, newId, true);
+    await mergeRoundTrip(sourceId, newId, true, reason);
     await reloadUntil(newId, (trip) => trip !== undefined && trip.roundTripKey !== null);
     setSelectedId(newId);
   }
@@ -1525,9 +1743,11 @@ export default function Trips({
   /** PAIR ROUND TRIP — merges this leg with a candidate already on the page,
    *  then waits on the same signal CREATE RETURN does: the key is only really
    *  set once the projection shows it. allowMismatch comes from which tier the
-   *  dispatcher picked from, never from a guess about what the server allows. */
-  async function onRoundTripPaired(id: string, otherTripId: string, allowMismatch: boolean) {
-    await mergeRoundTrip(id, otherTripId, allowMismatch);
+   *  dispatcher picked from, never from a guess about what the server allows.
+   *  `reason` is the step-up audit note, present only when a leg is read-only —
+   *  the modal has already re-checked the dispatcher's password by this point. */
+  async function onRoundTripPaired(id: string, otherTripId: string, allowMismatch: boolean, reason?: string) {
+    await mergeRoundTrip(id, otherTripId, allowMismatch, reason);
     await reloadUntil(id, (trip) => trip !== undefined && trip.roundTripKey !== null);
   }
 
@@ -2442,7 +2662,7 @@ export default function Trips({
                 <CreateReturnModal
                   trip={t}
                   onClose={() => setModal(null)}
-                  onCreated={(input) => onReturnCreated(t.id, input)}
+                  onCreated={(input, reason) => onReturnCreated(t.id, input, reason)}
                 />
               )}
               {modal === "pairRoundTrip" && (
@@ -2450,7 +2670,9 @@ export default function Trips({
                   trip={t}
                   all={rows ?? []}
                   onClose={() => setModal(null)}
-                  onPaired={(otherTripId, allowMismatch) => onRoundTripPaired(t.id, otherTripId, allowMismatch)}
+                  onPaired={(otherTripId, allowMismatch, reason) =>
+                    onRoundTripPaired(t.id, otherTripId, allowMismatch, reason)
+                  }
                 />
               )}
               {modal === "unpairRoundTrip" && (

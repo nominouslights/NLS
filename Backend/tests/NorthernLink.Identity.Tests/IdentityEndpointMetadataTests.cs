@@ -31,6 +31,7 @@ public class IdentityEndpointMetadataTests : IAsyncLifetime
         // building the endpoints throws. The services are never resolved — the app never runs.
         builder.Services.AddScoped<ISender, Sender>();
         builder.Services.AddScoped<ITenantContext, StubTenantContext>();
+        builder.Services.AddScoped<ICurrentActor, StubCurrentActor>();
 
         _app = builder.Build();
         _app.MapIdentityEndpoints();
@@ -96,10 +97,31 @@ public class IdentityEndpointMetadataTests : IAsyncLifetime
         Assert.Null(endpoint.Metadata.GetMetadata<IAuthorizeData>());
     }
 
+    [Fact]
+    public void Verify_password_requires_authentication_but_no_particular_role()
+    {
+        // Step-up re-auth is only meaningful for someone already signed in, and it checks the
+        // token subject's own password — so it must be authenticated, and role-blind.
+        var endpoint = Endpoint("POST", "/api/identity/auth/verify-password");
+
+        var authorizeData = endpoint.Metadata.GetMetadata<IAuthorizeData>();
+
+        Assert.NotNull(authorizeData);
+        Assert.Null(authorizeData.Policy);
+        Assert.Null(authorizeData.Roles);
+    }
+
     private sealed class StubTenantContext : ITenantContext
     {
         public Guid? TenantId => null;
 
         public TenantType? TenantType => null;
+    }
+
+    private sealed class StubCurrentActor : ICurrentActor
+    {
+        public Guid? UserId => null;
+
+        public string? Email => null;
     }
 }

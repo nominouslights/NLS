@@ -10,5 +10,16 @@ namespace NorthernLink.Trips.Application.Trips.MergeRoundTrip;
 /// (ties go to <see cref="TripId"/>). <see cref="AllowMismatch"/> is the dispatcher's
 /// manual override: it relaxes only the same-service-date and mirrored-corridor checks
 /// (overnight returns, reworded corridors); client/tenant/Cancelled/already-paired stay hard.
+/// <para>
+/// <see cref="Reason"/> is optional when both legs are still open (Scheduled/InProgress) and
+/// <b>required</b> when either leg is operationally closed — a ReadyForBilling, Invoiced or
+/// Completed leg is work that has already been reported or billed, so re-keying it has to leave
+/// a documented "why" behind. Trimmed, 500 characters maximum. The handler enforces this;
+/// the aggregate deliberately does not (see <c>TripErrors.RoundTripReasonRequired</c>).
+/// </para>
 /// </summary>
-public sealed record MergeRoundTripCommand(Guid TripId, Guid OtherTripId, bool AllowMismatch = false) : ICommand;
+public sealed record MergeRoundTripCommand(
+    Guid TripId,
+    Guid OtherTripId,
+    bool AllowMismatch = false,
+    string? Reason = null) : ICommand;

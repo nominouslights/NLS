@@ -340,7 +340,8 @@ internal static class TripPlanningEndpoints
         }
 
         var result = await sender.Send(
-            new MergeRoundTripCommand(id, request.OtherTripId, request.AllowMismatch), cancellationToken);
+            new MergeRoundTripCommand(id, request.OtherTripId, request.AllowMismatch, request.Reason),
+            cancellationToken);
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
@@ -760,8 +761,19 @@ public sealed record RecordTripDemandRequest(int SeatsConfirmed, bool DemandGuar
 /// plus the optional <c>allowMismatch</c> manual override (defaults false when omitted),
 /// which relaxes only the same-service-date and mirrored-corridor checks.
 /// (/unpair-round-trip and /deadhead-return take no body.)
+/// <para>
+/// <c>reason</c> is optional for two open legs and required when either leg is operationally
+/// closed (anything other than Scheduled/InProgress — ReadyForBilling, Invoiced, Completed):
+/// omitting it there fails with <c>Trips.Trip.RoundTripReasonRequired</c>, and over 500
+/// characters fails with <c>Trips.Trip.RoundTripReasonTooLong</c>. Sensitive pairings are
+/// expected to be preceded by a step-up password check against
+/// <c>POST /api/identity/auth/verify-password</c>.
+/// </para>
 /// </summary>
-public sealed record MergeRoundTripRequest(Guid OtherTripId, bool AllowMismatch = false);
+public sealed record MergeRoundTripRequest(
+    Guid OtherTripId,
+    bool AllowMismatch = false,
+    string? Reason = null);
 
 /// <summary>Request body for POST /api/trips/routes. Stops are chosen from the catalog by id (ordered).</summary>
 public sealed record CreateRouteRequest(

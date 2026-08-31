@@ -299,17 +299,33 @@ export function recordTripDemand(
   });
 }
 
+/** Backend error code when a pairing that touches an operationally closed leg
+ *  arrives without a reason. */
+export const ROUND_TRIP_REASON_REQUIRED = "Trips.Trip.RoundTripReasonRequired";
+
 /** POST /api/trips/{id}/merge-round-trip → 204 — pairs this leg with
  *  `otherTripId` under a shared roundTripKey (Billing prices an
  *  Outbound+Inbound pair sharing a key as one round-trip line).
  *  With `allowMismatch` the backend skips the same-date and mirrored-corridor
  *  checks (same client / not cancelled / unpaired still enforced) and assigns
- *  direction chronologically — the earlier leg becomes Outbound. The flag is
- *  omitted from the body when false to keep the wire shape backward compatible. */
-export function mergeRoundTrip(id: string, otherTripId: string, allowMismatch = false): Promise<void> {
+ *  direction chronologically — the earlier leg becomes Outbound.
+ *  `reason` (max 500) is recorded as an audit note; the backend REQUIRES it
+ *  when either leg is operationally closed and answers
+ *  {@link ROUND_TRIP_REASON_REQUIRED} when it is missing.
+ *  Both optional fields are omitted from the body when unset, keeping the wire
+ *  shape backward compatible for the ordinary same-day pairing. */
+export function mergeRoundTrip(
+  id: string,
+  otherTripId: string,
+  allowMismatch = false,
+  reason?: string,
+): Promise<void> {
+  const body: { otherTripId: string; allowMismatch?: true; reason?: string } = { otherTripId };
+  if (allowMismatch) body.allowMismatch = true;
+  if (reason) body.reason = reason;
   return request<void>(`/api/trips/${id}/merge-round-trip`, {
     method: "POST",
-    body: JSON.stringify(allowMismatch ? { otherTripId, allowMismatch: true } : { otherTripId }),
+    body: JSON.stringify(body),
   });
 }
 

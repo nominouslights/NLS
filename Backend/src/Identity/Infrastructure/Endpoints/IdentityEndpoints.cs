@@ -10,6 +10,7 @@ using NorthernLink.Identity.Application.Auth.Login;
 using NorthernLink.Identity.Application.Auth.Logout;
 using NorthernLink.Identity.Application.Auth.Refresh;
 using NorthernLink.Identity.Application.Auth.Setup;
+using NorthernLink.Identity.Application.Auth.VerifyPassword;
 using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Shared.Tenancy;
@@ -34,6 +35,10 @@ public static class IdentityEndpoints
         // Any authenticated caller, whatever their role — a client needs to be able to read its
         // own role in order to render the right thing, including "you may not be here".
         auth.MapGet("me", Me).RequireAuthorization();
+
+        // Step-up re-authentication. Authenticated on purpose: it checks the password of the
+        // token's own subject and nobody else's, so it can never be used to probe accounts.
+        auth.MapPost("verify-password", VerifyPassword).RequireAuthorization();
 
         // First-run setup — anonymous, and self-closing once any user exists. The status check
         // drives whether the console shows the create-admin screen; setup creates the first admin.
@@ -118,6 +123,30 @@ public static class IdentityEndpoints
             principal.FindFirstValue(JwtAccessTokenIssuer.TenantIdClaimType) ?? string.Empty,
             principal.FindFirstValue(JwtAccessTokenIssuer.TenantTypeClaimType) ?? string.Empty));
 
+    /// <summary>
+    /// Confirms the signed-in caller's password without issuing or rotating a single token —
+    /// 204 on match, 401 on mismatch, 400 on a blank password. The user id comes from the
+    /// validated access token (<c>ICurrentActor</c> reads the <c>sub</c> claim), never from the
+    /// body: the request carries a password and nothing else, so there is no account to point it
+    /// at but the caller's own.
+    /// </summary>
+    private static async Task<IResult> VerifyPassword(
+        VerifyPasswordRequest request,
+        ICurrentActor currentActor,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (currentActor.UserId is not { } userId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(
+            new VerifyPasswordCommand(userId, request.Password ?? string.Empty), cancellationToken);
+
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
     private static async Task<IResult> GenerateBootstrapToken(
         ITenantContext tenantContext, ISender sender, string? role, CancellationToken cancellationToken)
     {
@@ -145,6 +174,13 @@ public sealed record RefreshRequest(string? RefreshToken);
 
 /// <summary>Request body for POST /api/identity/auth/setup (first-run create-admin).</summary>
 public sealed record SetupRequest(string? Email, string? Password);
+
+/// <summary>
+/// Request body for POST /api/identity/auth/verify-password — the caller's own password and
+/// nothing else. There is deliberately no email or user id field: the account being checked is
+/// always the bearer token's subject.
+/// </summary>
+public sealed record VerifyPasswordRequest(string? Password);
 
 /// <summary>Request body for POST /api/identity/admin/bootstrap.</summary>
 public sealed record BootstrapAdminRequest(string? Token, string? Email, string? Password);

@@ -58,14 +58,26 @@ async function parseError(res: Response): Promise<ApiError> {
   return new ApiError(code, message, res.status);
 }
 
-/** Authenticated fetch with token refresh + 401 retry logic (returns raw Response). */
-async function authenticatedFetch(path: string, init?: RequestInit): Promise<Response> {
+/**
+ * Authenticated fetch with token refresh + 401 retry logic (returns raw Response).
+ *
+ * `retryOn401` must be false for endpoints where a 401 means "the thing you sent was
+ * wrong" rather than "your token expired" — the step-up password check is the one such
+ * endpoint today. Refreshing there is actively harmful: refresh tokens are single-use, so
+ * every mistyped password would rotate the session, and a refresh that loses a race calls
+ * clearLocalAuth() — signing the dispatcher out for a typo.
+ */
+async function authenticatedFetch(
+  path: string,
+  init?: RequestInit,
+  retryOn401 = true,
+): Promise<Response> {
   const { getAccessToken, getValidAccessToken, refreshAccessToken } = await import("../auth");
 
   const token = await getValidAccessToken();
   let res = await send(path, init, token);
 
-  if (res.status === 401) {
+  if (res.status === 401 && retryOn401) {
     let retryToken: string | null = null;
     const current = getAccessToken();
     if (current && current !== token) {
@@ -112,11 +124,18 @@ export async function identityGet<T>(path: string): Promise<T> {
  * refresh fails, lib/auth.ts clears the session (surfacing the login screen)
  * and the original 401 is thrown. Never loops.
  *
+ * Pass `{ retryOn401: false }` when a 401 from the endpoint means the request was
+ * wrong rather than the token stale — see authenticatedFetch.
+ *
  * Exported for lib/auth.ts (admin invite minting needs an authenticated call);
  * the domain endpoint wrappers remain the preferred surface for feature code.
  */
-export async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await authenticatedFetch(path, init);
+export async function request<T>(
+  path: string,
+  init?: RequestInit,
+  opts?: { retryOn401?: boolean },
+): Promise<T> {
+  const res = await authenticatedFetch(path, init, opts?.retryOn401 ?? true);
 
   if (!res.ok) throw await parseError(res);
   if (res.status === 204) return undefined as T;
