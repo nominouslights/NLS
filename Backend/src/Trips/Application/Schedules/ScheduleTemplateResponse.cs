@@ -24,7 +24,7 @@ public sealed record ScheduleTemplateResponse(
     TimeOnly DepartureTime,
     TimeOnly? ReturnDepartureTime,
     bool ReturnNextDay,
-    int SeatsCapacity,
+    int? SeatsCapacity,
     int? SeatsMinimum,
     string? DefaultVehicleUnit,
     Guid? DefaultDriverId,

@@ -22,9 +22,20 @@ public sealed record TripDraft(
 /// <see cref="ScheduleRecurrenceKind"/> — weekly days, an every-N-days interval, or
 /// clamped monthly days — emitting an Outbound leg per matching date plus an Inbound
 /// return leg when the template has a return departure, the pair sharing a RoundTripKey
-/// (<c>{templateId:N}:{yyyyMMdd}</c>). Occurrences already materialized (passed in as
-/// existing keys) are skipped, which makes generation idempotent; the database's unique
-/// index on (tenant, template, date, direction) backstops races.
+/// (<c>{templateId:N}:{yyyyMMdd}</c>).
+/// <para>
+/// The template's dated <see cref="ScheduleTemplate.Exceptions"/> are applied first:
+/// a Skip removes the whole occurrence (both legs of a pair, including a next-day
+/// return); an in-window ExtraRun adds an occurrence at the exception's own times (a
+/// same-day return leg iff the exception has one — even on a one-way template), and when
+/// it lands on a recurrence date the exception's times win; a TimeOverride keeps the
+/// occurrence and swaps each set time in, unset fields falling back to the template's
+/// (<see cref="ScheduleTemplate.ReturnNextDay"/> behaves exactly as without the override).
+/// </para>
+/// Occurrences already materialized (passed in as existing keys) are skipped, which makes
+/// generation idempotent; the database's unique index on (tenant, template, date,
+/// direction) backstops races. Exceptions are generation-time only: a trip already
+/// materialized for a date is never cancelled or retimed from here.
 /// </summary>
 public static class TripGenerator
 {
@@ -38,21 +49,81 @@ public static class TripGenerator
             return [];
         }
 
+        var windowEndExclusive = today.AddDays(template.GenerationHorizonDays);
+
+        // At most one exception per date (an aggregate invariant), so a plain dictionary.
+        var exceptionsByDate = template.Exceptions.ToDictionary(e => e.Date);
+
+        // Occurrence dates = recurrence dates − Skip dates ∪ in-window ExtraRun dates.
+        // The SortedSet both dedupes an extra run landing on a recurrence date and keeps
+        // the drafts in ascending date order.
+        var occurrenceDates = new SortedSet<DateOnly>(MatchingDates(template, today));
+        foreach (var exception in template.Exceptions)
+        {
+            switch (exception.Kind)
+            {
+                case ScheduleExceptionKind.Skip:
+                    occurrenceDates.Remove(exception.Date);
+                    break;
+
+                case ScheduleExceptionKind.ExtraRun
+                    when exception.Date >= today && exception.Date < windowEndExclusive:
+                    occurrenceDates.Add(exception.Date);
+                    break;
+            }
+        }
+
         var drafts = new List<TripDraft>();
 
-        foreach (var date in MatchingDates(template, today))
+        foreach (var date in occurrenceDates)
         {
+            exceptionsByDate.TryGetValue(date, out var exception);
+
+            if (exception is { Kind: ScheduleExceptionKind.ExtraRun })
+            {
+                // The exception's times win outright (dedupe case included). Same-day only:
+                // an extra run never spans midnight, whatever the template's own return does.
+                var extraDeparture = exception.DepartureTime!.Value;
+                var extraKey = exception.ReturnDepartureTime is null
+                    ? null
+                    : RoundTripKeyFor(template.Id, date);
+
+                if (!existingOccurrences.Contains((date, TripDirection.Outbound)))
+                {
+                    drafts.Add(new TripDraft(date, TripDirection.Outbound, extraKey, extraDeparture));
+                }
+
+                if (exception.ReturnDepartureTime is { } extraReturn
+                    && !existingOccurrences.Contains((date, TripDirection.Inbound)))
+                {
+                    drafts.Add(new TripDraft(date, TripDirection.Inbound, extraKey, extraReturn));
+                }
+
+                continue;
+            }
+
+            // A TimeOverride swaps in each time it sets; everything else — pairing, key
+            // minting, ReturnNextDay — behaves exactly as an ordinary occurrence.
+            var isOverride = exception is { Kind: ScheduleExceptionKind.TimeOverride };
+            var departureTime = isOverride
+                ? exception!.DepartureTime ?? template.DepartureTime
+                : template.DepartureTime;
+
             var roundTripKey = template.ReturnDepartureTime is null
                 ? null
                 : RoundTripKeyFor(template.Id, date);
 
             if (!existingOccurrences.Contains((date, TripDirection.Outbound)))
             {
-                drafts.Add(new TripDraft(date, TripDirection.Outbound, roundTripKey, template.DepartureTime));
+                drafts.Add(new TripDraft(date, TripDirection.Outbound, roundTripKey, departureTime));
             }
 
-            if (template.ReturnDepartureTime is { } returnTime)
+            if (template.ReturnDepartureTime is { } templateReturn)
             {
+                var returnTime = isOverride
+                    ? exception!.ReturnDepartureTime ?? templateReturn
+                    : templateReturn;
+
                 // An overnight route's return lands on the following calendar day — the
                 // outbound and inbound legs share a RoundTripKey (minted off the outbound's
                 // date) even though their ServiceDates differ.

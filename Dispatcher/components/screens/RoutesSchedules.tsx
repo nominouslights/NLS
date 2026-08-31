@@ -8,6 +8,7 @@ import {
   createScheduleTemplate,
   DAY_SHORT,
   hhmm,
+  isCargoService,
   listRoutes,
   listScheduleTemplates,
   RECURRENCE_LABELS,
@@ -36,6 +37,7 @@ import { ActionButton } from "@/components/ui/Button";
 import { CorridorStepper } from "@/components/ui/CorridorStepper";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { StopFormModal } from "@/components/StopFormModal";
+import SpecialDatesModal from "@/components/SpecialDatesModal";
 import { DateField, FieldLabel, NumberField, SelectField, TextField, TimeField } from "@/components/ui/Field";
 
 // Routes & Schedules — corridor routes and recurring schedule templates from
@@ -692,7 +694,7 @@ function TemplateFormModal({
     existing?.returnDepartureTime ? hhmm(existing.returnDepartureTime) : "",
   );
   const [returnNextDay, setReturnNextDay] = useState(existing?.returnNextDay ?? false);
-  const [seatsCapacity, setSeatsCapacity] = useState(existing ? String(existing.seatsCapacity) : "");
+  const [seatsCapacity, setSeatsCapacity] = useState(existing?.seatsCapacity != null ? String(existing.seatsCapacity) : "");
   const [seatsMinimum, setSeatsMinimum] = useState(existing?.seatsMinimum != null ? String(existing.seatsMinimum) : "");
   const [vehicleUnit, setVehicleUnit] = useState(existing?.defaultVehicleUnit ?? "");
   const [defaultDriverId, setDefaultDriverId] = useState(existing?.defaultDriverId ?? "");
@@ -703,6 +705,10 @@ function TemplateFormModal({
 
   const [clients, setClients] = useState<ClientRecord[] | null>(null);
   const [drivers, setDrivers] = useState<DriverRecord[] | null>(null);
+
+  // Cargo/Grocery templates carry no passenger seats — the fields disappear
+  // and the wire always sends null (the backend normalizes cargo to null too).
+  const cargoSvc = isCargoService(serviceType);
 
   useEffect(() => {
     let active = true;
@@ -753,9 +759,11 @@ function TemplateFormModal({
     }
 
     if (!departure) return setError("Enter the departure time.");
-    const cap = Number(seatsCapacity);
-    if (!Number.isInteger(cap) || cap <= 0) return setError("Seats capacity must be a whole number.");
-    const min = seatsMinimum === "" ? null : Number(seatsMinimum);
+    // Cargo/Grocery: seats are N/A — skip the checks entirely and submit nulls.
+    const cap = cargoSvc ? null : Number(seatsCapacity);
+    if (!cargoSvc && (!Number.isInteger(cap) || (cap as number) <= 0))
+      return setError("Seats capacity must be a whole number.");
+    const min = cargoSvc || seatsMinimum === "" ? null : Number(seatsMinimum);
     if (min !== null && (!Number.isInteger(min) || min < 0)) return setError("Seats minimum must be a whole number.");
     const horizon = Number(horizonDays);
     if (!Number.isInteger(horizon) || horizon <= 0) return setError("Generation horizon must be a whole number of days.");
@@ -956,7 +964,7 @@ function TemplateFormModal({
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 14, marginTop: 14 }}>
+      <div style={{ display: "grid", gridTemplateColumns: cargoSvc ? "1fr 1fr 2fr" : "1fr 1fr 1fr 1fr", gap: 14, marginTop: 14 }}>
         <TimeField label="Departure" value={departure} onChange={setDeparture} />
         <TimeField
           label="Return departure"
@@ -964,8 +972,29 @@ function TemplateFormModal({
           onChange={setReturnDeparture}
           hint={<span style={{ color: colors.textFaint }}>· set = paired round trip</span>}
         />
-        <NumberField label="Seats capacity" value={seatsCapacity} onChange={setSeatsCapacity} min={1} step={1} />
-        <NumberField label="Seats minimum" value={seatsMinimum} onChange={setSeatsMinimum} min={0} step={1} />
+        {cargoSvc ? (
+          <div
+            style={{
+              alignSelf: "end",
+              padding: "10px 13px",
+              borderRadius: 9,
+              background: colors.cardBg,
+              border: `1px solid ${colors.border}`,
+              fontFamily: fonts.body,
+              fontSize: 11.5,
+              color: colors.textMuted,
+              lineHeight: 1.45,
+            }}
+          >
+            Cargo &amp; grocery templates carry no passenger seats — capacity is N/A. Shipments are assigned from the
+            Cargo &amp; Grocery screen.
+          </div>
+        ) : (
+          <>
+            <NumberField label="Seats capacity" value={seatsCapacity} onChange={setSeatsCapacity} min={1} step={1} />
+            <NumberField label="Seats minimum" value={seatsMinimum} onChange={setSeatsMinimum} min={0} step={1} />
+          </>
+        )}
       </div>
 
       {returnDeparture && (
@@ -1010,12 +1039,18 @@ function TemplateFormModal({
 // Screen
 // ---------------------------------------------------------------------------
 
-export default function RoutesSchedules() {
+export default function RoutesSchedules({
+  onOpenTrip,
+}: {
+  /** Jump to a trip on the Trips screen (Special Dates "already generated" links). */
+  onOpenTrip?: (tripId: string) => void;
+}) {
   const [routes, setRoutes] = useState<RouteRecord[] | null>(null);
   const [templates, setTemplates] = useState<ScheduleTemplateRecord[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [sel, setSel] = useState<Selection | null>(null);
   const [modal, setModal] = useState<null | "newRoute" | "editRoute" | "newTemplate" | "editTemplate">(null);
+  const [specialDatesFor, setSpecialDatesFor] = useState<ScheduleTemplateRecord | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -1148,6 +1183,13 @@ export default function RoutesSchedules() {
       )}
       {modal === "editTemplate" && template && routes !== null && (
         <TemplateFormModal existing={template} routes={routes} onClose={() => setModal(null)} onSaved={saveTemplate} />
+      )}
+      {specialDatesFor && (
+        <SpecialDatesModal
+          template={specialDatesFor}
+          onClose={() => setSpecialDatesFor(null)}
+          onOpenTrip={onOpenTrip}
+        />
       )}
     </div>
   );
@@ -1496,10 +1538,20 @@ export default function RoutesSchedules() {
               <Panel>
                 <SectionLabel>Capacity &amp; defaults</SectionLabel>
                 <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-                  <DetailRow label="Seats capacity" value={String(template.seatsCapacity)} valueStyle={{ fontFamily: fonts.mono }} />
+                  <DetailRow
+                    label="Seats capacity"
+                    value={template.seatsCapacity != null ? String(template.seatsCapacity) : "—"}
+                    valueStyle={{ fontFamily: fonts.mono }}
+                  />
                   <DetailRow
                     label="Seats minimum"
-                    value={template.seatsMinimum != null ? String(template.seatsMinimum) : "no minimum"}
+                    value={
+                      template.seatsMinimum != null
+                        ? String(template.seatsMinimum)
+                        : isCargoService(template.serviceType)
+                          ? "—"
+                          : "no minimum"
+                    }
                     valueStyle={{ fontFamily: fonts.mono }}
                   />
                   <DetailRow label="Default vehicle" value={template.defaultVehicleUnit ?? "—"} valueStyle={{ fontFamily: fonts.mono }} />
@@ -1534,10 +1586,11 @@ export default function RoutesSchedules() {
               trips from generating — already-generated trips stay on the board.
             </div>
 
-            <div style={{ display: "flex", gap: 9 }}>
+            <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
               <ActionButton variant="primary" onClick={() => setModal("editTemplate")}>
                 EDIT TEMPLATE
               </ActionButton>
+              <ActionButton onClick={() => setSpecialDatesFor(template)}>SPECIAL DATES</ActionButton>
               <ActionButton
                 variant={template.active ? "destructive" : "success"}
                 onClick={() => toggleTemplateActive(template)}

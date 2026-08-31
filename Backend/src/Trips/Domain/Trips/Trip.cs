@@ -846,9 +846,15 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         return Result.Success();
     }
 
-    /// <summary>Records confirmed demand (Manifests screen; guaranteed = "gift-a-seat" pledge).</summary>
+    /// <summary>Records confirmed demand (Manifests screen; guaranteed = "gift-a-seat" pledge). Not applicable to cargo services.</summary>
     public Result RecordDemand(int seatsConfirmed, bool demandGuaranteed)
     {
+        // A cargo run carries goods, not passengers — seat demand has nothing to attach to.
+        if (ServiceType.IsCargoService())
+        {
+            return Result.Failure(TripErrors.DemandNotApplicable);
+        }
+
         if (IsOperationallyClosed)
         {
             return Result.Failure(TripErrors.OperationallyClosed(Status));

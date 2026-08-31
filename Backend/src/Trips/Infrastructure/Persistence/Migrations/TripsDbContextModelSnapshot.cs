@@ -639,6 +639,61 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                     b.ToTable("routes", "trips");
                 });
 
+            modelBuilder.Entity("NorthernLink.Trips.Domain.Schedules.ScheduleException", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<DateOnly>("Date")
+                        .HasColumnType("date")
+                        .HasColumnName("date");
+
+                    b.Property<TimeOnly?>("DepartureTime")
+                        .HasColumnType("time without time zone")
+                        .HasColumnName("departure_time");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("kind");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("note");
+
+                    b.Property<TimeOnly?>("ReturnDepartureTime")
+                        .HasColumnType("time without time zone")
+                        .HasColumnName("return_departure_time");
+
+                    b.Property<Guid>("ScheduleTemplateId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("schedule_template_id");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ScheduleTemplateId");
+
+                    b.HasIndex("TenantId", "ScheduleTemplateId", "Date")
+                        .IsUnique();
+
+                    b.ToTable("schedule_exceptions", "trips");
+                });
+
             modelBuilder.Entity("NorthernLink.Trips.Domain.Schedules.ScheduleTemplate", b =>
                 {
                     b.Property<Guid>("Id")
@@ -726,7 +781,7 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("route_id");
 
-                    b.Property<int>("SeatsCapacity")
+                    b.Property<int?>("SeatsCapacity")
                         .HasColumnType("integer")
                         .HasColumnName("seats_capacity");
 
@@ -1430,6 +1485,61 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                     b.ToTable("rm_routes", "trips");
                 });
 
+            modelBuilder.Entity("NorthernLink.Trips.Infrastructure.Persistence.ReadModels.ScheduleExceptionReadModel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<DateOnly>("Date")
+                        .HasColumnType("date")
+                        .HasColumnName("date");
+
+                    b.Property<TimeOnly?>("DepartureTime")
+                        .HasColumnType("time without time zone")
+                        .HasColumnName("departure_time");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("kind");
+
+                    b.Property<string>("Note")
+                        .HasColumnType("text")
+                        .HasColumnName("note");
+
+                    b.Property<TimeOnly?>("ReturnDepartureTime")
+                        .HasColumnType("time without time zone")
+                        .HasColumnName("return_departure_time");
+
+                    b.Property<Guid>("ScheduleTemplateId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("schedule_template_id");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "ScheduleTemplateId", "Date");
+
+                    b.ToTable("rm_schedule_exceptions", "trips");
+                });
+
             modelBuilder.Entity("NorthernLink.Trips.Infrastructure.Persistence.ReadModels.ScheduleTemplateReadModel", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1517,7 +1627,7 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("route_name");
 
-                    b.Property<int>("SeatsCapacity")
+                    b.Property<int?>("SeatsCapacity")
                         .HasColumnType("integer")
                         .HasColumnName("seats_capacity");
 
@@ -2374,6 +2484,15 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                     b.Navigation("Stops");
                 });
 
+            modelBuilder.Entity("NorthernLink.Trips.Domain.Schedules.ScheduleException", b =>
+                {
+                    b.HasOne("NorthernLink.Trips.Domain.Schedules.ScheduleTemplate", null)
+                        .WithMany("Exceptions")
+                        .HasForeignKey("ScheduleTemplateId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("NorthernLink.Trips.Domain.Shipments.ShipmentLeg", b =>
                 {
                     b.HasOne("NorthernLink.Trips.Domain.Shipments.Shipment", null)
@@ -2647,6 +2766,11 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                         });
 
                     b.Navigation("Stops");
+                });
+
+            modelBuilder.Entity("NorthernLink.Trips.Domain.Schedules.ScheduleTemplate", b =>
+                {
+                    b.Navigation("Exceptions");
                 });
 
             modelBuilder.Entity("NorthernLink.Trips.Domain.Shipments.Shipment", b =>

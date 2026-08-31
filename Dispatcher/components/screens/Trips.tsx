@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { colors, fonts, rowSurface, statusMeta, svcMeta } from "@/lib/theme";
+import { colors, fonts, rowSurface, SERVICE_SHORT, statusMeta, svcMeta } from "@/lib/theme";
 import {
   ApiError,
   deleteInspection,
@@ -23,6 +23,7 @@ import {
   getTrip,
   hasClearanceFor,
   hhmm,
+  isCargoService,
   isOpenTrip,
   isOperationallyClosed,
   listTrips,
@@ -39,9 +40,11 @@ import {
   updateTrip,
   type TripInput,
   type TripRecord,
+  type TripServiceType,
   type TripStop,
   type TripUpdateInput,
 } from "@/lib/api/trips";
+import { listShipments, shipmentLegChip, type ShipmentRecord } from "@/lib/api/shipments";
 import {
   listDrivers,
   listDriverClearances,
@@ -70,6 +73,8 @@ const DISPATCHER_LABEL = "Dispatch";
 /** Backend error code when starting a trip without a ≥1-passenger manifest. */
 const PASSENGER_MANIFEST_REQUIRED = "Trips.Trip.PassengerManifestRequired";
 const POST_TRIP_INSPECTION_REQUIRED = "Trips.Trip.PostTripInspectionRequired";
+/** Backend error code when starting a cargo trip with no assigned shipment leg. */
+const SHIPMENT_REQUIRED = "Trips.Trip.ShipmentRequired";
 
 // Trips — master list + detail from the real Trips API (GET /api/trips over the
 // selected month or quarter, one page at a time). Every filter is applied
@@ -79,6 +84,17 @@ const POST_TRIP_INSPECTION_REQUIRED = "Trips.Trip.PostTripInspectionRequired";
 // (lib/api/trips.ts), never persisted statuses.
 
 const FILTERS = ["All trips", "Open only", "Assigned"] as const;
+/** Service-type filter values (All + the six backend types), wired to the
+ *  server-side TripListParams.serviceType so page and total always agree. */
+const SERVICE_FILTERS: (TripServiceType | "")[] = [
+  "",
+  "ContractCrew",
+  "Community",
+  "Nihb",
+  "Charter",
+  "Cargo",
+  "Grocery",
+];
 const PAGE_SIZE = 50;
 
 function fmtUtcDateTime(iso: string | null): string {
@@ -434,11 +450,19 @@ function EditTripModal({
     if (!windowStart) return setError("Enter the departure window start.");
     const km = Number(distanceKm);
     if (!Number.isInteger(km) || km < 0) return setError("Distance must be a whole number of km.");
+    // Cargo/Grocery trips carry no passenger seats — always null on the wire.
     // With a fleet vehicle assigned, capacity is vehicle-derived — pass the
     // trip's existing snapshot through unchanged (reassigning is how it moves).
-    const cap = trip.vehicleId ? trip.seatsCapacity : seatsCapacity === "" ? null : Number(seatsCapacity);
-    const min = seatsMinimum === "" ? null : Number(seatsMinimum);
-    if (!trip.vehicleId && cap !== null && (!Number.isInteger(cap) || cap < 0))
+    const cargoSvc = isCargoService(trip.serviceType);
+    const cap = cargoSvc
+      ? null
+      : trip.vehicleId
+        ? trip.seatsCapacity
+        : seatsCapacity === ""
+          ? null
+          : Number(seatsCapacity);
+    const min = cargoSvc || seatsMinimum === "" ? null : Number(seatsMinimum);
+    if (!cargoSvc && !trip.vehicleId && cap !== null && (!Number.isInteger(cap) || cap < 0))
       return setError("Seats capacity must be a whole number.");
     if (min !== null && (!Number.isInteger(min) || min < 0)) return setError("Seats minimum must be a whole number.");
 
@@ -493,6 +517,23 @@ function EditTripModal({
         <TimeField label="Window start" value={windowStart} onChange={setWindowStart} />
         <TimeField label="Window end (optional)" value={windowEnd} onChange={setWindowEnd} />
         <TextField label="PO number (optional)" value={poNumber} onChange={setPoNumber} mono placeholder="PO-AG-2261" />
+        {isCargoService(trip.serviceType) ? (
+          <div
+            style={{
+              alignSelf: "end",
+              padding: "10px 13px",
+              borderRadius: 9,
+              background: colors.cardBg,
+              border: `1px solid ${colors.border}`,
+              fontFamily: fonts.body,
+              fontSize: 11.5,
+              color: colors.textMuted,
+              lineHeight: 1.45,
+            }}
+          >
+            Cargo &amp; grocery trips carry no passenger seats — capacity is N/A.
+          </div>
+        ) : (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
           {trip.vehicleId ? (
             // Capacity is snapshotted from the assigned vehicle — read-only here.
@@ -525,6 +566,7 @@ function EditTripModal({
           )}
           <NumberField label="Seats minimum" value={seatsMinimum} onChange={setSeatsMinimum} min={0} step={1} />
         </div>
+        )}
       </div>
       <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim, marginTop: 14, lineHeight: 1.5 }}>
         Corridor, service type, and client come from the trip&rsquo;s route/client snapshot and are not editable here.
@@ -967,6 +1009,7 @@ export default function Trips({
   setPage: (next: number) => void;
 }) {
   const [filter, setFilter] = useState(0);
+  const [svcFilter, setSvcFilter] = useState<TripServiceType | "">("");
   const [showCancelled, setShowCancelled] = useState(false);
   const [rows, setRows] = useState<TripRecord[] | null>(null);
   const [totalCount, setTotalCount] = useState(0);
@@ -983,6 +1026,9 @@ export default function Trips({
   const [manifestState, setManifestState] = useState<{ tripId: string; manifest: TripManifest | null } | null>(null);
   const [inspectionsState, setInspectionsState] = useState<{ tripId: string; rows: VehicleInspection[] } | null>(null);
   const [activityState, setActivityState] = useState<{ tripId: string; rows: TripActivityEntry[] } | null>(null);
+  // Shipments riding a Cargo/Grocery trip — drives the "Shipments on this
+  // trip" section and the cargo START gate (≥1 assigned shipment leg).
+  const [tripShipmentsState, setTripShipmentsState] = useState<{ tripId: string; rows: ShipmentRecord[] } | null>(null);
 
   const [modal, setModal] = useState<
     null | "assign" | "edit" | "createReturn" | "cancel" | "closeWithoutBilling" | "manifest" | "sendEmail"
@@ -1007,11 +1053,12 @@ export default function Trips({
       to: periodEnd,
       openOnly: filter === 1 || undefined,
       assignedOnly: filter === 2 || undefined,
+      serviceType: svcFilter || undefined,
       excludeCancelled: !showCancelled || undefined,
       page,
       pageSize: PAGE_SIZE,
     });
-  }, [periodStart, periodEnd, filter, showCancelled, page]);
+  }, [periodStart, periodEnd, filter, svcFilter, showCancelled, page]);
 
   const applyPage = useCallback(
     (fresh: Awaited<ReturnType<typeof fetchList>>) => {
@@ -1133,11 +1180,24 @@ export default function Trips({
   const tripClientId = t?.clientId ?? null;
   const tripClientName = t?.clientName ?? null;
   const tripManifestId = t?.manifestId ?? null;
+  const tripIsCargo = !!t && isCargoService(t.serviceType);
   // No synchronous setState here: the aux states are keyed by tripId, so a
   // stale entry from a previous trip is simply ignored by the render.
   useEffect(() => {
     if (!tripId) return;
     let active = true;
+
+    // Cargo trips: which shipments ride this run (backend filters by tripId).
+    if (tripIsCargo) {
+      listShipments({ tripId }).then(
+        (page2) => {
+          if (active) setTripShipmentsState({ tripId, rows: page2.items });
+        },
+        () => {
+          if (active) setTripShipmentsState({ tripId, rows: [] }); // best-effort — the START gate re-checks server-side
+        },
+      );
+    }
 
     if (tripDriverId && tripClientName) {
       listDriverClearances(tripDriverId).then(
@@ -1197,7 +1257,7 @@ export default function Trips({
     return () => {
       active = false;
     };
-  }, [tripId, tripNumber, tripDriverId, tripClientId, tripClientName, tripManifestId]);
+  }, [tripId, tripNumber, tripDriverId, tripClientId, tripClientName, tripManifestId, tripIsCargo]);
 
   async function runAction(fn: () => Promise<void>) {
     if (busy) return;
@@ -1327,11 +1387,18 @@ export default function Trips({
       try {
         await changeTripStatus(id, status, reason);
       } catch (e) {
-        // Friendly inline message for the en-route passenger-manifest guard.
+        // Friendly inline messages for the en-route guards.
         if (e instanceof ApiError && e.code === PASSENGER_MANIFEST_REQUIRED) {
           throw new ApiError(
             e.code,
             "This trip needs a passenger manifest with at least one passenger before it can start. Add a manifest first.",
+            e.status,
+          );
+        }
+        if (e instanceof ApiError && e.code === SHIPMENT_REQUIRED) {
+          throw new ApiError(
+            e.code,
+            "This cargo trip needs at least one assigned shipment before it can start. Assign shipments from the Cargo & Grocery screen.",
             e.status,
           );
         }
@@ -1461,6 +1528,41 @@ export default function Trips({
           {showCancelled ? "Hide cancelled" : `Show cancelled${cancelledCount ? ` (${cancelledCount})` : ""}`}
         </span>
       </div>
+      {/* Service-type filter — server-side (TripListParams.serviceType). Each
+          chip carries the service glyph + label, never colour alone. */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginTop: 8 }}>
+        {SERVICE_FILTERS.map((v) => {
+          const on = svcFilter === v;
+          const meta = v ? svcMeta(svcForTrip(v)) : null;
+          return (
+            <span
+              key={v || "all"}
+              onClick={() => {
+                setSvcFilter(v);
+                setPage(1);
+              }}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontFamily: fonts.body,
+                fontWeight: on ? 600 : 500,
+                fontSize: 12,
+                padding: "5px 12px",
+                borderRadius: 7,
+                background: on ? (meta ? meta.chipBg : colors.cardBgActive) : colors.cardBg,
+                border: `1px solid ${on ? (meta ? meta.chipBd : colors.borderActive) : colors.border}`,
+                color: on ? (meta ? meta.chipTx : colors.headingBright) : colors.textMuted,
+                cursor: "pointer",
+                userSelect: "none",
+              }}
+            >
+              {meta && <span style={{ fontSize: 10, lineHeight: 1, color: meta.accent }}>{meta.glyph}</span>}
+              {v ? SERVICE_SHORT[svcForTrip(v)] : "All services"}
+            </span>
+          );
+        })}
+      </div>
     </div>
   );
 
@@ -1509,18 +1611,28 @@ export default function Trips({
   // Pickup emails need a loaded manifest with ≥1 passenger; a cancelled trip
   // never sends (completed trips may — e.g. a return-leg reminder).
   const canSendPickupEmail = !!t && manifest !== null && manifest.passengers.length > 0 && t.status !== "Cancelled";
-  // START gate: a driver AND a linked manifest with ≥1 passenger (mirrors the
-  // backend en-route guard). Vehicle assignment is encouraged but not blocking.
-  // Deadheads skip the manifest half — one can't even be created for an empty
-  // leg — but still need a driver to actually go en route.
+  // Shipments on the selected cargo trip (null = still loading).
+  const tripShipments = t && tripShipmentsState?.tripId === t.id ? tripShipmentsState.rows : null;
+  // START gate: a driver, then the service-specific half of the backend
+  // en-route guard — passenger runs need a linked manifest with ≥1 passenger,
+  // Cargo/Grocery runs need ≥1 assigned shipment leg instead (manifests are
+  // optional-but-allowed on cargo and never gate it). Vehicle assignment is
+  // encouraged but not blocking. Deadheads skip both halves — but still need
+  // a driver to actually go en route.
   const startBlockReason =
     !t || t.status !== "Scheduled"
       ? null
       : t.driverId === null
         ? "Needs a driver"
-        : !t.isEmptyLeg && !hasPassengerManifest
-          ? "Needs a passenger manifest (≥1 passenger)"
-          : null;
+        : t.isEmptyLeg
+          ? null
+          : tripIsCargo
+            ? tripShipments === null || tripShipments.length === 0
+              ? "Needs at least one assigned shipment"
+              : null
+            : !hasPassengerManifest
+              ? "Needs a passenger manifest (≥1 passenger)"
+              : null;
 
   // FINISH: an in-progress trip needs a post-trip inspection logged before the
   // run can be finished — gated on the server's HasPostTripInspection flag so
@@ -1764,32 +1876,78 @@ export default function Trips({
                   </div>
                 </Panel>
                 <Panel>
-                  <SectionLabel>Manifest &amp; demand</SectionLabel>
+                  <SectionLabel>{tripIsCargo ? "Shipments & manifest" : "Manifest & demand"}</SectionLabel>
                   <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-                    <DetailRow label="Seats confirmed" value={seatsLabel(t)} valueStyle={{ fontFamily: fonts.mono }} />
-                    <DetailRow
-                      label="Demand"
-                      value={
-                        t.demandGuaranteed ? (
-                          <StatusChip kind="ontime" label="Guaranteed" />
-                        ) : t.seatsMinimum != null ? (
-                          t.seatsConfirmed >= t.seatsMinimum ? (
-                            <StatusChip kind="ontime" label="Viable" />
-                          ) : (
-                            <StatusChip kind="soon" label={`Needs ${t.seatsMinimum - t.seatsConfirmed} more`} />
-                          )
+                    {/* Cargo/Grocery: seats and demand are N/A (the backend
+                        rejects demand recording for cargo) — the trip carries
+                        shipments instead, managed from Cargo & Grocery. */}
+                    {!tripIsCargo && (
+                      <>
+                        <DetailRow label="Seats confirmed" value={seatsLabel(t)} valueStyle={{ fontFamily: fonts.mono }} />
+                        <DetailRow
+                          label="Demand"
+                          value={
+                            t.demandGuaranteed ? (
+                              <StatusChip kind="ontime" label="Guaranteed" />
+                            ) : t.seatsMinimum != null ? (
+                              t.seatsConfirmed >= t.seatsMinimum ? (
+                                <StatusChip kind="ontime" label="Viable" />
+                              ) : (
+                                <StatusChip kind="soon" label={`Needs ${t.seatsMinimum - t.seatsConfirmed} more`} />
+                              )
+                            ) : (
+                              "No minimum"
+                            )
+                          }
+                        />
+                      </>
+                    )}
+                    {tripIsCargo && (
+                      <div>
+                        <div style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim, marginBottom: 5 }}>
+                          Shipments on this trip
+                        </div>
+                        {tripShipments === null ? (
+                          <span style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textDim }}>Loading shipments…</span>
+                        ) : tripShipments.length === 0 ? (
+                          <StatusChip kind="soon" label="No shipments assigned — assign from Cargo & Grocery" />
                         ) : (
-                          "No minimum"
-                        )
-                      }
-                    />
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            {tripShipments.map((sh) => {
+                              const leg = sh.legs.find((l) => l.tripId === t.id) ?? null;
+                              const lc = leg ? shipmentLegChip(leg) : null;
+                              return (
+                                <div key={sh.id} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                                  <span style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.skyBlue }}>{sh.shipmentNumber}</span>
+                                  <span
+                                    style={{
+                                      fontFamily: fonts.body,
+                                      fontSize: 12,
+                                      color: colors.textSecondary,
+                                      minWidth: 0,
+                                      flex: 1,
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                  >
+                                    {sh.description}
+                                  </span>
+                                  {lc && <StatusChip kind={lc.kind} label={lc.label} />}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <DetailRow
-                      label="Passenger manifest"
+                      label={tripIsCargo ? "Manifest (optional for cargo)" : "Passenger manifest"}
                       value={
                         t.manifestId ? (
                           <StatusChip kind="ontime" label={`${manifestPaxCount} passenger${manifestPaxCount === 1 ? "" : "s"}`} />
                         ) : (
-                          <StatusChip kind="off" label="No manifest yet" />
+                          <StatusChip kind="off" label={tripIsCargo ? "No manifest — not required" : "No manifest yet"} />
                         )
                       }
                     />

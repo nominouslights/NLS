@@ -9,10 +9,14 @@ using NorthernLink.Trips.Application.Routes;
 using NorthernLink.Trips.Application.Routes.Create;
 using NorthernLink.Trips.Application.Routes.GetRoutes;
 using NorthernLink.Trips.Application.Routes.Update;
+using NorthernLink.Trips.Application.Schedules.AddException;
 using NorthernLink.Trips.Application.Schedules.Create;
+using NorthernLink.Trips.Application.Schedules.GetExceptions;
 using NorthernLink.Trips.Application.Schedules.GetScheduleTemplates;
+using NorthernLink.Trips.Application.Schedules.RemoveException;
 using NorthernLink.Trips.Application.Schedules.SetActive;
 using NorthernLink.Trips.Application.Schedules.Update;
+using NorthernLink.Trips.Application.Schedules.UpdateException;
 using NorthernLink.Trips.Application.Stops.Create;
 using NorthernLink.Trips.Application.Stops.GetStops;
 using NorthernLink.Trips.Application.Stops.SetActive;
@@ -85,6 +89,10 @@ internal static class TripPlanningEndpoints
         templates.MapPut("{id:guid}", UpdateScheduleTemplate);
         templates.MapPost("{id:guid}/activate", ActivateScheduleTemplate);
         templates.MapPost("{id:guid}/deactivate", DeactivateScheduleTemplate);
+        templates.MapGet("{id:guid}/exceptions", GetScheduleExceptions);
+        templates.MapPost("{id:guid}/exceptions", AddScheduleException);
+        templates.MapPut("{id:guid}/exceptions/{exceptionId:guid}", UpdateScheduleException);
+        templates.MapDelete("{id:guid}/exceptions/{exceptionId:guid}", RemoveScheduleException);
     }
 
     // ---- Trips ----
@@ -620,6 +628,75 @@ internal static class TripPlanningEndpoints
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
+    private static async Task<IResult> GetScheduleExceptions(
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(new GetScheduleExceptionsQuery(tenantId, id), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> AddScheduleException(
+        Guid id, ScheduleExceptionRequest request, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        var command = new AddScheduleExceptionCommand(
+            id,
+            request.Date,
+            request.Kind,
+            request.DepartureTime,
+            request.ReturnDepartureTime,
+            request.Note);
+
+        var result = await sender.Send(command, cancellationToken);
+        return result.IsSuccess
+            ? Results.Created(
+                $"/api/trips/schedule-templates/{id}/exceptions/{result.Value}",
+                new ScheduleExceptionCreatedResponse(result.Value))
+            : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> UpdateScheduleException(
+        Guid id, Guid exceptionId, ScheduleExceptionRequest request, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        var command = new UpdateScheduleExceptionCommand(
+            id,
+            exceptionId,
+            request.Date,
+            request.Kind,
+            request.DepartureTime,
+            request.ReturnDepartureTime,
+            request.Note);
+
+        var result = await sender.Send(command, cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> RemoveScheduleException(
+        Guid id, Guid exceptionId, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(new RemoveScheduleExceptionCommand(id, exceptionId), cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
     private static async Task<IResult> ActivateScheduleTemplate(
         Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
     {
@@ -653,6 +730,28 @@ public sealed record RouteCreatedResponse(Guid Id);
 
 /// <summary>Body of a successful schedule template creation (201, with Location header).</summary>
 public sealed record ScheduleTemplateCreatedResponse(Guid Id);
+
+/// <summary>Body of a successful schedule exception creation (201, with Location header).</summary>
+public sealed record ScheduleExceptionCreatedResponse(Guid Id);
+
+/// <summary>
+/// Request body for POST /api/trips/schedule-templates/{id}/exceptions and PUT
+/// .../exceptions/{exceptionId}. <c>Kind</c> takes an enum name
+/// ("Skip" | "ExtraRun" | "TimeOverride") and selects the time rules: Skip carries no
+/// times; ExtraRun requires <c>departureTime</c> and its optional
+/// <c>returnDepartureTime</c> means a same-day return leg (must be after the departure —
+/// extra runs never span midnight, and work on one-way templates too); TimeOverride needs
+/// at least one time, each replacing the template's own (a return override only on a
+/// template that has a return leg). One exception per date per template; past dates are
+/// allowed. Exceptions shape future generation only — already-generated trips are never
+/// touched.
+/// </summary>
+public sealed record ScheduleExceptionRequest(
+    DateOnly Date,
+    ScheduleExceptionKind Kind,
+    TimeOnly? DepartureTime,
+    TimeOnly? ReturnDepartureTime,
+    string? Note);
 
 /// <summary>Body of a successful stop creation (201, with Location header).</summary>
 public sealed record StopCreatedResponse(Guid Id);
@@ -801,6 +900,9 @@ public sealed record RouteStopRequest(
 /// <c>returnNextDay</c> true means the return leg lands on the calendar day AFTER the
 /// outbound's (an overnight route) — the return time is then expected to be at or before
 /// the outbound's clock time, and the usual same-day ordering check is skipped.
+/// <c>seatsCapacity</c>/<c>seatsMinimum</c> are required-positive for passenger service
+/// types and not applicable to Cargo/Grocery templates — send null (any supplied value is
+/// normalized to null server-side).
 /// </summary>
 public sealed record CreateScheduleTemplateRequest(
     string? Name,
@@ -816,7 +918,7 @@ public sealed record CreateScheduleTemplateRequest(
     TimeOnly DepartureTime,
     TimeOnly? ReturnDepartureTime,
     bool ReturnNextDay,
-    int SeatsCapacity,
+    int? SeatsCapacity,
     int? SeatsMinimum,
     string? DefaultVehicleUnit,
     Guid? DefaultDriverId,
@@ -838,7 +940,7 @@ public sealed record UpdateScheduleTemplateRequest(
     TimeOnly DepartureTime,
     TimeOnly? ReturnDepartureTime,
     bool ReturnNextDay,
-    int SeatsCapacity,
+    int? SeatsCapacity,
     int? SeatsMinimum,
     string? DefaultVehicleUnit,
     Guid? DefaultDriverId,

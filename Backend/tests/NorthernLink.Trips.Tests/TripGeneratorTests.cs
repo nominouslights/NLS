@@ -359,4 +359,208 @@ public class TripGeneratorTests
         var date = Assert.Single(OutboundDates(drafts));
         Assert.Equal(new DateOnly(2026, 2, 28), date);
     }
+
+    // ----- Exceptions: Skip -----
+
+    [Fact]
+    public void Skip_removes_both_legs_of_the_occurrence()
+    {
+        // Weekdays with a same-day return; skipping Wednesday kills its pair entirely.
+        var template = TestPlanning.CreateTemplate(
+            departureTime: new TimeOnly(6, 30),
+            returnDepartureTime: new TimeOnly(17, 30),
+            generationHorizonDays: 7);
+        var wednesday = new DateOnly(2026, 7, 22);
+        template.AddException(wednesday, ScheduleExceptionKind.Skip, null, null, "Treaty Days");
+
+        var drafts = TripGenerator.Generate(template, NoExisting, TestPlanning.Monday);
+
+        Assert.Equal(8, drafts.Count); // 4 remaining weekdays x 2 legs
+        Assert.DoesNotContain(drafts, d => d.ServiceDate == wednesday);
+    }
+
+    [Fact]
+    public void Skip_on_an_overnight_template_also_removes_the_next_day_return()
+    {
+        var template = TestPlanning.CreateTemplate(
+            daysOfWeek: [DayOfWeek.Monday],
+            departureTime: new TimeOnly(17, 30),
+            returnDepartureTime: new TimeOnly(6, 30),
+            returnNextDay: true,
+            generationHorizonDays: 7);
+        template.AddException(TestPlanning.Monday, ScheduleExceptionKind.Skip, null, null, null);
+
+        var drafts = TripGenerator.Generate(template, NoExisting, TestPlanning.Monday);
+
+        // Neither Monday's outbound nor Tuesday's inbound return exists.
+        Assert.Empty(drafts);
+    }
+
+    // ----- Exceptions: ExtraRun -----
+
+    [Fact]
+    public void ExtraRun_adds_a_one_way_occurrence_on_a_one_way_template()
+    {
+        // Monday-only template; extra run on Saturday.
+        var template = TestPlanning.CreateTemplate(daysOfWeek: [DayOfWeek.Monday], generationHorizonDays: 7);
+        var saturday = new DateOnly(2026, 7, 25);
+        template.AddException(saturday, ScheduleExceptionKind.ExtraRun, new TimeOnly(9, 0), null, null);
+
+        var drafts = TripGenerator.Generate(template, NoExisting, TestPlanning.Monday);
+
+        Assert.Equal(2, drafts.Count);
+        var extra = Assert.Single(drafts, d => d.ServiceDate == saturday);
+        Assert.Equal(TripDirection.Outbound, extra.Direction);
+        Assert.Equal(new TimeOnly(9, 0), extra.DepartureTime);
+        Assert.Null(extra.RoundTripKey); // no return leg -> no pair to price
+    }
+
+    [Fact]
+    public void ExtraRun_with_a_return_emits_a_same_day_pair_sharing_a_key_even_on_a_one_way_template()
+    {
+        var template = TestPlanning.CreateTemplate(daysOfWeek: [DayOfWeek.Monday], generationHorizonDays: 7);
+        var saturday = new DateOnly(2026, 7, 25);
+        template.AddException(
+            saturday, ScheduleExceptionKind.ExtraRun, new TimeOnly(9, 0), new TimeOnly(15, 0), null);
+
+        var drafts = TripGenerator.Generate(template, NoExisting, TestPlanning.Monday);
+        var pair = drafts.Where(d => d.ServiceDate == saturday).ToList();
+
+        Assert.Equal(2, pair.Count);
+        var outbound = Assert.Single(pair, d => d.Direction == TripDirection.Outbound);
+        var inbound = Assert.Single(pair, d => d.Direction == TripDirection.Inbound);
+        Assert.Equal(new TimeOnly(9, 0), outbound.DepartureTime);
+        Assert.Equal(new TimeOnly(15, 0), inbound.DepartureTime);
+        Assert.Equal(TripGenerator.RoundTripKeyFor(template.Id, saturday), outbound.RoundTripKey);
+        Assert.Equal(outbound.RoundTripKey, inbound.RoundTripKey);
+    }
+
+    [Fact]
+    public void ExtraRun_landing_on_a_recurrence_date_does_not_double_emit_and_its_times_win()
+    {
+        // Monday is already a recurrence date; the extra run's 09:00 replaces the 06:30.
+        var template = TestPlanning.CreateTemplate(
+            daysOfWeek: [DayOfWeek.Monday],
+            departureTime: new TimeOnly(6, 30),
+            returnDepartureTime: new TimeOnly(17, 30),
+            generationHorizonDays: 7);
+        template.AddException(
+            TestPlanning.Monday, ScheduleExceptionKind.ExtraRun, new TimeOnly(9, 0), null, null);
+
+        var drafts = TripGenerator.Generate(template, NoExisting, TestPlanning.Monday);
+
+        // Exception times win outright: departure 09:00 and NO return leg, despite the
+        // template's own 17:30 return.
+        var draft = Assert.Single(drafts);
+        Assert.Equal(TestPlanning.Monday, draft.ServiceDate);
+        Assert.Equal(TripDirection.Outbound, draft.Direction);
+        Assert.Equal(new TimeOnly(9, 0), draft.DepartureTime);
+    }
+
+    [Fact]
+    public void ExtraRun_outside_the_horizon_window_is_ignored()
+    {
+        var template = TestPlanning.CreateTemplate(daysOfWeek: [DayOfWeek.Monday], generationHorizonDays: 7);
+        template.AddException(
+            TestPlanning.Monday.AddDays(30), ScheduleExceptionKind.ExtraRun, new TimeOnly(9, 0), null, null);
+        template.AddException(
+            TestPlanning.Monday.AddDays(-3), ScheduleExceptionKind.ExtraRun, new TimeOnly(9, 0), null, null);
+
+        var drafts = TripGenerator.Generate(template, NoExisting, TestPlanning.Monday);
+
+        // Only the Monday recurrence occurrence — both out-of-window extra runs ignored.
+        var draft = Assert.Single(drafts);
+        Assert.Equal(TestPlanning.Monday, draft.ServiceDate);
+        Assert.Equal(new TimeOnly(6, 30), draft.DepartureTime);
+    }
+
+    // ----- Exceptions: TimeOverride -----
+
+    [Fact]
+    public void TimeOverride_replaces_only_the_set_time_and_falls_back_for_the_other()
+    {
+        var template = TestPlanning.CreateTemplate(
+            daysOfWeek: [DayOfWeek.Monday],
+            departureTime: new TimeOnly(6, 30),
+            returnDepartureTime: new TimeOnly(17, 30),
+            generationHorizonDays: 7);
+        template.AddException(
+            TestPlanning.Monday, ScheduleExceptionKind.TimeOverride, new TimeOnly(8, 0), null, null);
+
+        var drafts = TripGenerator.Generate(template, NoExisting, TestPlanning.Monday);
+
+        Assert.Equal(2, drafts.Count);
+        var outbound = Assert.Single(drafts, d => d.Direction == TripDirection.Outbound);
+        var inbound = Assert.Single(drafts, d => d.Direction == TripDirection.Inbound);
+        Assert.Equal(new TimeOnly(8, 0), outbound.DepartureTime);   // overridden
+        Assert.Equal(new TimeOnly(17, 30), inbound.DepartureTime);  // template fallback
+        Assert.Equal(outbound.RoundTripKey, inbound.RoundTripKey);  // pairing untouched
+    }
+
+    [Fact]
+    public void TimeOverride_of_both_times_applies_both()
+    {
+        var template = TestPlanning.CreateTemplate(
+            daysOfWeek: [DayOfWeek.Monday],
+            departureTime: new TimeOnly(6, 30),
+            returnDepartureTime: new TimeOnly(17, 30),
+            generationHorizonDays: 7);
+        template.AddException(
+            TestPlanning.Monday, ScheduleExceptionKind.TimeOverride, new TimeOnly(8, 0), new TimeOnly(19, 0), null);
+
+        var drafts = TripGenerator.Generate(template, NoExisting, TestPlanning.Monday);
+
+        Assert.Equal(new TimeOnly(8, 0), Assert.Single(drafts, d => d.Direction == TripDirection.Outbound).DepartureTime);
+        Assert.Equal(new TimeOnly(19, 0), Assert.Single(drafts, d => d.Direction == TripDirection.Inbound).DepartureTime);
+    }
+
+    [Fact]
+    public void TimeOverride_keeps_ReturnNextDay_behavior()
+    {
+        var template = TestPlanning.CreateTemplate(
+            daysOfWeek: [DayOfWeek.Monday],
+            departureTime: new TimeOnly(17, 30),
+            returnDepartureTime: new TimeOnly(6, 30),
+            returnNextDay: true,
+            generationHorizonDays: 7);
+        template.AddException(
+            TestPlanning.Monday, ScheduleExceptionKind.TimeOverride, new TimeOnly(19, 0), new TimeOnly(5, 30), null);
+
+        var drafts = TripGenerator.Generate(template, NoExisting, TestPlanning.Monday);
+
+        var outbound = Assert.Single(drafts, d => d.Direction == TripDirection.Outbound);
+        var inbound = Assert.Single(drafts, d => d.Direction == TripDirection.Inbound);
+        Assert.Equal(new TimeOnly(19, 0), outbound.DepartureTime);
+        Assert.Equal(new TimeOnly(5, 30), inbound.DepartureTime);
+        Assert.Equal(TestPlanning.Monday, outbound.ServiceDate);
+        Assert.Equal(TestPlanning.Monday.AddDays(1), inbound.ServiceDate); // still next day
+        Assert.Equal(outbound.RoundTripKey, inbound.RoundTripKey);
+    }
+
+    // ----- Exceptions: idempotency -----
+
+    [Fact]
+    public void Already_materialized_occurrences_are_still_skipped_with_exceptions_present()
+    {
+        var template = TestPlanning.CreateTemplate(daysOfWeek: [DayOfWeek.Monday], generationHorizonDays: 7);
+        var saturday = new DateOnly(2026, 7, 25);
+        template.AddException(
+            saturday, ScheduleExceptionKind.ExtraRun, new TimeOnly(9, 0), new TimeOnly(15, 0), null);
+        template.AddException(
+            TestPlanning.Monday, ScheduleExceptionKind.TimeOverride, new TimeOnly(8, 0), null, null);
+
+        var existing = new HashSet<(DateOnly, TripDirection)>
+        {
+            (TestPlanning.Monday, TripDirection.Outbound),  // override date already generated
+            (saturday, TripDirection.Outbound),             // extra run's outbound already generated
+        };
+
+        var drafts = TripGenerator.Generate(template, existing, TestPlanning.Monday);
+
+        // Only the extra run's not-yet-materialized return leg remains.
+        var draft = Assert.Single(drafts);
+        Assert.Equal(saturday, draft.ServiceDate);
+        Assert.Equal(TripDirection.Inbound, draft.Direction);
+        Assert.Equal(new TimeOnly(15, 0), draft.DepartureTime);
+    }
 }
