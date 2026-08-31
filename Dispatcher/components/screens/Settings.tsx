@@ -8,8 +8,9 @@ import { SelectField } from "@/components/ui/Field";
 import { generateAdminInvite, INVITE_ROLES, type AdminInvite, type InviteRole } from "@/lib/auth";
 import { ApiError } from "@/lib/api";
 import { copyToClipboard } from "@/lib/clipboard";
+import BookingPolicyPanel from "@/components/screens/settings/BookingPolicyPanel";
 
-const TABS = ["Organization", "Users & Roles", "Budget Codes", "Rate Schedules", "Connectors", "Audit Log"];
+const TABS = ["Organization", "Users & Roles", "Booking Policy", "Budget Codes", "Rate Schedules", "Connectors", "Audit Log"];
 
 const users = [
   { name: "R. Kelsey", role: "Owner · Dispatcher", tenant: "Internal", active: true },
@@ -338,6 +339,13 @@ export default function Settings() {
 
           {tab === 2 && (
             <div className="detailfade">
+              <h2 style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 23, color: colors.headingBright, margin: "0 0 14px" }}>Booking Policy</h2>
+              <BookingPolicyPanel />
+            </div>
+          )}
+
+          {tab === 3 && (
+            <div className="detailfade">
               <h2 style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 23, color: colors.headingBright, margin: "0 0 14px" }}>Budget Codes</h2>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {budgetCodes.map((b) => (
@@ -362,7 +370,7 @@ export default function Settings() {
             </div>
           )}
 
-          {tab === 3 && (
+          {tab === 4 && (
             <div className="detailfade">
               <h2 style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 23, color: colors.headingBright, margin: "0 0 14px" }}>Rate Schedules</h2>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -391,7 +399,7 @@ export default function Settings() {
             </div>
           )}
 
-          {tab === 4 && (
+          {tab === 5 && (
             <div className="detailfade">
               <h2 style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 23, color: colors.headingBright, margin: "0 0 14px" }}>Connectors</h2>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -415,7 +423,7 @@ export default function Settings() {
             </div>
           )}
 
-          {tab === 5 && (
+          {tab === 6 && (
             <div className="detailfade">
               <h2 style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 23, color: colors.headingBright, margin: "0 0 14px" }}>Audit Log</h2>
               <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>

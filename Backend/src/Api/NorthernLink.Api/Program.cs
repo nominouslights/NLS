@@ -12,6 +12,9 @@ using NorthernLink.Shared.Tenancy;
 using NorthernLink.Billing.Infrastructure;
 using NorthernLink.Billing.Infrastructure.Endpoints;
 using NorthernLink.Billing.Infrastructure.Persistence;
+using NorthernLink.Booking.Infrastructure;
+using NorthernLink.Booking.Infrastructure.Endpoints;
+using NorthernLink.Booking.Infrastructure.Persistence;
 using NorthernLink.Budgeting.Infrastructure;
 using NorthernLink.Budgeting.Infrastructure.Endpoints;
 using NorthernLink.Budgeting.Infrastructure.Persistence;
@@ -92,6 +95,7 @@ builder.Services
     .AddFleet(builder.Configuration)
     .AddClients(builder.Configuration)
     .AddBilling(builder.Configuration)
+    .AddBooking(builder.Configuration)
     .AddBudgeting(builder.Configuration)
     .AddIncidents(builder.Configuration)
     .AddNotifications(builder.Configuration)
@@ -109,6 +113,7 @@ builder.Services.AddModuleMigrations(
     typeof(FleetDbContext),
     typeof(ClientsDbContext),
     typeof(BillingDbContext),
+    typeof(BookingDbContext),
     typeof(BudgetingDbContext),
     typeof(NotificationsDbContext));
 
@@ -128,6 +133,7 @@ app.MapTripsEndpoints();
 app.MapDriversEndpoints();
 app.MapClientsEndpoints();
 app.MapBillingEndpoints();
+app.MapBookingEndpoints();
 app.MapBudgetingEndpoints();
 app.MapNotificationsEndpoints();
 
