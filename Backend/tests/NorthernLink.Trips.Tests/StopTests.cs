@@ -126,4 +126,33 @@ public class StopTests
         Assert.True(stop.Active);
         Assert.Empty(stop.DomainEvents);
     }
+
+    /// <summary>
+    /// Terminus is the classification the NL-TRM-01 terminus summary selects venues by, so it has
+    /// to survive both the create and the update path — a stop is routinely promoted to Terminus
+    /// long after it was first catalogued as an ordinary Hub or PickupPoint.
+    /// </summary>
+    [Fact]
+    public void A_stop_can_be_created_as_a_Terminus_and_promoted_to_one_later()
+    {
+        var terminus = Stop.Create(
+            TestPlanning.TenantId,
+            "Best Western Hotel & Suites",
+            StopType.Terminus,
+            ThompsonAddress(),
+            ThompsonCoordinate(),
+            null).Value;
+
+        Assert.Equal(StopType.Terminus, terminus.Type);
+
+        var promoted = Stop.Create(
+            TestPlanning.TenantId, "Lynn Inn", StopType.PickupPoint, ThompsonAddress(), ThompsonCoordinate(), null)
+            .Value;
+
+        var result = promoted.Update(
+            "Lynn Inn", StopType.Terminus, ThompsonAddress(), ThompsonCoordinate(), null, active: true);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(StopType.Terminus, promoted.Type);
+    }
 }
