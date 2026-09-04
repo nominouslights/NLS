@@ -16,6 +16,7 @@ import Clients from "@/components/screens/Clients";
 import Riders from "@/components/screens/Riders";
 import Billing from "@/components/screens/Billing";
 import Reports from "@/components/screens/Reports";
+import type { ReportTabId } from "@/components/screens/reports/shared";
 import Manifests from "@/components/screens/Manifests";
 import RoutesSchedules from "@/components/screens/RoutesSchedules";
 import Stops from "@/components/screens/Stops";
@@ -39,11 +40,18 @@ export default function Console() {
   const [fleetSelId, setFleetSelId] = useState<string | null>(null);
   const [clientSel, setClientSel] = useState<string | null>(null); // Clients API Guid
   const [invoiceSelId, setInvoiceSelId] = useState<string | null>(null); // Billing API Guid
-  // The accruals report's client + month live here for the same reason as
-  // tripPeriod: a dispatcher who built March's report for a client should not
-  // lose that selection on a detour to another screen.
+  // Both reports' selections live here for the same reason as tripPeriod: a
+  // dispatcher who built March's report should not lose it on a detour to
+  // another screen — including which of the two reports they were on.
+  const [reportTab, setReportTab] = useState<ReportTabId>("accruals");
   const [reportClientId, setReportClientId] = useState<string | null>(null); // Clients API Guid
   const [reportPeriod, setReportPeriod] = useState<Period>(() => currentPeriod("month"));
+  // The terminus report gets its OWN period, deliberately. Accruals is locked to
+  // a month and so renders no granularity pills; sharing one Period would let a
+  // quarter set here strand the accruals view stepping three months at a time
+  // with no way back — and print "Q3 2026" onto a monthly statement.
+  const [terminusStopId, setTerminusStopId] = useState<string | null>(null); // Stops API Guid
+  const [terminusPeriod, setTerminusPeriod] = useState<Period>(() => currentPeriod("month"));
   const [incidentSel, setIncidentSel] = useState(0);
 
   function openTrip(id: string | null) {
@@ -103,10 +111,16 @@ export default function Console() {
           {screen === "billing" && <Billing invoiceSelId={invoiceSelId} setInvoiceSelId={setInvoiceSelId} />}
           {screen === "reports" && (
             <Reports
+              tab={reportTab}
+              setTab={setReportTab}
               clientId={reportClientId}
               setClientId={setReportClientId}
               period={reportPeriod}
               setPeriod={setReportPeriod}
+              terminusStopId={terminusStopId}
+              setTerminusStopId={setTerminusStopId}
+              terminusPeriod={terminusPeriod}
+              setTerminusPeriod={setTerminusPeriod}
             />
           )}
           {screen === "incidents" && <Incidents incidentSel={incidentSel} setIncidentSel={setIncidentSel} />}
