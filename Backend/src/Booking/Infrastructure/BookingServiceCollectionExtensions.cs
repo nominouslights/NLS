@@ -103,9 +103,9 @@ public static class BookingServiceCollectionExtensions
 
         // 4. Integration event consumers — the storing/projecting path: one polling consumer
         //    over the trips outbox maintains booking.corridor_lookup and stamps the
-        //    day↔trip backlink. First poll replays each routing key's entire history (how
-        //    the replica bootstraps), but routes saved before trips.route-changed existed
-        //    never published — re-save each once (runbook step).
+        //    day↔trip backlink. The replica is seeded by the BackfillCorridorLookup
+        //    migration; live route-changed events keep it current (the first poll also
+        //    replays each routing key's outbox history).
         services.AddOutboxPollingConsumer<BookingDbContext>(SchemaName, subscriptions => subscriptions
             .On<RouteChangedIntegrationEvent, RouteChangedIntegrationEventHandler>()
             .On<TripScheduledFromBookingIntegrationEvent, TripScheduledFromBookingIntegrationEventHandler>());

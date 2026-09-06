@@ -30,8 +30,11 @@ public interface IShipmentRepository
     Task<IReadOnlyList<Shipment>> GetForTripAsync(Guid tripId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// How many shipments are booked on a trip. Backs the relaxed en-route gate: a freight-only
-    /// run has no passengers and is still a legitimate run.
+    /// How many LIVE shipments are booked on a trip — only legs whose parent shipment is
+    /// Registered, Assigned, or InTransit count (Delivered/Cancelled/WrittenOff and
+    /// billing-stage shipments no longer satisfy the gate). Backs the relaxed en-route
+    /// gate: a freight-only run has no passengers and is still a legitimate run, but a run
+    /// whose only cargo is dead is not.
     /// </summary>
     Task<int> CountForTripAsync(Guid tripId, CancellationToken cancellationToken = default);
 

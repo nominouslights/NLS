@@ -46,8 +46,18 @@ internal sealed class ShipmentRepository(TripsDbContext context) : IShipmentRepo
             .Where(s => s.Legs.Any(l => l.TripId == tripId))
             .ToListAsync(cancellationToken);
 
+    // Only legs whose parent shipment is still live (Registered/Assigned/InTransit) satisfy
+    // the cargo start gate — a Delivered/Cancelled/WrittenOff or billing-stage shipment's
+    // stale leg row must not let an empty freight run start. Mirrors the Dispatcher's
+    // isShipmentOpen helper.
     public Task<int> CountForTripAsync(Guid tripId, CancellationToken cancellationToken = default) =>
-        context.ShipmentLegs.CountAsync(l => l.TripId == tripId, cancellationToken);
+        context.ShipmentLegs.CountAsync(
+            l => l.TripId == tripId && context.Shipments.Any(s =>
+                s.Id == l.ShipmentId
+                && (s.Status == ShipmentStatus.Registered
+                    || s.Status == ShipmentStatus.Assigned
+                    || s.Status == ShipmentStatus.InTransit)),
+            cancellationToken);
 
     public async Task<IReadOnlyList<Shipment>> GetByIdsForTenantAsync(
         Guid tenantId,

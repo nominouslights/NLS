@@ -32,9 +32,11 @@ public sealed record TripDraft(
 /// occurrence and swaps each set time in, unset fields falling back to the template's
 /// (<see cref="ScheduleTemplate.ReturnNextDay"/> behaves exactly as without the override).
 /// </para>
-/// Occurrences already materialized (passed in as existing keys) are skipped, which makes
-/// generation idempotent; the database's unique index on (tenant, template, date,
-/// direction) backstops races. Exceptions are generation-time only: a trip already
+/// Occurrences already materialized (passed in as existing keys) are skipped, and no two
+/// drafts in one batch ever share a (date, direction) key — an overnight return landing on
+/// the next day's ExtraRun inbound would otherwise emit twice and blow the unique index —
+/// which makes generation idempotent; the database's unique index on (tenant, template,
+/// date, direction) backstops races. Exceptions are generation-time only: a trip already
 /// materialized for a date is never cancelled or retimed from here.
 /// </summary>
 public static class TripGenerator
@@ -75,6 +77,13 @@ public static class TripGenerator
 
         var drafts = new List<TripDraft>();
 
+        // Seeded with the already-materialized keys, then claims each draft's key as it is
+        // emitted, so one batch can never carry two drafts for the same (date, direction).
+        // occurrenceDates iterates ascending, so Monday's overnight return (Tuesday Inbound)
+        // is emitted before Tuesday's own ExtraRun same-day inbound — first-wins is
+        // deterministic and the overnight return takes precedence.
+        var emitted = new HashSet<(DateOnly ServiceDate, TripDirection Direction)>(existingOccurrences);
+
         foreach (var date in occurrenceDates)
         {
             exceptionsByDate.TryGetValue(date, out var exception);
@@ -88,13 +97,13 @@ public static class TripGenerator
                     ? null
                     : RoundTripKeyFor(template.Id, date);
 
-                if (!existingOccurrences.Contains((date, TripDirection.Outbound)))
+                if (emitted.Add((date, TripDirection.Outbound)))
                 {
                     drafts.Add(new TripDraft(date, TripDirection.Outbound, extraKey, extraDeparture));
                 }
 
                 if (exception.ReturnDepartureTime is { } extraReturn
-                    && !existingOccurrences.Contains((date, TripDirection.Inbound)))
+                    && emitted.Add((date, TripDirection.Inbound)))
                 {
                     drafts.Add(new TripDraft(date, TripDirection.Inbound, extraKey, extraReturn));
                 }
@@ -113,7 +122,7 @@ public static class TripGenerator
                 ? null
                 : RoundTripKeyFor(template.Id, date);
 
-            if (!existingOccurrences.Contains((date, TripDirection.Outbound)))
+            if (emitted.Add((date, TripDirection.Outbound)))
             {
                 drafts.Add(new TripDraft(date, TripDirection.Outbound, roundTripKey, departureTime));
             }
@@ -128,7 +137,7 @@ public static class TripGenerator
                 // outbound and inbound legs share a RoundTripKey (minted off the outbound's
                 // date) even though their ServiceDates differ.
                 var returnDate = template.ReturnNextDay ? date.AddDays(1) : date;
-                if (!existingOccurrences.Contains((returnDate, TripDirection.Inbound)))
+                if (emitted.Add((returnDate, TripDirection.Inbound)))
                 {
                     drafts.Add(new TripDraft(returnDate, TripDirection.Inbound, roundTripKey, returnTime));
                 }

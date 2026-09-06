@@ -10,7 +10,9 @@ namespace NorthernLink.Booking.Application.Bookings.Confirm;
 /// Confirms a booking, then recomputes the day's threshold in the SAME transaction: the
 /// booking flip, any resulting <c>BookingDay.Confirm</c> (with its outbox row — the
 /// chain-reaction event Trips turns into the community trip), and the audit entries all
-/// commit in one SaveChanges. See <see cref="BookingDayThresholdService"/>.
+/// commit in one SaveChanges. The day is ensured BEFORE the booking is mutated — the
+/// get-or-create may save mid-flow, and it must flush nothing but the day-create.
+/// See <see cref="BookingDayThresholdService"/>.
 /// </summary>
 public sealed class ConfirmBookingCommandHandler(
     IBookingRepository repository,
@@ -25,13 +27,16 @@ public sealed class ConfirmBookingCommandHandler(
             return Result.Failure(BookingErrors.NotFound);
         }
 
+        var day = await thresholds.EnsureDayAsync(
+            booking.TenantId, booking.CorridorId, booking.ServiceDate, cancellationToken);
+
         var result = booking.Confirm();
         if (result.IsFailure)
         {
             return result;
         }
 
-        await thresholds.ApplyAfterConfirmAsync(booking, cancellationToken);
+        await thresholds.RecomputeAsync(day, booking, cancellationToken);
 
         await repository.SaveChangesAsync(cancellationToken);
         return Result.Success();

@@ -314,10 +314,10 @@ export default function Bookings({ onOpenTrip }: { onOpenTrip: (id: string) => v
 
           {corridors !== null && corridors.length === 0 && (
             <Panel style={{ marginBottom: 14 }}>
-              <SectionLabel>No corridors synced yet</SectionLabel>
+              <SectionLabel>No community routes yet</SectionLabel>
               <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textMuted, lineHeight: 1.6 }}>
-                Booking corridors mirror the community routes in Routes &amp; Schedules. None have synced across
-                yet — open each community route there and re-save it once, and it will appear here.
+                Booking corridors mirror the community routes in Routes &amp; Schedules — existing routes are
+                seeded automatically, so create a route there and it will appear here.
               </div>
             </Panel>
           )}

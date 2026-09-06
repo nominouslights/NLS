@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Npgsql;
 using NorthernLink.Shared.Tenancy;
 using NorthernLink.Trips.Application.Abstractions;
 using NorthernLink.Trips.Application.Schedules.GenerateTrips;
@@ -109,10 +110,13 @@ internal sealed class TripGenerationWorker(
             {
                 throw;
             }
-            catch (DbUpdateException exception)
+            catch (DbUpdateException exception) when (
+                exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
             {
                 // Unique-index race with a concurrent pass — the occurrence already
-                // exists; this template converges on the next pass.
+                // exists; this template converges on the next pass. Only the 23505 case:
+                // any other save failure is a real error and falls through to the generic
+                // catch below.
                 logger.LogWarning(
                     exception,
                     "Trip generation for template {TemplateId} hit an existing occurrence; will reconcile next pass",
