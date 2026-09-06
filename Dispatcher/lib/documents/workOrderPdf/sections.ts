@@ -163,7 +163,7 @@ export function authorizationBlock(wo: WorkOrder): string {
   return (
     sectionBar("12. Authorization Limit — Read Before Starting Work") +
     `<div class="grid" style="grid-template-columns:1fr 1.6fr">
-       <div class="fld"><div class="lbl">Approved not to exceed (before GST)</div><div class="val mono">${esc(limit)}</div></div>
+       <div class="fld"><div class="lbl">Approved not to exceed (before taxes)</div><div class="val mono">${esc(limit)}</div></div>
        <div class="fld"><div class="lbl">Additional work discovered</div><div class="val" style="font-size:9px;font-weight:400">Stop and call (204) 441-7724 for written approval before proceeding. Work beyond this limit without written authorization may not be paid.</div></div>
      </div>
      <div class="grid" style="grid-template-columns:1fr">
@@ -210,7 +210,7 @@ export function shopCompletionPage2(wo: WorkOrder, vehicle: Vehicle): string {
     ])}
     ${grid([
       field("Subtotal $", ""),
-      field("GST (5%) $", ""),
+      field("GST $", ""),
       field("Total Due (CAD) $", ""),
     ], 3)}
 

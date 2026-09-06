@@ -205,10 +205,6 @@ namespace NorthernLink.Clients.Infrastructure.Persistence.Migrations
                         .HasColumnType("date")
                         .HasColumnName("end_date");
 
-                    b.Property<bool>("GstApplicable")
-                        .HasColumnType("boolean")
-                        .HasColumnName("gst_applicable");
-
                     b.Property<int>("NetTermsDays")
                         .HasColumnType("integer")
                         .HasColumnName("net_terms_days");
@@ -399,10 +395,6 @@ namespace NorthernLink.Clients.Infrastructure.Persistence.Migrations
                         .HasColumnType("date")
                         .HasColumnName("active_contract_end_date");
 
-                    b.Property<bool?>("ActiveContractGstApplicable")
-                        .HasColumnType("boolean")
-                        .HasColumnName("active_contract_gst_applicable");
-
                     b.Property<Guid?>("ActiveContractId")
                         .HasColumnType("uuid")
                         .HasColumnName("active_contract_id");
@@ -508,10 +500,6 @@ namespace NorthernLink.Clients.Infrastructure.Persistence.Migrations
                     b.Property<DateOnly?>("EndDate")
                         .HasColumnType("date")
                         .HasColumnName("end_date");
-
-                    b.Property<bool>("GstApplicable")
-                        .HasColumnType("boolean")
-                        .HasColumnName("gst_applicable");
 
                     b.Property<int>("NetTermsDays")
                         .HasColumnType("integer")

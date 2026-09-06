@@ -45,7 +45,6 @@ public sealed class ContractChangedIntegrationEventHandler(
         snapshot.EndDate = integrationEvent.EndDate;
         snapshot.BillingModel = integrationEvent.BillingModel;
         snapshot.RatePerRoundTripCad = integrationEvent.RatePerRoundTripCad;
-        snapshot.GstApplicable = integrationEvent.GstApplicable;
         snapshot.BudgetCode = integrationEvent.BudgetCode;
         snapshot.BillingFrequency = integrationEvent.BillingFrequency;
         snapshot.NetTermsDays = integrationEvent.NetTermsDays;

@@ -51,10 +51,15 @@ public sealed record AccrualsReconciliationRow(
     string Reason,
     string AmountCad);
 
-/// <summary>One referenced invoice's line — the only place GST appears in the report.</summary>
+/// <summary>
+/// One referenced invoice's line: the platform's worksheet number, the QuickBooks Online
+/// invoice number it was keyed in as, its status, the period it covers, and its total. One
+/// money figure only — the platform computes no GST/HST/PST anywhere, QuickBooks Online owns
+/// tax calculation, so there is no subtotal or tax column to show.
+/// </summary>
 public sealed record AccrualsInvoiceRow(
     string InvoiceNumber,
+    string QboInvoiceId,
     string Status,
-    string SubtotalCad,
-    string GstCad,
+    string PeriodLabel,
     string TotalCad);

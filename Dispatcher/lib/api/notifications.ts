@@ -212,9 +212,9 @@ export interface AccrualsEmailReport {
   }[];
   invoices: {
     invoiceNumber: string;
+    qboInvoiceId: string;
     status: string;
-    subtotalCad: string;
-    gstCad: string;
+    periodLabel: string;
     totalCad: string;
   }[];
 }

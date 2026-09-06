@@ -21,7 +21,7 @@ import { corridorLabel, listTrips, shortDateLabel, todayIso, type TripRecord } f
 import {
   ACCRUAL_BUCKET_META,
   ACCRUALS_ESTIMATE_NOTE,
-  ACCRUALS_GST_NOTE,
+  ACCRUALS_TAX_NOTE,
   AMOUNT_NOTE_META,
   accrualsClipboardText,
   buildAccrualsReport,
@@ -593,9 +593,9 @@ export default function Reports({
               </Panel>
             )}
 
-            {/* invoices referenced — the one place GST shows */}
+            {/* invoices referenced — line totals only, no tax anywhere */}
             <Panel style={{ marginTop: 18 }}>
-              <SectionLabel>Invoices referenced — GST shown here</SectionLabel>
+              <SectionLabel>Invoices referenced</SectionLabel>
               {report.invoices.length === 0 ? (
                 <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textDim }}>
                   No issued invoices are referenced by this month&rsquo;s trips.
@@ -615,7 +615,6 @@ export default function Reports({
                       <StatusChip kind={chip.kind} label={chip.label} />
                       <span style={cellStyle}>{invoicePeriodLabel(inv)}</span>
                       <span style={{ ...cellStyle, marginLeft: "auto" }}>
-                        {formatInvoiceCad(inv.subtotalCad)} + GST {formatInvoiceCad(inv.gstCad)} ={" "}
                         {formatInvoiceCad(inv.totalCad)}
                       </span>
                     </div>
@@ -626,7 +625,7 @@ export default function Reports({
 
             {/* footer wording shared with the printed sheet + clipboard */}
             <div style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim, lineHeight: 1.6, marginTop: 14 }}>
-              {ACCRUALS_GST_NOTE} {ACCRUALS_ESTIMATE_NOTE}
+              {ACCRUALS_TAX_NOTE} {ACCRUALS_ESTIMATE_NOTE}
             </div>
           </>
         )}

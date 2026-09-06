@@ -49,7 +49,7 @@ public sealed class TripManifest : AggregateRoot, ITenantScoped
 
     /// <summary>
     /// Fares actually collected on this run — cash and online, waived seats excluded. Computed
-    /// from the passenger rows rather than stored, for the same reason an invoice's subtotal is:
+    /// from the passenger rows rather than stored, for the same reason an invoice's total is:
     /// a total that can disagree with the lines under it is worse than no total.
     /// <para>
     /// Nothing downstream consumes this yet. It is not reconciled against a bank deposit or a

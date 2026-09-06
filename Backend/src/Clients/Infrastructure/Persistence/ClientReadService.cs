@@ -44,7 +44,6 @@ internal sealed class ClientReadService(ClientsDbContext context) : IClientReadS
                 client.ActiveContractEndDate,
                 client.ActiveContractBillingModel!,
                 client.ActiveContractRatePerRoundTripCad,
-                client.ActiveContractGstApplicable!.Value,
                 client.ActiveContractBudgetCode,
                 client.ActiveContractBillingFrequency!,
                 client.ActiveContractNetTermsDays!.Value,

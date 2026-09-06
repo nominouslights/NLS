@@ -13,7 +13,6 @@ public sealed record ContractResponse(
     DateOnly? EndDate,
     string BillingModel,
     decimal? RatePerRoundTripCad,
-    bool GstApplicable,
     string? BudgetCode,
     string BillingFrequency,
     int NetTermsDays,

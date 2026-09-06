@@ -1011,7 +1011,7 @@ function LineEditor({
       const expected = payload.reduce((s, l) => s + Math.round(l.quantity * l.unitPriceCad * 100) / 100, 0);
       const fresh = await refetchUntil(
         () => getInvoice(inv.id),
-        (d) => d.lines.length === payload.length && Math.abs(d.subtotalCad - expected) < 0.005,
+        (d) => d.lines.length === payload.length && Math.abs(d.totalCad - expected) < 0.005,
       );
       onSaved(fresh);
     } catch (e) {
@@ -1621,39 +1621,12 @@ function InvoiceDetail({
             );
           })}
 
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              padding: "9px 0",
-              borderBottom: `1px solid ${colors.borderSubtle}`,
-              fontFamily: fonts.body,
-              fontSize: 12.5,
-            }}
-          >
-            <span style={{ color: colors.textSecondary }}>Subtotal</span>
-            <span style={{ fontFamily: fonts.mono, color: colors.textPrimary }}>{formatInvoiceCad(inv.subtotalCad)}</span>
-          </div>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              padding: "9px 0",
-              borderBottom: `1px solid ${colors.borderSubtle}`,
-              fontFamily: fonts.body,
-              fontSize: 12.5,
-            }}
-          >
-            <span style={{ color: colors.textSecondary }}>
-              {inv.gstApplicable
-                ? `GST (${Math.round(inv.gstRate * 1000) / 10}%) · no PST on transportation`
-                : "GST — not applicable per contract"}
-            </span>
-            <span style={{ fontFamily: fonts.mono, color: colors.textPrimary }}>{formatInvoiceCad(inv.gstCad)}</span>
-          </div>
           <div style={{ display: "flex", justifyContent: "space-between", padding: "11px 0 0", fontFamily: fonts.body, fontSize: 13, fontWeight: 700 }}>
             <span style={{ color: colors.textPrimary }}>Total (CAD)</span>
             <span style={{ fontFamily: fonts.mono, color: statusMeta("ontime").t }}>{formatInvoiceCad(inv.totalCad)}</span>
+          </div>
+          <div style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim, marginTop: 8 }}>
+            Taxes are applied in QuickBooks — this worksheet carries none.
           </div>
         </div>
       )}

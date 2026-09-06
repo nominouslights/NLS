@@ -19,7 +19,6 @@ internal sealed class ContractProjection : ClientsProjection<Contract, ContractR
         row.EndDate = source.EndDate;
         row.BillingModel = source.BillingModel.ToString();
         row.RatePerRoundTripCad = source.RatePerRoundTripCad;
-        row.GstApplicable = source.GstApplicable;
         row.BudgetCode = source.BudgetCode;
         row.BillingFrequency = source.BillingFrequency.ToString();
         row.NetTermsDays = source.NetTermsDays;

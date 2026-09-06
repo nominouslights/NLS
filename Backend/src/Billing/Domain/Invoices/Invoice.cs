@@ -5,26 +5,23 @@ namespace NorthernLink.Billing.Domain.Invoices;
 
 /// <summary>
 /// A billing worksheet — the platform prepares the numbers (completed uninvoiced round trips
-/// priced at the contract rate, plus manual lines, GST and totals) that are then keyed into
-/// QuickBooks Online by hand. The platform never calls the QBO API — QBO remains the
-/// accounting system of record and owns sent/overdue and any partial-settlement detail —
-/// but two facts are recorded here by hand so dispatch can answer them without opening QBO:
-/// that the worksheet was entered (<see cref="QboInvoiceId"/>, <see cref="QboEnteredDate"/>)
-/// and that payment was confirmed (<see cref="PaymentConfirmedDate"/>).
-/// Everything contract-derived (<see cref="PoNumber"/>,
-/// <see cref="BudgetCode"/>, <see cref="NetTermsDays"/>, <see cref="GstApplicable"/>,
-/// <see cref="GstRate"/>) is a snapshot taken at drafting: later contract amendments never
-/// rewrite an existing worksheet. Totals are computed, never stored on the write side — a
-/// line list can't disagree with its own subtotal. The QBO fields record the manual
-/// reconciliation: <see cref="QboInvoiceId"/> is the QBO invoice number and
-/// <see cref="QboEnteredDate"/> the date it was keyed in.
+/// priced at the contract rate, plus manual lines) that are then keyed into QuickBooks Online
+/// by hand. <b>The platform never computes or applies GST/HST/PST or any other tax</b>:
+/// QuickBooks Online owns all tax calculation, so a worksheet carries one money figure —
+/// <see cref="TotalCad"/>, the plain sum of its lines — and no tax fields at all. The platform
+/// never calls the QBO API either — QBO remains the accounting system of record and owns
+/// sent/overdue and any partial-settlement detail — but two facts are recorded here by hand so
+/// dispatch can answer them without opening QBO: that the worksheet was entered
+/// (<see cref="QboInvoiceId"/>, <see cref="QboEnteredDate"/>) and that payment was confirmed
+/// (<see cref="PaymentConfirmedDate"/>). Everything contract-derived
+/// (<see cref="PoNumber"/>, <see cref="BudgetCode"/>, <see cref="NetTermsDays"/>) is a snapshot
+/// taken at drafting: later contract amendments never rewrite an existing worksheet. The total
+/// is computed, never stored on the write side — a line list can't disagree with its own total.
+/// The QBO fields record the manual reconciliation: <see cref="QboInvoiceId"/> is the QBO
+/// invoice number and <see cref="QboEnteredDate"/> the date it was keyed in.
 /// </summary>
 public sealed class Invoice : AggregateRoot, ITenantScoped
 {
-    /// <summary>GST rate snapshotted onto new drafts (5%). Stored per invoice so a future
-    /// rate change never silently reprices history.</summary>
-    public const decimal StandardGstRate = 0.05m;
-
     private readonly List<InvoiceLine> _lines = [];
 
     private Invoice()
@@ -45,8 +42,6 @@ public sealed class Invoice : AggregateRoot, ITenantScoped
     /// <summary>Informational snapshot of the contract's net terms at drafting — the platform
     /// no longer derives due dates or overdue state; QBO owns receivables.</summary>
     public int NetTermsDays { get; private set; }
-    public bool GstApplicable { get; private set; }
-    public decimal GstRate { get; private set; }
     public DateOnly PeriodStart { get; private set; }
     public DateOnly PeriodEnd { get; private set; }
     public InvoiceStatus Status { get; private set; }
@@ -74,11 +69,12 @@ public sealed class Invoice : AggregateRoot, ITenantScoped
 
     public IReadOnlyList<InvoiceLine> Lines => _lines;
 
-    public decimal SubtotalCad => Math.Round(_lines.Sum(line => line.AmountCad), 2);
-
-    public decimal GstCad => GstApplicable ? Math.Round(SubtotalCad * GstRate, 2) : 0m;
-
-    public decimal TotalCad => SubtotalCad + GstCad;
+    /// <summary>
+    /// The worksheet's one money figure: the plain sum of its lines, with no tax uplift. There
+    /// is deliberately no subtotal/total split — the platform applies no tax, so a second figure
+    /// could only ever drift from this one.
+    /// </summary>
+    public decimal TotalCad => Math.Round(_lines.Sum(line => line.AmountCad), 2);
 
     /// <summary>
     /// What the platform still expects to collect. Computed, not stored: only an invoice sitting
@@ -97,8 +93,6 @@ public sealed class Invoice : AggregateRoot, ITenantScoped
         string? poNumber,
         string? budgetCode,
         int netTermsDays,
-        bool gstApplicable,
-        decimal gstRate,
         DateOnly periodStart,
         DateOnly periodEnd,
         IReadOnlyList<InvoiceLine> lines)
@@ -133,8 +127,6 @@ public sealed class Invoice : AggregateRoot, ITenantScoped
             PoNumber = string.IsNullOrWhiteSpace(poNumber) ? null : poNumber.Trim(),
             BudgetCode = string.IsNullOrWhiteSpace(budgetCode) ? null : budgetCode.Trim(),
             NetTermsDays = netTermsDays,
-            GstApplicable = gstApplicable,
-            GstRate = gstRate,
             PeriodStart = periodStart,
             PeriodEnd = periodEnd,
             Status = InvoiceStatus.Draft,
@@ -161,7 +153,7 @@ public sealed class Invoice : AggregateRoot, ITenantScoped
         _lines.Clear();
         _lines.AddRange(lines);
 
-        Raise(new InvoiceLinesReplacedDomainEvent(Id, _lines.Count, SubtotalCad, TotalCad));
+        Raise(new InvoiceLinesReplacedDomainEvent(Id, _lines.Count, TotalCad));
         return Result.Success();
     }
 

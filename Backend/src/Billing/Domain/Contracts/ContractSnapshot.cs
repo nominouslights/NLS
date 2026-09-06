@@ -27,7 +27,6 @@ public sealed class ContractSnapshot : ITenantScoped
     public DateOnly? EndDate { get; set; }
     public string BillingModel { get; set; } = null!;
     public decimal? RatePerRoundTripCad { get; set; }
-    public bool GstApplicable { get; set; }
     public string? BudgetCode { get; set; }
     public string BillingFrequency { get; set; } = null!;
     public int NetTermsDays { get; set; }

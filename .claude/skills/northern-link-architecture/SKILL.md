@@ -57,6 +57,11 @@ reference file rather than guessing from this summary.
 8. **QuickBooks Online is read-only from the platform's perspective for accounting sync**, but
    the platform is the source of truth for Budget Codes (Section 5.3) — every transaction gets
    tagged, don't let untagged transactions accumulate.
+   **The platform never computes tax.** No GST/HST/PST rate, field, or line anywhere in
+   invoicing, contracts, or reports — QuickBooks owns all tax calculation, and an invoice total
+   is the plain sum of its lines. Contract rates are quoted tax-inclusive, so any uplift here
+   double-counts. (Budget-code tax *classification* and vendors’ GST registration numbers are
+   reference data, not calculation, and are unaffected.)
 9. **The Owner/Exec Desktop App is super-user-only** (Owner, Accountant, future Board) — this is
    a distinct authorization flag, not just "Internal tenant." Never let a Dispatcher/Supervisor
    account incidentally gain access to it.

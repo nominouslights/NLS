@@ -10,6 +10,8 @@ namespace NorthernLink.Clients.Domain.Contracts;
 /// creation (the create handler looks it up) so the full-snapshot
 /// <c>ContractChangedIntegrationEvent</c> never needs a join. <see cref="BudgetCode"/>
 /// implements the platform's tag-at-creation budget-code rule for anything touching money.
+/// A contract carries no tax terms — the platform computes no GST/HST/PST anywhere;
+/// QuickBooks Online owns tax calculation.
 /// Every state change is public contract for Billing, so create/update/terminate all raise
 /// events the mapper turns into <c>ContractChangedIntegrationEvent</c>.
 /// </summary>
@@ -28,7 +30,6 @@ public sealed class Contract : AggregateRoot, ITenantScoped
     public DateOnly? EndDate { get; private set; }
     public BillingModel BillingModel { get; private set; }
     public decimal? RatePerRoundTripCad { get; private set; }
-    public bool GstApplicable { get; private set; }
     public string? BudgetCode { get; private set; }
     public BillingFrequency BillingFrequency { get; private set; }
     public int NetTermsDays { get; private set; }
@@ -45,7 +46,6 @@ public sealed class Contract : AggregateRoot, ITenantScoped
         DateOnly? endDate,
         BillingModel billingModel,
         decimal? ratePerRoundTripCad,
-        bool gstApplicable,
         string? budgetCode,
         BillingFrequency billingFrequency,
         int netTermsDays,
@@ -66,7 +66,6 @@ public sealed class Contract : AggregateRoot, ITenantScoped
             EndDate = endDate,
             BillingModel = billingModel,
             RatePerRoundTripCad = ratePerRoundTripCad,
-            GstApplicable = gstApplicable,
             BudgetCode = Clean(budgetCode),
             BillingFrequency = billingFrequency,
             NetTermsDays = netTermsDays,
@@ -85,7 +84,6 @@ public sealed class Contract : AggregateRoot, ITenantScoped
         DateOnly? endDate,
         BillingModel billingModel,
         decimal? ratePerRoundTripCad,
-        bool gstApplicable,
         string? budgetCode,
         BillingFrequency billingFrequency,
         int netTermsDays,
@@ -105,7 +103,6 @@ public sealed class Contract : AggregateRoot, ITenantScoped
         EndDate = endDate;
         BillingModel = billingModel;
         RatePerRoundTripCad = ratePerRoundTripCad;
-        GstApplicable = gstApplicable;
         BudgetCode = Clean(budgetCode);
         BillingFrequency = billingFrequency;
         NetTermsDays = netTermsDays;

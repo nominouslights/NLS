@@ -32,7 +32,6 @@ public sealed record ActiveContractSummary(
     DateOnly? EndDate,
     string BillingModel,
     decimal? RatePerRoundTripCad,
-    bool GstApplicable,
     string? BudgetCode,
     string BillingFrequency,
     int NetTermsDays,

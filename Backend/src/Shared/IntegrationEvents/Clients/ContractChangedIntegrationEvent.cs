@@ -10,7 +10,9 @@ namespace NorthernLink.Shared.IntegrationEvents.Clients;
 /// library reference to Clients. The contract on the client profile is the source of
 /// truth for invoicing: draft invoices price round trips from
 /// <see cref="RatePerRoundTripCad"/> and default their PO/budget/terms fields from
-/// here. BillingModel ("RoundTripRate", "Manual"), BillingFrequency ("Monthly",
+/// here. No tax flag travels on this event and none is stored anywhere: the platform
+/// computes no GST/HST/PST at all — QuickBooks Online owns tax calculation.
+/// BillingModel ("RoundTripRate", "Manual"), BillingFrequency ("Monthly",
 /// "BiWeekly", "Weekly"), and Status ("Active", "Ended", "Terminated") travel as
 /// strings: integration events never reference Clients' internal enums.
 /// <see cref="TenantId"/> is part of the payload because handlers run outside any
@@ -25,7 +27,6 @@ public sealed record ContractChangedIntegrationEvent(
     DateOnly? EndDate,
     string BillingModel,
     decimal? RatePerRoundTripCad,
-    bool GstApplicable,
     string? BudgetCode,
     string BillingFrequency,
     int NetTermsDays,

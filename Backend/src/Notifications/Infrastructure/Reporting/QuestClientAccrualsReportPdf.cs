@@ -10,7 +10,7 @@ namespace NorthernLink.Notifications.Infrastructure.Reporting;
 /// <see cref="IClientAccrualsReportPdf"/> backed by QuestPDF (Community license, set once at
 /// DI time in <c>AddNotifications</c>). Renders a single-document report: a header block with
 /// the client and period, any notes, the bucket summary table, one detail table per bucket,
-/// the reconciliation section, and the referenced invoices (the only place GST appears).
+/// the reconciliation section, and the referenced invoices.
 /// Every value is an already-formatted string from the flat <see cref="ClientAccrualsReport"/>
 /// — no domain lookups, and empty sections are simply skipped (an empty month still renders).
 /// </summary>
@@ -61,7 +61,8 @@ public sealed class QuestClientAccrualsReportPdf : IClientAccrualsReportPdf
             });
 
             column.Item().PaddingTop(2).Text(
-                "Estimated amounts are marked and are not invoices. All amounts CAD; GST appears only in the invoices section.")
+                "Estimated amounts are marked and are not invoices. All amounts are CAD and exclude tax — "
+                + "taxes are applied in QuickBooks, not by this platform.")
                 .FontSize(8).FontColor(MutedColor);
 
             column.Item().PaddingTop(8).LineHorizontal(1).LineColor(Colors.Grey.Lighten2);
@@ -244,25 +245,25 @@ public sealed class QuestClientAccrualsReportPdf : IClientAccrualsReportPdf
                     columns.RelativeColumn(3);
                     columns.RelativeColumn(2);
                     columns.RelativeColumn(2);
-                    columns.RelativeColumn(2);
+                    columns.RelativeColumn(3);
                     columns.RelativeColumn(2);
                 });
 
                 table.Header(header =>
                 {
-                    header.Cell().Element(HeaderCell).Text("Invoice #");
+                    header.Cell().Element(HeaderCell).Text("Invoice");
+                    header.Cell().Element(HeaderCell).Text("QBO #");
                     header.Cell().Element(HeaderCell).Text("Status");
-                    header.Cell().Element(HeaderCell).AlignRight().Text("Subtotal");
-                    header.Cell().Element(HeaderCell).AlignRight().Text("GST");
-                    header.Cell().Element(HeaderCell).AlignRight().Text("Total");
+                    header.Cell().Element(HeaderCell).Text("Invoice period");
+                    header.Cell().Element(HeaderCell).AlignRight().Text("Total (CAD)");
                 });
 
                 foreach (var invoice in invoices)
                 {
                     table.Cell().Element(BodyCell).Text(invoice.InvoiceNumber);
+                    table.Cell().Element(BodyCell).Text(invoice.QboInvoiceId);
                     table.Cell().Element(BodyCell).Text(invoice.Status);
-                    table.Cell().Element(BodyCell).AlignRight().Text(invoice.SubtotalCad);
-                    table.Cell().Element(BodyCell).AlignRight().Text(invoice.GstCad);
+                    table.Cell().Element(BodyCell).Text(invoice.PeriodLabel);
                     table.Cell().Element(BodyCell).AlignRight().Text(invoice.TotalCad);
                 }
             });

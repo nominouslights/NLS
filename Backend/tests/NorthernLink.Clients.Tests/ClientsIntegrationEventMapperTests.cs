@@ -70,7 +70,6 @@ public class ClientsIntegrationEventMapperTests
         Assert.Equal(new DateOnly(2026, 12, 31), integrationEvent.EndDate);
         Assert.Equal("RoundTripRate", integrationEvent.BillingModel);
         Assert.Equal(1450m, integrationEvent.RatePerRoundTripCad);
-        Assert.True(integrationEvent.GstApplicable);
         Assert.Equal("ZBB-CREW-01", integrationEvent.BudgetCode);
         Assert.Equal("Monthly", integrationEvent.BillingFrequency);
         Assert.Equal(30, integrationEvent.NetTermsDays);
@@ -87,7 +86,6 @@ public class ClientsIntegrationEventMapperTests
             null,
             BillingModel.Manual,
             null,
-            gstApplicable: false,
             "ZBB-CHTR-03",
             BillingFrequency.Weekly,
             45,
@@ -99,7 +97,6 @@ public class ClientsIntegrationEventMapperTests
         Assert.Null(integrationEvent.EndDate);
         Assert.Equal("Manual", integrationEvent.BillingModel);
         Assert.Null(integrationEvent.RatePerRoundTripCad);
-        Assert.False(integrationEvent.GstApplicable);
         Assert.Equal("ZBB-CHTR-03", integrationEvent.BudgetCode);
         Assert.Equal("Weekly", integrationEvent.BillingFrequency);
         Assert.Equal(45, integrationEvent.NetTermsDays);

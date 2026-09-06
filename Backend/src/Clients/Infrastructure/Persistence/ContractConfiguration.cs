@@ -29,7 +29,6 @@ public sealed class ContractConfiguration : IEntityTypeConfiguration<Contract>
             .HasColumnName("rate_per_round_trip_cad")
             .HasColumnType("numeric(12,2)");
 
-        builder.Property(c => c.GstApplicable).HasColumnName("gst_applicable");
         builder.Property(c => c.BudgetCode).HasColumnName("budget_code").HasMaxLength(64);
 
         builder.Property(c => c.BillingFrequency)
