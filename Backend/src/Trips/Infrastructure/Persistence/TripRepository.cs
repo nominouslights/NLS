@@ -37,6 +37,42 @@ internal sealed class TripRepository(TripsDbContext context) : ITripRepository
             .ToListAsync(cancellationToken);
     }
 
+    public Task<Trip?> GetByBookingDayIdAsync(
+        Guid tenantId,
+        Guid bookingDayId,
+        CancellationToken cancellationToken = default) =>
+        context.Trips
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(
+                t => t.TenantId == tenantId && t.BookingDayId == bookingDayId, cancellationToken);
+
+    public async Task<bool> TryAddForBookingDayAsync(Trip trip, CancellationToken cancellationToken = default)
+    {
+        context.Trips.Add(trip);
+        try
+        {
+            await context.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateException exception) when (
+            exception.InnerException is Npgsql.PostgresException { SqlState: "23505" })
+        {
+            // The (tenant_id, booking_day_id) unique index rejected us — another processing
+            // of the same confirmation won. Drop every pending insert (the trip AND the
+            // audit/outbox rows the save pipeline staged for it — they rolled back with the
+            // transaction but are still tracked as Added) and report the duplicate.
+            foreach (var entry in context.ChangeTracker.Entries()
+                .Where(e => e.State == EntityState.Added)
+                .ToList())
+            {
+                entry.State = EntityState.Detached;
+            }
+
+            trip.ClearDomainEvents();
+            return false;
+        }
+    }
+
     public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
         context.SaveChangesAsync(cancellationToken);
 }

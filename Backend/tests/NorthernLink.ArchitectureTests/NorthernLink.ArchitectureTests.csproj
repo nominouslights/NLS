@@ -18,6 +18,7 @@
     <ProjectReference Include="..\..\src\Fleet\NorthernLink.Fleet.csproj" />
     <ProjectReference Include="..\..\src\Clients\NorthernLink.Clients.csproj" />
     <ProjectReference Include="..\..\src\Billing\NorthernLink.Billing.csproj" />
+    <ProjectReference Include="..\..\src\Booking\NorthernLink.Booking.csproj" />
     <ProjectReference Include="..\..\src\Incidents\NorthernLink.Incidents.csproj" />
     <ProjectReference Include="..\..\src\Notifications\NorthernLink.Notifications.csproj" />
     <ProjectReference Include="..\..\src\Grocery\NorthernLink.Grocery.csproj" />

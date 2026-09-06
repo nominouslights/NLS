@@ -19,6 +19,8 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
     public const int MaxHorizonDays = 60;
     public const int DefaultHorizonDays = 7;
 
+    private readonly List<ScheduleException> _exceptions = [];
+
     private ScheduleTemplate()
     {
         // EF Core materialization only.
@@ -61,9 +63,13 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
     /// </summary>
     public bool ReturnNextDay { get; private set; }
 
-    public int SeatsCapacity { get; private set; }
+    /// <summary>
+    /// Null for cargo-service templates (Cargo/Grocery carry goods, not passengers — inputs
+    /// are normalized to null on create/update); required positive for every passenger type.
+    /// </summary>
+    public int? SeatsCapacity { get; private set; }
 
-    /// <summary>Community-run viability threshold; surfacing it is a frontend concern.</summary>
+    /// <summary>Community-run viability threshold; surfacing it is a frontend concern. Null for cargo services.</summary>
     public int? SeatsMinimum { get; private set; }
 
     public string? DefaultVehicleUnit { get; private set; }
@@ -73,6 +79,14 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
     public bool Active { get; private set; }
     public DateTimeOffset CreatedAtUtc { get; private set; }
     public DateTimeOffset UpdatedAtUtc { get; private set; }
+
+    /// <summary>
+    /// Dated departures from the recurrence (skip / extra run / time override) — at most one
+    /// per date. A child table, not jsonb, so the generation worker and the special-dates UI
+    /// can query by date; mutated only through <see cref="AddException"/>,
+    /// <see cref="UpdateException"/>, and <see cref="RemoveException"/>.
+    /// </summary>
+    public IReadOnlyList<ScheduleException> Exceptions => _exceptions.AsReadOnly();
 
     public static Result<ScheduleTemplate> Create(
         Guid tenantId,
@@ -89,7 +103,7 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
         TimeOnly departureTime,
         TimeOnly? returnDepartureTime,
         bool returnNextDay,
-        int seatsCapacity,
+        int? seatsCapacity,
         int? seatsMinimum,
         string? defaultVehicleUnit,
         Guid? defaultDriverId,
@@ -97,7 +111,7 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
         string? cutoffNote = null)
     {
         var validation = Validate(
-            name, routeId, recurrenceKind, daysOfWeek, intervalDays, anchorDate, daysOfMonth,
+            name, routeId, serviceType, recurrenceKind, daysOfWeek, intervalDays, anchorDate, daysOfMonth,
             departureTime, returnDepartureTime, returnNextDay, seatsCapacity, seatsMinimum, generationHorizonDays);
         if (validation.IsFailure)
         {
@@ -116,8 +130,10 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
             DepartureTime = departureTime,
             ReturnDepartureTime = returnDepartureTime,
             ReturnNextDay = returnNextDay,
-            SeatsCapacity = seatsCapacity,
-            SeatsMinimum = seatsMinimum,
+            // Cargo services carry goods, not passengers — whatever a caller supplied is
+            // normalized away rather than stored as a lie.
+            SeatsCapacity = serviceType.IsCargoService() ? null : seatsCapacity,
+            SeatsMinimum = serviceType.IsCargoService() ? null : seatsMinimum,
             DefaultVehicleUnit = Normalize(defaultVehicleUnit),
             DefaultDriverId = defaultDriverId,
             GenerationHorizonDays = generationHorizonDays,
@@ -147,7 +163,7 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
         TimeOnly departureTime,
         TimeOnly? returnDepartureTime,
         bool returnNextDay,
-        int seatsCapacity,
+        int? seatsCapacity,
         int? seatsMinimum,
         string? defaultVehicleUnit,
         Guid? defaultDriverId,
@@ -155,7 +171,7 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
         string? cutoffNote)
     {
         var validation = Validate(
-            name, routeId, recurrenceKind, daysOfWeek, intervalDays, anchorDate, daysOfMonth,
+            name, routeId, serviceType, recurrenceKind, daysOfWeek, intervalDays, anchorDate, daysOfMonth,
             departureTime, returnDepartureTime, returnNextDay, seatsCapacity, seatsMinimum, generationHorizonDays);
         if (validation.IsFailure)
         {
@@ -171,8 +187,8 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
         DepartureTime = departureTime;
         ReturnDepartureTime = returnDepartureTime;
         ReturnNextDay = returnNextDay;
-        SeatsCapacity = seatsCapacity;
-        SeatsMinimum = seatsMinimum;
+        SeatsCapacity = serviceType.IsCargoService() ? null : seatsCapacity;
+        SeatsMinimum = serviceType.IsCargoService() ? null : seatsMinimum;
         DefaultVehicleUnit = Normalize(defaultVehicleUnit);
         DefaultDriverId = defaultDriverId;
         GenerationHorizonDays = generationHorizonDays;
@@ -203,9 +219,152 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
         }
     }
 
+    // ---- Schedule exceptions (special dates) ----
+
+    /// <summary>
+    /// Records a dated exception. One exception per date; per-kind time rules in
+    /// <see cref="ValidateException"/>. Past dates are allowed on purpose — a backdated skip
+    /// documents why a run never happened. Generation-time only: never touches trips already
+    /// materialized for the date.
+    /// </summary>
+    public Result<Guid> AddException(
+        DateOnly date,
+        ScheduleExceptionKind kind,
+        TimeOnly? departureTime,
+        TimeOnly? returnDepartureTime,
+        string? note)
+    {
+        var validation = ValidateException(date, kind, departureTime, returnDepartureTime, excludeExceptionId: null);
+        if (validation.IsFailure)
+        {
+            return Result.Failure<Guid>(validation.Error);
+        }
+
+        var exception = ScheduleException.Create(
+            TenantId, Id, date, kind, departureTime, returnDepartureTime, note);
+        _exceptions.Add(exception);
+        UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        Raise(new ScheduleTemplateExceptionsChangedDomainEvent(Id));
+        return Result.Success(exception.Id);
+    }
+
+    /// <summary>Full-row edit of one exception; the same rules as <see cref="AddException"/> apply to the new values.</summary>
+    public Result UpdateException(
+        Guid exceptionId,
+        DateOnly date,
+        ScheduleExceptionKind kind,
+        TimeOnly? departureTime,
+        TimeOnly? returnDepartureTime,
+        string? note)
+    {
+        if (_exceptions.SingleOrDefault(e => e.Id == exceptionId) is not { } exception)
+        {
+            return Result.Failure(ScheduleTemplateErrors.ExceptionNotFound);
+        }
+
+        var validation = ValidateException(date, kind, departureTime, returnDepartureTime, exceptionId);
+        if (validation.IsFailure)
+        {
+            return validation;
+        }
+
+        exception.Update(date, kind, departureTime, returnDepartureTime, note);
+        UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        Raise(new ScheduleTemplateExceptionsChangedDomainEvent(Id));
+        return Result.Success();
+    }
+
+    public Result RemoveException(Guid exceptionId)
+    {
+        if (_exceptions.SingleOrDefault(e => e.Id == exceptionId) is not { } exception)
+        {
+            return Result.Failure(ScheduleTemplateErrors.ExceptionNotFound);
+        }
+
+        _exceptions.Remove(exception);
+        UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        Raise(new ScheduleTemplateExceptionsChangedDomainEvent(Id));
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// The per-kind rules. Skip carries no times. ExtraRun needs its own departure and its
+    /// optional return is same-day, so it must follow the departure — even on a template whose
+    /// own return is overnight (an extra run never spans midnight). TimeOverride must change
+    /// at least one time, may only override a return the template actually has, and the
+    /// effective pair (each side falling back to the template's time) must order correctly —
+    /// unless the template's return is flagged next-day, where an earlier clock time is the
+    /// whole point.
+    /// </summary>
+    private Result ValidateException(
+        DateOnly date,
+        ScheduleExceptionKind kind,
+        TimeOnly? departureTime,
+        TimeOnly? returnDepartureTime,
+        Guid? excludeExceptionId)
+    {
+        if (_exceptions.Any(e => e.Date == date && e.Id != excludeExceptionId))
+        {
+            return Result.Failure(ScheduleTemplateErrors.DuplicateExceptionDate);
+        }
+
+        switch (kind)
+        {
+            case ScheduleExceptionKind.Skip:
+                if (departureTime is not null || returnDepartureTime is not null)
+                {
+                    return Result.Failure(ScheduleTemplateErrors.ExceptionTimesNotAllowed);
+                }
+
+                break;
+
+            case ScheduleExceptionKind.ExtraRun:
+                if (departureTime is not { } extraDeparture)
+                {
+                    return Result.Failure(ScheduleTemplateErrors.ExtraRunDepartureRequired);
+                }
+
+                if (returnDepartureTime is { } extraReturn && extraReturn <= extraDeparture)
+                {
+                    return Result.Failure(ScheduleTemplateErrors.ExceptionReturnBeforeDeparture);
+                }
+
+                break;
+
+            case ScheduleExceptionKind.TimeOverride:
+                if (departureTime is null && returnDepartureTime is null)
+                {
+                    return Result.Failure(ScheduleTemplateErrors.OverrideTimeRequired);
+                }
+
+                if (returnDepartureTime is not null && ReturnDepartureTime is null)
+                {
+                    return Result.Failure(ScheduleTemplateErrors.ExceptionReturnWithoutTemplateReturn);
+                }
+
+                if (ReturnDepartureTime is { } templateReturn && !ReturnNextDay)
+                {
+                    var effectiveDeparture = departureTime ?? DepartureTime;
+                    var effectiveReturn = returnDepartureTime ?? templateReturn;
+                    if (effectiveReturn <= effectiveDeparture)
+                    {
+                        return Result.Failure(ScheduleTemplateErrors.ExceptionReturnBeforeDeparture);
+                    }
+                }
+
+                break;
+        }
+
+        return Result.Success();
+    }
+
     private static Result Validate(
         string name,
         Guid routeId,
+        TripServiceType serviceType,
         ScheduleRecurrenceKind recurrenceKind,
         IReadOnlyList<DayOfWeek> daysOfWeek,
         int? intervalDays,
@@ -214,7 +373,7 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
         TimeOnly departureTime,
         TimeOnly? returnDepartureTime,
         bool returnNextDay,
-        int seatsCapacity,
+        int? seatsCapacity,
         int? seatsMinimum,
         int generationHorizonDays)
     {
@@ -250,7 +409,13 @@ public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
             return recurrenceValidation;
         }
 
-        if (seatsCapacity <= 0 || seatsMinimum is { } minimum && (minimum <= 0 || minimum > seatsCapacity))
+        // Seats are a passenger concept: cargo services skip the checks entirely (inputs are
+        // normalized to null after validation), passenger types still require a positive
+        // capacity with a minimum that fits inside it.
+        if (!serviceType.IsCargoService()
+            && (seatsCapacity is not { } capacity
+                || capacity <= 0
+                || seatsMinimum is { } minimum && (minimum <= 0 || minimum > capacity)))
         {
             return Result.Failure(ScheduleTemplateErrors.InvalidSeats);
         }

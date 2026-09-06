@@ -78,7 +78,7 @@ Reporting & Analytics · Crew & Workforce Visibility · Budget & Financial Contr
 
 | App | Tenant/Users | Device | Offline? |
 |---|---|---|---|
-| Community Mobile App | Consumer | iOS/Android (Flutter) | No |
+| Community Booking PWA *(superseded the Flutter Community Mobile App — Community Booking & Dispatch spec, 2026-08; the `CommunityMobile/` mockup remains its IA reference)* | Consumer | Mobile-first web, installable (Next.js PWA) | Cached shell only |
 | Client Web App (Alamos) | Client | Web | No |
 | Driver Field App | Internal Driver + Partner Driver | Company-issued Android tablet only (Flutter) | **Yes — critical** |
 | Admin Web App | Internal (Admin) | Web | No |
@@ -86,10 +86,18 @@ Reporting & Analytics · Crew & Workforce Visibility · Budget & Financial Contr
 
 ## Quick Reference: Tech Stack
 
-Frontend: Next.js 15 · Backend: .NET 10, CQRS/DDD · Database: PostgreSQL + RLS · Mobile: Flutter ·
-Object storage: OVHcloud Object Storage (S3-compatible) · Hosting: OVHcloud Canada (Beauharnois,
-QC) · Identity: self-hosted OIDC (OpenIddict) · Monitoring: self-hosted Sentry + Prometheus/Grafana
-+ Loki + Uptime Kuma
+Frontend: Next.js (repo is on 16; the reference doc predates this and says 15) · Backend: .NET 10,
+CQRS/DDD · Database: PostgreSQL + RLS · Mobile: Flutter for the Driver Field App only (the
+Community app is a Next.js PWA — superseded 2026-08) · Object storage: OVHcloud Object Storage
+(S3-compatible) · Hosting: OVHcloud Canada (Beauharnois, QC) · Identity: self-hosted OIDC
+(OpenIddict) · Monitoring: self-hosted Sentry + Prometheus/Grafana + Loki + Uptime Kuma
+
+**Superseded by the Community Booking & Dispatch spec (2026-08)** — where the reference doc
+disagrees, the spec wins: community payments are **Square + Interac e-Transfer (manual
+reconciliation)**, not Stripe (§9); transactional email is **Postmark** in the built system, not
+SendGrid, and SMS/Twilio is not built; community departures are **demand-activated** (no
+published timetable — schedule templates with fixed times are for crew/charter/cargo only), and
+the Community Booking domain now exists as `Backend/src/Booking`.
 
 ---
 

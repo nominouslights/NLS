@@ -8,8 +8,9 @@ public class ChangeTripStatusCommandHandlerTests
 {
     private readonly FakeTripRepository _trips = new();
     private readonly FakeTripManifestRepository _manifests = new();
+    private readonly FakeShipmentRepository _shipments = new();
 
-    private ChangeTripStatusCommandHandler Handler => new(_trips, _manifests);
+    private ChangeTripStatusCommandHandler Handler => new(_trips, _manifests, _shipments);
 
     [Fact]
     public async Task Start_is_rejected_when_the_trip_has_no_manifest()
@@ -74,6 +75,68 @@ public class ChangeTripStatusCommandHandlerTests
         Assert.True(result.IsSuccess);
         Assert.Equal(TripStatus.InProgress, deadhead.Status);
         Assert.Equal(1, _trips.SaveCount);
+    }
+
+    [Fact]
+    public async Task Cargo_start_is_rejected_with_no_shipment_assigned()
+    {
+        // The relaxed en-route gate: a cargo run needs freight booked on it, not a
+        // passenger manifest.
+        var trip = TestPlanning.ScheduleTrip(serviceType: TripServiceType.Cargo).Value;
+        _trips.Add(trip);
+
+        var result = await Handler.Handle(
+            new ChangeTripStatusCommand(trip.Id, TripStatus.InProgress, null), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(TripErrors.ShipmentRequired, result.Error);
+        Assert.Equal(TripStatus.Scheduled, trip.Status);
+        Assert.Equal(0, _trips.SaveCount);
+    }
+
+    [Fact]
+    public async Task Cargo_start_is_allowed_with_at_least_one_shipment_leg_and_no_manifest()
+    {
+        var trip = TestPlanning.ScheduleTrip(serviceType: TripServiceType.Grocery).Value;
+        _trips.Add(trip);
+        _shipments.Add(TestShipments.Register().OnTrip(trip.Id, trip.TripNumber, trip.ServiceDate));
+
+        var result = await Handler.Handle(
+            new ChangeTripStatusCommand(trip.Id, TripStatus.InProgress, null), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(TripStatus.InProgress, trip.Status);
+        Assert.Equal(1, _trips.SaveCount);
+    }
+
+    [Fact]
+    public async Task Cargo_deadhead_needs_neither_shipment_nor_manifest()
+    {
+        // IsEmptyLeg stays exempt from every en-route gate, cargo included.
+        var deadhead = TestPlanning.ScheduleTrip(
+            serviceType: TripServiceType.Cargo, isEmptyLeg: true).Value;
+        _trips.Add(deadhead);
+
+        var result = await Handler.Handle(
+            new ChangeTripStatusCommand(deadhead.Id, TripStatus.InProgress, null), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(TripStatus.InProgress, deadhead.Status);
+    }
+
+    [Fact]
+    public async Task Passenger_start_still_demands_a_manifest_even_with_shipments_aboard()
+    {
+        // Freight riding a passenger run never substitutes for the passenger manifest gate.
+        var trip = TestPlanning.ScheduleTrip().Value; // ContractCrew
+        _trips.Add(trip);
+        _shipments.Add(TestShipments.Register().OnTrip(trip.Id, trip.TripNumber, trip.ServiceDate));
+
+        var result = await Handler.Handle(
+            new ChangeTripStatusCommand(trip.Id, TripStatus.InProgress, null), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(TripErrors.PassengerManifestRequired, result.Error);
     }
 
     [Fact]

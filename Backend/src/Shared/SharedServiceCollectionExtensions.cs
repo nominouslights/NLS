@@ -39,10 +39,13 @@ public static class SharedServiceCollectionExtensions
             ?? new OutboxPollingOptions();
         services.AddSingleton(outboxPollingOptions);
 
-        // Chain-reaction events that must go through RabbitMQ list their types here.
-        // Currently empty: every integration event is storing/projecting and is consumed
-        // in-database by the modules' outbox polling consumers.
-        services.AddSingleton(new BusPublicationRegistry());
+        // Chain-reaction events that must go through RabbitMQ list their types here —
+        // events that trigger a command in another module. Everything else is
+        // storing/projecting and is consumed in-database by the modules' outbox polling
+        // consumers. Registry rule: only designate BRAND-NEW event types (see the class doc).
+        services.AddSingleton(new BusPublicationRegistry(
+            // booking.booking-day-confirmed → Trips creates the community trip.
+            typeof(IntegrationEvents.Booking.BookingDayConfirmedIntegrationEvent)));
 
         var projectionOptions = configuration.GetSection(ProjectionOptions.SectionName).Get<ProjectionOptions>()
             ?? new ProjectionOptions();

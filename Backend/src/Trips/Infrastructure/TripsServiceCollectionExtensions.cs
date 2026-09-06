@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using NorthernLink.Shared.EventBus;
 using NorthernLink.Shared.IntegrationEvents.Billing;
+using NorthernLink.Shared.IntegrationEvents.Booking;
 using NorthernLink.Shared.IntegrationEvents.Clients;
 using NorthernLink.Shared.IntegrationEvents.Drivers;
 using NorthernLink.Shared.IntegrationEvents.Fleet;
@@ -34,10 +35,14 @@ using NorthernLink.Trips.Application.Stops.Create;
 using NorthernLink.Trips.Application.Stops.GetStops;
 using NorthernLink.Trips.Application.Stops.SetActive;
 using NorthernLink.Trips.Application.Stops.Update;
+using NorthernLink.Trips.Application.Schedules.AddException;
 using NorthernLink.Trips.Application.Schedules.Create;
+using NorthernLink.Trips.Application.Schedules.GetExceptions;
 using NorthernLink.Trips.Application.Schedules.GetScheduleTemplates;
+using NorthernLink.Trips.Application.Schedules.RemoveException;
 using NorthernLink.Trips.Application.Schedules.SetActive;
 using NorthernLink.Trips.Application.Schedules.Update;
+using NorthernLink.Trips.Application.Schedules.UpdateException;
 using NorthernLink.Trips.Application.Trips;
 using NorthernLink.Trips.Application.Trips.Assign;
 using NorthernLink.Trips.Application.Trips.AttachManifest;
@@ -174,6 +179,10 @@ public static class TripsServiceCollectionExtensions
         services.AddScoped<ICommandHandler<UpdateScheduleTemplateCommand>, UpdateScheduleTemplateCommandHandler>();
         services.AddScoped<ICommandHandler<SetScheduleTemplateActiveCommand>, SetScheduleTemplateActiveCommandHandler>();
         services.AddScoped<IQueryHandler<GetScheduleTemplatesQuery, IReadOnlyList<ScheduleTemplateResponse>>, GetScheduleTemplatesQueryHandler>();
+        services.AddScoped<ICommandHandler<AddScheduleExceptionCommand, Guid>, AddScheduleExceptionCommandHandler>();
+        services.AddScoped<ICommandHandler<UpdateScheduleExceptionCommand>, UpdateScheduleExceptionCommandHandler>();
+        services.AddScoped<ICommandHandler<RemoveScheduleExceptionCommand>, RemoveScheduleExceptionCommandHandler>();
+        services.AddScoped<IQueryHandler<GetScheduleExceptionsQuery, IReadOnlyList<ScheduleExceptionResponse>>, GetScheduleExceptionsQueryHandler>();
         services.AddScoped<IQueryHandler<GetRidersQuery, IReadOnlyList<RiderResponse>>, GetRidersQueryHandler>();
         services.AddScoped<ICommandHandler<SetRiderRotationCommand>, SetRiderRotationCommandHandler>();
         services.AddScoped<ICommandHandler<UpsertRidersFromTripCommand>, UpsertRidersFromTripCommandHandler>();
@@ -190,6 +199,13 @@ public static class TripsServiceCollectionExtensions
             .On<VehicleInspectionRemovedIntegrationEvent, VehicleInspectionRemovedIntegrationEventHandler>()
             .On<ClientChangedIntegrationEvent, ClientChangedIntegrationEventHandler>()
             .On<InvoiceBillingStateChangedIntegrationEvent, InvoiceBillingStateChangedIntegrationEventHandler>());
+
+        // 4b. The chain-reaction path — the platform's first live RabbitMQ subscription:
+        //     booking.booking-day-confirmed must TRIGGER a command here (create the community
+        //     trip), so it is bus-designated in BusPublicationRegistry and consumed from the
+        //     durable northernlink.trips queue, not by polling the booking outbox.
+        services.AddIntegrationEventConsumer(SchemaName, subscriptions => subscriptions
+            .On<BookingDayConfirmedIntegrationEvent, BookingDayConfirmedIntegrationEventHandler>());
 
         // 5. Read-side projections — one worker upserts trips.rm_* from the journal, and a
         //    newly created manifest triggers the idempotent link-to-trip reaction (same-module

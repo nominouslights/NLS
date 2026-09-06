@@ -17,6 +17,14 @@ import type { DriverClearanceRecord } from "./drivers";
 /** Same enum as the Clients module's ServiceType (declared per-module backend-side). */
 export type TripServiceType = ClientServiceType;
 
+/** Cargo-family service types carry shipments, not passengers: seats are N/A
+ *  (null), demand recording is rejected backend-side, and the en-route gate is
+ *  "≥1 assigned shipment leg" instead of a passenger manifest. Mirrors the
+ *  backend's TripServiceTypeExtensions.IsCargoService. */
+export function isCargoService(serviceType: TripServiceType): boolean {
+  return serviceType === "Cargo" || serviceType === "Grocery";
+}
+
 export type TripStatus =
   | "Scheduled"
   | "InProgress"
@@ -463,7 +471,8 @@ export interface ScheduleTemplateRecord {
   /** True when the return leg lands the calendar day AFTER the outbound's (an overnight
    *  route) — returnDepartureTime is then a same-or-earlier clock time by design. */
   returnNextDay: boolean;
-  seatsCapacity: number;
+  /** Null for Cargo/Grocery templates — cargo carries no passenger seats. */
+  seatsCapacity: number | null;
   seatsMinimum: number | null;
   defaultVehicleUnit: string | null;
   defaultDriverId: string | null;
@@ -497,7 +506,9 @@ export interface ScheduleTemplateInput {
   /** True ⇒ the return leg lands the calendar day AFTER the outbound's. Only meaningful
    *  with returnDepartureTime set — send false when there is no return leg. */
   returnNextDay: boolean;
-  seatsCapacity: number;
+  /** Send null for Cargo/Grocery templates (the backend normalizes them to null
+   *  anyway); other service types require a positive capacity. */
+  seatsCapacity: number | null;
   seatsMinimum?: number | null;
   defaultVehicleUnit?: string | null;
   defaultDriverId?: string | null;
@@ -528,6 +539,84 @@ export function updateScheduleTemplate(id: string, input: ScheduleTemplateInput)
 export function setScheduleTemplateActive(id: string, active: boolean): Promise<void> {
   return request<void>(`/api/trips/schedule-templates/${id}/${active ? "activate" : "deactivate"}`, {
     method: "POST",
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Schedule exceptions — per-template special dates under
+// /api/trips/schedule-templates/{id}/exceptions. One exception per date; the
+// generation worker consumes them at GENERATION TIME ONLY (an exception never
+// cancels an already-generated trip — cancel those from Trips).
+// ---------------------------------------------------------------------------
+
+export type ScheduleExceptionKind = "Skip" | "ExtraRun" | "TimeOverride";
+
+/** Human labels for the exception kinds (never render a raw enum name). */
+export const EXCEPTION_KIND_LABELS: Record<ScheduleExceptionKind, string> = {
+  Skip: "Skip this date",
+  ExtraRun: "Extra run",
+  TimeOverride: "Time change",
+};
+
+/** Mirrors ScheduleExceptionResponse. */
+export interface ScheduleExceptionRecord {
+  id: string;
+  scheduleTemplateId: string;
+  date: string; // DateOnly, "2026-08-27"
+  kind: ScheduleExceptionKind;
+  /** TimeOnly "HH:mm:ss" — null for Skip; required for ExtraRun; optional for
+   *  TimeOverride (falls back to the template's departure). */
+  departureTime: string | null;
+  /** ExtraRun: optional same-day return (> departure). TimeOverride: only legal
+   *  when the template itself has a return leg. Always null for Skip. */
+  returnDepartureTime: string | null;
+  note: string | null;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+}
+
+/** POST/PUT body (ScheduleExceptionRequest). Validation mirrors the backend:
+ *  Skip = no times; ExtraRun = departure required, optional same-day return
+ *  after it; TimeOverride = at least one time, return override only if the
+ *  template has a return leg. */
+export interface ScheduleExceptionInput {
+  date: string; // "yyyy-MM-dd"
+  kind: ScheduleExceptionKind;
+  departureTime?: string | null; // "HH:mm"
+  returnDepartureTime?: string | null;
+  note?: string | null;
+}
+
+export function listScheduleExceptions(templateId: string): Promise<ScheduleExceptionRecord[]> {
+  return request<ScheduleExceptionRecord[]>(`/api/trips/schedule-templates/${templateId}/exceptions`);
+}
+
+/** POST → 201 { id }. */
+export async function createScheduleException(
+  templateId: string,
+  input: ScheduleExceptionInput,
+): Promise<string> {
+  const res = await request<{ id: string }>(`/api/trips/schedule-templates/${templateId}/exceptions`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return res.id;
+}
+
+export function updateScheduleException(
+  templateId: string,
+  exceptionId: string,
+  input: ScheduleExceptionInput,
+): Promise<void> {
+  return request<void>(`/api/trips/schedule-templates/${templateId}/exceptions/${exceptionId}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteScheduleException(templateId: string, exceptionId: string): Promise<void> {
+  return request<void>(`/api/trips/schedule-templates/${templateId}/exceptions/${exceptionId}`, {
+    method: "DELETE",
   });
 }
 

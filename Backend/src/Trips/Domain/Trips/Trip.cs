@@ -55,6 +55,15 @@ public sealed class Trip : AggregateRoot, ITenantScoped
     public List<RouteStop> Stops { get; private set; } = [];
     public int DistanceKm { get; private set; }
 
+    // Booking provenance.
+    /// <summary>
+    /// The Booking module's BookingDay this trip was materialized from
+    /// (<see cref="ScheduleFromBooking"/>) — null for every other creation path. A unique
+    /// index on (tenant_id, booking_day_id) makes the booking-day chain reaction
+    /// idempotent: a redelivered confirmation event can never create a second trip.
+    /// </summary>
+    public Guid? BookingDayId { get; private set; }
+
     // Template provenance.
     public Guid? ScheduleTemplateId { get; private set; }
     public string? RoundTripKey { get; private set; }
@@ -257,6 +266,87 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         };
 
         trip.Raise(new TripScheduledDomainEvent(trip.Id));
+        return Result.Success(trip);
+    }
+
+    /// <summary>
+    /// The booking-sourced creation path (US-B.9): a community trip materialized because a
+    /// booking day crossed its passenger minimum. Community service type ONLY, and — as a
+    /// deliberate, scoped relaxation of "a trip is never born unassigned" — no driver or
+    /// vehicle: the day confirms on demand, and dispatch assigns coverage afterwards through
+    /// the normal <see cref="AssignDriver"/>/<see cref="AssignVehicle"/> paths (the board's
+    /// "Open — needs coverage" derivation and the manifest gate on <see cref="Start"/>
+    /// already handle the operational checks). <paramref name="windowStart"/> is the
+    /// provisional departure (the consumer passes 08:00) that the dispatcher edits — per the
+    /// owner's decision that the dispatcher sets the departure window at confirmation.
+    /// Seat numbers are stamped from the booking day's derived math:
+    /// <see cref="SeatsConfirmed"/> starts booking-derived instead of 0 (the RecordDemand
+    /// write-race with the Manifests demand meter is documented and deferred — dispatcher
+    /// demand entry keeps working for non-booking trips).
+    /// </summary>
+    public static Result<Trip> ScheduleFromBooking(
+        Guid tenantId,
+        string tripNumber,
+        Guid bookingDayId,
+        DateOnly serviceDate,
+        TimeOnly windowStart,
+        Guid routeId,
+        string routeName,
+        string origin,
+        string destination,
+        IReadOnlyList<RouteStop> stops,
+        int distanceKm,
+        int seatsConfirmed,
+        int? seatsCapacity,
+        int? seatsMinimum)
+    {
+        if (string.IsNullOrWhiteSpace(tripNumber))
+        {
+            return Result.Failure<Trip>(TripErrors.TripNumberRequired);
+        }
+
+        if (bookingDayId == Guid.Empty)
+        {
+            return Result.Failure<Trip>(TripErrors.BookingDayRequired);
+        }
+
+        var validation = ValidateDetails(routeName, origin, destination, distanceKm, seatsCapacity, seatsMinimum);
+        if (validation.IsFailure)
+        {
+            return Result.Failure<Trip>(validation.Error);
+        }
+
+        if (seatsConfirmed < 0)
+        {
+            return Result.Failure<Trip>(TripErrors.InvalidSeats);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var trip = new Trip
+        {
+            TenantId = tenantId,
+            TripNumber = tripNumber.Trim(),
+            ServiceDate = serviceDate,
+            WindowStart = windowStart,
+            WindowEnd = null,
+            ServiceType = TripServiceType.Community,
+            RouteId = routeId,
+            RouteName = routeName.Trim(),
+            Origin = origin.Trim(),
+            Destination = destination.Trim(),
+            Stops = [.. stops],
+            DistanceKm = distanceKm,
+            BookingDayId = bookingDayId,
+            SeatsCapacity = seatsCapacity,
+            SeatsConfirmed = seatsConfirmed,
+            SeatsMinimum = seatsMinimum,
+            DemandGuaranteed = false,
+            Status = TripStatus.Scheduled,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+        };
+
+        trip.Raise(new TripScheduledFromBookingDomainEvent(trip.Id));
         return Result.Success(trip);
     }
 
@@ -846,9 +936,15 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         return Result.Success();
     }
 
-    /// <summary>Records confirmed demand (Manifests screen; guaranteed = "gift-a-seat" pledge).</summary>
+    /// <summary>Records confirmed demand (Manifests screen; guaranteed = "gift-a-seat" pledge). Not applicable to cargo services.</summary>
     public Result RecordDemand(int seatsConfirmed, bool demandGuaranteed)
     {
+        // A cargo run carries goods, not passengers — seat demand has nothing to attach to.
+        if (ServiceType.IsCargoService())
+        {
+            return Result.Failure(TripErrors.DemandNotApplicable);
+        }
+
         if (IsOperationallyClosed)
         {
             return Result.Failure(TripErrors.OperationallyClosed(Status));

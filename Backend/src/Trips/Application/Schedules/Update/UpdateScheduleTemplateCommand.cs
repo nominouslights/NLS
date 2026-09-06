@@ -23,7 +23,7 @@ public sealed record UpdateScheduleTemplateCommand(
     TimeOnly DepartureTime,
     TimeOnly? ReturnDepartureTime,
     bool ReturnNextDay,
-    int SeatsCapacity,
+    int? SeatsCapacity,
     int? SeatsMinimum,
     string? DefaultVehicleUnit,
     Guid? DefaultDriverId,

@@ -9,6 +9,16 @@
             "command": "node \"$CLAUDE_PROJECT_DIR/.claude/skills/code-map/scripts/codemap.mjs\" log"
           }
         ]
+      },
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/skills/migrations/scripts/migrations.mjs\" pr-hook",
+            "timeout": 90
+          }
+        ]
       }
     ],
     "SessionStart": [

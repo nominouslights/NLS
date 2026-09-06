@@ -140,6 +140,7 @@ internal sealed class TripGenerationWorker(
 
             var template = await context.ScheduleTemplates
                 .AsNoTracking()
+                .Include(t => t.Exceptions)
                 .FirstOrDefaultAsync(t => t.Id == templateId, cancellationToken);
             if (template is null || !template.Active)
             {
@@ -273,7 +274,8 @@ internal sealed class TripGenerationWorker(
                     vehicle.UnitNumber,
                     // The fleet vehicle's capacity is server-authoritative, exactly as on
                     // ad-hoc creation — the template's manual figure no longer applies.
-                    vehicle.SeatingCapacity,
+                    // Cargo services carry goods, not passengers: their trips have no seats.
+                    template.ServiceType.IsCargoService() ? null : vehicle.SeatingCapacity,
                     template.SeatsMinimum);
 
                 if (tripResult.IsFailure)

@@ -41,4 +41,29 @@ public static class ScheduleTemplateErrors
     public static readonly Error ReturnNextDayRequiresReturnDeparture = Error.Validation(
         "Trips.ScheduleTemplate.ReturnNextDayRequiresReturnDeparture",
         "Return next day only applies when a return departure time is set.");
+
+    // ---- Schedule exceptions (special dates) ----
+
+    public static readonly Error ExceptionNotFound = Error.NotFound(
+        "Trips.ScheduleTemplate.ExceptionNotFound", "The schedule exception was not found on this template.");
+
+    public static readonly Error DuplicateExceptionDate = Error.Validation(
+        "Trips.ScheduleTemplate.DuplicateExceptionDate", "The template already has an exception on that date.");
+
+    public static readonly Error ExceptionTimesNotAllowed = Error.Validation(
+        "Trips.ScheduleTemplate.ExceptionTimesNotAllowed", "A skip carries no times — the occurrence simply does not run.");
+
+    public static readonly Error ExtraRunDepartureRequired = Error.Validation(
+        "Trips.ScheduleTemplate.ExtraRunDepartureRequired", "An extra run needs a departure time of its own.");
+
+    public static readonly Error ExceptionReturnBeforeDeparture = Error.Validation(
+        "Trips.ScheduleTemplate.ExceptionReturnBeforeDeparture",
+        "The exception's return departure must be after its outbound departure.");
+
+    public static readonly Error OverrideTimeRequired = Error.Validation(
+        "Trips.ScheduleTemplate.OverrideTimeRequired", "A time override must change at least one time.");
+
+    public static readonly Error ExceptionReturnWithoutTemplateReturn = Error.Validation(
+        "Trips.ScheduleTemplate.ExceptionReturnWithoutTemplateReturn",
+        "A return-time override only applies to a template that has a return leg.");
 }

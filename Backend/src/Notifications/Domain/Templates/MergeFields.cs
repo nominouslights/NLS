@@ -44,10 +44,16 @@ public static partial class MergeFields
     /// <summary>The trip's client organization name (empty when the trip has none).</summary>
     public const string ClientName = "ClientName";
 
+    /// <summary>
+    /// Seats still needed to save an at-risk community trip (booking-day reverted emails;
+    /// empty for the pickup-email flows, which have no threshold).
+    /// </summary>
+    public const string SeatsNeeded = "SeatsNeeded";
+
     /// <summary>Every valid token name, in display order.</summary>
     public static readonly IReadOnlyList<string> All =
     [
-        PassengerName, TripDate, PickupTime, DropoffTime, Route, PickupStop, PickupAddress, DropoffStop, DropoffStopAddress, TripNumber, ClientName,
+        PassengerName, TripDate, PickupTime, DropoffTime, Route, PickupStop, PickupAddress, DropoffStop, DropoffStopAddress, TripNumber, ClientName, SeatsNeeded,
     ];
 
     private static readonly HashSet<string> AllSet = new(All, StringComparer.Ordinal);

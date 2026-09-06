@@ -7,7 +7,8 @@ export type ScreenId =
   | "routes"
   | "stops"
   | "manifests"
-  | "grocery"
+  | "cargo"
+  | "bookings"
   | "clients"
   | "riders"
   | "billing"
@@ -42,13 +43,14 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "routes", label: "Routes & Schedules", code: "RT" },
       { id: "stops", label: "Stops", code: "SP" },
       { id: "manifests", label: "Manifests & Demand", code: "MF" },
-      { id: "grocery", label: "Grocery & Parcel", code: "GP" },
+      { id: "cargo", label: "Cargo & Grocery", code: "CG" },
     ],
   },
   {
     label: "BUSINESS",
     collapsedLabel: "BIZ",
     items: [
+      { id: "bookings", label: "Booking Calendar", code: "BK" },
       { id: "clients", label: "Clients & Contracts", code: "CL", badge: "1" },
       { id: "riders", label: "Riders", code: "RD" },
       { id: "billing", label: "Billing", code: "BL" },

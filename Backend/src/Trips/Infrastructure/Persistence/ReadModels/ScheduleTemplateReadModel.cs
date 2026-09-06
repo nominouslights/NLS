@@ -30,7 +30,7 @@ public sealed class ScheduleTemplateReadModel
     public TimeOnly DepartureTime { get; set; }
     public TimeOnly? ReturnDepartureTime { get; set; }
     public bool ReturnNextDay { get; set; }
-    public int SeatsCapacity { get; set; }
+    public int? SeatsCapacity { get; set; }
     public int? SeatsMinimum { get; set; }
     public string? DefaultVehicleUnit { get; set; }
     public Guid? DefaultDriverId { get; set; }

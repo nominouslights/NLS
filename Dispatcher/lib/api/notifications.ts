@@ -1,6 +1,6 @@
 import { request } from "./transport";
-import type { StatusKind } from "../theme";
-import type { ClientServiceType } from "./clients";
+import type { ServiceType, StatusKind } from "../theme";
+import { SERVICE_TYPE_LABELS, svcForServiceType, type ClientServiceType } from "./clients";
 
 // ---------------------------------------------------------------------------
 // Notifications API client — contract owned by Backend/ (Notifications module,
@@ -15,8 +15,11 @@ import type { ClientServiceType } from "./clients";
 // strings (lib/billing/accruals.ts → accrualsEmailPayload).
 // ---------------------------------------------------------------------------
 
-/** Same enum as the Clients module's ServiceType (declared per-module backend-side). */
-export type NotificationServiceType = ClientServiceType;
+/** The Clients module's ServiceType plus Notifications-only entries (declared
+ *  per-module backend-side). CommunityBookingAtRisk is a notification purpose,
+ *  not a trip service: the "trip at risk — seats needed" email sent when a
+ *  community booking day reverts (an override template for the built-in body). */
+export type NotificationServiceType = ClientServiceType | "CommunityBookingAtRisk";
 
 export type EmailDispatchStatus = "Sent" | "PartiallyFailed" | "Failed";
 export type EmailRecipientStatus = "Sent" | "Failed";
@@ -372,6 +375,22 @@ export { refetchUntil } from "./shared";
 // pairs the colour with a glyph and text label).
 // ---------------------------------------------------------------------------
 
+/** Display labels for every notification service type — the Clients labels
+ *  plus the Notifications-only entries. Use these (never the raw enum string)
+ *  wherever a template's service type is shown. */
+export const NOTIFICATION_SERVICE_TYPE_LABELS: Record<NotificationServiceType, string> = {
+  ...SERVICE_TYPE_LABELS,
+  CommunityBookingAtRisk: "Community — booking at risk",
+};
+
+/** Notification service type → the console's theme service key (svcMeta).
+ *  Notifications-only entries render under the service they belong to
+ *  (CommunityBookingAtRisk → community). */
+export function svcForNotificationServiceType(serviceType: NotificationServiceType): ServiceType {
+  if (serviceType === "CommunityBookingAtRisk") return "community";
+  return svcForServiceType(serviceType);
+}
+
 /** Canonical merge-field set — mirrors the backend's MergeFields.cs exactly
  *  (case-sensitive PascalCase; a typo in a saved template is rejected with
  *  400 UnknownMergeField). Descriptions say where the value comes from. */
@@ -387,6 +406,7 @@ export const MERGE_FIELDS: { token: string; description: string }[] = [
   { token: "{{DropoffStopAddress}}", description: "The passenger's dropoff (final) stop street address" },
   { token: "{{TripNumber}}", description: "Trip number" },
   { token: "{{ClientName}}", description: "Client name (empty when the trip has no client)" },
+  { token: "{{SeatsNeeded}}", description: "Seats still needed to save an at-risk community booking day" },
 ];
 
 /** The manifest contact field is free-text email-or-phone. This RFC-lite gate

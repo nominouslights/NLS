@@ -1,8 +1,10 @@
 using NorthernLink.Trips.Application.Abstractions;
 using NorthernLink.Trips.Application.Integration;
+using NorthernLink.Trips.Application.Schedules;
 using NorthernLink.Trips.Domain.Manifests;
 using NorthernLink.Trips.Domain.Riders;
 using NorthernLink.Trips.Domain.Routes;
+using NorthernLink.Trips.Domain.Schedules;
 using NorthernLink.Trips.Domain.Stops;
 using NorthernLink.Trips.Domain.Trips;
 
@@ -36,6 +38,27 @@ internal sealed class FakeTripRepository : ITripRepository
             .Where(t => t.TenantId == tenantId && wanted.Contains(t.Id))
             .ToList();
         return Task.FromResult(matches);
+    }
+
+    public Task<Trip?> GetByBookingDayIdAsync(
+        Guid tenantId, Guid bookingDayId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Trips.FirstOrDefault(t => t.TenantId == tenantId && t.BookingDayId == bookingDayId));
+
+    /// <summary>
+    /// Mirrors the real implementation's unique-index semantics: a second trip for the same
+    /// (tenant, booking day) is rejected with false instead of added.
+    /// </summary>
+    public Task<bool> TryAddForBookingDayAsync(Trip trip, CancellationToken cancellationToken = default)
+    {
+        if (Trips.Any(t => t.TenantId == trip.TenantId && t.BookingDayId == trip.BookingDayId))
+        {
+            trip.ClearDomainEvents();
+            return Task.FromResult(false);
+        }
+
+        Trips.Add(trip);
+        SaveCount++;
+        return Task.FromResult(true);
     }
 
     public Task SaveChangesAsync(CancellationToken cancellationToken = default)
@@ -215,6 +238,40 @@ internal sealed class FakeRiderRepository : IRiderRepository
         SaveCount++;
         return Task.CompletedTask;
     }
+}
+
+internal sealed class FakeScheduleTemplateRepository : IScheduleTemplateRepository
+{
+    public List<ScheduleTemplate> Templates { get; } = [];
+    public int SaveCount { get; private set; }
+
+    public void Add(ScheduleTemplate template) => Templates.Add(template);
+
+    public Task<ScheduleTemplate?> GetByIdAsync(Guid templateId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Templates.FirstOrDefault(t => t.Id == templateId));
+
+    public Task SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        SaveCount++;
+        return Task.CompletedTask;
+    }
+}
+
+internal sealed class FakeScheduleTemplateReadService : IScheduleTemplateReadService
+{
+    public List<ScheduleTemplateResponse> Templates { get; } = [];
+
+    /// <summary>Rows returned for a matching template id, ordered by the fake exactly as supplied.</summary>
+    public List<ScheduleExceptionResponse> Exceptions { get; } = [];
+
+    public Task<IReadOnlyList<ScheduleTemplateResponse>> GetTemplatesAsync(
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<ScheduleTemplateResponse>>(Templates);
+
+    public Task<IReadOnlyList<ScheduleExceptionResponse>> GetExceptionsForTemplateAsync(
+        Guid templateId, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<ScheduleExceptionResponse>>(
+            Exceptions.Where(e => e.ScheduleTemplateId == templateId).ToList());
 }
 
 internal sealed class FakeTripManifestRepository : ITripManifestRepository

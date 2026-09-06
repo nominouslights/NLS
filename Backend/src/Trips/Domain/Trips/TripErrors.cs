@@ -62,6 +62,12 @@ public static class TripErrors
     public static readonly Error PassengerManifestRequired = Error.Conflict(
         "Trips.Trip.PassengerManifestRequired", "A trip cannot go en route until its manifest has at least one passenger.");
 
+    public static readonly Error DemandNotApplicable = Error.Conflict(
+        "Trips.Trip.DemandNotApplicable", "A cargo trip carries goods, not passengers — seat demand does not apply.");
+
+    public static readonly Error ShipmentRequired = Error.Conflict(
+        "Trips.Trip.ShipmentRequired", "A cargo trip cannot go en route until at least one shipment is assigned.");
+
     public static readonly Error ManifestNotAllowedForEmptyLeg = Error.Conflict(
         "Trips.Trip.ManifestNotAllowedForEmptyLeg", "A deadhead trip carries no passengers — a manifest cannot be created for it.");
 
@@ -118,6 +124,9 @@ public static class TripErrors
 
     public static readonly Error RoundTripKeyRequired = Error.Validation(
         "Trips.Trip.RoundTripKeyRequired", "A round-trip key is required to pair trips.");
+
+    public static readonly Error BookingDayRequired = Error.Validation(
+        "Trips.Trip.BookingDayRequired", "A booking-sourced trip requires the booking day it came from.");
 
     public static readonly Error DeadheadReturnOfEmptyLeg = Error.Conflict(
         "Trips.Trip.DeadheadReturnOfEmptyLeg", "An empty leg cannot get a deadhead return of its own.");

@@ -13,7 +13,7 @@ frontend or backend.**
 | `Dispatcher/` | Admin Web App (Dispatch Console) — currently a frontend-only prototype on mock data | Next.js 16, React 19 |
 | `Website/` | Public marketing site (northernlink shuttle & cargo) — static/prototype, no API calls yet | Next.js 16, React 19 |
 | `Budgeting/` | Zero-Based Budgeting console (Track 6) — real auth + role gate; budget periods and codes are live against the API, allocations/actuals/variance still mock. Deliberately holds **copies** of Dispatcher's design system — see its own `CLAUDE.md` | Next.js 16, React 19 |
-| `CommunityMobile/` | Community Mobile passenger app — design mockup only: 11 screens on hardcoded mock data (`lib/data/mock_data.dart`), no API/auth wiring, not orchestrated by `aspire run` | Flutter 3.29, Dart 3.7 |
+| `CommunityMobile/` | Community Mobile passenger app — design mockup only: 11 screens on hardcoded mock data (`lib/data/mock_data.dart`), no API/auth wiring, not orchestrated by `aspire run`. **SHELVED** by the Community Booking & Dispatch spec (2026-08): the passenger app ships as a Next.js PWA instead (future sibling folder); this mockup stays as the PWA's information-architecture reference. Payments for that flow are **Square + Interac e-Transfer** (Stripe is superseded) | Flutter 3.29, Dart 3.7 |
 | `AppHost/` | Local dev orchestrator — starts Postgres, RabbitMQ, the API, and Dispatcher together. Platform-level, not part of Backend — it depends on Backend and Dispatcher, not the other way around | .NET 10, Aspire |
 
 Future app folders (Driver Field App, Client Web App/Alamos, Owner Desktop)
@@ -105,6 +105,16 @@ Collision protocol for parallel batches:
 ### Backend (`Backend/`)
 - `dotnet build` — build the whole solution (warnings are errors)
 - `dotnet test` — includes architecture tests that enforce domain-library boundaries
+- **Migrations are never applied automatically** — see the `migrations` skill
+  (`.claude/skills/migrations/`). `Migrations__RunOnStartup` is `false` in every local mode, so
+  nothing you run locally migrates the shared database; it silently lags the model until a query
+  throws `42703`/`42P01`. `node .claude/skills/migrations/scripts/migrations.mjs check` is the
+  cheap check (~6s, cached, silent when current), `explain` prints the real DDL plus the commit
+  that introduced each pending migration, and `apply <Module>` applies one module after the user
+  says yes. A PostToolUse hook runs the check after `gh pr create`, `gh pr merge`, `git pull` and
+  `git merge`; it cannot see a PR opened in the GitHub web UI, so run it by hand then. Applying a
+  **breaking** migration (drop/rename, or NOT NULL with no default) from an unmerged branch
+  breaks main and production immediately — wait for the merge.
 - `dotnet run --project src/Api/NorthernLink.Api` — run just the API standalone (no AppHost);
   secrets come from the shell environment (see next bullet), the port from
   `Properties/launchSettings.json` — this hits the same DigitalOcean Postgres as everything else

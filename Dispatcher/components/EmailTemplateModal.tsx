@@ -3,21 +3,18 @@
 import { useEffect, useState } from "react";
 import { colors, fonts } from "@/lib/theme";
 import { ApiError } from "@/lib/api/transport";
-import {
-  listClients,
-  SERVICE_TYPE_LABELS,
-  type ClientRecord,
-  type ClientServiceType,
-} from "@/lib/api/clients";
+import { listClients, type ClientRecord } from "@/lib/api/clients";
 import {
   createEmailTemplate,
   previewEmailTemplate,
   setEmailTemplateActive,
   updateEmailTemplate,
   MERGE_FIELDS,
+  NOTIFICATION_SERVICE_TYPE_LABELS,
   type EmailPreviewResult,
   type EmailTemplateInput,
   type EmailTemplateRecord,
+  type NotificationServiceType,
 } from "@/lib/api/notifications";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { SelectField, TextAreaField, TextField } from "@/components/ui/Field";
@@ -32,9 +29,14 @@ import { SectionLabel } from "@/components/ui/Panel";
 // (null values → sample data) and renders the result in a FULLY sandboxed
 // iframe — template HTML is untrusted and must never touch the console.
 
-const SERVICE_TYPE_OPTIONS = (Object.keys(SERVICE_TYPE_LABELS) as ClientServiceType[]).map((v) => ({
+// Notification service types = the Clients ones plus Notifications-only
+// purposes (CommunityBookingAtRisk — the override template for the automatic
+// "trip at risk" email when a community booking day reverts).
+const SERVICE_TYPE_OPTIONS = (
+  Object.keys(NOTIFICATION_SERVICE_TYPE_LABELS) as NotificationServiceType[]
+).map((v) => ({
   value: v,
-  label: SERVICE_TYPE_LABELS[v],
+  label: NOTIFICATION_SERVICE_TYPE_LABELS[v],
 }));
 
 export default function EmailTemplateModal({
@@ -56,7 +58,7 @@ export default function EmailTemplateModal({
   // Locking only applies in create mode; editing keeps the stored client.
   const isLocked = !existing && !!lockedClient;
   const [name, setName] = useState(existing?.name ?? "");
-  const [serviceType, setServiceType] = useState<ClientServiceType>(existing?.serviceType ?? "Community");
+  const [serviceType, setServiceType] = useState<NotificationServiceType>(existing?.serviceType ?? "Community");
   const [clientId, setClientId] = useState(existing?.clientId ?? (isLocked ? lockedClient!.id : ""));
   const [subject, setSubject] = useState(existing?.subject ?? "");
   const [htmlBody, setHtmlBody] = useState(existing?.htmlBody ?? "");
@@ -246,7 +248,7 @@ export default function EmailTemplateModal({
         <SelectField
           label="Service type"
           value={serviceType}
-          onChange={(v) => setServiceType(v as ClientServiceType)}
+          onChange={(v) => setServiceType(v as NotificationServiceType)}
           options={SERVICE_TYPE_OPTIONS}
         />
         {isLocked ? (

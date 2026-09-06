@@ -10,4 +10,9 @@ namespace NorthernLink.Trips.Application.Abstractions;
 public interface IScheduleTemplateReadService
 {
     Task<IReadOnlyList<ScheduleTemplateResponse>> GetTemplatesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>One template's exceptions (special dates) from <c>rm_schedule_exceptions</c>, ascending by date.</summary>
+    Task<IReadOnlyList<ScheduleExceptionResponse>> GetExceptionsForTemplateAsync(
+        Guid templateId,
+        CancellationToken cancellationToken = default);
 }
