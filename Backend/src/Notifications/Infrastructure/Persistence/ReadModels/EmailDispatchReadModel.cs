@@ -6,19 +6,21 @@ namespace NorthernLink.Notifications.Infrastructure.Persistence.ReadModels;
 
 /// <summary>
 /// Read-side projection of an email dispatch into <c>notifications.rm_email_dispatches</c> —
-/// the trip's send-history rows. The recipients jsonb is carried verbatim and re-mapped with
-/// the same <c>OwnsMany(...).ToJson(...)</c> shape as the aggregate, so this read model is
-/// KEYED (on <see cref="Id"/>) — a keyless entity can't own a jsonb collection.
+/// the send-history rows (trip pickup sends carry trip + template context; client accruals
+/// sends carry neither and anchor on <see cref="ClientId"/>). The recipients jsonb is carried
+/// verbatim and re-mapped with the same <c>OwnsMany(...).ToJson(...)</c> shape as the
+/// aggregate, so this read model is KEYED (on <see cref="Id"/>) — a keyless entity can't own
+/// a jsonb collection.
 /// </summary>
 public sealed class EmailDispatchReadModel
 {
     public Guid Id { get; set; }
     public Guid TenantId { get; set; }
-    public Guid TripId { get; set; }
-    public string TripNumber { get; set; } = null!;
+    public Guid? TripId { get; set; }
+    public string? TripNumber { get; set; }
     public Guid? ManifestId { get; set; }
-    public Guid TemplateId { get; set; }
-    public string TemplateName { get; set; } = null!;
+    public Guid? TemplateId { get; set; }
+    public string? TemplateName { get; set; }
     public string ServiceType { get; set; } = null!;
     public Guid? ClientId { get; set; }
     public string? ClientName { get; set; }
@@ -57,5 +59,6 @@ public sealed class EmailDispatchReadModelConfiguration : IEntityTypeConfigurati
         });
 
         builder.HasIndex(d => new { d.TenantId, d.TripId });
+        builder.HasIndex(d => new { d.TenantId, d.ClientId });
     }
 }

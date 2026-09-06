@@ -1,18 +1,21 @@
 namespace NorthernLink.Notifications.Application.Dispatches;
 
 /// <summary>
-/// The Notifications module's public representation of one send action against a trip —
-/// returned by the send endpoint (whatever the outcome) and by the trip history query.
+/// The Notifications module's public representation of one send action — returned by the send
+/// endpoints (whatever the outcome) and by the email-history query. Trip pickup dispatches
+/// carry <paramref name="TripId"/>/<paramref name="TripNumber"/> and
+/// <paramref name="TemplateId"/>/<paramref name="TemplateName"/>; client accruals dispatches
+/// carry neither (all four null) and are anchored by <paramref name="ClientId"/> instead.
 /// <paramref name="ServiceType"/> is the <c>NotificationServiceType</c> name as a string;
 /// <paramref name="Status"/> is Sent, PartiallyFailed, or Failed.
 /// </summary>
 public sealed record EmailDispatchResponse(
     Guid Id,
-    Guid TripId,
-    string TripNumber,
+    Guid? TripId,
+    string? TripNumber,
     Guid? ManifestId,
-    Guid TemplateId,
-    string TemplateName,
+    Guid? TemplateId,
+    string? TemplateName,
     string ServiceType,
     Guid? ClientId,
     string Status,

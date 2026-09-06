@@ -8,13 +8,15 @@ import { SectionLabel } from "@/components/ui/Panel";
 import { ActionButton } from "@/components/ui/Button";
 import ClientContactFormModal from "@/components/ClientContactFormModal";
 
-// Contact roster for a client — read-only display with add-contact flow.
-// Fetches real contacts from the API (real backend CRM data, not the mock shim).
+// Contact roster for a client — display with add-contact and edit-contact
+// flows. Fetches real contacts from the API (real backend CRM data, not the
+// mock shim).
 
 export default function ContactRoster({ clientId, clientName }: { clientId: string; clientName: string }) {
   const [contacts, setContacts] = useState<ClientContactRecord[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [editContact, setEditContact] = useState<ClientContactRecord | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -39,7 +41,8 @@ export default function ContactRoster({ clientId, clientName }: { clientId: stri
 
   async function onContactSaved() {
     setShowAddForm(false);
-    // Refetch the roster after adding a contact.
+    setEditContact(null);
+    // Refetch the roster after adding or editing a contact.
     try {
       const fresh = await listContacts(clientId);
       setContacts(fresh);
@@ -143,6 +146,22 @@ export default function ContactRoster({ clientId, clientName }: { clientId: stri
                       Reports
                     </span>
                   )}
+                  {c.receivesAccrualsReports && (
+                    <span
+                      style={{
+                        fontFamily: fonts.semiCondensed,
+                        fontSize: 9,
+                        letterSpacing: ".1em",
+                        textTransform: "uppercase",
+                        color: "#FFFFFF",
+                        background: colors.navy,
+                        padding: "2px 6px",
+                        borderRadius: 5,
+                      }}
+                    >
+                      Accruals
+                    </span>
+                  )}
                 </div>
                 <div
                   style={{
@@ -168,6 +187,10 @@ export default function ContactRoster({ clientId, clientName }: { clientId: stri
                   </div>
                 )}
               </div>
+
+              <ActionButton style={{ flex: "none" }} onClick={() => setEditContact(c)}>
+                EDIT
+              </ActionButton>
             </div>
           ))}
         </div>
@@ -178,6 +201,16 @@ export default function ContactRoster({ clientId, clientName }: { clientId: stri
           clientId={clientId}
           clientName={clientName}
           onClose={() => setShowAddForm(false)}
+          onSaved={onContactSaved}
+        />
+      )}
+
+      {editContact && (
+        <ClientContactFormModal
+          clientId={clientId}
+          clientName={clientName}
+          contact={editContact}
+          onClose={() => setEditContact(null)}
           onSaved={onContactSaved}
         />
       )}

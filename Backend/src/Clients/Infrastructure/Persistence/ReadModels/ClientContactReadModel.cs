@@ -16,6 +16,7 @@ public sealed class ClientContactReadModel
     public string? Notes { get; set; }
     public bool IsPrimary { get; set; }
     public bool ReceivesEmailReports { get; set; }
+    public bool ReceivesAccrualsReports { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset UpdatedAtUtc { get; set; }
     public int Version { get; set; }
@@ -38,6 +39,7 @@ public sealed class ClientContactReadModelConfiguration : IEntityTypeConfigurati
         builder.Property(c => c.Notes).HasColumnName("notes");
         builder.Property(c => c.IsPrimary).HasColumnName("is_primary");
         builder.Property(c => c.ReceivesEmailReports).HasColumnName("receives_email_reports");
+        builder.Property(c => c.ReceivesAccrualsReports).HasColumnName("receives_accruals_reports");
         builder.Property(c => c.CreatedAtUtc).HasColumnName("created_at_utc");
         builder.Property(c => c.UpdatedAtUtc).HasColumnName("updated_at_utc");
         builder.Property(c => c.Version).HasColumnName("version");

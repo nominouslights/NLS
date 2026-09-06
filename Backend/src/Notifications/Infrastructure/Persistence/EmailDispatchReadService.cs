@@ -24,6 +24,19 @@ internal sealed class EmailDispatchReadService(NotificationsDbContext context) :
         return dispatches.Select(ToResponse).ToList();
     }
 
+    public async Task<IReadOnlyList<EmailDispatchResponse>> GetForClientAsync(
+        Guid clientId,
+        CancellationToken cancellationToken = default)
+    {
+        var dispatches = await context.EmailDispatchReadModels
+            .AsNoTracking()
+            .Where(d => d.ClientId == clientId)
+            .OrderByDescending(d => d.SentAtUtc)
+            .ToListAsync(cancellationToken);
+
+        return dispatches.Select(ToResponse).ToList();
+    }
+
     private static EmailDispatchResponse ToResponse(EmailDispatchReadModel dispatch) => new(
         dispatch.Id,
         dispatch.TripId,

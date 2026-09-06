@@ -9,4 +9,12 @@ public interface IEmailDispatchReadService
     Task<IReadOnlyList<EmailDispatchResponse>> GetForTripAsync(
         Guid tripId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Every dispatch recorded against a client, newest first — accruals sends and any trip
+    /// pickup sends that snapshotted this client id.
+    /// </summary>
+    Task<IReadOnlyList<EmailDispatchResponse>> GetForClientAsync(
+        Guid clientId,
+        CancellationToken cancellationToken = default);
 }

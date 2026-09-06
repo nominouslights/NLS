@@ -14,5 +14,6 @@ public sealed record ClientContactResponse(
     string? Notes,
     bool IsPrimary,
     bool ReceivesEmailReports,
+    bool ReceivesAccrualsReports,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc);

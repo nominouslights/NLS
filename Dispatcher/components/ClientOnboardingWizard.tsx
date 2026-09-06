@@ -102,6 +102,7 @@ export default function ClientOnboardingWizard({
         notes: contactNotes.trim() || undefined,
         isPrimary: true,
         receivesEmailReports: false,
+        receivesAccrualsReports: false,
       };
 
       await createContact(newClientId!, input);

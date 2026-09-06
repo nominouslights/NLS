@@ -21,6 +21,7 @@
 // ---------------------------------------------------------------------------
 
 import { ApiError, identityGet, identityRequest, request } from "./api";
+import { decodeAccessToken, type AccessClaims } from "./claims";
 
 export interface AuthTokens {
   accessToken: string;
@@ -97,6 +98,15 @@ export function getAccessToken(): string | null {
 /** True when a persisted refresh token exists (session may be restorable). */
 export function hasStoredSession(): boolean {
   return storedRefreshToken() !== null;
+}
+
+/**
+ * Claims from the current access token, or null when signed out. Unverified by construction —
+ * see lib/claims.ts. Read at call time rather than held in state: the value changes only when
+ * the token does, and every path that replaces the token already re-renders through AuthGate.
+ */
+export function getClaims(): AccessClaims | null {
+  return decodeAccessToken(accessToken);
 }
 
 // --- token lifecycle -------------------------------------------------------

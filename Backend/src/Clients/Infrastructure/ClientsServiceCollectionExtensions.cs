@@ -16,6 +16,7 @@ using NorthernLink.Clients.Application.Clients.Update;
 using NorthernLink.Clients.Application.ClientContacts;
 using NorthernLink.Clients.Application.ClientContacts.Create;
 using NorthernLink.Clients.Application.ClientContacts.GetForClient;
+using NorthernLink.Clients.Application.ClientContacts.Update;
 using NorthernLink.Clients.Application.Contracts;
 using NorthernLink.Clients.Application.Contracts.Create;
 using NorthernLink.Clients.Application.Contracts.GetForClient;
@@ -76,6 +77,7 @@ public static class ClientsServiceCollectionExtensions
         services.AddScoped<IQueryHandler<GetClientsQuery, IReadOnlyList<ClientResponse>>, GetClientsQueryHandler>();
         services.AddScoped<IQueryHandler<GetClientByIdQuery, ClientResponse>, GetClientByIdQueryHandler>();
         services.AddScoped<ICommandHandler<CreateClientContactCommand, Guid>, CreateClientContactCommandHandler>();
+        services.AddScoped<ICommandHandler<UpdateClientContactCommand>, UpdateClientContactCommandHandler>();
         services.AddScoped<IQueryHandler<GetClientContactsQuery, IReadOnlyList<ClientContactResponse>>, GetClientContactsQueryHandler>();
         services.AddScoped<ICommandHandler<CreateContractCommand, Guid>, CreateContractCommandHandler>();
         services.AddScoped<ICommandHandler<UpdateContractCommand>, UpdateContractCommandHandler>();

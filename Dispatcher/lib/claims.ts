@@ -21,6 +21,25 @@
 
 import { getAccessToken } from "./auth";
 
+// Copied from Budgeting/lib/claims.ts — the reverse of the usual Dispatcher→Budgeting copy
+// direction (claims.ts originated there). Keep the two in sync if either changes.
+// ---------------------------------------------------------------------------
+// Access-token claim reader.
+//
+// THIS DOES NOT VERIFY THE SIGNATURE, DELIBERATELY. It reads the JWT payload so the UI can
+// render the right thing immediately — the signed-in user's role, initials, tenant — without a
+// round trip. Anyone can hand-craft a token that satisfies this decoder.
+//
+// That is fine because this is a UX gate, not a security boundary: the API validates the
+// signature on every request, and GET /api/identity/auth/me is the server-confirmed answer when
+// one is actually needed. Nothing here is permitted to be the only thing standing between a
+// user and data.
+//
+// Claim names are the literals stamped by
+// Backend/src/Identity/Infrastructure/Auth/JwtAccessTokenIssuer.cs — sub, email, tenant_id,
+// tenant_type, role. That file's constants and this interface have to move together.
+// ---------------------------------------------------------------------------
+
 export interface AccessClaims {
   /** User id. */
   sub: string;
@@ -41,6 +60,9 @@ function decodeBase64Url(segment: string): string | null {
     // atob yields a binary string, one char per byte — not UTF-8. Feeding it
     // straight to JSON.parse mangles any non-ASCII (an accented name in an
     // email claim, say), so route the bytes through TextDecoder instead.
+    // atob yields a binary string, one char per byte — not UTF-8. Feeding it straight to
+    // JSON.parse mangles any non-ASCII (an accented name in an email claim, say), so route
+    // the bytes through TextDecoder instead.
     const bytes = Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
     return new TextDecoder().decode(bytes);
   } catch {
@@ -52,6 +74,9 @@ function decodeBase64Url(segment: string): string | null {
  * Reads the claims out of a JWT's payload segment. Returns null for anything
  * that is not a well-formed three-segment token with a decodable JSON payload —
  * callers treat null as "no usable identity", never as "trusted but empty".
+ * Reads the claims out of a JWT's payload segment. Returns null for anything that is not a
+ * well-formed three-segment token with a decodable JSON payload — callers treat null as
+ * "no usable identity", never as "trusted but empty".
  */
 export function decodeAccessToken(token: string | null): AccessClaims | null {
   if (!token) return null;
@@ -68,6 +93,9 @@ export function decodeAccessToken(token: string | null): AccessClaims | null {
     // too, so they need ruling out explicitly — otherwise a `[1,2,3]` payload
     // yields a claims object full of empty strings, which reads to callers as
     // a valid session belonging to nobody.
+    // A JWT payload is a JSON object. Arrays satisfy `typeof x === "object"` too, so they need
+    // ruling out explicitly — otherwise a `[1,2,3]` payload yields a claims object full of empty
+    // strings, which reads to callers as a valid session belonging to nobody.
     if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return null;
 
     const claims = payload as Record<string, unknown>;
