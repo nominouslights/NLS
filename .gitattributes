@@ -1,0 +1,18 @@
+# Normalize line endings: LF in the repository AND in the working tree, on every platform.
+# Added 2026-09-04: the Budgeting design-system drift check (Budgeting/CLAUDE.md) is byte-exact,
+# and mixed CRLF/LF checkouts on Windows made identical files read as DRIFT. eol=lf overrides
+# core.autocrlf, so fresh checkouts are LF everywhere and the check stays trustworthy.
+* text=auto eol=lf
+
+# Windows-native scripts genuinely need CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Explicit binaries (text=auto detects these anyway; declared for clarity).
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.ttf binary
+*.otf binary
+*.pdf binary

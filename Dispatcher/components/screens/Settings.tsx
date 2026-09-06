@@ -155,7 +155,7 @@ export default function Settings() {
                 <Panel style={{ borderRadius: 11 }}>
                   <div style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim, marginBottom: 5 }}>QBO connector</div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-                    <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#009E73" }} />
+                    <span style={{ width: 9, height: 9, borderRadius: "50%", background: statusMeta("ontime").c }} />
                     <span style={{ fontFamily: fonts.body, fontSize: 13.5, color: colors.textPrimary, fontWeight: 500 }}>Connected · read-only</span>
                   </div>
                 </Panel>
@@ -406,7 +406,7 @@ export default function Settings() {
                 <Panel style={{ borderRadius: 11 }}>
                   <div style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim, marginBottom: 5 }}>QuickBooks Online</div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-                    <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#009E73" }} />
+                    <span style={{ width: 9, height: 9, borderRadius: "50%", background: statusMeta("ontime").c }} />
                     <span style={{ fontFamily: fonts.body, fontSize: 13.5, color: colors.textPrimary, fontWeight: 500 }}>Connected · read-only book of record</span>
                   </div>
                   <div style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textDim, marginTop: 8 }}>Last read 4m ago · no write path</div>
@@ -414,7 +414,7 @@ export default function Settings() {
                 <Panel style={{ borderRadius: 11 }}>
                   <div style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim, marginBottom: 5 }}>Notification provider</div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-                    <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#009E73" }} />
+                    <span style={{ width: 9, height: 9, borderRadius: "50%", background: statusMeta("ontime").c }} />
                     <span style={{ fontFamily: fonts.body, fontSize: 13.5, color: colors.textPrimary, fontWeight: 500 }}>SMS + email · connected</span>
                   </div>
                   <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: statusMeta("ontime").t, marginTop: 8 }}>Canadian-hosted · PIPEDA-aligned</div>

@@ -464,12 +464,12 @@ export default function CreateTripWizard({
                       fontFamily: fonts.condensed,
                       fontWeight: 700,
                       fontSize: 12,
-                      background: n < step ? "#009E73" : n === step ? colors.blue : colors.cardBg,
+                      background: n < step ? statusMeta("ontime").c : n === step ? colors.blue : colors.cardBg,
                       color: n < step ? "#FFFFFF" : n === step ? "#FFFFFF" : colors.textDim,
                       border: n > step ? `1px solid ${colors.border}` : undefined,
                     }}
                   >
-                    {n}
+                    {n < step ? "✓" : n}
                   </span>
                   <span
                     style={{

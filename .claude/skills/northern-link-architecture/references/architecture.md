@@ -503,7 +503,7 @@ Lynn Lake, and the Alamos mine site is patchy by design of geography, not a corn
 | Service | Purpose | Notes |
 |---|---|---|
 | **QuickBooks Online** | Invoicing, payment sync | OAuth tokens held centrally in API, never on client devices |
-| **Stripe** | Community app payments | PCI scope stays on Stripe's side |
+| **Square** *(superseded Stripe — Community Booking & Dispatch spec, 2026-08)* | Community booking payments, online + in-person tap-to-pay | PCI scope stays on Square's side; **Interac e-Transfer** also accepted, reconciled manually (dispatcher marks received) |
 | **SendGrid** | Transactional email | Trip confirmations, invoices, endorsements |
 | **Twilio** | SMS notifications | Departure reminders, driver contact reveal |
 | **Google Maps** | Geocoding, routing | Trip distance calc, ETA |
@@ -612,7 +612,10 @@ These are real decisions, not defaults I've silently picked — worth a delibera
 the roadmap locks them in:
 
 1. ~~Identity provider~~ — **Resolved**: self-host OIDC for now.
-2. ~~Mobile app framework~~ — **Resolved**: Flutter, for both Community App and Driver Field App.
+2. ~~Mobile app framework~~ — **Resolved, then partially superseded (2026-08)**: Flutter stands
+   for the Driver Field App; the Community App was re-decided as a **Next.js PWA** by the
+   Community Booking & Dispatch spec (the Flutter `CommunityMobile/` mockup is shelved as its
+   IA reference).
 3. ~~Desktop app approach~~ — **Resolved (access model)**: restricted to super-user roles (Owner,
    Accountant, future Board). Technical implementation recommended as Electron wrapping the Admin
    Web App's Next.js code, given the small user base — confirm if you want a different approach.
