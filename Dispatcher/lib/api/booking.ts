@@ -79,11 +79,21 @@ export function listCorridors(): Promise<CorridorRecord[]> {
 
 // --- calendar (US-B.6/7) ---------------------------------------------------
 
+/** Day lifecycle (US-B.9–11): Unconfirmed until sold reaches the minimum,
+ *  Confirmed once it does (a trip is created), Reverted when cancellations
+ *  drop it back below minimum outside the cancellation window. An
+ *  unmaterialized day reads as Unconfirmed. */
+export type BookingDayStatus = "Unconfirmed" | "Confirmed" | "Reverted";
+
 /** One date with booking activity — dates absent from the response are neutral. */
 export interface CalendarDaySummary {
   date: string; // "YYYY-MM-DD"
   bookingDayId: string | null;
   tripId: string | null;
+  tripNumber: string | null;
+  status: BookingDayStatus;
+  /** Gift-a-Seat pledge — the day runs even below minimum (never reverts). */
+  minimumGuaranteed: boolean;
   bookingCount: number;
   sold: number;
   pending: number;
@@ -159,13 +169,18 @@ export interface BookingRecord {
   updatedAtUtc: string;
 }
 
-/** Day-panel detail — tripId is always null in this batch (no trip yet). */
+/** Day-panel detail — tripId/tripNumber stay null until the day confirms and
+ *  Trips' backlink lands (the panel shows "no trip yet" meanwhile). */
 export interface DayDetail {
   date: string;
   corridorId: string;
   corridorName: string;
   bookingDayId: string | null;
   tripId: string | null;
+  tripNumber: string | null;
+  status: BookingDayStatus;
+  /** Gift-a-Seat pledge — the day runs even below minimum (never reverts). */
+  minimumGuaranteed: boolean;
   passengerMinimumOverride: number | null;
   seatCapacityOverride: number | null;
   sold: number;
@@ -229,6 +244,17 @@ export function confirmBooking(id: string): Promise<void> {
 /** 409 AlreadyCancelled. */
 export function cancelBooking(id: string): Promise<void> {
   return request<void>(`/api/booking/bookings/${id}/cancel`, { method: "POST" });
+}
+
+/** Gift-a-Seat (US-B.11): POST /api/booking/days/{id}/guarantee → 204.
+ *  Sets MinimumGuaranteed and re-confirms a Reverted day; on a never-confirmed
+ *  day it records the pledge only (the day still confirms via the normal
+ *  threshold — the pledge then protects it from reverting). Idempotent;
+ *  404 for an unknown day. */
+export function guaranteeDay(bookingDayId: string): Promise<void> {
+  return request<void>(`/api/booking/days/${encodeURIComponent(bookingDayId)}/guarantee`, {
+    method: "POST",
+  });
 }
 
 // --- settings (US-B.22/23) -------------------------------------------------
@@ -309,6 +335,21 @@ export function bookingStatusKind(status: BookingStatus): StatusKind {
     case "Confirmed":
       return "ontime";
     case "Cancelled":
+      return "over";
+    case "Unconfirmed":
+    default:
+      return "soon";
+  }
+}
+
+/** Day lifecycle → the protected status palette (colour + glyph + text label,
+ *  never colour alone): Unconfirmed = Gold, Confirmed = Teal, Reverted =
+ *  Vermillion. */
+export function dayStatusKind(status: BookingDayStatus): StatusKind {
+  switch (status) {
+    case "Confirmed":
+      return "ontime";
+    case "Reverted":
       return "over";
     case "Unconfirmed":
     default:

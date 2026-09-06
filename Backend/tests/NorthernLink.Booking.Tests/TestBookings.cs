@@ -15,7 +15,10 @@ internal static class TestBookings
 
     public static BookingAggregate Create(
         int passengerCount = 2,
-        TimeSpan? seatHold = null)
+        TimeSpan? seatHold = null,
+        Guid? customerId = null,
+        string customerName = "Doris Spence",
+        DateOnly? serviceDate = null)
     {
         var passengers = Enumerable.Range(1, passengerCount)
             .Select(i => new BookingPassengerDetails($"Passenger {i}", null, i == 1))
@@ -23,11 +26,11 @@ internal static class TestBookings
 
         return BookingAggregate.Create(
             TenantId,
-            CustomerId,
-            "Doris Spence",
+            customerId ?? CustomerId,
+            customerName,
             CorridorId,
             "Thompson ↔ Lynn Lake",
-            new DateOnly(2026, 9, 15),
+            serviceDate ?? new DateOnly(2026, 9, 15),
             Location(),
             Location("Lynn Lake Terminal"),
             passengers,

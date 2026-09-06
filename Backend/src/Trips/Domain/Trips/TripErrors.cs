@@ -125,6 +125,9 @@ public static class TripErrors
     public static readonly Error RoundTripKeyRequired = Error.Validation(
         "Trips.Trip.RoundTripKeyRequired", "A round-trip key is required to pair trips.");
 
+    public static readonly Error BookingDayRequired = Error.Validation(
+        "Trips.Trip.BookingDayRequired", "A booking-sourced trip requires the booking day it came from.");
+
     public static readonly Error DeadheadReturnOfEmptyLeg = Error.Conflict(
         "Trips.Trip.DeadheadReturnOfEmptyLeg", "An empty leg cannot get a deadhead return of its own.");
 

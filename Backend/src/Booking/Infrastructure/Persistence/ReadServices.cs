@@ -84,10 +84,28 @@ internal sealed class BookingReadService(BookingDbContext context) : IBookingRea
             .AsNoTracking()
             .Where(b => b.CorridorId == corridorId && b.ServiceDate >= from && b.ServiceDate <= to)
             .Select(b => new BookingSeatRow(
+                b.Id,
                 b.ServiceDate,
                 b.Status,
                 b.HoldExpiresAtUtc,
                 b.Passengers.Count))
+            .ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<BookingRecipientRow>> GetRecipientRowsAsync(
+        Guid corridorId, DateOnly serviceDate, CancellationToken cancellationToken = default) =>
+        await context.Bookings
+            .AsNoTracking()
+            .Where(b => b.CorridorId == corridorId && b.ServiceDate == serviceDate)
+            .Join(
+                context.Customers.AsNoTracking(),
+                booking => booking.CustomerId,
+                customer => customer.Id,
+                (booking, customer) => new BookingRecipientRow(
+                    booking.Id,
+                    customer.Id,
+                    customer.Name,
+                    booking.Status,
+                    customer.Email))
             .ToListAsync(cancellationToken);
 
     private static BookingResponse ToResponse(Domain.Bookings.Booking booking, DateTimeOffset now) => new(

@@ -1179,6 +1179,10 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<Guid?>("BookingDayId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("booking_day_id");
+
                     b.Property<string>("CancelledReason")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)")
@@ -1345,6 +1349,9 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                         .HasColumnName("written_off_reason");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "BookingDayId")
+                        .IsUnique();
 
                     b.HasIndex("TenantId", "ClientId");
 

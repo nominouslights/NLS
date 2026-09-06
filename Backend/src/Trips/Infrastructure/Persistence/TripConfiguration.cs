@@ -36,6 +36,7 @@ public sealed class TripConfiguration : IEntityTypeConfiguration<Trip>
         builder.OwnsMany(t => t.Stops, stop => stop.ToJson("stops"));
         builder.Property(t => t.DistanceKm).HasColumnName("distance_km");
 
+        builder.Property(t => t.BookingDayId).HasColumnName("booking_day_id");
         builder.Property(t => t.ScheduleTemplateId).HasColumnName("schedule_template_id");
         builder.Property(t => t.RoundTripKey).HasColumnName("round_trip_key").HasMaxLength(64);
         builder.Property(t => t.Direction)
@@ -77,6 +78,11 @@ public sealed class TripConfiguration : IEntityTypeConfiguration<Trip>
 
         builder.HasIndex(t => new { t.TenantId, t.TripNumber }).IsUnique();
         builder.HasIndex(t => new { t.TenantId, t.ScheduleTemplateId, t.ServiceDate, t.Direction }).IsUnique();
+
+        // The booking-day chain reaction's idempotency backstop: at most one trip per
+        // (tenant, booking day). Postgres treats NULLs as distinct, so every non-booking
+        // trip passes untouched. The consumer catches the 23505 and no-ops.
+        builder.HasIndex(t => new { t.TenantId, t.BookingDayId }).IsUnique();
         builder.HasIndex(t => new { t.TenantId, t.ServiceDate });
         builder.HasIndex(t => new { t.TenantId, t.DriverId });
         builder.HasIndex(t => new { t.TenantId, t.ClientId });

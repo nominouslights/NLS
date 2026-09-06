@@ -37,6 +37,7 @@ public sealed class TripsIntegrationEventMapper : IIntegrationEventMapper
             TripReadyForBillingDomainEvent => MapReadyForBilling((Trip)aggregate),
             TripClosedWithoutBillingDomainEvent => MapClosedWithoutBilling((Trip)aggregate),
             TripRoundTripChangedDomainEvent => MapRoundTripChanged((Trip)aggregate),
+            TripScheduledFromBookingDomainEvent => MapScheduledFromBooking((Trip)aggregate),
             RouteCreatedDomainEvent => MapRouteChanged((Route)aggregate),
             RouteUpdatedDomainEvent => MapRouteChanged((Route)aggregate),
             _ => null,
@@ -98,4 +99,20 @@ public sealed class TripsIntegrationEventMapper : IIntegrationEventMapper
         trip.TenantId,
         trip.RoundTripKey,
         trip.Direction?.ToString());
+
+    /// <summary>
+    /// The booking-day backlink feed: tells Booking which trip its confirmed day produced.
+    /// Only <see cref="Trip.ScheduleFromBooking"/> raises the source event, so
+    /// <see cref="Trip.BookingDayId"/> is always set here; the null-guard keeps a future
+    /// refactor from publishing a backlink no consumer could apply.
+    /// </summary>
+    private static TripScheduledFromBookingIntegrationEvent? MapScheduledFromBooking(Trip trip) =>
+        trip.BookingDayId is not { } bookingDayId
+            ? null
+            : new TripScheduledFromBookingIntegrationEvent(
+                trip.Id,
+                trip.TripNumber,
+                trip.TenantId,
+                bookingDayId,
+                trip.ServiceDate);
 }

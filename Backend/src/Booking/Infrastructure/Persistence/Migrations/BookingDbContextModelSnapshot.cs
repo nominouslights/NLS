@@ -80,9 +80,19 @@ namespace NorthernLink.Booking.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at_utc");
 
+                    b.Property<bool>("MinimumGuaranteed")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("minimum_guaranteed");
+
                     b.Property<int?>("PassengerMinimumOverride")
                         .HasColumnType("integer")
                         .HasColumnName("passenger_minimum_override");
+
+                    b.Property<DateTimeOffset?>("RevertedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("reverted_at_utc");
 
                     b.Property<int?>("SeatCapacityOverride")
                         .HasColumnType("integer")
@@ -92,6 +102,14 @@ namespace NorthernLink.Booking.Infrastructure.Persistence.Migrations
                         .HasColumnType("date")
                         .HasColumnName("service_date");
 
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("Unconfirmed")
+                        .HasColumnName("status");
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");
@@ -99,6 +117,11 @@ namespace NorthernLink.Booking.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("TripId")
                         .HasColumnType("uuid")
                         .HasColumnName("trip_id");
+
+                    b.Property<string>("TripNumber")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("trip_number");
 
                     b.Property<DateTimeOffset>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone")

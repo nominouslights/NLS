@@ -17,12 +17,17 @@ public sealed record GetBookingCalendarMonthQuery(
 /// One calendar cell. Sold/Pending/Capacity/Remaining/PassengerMinimum/NeededToConfirm are
 /// the derived seat math (see SeatMath); BookingCount counts non-cancelled bookings;
 /// HasOverrides flags a day whose minimum/capacity deviate from corridor/policy defaults;
-/// BookingDayId/TripId are null until the day materializes (TripId always null this batch).
+/// BookingDayId is null until the day materializes; Status is the day lifecycle
+/// (Unconfirmed for an unmaterialized day), MinimumGuaranteed the Gift-a-Seat pledge, and
+/// TripId/TripNumber the Trips backlink (null until it lands).
 /// </summary>
 public sealed record CalendarDaySummaryResponse(
     DateOnly Date,
     Guid? BookingDayId,
     Guid? TripId,
+    string? TripNumber,
+    Domain.BookingDays.BookingDayStatus Status,
+    bool MinimumGuaranteed,
     int BookingCount,
     int Sold,
     int Pending,

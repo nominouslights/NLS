@@ -76,6 +76,20 @@ public class TripBillingReconcileTests(PostgresFixture fixture)
                 .Where(t => t.TenantId == tenantId && tripIds.Contains(t.Id))
                 .ToListAsync(cancellationToken);
 
+        public Task<Trip?> GetByBookingDayIdAsync(
+            Guid tenantId, Guid bookingDayId, CancellationToken cancellationToken = default) =>
+            context.Trips
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(
+                    t => t.TenantId == tenantId && t.BookingDayId == bookingDayId, cancellationToken);
+
+        public async Task<bool> TryAddForBookingDayAsync(Trip trip, CancellationToken cancellationToken = default)
+        {
+            context.Trips.Add(trip);
+            await context.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+
         public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
             context.SaveChangesAsync(cancellationToken);
     }

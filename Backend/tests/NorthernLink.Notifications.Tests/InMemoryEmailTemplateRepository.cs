@@ -13,6 +13,15 @@ internal sealed class InMemoryEmailTemplateRepository : IEmailTemplateRepository
     public Task<EmailTemplate?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         Task.FromResult(Templates.FirstOrDefault(t => t.Id == id));
 
+    public Task<EmailTemplate?> GetActiveByServiceTypeAsync(
+        Guid tenantId,
+        Domain.NotificationServiceType serviceType,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(Templates
+            .Where(t => t.TenantId == tenantId && t.ServiceType == serviceType && t.IsActive && t.ClientId == null)
+            .OrderByDescending(t => t.UpdatedAtUtc)
+            .FirstOrDefault());
+
     public void Add(EmailTemplate template) => Templates.Add(template);
 
     public Task SaveChangesAsync(CancellationToken cancellationToken = default)

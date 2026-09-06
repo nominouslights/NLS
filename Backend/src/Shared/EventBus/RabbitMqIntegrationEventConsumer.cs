@@ -200,6 +200,15 @@ public sealed class RabbitMqIntegrationEventConsumer(
         IIntegrationEvent integrationEvent,
         CancellationToken cancellationToken)
     {
+        // Same contract as OutboxPollingConsumer: the handler scope is resolved INSIDE the
+        // ambient-tenant push, because ModuleDbContext captures ITenantContext.TenantId at
+        // construction — a DbContext built before the push would carry a null tenant and its
+        // query filters would silently hide every row from the handler. The polling path gets
+        // the tenant from the outbox row; here the only source is the event payload, where
+        // every integration event carries a TenantId property by convention.
+        using var tenantPush = TenantIdOf(eventType, integrationEvent) is { } tenantId
+            ? Tenancy.AmbientTenant.Push(tenantId)
+            : null;
         using var scope = scopeFactory.CreateScope();
 
         // Same dynamic dispatch as the in-process Sender: resolve every registered
@@ -210,4 +219,12 @@ public sealed class RabbitMqIntegrationEventConsumer(
             await ((dynamic)handler!).Handle((dynamic)integrationEvent, cancellationToken);
         }
     }
+
+    /// <summary>
+    /// The event's TenantId payload property, when it has one (all current events do — it is
+    /// part of the integration-event convention precisely because handlers run outside any
+    /// HTTP request). Null tolerated for a hypothetical tenantless platform event.
+    /// </summary>
+    private static Guid? TenantIdOf(Type eventType, IIntegrationEvent integrationEvent) =>
+        eventType.GetProperty("TenantId")?.GetValue(integrationEvent) as Guid?;
 }

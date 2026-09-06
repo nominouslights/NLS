@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using NorthernLink.Shared.EventBus;
 using NorthernLink.Shared.IntegrationEvents.Billing;
+using NorthernLink.Shared.IntegrationEvents.Booking;
 using NorthernLink.Shared.IntegrationEvents.Clients;
 using NorthernLink.Shared.IntegrationEvents.Drivers;
 using NorthernLink.Shared.IntegrationEvents.Fleet;
@@ -198,6 +199,13 @@ public static class TripsServiceCollectionExtensions
             .On<VehicleInspectionRemovedIntegrationEvent, VehicleInspectionRemovedIntegrationEventHandler>()
             .On<ClientChangedIntegrationEvent, ClientChangedIntegrationEventHandler>()
             .On<InvoiceBillingStateChangedIntegrationEvent, InvoiceBillingStateChangedIntegrationEventHandler>());
+
+        // 4b. The chain-reaction path — the platform's first live RabbitMQ subscription:
+        //     booking.booking-day-confirmed must TRIGGER a command here (create the community
+        //     trip), so it is bus-designated in BusPublicationRegistry and consumed from the
+        //     durable northernlink.trips queue, not by polling the booking outbox.
+        services.AddIntegrationEventConsumer(SchemaName, subscriptions => subscriptions
+            .On<BookingDayConfirmedIntegrationEvent, BookingDayConfirmedIntegrationEventHandler>());
 
         // 5. Read-side projections — one worker upserts trips.rm_* from the journal, and a
         //    newly created manifest triggers the idempotent link-to-trip reaction (same-module

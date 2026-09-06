@@ -11,13 +11,14 @@ import {
   type TripManifest,
   type TripRecord,
 } from "@/lib/api/trips";
-import { SERVICE_TYPE_LABELS, listContacts, type ClientContactRecord } from "@/lib/api/clients";
+import { listContacts, type ClientContactRecord } from "@/lib/api/clients";
 import { listStops, stopAddressLine, type StopRecord } from "@/lib/api/stops";
 import { stopTimeOnTrip } from "@/lib/timetable";
 import {
   dispatchChip,
   isEmailContact,
   listEmailTemplates,
+  NOTIFICATION_SERVICE_TYPE_LABELS,
   listTripEmailDispatches,
   previewEmailTemplate,
   previewTripPickupReport,
@@ -376,7 +377,7 @@ export default function SendPickupEmailModal({
     { value: "", label: "— Select a template —" },
     ...(templates ?? []).map((t) => ({
       value: t.id,
-      label: `${t.name}${t.clientName ? ` · ${t.clientName}` : ""} · ${SERVICE_TYPE_LABELS[t.serviceType]}`,
+      label: `${t.name}${t.clientName ? ` · ${t.clientName}` : ""} · ${NOTIFICATION_SERVICE_TYPE_LABELS[t.serviceType]}`,
     })),
   ];
 

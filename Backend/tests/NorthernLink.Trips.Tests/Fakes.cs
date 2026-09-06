@@ -40,6 +40,27 @@ internal sealed class FakeTripRepository : ITripRepository
         return Task.FromResult(matches);
     }
 
+    public Task<Trip?> GetByBookingDayIdAsync(
+        Guid tenantId, Guid bookingDayId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Trips.FirstOrDefault(t => t.TenantId == tenantId && t.BookingDayId == bookingDayId));
+
+    /// <summary>
+    /// Mirrors the real implementation's unique-index semantics: a second trip for the same
+    /// (tenant, booking day) is rejected with false instead of added.
+    /// </summary>
+    public Task<bool> TryAddForBookingDayAsync(Trip trip, CancellationToken cancellationToken = default)
+    {
+        if (Trips.Any(t => t.TenantId == trip.TenantId && t.BookingDayId == trip.BookingDayId))
+        {
+            trip.ClearDomainEvents();
+            return Task.FromResult(false);
+        }
+
+        Trips.Add(trip);
+        SaveCount++;
+        return Task.FromResult(true);
+    }
+
     public Task SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         SaveCount++;

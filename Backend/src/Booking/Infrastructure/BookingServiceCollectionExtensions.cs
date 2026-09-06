@@ -6,8 +6,11 @@ using NorthernLink.Shared.EventBus;
 using NorthernLink.Shared.IntegrationEvents.Trips;
 using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
+using NorthernLink.Shared.Persistence.Auditing;
 using NorthernLink.Shared.Tenancy;
 using NorthernLink.Booking.Application.Abstractions;
+using NorthernLink.Booking.Application.BookingDays;
+using NorthernLink.Booking.Application.BookingDays.Guarantee;
 using NorthernLink.Booking.Application.Bookings;
 using NorthernLink.Booking.Application.Bookings.Cancel;
 using NorthernLink.Booking.Application.Bookings.Confirm;
@@ -34,11 +37,10 @@ namespace NorthernLink.Booking.Infrastructure;
 /// DI entry point for the Booking domain library — the only thing the API gateway sees.
 /// Registers the library DbContext (Postgres schema "booking"), persistence services,
 /// every CQRS handler explicitly (the reflection-based Sender resolves handlers from DI;
-/// no assembly scanning), and the trips.route-changed consumer that maintains the
-/// corridor replica. Booking publishes no integration events yet, so there is no
-/// integration event mapper and no OutboxDispatcher — its outbox table exists (shared
-/// module shape) and stays empty until the first public contract (likely the
-/// threshold-confirmation chain reaction in a later batch).
+/// no assembly scanning), the module's integration event mapper + outbox dispatcher
+/// (Booking now publishes: the booking-day-confirmed chain reaction over RabbitMQ and the
+/// booking-day-reverted storing event), and the polling consumers that maintain the
+/// corridor replica and the day↔trip backlink.
 /// </summary>
 public static class BookingServiceCollectionExtensions
 {
@@ -59,7 +61,13 @@ public static class BookingServiceCollectionExtensions
                     npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", SchemaName))
                 .AddInterceptors(serviceProvider.GetRequiredService<TenantSessionInterceptor>()));
 
-        // 2. Persistence + read services.
+        // 2. Persistence + read services. The mapper is registered as its concrete type —
+        //    every module has its own IIntegrationEventMapper, so the interface can't be a
+        //    single DI registration. The outbox dispatcher publishes the module's
+        //    bus-designated rows (booking.booking-day-confirmed) to RabbitMQ; the reverted
+        //    event stays on the polling path and needs no dispatcher involvement.
+        services.AddScoped<BookingIntegrationEventMapper>();
+        services.AddHostedService<OutboxDispatcher<BookingDbContext>>();
         services.AddScoped<ICustomerRepository, CustomerRepository>();
         services.AddScoped<ICustomerReadService, CustomerReadService>();
         services.AddScoped<IBookingRepository, BookingRepository>();
@@ -68,6 +76,12 @@ public static class BookingServiceCollectionExtensions
         services.AddScoped<IBookingPolicyRepository, BookingPolicyRepository>();
         services.AddScoped<ICorridorSettingsRepository, CorridorSettingsRepository>();
         services.AddScoped<ICorridorLookupRepository, CorridorLookupRepository>();
+
+        // Threshold recompute (confirm/cancel handlers run it inside their transaction) and
+        // the injectable clock the 12-hour window rule is tested through. TryAdd: the
+        // system clock is process-wide plumbing another module may also register.
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddScoped<BookingDayThresholdService>();
 
         // 3. Command/query handlers — registered explicitly, one line per handler.
         services.AddScoped<ICommandHandler<CreateCustomerCommand, Guid>, CreateCustomerCommandHandler>();
@@ -85,13 +99,16 @@ public static class BookingServiceCollectionExtensions
         services.AddScoped<ICommandHandler<UpdateBookingPolicyCommand>, UpdateBookingPolicyCommandHandler>();
         services.AddScoped<ICommandHandler<UpsertCorridorBookingSettingsCommand>, UpsertCorridorBookingSettingsCommandHandler>();
         services.AddScoped<ICommandHandler<SetBookingDayOverridesCommand>, SetBookingDayOverridesCommandHandler>();
+        services.AddScoped<ICommandHandler<GuaranteeBookingDayCommand>, GuaranteeBookingDayCommandHandler>();
 
         // 4. Integration event consumers — the storing/projecting path: one polling consumer
-        //    over the trips outbox maintains booking.corridor_lookup. First poll replays the
-        //    routing key's entire history (how the replica bootstraps), but routes saved before
-        //    trips.route-changed existed never published — re-save each once (runbook step).
+        //    over the trips outbox maintains booking.corridor_lookup and stamps the
+        //    day↔trip backlink. First poll replays each routing key's entire history (how
+        //    the replica bootstraps), but routes saved before trips.route-changed existed
+        //    never published — re-save each once (runbook step).
         services.AddOutboxPollingConsumer<BookingDbContext>(SchemaName, subscriptions => subscriptions
-            .On<RouteChangedIntegrationEvent, RouteChangedIntegrationEventHandler>());
+            .On<RouteChangedIntegrationEvent, RouteChangedIntegrationEventHandler>()
+            .On<TripScheduledFromBookingIntegrationEvent, TripScheduledFromBookingIntegrationEventHandler>());
 
         // 5. Read-side projections — none: query handlers derive the seat math from the
         //    aggregate tables directly, so there are no rm_* tables to maintain.

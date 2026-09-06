@@ -10,8 +10,10 @@ import {
   confirmBooking,
   createBooking,
   createCustomer,
+  dayStatusKind,
   getCalendarMonth,
   getDayDetail,
+  guaranteeDay,
   listCorridors,
   locationLabel,
   PAYMENT_METHOD_LABELS,
@@ -41,9 +43,10 @@ import { NumberField, SelectField, TextAreaField, TextField, FieldLabel } from "
 //
 // Day-badge language (colour + icon + text, never colour alone — statusMeta):
 //   no activity            → Neutral gray  — · "—"
-//   sold < minimum         → Gold          ◐ · "sold/min"   (pending)
-//   sold ≥ minimum         → Teal          ✓ · "sold/min"   (confirmed)
+//   day Reverted           → Vermillion    ▲ · "sold/min"   (needs seats — wins over the math)
 //   sold+pending > capacity→ Vermillion    ▲ · "taken/cap"  (overbooked)
+//   day Confirmed / min met→ Teal          ✓ · "sold/min"   (confirmed)
+//   sold < minimum         → Gold          ◐ · "sold/min"   (pending)
 //
 // Corridors are a replica of Trips routes (corridorId === routeId), so the
 // pickup/dropoff stop pickers reuse the Trips routes API — frontend
@@ -61,12 +64,23 @@ interface DayBadge {
 
 function dayBadge(s: CalendarDaySummary | undefined): DayBadge | null {
   if (!s) return null; // absent from the calendar response = no activity
+  // A Reverted day is a problem regardless of the sold/min math — cancellations
+  // dropped it below minimum and its trip is at risk.
+  if (s.status === "Reverted") {
+    return {
+      kind: "over",
+      label: `${s.sold}/${s.passengerMinimum}`,
+      title: `Reverted — needs ${s.neededToConfirm} more seat(s) to re-confirm`,
+    };
+  }
   const taken = s.sold + s.pending;
   if (taken > s.capacity) {
     return { kind: "over", label: `${taken}/${s.capacity}`, title: "Overbooked — sold + holds exceed capacity" };
   }
-  if (s.sold >= s.passengerMinimum) {
-    return { kind: "ontime", label: `${s.sold}/${s.passengerMinimum}`, title: "Minimum met" };
+  // A Confirmed day stays teal even if sold has slipped below minimum inside
+  // the cancellation window (the day still runs — the panel chip agrees).
+  if (s.status === "Confirmed" || s.sold >= s.passengerMinimum) {
+    return { kind: "ontime", label: `${s.sold}/${s.passengerMinimum}`, title: "Confirmed — minimum met" };
   }
   return { kind: "soon", label: `${s.sold}/${s.passengerMinimum}`, title: "Below the passenger minimum" };
 }
@@ -103,7 +117,7 @@ function monthKeyOf(year: number, month: number, corridorId: string): string {
 // Screen
 // ---------------------------------------------------------------------------
 
-export default function Bookings() {
+export default function Bookings({ onOpenTrip }: { onOpenTrip: (id: string) => void }) {
   const now = new Date();
   const today = todayIso();
   const isOwner = getRole() === "Owner";
@@ -409,10 +423,29 @@ export default function Bookings() {
                         >
                           {Number(dateIso.slice(8, 10))}
                         </span>
+                        {summary?.minimumGuaranteed && (
+                          <span
+                            title="Gift-a-Seat — minimum guaranteed, the day never reverts"
+                            style={{
+                              marginLeft: "auto",
+                              fontFamily: fonts.mono,
+                              fontSize: 8.5,
+                              fontWeight: 700,
+                              color: statusMeta("soon").t,
+                            }}
+                          >
+                            GT
+                          </span>
+                        )}
                         {summary?.hasOverrides && (
                           <span
                             title="Per-date override on minimum or capacity"
-                            style={{ marginLeft: "auto", fontFamily: fonts.mono, fontSize: 8.5, color: colors.textFaint }}
+                            style={{
+                              marginLeft: summary.minimumGuaranteed ? 0 : "auto",
+                              fontFamily: fonts.mono,
+                              fontSize: 8.5,
+                              color: colors.textFaint,
+                            }}
                           >
                             OV
                           </span>
@@ -465,7 +498,7 @@ export default function Bookings() {
                     { kind: "off" as StatusKind, label: "No bookings" },
                     { kind: "soon" as StatusKind, label: "Below minimum (sold/min)" },
                     { kind: "ontime" as StatusKind, label: "Minimum met" },
-                    { kind: "over" as StatusKind, label: "Overbooked" },
+                    { kind: "over" as StatusKind, label: "Overbooked / Reverted" },
                   ] as const
                 ).map((l) => (
                   <span key={l.kind} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -498,6 +531,7 @@ export default function Bookings() {
               loadError={dayError}
               onRetry={loadDay}
               onChanged={refreshAll}
+              onOpenTrip={onOpenTrip}
               routeStops={route?.stops ?? []}
               isOwner={isOwner}
               past={selDate < today}
@@ -520,6 +554,7 @@ function DayPanel({
   loadError,
   onRetry,
   onChanged,
+  onOpenTrip,
   routeStops,
   isOwner,
   past,
@@ -530,6 +565,7 @@ function DayPanel({
   loadError: string | null;
   onRetry: () => void;
   onChanged: () => Promise<void>;
+  onOpenTrip: (id: string) => void;
   routeStops: TripStop[];
   isOwner: boolean;
   past: boolean;
@@ -600,7 +636,24 @@ function DayPanel({
         <h2 style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 24, lineHeight: 1, color: colors.headingBright, margin: 0 }}>
           {shortDateLabel(date)}
         </h2>
+        {/* Day lifecycle (US-B.9–11) — colour + glyph + text via statusMeta. */}
+        <StatusChip
+          kind={dayStatusKind(detail.status)}
+          label={
+            detail.status === "Confirmed"
+              ? "Confirmed"
+              : detail.status === "Reverted"
+                ? `Reverted — needs ${detail.neededToConfirm}`
+                : "Pending"
+          }
+        />
+        {detail.minimumGuaranteed && <StatusChip kind="soon" label="GUARANTEED" />}
         {past && <StatusChip kind="off" label="Past date" />}
+        {detail.tripId && (
+          <ActionButton onClick={() => onOpenTrip(detail.tripId!)} style={{ marginLeft: "auto" }}>
+            OPEN TRIP →
+          </ActionButton>
+        )}
       </div>
 
       {actionError && (
@@ -613,7 +666,16 @@ function DayPanel({
         <SectionLabel>Demand &amp; capacity</SectionLabel>
         <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
           <DetailRow label="Corridor" value={detail.corridorName || corridor?.name || "—"} />
-          <DetailRow label="Vehicle" value={detail.tripId ? "Trip created" : "— no trip yet"} />
+          <DetailRow
+            label="Vehicle"
+            value={
+              detail.tripId ? (
+                <span style={{ fontFamily: fonts.mono }}>{detail.tripNumber ?? "Trip created"}</span>
+              ) : (
+                "— no trip yet"
+              )
+            }
+          />
           <DetailRow label="Seats sold" value={String(detail.sold)} valueStyle={{ fontFamily: fonts.mono }} />
           <DetailRow label="Pending holds" value={String(detail.pending)} valueStyle={{ fontFamily: fonts.mono }} />
           <DetailRow label="Remaining" value={String(detail.remaining)} valueStyle={{ fontFamily: fonts.mono }} />
@@ -647,6 +709,17 @@ function DayPanel({
           />
         </div>
       </Panel>
+
+      {/* Gift-a-Seat (US-B.11): hidden once guaranteed (the header chip takes
+          over), and needs a materialized day (the endpoint 404s otherwise). */}
+      {!past && !detail.minimumGuaranteed && detail.bookingDayId && (
+        <GuaranteeSection
+          bookingDayId={detail.bookingDayId}
+          reverted={detail.status === "Reverted"}
+          neededToConfirm={detail.neededToConfirm}
+          onChanged={onChanged}
+        />
+      )}
 
       {isOwner && detail.bookingDayId && (
         <OverridesEditor
@@ -755,6 +828,73 @@ function BookingRow({
         </div>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Gift-a-Seat guarantee (US-B.11) — a business commitment, so the button asks
+// for an explicit confirm step before calling the API.
+// ---------------------------------------------------------------------------
+
+function GuaranteeSection({
+  bookingDayId,
+  reverted,
+  neededToConfirm,
+  onChanged,
+}: {
+  bookingDayId: string;
+  reverted: boolean;
+  neededToConfirm: number;
+  onChanged: () => Promise<void>;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function run() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await guaranteeDay(bookingDayId);
+      await onChanged();
+      // On success the panel refetches with minimumGuaranteed=true and this
+      // section unmounts — no local state to reset.
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Failed to set the guarantee — please try again.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Panel style={{ marginBottom: 12 }}>
+      <SectionLabel>Gift-a-Seat guarantee</SectionLabel>
+      <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textMuted, lineHeight: 1.6, marginBottom: 10 }}>
+        {reverted
+          ? `Guaranteeing re-confirms this reverted day: the run departs even if the remaining ${neededToConfirm} seat(s) never sell.`
+          : "Guaranteeing pledges the unsold minimum: the day runs even below the passenger minimum and never reverts."}
+      </div>
+      {!confirming ? (
+        <ActionButton variant="primary" onClick={() => setConfirming(true)}>
+          GUARANTEE MINIMUM
+        </ActionButton>
+      ) : (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <StatusChip kind="soon" label="This is a business commitment — the seats are covered either way." />
+          <ActionButton variant="success" disabled={busy} onClick={() => void run()}>
+            {busy ? "WORKING…" : "CONFIRM GUARANTEE"}
+          </ActionButton>
+          <ActionButton disabled={busy} onClick={() => setConfirming(false)}>
+            CANCEL
+          </ActionButton>
+        </div>
+      )}
+      {error && (
+        <div style={{ marginTop: 9 }}>
+          <StatusChip kind="over" label={error} />
+        </div>
+      )}
+    </Panel>
   );
 }
 

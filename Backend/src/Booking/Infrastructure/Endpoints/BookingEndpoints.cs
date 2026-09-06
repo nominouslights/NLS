@@ -9,6 +9,7 @@ using NorthernLink.Booking.Application.Bookings.Cancel;
 using NorthernLink.Booking.Application.Bookings.Confirm;
 using NorthernLink.Booking.Application.Bookings.Create;
 using NorthernLink.Booking.Application.Bookings.Update;
+using NorthernLink.Booking.Application.BookingDays.Guarantee;
 using NorthernLink.Booking.Application.Calendar.GetDay;
 using NorthernLink.Booking.Application.Calendar.GetMonth;
 using NorthernLink.Booking.Application.Corridors.GetCorridors;
@@ -51,6 +52,11 @@ public static class BookingEndpoints
         // Calendar — month summaries + one day's panel detail.
         booking.MapGet("calendar", GetCalendarMonth);
         booking.MapGet("days/{date}", GetDayDetail);
+
+        // Gift-a-Seat: guarantee the day's minimum (re-confirms a Reverted day). Dispatch-wide
+        // (the group's DispatchAccess) — covering seats is an operational save-the-trip action,
+        // not pricing policy. Idempotent; {id} is the BookingDay id from the calendar responses.
+        booking.MapPost("days/{id:guid}/guarantee", GuaranteeDay);
 
         // Bookings.
         booking.MapPost("bookings", CreateBooking);
@@ -172,6 +178,18 @@ public static class BookingEndpoints
         var result = await sender.Query(
             new GetBookingDayDetailQuery(tenantId, corridorId, date), cancellationToken);
         return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> GuaranteeDay(
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(new GuaranteeBookingDayCommand(tenantId, id), cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
     private static async Task<IResult> CreateBooking(

@@ -13,17 +13,18 @@ namespace NorthernLink.Booking.Infrastructure.Persistence;
 /// The Booking module's DbContext (Postgres schema "booking"). Tenant stamping and the
 /// audit pipeline (event journal + aggregate snapshots + outbox) come from
 /// <see cref="ModuleDbContext"/>; this class only maps Booking's own entities and their
-/// query filters. No integration event mapper is passed: Booking consumes trips events but
-/// publishes nothing yet — its outbox table exists (base mapping) and stays empty. Query
-/// handlers read the aggregate tables directly (no rm_* projections — the seat math is
-/// derived per read, and the write shapes already serve the read side). The database half
-/// of tenant enforcement (RLS) is enabled in the migration, keyed on the session variable
-/// set by <see cref="TenantSessionInterceptor"/>.
+/// query filters. The integration event mapper turns BookingDay lifecycle events into the
+/// module's public contracts (booking-day-confirmed / booking-day-reverted) via the outbox.
+/// Query handlers read the aggregate tables directly (no rm_* projections — the seat math
+/// is derived per read, and the write shapes already serve the read side). The database
+/// half of tenant enforcement (RLS) is enabled in the migration, keyed on the session
+/// variable set by <see cref="TenantSessionInterceptor"/>.
 /// </summary>
 public sealed class BookingDbContext(
     DbContextOptions<BookingDbContext> options,
-    ITenantContext tenantContext)
-    : ModuleDbContext(options, BookingServiceCollectionExtensions.SchemaName, tenantContext)
+    ITenantContext tenantContext,
+    BookingIntegrationEventMapper? integrationEventMapper = null)
+    : ModuleDbContext(options, BookingServiceCollectionExtensions.SchemaName, tenantContext, integrationEventMapper)
 {
     public DbSet<Customer> Customers => Set<Customer>();
 

@@ -16,7 +16,7 @@ public class SeatMathTests
     private static readonly DateTimeOffset Now = new(2026, 9, 10, 12, 0, 0, TimeSpan.Zero);
 
     private static BookingSeatRow Row(BookingStatus status, int passengers, bool holdLive = true) =>
-        new(Date, status, holdLive ? Now.AddMinutes(10) : Now.AddMinutes(-10), passengers);
+        new(Guid.NewGuid(), Date, status, holdLive ? Now.AddMinutes(10) : Now.AddMinutes(-10), passengers);
 
     private static BookingPolicy Policy(int minimum = 4, int capacity = 10)
     {

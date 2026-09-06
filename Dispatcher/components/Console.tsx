@@ -104,7 +104,7 @@ export default function Console() {
               onOpenTrip={openTrip}
             />
           )}
-          {screen === "bookings" && <Bookings />}
+          {screen === "bookings" && <Bookings onOpenTrip={openTrip} />}
           {screen === "clients" && (
             <Clients clientSel={clientSel} setClientSel={setClientSel} onCreateTrip={() => setWizardOpen(true)} />
           )}

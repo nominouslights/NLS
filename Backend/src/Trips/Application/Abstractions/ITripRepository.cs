@@ -35,5 +35,24 @@ public interface ITripRepository
         IReadOnlyCollection<Guid> tripIds,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// The trip materialized from one booking day, when it exists — the cheap pre-check the
+    /// booking-day-confirmed consumer runs before minting a trip number. Explicit tenant +
+    /// filter bypass (the consumer-path shape — see <see cref="GetByIdsAsync"/>).
+    /// </summary>
+    Task<Trip?> GetByBookingDayIdAsync(
+        Guid tenantId,
+        Guid bookingDayId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Adds and SAVES a booking-sourced trip, absorbing the (tenant_id, booking_day_id)
+    /// unique-index race DB-atomically: false when a concurrent (or replayed) processing of
+    /// the same confirmation already created the day's trip — the caller then no-ops, per
+    /// the single-API-instance rule that idempotency guarantees live in the database, never
+    /// in an application-level existence check alone.
+    /// </summary>
+    Task<bool> TryAddForBookingDayAsync(Trip trip, CancellationToken cancellationToken = default);
+
     Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }

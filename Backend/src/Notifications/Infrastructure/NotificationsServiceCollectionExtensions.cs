@@ -2,6 +2,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using NorthernLink.Shared.EventBus;
+using NorthernLink.Shared.IntegrationEvents.Booking;
 using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Shared.Persistence.Auditing;
@@ -9,6 +11,7 @@ using NorthernLink.Shared.Persistence.Projections;
 using NorthernLink.Shared.Tenancy;
 using NorthernLink.Notifications.Application;
 using NorthernLink.Notifications.Application.Abstractions;
+using NorthernLink.Notifications.Application.Integration;
 using NorthernLink.Notifications.Application.Dispatches;
 using NorthernLink.Notifications.Application.Dispatches.GetTripEmailHistory;
 using NorthernLink.Notifications.Application.Dispatches.PreviewTripPickupReport;
@@ -102,8 +105,12 @@ public static class NotificationsServiceCollectionExtensions
         services.AddScoped<IQueryHandler<PreviewTripPickupReportQuery, PickupReportPreviewResponse>, PreviewTripPickupReportQueryHandler>();
         services.AddScoped<IQueryHandler<GetTripEmailHistoryQuery, IReadOnlyList<EmailDispatchResponse>>, GetTripEmailHistoryQueryHandler>();
 
-        // 5. Integration event consumers — none: Notifications neither publishes nor consumes
-        //    today (the send request carries its trip context as opaque snapshots).
+        // 5. Integration event consumers — the module's first: booking.booking-day-reverted
+        //    (a storing event, polled from the booking outbox) drives the automated
+        //    "trip at risk" emails. The event carries its full recipient snapshot, so the
+        //    handler still never queries another module.
+        services.AddOutboxPollingConsumer<NotificationsDbContext>(SchemaName, subscriptions => subscriptions
+            .On<BookingDayRevertedIntegrationEvent, BookingDayRevertedIntegrationEventHandler>());
 
         // 6. Read-side projections — one worker polls notifications.event_journal and upserts
         //    the read-model rows for the aggregates the batch touched.

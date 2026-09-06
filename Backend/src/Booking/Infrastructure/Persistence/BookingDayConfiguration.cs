@@ -25,6 +25,16 @@ public sealed class BookingDayConfiguration : IEntityTypeConfiguration<BookingDa
         builder.Property(d => d.PassengerMinimumOverride).HasColumnName("passenger_minimum_override");
         builder.Property(d => d.SeatCapacityOverride).HasColumnName("seat_capacity_override");
         builder.Property(d => d.TripId).HasColumnName("trip_id");
+        builder.Property(d => d.TripNumber).HasColumnName("trip_number").HasMaxLength(32);
+        builder.Property(d => d.Status)
+            .HasColumnName("status")
+            .HasConversion<string>()
+            .HasMaxLength(16)
+            .HasDefaultValue(BookingDayStatus.Unconfirmed);
+        builder.Property(d => d.MinimumGuaranteed)
+            .HasColumnName("minimum_guaranteed")
+            .HasDefaultValue(false);
+        builder.Property(d => d.RevertedAtUtc).HasColumnName("reverted_at_utc");
         builder.Property(d => d.CreatedAtUtc).HasColumnName("created_at_utc");
         builder.Property(d => d.UpdatedAtUtc).HasColumnName("updated_at_utc");
 

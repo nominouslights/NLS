@@ -31,7 +31,7 @@ public sealed class GetBookingDayDetailQueryHandler(
         var capacity = SeatMath.ResolveCapacity(day?.SeatCapacityOverride, settings?.SeatCapacity, policy);
         var minimum = SeatMath.ResolveMinimum(day?.PassengerMinimumOverride, settings?.PassengerMinimum, policy);
         var seats = SeatMath.Compute(
-            [.. bookings.Select(b => new BookingSeatRow(b.ServiceDate, b.Status, b.HoldExpiresAtUtc, b.Passengers.Count))],
+            [.. bookings.Select(b => new BookingSeatRow(b.Id, b.ServiceDate, b.Status, b.HoldExpiresAtUtc, b.Passengers.Count))],
             now,
             capacity,
             minimum);
@@ -42,6 +42,9 @@ public sealed class GetBookingDayDetailQueryHandler(
             CorridorName: corridor.Name,
             BookingDayId: day?.Id,
             TripId: day?.TripId,
+            TripNumber: day?.TripNumber,
+            Status: day?.Status ?? Domain.BookingDays.BookingDayStatus.Unconfirmed,
+            MinimumGuaranteed: day?.MinimumGuaranteed ?? false,
             PassengerMinimumOverride: day?.PassengerMinimumOverride,
             SeatCapacityOverride: day?.SeatCapacityOverride,
             Sold: seats.Sold,

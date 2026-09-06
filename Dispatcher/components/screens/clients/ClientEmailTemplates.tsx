@@ -3,9 +3,13 @@
 import { useEffect, useState } from "react";
 import { colors, fonts } from "@/lib/theme";
 import { ApiError } from "@/lib/api";
-import { svcForServiceType } from "@/lib/api/clients";
 import { refetchUntil } from "@/lib/api/trips";
-import { listEmailTemplates, type EmailTemplateRecord } from "@/lib/api/notifications";
+import {
+  listEmailTemplates,
+  NOTIFICATION_SERVICE_TYPE_LABELS,
+  svcForNotificationServiceType,
+  type EmailTemplateRecord,
+} from "@/lib/api/notifications";
 import { SectionLabel } from "@/components/ui/Panel";
 import { ActionButton } from "@/components/ui/Button";
 import { ServiceChip, StatusChip } from "@/components/ui/Chip";
@@ -129,7 +133,16 @@ export default function ClientEmailTemplates({ clientId, clientName }: { clientI
                 <StatusChip kind={t.isActive ? "ontime" : "off"} label={t.isActive ? "Active" : "Inactive"} />
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <ServiceChip svc={svcForServiceType(t.serviceType)} />
+                {/* Notifications-only types (e.g. CommunityBookingAtRisk) carry
+                    their own label — never the raw enum string. */}
+                <ServiceChip
+                  svc={svcForNotificationServiceType(t.serviceType)}
+                  label={
+                    t.serviceType === "CommunityBookingAtRisk"
+                      ? NOTIFICATION_SERVICE_TYPE_LABELS[t.serviceType]
+                      : undefined
+                  }
+                />
               </div>
               <div
                 style={{
