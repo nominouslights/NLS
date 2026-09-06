@@ -42,4 +42,26 @@ internal sealed class ScheduleTemplateReadService(TripsDbContext context) : ISch
             t.CreatedAtUtc,
             t.UpdatedAtUtc)).ToList();
     }
+
+    public async Task<IReadOnlyList<ScheduleExceptionResponse>> GetExceptionsForTemplateAsync(
+        Guid templateId,
+        CancellationToken cancellationToken = default)
+    {
+        var exceptions = await context.ScheduleExceptionReadModels
+            .AsNoTracking()
+            .Where(e => e.ScheduleTemplateId == templateId)
+            .OrderBy(e => e.Date)
+            .ToListAsync(cancellationToken);
+
+        return exceptions.Select(e => new ScheduleExceptionResponse(
+            e.Id,
+            e.ScheduleTemplateId,
+            e.Date.ToString("yyyy-MM-dd"),
+            e.Kind,
+            e.DepartureTime,
+            e.ReturnDepartureTime,
+            e.Note,
+            e.CreatedAtUtc,
+            e.UpdatedAtUtc)).ToList();
+    }
 }

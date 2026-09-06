@@ -1,6 +1,8 @@
 using NorthernLink.Shared.Events;
 using NorthernLink.Shared.IntegrationEvents.Trips;
 using NorthernLink.Shared.Kernel;
+using NorthernLink.Trips.Domain.Routes;
+using NorthernLink.Trips.Domain.Routes.Events;
 using NorthernLink.Trips.Domain.Trips;
 using NorthernLink.Trips.Domain.Trips.Events;
 
@@ -8,8 +10,9 @@ namespace NorthernLink.Trips.Application.Manifests;
 
 /// <summary>
 /// Trips' explicit domain-event → integration-event translation. The public contracts today are
-/// a trip becoming billable (Billing records a billable trip) and post-hoc round-trip pairing
-/// changes (Billing re-keys its uninvoiced replica rows).
+/// a trip becoming billable (Billing records a billable trip), post-hoc round-trip pairing
+/// changes (Billing re-keys its uninvoiced replica rows), and route changes (Booking maintains
+/// its <c>corridor_lookup</c> replica — a booking corridor is a Trips route).
 /// <para>
 /// The billable feed hangs off <see cref="TripReadyForBillingDomainEvent"/>, not completion:
 /// under the billing-driven lifecycle a trip reaches Completed only once payment is confirmed,
@@ -34,8 +37,25 @@ public sealed class TripsIntegrationEventMapper : IIntegrationEventMapper
             TripReadyForBillingDomainEvent => MapReadyForBilling((Trip)aggregate),
             TripClosedWithoutBillingDomainEvent => MapClosedWithoutBilling((Trip)aggregate),
             TripRoundTripChangedDomainEvent => MapRoundTripChanged((Trip)aggregate),
+            TripScheduledFromBookingDomainEvent => MapScheduledFromBooking((Trip)aggregate),
+            RouteCreatedDomainEvent => MapRouteChanged((Route)aggregate),
+            RouteUpdatedDomainEvent => MapRouteChanged((Route)aggregate),
             _ => null,
         };
+
+    /// <summary>
+    /// The corridor replica feed: one upsert-shaped event for create and update, built from the
+    /// aggregate because the domain events carry only the route id. Origin/Destination are the
+    /// outbound leg's first/last stop names at publish time. Routes saved before this mapping
+    /// existed never published — re-save each once to backfill a consumer's replica.
+    /// </summary>
+    private static RouteChangedIntegrationEvent MapRouteChanged(Route route) => new(
+        route.Id,
+        route.TenantId,
+        route.Name,
+        route.Origin,
+        route.Destination,
+        route.Active);
 
     /// <summary>
     /// The undo of the billable feed: tells Billing to drop the trip from its uninvoiced pool.
@@ -79,4 +99,20 @@ public sealed class TripsIntegrationEventMapper : IIntegrationEventMapper
         trip.TenantId,
         trip.RoundTripKey,
         trip.Direction?.ToString());
+
+    /// <summary>
+    /// The booking-day backlink feed: tells Booking which trip its confirmed day produced.
+    /// Only <see cref="Trip.ScheduleFromBooking"/> raises the source event, so
+    /// <see cref="Trip.BookingDayId"/> is always set here; the null-guard keeps a future
+    /// refactor from publishing a backlink no consumer could apply.
+    /// </summary>
+    private static TripScheduledFromBookingIntegrationEvent? MapScheduledFromBooking(Trip trip) =>
+        trip.BookingDayId is not { } bookingDayId
+            ? null
+            : new TripScheduledFromBookingIntegrationEvent(
+                trip.Id,
+                trip.TripNumber,
+                trip.TenantId,
+                bookingDayId,
+                trip.ServiceDate);
 }

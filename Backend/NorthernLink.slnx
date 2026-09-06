@@ -7,6 +7,7 @@
   </Folder>
   <Folder Name="/Domains/">
     <Project Path="src/Billing/NorthernLink.Billing.csproj" />
+    <Project Path="src/Booking/NorthernLink.Booking.csproj" />
     <Project Path="src/Budgeting/NorthernLink.Budgeting.csproj" />
     <Project Path="src/Clients/NorthernLink.Clients.csproj" />
     <Project Path="src/Drivers/NorthernLink.Drivers.csproj" />
@@ -33,5 +34,6 @@
     <Project Path="tests/NorthernLink.Notifications.Tests/NorthernLink.Notifications.Tests.csproj" />
     <Project Path="tests/NorthernLink.Api.Tests/NorthernLink.Api.Tests.csproj" />
     <Project Path="tests/NorthernLink.Budgeting.Tests/NorthernLink.Budgeting.Tests.csproj" />
+    <Project Path="tests/NorthernLink.Booking.Tests/NorthernLink.Booking.Tests.csproj" />
   </Folder>
 </Solution>

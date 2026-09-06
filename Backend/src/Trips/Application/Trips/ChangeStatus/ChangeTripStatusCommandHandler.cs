@@ -7,7 +7,8 @@ namespace NorthernLink.Trips.Application.Trips.ChangeStatus;
 
 public sealed class ChangeTripStatusCommandHandler(
     ITripRepository tripRepository,
-    ITripManifestRepository manifestRepository)
+    ITripManifestRepository manifestRepository,
+    IShipmentRepository shipmentRepository)
     : ICommandHandler<ChangeTripStatusCommand>
 {
     public async Task<Result> Handle(ChangeTripStatusCommand command, CancellationToken cancellationToken)
@@ -18,12 +19,15 @@ public sealed class ChangeTripStatusCommandHandler(
             return Result.Failure(TripErrors.NotFound);
         }
 
-        // En-route guard: a trip cannot go InProgress without a manifest carrying >=1 passenger.
-        // Deadheads (IsEmptyLeg) are exempt — an empty repositioning run starts and ends
-        // without passengers, and manifests can't even be created for it.
+        // En-route guard. Passenger services cannot go InProgress without a manifest carrying
+        // >=1 passenger; cargo services (Cargo/Grocery) instead need >=1 shipment assigned to
+        // the run — a manifest stays optional for them. Deadheads (IsEmptyLeg) are exempt from
+        // both: an empty repositioning run starts and ends carrying nothing.
         if (command.Status == TripStatus.InProgress && !trip.IsEmptyLeg)
         {
-            var guard = await GuardPassengerManifest(trip, cancellationToken);
+            var guard = trip.ServiceType.IsCargoService()
+                ? await GuardShipmentAssigned(trip, cancellationToken)
+                : await GuardPassengerManifest(trip, cancellationToken);
             if (guard.IsFailure)
             {
                 return guard;
@@ -62,6 +66,15 @@ public sealed class ChangeTripStatusCommandHandler(
 
         await tripRepository.SaveChangesAsync(cancellationToken);
         return Result.Success();
+    }
+
+    /// <summary>The relaxed en-route gate for freight: at least one shipment leg booked on the run.</summary>
+    private async Task<Result> GuardShipmentAssigned(Trip trip, CancellationToken cancellationToken)
+    {
+        var assigned = await shipmentRepository.CountForTripAsync(trip.Id, cancellationToken);
+        return assigned >= 1
+            ? Result.Success()
+            : Result.Failure(TripErrors.ShipmentRequired);
     }
 
     private async Task<Result> GuardPassengerManifest(Trip trip, CancellationToken cancellationToken)

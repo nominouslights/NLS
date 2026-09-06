@@ -149,6 +149,86 @@ public class ScheduleTemplateRecurrenceTests
         Assert.Empty(template.DaysOfMonth);
     }
 
+    // ----- Seats guard (nullable for cargo services) -----
+
+    [Theory]
+    [InlineData(TripServiceType.ContractCrew)]
+    [InlineData(TripServiceType.Community)]
+    [InlineData(TripServiceType.Nihb)]
+    [InlineData(TripServiceType.Charter)]
+    public void Passenger_service_types_still_require_a_positive_seat_capacity(TripServiceType serviceType)
+    {
+        var nullSeats = TestPlanning.CreateTemplateResult(serviceType: serviceType, seatsCapacity: null);
+        var zeroSeats = TestPlanning.CreateTemplateResult(serviceType: serviceType, seatsCapacity: 0);
+
+        Assert.Equal(ScheduleTemplateErrors.InvalidSeats, nullSeats.Error);
+        Assert.Equal(ScheduleTemplateErrors.InvalidSeats, zeroSeats.Error);
+    }
+
+    [Theory]
+    [InlineData(TripServiceType.Cargo)]
+    [InlineData(TripServiceType.Grocery)]
+    public void Cargo_service_types_accept_null_seats(TripServiceType serviceType)
+    {
+        var template = TestPlanning.CreateTemplate(serviceType: serviceType, seatsCapacity: null, seatsMinimum: null);
+
+        Assert.Null(template.SeatsCapacity);
+        Assert.Null(template.SeatsMinimum);
+    }
+
+    [Theory]
+    [InlineData(TripServiceType.Cargo)]
+    [InlineData(TripServiceType.Grocery)]
+    public void Cargo_service_types_normalize_supplied_seats_to_null(TripServiceType serviceType)
+    {
+        // Whatever a caller sends, a cargo template never stores a seat count — the old
+        // NOT NULL column forced dispatchers to invent one, and that lie ends here.
+        var template = TestPlanning.CreateTemplate(serviceType: serviceType, seatsCapacity: 12, seatsMinimum: 4);
+
+        Assert.Null(template.SeatsCapacity);
+        Assert.Null(template.SeatsMinimum);
+    }
+
+    [Fact]
+    public void Updating_a_template_to_a_cargo_service_normalizes_seats_to_null()
+    {
+        var template = TestPlanning.CreateTemplate(); // ContractCrew, 12 seats
+        Assert.Equal(12, template.SeatsCapacity);
+
+        var update = template.Update(
+            name: "Lynn Lake freight run",
+            routeId: Guid.NewGuid(),
+            serviceType: TripServiceType.Cargo,
+            clientId: null,
+            clientName: null,
+            recurrenceKind: ScheduleRecurrenceKind.DaysOfWeek,
+            daysOfWeek: [DayOfWeek.Friday],
+            intervalDays: null,
+            anchorDate: null,
+            daysOfMonth: [],
+            departureTime: new TimeOnly(8, 0),
+            returnDepartureTime: null,
+            returnNextDay: false,
+            seatsCapacity: 12, // supplied but must be normalized away
+            seatsMinimum: 4,
+            defaultVehicleUnit: "U-04",
+            defaultDriverId: null,
+            generationHorizonDays: 7,
+            cutoffNote: null);
+
+        Assert.True(update.IsSuccess);
+        Assert.Null(template.SeatsCapacity);
+        Assert.Null(template.SeatsMinimum);
+    }
+
+    [Fact]
+    public void Passenger_minimum_above_capacity_still_fails()
+    {
+        var result = TestPlanning.CreateTemplateResult(seatsCapacity: 12, seatsMinimum: 13);
+
+        Assert.Equal(ScheduleTemplateErrors.InvalidSeats, result.Error);
+    }
+
     // ----- Return departure guard -----
 
     [Fact]

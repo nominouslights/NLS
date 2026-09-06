@@ -559,6 +559,22 @@ public class TripLifecycleTests
     }
 
     [Fact]
+    public void Demand_does_not_apply_to_cargo_trips()
+    {
+        // A cargo run carries goods, not passengers — seat demand has nothing to attach to,
+        // whatever the trip's status.
+        foreach (var serviceType in new[] { TripServiceType.Cargo, TripServiceType.Grocery })
+        {
+            var trip = TestPlanning.ScheduleTrip(serviceType: serviceType).Value;
+
+            var result = trip.RecordDemand(3, demandGuaranteed: false);
+
+            Assert.Equal(TripErrors.DemandNotApplicable, result.Error);
+            Assert.Equal(0, trip.SeatsConfirmed);
+        }
+    }
+
+    [Fact]
     public void Attach_manifest_links_without_changing_status()
     {
         var trip = TestPlanning.ScheduleTrip().Value;

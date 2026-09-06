@@ -47,11 +47,15 @@ internal static class TestPlanning
         ScheduleRecurrenceKind recurrenceKind = ScheduleRecurrenceKind.DaysOfWeek,
         int? intervalDays = null,
         DateOnly? anchorDate = null,
-        IReadOnlyList<int>? daysOfMonth = null)
+        IReadOnlyList<int>? daysOfMonth = null,
+        TripServiceType serviceType = TripServiceType.ContractCrew,
+        int? seatsCapacity = 12,
+        int? seatsMinimum = null)
     {
         var result = CreateTemplateResult(
             daysOfWeek, departureTime, returnDepartureTime, returnNextDay, generationHorizonDays,
-            routeId, recurrenceKind, intervalDays, anchorDate, daysOfMonth);
+            routeId, recurrenceKind, intervalDays, anchorDate, daysOfMonth,
+            serviceType, seatsCapacity, seatsMinimum);
         var template = result.Value;
 
         if (!active)
@@ -76,12 +80,15 @@ internal static class TestPlanning
         ScheduleRecurrenceKind recurrenceKind = ScheduleRecurrenceKind.DaysOfWeek,
         int? intervalDays = null,
         DateOnly? anchorDate = null,
-        IReadOnlyList<int>? daysOfMonth = null) =>
+        IReadOnlyList<int>? daysOfMonth = null,
+        TripServiceType serviceType = TripServiceType.ContractCrew,
+        int? seatsCapacity = 12,
+        int? seatsMinimum = null) =>
         ScheduleTemplate.Create(
             TenantId,
             "Alamos crew shuttle",
             routeId ?? Guid.NewGuid(),
-            TripServiceType.ContractCrew,
+            serviceType,
             clientId: null,
             clientName: "Alamos Gold",
             recurrenceKind: recurrenceKind,
@@ -92,8 +99,8 @@ internal static class TestPlanning
             departureTime: departureTime ?? new TimeOnly(6, 30),
             returnDepartureTime: returnDepartureTime,
             returnNextDay: returnNextDay,
-            seatsCapacity: 12,
-            seatsMinimum: null,
+            seatsCapacity: seatsCapacity,
+            seatsMinimum: seatsMinimum,
             defaultVehicleUnit: "U-04",
             defaultDriverId: null,
             generationHorizonDays: generationHorizonDays);

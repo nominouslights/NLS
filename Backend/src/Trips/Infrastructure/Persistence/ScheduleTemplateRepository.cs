@@ -10,7 +10,9 @@ internal sealed class ScheduleTemplateRepository(TripsDbContext context) : ISche
     public void Add(ScheduleTemplate template) => context.ScheduleTemplates.Add(template);
 
     public Task<ScheduleTemplate?> GetByIdAsync(Guid templateId, CancellationToken cancellationToken = default) =>
-        context.ScheduleTemplates.FirstOrDefaultAsync(t => t.Id == templateId, cancellationToken);
+        context.ScheduleTemplates
+            .Include(t => t.Exceptions)
+            .FirstOrDefaultAsync(t => t.Id == templateId, cancellationToken);
 
     public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
         context.SaveChangesAsync(cancellationToken);

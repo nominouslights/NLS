@@ -20,7 +20,8 @@ import type { ReportTabId } from "@/components/screens/reports/shared";
 import Manifests from "@/components/screens/Manifests";
 import RoutesSchedules from "@/components/screens/RoutesSchedules";
 import Stops from "@/components/screens/Stops";
-import Grocery from "@/components/screens/Grocery";
+import Cargo, { type CargoTab } from "@/components/screens/Cargo";
+import Bookings from "@/components/screens/Bookings";
 import Incidents from "@/components/screens/Incidents";
 import Communications from "@/components/screens/Communications";
 import Settings from "@/components/screens/Settings";
@@ -37,6 +38,11 @@ export default function Console() {
   const [tripPeriod, setTripPeriod] = useState<Period>(() => currentPeriod("month"));
   const [tripPage, setTripPage] = useState(1);
   const [driverSel, setDriverSel] = useState(0);
+  // Cargo & Grocery tab + shipment selection live here (tripPeriod precedent):
+  // switching screens unmounts Cargo, and a dispatcher mid-shipment should not
+  // lose their place on a detour to Trips.
+  const [cargoTab, setCargoTab] = useState<CargoTab>("shipments");
+  const [cargoSelId, setCargoSelId] = useState<string | null>(null); // Shipments API Guid
   const [fleetSelId, setFleetSelId] = useState<string | null>(null);
   const [clientSel, setClientSel] = useState<string | null>(null); // Clients API Guid
   const [invoiceSelId, setInvoiceSelId] = useState<string | null>(null); // Billing API Guid
@@ -100,10 +106,19 @@ export default function Console() {
           )}
           {screen === "drivers" && <Drivers driverSel={driverSel} setDriverSel={setDriverSel} />}
           {screen === "fleet" && <Fleet fleetSelId={fleetSelId} setFleetSelId={setFleetSelId} />}
-          {screen === "routes" && <RoutesSchedules />}
+          {screen === "routes" && <RoutesSchedules onOpenTrip={openTrip} />}
           {screen === "stops" && <Stops />}
           {screen === "manifests" && <Manifests />}
-          {screen === "grocery" && <Grocery />}
+          {screen === "cargo" && (
+            <Cargo
+              tab={cargoTab}
+              setTab={setCargoTab}
+              selectedId={cargoSelId}
+              setSelectedId={setCargoSelId}
+              onOpenTrip={openTrip}
+            />
+          )}
+          {screen === "bookings" && <Bookings onOpenTrip={openTrip} />}
           {screen === "clients" && (
             <Clients clientSel={clientSel} setClientSel={setClientSel} onCreateTrip={() => setWizardOpen(true)} />
           )}

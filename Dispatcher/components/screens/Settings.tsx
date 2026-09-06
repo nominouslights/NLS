@@ -8,8 +8,9 @@ import { SelectField } from "@/components/ui/Field";
 import { generateAdminInvite, INVITE_ROLES, type AdminInvite, type InviteRole } from "@/lib/auth";
 import { ApiError } from "@/lib/api";
 import { copyToClipboard } from "@/lib/clipboard";
+import BookingPolicyPanel from "@/components/screens/settings/BookingPolicyPanel";
 
-const TABS = ["Organization", "Users & Roles", "Budget Codes", "Rate Schedules", "Connectors", "Audit Log"];
+const TABS = ["Organization", "Users & Roles", "Booking Policy", "Budget Codes", "Rate Schedules", "Connectors", "Audit Log"];
 
 const users = [
   { name: "R. Kelsey", role: "Owner · Dispatcher", tenant: "Internal", active: true },
@@ -154,7 +155,7 @@ export default function Settings() {
                 <Panel style={{ borderRadius: 11 }}>
                   <div style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim, marginBottom: 5 }}>QBO connector</div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-                    <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#009E73" }} />
+                    <span style={{ width: 9, height: 9, borderRadius: "50%", background: statusMeta("ontime").c }} />
                     <span style={{ fontFamily: fonts.body, fontSize: 13.5, color: colors.textPrimary, fontWeight: 500 }}>Connected · read-only</span>
                   </div>
                 </Panel>
@@ -338,6 +339,13 @@ export default function Settings() {
 
           {tab === 2 && (
             <div className="detailfade">
+              <h2 style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 23, color: colors.headingBright, margin: "0 0 14px" }}>Booking Policy</h2>
+              <BookingPolicyPanel />
+            </div>
+          )}
+
+          {tab === 3 && (
+            <div className="detailfade">
               <h2 style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 23, color: colors.headingBright, margin: "0 0 14px" }}>Budget Codes</h2>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {budgetCodes.map((b) => (
@@ -362,7 +370,7 @@ export default function Settings() {
             </div>
           )}
 
-          {tab === 3 && (
+          {tab === 4 && (
             <div className="detailfade">
               <h2 style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 23, color: colors.headingBright, margin: "0 0 14px" }}>Rate Schedules</h2>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -391,14 +399,14 @@ export default function Settings() {
             </div>
           )}
 
-          {tab === 4 && (
+          {tab === 5 && (
             <div className="detailfade">
               <h2 style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 23, color: colors.headingBright, margin: "0 0 14px" }}>Connectors</h2>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <Panel style={{ borderRadius: 11 }}>
                   <div style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim, marginBottom: 5 }}>QuickBooks Online</div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-                    <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#009E73" }} />
+                    <span style={{ width: 9, height: 9, borderRadius: "50%", background: statusMeta("ontime").c }} />
                     <span style={{ fontFamily: fonts.body, fontSize: 13.5, color: colors.textPrimary, fontWeight: 500 }}>Connected · read-only book of record</span>
                   </div>
                   <div style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textDim, marginTop: 8 }}>Last read 4m ago · no write path</div>
@@ -406,7 +414,7 @@ export default function Settings() {
                 <Panel style={{ borderRadius: 11 }}>
                   <div style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim, marginBottom: 5 }}>Notification provider</div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-                    <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#009E73" }} />
+                    <span style={{ width: 9, height: 9, borderRadius: "50%", background: statusMeta("ontime").c }} />
                     <span style={{ fontFamily: fonts.body, fontSize: 13.5, color: colors.textPrimary, fontWeight: 500 }}>SMS + email · connected</span>
                   </div>
                   <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: statusMeta("ontime").t, marginTop: 8 }}>Canadian-hosted · PIPEDA-aligned</div>
@@ -415,7 +423,7 @@ export default function Settings() {
             </div>
           )}
 
-          {tab === 5 && (
+          {tab === 6 && (
             <div className="detailfade">
               <h2 style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 23, color: colors.headingBright, margin: "0 0 14px" }}>Audit Log</h2>
               <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>

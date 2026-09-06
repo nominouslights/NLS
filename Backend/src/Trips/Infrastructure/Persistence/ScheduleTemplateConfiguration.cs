@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using NorthernLink.Trips.Domain.Schedules;
 
@@ -77,7 +78,52 @@ public sealed class ScheduleTemplateConfiguration : IEntityTypeConfiguration<Sch
         builder.Property(t => t.CreatedAtUtc).HasColumnName("created_at_utc");
         builder.Property(t => t.UpdatedAtUtc).HasColumnName("updated_at_utc");
 
+        // Read-only navigation over the aggregate's backing field — exceptions only ever
+        // change through ScheduleTemplate, which owns the one-per-date and time invariants.
+        builder.HasMany(t => t.Exceptions)
+            .WithOne()
+            .HasForeignKey(e => e.ScheduleTemplateId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Metadata
+            .FindNavigation(nameof(ScheduleTemplate.Exceptions))!
+            .SetPropertyAccessMode(PropertyAccessMode.Field);
+
         builder.HasIndex(t => new { t.TenantId, t.Active });
         builder.HasIndex(t => new { t.TenantId, t.RouteId });
+    }
+}
+
+/// <summary>
+/// Maps <see cref="ScheduleException"/> to trips.schedule_exceptions. Carries its own
+/// <c>tenant_id</c> and its own RLS policy — isolation is never inherited through a
+/// foreign key. The unique (tenant, template, date) index backstops the aggregate's
+/// one-exception-per-date invariant against concurrent writers.
+/// </summary>
+public sealed class ScheduleExceptionConfiguration : IEntityTypeConfiguration<ScheduleException>
+{
+    public void Configure(EntityTypeBuilder<ScheduleException> builder)
+    {
+        builder.ToTable("schedule_exceptions");
+
+        builder.HasKey(e => e.Id);
+        builder.Property(e => e.Id).HasColumnName("id").ValueGeneratedNever();
+
+        builder.Property(e => e.TenantId).HasColumnName("tenant_id");
+        builder.Property(e => e.ScheduleTemplateId).HasColumnName("schedule_template_id");
+        builder.Property(e => e.Date).HasColumnName("date");
+
+        builder.Property(e => e.Kind)
+            .HasColumnName("kind")
+            .HasConversion<string>()
+            .HasMaxLength(32);
+
+        builder.Property(e => e.DepartureTime).HasColumnName("departure_time");
+        builder.Property(e => e.ReturnDepartureTime).HasColumnName("return_departure_time");
+        builder.Property(e => e.Note).HasColumnName("note").HasMaxLength(500);
+        builder.Property(e => e.CreatedAtUtc).HasColumnName("created_at_utc");
+        builder.Property(e => e.UpdatedAtUtc).HasColumnName("updated_at_utc");
+
+        builder.HasIndex(e => new { e.TenantId, e.ScheduleTemplateId, e.Date }).IsUnique();
     }
 }

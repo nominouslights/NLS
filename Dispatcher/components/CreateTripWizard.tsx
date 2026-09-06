@@ -9,6 +9,7 @@ import {
   getTrip,
   hasClearanceFor,
   hhmm,
+  isCargoService,
   refetchUntil,
   stopNames,
   svcForTrip,
@@ -149,6 +150,9 @@ export default function CreateTripWizard({
   const driver = drivers?.find((d) => d.id === driverId) ?? null;
   const vehicle = vehicles?.find((v) => v.id === vehicleId) ?? null;
   const contract = client?.activeContract ?? null;
+  // Cargo/Grocery trips carry shipments, not passengers: no seats, no manifest
+  // — shipments are registered and assigned from the Cargo & Grocery screen.
+  const cargoSvc = isCargoService(serviceType);
 
   // Stop options for the passenger pickers: the selected route's stops, or the
   // free-form origin/destination (which carry no stop ids).
@@ -221,6 +225,8 @@ export default function CreateTripWizard({
       return null;
     }
     if (n === 4) {
+      // Cargo/Grocery: seats are N/A and the step collects nothing — skip.
+      if (cargoSvc) return null;
       // Capacity is server-derived from the vehicle when one is assigned — only
       // the manual entry (no fleet vehicle) needs validating.
       if (!vehicle) {
@@ -278,10 +284,11 @@ export default function CreateTripWizard({
       poNumber: effectivePo.trim() || null,
       driverId,
       vehicleId: vehicleId || null,
-      // With a fleet vehicle, capacity is server-derived (the backend snapshots
+      // Cargo/Grocery: seats are N/A — always null on the wire. Otherwise,
+      // with a fleet vehicle, capacity is server-derived (the backend snapshots
       // the vehicle's seating capacity and ignores a client-supplied value).
-      seatsCapacity: vehicleId ? null : seatsCapacity === "" ? null : Number(seatsCapacity),
-      seatsMinimum: seatsMinimum === "" ? null : Number(seatsMinimum),
+      seatsCapacity: cargoSvc || vehicleId ? null : seatsCapacity === "" ? null : Number(seatsCapacity),
+      seatsMinimum: cargoSvc || seatsMinimum === "" ? null : Number(seatsMinimum),
     };
 
     setBusy(true);
@@ -300,7 +307,9 @@ export default function CreateTripWizard({
       // is server-generated, so read the created trip back (projection may trail).
       const wirePax = paxRowsToWire(passengers, stopOptions, maxPax);
       const wireCargo = cargoRowsToWire(cargo);
-      if (wirePax.length > 0 || wireCargo.length > 0) {
+      // Cargo/Grocery trips get no manifest from the wizard — shipments are
+      // registered and assigned from the Cargo & Grocery screen instead.
+      if (!cargoSvc && (wirePax.length > 0 || wireCargo.length > 0)) {
         const created = await refetchUntil(
           () => getTrip(tripId!).catch(() => null),
           (v) => v !== null,
@@ -349,19 +358,23 @@ export default function CreateTripWizard({
     ["Driver", driver ? driver.name : "OPEN — claimable"],
     [
       "Manifest",
-      paxCount || cargoCount
-        ? `${paxCount} passenger${paxCount === 1 ? "" : "s"} · ${cargoCount} cargo item${cargoCount === 1 ? "" : "s"}`
-        : "none — add later from Trips",
+      cargoSvc
+        ? "n/a — shipments assigned from Cargo & Grocery"
+        : paxCount || cargoCount
+          ? `${paxCount} passenger${paxCount === 1 ? "" : "s"} · ${cargoCount} cargo item${cargoCount === 1 ? "" : "s"}`
+          : "none — add later from Trips",
     ],
     ["Billing", `${effectivePo.trim() || "no PO"}${contract?.budgetCode ? ` · ${contract.budgetCode}` : ""}`],
     // Appended last — indices 2/5 above drive the mono-font styling.
     [
       "Seats",
-      vehicle
-        ? `${vehicle.seatingCapacity} · from ${vehicle.unitNumber}`
-        : seatsCapacity
-          ? `${Number(seatsCapacity)} · manual`
-          : "—",
+      cargoSvc
+        ? "N/A — cargo service"
+        : vehicle
+          ? `${vehicle.seatingCapacity} · from ${vehicle.unitNumber}`
+          : seatsCapacity
+            ? `${Number(seatsCapacity)} · manual`
+            : "—",
     ],
   ];
 
@@ -451,12 +464,12 @@ export default function CreateTripWizard({
                       fontFamily: fonts.condensed,
                       fontWeight: 700,
                       fontSize: 12,
-                      background: n < step ? "#009E73" : n === step ? colors.blue : colors.cardBg,
+                      background: n < step ? statusMeta("ontime").c : n === step ? colors.blue : colors.cardBg,
                       color: n < step ? "#FFFFFF" : n === step ? "#FFFFFF" : colors.textDim,
                       border: n > step ? `1px solid ${colors.border}` : undefined,
                     }}
                   >
-                    {n}
+                    {n < step ? "✓" : n}
                   </span>
                   <span
                     style={{
@@ -696,7 +709,35 @@ export default function CreateTripWizard({
               </div>
             )}
 
-            {step === 4 && (
+            {step === 4 && cargoSvc && (
+              <div className="detailfade">
+                <h3 style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 22, color: colors.headingBright, margin: "0 0 4px" }}>
+                  Cargo — no passengers
+                </h3>
+                <p style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textMuted, margin: "0 0 18px" }}>
+                  Cargo &amp; grocery trips carry shipments, not passengers — seats are N/A and no manifest is created.
+                </p>
+                <div
+                  style={{
+                    padding: "12px 15px",
+                    background: "rgba(31,111,178,.07)",
+                    border: "1px solid rgba(31,111,178,.25)",
+                    borderRadius: 10,
+                    fontFamily: fonts.body,
+                    fontSize: 12.5,
+                    color: colors.textMuted,
+                    lineHeight: 1.55,
+                    maxWidth: 560,
+                  }}
+                >
+                  After the trip is created, <strong style={{ color: colors.textPrimary }}>register and assign shipments
+                  from the Cargo &amp; Grocery screen</strong>. A cargo trip cannot go en route until at least one
+                  shipment is assigned to it.
+                </div>
+              </div>
+            )}
+
+            {step === 4 && !cargoSvc && (
               <div className="detailfade">
                 <h3 style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 22, color: colors.headingBright, margin: "0 0 4px" }}>
                   Passengers / demand
