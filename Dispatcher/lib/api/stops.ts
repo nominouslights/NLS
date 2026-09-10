@@ -11,15 +11,27 @@ import { request } from "./transport";
 
 /** Backend stores stopType as a free-text string (a small enum server-side).
  *  This list is the console's dropdown vocabulary, not a wire enum. */
-export const STOP_TYPES: string[] = ["Hub", "Community", "Airport", "MineSite", "PickupPoint"];
+export const STOP_TYPES: string[] = [
+  "Hub",
+  "Community",
+  "Airport",
+  "MineSite",
+  "PickupPoint",
+  "Terminus",
+];
 
-/** Friendly labels for the stop-type vocabulary. Unknown values render as-is. */
+/** Friendly labels for the stop-type vocabulary. Unknown values render as-is.
+ *  Terminus is the odd one out: the others say what KIND of place a stop is,
+ *  while Terminus says we have a standing business relationship with the venue.
+ *  It is what the terminus summary report selects on, so it is set deliberately
+ *  rather than inferred — an airport we merely pick up from stays an Airport. */
 export const STOP_TYPE_LABELS: Record<string, string> = {
   Hub: "Hub",
   Community: "Community",
   Airport: "Airport",
   MineSite: "Mine site",
   PickupPoint: "Pickup point",
+  Terminus: "Terminus (partner venue)",
 };
 
 export function stopTypeLabel(type: string | null): string {

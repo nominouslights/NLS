@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { colors, fonts } from "@/lib/theme";
 import { ApiError } from "@/lib/api";
 import {
@@ -21,7 +21,7 @@ import { corridorLabel, listTrips, shortDateLabel, todayIso, type TripRecord } f
 import {
   ACCRUAL_BUCKET_META,
   ACCRUALS_ESTIMATE_NOTE,
-  ACCRUALS_TAX_NOTE,
+  ACCRUALS_GST_NOTE,
   AMOUNT_NOTE_META,
   accrualsClipboardText,
   buildAccrualsReport,
@@ -37,12 +37,14 @@ import { printAccrualsReport } from "@/lib/documents/accrualsPdf";
 import { periodLabel, type Period } from "@/lib/period";
 import SendAccrualsEmailModal from "@/components/SendAccrualsEmailModal";
 import { PageHeader, Panel, SectionLabel } from "@/components/ui/Panel";
+import { cellStyle, headerRowStyle } from "@/components/screens/reports/shared";
 import { MonoTag, StatusBadge, StatusChip } from "@/components/ui/Chip";
 import { ActionButton } from "@/components/ui/Button";
 import { SelectField } from "@/components/ui/Field";
 import { PeriodNav } from "@/components/ui/PeriodNav";
 
-// Reports — the monthly per-client accruals report: every trip in the month
+// Client Accruals — the monthly per-client accruals report, one of the two
+// reports the Reports screen hosts: every trip in the month
 // bucketed by billing state (paid / invoiced / ready / scheduled / upcoming),
 // real invoice amounts where invoiced or paid, clearly-marked contract-rate
 // estimates elsewhere, and a reconciliation section for cancelled/written-off
@@ -51,28 +53,6 @@ import { PeriodNav } from "@/components/ui/PeriodNav";
 
 /** Pseudo-table column template shared by the header row and every group row. */
 const GRID_COLS = "88px 170px 1fr 90px 140px 150px";
-
-const headerRowStyle = {
-  display: "grid",
-  gridTemplateColumns: GRID_COLS,
-  gap: 11,
-  padding: "7px 13px",
-  fontFamily: fonts.semiCondensed,
-  fontSize: 9.5,
-  letterSpacing: ".12em",
-  textTransform: "uppercase",
-  color: colors.textFaint,
-  borderBottom: `1px solid ${colors.borderSubtle}`,
-} as const;
-
-const cellStyle = {
-  fontFamily: fonts.mono,
-  fontSize: 11.5,
-  color: colors.textSecondary,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-} as const;
 
 // ---------------------------------------------------------------------------
 // Row pieces
@@ -208,7 +188,7 @@ function BucketSection({ bucket }: { bucket: AccrualBucket }) {
         </span>
       </div>
       <div style={{ border: `1px solid ${colors.borderSubtle}`, borderRadius: 9, overflow: "hidden", background: colors.cardBg }}>
-        <div style={headerRowStyle}>
+        <div style={headerRowStyle(GRID_COLS)}>
           <div>Date</div>
           <div>Trips</div>
           <div>Route</div>
@@ -246,28 +226,21 @@ function BucketSection({ bucket }: { bucket: AccrualBucket }) {
 // The screen
 // ---------------------------------------------------------------------------
 
-export default function Reports({
-  tab,
-  setTab,
+export default function ClientAccruals({
   clientId,
   setClientId,
   period,
   setPeriod,
-  terminusStopId,
-  setTerminusStopId,
-  terminusPeriod,
-  setTerminusPeriod,
+  tabs,
 }: {
-  tab: ReportTabId;
-  setTab: (t: ReportTabId) => void;
   clientId: string | null;
   setClientId: (id: string | null) => void;
   period: Period;
   setPeriod: (p: Period) => void;
-  terminusStopId: string | null;
-  setTerminusStopId: (id: string | null) => void;
-  terminusPeriod: Period;
-  setTerminusPeriod: (p: Period) => void;
+  /** The report switcher, built once by the Reports shell. It renders inside
+   *  this header block rather than above it because the PageHeader's actions
+   *  are report-local (copy state, the email modal). */
+  tabs: ReactNode;
 }) {
   // Client roster for the picker.
   const [clients, setClients] = useState<ClientRecord[] | null>(null);
@@ -386,7 +359,7 @@ export default function Reports({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }} className="detailfade">
-      <div style={{ flex: "none", padding: "20px 26px 12px" }}>
+      <div style={{ flex: "none", padding: "20px 26px 6px" }}>
         <PageHeader
           eyebrow="Business · Monthly client accruals"
           title="Reports"
@@ -408,9 +381,10 @@ export default function Reports({
             </div>
           }
         />
+        {tabs}
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "4px 26px 26px", borderTop: `1px solid ${colors.border}` }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "4px 26px 26px" }}>
         {/* controls — client picker + month stepper */}
         <Panel style={{ marginTop: 14 }}>
           <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -605,9 +579,9 @@ export default function Reports({
               </Panel>
             )}
 
-            {/* invoices referenced — line totals only, no tax anywhere */}
+            {/* invoices referenced — the one place GST shows */}
             <Panel style={{ marginTop: 18 }}>
-              <SectionLabel>Invoices referenced</SectionLabel>
+              <SectionLabel>Invoices referenced — GST shown here</SectionLabel>
               {report.invoices.length === 0 ? (
                 <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textDim }}>
                   No issued invoices are referenced by this month&rsquo;s trips.
@@ -627,6 +601,7 @@ export default function Reports({
                       <StatusChip kind={chip.kind} label={chip.label} />
                       <span style={cellStyle}>{invoicePeriodLabel(inv)}</span>
                       <span style={{ ...cellStyle, marginLeft: "auto" }}>
+                        {formatInvoiceCad(inv.subtotalCad)} + GST {formatInvoiceCad(inv.gstCad)} ={" "}
                         {formatInvoiceCad(inv.totalCad)}
                       </span>
                     </div>
@@ -637,7 +612,7 @@ export default function Reports({
 
             {/* footer wording shared with the printed sheet + clipboard */}
             <div style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim, lineHeight: 1.6, marginTop: 14 }}>
-              {ACCRUALS_TAX_NOTE} {ACCRUALS_ESTIMATE_NOTE}
+              {ACCRUALS_GST_NOTE} {ACCRUALS_ESTIMATE_NOTE}
             </div>
           </>
         )}
