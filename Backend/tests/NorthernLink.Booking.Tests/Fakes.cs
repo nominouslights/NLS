@@ -77,6 +77,13 @@ internal sealed class InMemoryBookingDayRepository : IBookingDayRepository
 
     public int SaveChangesCallCount { get; private set; }
 
+    /// <summary>
+    /// Invoked at the top of <see cref="GetOrCreateAsync"/> — lets the ordering test record
+    /// the state of the world (e.g. the loaded booking's status) at the moment the
+    /// get-or-create's potential mid-flow save would run.
+    /// </summary>
+    public Action? OnGetOrCreate { get; set; }
+
     public Task<BookingDay?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         Task.FromResult(Days.FirstOrDefault(d => d.Id == id));
 
@@ -94,6 +101,8 @@ internal sealed class InMemoryBookingDayRepository : IBookingDayRepository
     public async Task<BookingDay> GetOrCreateAsync(
         Guid corridorId, DateOnly serviceDate, Func<BookingDay> factory, CancellationToken cancellationToken = default)
     {
+        OnGetOrCreate?.Invoke();
+
         var existing = await GetAsync(corridorId, serviceDate, cancellationToken);
         if (existing is not null)
         {

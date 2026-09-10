@@ -1,10 +1,14 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using NorthernLink.Booking.Application.BookingDays;
+using NorthernLink.Booking.Application.Bookings;
 using NorthernLink.Booking.Application.Bookings.Cancel;
 using NorthernLink.Booking.Application.Bookings.Confirm;
+using NorthernLink.Booking.Application.Bookings.Update;
 using NorthernLink.Booking.Application.Integration;
+using NorthernLink.Booking.Application.Settings.SetDayOverrides;
 using NorthernLink.Booking.Domain.BookingDays;
 using NorthernLink.Booking.Domain.BookingDays.Events;
+using NorthernLink.Booking.Domain.Bookings;
 using Xunit;
 using BookingAggregate = NorthernLink.Booking.Domain.Bookings.Booking;
 
@@ -57,6 +61,22 @@ public class BookingThresholdHandlerTests
     private ConfirmBookingCommandHandler ConfirmHandler => new(_bookings, Thresholds);
 
     private CancelBookingCommandHandler CancelHandler => new(_bookings, Thresholds);
+
+    private UpdateBookingCommandHandler UpdateHandler => new(_bookings, Thresholds);
+
+    private SetBookingDayOverridesCommandHandler OverridesHandler => new(_days, Thresholds);
+
+    /// <summary>An edit that only changes the passenger count — everything else stays baseline.</summary>
+    private static UpdateBookingCommand UpdateTo(Guid bookingId, int passengers) =>
+        new(
+            TestBookings.TenantId,
+            bookingId,
+            new BookingLocationInput(null, "Thompson Depot", null),
+            new BookingLocationInput(null, "Lynn Lake Terminal", null),
+            [.. Enumerable.Range(1, passengers).Select(i => new BookingPassengerInput($"Passenger {i}", null, i == 1))],
+            PaymentMethod.ETransfer,
+            PaymentStatus.Unpaid,
+            null);
 
     private BookingAggregate AddBooking(int passengers, bool confirmed, Guid? customerId = null, string name = "Doris Spence")
     {
@@ -231,6 +251,132 @@ public class BookingThresholdHandlerTests
 
         Assert.Equal(BookingDayStatus.Confirmed, day.Status);
         Assert.Empty(day.DomainEvents);
+    }
+
+    [Fact]
+    public async Task Updating_a_confirmed_booking_up_across_the_minimum_confirms_the_day()
+    {
+        // Finding #1's anchor: edits change seat counts, so a Confirmed booking growing
+        // from 2 to 3 passengers crosses the minimum exactly like a confirm does.
+        var booking = AddBooking(passengers: 2, confirmed: true);
+        var day = AddDay();
+
+        var result = await UpdateHandler.Handle(UpdateTo(booking.Id, 3), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(BookingDayStatus.Confirmed, day.Status);
+        var raised = Assert.IsType<BookingDayConfirmedDomainEvent>(Assert.Single(day.DomainEvents));
+        Assert.Equal(3, raised.SeatsSold);
+        Assert.Equal(3, raised.SeatsMinimum);
+        Assert.Equal(1, _bookings.SaveChangesCallCount);
+    }
+
+    [Fact]
+    public async Task Updating_down_below_the_minimum_outside_the_window_reverts_with_recipients()
+    {
+        var booking = AddBooking(passengers: 3, confirmed: true);
+        var day = AddDay(confirmed: true);
+        _reads.EmailsByCustomerId[TestBookings.CustomerId] = "doris@example.com";
+        _clock.UtcNow = WellBeforeCutoff;
+
+        var result = await UpdateHandler.Handle(UpdateTo(booking.Id, 2), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(BookingDayStatus.Reverted, day.Status);
+        var raised = Assert.IsType<BookingDayRevertedDomainEvent>(Assert.Single(day.DomainEvents));
+        Assert.Equal(2, raised.SeatsSold);
+        Assert.Equal(1, raised.SeatsNeeded);
+
+        // The edited booking is still live, so its customer is on the notify list.
+        var recipient = Assert.Single(raised.Recipients);
+        Assert.Equal("doris@example.com", recipient.Email);
+    }
+
+    [Fact]
+    public async Task Updating_down_inside_the_window_stays_confirmed()
+    {
+        var booking = AddBooking(passengers: 3, confirmed: true);
+        var day = AddDay(confirmed: true);
+        _clock.UtcNow = Cutoff.AddHours(3);
+
+        var result = await UpdateHandler.Handle(UpdateTo(booking.Id, 2), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(BookingDayStatus.Confirmed, day.Status);
+        Assert.Empty(day.DomainEvents);
+    }
+
+    [Fact]
+    public async Task Updating_down_with_a_guaranteed_minimum_stays_confirmed()
+    {
+        var booking = AddBooking(passengers: 3, confirmed: true);
+        var day = AddDay(confirmed: true, guaranteed: true);
+        _clock.UtcNow = WellBeforeCutoff;
+
+        var result = await UpdateHandler.Handle(UpdateTo(booking.Id, 2), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(BookingDayStatus.Confirmed, day.Status);
+        Assert.Empty(day.DomainEvents);
+    }
+
+    [Fact]
+    public async Task Override_raising_the_minimum_above_sold_reverts_outside_the_window()
+    {
+        AddBooking(passengers: 3, confirmed: true);
+        var day = AddDay(confirmed: true);
+        _reads.EmailsByCustomerId[TestBookings.CustomerId] = "doris@example.com";
+        _clock.UtcNow = WellBeforeCutoff;
+
+        var result = await OverridesHandler.Handle(
+            new SetBookingDayOverridesCommand(TestBookings.TenantId, day.Id, PassengerMinimum: 5, SeatCapacity: null),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(BookingDayStatus.Reverted, day.Status);
+        Assert.Equal(5, day.PassengerMinimumOverride);
+        var raised = Assert.Single(day.DomainEvents.OfType<BookingDayRevertedDomainEvent>());
+        Assert.Equal(3, raised.SeatsSold);
+        Assert.Equal(2, raised.SeatsNeeded);
+        Assert.Equal(1, _days.SaveChangesCallCount);
+    }
+
+    [Fact]
+    public async Task Override_lowering_the_minimum_to_the_sold_count_confirms()
+    {
+        AddBooking(passengers: 2, confirmed: true);
+        var day = AddDay();
+
+        var result = await OverridesHandler.Handle(
+            new SetBookingDayOverridesCommand(TestBookings.TenantId, day.Id, PassengerMinimum: 2, SeatCapacity: null),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(BookingDayStatus.Confirmed, day.Status);
+        var raised = Assert.Single(day.DomainEvents.OfType<BookingDayConfirmedDomainEvent>());
+        Assert.Equal(2, raised.SeatsSold);
+        Assert.Equal(2, raised.SeatsMinimum);
+    }
+
+    [Fact]
+    public async Task The_day_is_ensured_while_the_booking_is_still_unmutated()
+    {
+        // The get-or-create may save mid-flow (its insert path commits), so the handler
+        // MUST call it before mutating the loaded booking — otherwise the early save would
+        // flush the half-done change and split the confirm across two transactions.
+        AddBooking(passengers: 2, confirmed: true);
+        var crossing = AddBooking(passengers: 1, confirmed: false, customerId: Guid.NewGuid(), name: "Levi Park");
+        var day = AddDay();
+
+        BookingStatus? statusAtEnsure = null;
+        _days.OnGetOrCreate = () => statusAtEnsure = crossing.Status;
+
+        var result = await ConfirmHandler.Handle(
+            new ConfirmBookingCommand(TestBookings.TenantId, crossing.Id), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(BookingStatus.Unconfirmed, statusAtEnsure);
+        Assert.Equal(BookingDayStatus.Confirmed, day.Status);
     }
 
     [Fact]

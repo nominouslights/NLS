@@ -6,8 +6,8 @@ namespace NorthernLink.Booking.Application.Integration;
 /// libraries never reference each other). A plain keyed row (not an aggregate: no audit
 /// journal, no events), used to validate a booking's corridor, snapshot its name, and
 /// list corridors for the calendar's selector. Mirrors Trips' <c>VehicleLookup</c>.
-/// Empty until each existing route is re-saved once after this module deploys — routes
-/// created before <c>trips.route-changed</c> existed never published it.
+/// Seeded from <c>trips.rm_routes</c> by the <c>BackfillCorridorLookup</c> migration;
+/// live <c>trips.route-changed</c> events keep it current.
 /// </summary>
 public sealed class CorridorLookup
 {

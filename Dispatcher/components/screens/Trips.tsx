@@ -48,7 +48,7 @@ import {
   type TripStop,
   type TripUpdateInput,
 } from "@/lib/api/trips";
-import { listShipments, shipmentLegChip, type ShipmentRecord } from "@/lib/api/shipments";
+import { isShipmentOpen, listShipments, shipmentLegChip, type ShipmentRecord } from "@/lib/api/shipments";
 import {
   listDrivers,
   listDriverClearances,
@@ -1904,8 +1904,9 @@ export default function Trips({
   const tripShipments = t && tripShipmentsState?.tripId === t.id ? tripShipmentsState.rows : null;
   // START gate: a driver, then the service-specific half of the backend
   // en-route guard — passenger runs need a linked manifest with ≥1 passenger,
-  // Cargo/Grocery runs need ≥1 assigned shipment leg instead (manifests are
-  // optional-but-allowed on cargo and never gate it). Vehicle assignment is
+  // Cargo/Grocery runs need ≥1 LIVE assigned shipment instead (cancelled or
+  // written-off freight no longer counts, mirroring the server's gate; manifests
+  // are optional-but-allowed on cargo and never gate it). Vehicle assignment is
   // encouraged but not blocking. Deadheads skip both halves — but still need
   // a driver to actually go en route.
   const startBlockReason =
@@ -1916,7 +1917,7 @@ export default function Trips({
         : t.isEmptyLeg
           ? null
           : tripIsCargo
-            ? tripShipments === null || tripShipments.length === 0
+            ? tripShipments === null || tripShipments.filter(isShipmentOpen).length === 0
               ? "Needs at least one assigned shipment"
               : null
             : !hasPassengerManifest

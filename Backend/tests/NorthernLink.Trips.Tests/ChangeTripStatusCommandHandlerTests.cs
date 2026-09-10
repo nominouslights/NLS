@@ -110,6 +110,45 @@ public class ChangeTripStatusCommandHandlerTests
     }
 
     [Fact]
+    public async Task Cargo_start_is_rejected_when_its_only_shipment_is_cancelled()
+    {
+        // A dead shipment's stale leg row must not satisfy the gate — the freight is not
+        // riding, so the run would leave empty.
+        var trip = TestPlanning.ScheduleTrip(serviceType: TripServiceType.Cargo).Value;
+        _trips.Add(trip);
+        var dead = TestShipments.Register().OnTrip(trip.Id, trip.TripNumber, trip.ServiceDate);
+        dead.Cancel("Client pulled the freight");
+        _shipments.Add(dead);
+
+        var result = await Handler.Handle(
+            new ChangeTripStatusCommand(trip.Id, TripStatus.InProgress, null), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(TripErrors.ShipmentRequired, result.Error);
+        Assert.Equal(TripStatus.Scheduled, trip.Status);
+        Assert.Equal(0, _trips.SaveCount);
+    }
+
+    [Fact]
+    public async Task Cargo_start_is_allowed_when_one_live_shipment_rides_beside_a_cancelled_one()
+    {
+        var trip = TestPlanning.ScheduleTrip(serviceType: TripServiceType.Cargo).Value;
+        _trips.Add(trip);
+        var dead = TestShipments.Register().OnTrip(trip.Id, trip.TripNumber, trip.ServiceDate);
+        dead.Cancel("Client pulled the freight");
+        _shipments.Add(dead);
+        _shipments.Add(TestShipments.Register(shipmentNumber: "SH-1002")
+            .OnTrip(trip.Id, trip.TripNumber, trip.ServiceDate));
+
+        var result = await Handler.Handle(
+            new ChangeTripStatusCommand(trip.Id, TripStatus.InProgress, null), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(TripStatus.InProgress, trip.Status);
+        Assert.Equal(1, _trips.SaveCount);
+    }
+
+    [Fact]
     public async Task Cargo_deadhead_needs_neither_shipment_nor_manifest()
     {
         // IsEmptyLeg stays exempt from every en-route gate, cargo included.
