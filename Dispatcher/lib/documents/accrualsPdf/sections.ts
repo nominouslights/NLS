@@ -5,12 +5,13 @@
 //
 // Money rules restated where they print: estimates carry an explicit "EST."
 // suffix, an unpaired leg prints "UNPAIRED — NOT ESTIMATED" rather than a
-// half-rate, and GST appears only in the Invoices Referenced section.
+// half-rate, and no tax appears anywhere — QuickBooks Online owns all tax
+// calculation, so every amount printed here is a bare line total in CAD.
 
 import {
   ACCRUAL_BUCKET_META,
   ACCRUALS_ESTIMATE_NOTE,
-  ACCRUALS_GST_NOTE,
+  ACCRUALS_TAX_NOTE,
   accrualTotals,
   groupAmountLabel,
   groupRefLabel,
@@ -37,7 +38,7 @@ export function header(company: CompanyInfo, report: AccrualsReport): string {
   const banner =
     "Accruals statement — a monthly position of trips by billing state, NOT an invoice. " +
     "Amounts marked EST. are contract-rate estimates; issued invoice amounts govern. " +
-    "All amounts CAD, excluding GST except where shown under Invoices Referenced.";
+    "All amounts CAD. Taxes are applied in QuickBooks; this report contains none.";
   return `
   <div class="head">
     <div>
@@ -74,7 +75,7 @@ export function detailsBlock(report: AccrualsReport): string {
     ]) +
     grid([
       field("Budget code", contract?.budgetCode ?? "—", { mono: true }),
-      field("GST", contract ? (contract.gstApplicable ? "Applies on issued invoices" : "Not applicable per contract") : "—"),
+      field("", ""),
       field("", ""),
       field("", ""),
     ])
@@ -249,12 +250,12 @@ export function reconciliationBlock(report: AccrualsReport): string {
 
 // ---- invoices referenced ----------------------------------------------------
 
-/** Every fetched invoice behind the real amounts — the one place GST prints,
- *  straight off each invoice's own subtotal / GST / total. */
+/** Every fetched invoice behind the real amounts — one Total (CAD) column,
+ *  straight off each invoice's own line total. No tax is printed or implied. */
 export function invoicesBlock(report: AccrualsReport): string {
   const rows =
     report.invoices.length === 0
-      ? `<tr><td class="note" colspan="7">No issued invoices are referenced by this period's trips.</td></tr>`
+      ? `<tr><td class="note" colspan="5">No issued invoices are referenced by this period's trips.</td></tr>`
       : report.invoices
           .map(
             (inv) => `<tr>
@@ -262,14 +263,12 @@ export function invoicesBlock(report: AccrualsReport): string {
       <td class="ref">${esc(inv.qboInvoiceId ?? "—")}</td>
       <td>${esc(invoiceChip(inv).label)}</td>
       <td class="ref">${esc(invoicePeriodLabel(inv))}</td>
-      <td class="amt">${esc(formatInvoiceCad(inv.subtotalCad))}</td>
-      <td class="amt">${esc(formatInvoiceCad(inv.gstCad))}</td>
       <td class="amt">${esc(formatInvoiceCad(inv.totalCad))}</td>
     </tr>`,
           )
           .join("");
   return `<div class="blk">
-    ${sectionBar("Invoices Referenced (GST shown here)")}
+    ${sectionBar("Invoices Referenced")}
     <table>
       <thead>
         <tr>
@@ -277,8 +276,6 @@ export function invoicesBlock(report: AccrualsReport): string {
           <th>QBO #</th>
           <th>Status</th>
           <th>Invoice period</th>
-          <th class="amt">Subtotal</th>
-          <th class="amt">GST</th>
           <th class="amt">Total (CAD)</th>
         </tr>
       </thead>
@@ -292,7 +289,7 @@ export function invoicesBlock(report: AccrualsReport): string {
 export function footer(company: CompanyInfo): string {
   return `<div class="foot">
     <b>Northern Link Shuttle and Cargo</b> | ${esc(company.phone)} | ${esc(company.email)}<br/>
-    ${esc(ACCRUALS_GST_NOTE)} ${esc(ACCRUALS_ESTIMATE_NOTE)}<br/>
+    ${esc(ACCRUALS_TAX_NOTE)} ${esc(ACCRUALS_ESTIMATE_NOTE)}<br/>
     QuickBooks Online is the system of record for issued invoices.
   </div>`;
 }

@@ -35,7 +35,6 @@ internal static class ActiveContractFields
             row.ActiveContractEndDate = null;
             row.ActiveContractBillingModel = null;
             row.ActiveContractRatePerRoundTripCad = null;
-            row.ActiveContractGstApplicable = null;
             row.ActiveContractBudgetCode = null;
             row.ActiveContractBillingFrequency = null;
             row.ActiveContractNetTermsDays = null;
@@ -48,7 +47,6 @@ internal static class ActiveContractFields
         row.ActiveContractEndDate = active.EndDate;
         row.ActiveContractBillingModel = active.BillingModel.ToString();
         row.ActiveContractRatePerRoundTripCad = active.RatePerRoundTripCad;
-        row.ActiveContractGstApplicable = active.GstApplicable;
         row.ActiveContractBudgetCode = active.BudgetCode;
         row.ActiveContractBillingFrequency = active.BillingFrequency.ToString();
         row.ActiveContractNetTermsDays = active.NetTermsDays;

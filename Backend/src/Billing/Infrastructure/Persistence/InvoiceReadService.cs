@@ -51,8 +51,6 @@ internal sealed class InvoiceReadService(BillingDbContext context) : IInvoiceRea
             i.PeriodEnd,
             i.Status,
             i.IssuedAtUtc,
-            i.SubtotalCad,
-            i.GstCad,
             i.TotalCad,
             i.LineCount,
             i.QboInvoiceId,

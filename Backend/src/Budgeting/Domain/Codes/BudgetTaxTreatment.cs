@@ -6,8 +6,8 @@ namespace NorthernLink.Budgeting.Domain.Codes;
 /// <para>
 /// This is a planning annotation, not a tax engine: nothing here computes or remits anything.
 /// The authoritative tax treatment of an actual dollar is whatever QuickBooks recorded — the
-/// platform never calls the QBO API (see <c>Invoice</c>) — and the closest operational
-/// counterpart is the <c>GstApplicable</c> flag Clients already carries on a contract.
+/// platform never calls the QBO API (see <c>Invoice</c>). Nothing downstream reads this to
+/// compute tax, and nothing may: invoicing carries no tax fields at all, by design.
 /// </para>
 /// </summary>
 public enum BudgetTaxTreatment

@@ -5,7 +5,7 @@ namespace NorthernLink.Billing.Infrastructure.Persistence.ReadModels;
 
 /// <summary>
 /// Read-side projection of a worksheet for the list view, maintained by
-/// <c>InvoiceProjection</c> in <c>billing.rm_invoices</c>. Carries the computed totals plus
+/// <c>InvoiceProjection</c> in <c>billing.rm_invoices</c>. Carries the computed total plus
 /// the manual QBO reference (<see cref="QboInvoiceId"/>, <see cref="QboEnteredDate"/>) and
 /// the manually confirmed payment date (<see cref="PaymentConfirmedDate"/>) that drives the
 /// outstanding/paid split. QuickBooks still owns sent/overdue and partial settlement — no
@@ -25,8 +25,6 @@ public sealed class InvoiceReadModel
     public string? PoNumber { get; set; }
     public string? BudgetCode { get; set; }
     public int NetTermsDays { get; set; }
-    public bool GstApplicable { get; set; }
-    public decimal GstRate { get; set; }
     public DateOnly PeriodStart { get; set; }
     public DateOnly PeriodEnd { get; set; }
     public string Status { get; set; } = null!;
@@ -44,9 +42,8 @@ public sealed class InvoiceReadModel
     /// <summary>Materialized so the receivables tiles are a sum, not a per-row status test.</summary>
     public decimal OutstandingCad { get; set; }
 
-    // Derived columns, computed by the aggregate at projection time.
-    public decimal SubtotalCad { get; set; }
-    public decimal GstCad { get; set; }
+    // Derived columns, computed by the aggregate at projection time. No tax column exists —
+    // the platform computes no tax; QuickBooks Online owns that.
     public decimal TotalCad { get; set; }
     public int LineCount { get; set; }
 
@@ -74,8 +71,6 @@ public sealed class InvoiceReadModelConfiguration : IEntityTypeConfiguration<Inv
         builder.Property(i => i.PoNumber).HasColumnName("po_number");
         builder.Property(i => i.BudgetCode).HasColumnName("budget_code");
         builder.Property(i => i.NetTermsDays).HasColumnName("net_terms_days");
-        builder.Property(i => i.GstApplicable).HasColumnName("gst_applicable");
-        builder.Property(i => i.GstRate).HasColumnName("gst_rate");
         builder.Property(i => i.PeriodStart).HasColumnName("period_start");
         builder.Property(i => i.PeriodEnd).HasColumnName("period_end");
         builder.Property(i => i.Status).HasColumnName("status");
@@ -87,8 +82,6 @@ public sealed class InvoiceReadModelConfiguration : IEntityTypeConfiguration<Inv
         builder.Property(i => i.WrittenOffDate).HasColumnName("written_off_date");
         builder.Property(i => i.WrittenOffReason).HasColumnName("written_off_reason").HasMaxLength(500);
         builder.Property(i => i.OutstandingCad).HasColumnName("outstanding_cad").HasPrecision(12, 2);
-        builder.Property(i => i.SubtotalCad).HasColumnName("subtotal_cad");
-        builder.Property(i => i.GstCad).HasColumnName("gst_cad");
         builder.Property(i => i.TotalCad).HasColumnName("total_cad");
         builder.Property(i => i.LineCount).HasColumnName("line_count");
         builder.Property(i => i.Version).HasColumnName("version");

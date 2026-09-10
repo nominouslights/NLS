@@ -31,7 +31,7 @@ import { CLIENT_TABS, isClientType, VENDOR_TABS } from "./shared";
 
 // Unified client detail — one screen per organization combining the contract
 // summary + billing config (real Clients API: structured active contract with
-// dates, rate, GST, terms, budget code), contract management (create / edit /
+// dates, rate, terms, budget code), contract management (create / edit /
 // terminate), the PO expiry dashboard (real API CRUD), the contact roster, and
 // the interaction timeline. The roster + interaction tabs are Client-type only
 // and still run on the prototype-CRM mock store, joined by mockCrmId (see
@@ -45,7 +45,6 @@ function contractMatches(r: ContractRecord, id: string, input: ContractInput): b
     (r.endDate ?? null) === (input.endDate ?? null) &&
     r.billingModel === input.billingModel &&
     (r.ratePerRoundTripCad ?? null) === (input.ratePerRoundTripCad ?? null) &&
-    r.gstApplicable === input.gstApplicable &&
     (r.budgetCode ?? null) === (input.budgetCode ?? null) &&
     r.billingFrequency === input.billingFrequency &&
     r.netTermsDays === input.netTermsDays &&
@@ -281,7 +280,7 @@ export default function ClientDetail({
               {contract === null ? (
                 <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textDim }}>
                   Billing configuration comes from the active contract — create one to set the
-                  default PO, GST, budget code, and terms that drive invoice drafting.
+                  default PO, budget code, and terms that drive invoice drafting.
                 </div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
@@ -290,7 +289,6 @@ export default function ClientDetail({
                     value={contract.defaultPoNumber ?? "—"}
                     valueStyle={{ fontFamily: fonts.mono, fontSize: 11.5 }}
                   />
-                  <DetailRow label="Tax" value={contract.gstApplicable ? "GST 5% applicable" : "No GST"} />
                   <DetailRow
                     label="Budget code"
                     value={contract.budgetCode ?? "—"}

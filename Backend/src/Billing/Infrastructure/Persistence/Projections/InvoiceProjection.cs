@@ -5,8 +5,8 @@ using NorthernLink.Shared.Persistence.Auditing;
 namespace NorthernLink.Billing.Infrastructure.Persistence.Projections;
 
 /// <summary>
-/// Projects <see cref="Invoice"/> into <c>billing.rm_invoices</c>. Totals are read straight
-/// off the aggregate's computed properties, so the API and the read model can never disagree
+/// Projects <see cref="Invoice"/> into <c>billing.rm_invoices</c>. The total is read straight
+/// off the aggregate's computed property, so the API and the read model can never disagree
 /// about a rounded value. Consumes every Invoice domain event (drafted, lines replaced,
 /// entered-in-QBO, status-changed for Void/Reopen) — the projector re-maps the whole row from
 /// the current aggregate state each time, so no per-event branching is needed.
@@ -26,8 +26,6 @@ internal sealed class InvoiceProjection : BillingProjection<Invoice, InvoiceRead
         row.PoNumber = source.PoNumber;
         row.BudgetCode = source.BudgetCode;
         row.NetTermsDays = source.NetTermsDays;
-        row.GstApplicable = source.GstApplicable;
-        row.GstRate = source.GstRate;
         row.PeriodStart = source.PeriodStart;
         row.PeriodEnd = source.PeriodEnd;
         row.Status = source.Status.ToString();
@@ -42,8 +40,6 @@ internal sealed class InvoiceProjection : BillingProjection<Invoice, InvoiceRead
         row.Version = source.Version;
 
         // Derived — the aggregate is the only implementation.
-        row.SubtotalCad = source.SubtotalCad;
-        row.GstCad = source.GstCad;
         row.TotalCad = source.TotalCad;
         row.LineCount = source.Lines.Count;
     }

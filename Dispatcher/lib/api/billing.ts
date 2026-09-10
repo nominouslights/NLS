@@ -50,8 +50,6 @@ export interface InvoiceSummaryRecord {
   periodEnd: string;
   status: InvoiceStatus;
   issuedAtUtc: string;
-  subtotalCad: number;
-  gstCad: number;
   totalCad: number;
   lineCount: number;
   qboInvoiceId: string | null;
@@ -73,14 +71,12 @@ export interface InvoiceDetailRecord {
   poNumber: string | null;
   budgetCode: string | null;
   netTermsDays: number; // informational only — no overdue logic
-  gstApplicable: boolean;
-  gstRate: number; // fraction, e.g. 0.05
   periodStart: string;
   periodEnd: string;
   status: InvoiceStatus;
   issuedAtUtc: string;
-  subtotalCad: number;
-  gstCad: number;
+  /** Sum of the invoice lines — the one money figure. No tax is computed or
+   *  carried anywhere on the platform; QuickBooks Online applies it. */
   totalCad: number;
   qboInvoiceId: string | null;
   qboEnteredDate: string | null; // DateOnly, set when EnteredInQbo
@@ -430,11 +426,8 @@ export function invoiceClipboardText(inv: InvoiceDetailRecord, details?: TripDet
     );
   }
   out.push("");
-  out.push(`Subtotal: ${formatInvoiceCad(inv.subtotalCad)}`);
-  if (inv.gstApplicable) {
-    out.push(`GST (${Math.round(inv.gstRate * 1000) / 10}%): ${formatInvoiceCad(inv.gstCad)}`);
-  }
   out.push(`Total (CAD): ${formatInvoiceCad(inv.totalCad)}`);
+  out.push("Taxes are applied in QuickBooks — this worksheet carries none.");
 
   // Trip & passenger detail — only when the caller has the loaded trips and at
   // least one line actually references a trip.

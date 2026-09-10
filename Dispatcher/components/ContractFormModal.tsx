@@ -20,7 +20,8 @@ import { ActionButton } from "@/components/ui/Button";
 // Create or edit a client contract — POST/PUT /api/clients/{id}/contracts
 // (Clients module). This is where the billing configuration is entered: the
 // invoice draft generator feeds off the client contract on this profile
-// (rate per round trip, GST, budget code, net terms, default PO). The backend
+// (rate per round trip, budget code, net terms, default PO). No tax is
+// configured or computed anywhere — QuickBooks Online owns that. The backend
 // enforces non-overlapping contract periods — a 409
 // Clients.Contract.OverlappingPeriod surfaces inline here.
 
@@ -96,7 +97,6 @@ export default function ContractFormModal({
   const [evergreen, setEvergreen] = useState(editing ? existing.endDate == null : false);
   const [billingModel, setBillingModel] = useState<BillingModel>(existing?.billingModel ?? "RoundTripRate");
   const [rate, setRate] = useState(existing?.ratePerRoundTripCad != null ? String(existing.ratePerRoundTripCad) : "");
-  const [gstApplicable, setGstApplicable] = useState(existing?.gstApplicable ?? true);
   const [budgetCode, setBudgetCode] = useState(existing?.budgetCode ?? "");
   const [billingFrequency, setBillingFrequency] = useState<BillingFrequency>(existing?.billingFrequency ?? "Monthly");
   const [netTermsDays, setNetTermsDays] = useState(String(existing?.netTermsDays ?? 30));
@@ -123,7 +123,6 @@ export default function ContractFormModal({
       endDate: evergreen ? null : endDate,
       billingModel,
       ratePerRoundTripCad: roundTrip ? rateNum : null,
-      gstApplicable,
       budgetCode: budgetCode.trim() || null,
       billingFrequency,
       netTermsDays: terms,
@@ -212,12 +211,6 @@ export default function ContractFormModal({
           onToggle={() => setEvergreen((v) => !v)}
           title="Evergreen (no end date)"
           hint="Open-ended contract — renewal chips derive from the end date, so evergreen contracts never flag."
-        />
-        <ToggleRow
-          on={gstApplicable}
-          onToggle={() => setGstApplicable((v) => !v)}
-          title="GST applicable"
-          hint="5% GST line is added to draft invoices when on."
         />
       </div>
     </ModalShell>

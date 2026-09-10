@@ -273,10 +273,14 @@ public class InvoiceDraftBuilderTests
         Assert.Equal(140m, Assert.Single(result.Value.Lines).UnitPriceCad);
     }
 
+    /// <summary>
+    /// A drafted invoice's total is exactly the sum of the lines the builder priced — no tax is
+    /// added at any point. The platform never computes GST/HST/PST; QuickBooks Online does.
+    /// </summary>
     [Fact]
-    public void Gst_is_five_percent_of_subtotal_when_applicable()
+    public void Drafted_invoice_total_is_the_sum_of_its_lines_with_no_tax_added()
     {
-        var contract = TestBilling.Contract(rate: 120m, gstApplicable: true);
+        var contract = TestBilling.Contract(rate: 120m);
         var (o1, r1) = TestBilling.RoundTrip(new DateOnly(2026, 7, 6), "rt-1");
         var (o2, r2) = TestBilling.RoundTrip(new DateOnly(2026, 7, 13), "rt-2");
 
@@ -286,32 +290,11 @@ public class InvoiceDraftBuilderTests
         var invoice = Invoice.CreateDraft(
             TestBilling.TenantId, "INV-0001", TestBilling.ClientId, contract.ClientName,
             contract.Id, contract.DefaultPoNumber, contract.BudgetCode, contract.NetTermsDays,
-            contract.GstApplicable, Invoice.StandardGstRate,
             PeriodStart, PeriodEnd, draft.Lines).Value;
 
-        Assert.Equal(240m, invoice.SubtotalCad);
-        Assert.Equal(12m, invoice.GstCad);
-        Assert.Equal(252m, invoice.TotalCad);
-    }
-
-    [Fact]
-    public void Gst_is_absent_when_contract_is_not_gst_applicable()
-    {
-        var contract = TestBilling.Contract(rate: 120m, gstApplicable: false);
-        var (outbound, returnLeg) = TestBilling.RoundTrip(new DateOnly(2026, 7, 6), "rt-1");
-
-        var draft = InvoiceDraftBuilder.Build(
-            [contract], PeriodStart, PeriodEnd, [outbound, returnLeg]).Value;
-
-        var invoice = Invoice.CreateDraft(
-            TestBilling.TenantId, "INV-0001", TestBilling.ClientId, contract.ClientName,
-            contract.Id, contract.DefaultPoNumber, contract.BudgetCode, contract.NetTermsDays,
-            contract.GstApplicable, Invoice.StandardGstRate,
-            PeriodStart, PeriodEnd, draft.Lines).Value;
-
-        Assert.Equal(120m, invoice.SubtotalCad);
-        Assert.Equal(0m, invoice.GstCad);
-        Assert.Equal(120m, invoice.TotalCad);
+        // Two round trips at $120 — $240, not $252.
+        Assert.Equal(240m, invoice.TotalCad);
+        Assert.Equal(draft.Lines.Sum(line => line.AmountCad), invoice.TotalCad);
     }
 
     [Fact]

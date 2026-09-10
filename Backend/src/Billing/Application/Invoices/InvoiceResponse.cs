@@ -16,6 +16,9 @@ public sealed record InvoiceLineResponse(
 
 /// <summary>
 /// Full worksheet detail, lines included. <c>NetTermsDays</c> is an informational snapshot.
+/// <c>TotalCad</c> is the worksheet's single money figure — the plain sum of <c>Lines</c>, with
+/// no tax of any kind: the platform never computes GST/HST/PST, QuickBooks Online does, so there
+/// is no subtotal/tax/total split that could ever drift apart.
 /// <c>QboInvoiceId</c>/<c>QboEnteredDate</c> record the manual QBO reconciliation and
 /// <c>PaymentConfirmedDate</c> the manually confirmed settlement (null while outstanding).
 /// <c>OutstandingCad</c> is what the platform still expects to collect — the total while the
@@ -32,14 +35,10 @@ public sealed record InvoiceResponse(
     string? PoNumber,
     string? BudgetCode,
     int NetTermsDays,
-    bool GstApplicable,
-    decimal GstRate,
     DateOnly PeriodStart,
     DateOnly PeriodEnd,
     string Status,
     DateTimeOffset IssuedAtUtc,
-    decimal SubtotalCad,
-    decimal GstCad,
     decimal TotalCad,
     string? QboInvoiceId,
     DateOnly? QboEnteredDate,
@@ -51,7 +50,8 @@ public sealed record InvoiceResponse(
     IReadOnlyList<InvoiceLineResponse> Lines);
 
 /// <summary>
-/// Worksheet list row (no lines), served from <c>rm_invoices</c>. Carries the QBO
+/// Worksheet list row (no lines), served from <c>rm_invoices</c>. <c>TotalCad</c> is the one
+/// money figure — the sum of the worksheet's lines, tax-free by design. Carries the QBO
 /// reconciliation and payment-confirmation fields so the frontend can show entered-in-QBO
 /// and outstanding/paid state without another call.
 /// </summary>
@@ -67,8 +67,6 @@ public sealed record InvoiceSummaryResponse(
     DateOnly PeriodEnd,
     string Status,
     DateTimeOffset IssuedAtUtc,
-    decimal SubtotalCad,
-    decimal GstCad,
     decimal TotalCad,
     int LineCount,
     string? QboInvoiceId,

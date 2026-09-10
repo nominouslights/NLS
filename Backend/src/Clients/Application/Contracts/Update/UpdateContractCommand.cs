@@ -11,7 +11,6 @@ public sealed record UpdateContractCommand(
     DateOnly? EndDate,
     BillingModel BillingModel,
     decimal? RatePerRoundTripCad,
-    bool GstApplicable,
     string? BudgetCode,
     BillingFrequency BillingFrequency,
     int NetTermsDays,

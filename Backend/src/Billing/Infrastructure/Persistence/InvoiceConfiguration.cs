@@ -7,8 +7,9 @@ namespace NorthernLink.Billing.Infrastructure.Persistence;
 /// <summary>
 /// Maps the Invoice aggregate to billing.invoices (snake_case columns). Lines are an
 /// owned collection mapped to jsonb — one row per invoice, no child table (lines are
-/// replaced wholesale while drafting, never addressed individually by SQL). Totals are
-/// computed properties on the aggregate, not columns; the read model materializes them.
+/// replaced wholesale while drafting, never addressed individually by SQL). The total is a
+/// computed property on the aggregate, not a column; the read model materializes it. No tax
+/// columns exist by design — the platform computes no tax, QuickBooks Online does.
 /// </summary>
 public sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
 {
@@ -28,8 +29,6 @@ public sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
         builder.Property(i => i.PoNumber).HasColumnName("po_number").HasMaxLength(64);
         builder.Property(i => i.BudgetCode).HasColumnName("budget_code").HasMaxLength(64);
         builder.Property(i => i.NetTermsDays).HasColumnName("net_terms_days");
-        builder.Property(i => i.GstApplicable).HasColumnName("gst_applicable");
-        builder.Property(i => i.GstRate).HasColumnName("gst_rate").HasColumnType("numeric(5,4)");
         builder.Property(i => i.PeriodStart).HasColumnName("period_start");
         builder.Property(i => i.PeriodEnd).HasColumnName("period_end");
 

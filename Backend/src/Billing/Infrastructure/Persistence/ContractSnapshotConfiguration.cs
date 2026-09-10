@@ -26,7 +26,6 @@ public sealed class ContractSnapshotConfiguration : IEntityTypeConfiguration<Con
         builder.Property(c => c.RatePerRoundTripCad)
             .HasColumnName("rate_per_round_trip_cad")
             .HasColumnType("numeric(12,2)");
-        builder.Property(c => c.GstApplicable).HasColumnName("gst_applicable");
         builder.Property(c => c.BudgetCode).HasColumnName("budget_code").HasMaxLength(64);
         builder.Property(c => c.BillingFrequency).HasColumnName("billing_frequency").HasMaxLength(32);
         builder.Property(c => c.NetTermsDays).HasColumnName("net_terms_days");

@@ -40,7 +40,6 @@ public sealed class ClientsIntegrationEventMapper : IIntegrationEventMapper
                     contract.EndDate,
                     contract.BillingModel.ToString(),
                     contract.RatePerRoundTripCad,
-                    contract.GstApplicable,
                     contract.BudgetCode,
                     contract.BillingFrequency.ToString(),
                     contract.NetTermsDays,

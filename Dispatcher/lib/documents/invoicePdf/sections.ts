@@ -129,10 +129,6 @@ export function lineItemsBlock(inv: InvoiceDetailRecord): string {
           )
           .join("");
 
-  const gstRow = inv.gstApplicable
-    ? `<tr><td class="lbl2" colspan="5">GST (${Math.round(inv.gstRate * 1000) / 10}%) — no PST on transportation</td><td class="amt">${esc(formatInvoiceCad(inv.gstCad))}</td></tr>`
-    : `<tr><td class="lbl2" colspan="5">GST — not applicable per contract</td><td class="amt">${esc(formatInvoiceCad(inv.gstCad))}</td></tr>`;
-
   return (
     sectionBar("Line Items") +
     `<table>
@@ -148,8 +144,6 @@ export function lineItemsBlock(inv: InvoiceDetailRecord): string {
        </thead>
        <tbody>${rows}</tbody>
        <tfoot>
-         <tr><td class="lbl2" colspan="5">Subtotal</td><td class="amt">${esc(formatInvoiceCad(inv.subtotalCad))}</td></tr>
-         ${gstRow}
          <tr class="total"><td class="lbl2" colspan="5">Total (CAD)</td><td class="amt">${esc(formatInvoiceCad(inv.totalCad))}</td></tr>
        </tfoot>
      </table>`
@@ -238,6 +232,7 @@ export function tripDetailBlock(inv: InvoiceDetailRecord, details: TripDetailMap
 export function footer(company: CompanyInfo): string {
   return `<div class="foot">
     <b>Northern Link Shuttle and Cargo</b> | ${esc(company.phone)} | ${esc(company.email)}<br/>
-    Internal worksheet — QuickBooks Online is the system of record for issued invoices.
+    Internal worksheet — QuickBooks Online is the system of record for issued invoices.<br/>
+    All amounts CAD. Taxes are applied in QuickBooks; this worksheet carries none.
   </div>`;
 }

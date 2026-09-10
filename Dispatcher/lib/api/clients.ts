@@ -33,7 +33,6 @@ export interface ActiveContractSummary {
   endDate: string | null; // null = evergreen
   billingModel: BillingModel;
   ratePerRoundTripCad: number | null;
-  gstApplicable: boolean;
   budgetCode: string | null;
   billingFrequency: BillingFrequency;
   netTermsDays: number;
@@ -99,7 +98,6 @@ export interface ContractRecord {
   endDate: string | null;
   billingModel: BillingModel;
   ratePerRoundTripCad: number | null;
-  gstApplicable: boolean;
   budgetCode: string | null;
   billingFrequency: BillingFrequency;
   netTermsDays: number;
@@ -115,7 +113,6 @@ export interface ContractInput {
   endDate?: string | null;
   billingModel: BillingModel;
   ratePerRoundTripCad?: number | null;
-  gstApplicable: boolean;
   budgetCode?: string | null;
   billingFrequency: BillingFrequency;
   netTermsDays: number;

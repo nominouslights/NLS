@@ -9,16 +9,13 @@ public class InvoiceLifecycleTests
     public void CreateDraft_starts_in_draft_with_computed_totals()
     {
         var invoice = TestBilling.DraftInvoice(
-            gstApplicable: true,
             TestBilling.Line(1m, 120m),
             TestBilling.Line(0.5m, 120m));
 
         Assert.Equal(InvoiceStatus.Draft, invoice.Status);
         Assert.Null(invoice.QboInvoiceId);
         Assert.Null(invoice.QboEnteredDate);
-        Assert.Equal(180m, invoice.SubtotalCad);
-        Assert.Equal(9m, invoice.GstCad);
-        Assert.Equal(189m, invoice.TotalCad);
+        Assert.Equal(180m, invoice.TotalCad);
     }
 
     [Fact]
@@ -26,7 +23,7 @@ public class InvoiceLifecycleTests
     {
         var result = Invoice.CreateDraft(
             TestBilling.TenantId, "INV-0001", TestBilling.ClientId, "Client",
-            null, null, null, 30, true, Invoice.StandardGstRate,
+            null, null, null, 30,
             new DateOnly(2026, 7, 31), new DateOnly(2026, 7, 1), []);
 
         Assert.True(result.IsFailure);
@@ -36,24 +33,24 @@ public class InvoiceLifecycleTests
     [Fact]
     public void ReplaceLines_works_only_while_draft()
     {
-        var invoice = TestBilling.DraftInvoice(true, TestBilling.Line());
+        var invoice = TestBilling.DraftInvoice(TestBilling.Line());
 
         var replace = invoice.ReplaceLines([TestBilling.Line(1m, 150m)]);
         Assert.True(replace.IsSuccess);
-        Assert.Equal(150m, invoice.SubtotalCad);
+        Assert.Equal(150m, invoice.TotalCad);
 
         Assert.True(invoice.MarkEnteredInQbo("QBO-1042", new DateOnly(2026, 8, 1)).IsSuccess);
 
         var afterEntered = invoice.ReplaceLines([TestBilling.Line(1m, 99m)]);
         Assert.True(afterEntered.IsFailure);
         Assert.Equal("Billing.Invoice.NotDraft", afterEntered.Error.Code);
-        Assert.Equal(150m, invoice.SubtotalCad);
+        Assert.Equal(150m, invoice.TotalCad);
     }
 
     [Fact]
     public void MarkEnteredInQbo_transitions_draft_to_entered_once()
     {
-        var invoice = TestBilling.DraftInvoice(true, TestBilling.Line());
+        var invoice = TestBilling.DraftInvoice(TestBilling.Line());
 
         var entered = invoice.MarkEnteredInQbo("QBO-1042", new DateOnly(2026, 8, 1));
         Assert.True(entered.IsSuccess);
@@ -69,7 +66,7 @@ public class InvoiceLifecycleTests
     [Fact]
     public void MarkEnteredInQbo_requires_a_qbo_invoice_number()
     {
-        var invoice = TestBilling.DraftInvoice(true, TestBilling.Line());
+        var invoice = TestBilling.DraftInvoice(TestBilling.Line());
 
         var result = invoice.MarkEnteredInQbo("  ", new DateOnly(2026, 8, 1));
 
@@ -81,7 +78,7 @@ public class InvoiceLifecycleTests
     [Fact]
     public void MarkEnteredInQbo_is_rejected_from_void()
     {
-        var invoice = TestBilling.DraftInvoice(true, TestBilling.Line());
+        var invoice = TestBilling.DraftInvoice(TestBilling.Line());
         Assert.True(invoice.Void().IsSuccess);
 
         var result = invoice.MarkEnteredInQbo("QBO-1042", new DateOnly(2026, 8, 1));
@@ -95,7 +92,7 @@ public class InvoiceLifecycleTests
     [Fact]
     public void UpdateQboReference_requires_entered_status()
     {
-        var invoice = TestBilling.DraftInvoice(true, TestBilling.Line());
+        var invoice = TestBilling.DraftInvoice(TestBilling.Line());
 
         var early = invoice.UpdateQboReference("QBO-1", new DateOnly(2026, 8, 1));
         Assert.True(early.IsFailure);
@@ -111,7 +108,7 @@ public class InvoiceLifecycleTests
     [Fact]
     public void UpdateQboReference_is_rejected_from_void()
     {
-        var invoice = TestBilling.DraftInvoice(true, TestBilling.Line());
+        var invoice = TestBilling.DraftInvoice(TestBilling.Line());
         Assert.True(invoice.Void().IsSuccess);
 
         var result = invoice.UpdateQboReference("QBO-1", new DateOnly(2026, 8, 1));
@@ -123,7 +120,7 @@ public class InvoiceLifecycleTests
     [Fact]
     public void UpdateQboReference_requires_a_qbo_invoice_number()
     {
-        var invoice = TestBilling.DraftInvoice(true, TestBilling.Line());
+        var invoice = TestBilling.DraftInvoice(TestBilling.Line());
         Assert.True(invoice.MarkEnteredInQbo("QBO-1042", new DateOnly(2026, 8, 1)).IsSuccess);
 
         var result = invoice.UpdateQboReference("   ", new DateOnly(2026, 8, 5));
@@ -138,7 +135,7 @@ public class InvoiceLifecycleTests
     [Fact]
     public void Write_off_zeroes_the_outstanding_balance_and_keeps_the_qbo_reference()
     {
-        var invoice = TestBilling.DraftInvoice(true, TestBilling.Line());
+        var invoice = TestBilling.DraftInvoice(TestBilling.Line());
         Assert.True(invoice.MarkEnteredInQbo("QBO-1042", new DateOnly(2026, 8, 1)).IsSuccess);
         Assert.Equal(invoice.TotalCad, invoice.OutstandingCad);
 
@@ -159,10 +156,10 @@ public class InvoiceLifecycleTests
     public void Write_off_validates_state_amount_and_reason()
     {
         // Only from EnteredInQbo: a draft was never sent, void it instead.
-        var draft = TestBilling.DraftInvoice(true, TestBilling.Line());
+        var draft = TestBilling.DraftInvoice(TestBilling.Line());
         Assert.Equal(InvoiceErrors.NotEnteredForWriteOff, draft.WriteOff(10m, new DateOnly(2026, 9, 15), "x").Error);
 
-        var invoice = TestBilling.DraftInvoice(true, TestBilling.Line());
+        var invoice = TestBilling.DraftInvoice(TestBilling.Line());
         Assert.True(invoice.MarkEnteredInQbo("QBO-1042", new DateOnly(2026, 8, 1)).IsSuccess);
 
         Assert.Equal(InvoiceErrors.InvalidWriteOffAmount, invoice.WriteOff(0m, new DateOnly(2026, 9, 15), "x").Error);
@@ -174,7 +171,7 @@ public class InvoiceLifecycleTests
     [Fact]
     public void A_written_off_invoice_is_terminal()
     {
-        var invoice = TestBilling.DraftInvoice(true, TestBilling.Line());
+        var invoice = TestBilling.DraftInvoice(TestBilling.Line());
         Assert.True(invoice.MarkEnteredInQbo("QBO-1042", new DateOnly(2026, 8, 1)).IsSuccess);
         Assert.True(invoice.WriteOff(invoice.TotalCad, new DateOnly(2026, 9, 15), "Client insolvent").IsSuccess);
 
@@ -191,11 +188,11 @@ public class InvoiceLifecycleTests
     [Fact]
     public void Void_works_only_from_draft()
     {
-        var draft = TestBilling.DraftInvoice(true, TestBilling.Line());
+        var draft = TestBilling.DraftInvoice(TestBilling.Line());
         Assert.True(draft.Void().IsSuccess);
         Assert.Equal(InvoiceStatus.Void, draft.Status);
 
-        var entered = TestBilling.DraftInvoice(true, TestBilling.Line());
+        var entered = TestBilling.DraftInvoice(TestBilling.Line());
         Assert.True(entered.MarkEnteredInQbo("QBO-1042", new DateOnly(2026, 8, 1)).IsSuccess);
         var voidEntered = entered.Void();
         Assert.True(voidEntered.IsFailure);
@@ -205,7 +202,7 @@ public class InvoiceLifecycleTests
     [Fact]
     public void Void_is_rejected_when_already_void()
     {
-        var invoice = TestBilling.DraftInvoice(true, TestBilling.Line());
+        var invoice = TestBilling.DraftInvoice(TestBilling.Line());
         Assert.True(invoice.Void().IsSuccess);
 
         var again = invoice.Void();
@@ -220,7 +217,7 @@ public class InvoiceLifecycleTests
         // Reopen (EnteredInQbo -> Draft) no longer exists: once the worksheet is keyed into
         // QBO the invoice is out in the world — correct the reference or write it off, never
         // un-send it. This pins the method's absence semantically: re-entering must fail.
-        var invoice = TestBilling.DraftInvoice(true, TestBilling.Line());
+        var invoice = TestBilling.DraftInvoice(TestBilling.Line());
         Assert.True(invoice.MarkEnteredInQbo("QBO-1042", new DateOnly(2026, 8, 1)).IsSuccess);
 
         var reEntered = invoice.MarkEnteredInQbo("QBO-2000", new DateOnly(2026, 9, 1));
@@ -230,18 +227,21 @@ public class InvoiceLifecycleTests
         Assert.Equal("QBO-1042", invoice.QboInvoiceId); // the original entry stands
     }
 
+    /// <summary>
+    /// The owner's rule, pinned: a worksheet total is the plain sum of its lines with no tax
+    /// uplift of any kind. QuickBooks Online applies GST/HST/PST — this platform never does.
+    /// </summary>
     [Fact]
-    public void CreateDraft_computes_totals_without_gst_when_not_applicable()
+    public void Total_is_the_plain_sum_of_the_lines_with_no_tax_uplift()
     {
         var invoice = TestBilling.DraftInvoice(
-            gstApplicable: false,
             TestBilling.Line(1m, 120m),
             TestBilling.Line(2m, 100m),
             TestBilling.Line(0.5m, 120m));
 
-        Assert.Equal(380m, invoice.SubtotalCad);
-        Assert.Equal(0m, invoice.GstCad);
+        // 120 + 200 + 60 — not a cent more.
         Assert.Equal(380m, invoice.TotalCad);
+        Assert.Equal(invoice.Lines.Sum(line => line.AmountCad), invoice.TotalCad);
     }
 
     [Fact]

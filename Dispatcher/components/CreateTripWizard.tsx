@@ -881,12 +881,6 @@ export default function CreateTripWizard({
                     <span style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textMuted }}>Budget code (ZBB)</span>
                     <span style={{ fontFamily: fonts.mono, fontSize: 12.5, color: colors.textPrimary }}>{contract?.budgetCode ?? "—"}</span>
                   </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", padding: "12px 15px", background: colors.cardBg, border: `1px solid ${colors.border}`, borderRadius: 10, boxShadow: colors.shadowCard }}>
-                    <span style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textMuted }}>GST</span>
-                    <span style={{ fontFamily: fonts.body, fontSize: 13, color: contract?.gstApplicable ? statusMeta("ontime").t : colors.textPrimary, fontWeight: 500 }}>
-                      {contract ? (contract.gstApplicable ? "5% · no PST on transportation" : "Not applicable") : "—"}
-                    </span>
-                  </div>
                 </div>
               </div>
             )}

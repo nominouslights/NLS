@@ -13,7 +13,6 @@ public static class TestBilling
     public static ContractSnapshot Contract(
         string billingModel = ContractSnapshot.RoundTripRateBillingModel,
         decimal? rate = 120m,
-        bool gstApplicable = true,
         DateOnly? startDate = null,
         DateOnly? endDate = null,
         string status = "Active") => new()
@@ -26,7 +25,6 @@ public static class TestBilling
         EndDate = endDate,
         BillingModel = billingModel,
         RatePerRoundTripCad = rate,
-        GstApplicable = gstApplicable,
         BudgetCode = "ZBB-CREW-01",
         BillingFrequency = "Monthly",
         NetTermsDays = 30,
@@ -82,9 +80,7 @@ public static class TestBilling
         InvoiceLine.Create("Corridor round trip · Thompson–Lynn Lake · 2026-07-06",
             tripIds, null, new DateOnly(2026, 7, 6), quantity, unitPrice).Value;
 
-    public static Invoice DraftInvoice(
-        bool gstApplicable = true,
-        params InvoiceLine[] lines) =>
+    public static Invoice DraftInvoice(params InvoiceLine[] lines) =>
         Invoice.CreateDraft(
             TenantId,
             "INV-0001",
@@ -94,8 +90,6 @@ public static class TestBilling
             "PO-7781",
             "ZBB-CREW-01",
             30,
-            gstApplicable,
-            Invoice.StandardGstRate,
             new DateOnly(2026, 7, 1),
             new DateOnly(2026, 7, 31),
             lines).Value;

@@ -347,9 +347,9 @@ public static class NotificationsEndpoints
         (report?.Invoices ?? [])
             .Select(invoice => new AccrualsInvoiceRow(
                 invoice.InvoiceNumber ?? string.Empty,
+                invoice.QboInvoiceId ?? string.Empty,
                 invoice.Status ?? string.Empty,
-                invoice.SubtotalCad ?? string.Empty,
-                invoice.GstCad ?? string.Empty,
+                invoice.PeriodLabel ?? string.Empty,
                 invoice.TotalCad ?? string.Empty))
             .ToList());
 
@@ -524,10 +524,14 @@ public sealed record AccrualsReconciliationRowRequest(
     string? Reason,
     string? AmountCad);
 
-/// <summary>One referenced invoice's line — the only place GST appears in the report.</summary>
+/// <summary>
+/// One referenced invoice's line — worksheet number, QBO invoice number, status, invoice
+/// period and total. No tax fields: the platform never computes GST/HST/PST, QuickBooks
+/// Online does.
+/// </summary>
 public sealed record AccrualsInvoiceRowRequest(
     string? InvoiceNumber,
+    string? QboInvoiceId,
     string? Status,
-    string? SubtotalCad,
-    string? GstCad,
+    string? PeriodLabel,
     string? TotalCad);
