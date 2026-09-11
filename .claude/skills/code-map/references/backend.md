@@ -212,6 +212,11 @@ Infrastructure:
   Migrations: 15 files, latest 20260807223605_AddInvoiceWriteOff — DO NOT READ (generated)
 <!-- gen:billing:end -->
 <!-- notes:billing:start -->
+A QuickBooks prep worksheet, not an invoice system of record: the module prices completed
+uninvoiced round trips at the contract rate and the numbers are keyed into QBO by hand (no QBO
+API call anywhere). It computes **no tax** — `Invoice.TotalCad` is the plain sum of its lines,
+with no subtotal/GST split and no rate field; QuickBooks owns all tax calculation. Lifecycle is
+Draft → EnteredInQbo → Void, with no Sent/Paid/AR-aging.
 <!-- notes:billing:end -->
 
 ## Booking — Backend/src/Booking (77 files, +5 migration files)
