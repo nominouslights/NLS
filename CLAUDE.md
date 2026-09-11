@@ -71,6 +71,12 @@ Collision protocol for parallel batches:
   another module (`BusPublicationRegistry`, currently empty — the bus is wired but dormant)
 - Every tenant-scoped table: `tenant_id` + API-level check + Postgres RLS (both, always)
 - Canadian data residency (OVHcloud Canada) governs every infrastructure choice
+- **The platform never computes tax.** No GST/HST/PST rate, field, or line anywhere in invoicing,
+  contracts, or reports — QuickBooks owns all tax calculation, and an invoice total is the plain
+  sum of its lines (`Invoice.TotalCad`, with no subtotal/total split). Contract rates are quoted
+  tax-inclusive, so any uplift here double-counts. Budget-code tax *classification*
+  (`BudgetTaxTreatment`) and vendors' GST registration numbers are reference data, not
+  calculation — they stay, but must never assert a rate
 - Status colors never stand alone: Teal `#009E73` / Gold `#E1B000` / Vermillion `#D55E00` + icon + label
 - Library isolation in Backend is enforced by architecture tests — don't fight them, fix the design
 - Roles are constants in `Backend/src/Shared/Kernel/Roles.cs`, never string literals — Kernel, not
