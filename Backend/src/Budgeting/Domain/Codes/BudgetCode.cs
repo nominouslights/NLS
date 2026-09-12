@@ -31,6 +31,13 @@ namespace NorthernLink.Budgeting.Domain.Codes;
 /// this string against, and this story does not add one. It is a reference a person types and a
 /// bookkeeper reads. Validating it later is a new slice, not a hole left open here.
 /// </para>
+/// <para>
+/// <b>A Revenue code cannot carry a <see cref="CostCentre"/>.</b> A cost centre attributes cost,
+/// and revenue is not attributed to one, so the combination is always a data-entry mistake.
+/// <see cref="Validate"/> rejects it outright rather than quietly dropping the value, so an API
+/// caller learns the rule instead of losing a field silently. Blank-or-whitespace is not a
+/// violation — it normalizes to null like every other optional string.
+/// </para>
 /// Uniqueness of (tenant, code) is enforced by the create handler against the tenant's existing
 /// codes, with a unique index as the double-click backstop.
 /// </summary>
@@ -250,6 +257,17 @@ public sealed class BudgetCode : AggregateRoot, ITenantScoped
         if (!Enum.IsDefined(details.Category))
         {
             return Result.Failure(BudgetCodeErrors.CategoryInvalid);
+        }
+
+        // A cost centre attributes cost. Revenue is not attributed to one, so carrying it on a
+        // revenue code is always a data-entry mistake — rejected rather than quietly dropped, so
+        // an API caller learns the rule instead of losing a field silently. Deliberately after the
+        // Enum.IsDefined check above: an out-of-range numeric category must still fail as
+        // CategoryInvalid rather than pass here as "not Revenue". Whitespace-only is not a
+        // violation — Apply normalizes it to null, so IsNullOrWhiteSpace keeps the two agreeing.
+        if (details.Category == BudgetCodeCategory.Revenue && !string.IsNullOrWhiteSpace(details.CostCentre))
+        {
+            return Result.Failure(BudgetCodeErrors.CostCentreNotAllowedForRevenue);
         }
 
         if (!Enum.IsDefined(details.ReviewFrequency))
