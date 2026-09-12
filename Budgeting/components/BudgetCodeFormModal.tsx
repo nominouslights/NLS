@@ -16,6 +16,7 @@ import {
   createBudgetCode,
   listBudgetCodes,
   normalizeBudgetCode,
+  ownerLabel,
   parentCandidates,
   refetchUntil,
   updateBudgetCode,
@@ -114,7 +115,7 @@ export default function BudgetCodeFormModal({
 
   const ownerOptions = [
     { value: NONE, label: "— Unassigned —" },
-    ...owners.map((o) => ({ value: o.userId, label: o.email })),
+    ...owners.map((o) => ({ value: o.userId, label: ownerLabel(o) })),
   ];
 
   async function submit() {

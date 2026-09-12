@@ -160,12 +160,16 @@ export interface BudgetCodeRecord {
   glAccountCode: string | null;
   taxTreatment: BudgetTaxTreatment | null;
   budgetOwnerUserId: string | null;
+  /** Null when that user has not set a profile name — render the email instead. */
+  budgetOwnerName: string | null;
   budgetOwnerEmail: string | null;
   reviewFrequency: BudgetReviewFrequency;
   isActive: boolean;
   createdBy: string | null;
+  createdByName: string | null;
   createdByEmail: string | null;
   modifiedBy: string | null;
+  modifiedByName: string | null;
   modifiedByEmail: string | null;
   createdAtUtc: string;
   updatedAtUtc: string;
@@ -199,9 +203,34 @@ export type BudgetCodeUpdateInput = Omit<BudgetCodeInput, "code">;
 /** Mirrors BudgetOwnerOptionResponse — the owner picker's options. */
 export interface BudgetOwnerOption {
   userId: string;
-  /** Identity has no name field, so email is the only human-readable identifier. */
+  /** Always present, and the only identifier guaranteed to be unique. */
   email: string;
   role: string;
+  /** Null until that user sets one in Settings -> Profile. */
+  fullName: string | null;
+}
+
+/**
+ * How one owner reads in the picker: "Lea Fontaine (lea@northernlink.ca)", or the bare email for
+ * anyone who has not set a name. Both halves stay visible on purpose — the name is what a person
+ * recognizes, and the email is what tells two similar names apart.
+ */
+export function ownerLabel(owner: BudgetOwnerOption): string {
+  const name = owner.fullName?.trim();
+  return name ? `${name} (${owner.email})` : owner.email;
+}
+
+/**
+ * The display value for a user id resolved server-side: their name if they have one, else their
+ * email, else a caller-supplied placeholder. The one place the fallback is spelled out for the
+ * budget-code screen's owner and audit rows.
+ */
+export function userDisplay(
+  name: string | null,
+  email: string | null,
+  fallback: string,
+): string {
+  return name?.trim() || email?.trim() || fallback;
 }
 
 /** Ordered by code ascending server-side. Includes retired codes. */
@@ -362,10 +391,13 @@ export function toBudgetCode(r: BudgetCodeRecord): BudgetCode {
     glAccountCode: r.glAccountCode,
     taxTreatment: r.taxTreatment,
     budgetOwnerUserId: r.budgetOwnerUserId,
+    budgetOwnerName: r.budgetOwnerName,
     budgetOwnerEmail: r.budgetOwnerEmail,
     reviewFrequency: r.reviewFrequency,
     active: r.isActive,
+    createdByName: r.createdByName,
     createdByEmail: r.createdByEmail,
+    modifiedByName: r.modifiedByName,
     modifiedByEmail: r.modifiedByEmail,
   };
 }
