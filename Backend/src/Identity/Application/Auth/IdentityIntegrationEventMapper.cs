@@ -18,9 +18,12 @@ namespace NorthernLink.Identity.Application.Auth;
 /// email, role.
 /// </para>
 /// <para>
-/// The switch has exactly one arm because <c>User</c> raises exactly one event. See
+/// Creation and profile edits share one arm, and every field is read off the <b>aggregate</b>
+/// rather than off the domain event. That is what makes "any change to a User publishes the whole
+/// current snapshot" structural rather than a convention each new arm has to remember — a replica
+/// that upserts the full row can never be left holding a half-applied change. See
 /// <see cref="UserChangedIntegrationEvent"/> for what must happen here when the aggregate grows
-/// a rename or a deactivation.
+/// an email change or a deactivation.
 /// </para>
 /// </summary>
 public sealed class IdentityIntegrationEventMapper : IIntegrationEventMapper
@@ -28,12 +31,14 @@ public sealed class IdentityIntegrationEventMapper : IIntegrationEventMapper
     public IIntegrationEvent? Map(IDomainEvent domainEvent, AggregateRoot aggregate) =>
         domainEvent switch
         {
-            UserCreatedDomainEvent when aggregate is User user =>
+            UserCreatedDomainEvent or UserProfileUpdatedDomainEvent when aggregate is User user =>
                 new UserChangedIntegrationEvent(
                     user.Id,
                     user.TenantId,
                     user.Email,
-                    user.Role),
+                    user.Role,
+                    user.FullName,
+                    user.JobTitle),
             _ => null,
         };
 }

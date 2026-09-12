@@ -30,6 +30,72 @@ public class IdentityIntegrationEventMapperTests
         Assert.Equal(SeedTenant.Id, integrationEvent.TenantId);
         Assert.Equal("planner@northernlink.ca", integrationEvent.Email);
         Assert.Equal(Roles.Accountant, integrationEvent.Role);
+
+        // Null, not "": a brand-new account has no profile, and the replica's fallback to email
+        // keys on null. An empty string here would render as a blank name downstream.
+        Assert.Null(integrationEvent.FullName);
+        Assert.Null(integrationEvent.JobTitle);
+    }
+
+    [Fact]
+    public void A_profile_edit_maps_to_the_same_full_snapshot_event()
+    {
+        var user = TestUsers.Create("planner@northernlink.ca", Roles.Accountant);
+        user.ClearDomainEvents();
+        user.UpdateProfile("Léa Fontaine", "Financial Planner");
+        var domainEvent = Assert.Single(user.DomainEvents.OfType<UserProfileUpdatedDomainEvent>());
+
+        var integrationEvent = Assert.IsType<UserChangedIntegrationEvent>(_mapper.Map(domainEvent, user));
+
+        // The whole row travels, not just what changed — that is what lets the consumer upsert.
+        Assert.Equal(user.Id, integrationEvent.UserId);
+        Assert.Equal("planner@northernlink.ca", integrationEvent.Email);
+        Assert.Equal(Roles.Accountant, integrationEvent.Role);
+        Assert.Equal("Léa Fontaine", integrationEvent.FullName);
+        Assert.Equal("Financial Planner", integrationEvent.JobTitle);
+    }
+
+    [Fact]
+    public void A_cleared_name_travels_as_null_so_the_replica_clears_too()
+    {
+        var user = TestUsers.Create();
+        user.UpdateProfile("Léa Fontaine", "Financial Planner");
+        user.ClearDomainEvents();
+        user.UpdateProfile(null, null);
+        var domainEvent = Assert.Single(user.DomainEvents.OfType<UserProfileUpdatedDomainEvent>());
+
+        var integrationEvent = Assert.IsType<UserChangedIntegrationEvent>(_mapper.Map(domainEvent, user));
+
+        Assert.Null(integrationEvent.FullName);
+        Assert.Null(integrationEvent.JobTitle);
+    }
+
+    [Fact]
+    public void The_profile_travels_as_the_aggregate_stored_it_not_as_the_event_carried_it()
+    {
+        // Same discipline as the email test above: the mapper reads the aggregate, so a snapshot
+        // can never disagree with what was persisted.
+        var user = TestUsers.Create();
+        user.ClearDomainEvents();
+        user.UpdateProfile("  Léa Fontaine  ", null);
+        var domainEvent = Assert.Single(user.DomainEvents.OfType<UserProfileUpdatedDomainEvent>());
+
+        var integrationEvent = Assert.IsType<UserChangedIntegrationEvent>(_mapper.Map(domainEvent, user));
+
+        Assert.Equal("Léa Fontaine", integrationEvent.FullName);
+        Assert.Equal(user.FullName, integrationEvent.FullName);
+    }
+
+    [Fact]
+    public void A_profile_event_paired_with_a_foreign_aggregate_publishes_nothing()
+    {
+        // The `or` pattern must not widen the arm past its `when aggregate is User` guard.
+        var user = TestUsers.Create();
+        user.ClearDomainEvents();
+        user.UpdateProfile("Léa Fontaine", null);
+        var domainEvent = Assert.Single(user.DomainEvents.OfType<UserProfileUpdatedDomainEvent>());
+
+        Assert.Null(_mapper.Map(domainEvent, new ForeignAggregate()));
     }
 
     [Fact]

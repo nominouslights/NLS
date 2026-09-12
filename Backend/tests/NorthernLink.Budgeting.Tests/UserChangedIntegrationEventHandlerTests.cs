@@ -23,8 +23,12 @@ public class UserChangedIntegrationEventHandlerTests
     }
 
     private static UserChangedIntegrationEvent Event(
-        Guid userId, string email = "planner@northernlink.ca", string role = Roles.Accountant) =>
-        new(userId, TestBudgeting.TenantId, email, role);
+        Guid userId,
+        string email = "planner@northernlink.ca",
+        string role = Roles.Accountant,
+        string? fullName = null,
+        string? jobTitle = null) =>
+        new(userId, TestBudgeting.TenantId, email, role, fullName, jobTitle);
 
     [Fact]
     public async Task A_first_event_inserts_the_replica_row()
