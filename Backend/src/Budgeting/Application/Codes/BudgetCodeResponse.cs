@@ -10,6 +10,13 @@ namespace NorthernLink.Budgeting.Application.Codes;
 /// the read service, not stored: they exist so a screen can render a parent or an owner without a
 /// second round trip, and they are recomputed on every read so they cannot go stale.
 /// </para>
+/// <para>
+/// Each of the three user ids gets both a <c>…Name</c> and a <c>…Email</c>. The name is null for
+/// anyone who has not set a profile, so a client renders name-or-email; sending one merged
+/// display string instead would take away its ability to show the name with the email beneath it,
+/// and resolving only the owner would leave "created by" and "last modified by" reading as raw
+/// addresses directly below it.
+/// </para>
 /// </summary>
 public sealed record BudgetCodeResponse(
     Guid Id,
@@ -25,12 +32,15 @@ public sealed record BudgetCodeResponse(
     string? GlAccountCode,
     string? TaxTreatment,
     Guid? BudgetOwnerUserId,
+    string? BudgetOwnerName,
     string? BudgetOwnerEmail,
     string ReviewFrequency,
     bool IsActive,
     Guid? CreatedBy,
+    string? CreatedByName,
     string? CreatedByEmail,
     Guid? ModifiedBy,
+    string? ModifiedByName,
     string? ModifiedByEmail,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc);

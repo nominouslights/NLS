@@ -21,6 +21,12 @@ public sealed class UserLookupConfiguration : IEntityTypeConfiguration<UserLooku
         // 256 matches identity.users.email — a replica column narrower than its source would
         // truncate silently at the upsert.
         builder.Property(u => u.Email).HasColumnName("email").HasMaxLength(256);
+
+        // 128 matches identity.users.full_name for the same reason as the email above.
+        // Nullable: an account whose owner has not set a name has none, and the display chain
+        // falls back to the email on null.
+        builder.Property(u => u.FullName).HasColumnName("full_name").HasMaxLength(128);
+
         builder.Property(u => u.Role).HasColumnName("role").HasMaxLength(32);
         builder.Property(u => u.UpdatedAtUtc).HasColumnName("updated_at_utc");
 

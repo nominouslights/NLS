@@ -28,6 +28,7 @@ public sealed class UserChangedIntegrationEventHandler(
                     UserId = integrationEvent.UserId,
                     TenantId = integrationEvent.TenantId,
                     Email = integrationEvent.Email,
+                    FullName = integrationEvent.FullName,
                     Role = integrationEvent.Role,
                     UpdatedAtUtc = DateTimeOffset.UtcNow,
                 },
