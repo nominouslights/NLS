@@ -16,6 +16,7 @@ import {
   seedStarterBudgetCodes,
   setBudgetCodeActive,
   toBudgetCode,
+  userDisplay,
   REVIEW_FREQUENCY_LABELS,
   SERVICE_LINE_LABELS,
   TAX_TREATMENT_LABELS,
@@ -373,7 +374,14 @@ export default function BudgetCodes({
                 <Panel>
                   <SectionLabel>Governance</SectionLabel>
                   <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-                    <DetailRow label="Budget owner" value={selected.budgetOwnerEmail ?? "Unassigned"} />
+                    <DetailRow
+                      label="Budget owner"
+                      value={userDisplay(
+                        selected.budgetOwnerName,
+                        selected.budgetOwnerEmail,
+                        "Unassigned",
+                      )}
+                    />
                     <DetailRow
                       label="Review frequency"
                       value={REVIEW_FREQUENCY_LABELS[selected.reviewFrequency]}
@@ -387,8 +395,14 @@ export default function BudgetCodes({
                         />
                       }
                     />
-                    <DetailRow label="Created by" value={selected.createdByEmail ?? "—"} />
-                    <DetailRow label="Last modified by" value={selected.modifiedByEmail ?? "—"} />
+                    <DetailRow
+                      label="Created by"
+                      value={userDisplay(selected.createdByName, selected.createdByEmail, "—")}
+                    />
+                    <DetailRow
+                      label="Last modified by"
+                      value={userDisplay(selected.modifiedByName, selected.modifiedByEmail, "—")}
+                    />
                   </div>
                 </Panel>
 

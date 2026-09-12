@@ -1,5 +1,6 @@
 using NorthernLink.Identity.Application.Abstractions;
 using NorthernLink.Identity.Domain.Users;
+using NorthernLink.Shared.Kernel;
 
 namespace NorthernLink.Identity.Tests;
 
@@ -9,6 +10,14 @@ internal sealed class InMemoryUserRepository : IUserRepository
     public List<User> Users { get; } = [];
 
     public int SaveChangesCallCount { get; private set; }
+
+    /// <summary>
+    /// The tenant <see cref="GetByIdForTenantAsync"/> is scoped to — the fake's stand-in for the
+    /// EF query filter and the RLS policy. Settable so a test can prove a cross-tenant id really
+    /// returns null here, rather than this method quietly being an alias of
+    /// <see cref="GetByIdAsync"/>.
+    /// </summary>
+    public Guid TenantId { get; set; } = SeedTenant.Id;
 
     /// <summary>
     /// Forces the next <see cref="TryAddNewUserAsync"/> to report a unique-index violation
@@ -25,6 +34,9 @@ internal sealed class InMemoryUserRepository : IUserRepository
 
     public Task<User?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         Task.FromResult(Users.FirstOrDefault(u => u.Id == id));
+
+    public Task<User?> GetByIdForTenantAsync(Guid id, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Users.FirstOrDefault(u => u.Id == id && u.TenantId == TenantId));
 
     public Task<bool> AnyAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(Users.Count > 0);

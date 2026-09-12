@@ -10,6 +10,8 @@ using NorthernLink.Identity.Application.Auth.Login;
 using NorthernLink.Identity.Application.Auth.Logout;
 using NorthernLink.Identity.Application.Auth.Refresh;
 using NorthernLink.Identity.Application.Auth.Setup;
+using NorthernLink.Identity.Application.Profile.GetProfile;
+using NorthernLink.Identity.Application.Profile.UpdateProfile;
 using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Shared.Tenancy;
@@ -34,6 +36,13 @@ public static class IdentityEndpoints
         // Any authenticated caller, whatever their role — a client needs to be able to read its
         // own role in order to render the right thing, including "you may not be here".
         auth.MapGet("me", Me).RequireAuthorization();
+
+        // Self-service, so authenticated-but-unpolicied: every role owns a profile, and gating
+        // this on BudgetAccess would refuse the Dispatch Console the day it grows the same
+        // screen, for no security gain. What bounds the caller is that the user id comes from
+        // the token's sub claim and is never accepted from the route or body.
+        auth.MapGet("profile", GetProfile).RequireAuthorization();
+        auth.MapPut("profile", UpdateProfile).RequireAuthorization();
 
         // First-run setup — anonymous, and self-closing once any user exists. The status check
         // drives whether the console shows the create-admin screen; setup creates the first admin.
@@ -118,6 +127,43 @@ public static class IdentityEndpoints
             principal.FindFirstValue(JwtAccessTokenIssuer.TenantIdClaimType) ?? string.Empty,
             principal.FindFirstValue(JwtAccessTokenIssuer.TenantTypeClaimType) ?? string.Empty));
 
+    /// <summary>
+    /// The caller's own profile, read from the database — unlike <see cref="Me"/>, which answers
+    /// from claims alone. A screen about account facts should not render a snapshot that can be
+    /// fifteen minutes old.
+    /// </summary>
+    private static async Task<IResult> GetProfile(
+        ICurrentActor currentActor, ISender sender, CancellationToken cancellationToken)
+    {
+        // Not ceremony despite RequireAuthorization: JwtCurrentActor yields null when the sub
+        // claim is absent or unparseable, which authentication alone does not rule out.
+        if (currentActor.UserId is not { } userId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(new GetMyProfileQuery(userId), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> UpdateProfile(
+        UpdateProfileRequest request,
+        ICurrentActor currentActor,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (currentActor.UserId is not { } userId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(
+            new UpdateMyProfileCommand(userId, request.FullName, request.JobTitle),
+            cancellationToken);
+
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
     private static async Task<IResult> GenerateBootstrapToken(
         ITenantContext tenantContext, ISender sender, string? role, CancellationToken cancellationToken)
     {
@@ -151,6 +197,14 @@ public sealed record BootstrapAdminRequest(string? Token, string? Email, string?
 
 /// <summary>Body of a successful admin bootstrap (201, with Location header).</summary>
 public sealed record BootstrapAdminResponse(Guid UserId);
+
+/// <summary>
+/// Request body for PUT /api/identity/auth/profile. Both members are the complete new value:
+/// null clears the field rather than leaving it alone, which is what makes PUT the honest verb
+/// here. Nullable (rather than required) so a client omitting a member binds to null instead of
+/// failing at the model binder, matching the other request records in this file.
+/// </summary>
+public sealed record UpdateProfileRequest(string? FullName, string? JobTitle);
 
 /// <summary>Response body for GET /api/identity/auth/me — the caller's own token claims.</summary>
 public sealed record MeResponse(

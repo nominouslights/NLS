@@ -55,8 +55,8 @@ Run it before touching anything on the list, and whenever a Dispatcher UI story 
 | `app/layout.tsx` | `Dispatcher/app/layout.tsx` | **no** — title/description only; the four Google Fonts `<link>` tags are byte-identical and must stay that way |
 | `lib/auth.ts` | `Dispatcher/lib/auth.ts` | **no** — see below |
 | `components/TopBar.tsx`, `AuthGate.tsx`, `LoginScreen.tsx`, `Console.tsx` | same paths | **no** — adapted |
-| `lib/nav.ts`, `lib/data.ts`, `lib/types.ts`, `lib/claims.ts`, `lib/roles.ts`, `lib/api/budgeting.ts` | — | new |
-| `components/Brandmark.tsx`, `ErrorNotice.tsx`, `RoleGate.tsx`, `AccessDeniedScreen.tsx`, `SetupPendingScreen.tsx`, `BudgetPeriodFormModal.tsx`, `BudgetCodeFormModal.tsx`, `screens/*` | — | new |
+| `lib/nav.ts`, `lib/data.ts`, `lib/types.ts`, `lib/claims.ts`, `lib/roles.ts`, `lib/api/budgeting.ts`, `lib/api/identity.ts` | — | new |
+| `components/Brandmark.tsx`, `ErrorNotice.tsx`, `RoleGate.tsx`, `AccessDeniedScreen.tsx`, `SetupPendingScreen.tsx`, `BudgetPeriodFormModal.tsx`, `BudgetCodeFormModal.tsx`, `ProfileForm.tsx`, `screens/*` | — | new |
 
 `theme.ts` and the 12 `ui/` files are copied **unpruned**, including parts this app never uses
 (`ServiceType`, `DutyStatus`, `CorridorStepper`, the two upload fields). Pruning them would break
@@ -110,12 +110,20 @@ step; both have tests that fail if they diverge.
 ## Testing
 
 Vitest, added here as a **pilot for this app only** — it does not obligate Dispatcher to adopt
-it. Four files, and only one needs a DOM:
+it. Six files, and only two need a DOM:
 
 - `lib/roles.test.ts` — US-6.0.1's acceptance criterion: a Dispatcher account is rejected.
 - `lib/claims.test.ts` — JWT decoding, including the non-ASCII round trip (`atob` yields a binary
   string, so a naive decoder mangles accented emails) and malformed-token handling.
 - `components/RoleGate.test.tsx` — the gate applies the rule and offers a way out.
+- `lib/api/identity.test.ts` — `normalizeProfileField` against `User.Normalize`,
+  `PROFILE_FIELD_MAX_LENGTH` against `User.ProfileFieldMaxLength`, and the
+  `profileDisplayName` name-then-email fallback.
+- `components/ProfileForm.test.tsx` — the profile form seeds from its props, refuses to save
+  when nothing changed (including when the only change is whitespace, matching the server's
+  no-op rule), sends `null` for a cleared field, and shows a refused save's message verbatim.
+  It takes `onSave` as a prop, so it injects a `vi.fn()` rather than stubbing the transport —
+  no client test in this app mocks `request()`.
 - `lib/api/budgeting.test.ts` — the client-side mirrors of server rules stay pinned to the
   server: `previewPeriod` against `BudgetPeriod.Create`, `normalizeBudgetCode` /
   `budgetCodeFormatError` against `BudgetCode.NormalizeCode` / `ValidateCode`, and
@@ -260,10 +268,14 @@ Not used here on purpose: axe-core / pa11y / Lighthouse. They catch the automata
   cross-module user link: Identity gained its first `IIntegrationEventMapper` and publishes
   `identity.user-changed`; Budgeting consumes it into `budgeting.user_lookup`. Because Identity's
   outbox had always been empty, existing accounts arrive via the
-  `BackfillBudgetingUserLookup` migration rather than by replay. **`Identity.User` is still
-  create-only** — no rename, no deactivation — so the replica never shrinks and never sees an
-  email change. Whoever adds those must raise a domain event and extend the mapper, or every
-  replica goes stale with no error anywhere.
+  `BackfillBudgetingUserLookup` migration rather than by replay. **`Identity.User` is no longer
+  create-only**: it carries a full name and a job title that its owner edits through
+  `GET`/`PUT /api/identity/auth/profile`, and `UserProfileUpdatedDomainEvent` maps to the same
+  full-snapshot `identity.user-changed` event, so `budgeting.user_lookup.full_name` follows. The
+  replica still never *shrinks* — there is no deactivation or deletion, so a departed person
+  stays pickable, and that fix still belongs in Identity. Whoever adds an email change, a role
+  change or a deactivation must raise a domain event **and** extend
+  `IdentityIntegrationEventMapper`, or every replica goes stale with no error anywhere.
 - `BudgetAllocation` / `ActualTransaction` tables and their RLS policies; QuickBooks actuals
   reconciliation. The Stage 6.2 slice that adds allocations must also replace
   `NeverReferencedBudgetCodeUsageProbe` — until it does, "has this code been used?" answers no,

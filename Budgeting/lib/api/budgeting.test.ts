@@ -4,10 +4,12 @@ import {
   budgetCodeFormatError,
   costCentreApplies,
   normalizeBudgetCode,
+  ownerLabel,
   parentCandidates,
   periodKind,
   previewPeriod,
   toBudgetCode,
+  userDisplay,
   REVIEW_FREQUENCY_LABELS,
   SERVICE_LINE_LABELS,
   TAX_TREATMENT_LABELS,
@@ -315,5 +317,48 @@ describe("toBudgetCode", () => {
 
     expect(child.parentCode).toBe("ZBB-REV");
     expect(child.parentName).toBe("Revenue rollup");
+  });
+});
+
+// Both of these decide how a *person* is rendered. The server sends the name and the email
+// separately and resolves the name on every read (BudgetCodeReadService), so the fallback is a
+// client decision — made once here rather than at each of the four call sites.
+
+describe("ownerLabel", () => {
+  const owner = {
+    userId: "8f1d2c3b-4a5e-4f60-9a71-2b3c4d5e6f70",
+    email: "lea@northernlink.ca",
+    role: "Accountant",
+    fullName: null as string | null,
+  };
+
+  it("shows the name with the email beside it, so similar names stay distinguishable", () => {
+    expect(ownerLabel({ ...owner, fullName: "Léa Fontaine" })).toBe(
+      "Léa Fontaine (lea@northernlink.ca)",
+    );
+  });
+
+  it("shows the bare email for anyone who has not set a name", () => {
+    expect(ownerLabel(owner)).toBe("lea@northernlink.ca");
+  });
+
+  it("shows the bare email when the name is only whitespace", () => {
+    expect(ownerLabel({ ...owner, fullName: "   " })).toBe("lea@northernlink.ca");
+  });
+});
+
+describe("userDisplay", () => {
+  it("prefers the name", () => {
+    expect(userDisplay("Léa Fontaine", "lea@northernlink.ca", "—")).toBe("Léa Fontaine");
+  });
+
+  it("falls back to the email when there is no name", () => {
+    expect(userDisplay(null, "lea@northernlink.ca", "—")).toBe("lea@northernlink.ca");
+  });
+
+  it("falls back to the placeholder when the id resolved to nobody at all", () => {
+    // Both null is what an unassigned budget owner looks like, and what a user id that is no
+    // longer in the replica looks like. The caller decides the word.
+    expect(userDisplay(null, null, "Unassigned")).toBe("Unassigned");
   });
 });
