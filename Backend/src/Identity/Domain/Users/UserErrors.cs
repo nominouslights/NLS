@@ -21,6 +21,23 @@ public static class UserErrors
     public static readonly Error DuplicateEmail = Error.Conflict(
         "Identity.User.DuplicateEmail", "A user with this email already exists for this tenant.");
 
+    public static readonly Error FullNameTooLong = Error.Validation(
+        "Identity.User.FullNameTooLong",
+        $"A full name may be at most {User.ProfileFieldMaxLength} characters.");
+
+    public static readonly Error JobTitleTooLong = Error.Validation(
+        "Identity.User.JobTitleTooLong",
+        $"A job title may be at most {User.ProfileFieldMaxLength} characters.");
+
+    /// <summary>
+    /// The signed-in caller's own id named no row. Not paranoia: <c>sub</c> is trustworthy, but
+    /// the account behind it can have been removed, or belong to another tenant, while a
+    /// 15-minute access token is still valid. A 404 is the honest answer; dereferencing null is
+    /// not.
+    /// </summary>
+    public static readonly Error NotFound = Error.NotFound(
+        "Identity.User.NotFound", "No user account was found.");
+
     /// <summary>
     /// Deliberately generic — never reveals whether the email exists vs. the password was
     /// wrong, so login failures don't leak account existence.
