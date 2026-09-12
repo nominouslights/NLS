@@ -25,7 +25,6 @@ internal sealed class ContractReadService(ClientsDbContext context) : IContractR
             c.EndDate,
             c.BillingModel,
             c.RatePerRoundTripCad,
-            c.GstApplicable,
             c.BudgetCode,
             c.BillingFrequency,
             c.NetTermsDays,

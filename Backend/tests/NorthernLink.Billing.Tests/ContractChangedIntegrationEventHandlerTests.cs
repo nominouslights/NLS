@@ -19,7 +19,6 @@ public class ContractChangedIntegrationEventHandlerTests
         null,
         "RoundTripRate",
         rate,
-        GstApplicable: true,
         "ZBB-CREW-01",
         "Monthly",
         30,

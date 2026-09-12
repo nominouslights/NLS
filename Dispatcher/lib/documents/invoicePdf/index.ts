@@ -5,7 +5,7 @@
 //
 // Page assembly (US-Letter):
 //   header + Invoice Details + QuickBooks Entry + (Write-off)
-//   + Line Items (with Subtotal / GST / Total) + Trip & Passenger Detail + footer
+//   + Line Items (one Total (CAD) row) + Trip & Passenger Detail + footer
 //
 // The sheet carries the same facts as the screen's COPY FOR QUICKBOOKS and
 // per-line COPY, so it can be keyed from on its own: `details` is the loaded

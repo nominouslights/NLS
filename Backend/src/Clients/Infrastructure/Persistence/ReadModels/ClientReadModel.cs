@@ -29,7 +29,6 @@ public sealed class ClientReadModel
     public DateOnly? ActiveContractEndDate { get; set; }
     public string? ActiveContractBillingModel { get; set; }
     public decimal? ActiveContractRatePerRoundTripCad { get; set; }
-    public bool? ActiveContractGstApplicable { get; set; }
     public string? ActiveContractBudgetCode { get; set; }
     public string? ActiveContractBillingFrequency { get; set; }
     public int? ActiveContractNetTermsDays { get; set; }
@@ -62,7 +61,6 @@ public sealed class ClientReadModelConfiguration : IEntityTypeConfiguration<Clie
         builder.Property(c => c.ActiveContractRatePerRoundTripCad)
             .HasColumnName("active_contract_rate_per_round_trip_cad")
             .HasColumnType("numeric(12,2)");
-        builder.Property(c => c.ActiveContractGstApplicable).HasColumnName("active_contract_gst_applicable");
         builder.Property(c => c.ActiveContractBudgetCode).HasColumnName("active_contract_budget_code");
         builder.Property(c => c.ActiveContractBillingFrequency).HasColumnName("active_contract_billing_frequency");
         builder.Property(c => c.ActiveContractNetTermsDays).HasColumnName("active_contract_net_terms_days");

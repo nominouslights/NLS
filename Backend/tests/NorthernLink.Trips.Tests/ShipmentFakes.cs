@@ -27,7 +27,9 @@ internal sealed class FakeShipmentRepository : IShipmentRepository
             [.. Shipments.Where(s => s.Legs.Any(l => l.TripId == tripId))]);
 
     public Task<int> CountForTripAsync(Guid tripId, CancellationToken cancellationToken = default) =>
-        Task.FromResult(Shipments.Sum(s => s.Legs.Count(l => l.TripId == tripId)));
+        Task.FromResult(Shipments
+            .Where(s => s.Status is ShipmentStatus.Registered or ShipmentStatus.Assigned or ShipmentStatus.InTransit)
+            .Sum(s => s.Legs.Count(l => l.TripId == tripId)));
 
     public Task<IReadOnlyList<Shipment>> GetByIdsForTenantAsync(
         Guid tenantId, IReadOnlyCollection<Guid> shipmentIds, CancellationToken cancellationToken = default) =>

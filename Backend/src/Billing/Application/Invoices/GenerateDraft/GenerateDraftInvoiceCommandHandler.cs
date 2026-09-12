@@ -45,8 +45,6 @@ public sealed class GenerateDraftInvoiceCommandHandler(
             draft.Contract.DefaultPoNumber,
             draft.Contract.BudgetCode,
             draft.Contract.NetTermsDays,
-            draft.Contract.GstApplicable,
-            Invoice.StandardGstRate,
             command.PeriodStart,
             command.PeriodEnd,
             draft.Lines);

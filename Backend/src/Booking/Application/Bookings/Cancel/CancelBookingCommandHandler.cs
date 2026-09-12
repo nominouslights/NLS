@@ -10,9 +10,11 @@ namespace NorthernLink.Booking.Application.Bookings.Cancel;
 /// Cancels a booking (revert-not-delete — the record stays listed, read-only), then
 /// recomputes the day's threshold in the SAME transaction: dropping a Confirmed day below
 /// its minimum applies the window rule (revert + notify outside the cancellation window,
-/// stay Confirmed inside it; a Gift-a-Seat guarantee suppresses reverting). The policy's
-/// cancellation penalty is still stored/displayed only — enforcement lands with the public
-/// PWA batch. See <see cref="BookingDayThresholdService"/>.
+/// stay Confirmed inside it; a Gift-a-Seat guarantee suppresses reverting). The day is
+/// ensured BEFORE the booking is mutated — the get-or-create may save mid-flow, and it
+/// must flush nothing but the day-create. The policy's cancellation penalty is still
+/// stored/displayed only — enforcement lands with the public PWA batch.
+/// See <see cref="BookingDayThresholdService"/>.
 /// </summary>
 public sealed class CancelBookingCommandHandler(
     IBookingRepository repository,
@@ -27,13 +29,16 @@ public sealed class CancelBookingCommandHandler(
             return Result.Failure(BookingErrors.NotFound);
         }
 
+        var day = await thresholds.EnsureDayAsync(
+            booking.TenantId, booking.CorridorId, booking.ServiceDate, cancellationToken);
+
         var result = booking.Cancel();
         if (result.IsFailure)
         {
             return result;
         }
 
-        await thresholds.ApplyAfterCancelAsync(booking, cancellationToken);
+        await thresholds.RecomputeAsync(day, booking, cancellationToken);
 
         await repository.SaveChangesAsync(cancellationToken);
         return Result.Success();

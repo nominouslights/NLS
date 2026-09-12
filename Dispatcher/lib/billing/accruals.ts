@@ -30,9 +30,9 @@
 //     unpaired leg is never estimated — the backend prices complete round trips
 //     only, so a half-rate would print a number no invoice will ever contain.
 //     Manual billing / no contract / no rate → no estimates, one banner note.
-//   - GST is out of scope for the report body (estimates cannot compute it and
-//     line amounts are pre-GST); real GST appears only in the Invoices
-//     Referenced section, straight off each fetched invoice.
+//   - No tax appears anywhere in this report. The platform never computes or
+//     displays a tax amount — QuickBooks Online owns all tax calculation — so
+//     every amount here, estimated or invoiced, is a bare line total in CAD.
 
 import {
   formatInvoiceCad,
@@ -163,15 +163,15 @@ export interface AccrualsReport {
   cancelled: TripRecord[];
   /** Written-off groups with reasons + lost amounts — reconciliation. */
   writtenOff: AccrualGroup[];
-  /** The fetched invoices behind the real amounts — the only place GST shows. */
+  /** The fetched invoices behind the real amounts. */
   invoices: InvoiceDetailRecord[];
   /** Degradation banners: manual billing, missing rate, failed fetches, unpaired legs. */
   notes: string[];
 }
 
 /** Footer wording shared by the screen, the printed sheet, and the clipboard. */
-export const ACCRUALS_GST_NOTE =
-  "All amounts CAD, excluding GST. GST applies on issued invoices only — see Invoices referenced.";
+export const ACCRUALS_TAX_NOTE =
+  "All amounts CAD. Taxes are applied in QuickBooks; this report contains none.";
 export const ACCRUALS_ESTIMATE_NOTE =
   "Amounts marked “est.” are contract-rate estimates, not invoices — issued invoice amounts govern.";
 
@@ -509,7 +509,7 @@ export function accrualsClipboardText(report: AccrualsReport): string {
   if (report.invoices.length === 0) {
     out.push("No issued invoices are referenced by this period's trips.");
   } else {
-    out.push(["Invoice", "QBO #", "Status", "Invoice period", "Subtotal", "GST", "Total (CAD)"].join("\t"));
+    out.push(["Invoice", "QBO #", "Status", "Invoice period", "Total (CAD)"].join("\t"));
     for (const inv of report.invoices) {
       out.push(
         [
@@ -517,8 +517,6 @@ export function accrualsClipboardText(report: AccrualsReport): string {
           inv.qboInvoiceId ?? "—",
           invoiceChip(inv).label,
           invoicePeriodLabel(inv),
-          formatInvoiceCad(inv.subtotalCad),
-          formatInvoiceCad(inv.gstCad),
           formatInvoiceCad(inv.totalCad),
         ].join("\t"),
       );
@@ -526,7 +524,7 @@ export function accrualsClipboardText(report: AccrualsReport): string {
   }
 
   out.push("");
-  out.push(ACCRUALS_GST_NOTE);
+  out.push(ACCRUALS_TAX_NOTE);
   out.push(ACCRUALS_ESTIMATE_NOTE);
   return out.join("\n");
 }
@@ -546,7 +544,7 @@ export function accrualsEmailPayload(report: AccrualsReport): AccrualsEmailRepor
     clientName: report.client.name,
     periodLabel: periodLabel(report.period),
     preparedDate: report.today,
-    // Degradation banners only — the backend PDF bakes its own GST/estimate
+    // Degradation banners only — the backend PDF bakes its own tax/estimate
     // disclaimer banner, so sending ours here would print it twice.
     notes: report.notes,
     // All five buckets, zeros included — the summary is the complete position.
@@ -594,12 +592,10 @@ export function accrualsEmailPayload(report: AccrualsReport): AccrualsEmailRepor
       })),
     ],
     invoices: report.invoices.map((inv) => ({
-      invoiceNumber: inv.qboInvoiceId
-        ? `${inv.invoiceNumber} · QBO ${inv.qboInvoiceId}`
-        : inv.invoiceNumber,
+      invoiceNumber: inv.invoiceNumber,
+      qboInvoiceId: inv.qboInvoiceId ?? "—",
       status: invoiceChip(inv).label,
-      subtotalCad: formatInvoiceCad(inv.subtotalCad),
-      gstCad: formatInvoiceCad(inv.gstCad),
+      periodLabel: invoicePeriodLabel(inv),
       totalCad: formatInvoiceCad(inv.totalCad),
     })),
   };

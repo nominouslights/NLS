@@ -264,7 +264,7 @@ export default function BudgetCodeFormModal({
           value={taxTreatment}
           onChange={setTaxTreatment}
           options={TAX_TREATMENT_OPTIONS}
-          hint="GST 5% — no PST on transport in Manitoba"
+          hint="Planning classification only — QuickBooks owns the rate"
         />
       </Row>
 

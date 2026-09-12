@@ -324,7 +324,7 @@ export const SERVICE_LINE_LABELS: Record<BudgetServiceLine, string> = {
 };
 
 export const TAX_TREATMENT_LABELS: Record<BudgetTaxTreatment, string> = {
-  GstApplicable: "GST applicable (5%)",
+  GstApplicable: "GST applicable",
   ZeroRated: "Zero-rated",
   Exempt: "Exempt",
   NotApplicable: "N/A",

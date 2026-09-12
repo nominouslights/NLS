@@ -47,7 +47,10 @@ export type BudgetServiceLine =
   | "Administrative"
   | "Apprenticeship";
 
-/** Mirrors C# BudgetTaxTreatment. GST 5% is the only tax in play (no PST on transport in MB). */
+/**
+ * Mirrors C# BudgetTaxTreatment. A planning classification only — the platform computes no tax
+ * and never asserts a rate; QuickBooks owns the rate and the calculation.
+ */
 export type BudgetTaxTreatment = "GstApplicable" | "ZeroRated" | "Exempt" | "NotApplicable";
 
 /** Mirrors C# BudgetReviewFrequency. Required on every code; the server defaults it to Quarterly. */

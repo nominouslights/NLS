@@ -42,7 +42,6 @@ public sealed class CreateContractCommandHandler(
             command.EndDate,
             command.BillingModel,
             command.RatePerRoundTripCad,
-            command.GstApplicable,
             command.BudgetCode,
             command.BillingFrequency,
             command.NetTermsDays,

@@ -436,6 +436,58 @@ public class TripGeneratorTests
     }
 
     [Fact]
+    public void ExtraRun_the_day_after_an_overnight_return_emits_one_inbound_not_two()
+    {
+        // The wedge case: Monday's overnight return lands on Tuesday (Inbound), and an
+        // ExtraRun on Tuesday carries its own same-day return (also Tuesday Inbound).
+        // Both target the same (date, direction) key — without in-batch dedupe the two
+        // drafts would collide on the unique index and fail the whole template's save.
+        // Dates iterate ascending, so the overnight return wins deterministically.
+        var template = TestPlanning.CreateTemplate(
+            daysOfWeek: [DayOfWeek.Monday],
+            departureTime: new TimeOnly(17, 30),
+            returnDepartureTime: new TimeOnly(6, 30),
+            returnNextDay: true,
+            generationHorizonDays: 7);
+        var tuesday = TestPlanning.Monday.AddDays(1);
+        template.AddException(
+            tuesday, ScheduleExceptionKind.ExtraRun, new TimeOnly(9, 0), new TimeOnly(15, 0), null);
+
+        var drafts = TripGenerator.Generate(template, NoExisting, TestPlanning.Monday);
+
+        var inbound = Assert.Single(
+            drafts, d => d.ServiceDate == tuesday && d.Direction == TripDirection.Inbound);
+
+        // It's the overnight return's leg: the template's return time, keyed off Monday's
+        // outbound — not the extra run's 15:00.
+        Assert.Equal(new TimeOnly(6, 30), inbound.DepartureTime);
+        Assert.Equal(TripGenerator.RoundTripKeyFor(template.Id, TestPlanning.Monday), inbound.RoundTripKey);
+    }
+
+    [Fact]
+    public void ExtraRun_outbound_still_emitted_when_its_inbound_is_deduped()
+    {
+        // Same wedge as above — losing its return leg to the overnight return must not
+        // suppress the extra run's outbound.
+        var template = TestPlanning.CreateTemplate(
+            daysOfWeek: [DayOfWeek.Monday],
+            departureTime: new TimeOnly(17, 30),
+            returnDepartureTime: new TimeOnly(6, 30),
+            returnNextDay: true,
+            generationHorizonDays: 7);
+        var tuesday = TestPlanning.Monday.AddDays(1);
+        template.AddException(
+            tuesday, ScheduleExceptionKind.ExtraRun, new TimeOnly(9, 0), new TimeOnly(15, 0), null);
+
+        var drafts = TripGenerator.Generate(template, NoExisting, TestPlanning.Monday);
+
+        Assert.Equal(3, drafts.Count); // Mon outbound, Tue overnight inbound, Tue extra outbound
+        var extraOutbound = Assert.Single(
+            drafts, d => d.ServiceDate == tuesday && d.Direction == TripDirection.Outbound);
+        Assert.Equal(new TimeOnly(9, 0), extraOutbound.DepartureTime);
+    }
+
+    [Fact]
     public void ExtraRun_landing_on_a_recurrence_date_does_not_double_emit_and_its_times_win()
     {
         // Monday is already a recurrence date; the extra run's 09:00 replaces the 06:30.

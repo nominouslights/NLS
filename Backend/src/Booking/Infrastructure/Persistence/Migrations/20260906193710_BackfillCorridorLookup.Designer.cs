@@ -2,49 +2,45 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
-using NorthernLink.Clients.Infrastructure.Persistence;
+using NorthernLink.Booking.Infrastructure.Persistence;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
-namespace NorthernLink.Clients.Infrastructure.Persistence.Migrations
+namespace NorthernLink.Booking.Infrastructure.Persistence.Migrations
 {
-    [DbContext(typeof(ClientsDbContext))]
-    partial class ClientsDbContextModelSnapshot : ModelSnapshot
+    [DbContext(typeof(BookingDbContext))]
+    [Migration("20260906193710_BackfillCorridorLookup")]
+    partial class BackfillCorridorLookup
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasDefaultSchema("clients")
+                .HasDefaultSchema("booking")
                 .HasAnnotation("ProductVersion", "10.0.0")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-            modelBuilder.Entity("NorthernLink.Clients.Domain.ClientContacts.ClientContact", b =>
+            modelBuilder.Entity("NorthernLink.Booking.Application.Integration.CorridorLookup", b =>
                 {
-                    b.Property<Guid>("Id")
+                    b.Property<Guid>("CorridorId")
                         .HasColumnType("uuid")
-                        .HasColumnName("id");
+                        .HasColumnName("corridor_id");
 
-                    b.Property<Guid>("ClientId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("client_id");
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
 
-                    b.Property<DateTimeOffset>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at_utc");
-
-                    b.Property<string>("Email")
+                    b.Property<string>("Destination")
+                        .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)")
-                        .HasColumnName("email");
-
-                    b.Property<bool>("IsPrimary")
-                        .HasColumnType("boolean")
-                        .HasColumnName("is_primary");
+                        .HasColumnName("destination");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -52,33 +48,83 @@ namespace NorthernLink.Clients.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(200)")
                         .HasColumnName("name");
 
-                    b.Property<string>("Notes")
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)")
-                        .HasColumnName("notes");
-
-                    b.Property<string>("Phone")
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)")
-                        .HasColumnName("phone");
-
-                    b.Property<bool>("ReceivesAccrualsReports")
-                        .HasColumnType("boolean")
-                        .HasColumnName("receives_accruals_reports");
-
-                    b.Property<bool>("ReceivesEmailReports")
-                        .HasColumnType("boolean")
-                        .HasColumnName("receives_email_reports");
+                    b.Property<string>("Origin")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("origin");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");
 
-                    b.Property<string>("Title")
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.HasKey("CorridorId");
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("corridor_lookup", "booking");
+                });
+
+            modelBuilder.Entity("NorthernLink.Booking.Domain.BookingDays.BookingDay", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("CorridorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("corridor_id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<bool>("MinimumGuaranteed")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("minimum_guaranteed");
+
+                    b.Property<int?>("PassengerMinimumOverride")
+                        .HasColumnType("integer")
+                        .HasColumnName("passenger_minimum_override");
+
+                    b.Property<DateTimeOffset?>("RevertedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("reverted_at_utc");
+
+                    b.Property<int?>("SeatCapacityOverride")
+                        .HasColumnType("integer")
+                        .HasColumnName("seat_capacity_override");
+
+                    b.Property<DateOnly>("ServiceDate")
+                        .HasColumnType("date")
+                        .HasColumnName("service_date");
+
+                    b.Property<string>("Status")
                         .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)")
-                        .HasColumnName("title");
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("Unconfirmed")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid?>("TripId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("trip_id");
+
+                    b.Property<string>("TripNumber")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("trip_number");
 
                     b.Property<DateTimeOffset>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone")
@@ -91,25 +137,147 @@ namespace NorthernLink.Clients.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("TenantId", "ClientId");
+                    b.HasIndex("TenantId", "CorridorId", "ServiceDate")
+                        .IsUnique();
 
-                    b.ToTable("client_contacts", "clients");
+                    b.ToTable("booking_days", "booking");
                 });
 
-            modelBuilder.Entity("NorthernLink.Clients.Domain.Clients.Client", b =>
+            modelBuilder.Entity("NorthernLink.Booking.Domain.Bookings.Booking", b =>
                 {
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<string>("AgreementReference")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)")
-                        .HasColumnName("agreement_reference");
+                    b.Property<Guid>("CorridorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("corridor_id");
+
+                    b.Property<string>("CorridorName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("corridor_name");
 
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at_utc");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("customer_id");
+
+                    b.Property<string>("CustomerName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("customer_name");
+
+                    b.Property<DateTimeOffset>("HoldExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("hold_expires_at_utc");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("notes");
+
+                    b.Property<string>("PaymentMethod")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("payment_method");
+
+                    b.Property<string>("PaymentStatus")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("payment_status");
+
+                    b.Property<DateOnly>("ServiceDate")
+                        .HasColumnType("date")
+                        .HasColumnName("service_date");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "CustomerId");
+
+                    b.HasIndex("TenantId", "CorridorId", "ServiceDate");
+
+                    b.ToTable("bookings", "booking");
+                });
+
+            modelBuilder.Entity("NorthernLink.Booking.Domain.Bookings.BookingPassenger", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("BookingId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("booking_id");
+
+                    b.Property<bool>("IsBillingCustomer")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_billing_customer");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Phone")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("phone");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BookingId");
+
+                    b.HasIndex("TenantId", "BookingId");
+
+                    b.ToTable("booking_passengers", "booking");
+                });
+
+            modelBuilder.Entity("NorthernLink.Booking.Domain.Customers.Customer", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("email");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -122,26 +290,19 @@ namespace NorthernLink.Clients.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(2000)")
                         .HasColumnName("notes");
 
-                    b.Property<string>("ServiceType")
+                    b.Property<string>("Phone")
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)")
-                        .HasColumnName("service_type");
+                        .HasColumnName("phone");
 
-                    b.Property<string>("Tag")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("tag");
+                    b.Property<string>("PhoneDigits")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("phone_digits");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");
-
-                    b.Property<string>("Type")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)")
-                        .HasColumnName("type");
 
                     b.Property<DateTimeOffset>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone")
@@ -156,72 +317,44 @@ namespace NorthernLink.Clients.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("TenantId", "Name");
 
-                    b.ToTable("clients", "clients");
+                    b.HasIndex("TenantId", "PhoneDigits");
+
+                    b.ToTable("customers", "booking");
                 });
 
-            modelBuilder.Entity("NorthernLink.Clients.Domain.Contracts.Contract", b =>
+            modelBuilder.Entity("NorthernLink.Booking.Domain.Settings.BookingPolicy", b =>
                 {
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<string>("BillingFrequency")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)")
-                        .HasColumnName("billing_frequency");
+                    b.Property<int>("BookingCutoffHours")
+                        .HasColumnType("integer")
+                        .HasColumnName("booking_cutoff_hours");
 
-                    b.Property<string>("BillingModel")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)")
-                        .HasColumnName("billing_model");
-
-                    b.Property<string>("BudgetCode")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("budget_code");
-
-                    b.Property<Guid>("ClientId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("client_id");
-
-                    b.Property<string>("ClientName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)")
-                        .HasColumnName("client_name");
+                    b.Property<int>("CancellationWindowHours")
+                        .HasColumnType("integer")
+                        .HasColumnName("cancellation_window_hours");
 
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at_utc");
 
-                    b.Property<string>("DefaultPoNumber")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("default_po_number");
-
-                    b.Property<DateOnly?>("EndDate")
-                        .HasColumnType("date")
-                        .HasColumnName("end_date");
-
-                    b.Property<int>("NetTermsDays")
+                    b.Property<int>("DefaultPassengerMinimum")
                         .HasColumnType("integer")
-                        .HasColumnName("net_terms_days");
+                        .HasColumnName("default_passenger_minimum");
 
-                    b.Property<decimal?>("RatePerRoundTripCad")
+                    b.Property<int>("DefaultSeatCapacity")
+                        .HasColumnType("integer")
+                        .HasColumnName("default_seat_capacity");
+
+                    b.Property<decimal>("EarlyCancellationPenaltyCad")
                         .HasColumnType("numeric(12,2)")
-                        .HasColumnName("rate_per_round_trip_cad");
+                        .HasColumnName("early_cancellation_penalty_cad");
 
-                    b.Property<DateOnly>("StartDate")
-                        .HasColumnType("date")
-                        .HasColumnName("start_date");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)")
-                        .HasColumnName("status");
+                    b.Property<int>("SeatHoldMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("seat_hold_minutes");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
@@ -238,47 +371,33 @@ namespace NorthernLink.Clients.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("TenantId", "ClientId");
+                    b.HasIndex("TenantId")
+                        .IsUnique();
 
-                    b.ToTable("contracts", "clients");
+                    b.ToTable("booking_policies", "booking");
                 });
 
-            modelBuilder.Entity("NorthernLink.Clients.Domain.PurchaseOrders.PurchaseOrder", b =>
+            modelBuilder.Entity("NorthernLink.Booking.Domain.Settings.CorridorBookingSettings", b =>
                 {
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<decimal?>("AmountCad")
-                        .HasColumnType("numeric(12,2)")
-                        .HasColumnName("amount_cad");
-
-                    b.Property<Guid>("ClientId")
+                    b.Property<Guid>("CorridorId")
                         .HasColumnType("uuid")
-                        .HasColumnName("client_id");
+                        .HasColumnName("corridor_id");
 
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at_utc");
 
-                    b.Property<DateOnly?>("Expiry")
-                        .HasColumnType("date")
-                        .HasColumnName("expiry");
+                    b.Property<int?>("PassengerMinimum")
+                        .HasColumnType("integer")
+                        .HasColumnName("passenger_minimum");
 
-                    b.Property<DateOnly>("Issued")
-                        .HasColumnType("date")
-                        .HasColumnName("issued");
-
-                    b.Property<string>("Note")
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)")
-                        .HasColumnName("note");
-
-                    b.Property<string>("PoNumber")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("po_number");
+                    b.Property<int?>("SeatCapacity")
+                        .HasColumnType("integer")
+                        .HasColumnName("seat_capacity");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
@@ -295,297 +414,10 @@ namespace NorthernLink.Clients.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("TenantId", "ClientId");
+                    b.HasIndex("TenantId", "CorridorId")
+                        .IsUnique();
 
-                    b.ToTable("purchase_orders", "clients");
-                });
-
-            modelBuilder.Entity("NorthernLink.Clients.Infrastructure.Persistence.ReadModels.ClientContactReadModel", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<Guid>("ClientId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("client_id");
-
-                    b.Property<DateTimeOffset>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at_utc");
-
-                    b.Property<string>("Email")
-                        .HasColumnType("text")
-                        .HasColumnName("email");
-
-                    b.Property<bool>("IsPrimary")
-                        .HasColumnType("boolean")
-                        .HasColumnName("is_primary");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("name");
-
-                    b.Property<string>("Notes")
-                        .HasColumnType("text")
-                        .HasColumnName("notes");
-
-                    b.Property<string>("Phone")
-                        .HasColumnType("text")
-                        .HasColumnName("phone");
-
-                    b.Property<bool>("ReceivesAccrualsReports")
-                        .HasColumnType("boolean")
-                        .HasColumnName("receives_accruals_reports");
-
-                    b.Property<bool>("ReceivesEmailReports")
-                        .HasColumnType("boolean")
-                        .HasColumnName("receives_email_reports");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("tenant_id");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("title");
-
-                    b.Property<DateTimeOffset>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at_utc");
-
-                    b.Property<int>("Version")
-                        .HasColumnType("integer")
-                        .HasColumnName("version");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TenantId", "ClientId");
-
-                    b.ToTable("rm_client_contacts", "clients");
-                });
-
-            modelBuilder.Entity("NorthernLink.Clients.Infrastructure.Persistence.ReadModels.ClientReadModel", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<string>("ActiveContractBillingFrequency")
-                        .HasColumnType("text")
-                        .HasColumnName("active_contract_billing_frequency");
-
-                    b.Property<string>("ActiveContractBillingModel")
-                        .HasColumnType("text")
-                        .HasColumnName("active_contract_billing_model");
-
-                    b.Property<string>("ActiveContractBudgetCode")
-                        .HasColumnType("text")
-                        .HasColumnName("active_contract_budget_code");
-
-                    b.Property<string>("ActiveContractDefaultPoNumber")
-                        .HasColumnType("text")
-                        .HasColumnName("active_contract_default_po_number");
-
-                    b.Property<DateOnly?>("ActiveContractEndDate")
-                        .HasColumnType("date")
-                        .HasColumnName("active_contract_end_date");
-
-                    b.Property<Guid?>("ActiveContractId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("active_contract_id");
-
-                    b.Property<int?>("ActiveContractNetTermsDays")
-                        .HasColumnType("integer")
-                        .HasColumnName("active_contract_net_terms_days");
-
-                    b.Property<decimal?>("ActiveContractRatePerRoundTripCad")
-                        .HasColumnType("numeric(12,2)")
-                        .HasColumnName("active_contract_rate_per_round_trip_cad");
-
-                    b.Property<DateOnly?>("ActiveContractStartDate")
-                        .HasColumnType("date")
-                        .HasColumnName("active_contract_start_date");
-
-                    b.Property<string>("AgreementReference")
-                        .HasColumnType("text")
-                        .HasColumnName("agreement_reference");
-
-                    b.Property<DateTimeOffset>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at_utc");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("name");
-
-                    b.Property<string>("Notes")
-                        .HasColumnType("text")
-                        .HasColumnName("notes");
-
-                    b.Property<string>("ServiceType")
-                        .HasColumnType("text")
-                        .HasColumnName("service_type");
-
-                    b.Property<string>("Tag")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("tag");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("tenant_id");
-
-                    b.Property<string>("Type")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("type");
-
-                    b.Property<DateTimeOffset>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at_utc");
-
-                    b.Property<int>("Version")
-                        .HasColumnType("integer")
-                        .HasColumnName("version");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("rm_clients", "clients");
-                });
-
-            modelBuilder.Entity("NorthernLink.Clients.Infrastructure.Persistence.ReadModels.ContractReadModel", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<string>("BillingFrequency")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("billing_frequency");
-
-                    b.Property<string>("BillingModel")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("billing_model");
-
-                    b.Property<string>("BudgetCode")
-                        .HasColumnType("text")
-                        .HasColumnName("budget_code");
-
-                    b.Property<Guid>("ClientId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("client_id");
-
-                    b.Property<string>("ClientName")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("client_name");
-
-                    b.Property<DateTimeOffset>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at_utc");
-
-                    b.Property<string>("DefaultPoNumber")
-                        .HasColumnType("text")
-                        .HasColumnName("default_po_number");
-
-                    b.Property<DateOnly?>("EndDate")
-                        .HasColumnType("date")
-                        .HasColumnName("end_date");
-
-                    b.Property<int>("NetTermsDays")
-                        .HasColumnType("integer")
-                        .HasColumnName("net_terms_days");
-
-                    b.Property<decimal?>("RatePerRoundTripCad")
-                        .HasColumnType("numeric(12,2)")
-                        .HasColumnName("rate_per_round_trip_cad");
-
-                    b.Property<DateOnly>("StartDate")
-                        .HasColumnType("date")
-                        .HasColumnName("start_date");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("status");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("tenant_id");
-
-                    b.Property<DateTimeOffset>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at_utc");
-
-                    b.Property<int>("Version")
-                        .HasColumnType("integer")
-                        .HasColumnName("version");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("rm_contracts", "clients");
-                });
-
-            modelBuilder.Entity("NorthernLink.Clients.Infrastructure.Persistence.ReadModels.PurchaseOrderReadModel", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<decimal?>("AmountCad")
-                        .HasColumnType("numeric(12,2)")
-                        .HasColumnName("amount_cad");
-
-                    b.Property<Guid>("ClientId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("client_id");
-
-                    b.Property<DateTimeOffset>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at_utc");
-
-                    b.Property<DateOnly?>("Expiry")
-                        .HasColumnType("date")
-                        .HasColumnName("expiry");
-
-                    b.Property<DateOnly>("Issued")
-                        .HasColumnType("date")
-                        .HasColumnName("issued");
-
-                    b.Property<string>("Note")
-                        .HasColumnType("text")
-                        .HasColumnName("note");
-
-                    b.Property<string>("PoNumber")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("po_number");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("tenant_id");
-
-                    b.Property<DateTimeOffset>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at_utc");
-
-                    b.Property<int>("Version")
-                        .HasColumnType("integer")
-                        .HasColumnName("version");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("rm_purchase_orders", "clients");
+                    b.ToTable("corridor_booking_settings", "booking");
                 });
 
             modelBuilder.Entity("NorthernLink.Shared.Persistence.Auditing.AggregateSnapshot", b =>
@@ -629,7 +461,7 @@ namespace NorthernLink.Clients.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("TenantId", "AggregateType", "CreatedAtUtc");
 
-                    b.ToTable("aggregate_snapshots", "clients");
+                    b.ToTable("aggregate_snapshots", "booking");
                 });
 
             modelBuilder.Entity("NorthernLink.Shared.Persistence.Auditing.EventJournalEntry", b =>
@@ -701,7 +533,7 @@ namespace NorthernLink.Clients.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("TenantId", "AggregateId", "AggregateVersion");
 
-                    b.ToTable("event_journal", "clients");
+                    b.ToTable("event_journal", "booking");
                 });
 
             modelBuilder.Entity("NorthernLink.Shared.Persistence.Auditing.OutboxMessage", b =>
@@ -799,7 +631,7 @@ namespace NorthernLink.Clients.Infrastructure.Persistence.Migrations
                     b.HasIndex(new[] { "Position" }, "ix_outbox_messages_unprocessed")
                         .HasFilter("processing_status = 'Pending'");
 
-                    b.ToTable("outbox_messages", "clients");
+                    b.ToTable("outbox_messages", "booking");
                 });
 
             modelBuilder.Entity("NorthernLink.Shared.Persistence.Projections.ProjectionCheckpoint", b =>
@@ -819,7 +651,84 @@ namespace NorthernLink.Clients.Infrastructure.Persistence.Migrations
 
                     b.HasKey("ProjectionName");
 
-                    b.ToTable("projection_checkpoints", "clients");
+                    b.ToTable("projection_checkpoints", "booking");
+                });
+
+            modelBuilder.Entity("NorthernLink.Booking.Domain.Bookings.Booking", b =>
+                {
+                    b.OwnsOne("NorthernLink.Booking.Domain.Bookings.BookingLocation", "Dropoff", b1 =>
+                        {
+                            b1.Property<Guid>("BookingId")
+                                .HasColumnType("uuid");
+
+                            b1.Property<string>("AddressDetail")
+                                .HasMaxLength(500)
+                                .HasColumnType("character varying(500)")
+                                .HasColumnName("dropoff_address_detail");
+
+                            b1.Property<Guid?>("StopId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("dropoff_stop_id");
+
+                            b1.Property<string>("StopName")
+                                .HasMaxLength(200)
+                                .HasColumnType("character varying(200)")
+                                .HasColumnName("dropoff_stop_name");
+
+                            b1.HasKey("BookingId");
+
+                            b1.ToTable("bookings", "booking");
+
+                            b1.WithOwner()
+                                .HasForeignKey("BookingId");
+                        });
+
+                    b.OwnsOne("NorthernLink.Booking.Domain.Bookings.BookingLocation", "Pickup", b1 =>
+                        {
+                            b1.Property<Guid>("BookingId")
+                                .HasColumnType("uuid");
+
+                            b1.Property<string>("AddressDetail")
+                                .HasMaxLength(500)
+                                .HasColumnType("character varying(500)")
+                                .HasColumnName("pickup_address_detail");
+
+                            b1.Property<Guid?>("StopId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("pickup_stop_id");
+
+                            b1.Property<string>("StopName")
+                                .HasMaxLength(200)
+                                .HasColumnType("character varying(200)")
+                                .HasColumnName("pickup_stop_name");
+
+                            b1.HasKey("BookingId");
+
+                            b1.ToTable("bookings", "booking");
+
+                            b1.WithOwner()
+                                .HasForeignKey("BookingId");
+                        });
+
+                    b.Navigation("Dropoff")
+                        .IsRequired();
+
+                    b.Navigation("Pickup")
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NorthernLink.Booking.Domain.Bookings.BookingPassenger", b =>
+                {
+                    b.HasOne("NorthernLink.Booking.Domain.Bookings.Booking", null)
+                        .WithMany("Passengers")
+                        .HasForeignKey("BookingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NorthernLink.Booking.Domain.Bookings.Booking", b =>
+                {
+                    b.Navigation("Passengers");
                 });
 #pragma warning restore 612, 618
         }

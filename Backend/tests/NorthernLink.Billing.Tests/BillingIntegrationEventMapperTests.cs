@@ -34,7 +34,7 @@ public class BillingIntegrationEventMapperTests
 
         var invoice = Invoice.CreateDraft(
             Guid.NewGuid(), "INV-2026-114", Guid.NewGuid(), "Alamos", null, null, null,
-            30, gstApplicable: true, Invoice.StandardGstRate,
+            30,
             new DateOnly(2026, 8, 1), new DateOnly(2026, 8, 31), lines);
 
         Assert.True(invoice.IsSuccess);
@@ -48,7 +48,7 @@ public class BillingIntegrationEventMapperTests
     }
 
     private static InvoiceLinesReplacedDomainEvent LinesReplaced(Invoice invoice) =>
-        new(invoice.Id, invoice.Lines.Count, invoice.SubtotalCad, invoice.TotalCad);
+        new(invoice.Id, invoice.Lines.Count, invoice.TotalCad);
 
     [Fact]
     public void A_draft_publishes_its_trips_as_on_worksheet()

@@ -14,7 +14,6 @@ public sealed class ContractReadModel
     public DateOnly? EndDate { get; set; }
     public string BillingModel { get; set; } = null!;
     public decimal? RatePerRoundTripCad { get; set; }
-    public bool GstApplicable { get; set; }
     public string? BudgetCode { get; set; }
     public string BillingFrequency { get; set; } = null!;
     public int NetTermsDays { get; set; }
@@ -42,7 +41,6 @@ public sealed class ContractReadModelConfiguration : IEntityTypeConfiguration<Co
         builder.Property(c => c.RatePerRoundTripCad)
             .HasColumnName("rate_per_round_trip_cad")
             .HasColumnType("numeric(12,2)");
-        builder.Property(c => c.GstApplicable).HasColumnName("gst_applicable");
         builder.Property(c => c.BudgetCode).HasColumnName("budget_code");
         builder.Property(c => c.BillingFrequency).HasColumnName("billing_frequency");
         builder.Property(c => c.NetTermsDays).HasColumnName("net_terms_days");

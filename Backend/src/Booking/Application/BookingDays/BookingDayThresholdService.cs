@@ -8,21 +8,30 @@ using NorthernLink.Booking.Domain.Settings;
 namespace NorthernLink.Booking.Application.BookingDays;
 
 /// <summary>
-/// The threshold recompute that runs INSIDE the confirm/cancel booking transaction: after
-/// the handler mutates the booking (but before anything is saved), this recomputes the
-/// day's sold-vs-minimum and moves the <see cref="BookingDay"/> lifecycle accordingly. It
-/// never saves — the calling handler commits booking + day + outbox rows in one
-/// SaveChanges, which is the whole DB-atomicity guarantee (single-API-instance rule; the
-/// day's optimistic-concurrency Version arbitrates racing recomputes).
+/// The unified threshold recompute that runs INSIDE the booking/override transaction. The
+/// handler shape is load-bearing and always the same: load the aggregate (clean) →
+/// <see cref="EnsureDayAsync"/> → mutate → <see cref="RecomputeAsync"/> → one SaveChanges.
 /// <para>
-/// Because the mutated booking is not yet saved, the read-side rows still show its old
-/// status; every computation overlays the in-flight status onto that booking's row first.
-/// Crossing up (on a booking confirm) confirms the day — from Unconfirmed or Reverted —
-/// publishing the chain-reaction event Trips turns into the community trip. Crossing down
-/// (on a cancellation, while Confirmed) applies the window rule: revert only when the
-/// minimum is not guaranteed (Gift-a-Seat) and <see cref="CancellationWindow"/> says the
-/// departure is still more than the policy window away; inside the window the day stays
-/// Confirmed and the run happens.
+/// <see cref="EnsureDayAsync"/> is the ONLY place a mid-flow save may occur (the
+/// repository's DB-atomic get-or-create commits the day row when it has to insert one), so
+/// it must run BEFORE anything else is mutated — at that point the tracker holds only clean
+/// entities and the early save flushes nothing but the day-create. <see cref="RecomputeAsync"/>
+/// never saves: the booking flip, any resulting day transition (with its outbox row — the
+/// chain-reaction event Trips turns into the community trip), and the audit entries all
+/// commit in the handler's single SaveChanges, which is the DB-atomicity guarantee
+/// (single-API-instance rule; the day's optimistic-concurrency Version arbitrates racing
+/// recomputes).
+/// </para>
+/// <para>
+/// Because the mutated aggregate is not yet saved, the read-side rows still show its old
+/// state; the recompute overlays the in-flight booking's status AND passenger count onto
+/// its row first (edits change seat counts too, not just status). Crossing up confirms the
+/// day — from Unconfirmed or Reverted. Crossing down while Confirmed applies the window
+/// rule: revert only when the minimum is not guaranteed (Gift-a-Seat) and
+/// <see cref="CancellationWindow"/> says the departure is still more than the policy window
+/// away; inside the window the day stays Confirmed and the run happens. Override changes
+/// recompute under exactly the same rules — a raised minimum inside the cancellation window
+/// does NOT revert a confirmed day, same as cancellations.
 /// </para>
 /// </summary>
 public sealed class BookingDayThresholdService(
@@ -35,56 +44,55 @@ public sealed class BookingDayThresholdService(
     ILogger<BookingDayThresholdService> logger)
 {
     /// <summary>
-    /// After a booking confirm: crossing (or sitting at/above) the minimum confirms the day.
-    /// A confirm never moves a day downward, so nothing else can happen here.
+    /// Returns the corridor+date's <see cref="BookingDay"/>, creating it when missing
+    /// (get-or-create covers legacy bookings from before days materialized eagerly). May
+    /// save mid-flow (the insert path), so callers MUST invoke this before mutating any
+    /// loaded aggregate — see the class doc.
     /// </summary>
-    public async Task ApplyAfterConfirmAsync(
-        Domain.Bookings.Booking booking, CancellationToken cancellationToken = default)
-    {
-        // The day normally exists (created with the first booking); get-or-create covers
-        // legacy bookings from before days materialized eagerly.
-        var day = await bookingDays.GetOrCreateAsync(
-            booking.CorridorId,
-            booking.ServiceDate,
-            () => BookingDay.Create(booking.TenantId, booking.CorridorId, booking.ServiceDate),
+    public Task<BookingDay> EnsureDayAsync(
+        Guid tenantId, Guid corridorId, DateOnly serviceDate, CancellationToken cancellationToken = default) =>
+        bookingDays.GetOrCreateAsync(
+            corridorId,
+            serviceDate,
+            () => BookingDay.Create(tenantId, corridorId, serviceDate),
             cancellationToken);
 
-        var math = await ComputeAsync(day, booking, cancellationToken);
-        if (math.Seats.Sold < math.Minimum || day.Status == BookingDayStatus.Confirmed)
-        {
-            return;
-        }
-
-        var result = day.Confirm(await SnapshotAsync(booking, math, cancellationToken));
-        if (result.IsFailure)
-        {
-            logger.LogWarning(
-                "Booking day {BookingDayId} did not confirm after crossing its minimum: {Error}",
-                day.Id, result.Error.Code);
-            return;
-        }
-
-        logger.LogInformation(
-            "Booking day {BookingDayId} ({CorridorId} {ServiceDate}) confirmed at {Sold}/{Minimum} seats",
-            day.Id, day.CorridorId, day.ServiceDate, math.Seats.Sold, math.Minimum);
-    }
-
     /// <summary>
-    /// After a booking cancellation: dropping below the minimum while Confirmed applies the
-    /// window rule (revert before the cutoff, stay Confirmed at or past it; a guaranteed
-    /// minimum suppresses reverting entirely). A cancellation never moves a day upward.
+    /// Recomputes sold-vs-minimum for <paramref name="day"/> and moves its lifecycle in
+    /// whichever direction the numbers demand. <paramref name="inFlight"/> is the booking
+    /// the current transaction mutated but has not yet saved (null for override changes,
+    /// where the read side is already current); its row is overlaid before computing.
+    /// Never saves, and the no-op path touches nothing — an untouched tracked day stays
+    /// Unchanged, so the eventless-write guard in ModuleDbContext is not tripped.
     /// </summary>
-    public async Task ApplyAfterCancelAsync(
-        Domain.Bookings.Booking booking, CancellationToken cancellationToken = default)
+    public async Task RecomputeAsync(
+        BookingDay day, Domain.Bookings.Booking? inFlight, CancellationToken cancellationToken = default)
     {
-        var day = await bookingDays.GetAsync(booking.CorridorId, booking.ServiceDate, cancellationToken);
-        if (day is null || day.Status != BookingDayStatus.Confirmed)
+        var math = await ComputeAsync(day, inFlight, cancellationToken);
+
+        if (math.Seats.Sold >= math.Minimum)
         {
+            if (day.Status == BookingDayStatus.Confirmed)
+            {
+                return;
+            }
+
+            var confirmed = day.Confirm(await SnapshotAsync(day, inFlight, math, cancellationToken));
+            if (confirmed.IsFailure)
+            {
+                logger.LogWarning(
+                    "Booking day {BookingDayId} did not confirm after crossing its minimum: {Error}",
+                    day.Id, confirmed.Error.Code);
+                return;
+            }
+
+            logger.LogInformation(
+                "Booking day {BookingDayId} ({CorridorId} {ServiceDate}) confirmed at {Sold}/{Minimum} seats",
+                day.Id, day.CorridorId, day.ServiceDate, math.Seats.Sold, math.Minimum);
             return;
         }
 
-        var math = await ComputeAsync(day, booking, cancellationToken);
-        if (math.Seats.Sold >= math.Minimum)
+        if (day.Status != BookingDayStatus.Confirmed)
         {
             return;
         }
@@ -99,7 +107,7 @@ public sealed class BookingDayThresholdService(
 
         var windowHours = math.Policy?.CancellationWindowHours ?? BookingPolicy.DefaultCancellationWindowHours;
         var now = clock.GetUtcNow();
-        if (!CancellationWindow.IsBeforeCutoff(booking.ServiceDate, windowHours, now))
+        if (!CancellationWindow.IsBeforeCutoff(day.ServiceDate, windowHours, now))
         {
             logger.LogInformation(
                 "Booking day {BookingDayId} dropped to {Sold}/{Minimum} seats inside the {Window}h window — staying Confirmed, the run happens",
@@ -107,8 +115,8 @@ public sealed class BookingDayThresholdService(
             return;
         }
 
-        var recipients = await BuildRecipientsAsync(booking, cancellationToken);
-        var corridorName = await CorridorNameAsync(booking, cancellationToken);
+        var recipients = await BuildRecipientsAsync(day, inFlight, cancellationToken);
+        var corridorName = await CorridorNameAsync(day, inFlight, cancellationToken);
         var result = day.Revert(
             corridorName,
             math.Seats.Sold,
@@ -130,18 +138,24 @@ public sealed class BookingDayThresholdService(
     }
 
     private async Task<DayMath> ComputeAsync(
-        BookingDay day, Domain.Bookings.Booking booking, CancellationToken cancellationToken)
+        BookingDay day, Domain.Bookings.Booking? inFlight, CancellationToken cancellationToken)
     {
-        var settings = await corridorSettings.GetByCorridorAsync(booking.CorridorId, cancellationToken);
+        var settings = await corridorSettings.GetByCorridorAsync(day.CorridorId, cancellationToken);
         var policy = await policies.GetAsync(cancellationToken);
 
         var rows = await bookingReads.GetSeatRowsAsync(
-            booking.CorridorId, booking.ServiceDate, booking.ServiceDate, cancellationToken);
+            day.CorridorId, day.ServiceDate, day.ServiceDate, cancellationToken);
 
-        // Overlay the in-flight (unsaved) status of the booking this transaction mutated.
-        var overlaid = rows
-            .Select(row => row.BookingId == booking.Id ? row with { Status = booking.Status } : row)
-            .ToList();
+        // Overlay the in-flight (unsaved) state of the booking this transaction mutated —
+        // both status AND passenger count, because the read is a database query that cannot
+        // see unsaved passenger edits.
+        var overlaid = inFlight is null
+            ? rows
+            : rows
+                .Select(row => row.BookingId == inFlight.Id
+                    ? row with { Status = inFlight.Status, PassengerCount = inFlight.Passengers.Count }
+                    : row)
+                .ToList();
 
         var capacity = SeatMath.ResolveCapacity(day.SeatCapacityOverride, settings?.SeatCapacity, policy);
         var minimum = SeatMath.ResolveMinimum(day.PassengerMinimumOverride, settings?.PassengerMinimum, policy);
@@ -151,11 +165,11 @@ public sealed class BookingDayThresholdService(
     }
 
     private async Task<BookingDayConfirmationSnapshot> SnapshotAsync(
-        Domain.Bookings.Booking booking, DayMath math, CancellationToken cancellationToken)
+        BookingDay day, Domain.Bookings.Booking? inFlight, DayMath math, CancellationToken cancellationToken)
     {
-        var corridor = await corridors.GetAsync(booking.CorridorId, cancellationToken);
+        var corridor = await corridors.GetAsync(day.CorridorId, cancellationToken);
         return new BookingDayConfirmationSnapshot(
-            CorridorName: corridor?.Name ?? booking.CorridorName,
+            CorridorName: corridor?.Name ?? inFlight?.CorridorName ?? string.Empty,
             Origin: corridor?.Origin ?? string.Empty,
             Destination: corridor?.Destination ?? string.Empty,
             SeatsSold: math.Seats.Sold,
@@ -164,26 +178,29 @@ public sealed class BookingDayThresholdService(
     }
 
     private async Task<string> CorridorNameAsync(
-        Domain.Bookings.Booking booking, CancellationToken cancellationToken)
+        BookingDay day, Domain.Bookings.Booking? inFlight, CancellationToken cancellationToken)
     {
-        var corridor = await corridors.GetAsync(booking.CorridorId, cancellationToken);
-        return corridor?.Name ?? booking.CorridorName;
+        var corridor = await corridors.GetAsync(day.CorridorId, cancellationToken);
+        return corridor?.Name ?? inFlight?.CorridorName ?? string.Empty;
     }
 
     /// <summary>
     /// The revert notification snapshot: one entry per customer holding a non-cancelled
-    /// booking on the day (the just-cancelled booking overlaid first, so its customer drops
-    /// out unless another live booking of theirs remains), customers without an email
-    /// excluded — they simply cannot be reached this way, which is not an error.
+    /// booking on the day (the in-flight booking overlaid first, so a just-cancelled
+    /// booking's customer drops out unless another live booking of theirs remains),
+    /// customers without an email excluded — they simply cannot be reached this way, which
+    /// is not an error.
     /// </summary>
     private async Task<IReadOnlyList<DayRevertRecipient>> BuildRecipientsAsync(
-        Domain.Bookings.Booking booking, CancellationToken cancellationToken)
+        BookingDay day, Domain.Bookings.Booking? inFlight, CancellationToken cancellationToken)
     {
         var rows = await bookingReads.GetRecipientRowsAsync(
-            booking.CorridorId, booking.ServiceDate, cancellationToken);
+            day.CorridorId, day.ServiceDate, cancellationToken);
 
         return rows
-            .Select(row => row.BookingId == booking.Id ? row with { Status = booking.Status } : row)
+            .Select(row => inFlight is not null && row.BookingId == inFlight.Id
+                ? row with { Status = inFlight.Status }
+                : row)
             .Where(row => row.Status != Domain.Bookings.BookingStatus.Cancelled)
             .Where(row => !string.IsNullOrWhiteSpace(row.Email))
             .GroupBy(row => row.CustomerId)

@@ -46,7 +46,8 @@ internal static class TestNotifications
         ],
         Invoices:
         [
-            new AccrualsInvoiceRow("INV-2026-081", "Paid", "$2,900.00", "$145.00", "$3,045.00"),
+            new AccrualsInvoiceRow(
+                "INV-2026-081", "QBO-4417", "Paid", "Aug 1 – Aug 31, 2026", "$2,900.00"),
         ]);
 
     public static EmailTemplate CreateTemplate(

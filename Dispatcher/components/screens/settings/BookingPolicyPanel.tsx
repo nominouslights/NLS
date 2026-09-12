@@ -189,8 +189,8 @@ export default function BookingPolicyPanel() {
         <SectionLabel>Per-corridor minimum &amp; capacity</SectionLabel>
         {settings.corridors.length === 0 ? (
           <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textMuted, lineHeight: 1.6 }}>
-            No corridors synced yet — corridors mirror the community routes in Routes &amp; Schedules and appear
-            here after each route is re-saved once.
+            No per-corridor overrides configured yet — corridors use the policy defaults above until an
+            override row is created for them.
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>

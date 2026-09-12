@@ -26,8 +26,8 @@ public sealed record InvoiceDraft(
 /// (empty repositioning) leg still prices at the full round-trip rate, but the line is
 /// flagged so the dispatcher can apply an optional manual discount — worksheet lines are
 /// editable. Trips with no key (ad-hoc/charter/cargo) are left unclaimed for manual
-/// lines on the draft. GST is not a line — the invoice computes it from its snapshot
-/// rate when applicable.
+/// lines on the draft. No tax line is ever built: the platform applies no tax at all,
+/// and QuickBooks Online owns that calculation.
 /// </summary>
 public static class InvoiceDraftBuilder
 {
