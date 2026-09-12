@@ -9,6 +9,7 @@ import { DetailRow, Panel, SectionLabel } from "@/components/ui/Panel";
 import { ApiError } from "@/lib/api/transport";
 import {
   budgetCodeCategoryKind,
+  costCentreApplies,
   deleteBudgetCode,
   listBudgetCodes,
   listBudgetOwnerCandidates,
@@ -342,7 +343,9 @@ export default function BudgetCodes({
                         selected.serviceLine ? SERVICE_LINE_LABELS[selected.serviceLine] : "Unassigned"
                       }
                     />
-                    <DetailRow label="Cost centre" value={selected.costCentre ?? "—"} />
+                    {costCentreApplies(selected.category) && (
+                      <DetailRow label="Cost centre" value={selected.costCentre ?? "—"} />
+                    )}
                     <DetailRow
                       label="Parent code"
                       value={

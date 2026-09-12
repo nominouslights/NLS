@@ -10,9 +10,11 @@ public class BudgetCodeTests
     [Fact]
     public void Create_starts_active_and_keeps_every_detail()
     {
+        // Expense, not Revenue, purely so the cost centre can be part of the round trip — a
+        // revenue code is not allowed to carry one (CostCentreNotAllowedForRevenue, below).
         var details = TestBudgeting.CodeDetails(
             name: "Alamos crew shuttle",
-            category: BudgetCodeCategory.Revenue,
+            category: BudgetCodeCategory.Expense,
             reviewFrequency: BudgetReviewFrequency.Monthly,
             serviceLine: BudgetServiceLine.ContractCrew,
             costCentre: "OPS-01",
@@ -27,7 +29,7 @@ public class BudgetCodeTests
         Assert.True(code.IsActive);
         Assert.Equal("ZBB-CREW-01", code.Code);
         Assert.Equal("Alamos crew shuttle", code.Name);
-        Assert.Equal(BudgetCodeCategory.Revenue, code.Category);
+        Assert.Equal(BudgetCodeCategory.Expense, code.Category);
         Assert.Equal(BudgetReviewFrequency.Monthly, code.ReviewFrequency);
         Assert.Equal(BudgetServiceLine.ContractCrew, code.ServiceLine);
         Assert.Equal("OPS-01", code.CostCentre);
@@ -184,6 +186,83 @@ public class BudgetCodeTests
 
         Assert.True(result.IsFailure);
         Assert.Equal(BudgetCodeErrors.CostCentreTooLong, result.Error);
+    }
+
+    // --- A cost centre attributes cost, so revenue never carries one -----------------------------
+
+    [Fact]
+    public void A_revenue_code_with_a_cost_centre_is_rejected()
+    {
+        var result = BudgetCode.Create(
+            TestBudgeting.TenantId,
+            "ZBB-CREW-01",
+            TestBudgeting.CodeDetails(category: BudgetCodeCategory.Revenue, costCentre: "OPS-01"),
+            actorId: null);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(BudgetCodeErrors.CostCentreNotAllowedForRevenue, result.Error);
+    }
+
+    [Fact]
+    public void A_revenue_code_without_a_cost_centre_is_allowed()
+    {
+        // The normal revenue path, pinned so the rule above cannot over-reach into it.
+        var result = BudgetCode.Create(
+            TestBudgeting.TenantId,
+            "ZBB-CREW-01",
+            TestBudgeting.CodeDetails(category: BudgetCodeCategory.Revenue, costCentre: null),
+            actorId: null);
+
+        Assert.True(result.IsSuccess);
+        Assert.Null(result.Value.CostCentre);
+    }
+
+    [Fact]
+    public void A_revenue_code_with_a_whitespace_only_cost_centre_is_allowed_and_stores_null()
+    {
+        // Whitespace is not a violation: Apply normalizes "   " to null, so there is nothing left
+        // to reject. Rejecting it would make an empty form field an error message.
+        var result = BudgetCode.Create(
+            TestBudgeting.TenantId,
+            "ZBB-CREW-01",
+            TestBudgeting.CodeDetails(category: BudgetCodeCategory.Revenue, costCentre: "   "),
+            actorId: null);
+
+        Assert.True(result.IsSuccess);
+        Assert.Null(result.Value.CostCentre);
+    }
+
+    [Fact]
+    public void An_expense_code_still_carries_its_cost_centre()
+    {
+        // Guards the regression the other way: the rule is about Revenue only.
+        var result = BudgetCode.Create(
+            TestBudgeting.TenantId,
+            "ZBB-CREW-01",
+            TestBudgeting.CodeDetails(category: BudgetCodeCategory.Expense, costCentre: "OPS-01"),
+            actorId: null);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("OPS-01", result.Value.CostCentre);
+    }
+
+    [Fact]
+    public void Update_rejects_switching_an_expense_code_to_revenue_while_keeping_its_cost_centre()
+    {
+        // The edit path explicitly, because it is the path the console uses to clear a legacy
+        // value: a code that predates this rule must be saved without its cost centre, not with it.
+        var code = TestBudgeting.CreateCode(
+            details: TestBudgeting.CodeDetails(category: BudgetCodeCategory.Expense, costCentre: "OPS-01"));
+
+        var result = code.Update(
+            TestBudgeting.CodeDetails(category: BudgetCodeCategory.Revenue, costCentre: "OPS-01"),
+            TestBudgeting.ActorId);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(BudgetCodeErrors.CostCentreNotAllowedForRevenue, result.Error);
+        Assert.Equal(BudgetCodeCategory.Expense, code.Category);
+        Assert.Equal("OPS-01", code.CostCentre);
+        Assert.Empty(code.DomainEvents.OfType<BudgetCodeUpdatedDomainEvent>());
     }
 
     [Fact]

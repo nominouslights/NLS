@@ -38,6 +38,10 @@ public static class BudgetCodeErrors
         "Budgeting.Code.CostCentreTooLong",
         $"The cost centre must be {BudgetCode.CostCentreMaxLength} characters or fewer.");
 
+    public static readonly Error CostCentreNotAllowedForRevenue = Error.Validation(
+        "Budgeting.Code.CostCentreNotAllowedForRevenue",
+        "A revenue code cannot carry a cost centre — a cost centre attributes cost, not revenue.");
+
     public static readonly Error GlAccountCodeTooLong = Error.Validation(
         "Budgeting.Code.GlAccountCodeTooLong",
         $"The GL account code must be {BudgetCode.GlAccountCodeMaxLength} characters or fewer.");

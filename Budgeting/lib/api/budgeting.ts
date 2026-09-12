@@ -284,6 +284,20 @@ export function budgetCodeFormatError(code: string): string | null {
 }
 
 /**
+ * Whether a cost centre applies to a code of this category. Mirrors the
+ * CostCentreNotAllowedForRevenue rule in BudgetCode.Validate
+ * (BudgetCodeErrors.CostCentreNotAllowedForRevenue) — a cost centre attributes cost, so revenue
+ * codes do not carry one. The form hides the field, and the detail panel hides the row, on the
+ * strength of this.
+ *
+ * Written as === "Expense" rather than !== "Revenue" deliberately: a future third category has
+ * to make a deliberate choice here rather than silently inherit a cost-centre field.
+ */
+export function costCentreApplies(category: BudgetCodeCategory): boolean {
+  return category === "Expense";
+}
+
+/**
  * Category → status kind, here rather than in the screen for the same reason as periodKind: the
  * mapping is decided once, next to the data, so every screen agrees. Revenue is money coming in
  * ("ontime"); an expense is neither good nor bad on its own, so it stays informational ("info").
