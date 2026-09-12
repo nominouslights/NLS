@@ -12,6 +12,7 @@ import type {
 import { ApiError } from "@/lib/api/transport";
 import {
   budgetCodeFormatError,
+  costCentreApplies,
   createBudgetCode,
   listBudgetCodes,
   normalizeBudgetCode,
@@ -32,8 +33,8 @@ import { ActionButton } from "@/components/ui/Button";
 // field, server-side validation is authoritative, and a 409 or 400 surfaces as the backend's own
 // message in the vermillion banner.
 //
-// Two rules this form has to carry visibly, because both are enforced server-side and neither is
-// guessable from the UI:
+// Three rules this form has to carry visibly, because all three are enforced server-side and
+// none is guessable from the UI:
 //
 //   1. **The code string is set once.** There is no rename endpoint — allocations and actuals
 //      reference a code by string, so renaming would orphan every row already tagged. In edit
@@ -41,6 +42,9 @@ import { ActionButton } from "@/components/ui/Button";
 //      field reads as "not right now" when the truth is "not ever".
 //   2. **The hierarchy is one level deep.** The parent picker only offers top-level codes, and
 //      says so — a user who cannot find a code in the list should not have to guess why.
+//   3. **A revenue code has no cost centre.** A cost centre attributes cost, so the field is
+//      absent rather than disabled when the category is Revenue, and a value stored before the
+//      rule existed is cleared on save. `costCentreApplies` is the mirror of the server's rule.
 
 const CATEGORY_OPTIONS: { value: BudgetCodeCategory; label: string }[] = [
   { value: "Revenue", label: "Revenue" },
@@ -131,7 +135,9 @@ export default function BudgetCodeFormModal({
       description: description.trim() || null,
       category,
       serviceLine: (serviceLine || null) as BudgetServiceLine | null,
-      costCentre: costCentre.trim() || null,
+      // Revenue codes never carry a cost centre (BudgetCode.Validate rejects one). Sending null
+      // rather than the hidden state also clears a value stored before this rule existed.
+      costCentre: costCentreApplies(category) ? costCentre.trim() || null : null,
       parentCodeId: parentCodeId || null,
       glAccountCode: glAccountCode.trim() || null,
       taxTreatment: (taxTreatment || null) as BudgetTaxTreatment | null,
@@ -263,14 +269,18 @@ export default function BudgetCodeFormModal({
       </Row>
 
       <Row top>
-        <TextField
-          label="Cost centre"
-          value={costCentre}
-          onChange={setCostCentre}
-          maxLength={32}
-          placeholder="OPS-01"
-          hint="Optional"
-        />
+        {/* A cost centre attributes cost, so a revenue code never has one — the field is not
+            offered at all, and GL account code simply takes the first column. */}
+        {costCentreApplies(category) && (
+          <TextField
+            label="Cost centre"
+            value={costCentre}
+            onChange={setCostCentre}
+            maxLength={32}
+            placeholder="OPS-01"
+            hint="Optional"
+          />
+        )}
         <TextField
           label="GL account code"
           value={glAccountCode}

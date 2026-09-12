@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   budgetCodeCategoryKind,
   budgetCodeFormatError,
+  costCentreApplies,
   normalizeBudgetCode,
   parentCandidates,
   periodKind,
@@ -220,6 +221,20 @@ describe("parentCandidates", () => {
 
   it("returns nothing when every code already has a parent", () => {
     expect(parentCandidates([code("b", "a")], null)).toEqual([]);
+  });
+});
+
+// costCentreApplies mirrors the CostCentreNotAllowedForRevenue check in BudgetCode.Validate
+// (BudgetCodeErrors.CostCentreNotAllowedForRevenue). The form hides the field and the detail
+// panel hides the row on this answer, so the day the server rule changes, this is what fails.
+
+describe("costCentreApplies", () => {
+  it("applies to an expense code — a cost centre attributes cost", () => {
+    expect(costCentreApplies("Expense")).toBe(true);
+  });
+
+  it("does not apply to a revenue code — the server rejects the combination", () => {
+    expect(costCentreApplies("Revenue")).toBe(false);
   });
 });
 

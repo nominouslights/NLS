@@ -157,7 +157,7 @@ to honest zeros until the allocations slice lands, and derives `pk` from `state`
 Unlike periods, codes are **not** hoisted into `Console.tsx`: only `screens/BudgetCodes.tsx`
 reads them, so that screen owns its own fetch.
 
-Four rules the UI has to keep visible, because all four are enforced server-side and none is
+Five rules the UI has to keep visible, because all five are enforced server-side and none is
 guessable from the form:
 
 - **The code string is set once.** There is no rename endpoint — allocations and actuals
@@ -177,6 +177,10 @@ guessable from the form:
   is manual by decision — `Invoice.EnteredInQbo` is a flag a bookkeeper ticks, and the platform
   never calls the QBO API. There is no synced chart of accounts to validate against and no
   validator abstraction pretending otherwise. The field's hint says so to the user.
+- **A revenue code has no cost centre.** A cost centre attributes cost; revenue is not attributed
+  to one. `BudgetCode.Validate` rejects the combination outright, the form hides the field when
+  the category is Revenue, and the detail panel hides the row. `costCentreApplies` in
+  `lib/api/budgeting.ts` is the single mirror both screens read.
 
 `serviceLine`'s six revenue members are **byte-identical to the backend's `TripServiceType`**
 (`ContractCrew, Community, Nihb, Charter, Cargo, Grocery`) so Stage 6.2's revenue-mix report joins
