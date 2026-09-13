@@ -76,11 +76,24 @@ function discoverModules() {
 }
 
 /**
- * The connection string exists in exactly one place on a dev machine: the gitignored
+ * The connection string comes from the shell environment first, and only then from the gitignored
  * launchSettings.json. Nothing is read from appsettings.json — that is the whole point of the
  * env-var-only secrets convention.
+ *
+ * The environment is checked first because it is the convention the rest of the platform already
+ * follows: `NorthernLink.Shared.Kernel.RequiredEnvironmentVariable` reads every secret via
+ * Environment.GetEnvironmentVariable, never through IConfiguration, so no secret can end up in a
+ * committed file. launchSettings.json remains a fallback only because it used to be the single
+ * documented home for this one value; a machine that keeps the credential exported in ~/.zshrc (or
+ * a gitignored env file it sources) needs no secret written to disk inside the repo at all.
  */
 function loadEnv() {
+  const fromShell = process.env['ConnectionStrings__Postgres'];
+  if (fromShell) {
+    // Pass only the keys this tool needs. Spreading all of process.env here would hand the
+    // redactor every unrelated token on the machine to scan for.
+    return { ConnectionStrings__Postgres: fromShell };
+  }
   if (!fs.existsSync(launchSettings)) return null;
   const profiles = JSON.parse(fs.readFileSync(launchSettings, 'utf8').replace(/^﻿/, '')).profiles ?? {};
   const vars = (profiles.http ?? Object.values(profiles)[0])?.environmentVariables;
@@ -316,7 +329,7 @@ async function gather() {
   const vars = loadEnv();
   if (!vars) {
     const rel = path.relative(repoRoot, launchSettings);
-    return { fatal: `No connection string found. ${rel} is gitignored — recreate it locally before this check can run.` };
+    return { fatal: `No connection string found. Export ConnectionStrings__Postgres in your shell (the platform convention), or put it in ${rel}, which is gitignored.` };
   }
   const redact = makeRedactor(vars);
   const reports = [];
@@ -416,7 +429,7 @@ async function apply(moduleName) {
     return 2;
   }
   const vars = loadEnv();
-  if (!vars) { console.error('No connection string — recreate launchSettings.json locally.'); return 2; }
+  if (!vars) { console.error('No connection string — export ConnectionStrings__Postgres, or put it in the gitignored launchSettings.json.'); return 2; }
   const redact = makeRedactor(vars);
 
   const before = await listMigrations(module, vars, redact);
