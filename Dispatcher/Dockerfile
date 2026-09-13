@@ -34,6 +34,14 @@ ENV API_PROXY_TARGET=$API_PROXY_TARGET
 ARG NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=""
 ENV NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=$NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
 
+# Where the launcher's Budgeting tile links out to (the Budgeting console is a separate app).
+# Inlined at build time like every NEXT_PUBLIC_*, so a runtime value does nothing. Empty
+# renders the tile as "Not configured" (visible, disabled) — the safe default. Set it to
+# /budget as part of the path-prefix flip below, in the same sitting as the ingress rule that
+# actually mounts Budgeting there, and never before: an earlier value is a dead link.
+ARG NEXT_PUBLIC_BUDGETING_URL=""
+ENV NEXT_PUBLIC_BUDGETING_URL=$NEXT_PUBLIC_BUDGETING_URL
+
 # Path prefix this console is mounted at, when the three frontends share one hostname instead
 # of getting one each. Both of these bake in at build time and must agree with each other and
 # with the App Platform ingress rule (preserve_path_prefix: true) — see next.config.ts.

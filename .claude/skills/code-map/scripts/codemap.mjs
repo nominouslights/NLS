@@ -334,9 +334,10 @@ function buildAll(all) {
     'dispatcher.md': {
       title: 'Code Map — Dispatcher (Admin Web App / Dispatch Console)',
       intro: [
-        'Next.js 16 / React 19, frontend-only prototype on mock data. components/Console.tsx is the',
-        'shell (TopBar + NavRail + screen switch, state in lib/nav.ts). Styling is inline style',
-        'objects driven by lib/theme.ts tokens — no Tailwind/CSS modules.',
+        'Next.js 16 / React 19, mostly API-backed with mock remnants. components/Console.tsx is a',
+        'two-level shell: the Home.tsx launcher, then one apps/*App at a time, each rendering NavRail',
+        'with its own group (manifest in lib/apps.ts; lib/nav.ts derives NAV_GROUPS from it). Styling',
+        'is inline style objects driven by lib/theme.ts tokens — no Tailwind/CSS modules.',
       ],
       sections: [screensSection('Dispatcher', all), componentsSection('Dispatcher', all), libSection('Dispatcher', all)],
     },

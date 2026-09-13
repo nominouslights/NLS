@@ -8,21 +8,13 @@ import { SelectField } from "@/components/ui/Field";
 import { generateAdminInvite, INVITE_ROLES, type AdminInvite, type InviteRole } from "@/lib/auth";
 import { ApiError } from "@/lib/api";
 import { copyToClipboard } from "@/lib/clipboard";
-import BookingPolicyPanel from "@/components/screens/settings/BookingPolicyPanel";
 
-const TABS = ["Organization", "Users & Roles", "Booking Policy", "Budget Codes", "Rate Schedules", "Connectors", "Audit Log"];
+const TABS = ["Organization", "Users & Roles", "Rate Schedules", "Connectors", "Audit Log"];
 
 const users = [
   { name: "R. Kelsey", role: "Owner · Dispatcher", tenant: "Internal", active: true },
   { name: "S. Okimaw", role: "Dispatcher", tenant: "Internal", active: true },
   { name: "L. Fontaine", role: "Accountant", tenant: "Internal", active: true },
-];
-
-const budgetCodes = [
-  { code: "ZBB-CREW-01", desc: "Alamos crew shuttle" },
-  { code: "ZBB-NIHB-01", desc: "NIHB medical transport" },
-  { code: "ZBB-CHTR-02", desc: "Charter runs" },
-  { code: "ZBB-COMM-01", desc: "Community fare runs" },
 ];
 
 const rateSchedules = [
@@ -339,39 +331,6 @@ export default function Settings() {
 
           {tab === 2 && (
             <div className="detailfade">
-              <h2 style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 23, color: colors.headingBright, margin: "0 0 14px" }}>Booking Policy</h2>
-              <BookingPolicyPanel />
-            </div>
-          )}
-
-          {tab === 3 && (
-            <div className="detailfade">
-              <h2 style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 23, color: colors.headingBright, margin: "0 0 14px" }}>Budget Codes</h2>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {budgetCodes.map((b) => (
-                  <div
-                    key={b.code}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 12,
-                      padding: "12px 15px",
-                      background: colors.cardBg,
-                      border: `1px solid ${colors.border}`,
-                      borderRadius: 10,
-                      boxShadow: colors.shadowCard,
-                    }}
-                  >
-                    <div style={{ fontFamily: fonts.mono, fontSize: 12.5, color: colors.skyBlue, width: 130 }}>{b.code}</div>
-                    <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textSecondary }}>{b.desc}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {tab === 4 && (
-            <div className="detailfade">
               <h2 style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 23, color: colors.headingBright, margin: "0 0 14px" }}>Rate Schedules</h2>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {rateSchedules.map((r) => (
@@ -399,7 +358,7 @@ export default function Settings() {
             </div>
           )}
 
-          {tab === 5 && (
+          {tab === 3 && (
             <div className="detailfade">
               <h2 style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 23, color: colors.headingBright, margin: "0 0 14px" }}>Connectors</h2>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -423,7 +382,7 @@ export default function Settings() {
             </div>
           )}
 
-          {tab === 6 && (
+          {tab === 4 && (
             <div className="detailfade">
               <h2 style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 23, color: colors.headingBright, margin: "0 0 14px" }}>Audit Log</h2>
               <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>

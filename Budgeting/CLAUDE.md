@@ -52,7 +52,7 @@ Run it before touching anything on the list, and whenever a Dispatcher UI story 
 | `lib/api/transport.ts`, `lib/api/format.ts`, `lib/api/shared.ts` | same paths | yes |
 | `app/globals.css` | `Dispatcher/app/globals.css` | yes |
 | `components/ui/*` (12 files) | `Dispatcher/components/ui/*` | yes |
-| `components/HeaderClock.tsx`, `components/NavRail.tsx` | same paths | yes |
+| `components/HeaderClock.tsx`, `components/NavRail.tsx` | same paths | yes — `NavRail`'s optional `groups` / `onHome` props exist for Dispatcher's app launcher and go unused here; `Console.tsx` still passes only the original three |
 | `app/layout.tsx` | `Dispatcher/app/layout.tsx` | **no** — title/description only; the four Google Fonts `<link>` tags are byte-identical and must stay that way |
 | `lib/auth.ts` | `Dispatcher/lib/auth.ts` | **no** — see below |
 | `components/TopBar.tsx`, `AuthGate.tsx`, `LoginScreen.tsx`, `Console.tsx` | same paths | **no** — adapted |

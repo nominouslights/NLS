@@ -1,3 +1,5 @@
+import { INTERNAL_APPS, railGroupsFor } from "./apps";
+
 export type ScreenId =
   | "dispatch"
   | "map"
@@ -9,6 +11,7 @@ export type ScreenId =
   | "manifests"
   | "cargo"
   | "bookings"
+  | "bookingPolicy"
   | "clients"
   | "riders"
   | "billing"
@@ -30,34 +33,8 @@ export interface NavGroup {
   items: NavItem[];
 }
 
-export const NAV_GROUPS: NavGroup[] = [
-  {
-    label: "OPERATIONS",
-    collapsedLabel: "OPS",
-    items: [
-      { id: "dispatch", label: "Dispatch Board", code: "DB" },
-      { id: "map", label: "Live Map", code: "MP" },
-      { id: "trips", label: "Trips", code: "TR" },
-      { id: "drivers", label: "Drivers & Compliance", code: "DR", badge: "2" },
-      { id: "fleet", label: "Fleet & Maintenance", code: "FM", badge: "1" },
-      { id: "routes", label: "Routes & Schedules", code: "RT" },
-      { id: "stops", label: "Stops", code: "SP" },
-      { id: "manifests", label: "Manifests & Demand", code: "MF" },
-      { id: "cargo", label: "Cargo & Grocery", code: "CG" },
-    ],
-  },
-  {
-    label: "BUSINESS",
-    collapsedLabel: "BIZ",
-    items: [
-      { id: "bookings", label: "Booking Calendar", code: "BK" },
-      { id: "clients", label: "Clients & Contracts", code: "CL", badge: "1" },
-      { id: "riders", label: "Riders", code: "RD" },
-      { id: "billing", label: "Billing", code: "BL" },
-      { id: "reports", label: "Reports", code: "RP" },
-      { id: "incidents", label: "Incidents & Faults", code: "IN", badge: "2" },
-      { id: "comms", label: "Communications", code: "CM" },
-      { id: "settings", label: "Settings", code: "ST" },
-    ],
-  },
-];
+// Every app's rail group, in launcher order. The screens themselves are declared once, in
+// lib/apps.ts; this export survives as NavRail's default so the component (copied verbatim
+// into Budgeting/, whose own lib/nav.ts exports the same name) keeps working with no props
+// beyond the original three.
+export const NAV_GROUPS: NavGroup[] = INTERNAL_APPS.flatMap(railGroupsFor);

@@ -46,7 +46,10 @@ jobs:
         # under a "/" route and 404 on its own JavaScript.
         #
         # So the prefix flip is a coupled change, made in one sitting, never half:
-        #   1. add build_args here (BASE_PATH + NEXT_PUBLIC_API_BASE_URL, always equal)
+        #   1. add build_args here (BASE_PATH + NEXT_PUBLIC_API_BASE_URL, always equal);
+        #      dispatcher also gets NEXT_PUBLIC_BUDGETING_URL=/budget so the launcher's
+        #      Budgeting tile links to the console that step 2 mounts there (unset today on
+        #      purpose: the tile renders "Not configured" rather than a dead link)
         #   2. add preserve_path_prefix: true to the matching ingress rule in .do/app.yaml
         #   3. point each console's health_check http_path at its basePath — "/" now 404s
         # Website never gets any of this: it owns the root and makes no API calls.

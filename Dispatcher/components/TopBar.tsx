@@ -1,16 +1,43 @@
 "use client";
 
 import { colors, fonts } from "@/lib/theme";
-import { logout } from "@/lib/auth";
+import { getClaims, logout } from "@/lib/auth";
 import HeaderClock from "@/components/HeaderClock";
+
+/**
+ * Two initials from an email's local part: "l.fontaine@…" and "l_fontaine@…" both give "LF",
+ * "owner@…" gives "OW". Twin of the same helper in Budgeting/components/TopBar.tsx — that file
+ * is adapted from this one rather than copied, so the helper lives in both; keep them in step.
+ * (Dispatcher has no profile fetch, so the email is all there is to go on here.)
+ */
+function emailInitials(email: string): string {
+  const local = email.split("@")[0] ?? "";
+  const parts = local.split(/[._-]+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return "?";
+}
 
 export default function TopBar({
   onToggleRail,
   onCreateTrip,
+  onHome,
+  app,
 }: {
   onToggleRail: () => void;
-  onCreateTrip: () => void;
+  /** null hides CREATE TRIP: the wizard lands on Trip Operations, which this role cannot open. */
+  onCreateTrip: (() => void) | null;
+  /** The wordmark is a button back to the launcher. */
+  onHome: () => void;
+  /** The open app, for the breadcrumb; null on the launcher (which also hides the rail toggle). */
+  app: { label: string; code: string } | null;
 }) {
+  // Email and role stay on the claims: neither can change without a new token, and a new token
+  // means a login or a refresh, both of which re-render through AuthGate.
+  const claims = getClaims();
+  const email = claims?.email ?? "";
+  const role = claims?.role ?? "";
+
   return (
     <div
       style={{
@@ -39,6 +66,9 @@ export default function TopBar({
           borderRadius: 6,
           cursor: "pointer",
           color: colors.textLabel,
+          // Keeps its box on the launcher (there is no rail to collapse) so the wordmark
+          // does not shift between Home and an app.
+          visibility: app ? undefined : "hidden",
         }}
         title="Collapse rail"
       >
@@ -48,14 +78,66 @@ export default function TopBar({
           <span style={{ width: 14, height: 1.5, background: "currentColor", display: "block" }} />
         </div>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 2, flex: "none" }}>
+      <button
+        type="button"
+        onClick={onHome}
+        aria-label="All apps"
+        title="All apps"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 2,
+          flex: "none",
+          background: "none",
+          border: 0,
+          padding: 0,
+          margin: 0,
+          font: "inherit",
+          cursor: "pointer",
+        }}
+      >
         <span style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 19, letterSpacing: ".02em", color: colors.headingBright }}>
           NORTHERN
         </span>
         <span style={{ fontFamily: fonts.condensed, fontWeight: 700, fontSize: 19, letterSpacing: ".02em", color: colors.amberText }}>
           LINK
         </span>
-      </div>
+      </button>
+      {app && (
+        <div style={{ display: "flex", alignItems: "center", gap: 9, flex: "none" }}>
+          <span style={{ fontFamily: fonts.body, fontSize: 16, color: colors.textFaint }}>/</span>
+          <span
+            style={{
+              width: 26,
+              height: 26,
+              flex: "none",
+              borderRadius: 7,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontFamily: fonts.mono,
+              fontSize: 10,
+              fontWeight: 500,
+              background: colors.amber,
+              color: colors.navy,
+            }}
+          >
+            {app.code}
+          </span>
+          <span
+            style={{
+              fontFamily: fonts.semiCondensed,
+              fontSize: 12,
+              letterSpacing: ".08em",
+              textTransform: "uppercase",
+              color: colors.textSecondary,
+              whiteSpace: "nowrap",
+            }}
+          >
+            {app.label}
+          </span>
+        </div>
+      )}
       <div
         style={{
           display: "flex",
@@ -142,26 +224,28 @@ export default function TopBar({
           5
         </span>
       </div>
-      <div
-        onClick={onCreateTrip}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 7,
-          flex: "none",
-          padding: "8px 15px",
-          borderRadius: 8,
-          background: colors.blue,
-          color: "#FFFFFF",
-          fontFamily: fonts.condensed,
-          fontWeight: 700,
-          fontSize: 14,
-          letterSpacing: ".04em",
-          cursor: "pointer",
-        }}
-      >
-        <span style={{ fontSize: 15, lineHeight: 1 }}>+</span> CREATE TRIP
-      </div>
+      {onCreateTrip && (
+        <div
+          onClick={onCreateTrip}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 7,
+            flex: "none",
+            padding: "8px 15px",
+            borderRadius: 8,
+            background: colors.blue,
+            color: "#FFFFFF",
+            fontFamily: fonts.condensed,
+            fontWeight: 700,
+            fontSize: 14,
+            letterSpacing: ".04em",
+            cursor: "pointer",
+          }}
+        >
+          <span style={{ fontSize: 15, lineHeight: 1 }}>+</span> CREATE TRIP
+        </div>
+      )}
       <div
         style={{
           display: "flex",
@@ -186,12 +270,26 @@ export default function TopBar({
             fontWeight: 700,
             fontSize: 14,
             color: colors.blue,
+            flex: "none",
           }}
         >
-          RK
+          {emailInitials(email)}
         </div>
         <div style={{ lineHeight: 1.15 }}>
-          <div style={{ fontFamily: fonts.body, fontWeight: 600, fontSize: 12.5, color: colors.textPrimary }}>R. Kelsey</div>
+          <div
+            style={{
+              fontFamily: fonts.body,
+              fontWeight: 600,
+              fontSize: 12.5,
+              color: colors.textPrimary,
+              maxWidth: 180,
+              overflow: "hidden",
+              whiteSpace: "nowrap",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {email || "—"}
+          </div>
           <div
             style={{
               fontFamily: fonts.semiCondensed,
@@ -201,7 +299,7 @@ export default function TopBar({
               textTransform: "uppercase",
             }}
           >
-            Owner · Dispatcher
+            {role || "—"}
           </div>
         </div>
         <div

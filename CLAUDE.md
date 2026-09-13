@@ -10,7 +10,7 @@ frontend or backend.**
 | Folder | What it is | Stack |
 |---|---|---|
 | `Backend/` | The one shared API — one class library per domain, composed by the API gateway | .NET 10, CQRS/DDD, PostgreSQL (DigitalOcean managed, no local instance), RabbitMQ |
-| `Dispatcher/` | Admin Web App (Dispatch Console) — currently a frontend-only prototype on mock data | Next.js 16, React 19 |
+| `Dispatcher/` | Admin Web App (Dispatch Console) — a launcher Home opens seven in-console apps (manifest in `lib/apps.ts`, role-gated client-side as a UX gate only); the Budgeting tile links out to the Budgeting console via the build-time `NEXT_PUBLIC_BUDGETING_URL`. Most screens are API-backed; a few (Live Map, Incidents, parts of Settings) are still mock | Next.js 16, React 19 |
 | `Website/` | Public marketing site (northernlink shuttle & cargo) — static/prototype, no API calls yet | Next.js 16, React 19 |
 | `Budgeting/` | Zero-Based Budgeting console (Track 6) — real auth + role gate; budget periods, codes and allocations are live against the API, actuals/variance still mock. Deliberately holds **copies** of Dispatcher's design system — see its own `CLAUDE.md` | Next.js 16, React 19 |
 | `CommunityMobile/` | Community Mobile passenger app — design mockup only: 11 screens on hardcoded mock data (`lib/data/mock_data.dart`), no API/auth wiring, not orchestrated by `aspire run`. **SHELVED** by the Community Booking & Dispatch spec (2026-08): the passenger app ships as a Next.js PWA instead (future sibling folder); this mockup stays as the PWA's information-architecture reference. Payments for that flow are **Square + Interac e-Transfer** (Stripe is superseded) | Flutter 3.29, Dart 3.7 |
@@ -155,6 +155,16 @@ Collision protocol for parallel batches:
 - `npm run dev` — dev server standalone (no AppHost), usually lands on port **3001** (3000 is
   often taken on this machine). Requests to `/api/*` proxy to `http://localhost:5215` by default
   (see `next.config.ts`) — works against a manually-started API with no other setup.
+- `NEXT_PUBLIC_BUDGETING_URL=http://localhost:3003` in a gitignored `Dispatcher/.env.local` (or
+  forwarded by your local `AppHost.cs` with `.WithEnvironment(...)`) lights the launcher's
+  Budgeting tile; unset, the tile renders as "Not configured" rather than disappearing. It is
+  inlined at `next build` like every `NEXT_PUBLIC_*`, so restart the dev server after changing it.
+- The console is a two-level shell: `components/Console.tsx` shows `components/Home.tsx` (the
+  launcher) or one of `components/apps/*App.tsx`, each rendering `NavRail` with its own group
+  plus its screens (still under `components/screens/`). Add or move a screen in `lib/apps.ts`
+  only — the `Record<ScreenId, AppId>` there fails the build if a screen has no app. Per-app
+  selection state survives a trip Home via `lib/appState.ts`; there is still no URL routing, so a
+  refresh lands on Home.
 
 ### Website (`Website/`)
 - `npm run dev` — dev server on port **3002** (pinned in the script). No API proxy — the site is
@@ -218,7 +228,9 @@ Four things that will bite whoever deploys these images, on any host:
   so `API_PROXY_TARGET` set on a running container does nothing. The images bake
   `http://northernlink-api:8080` as the proxy target, so the host must make the API resolvable
   under the name `northernlink-api` (container-network DNS/alias) — or the frontend images must
-  be rebuilt with a different `API_PROXY_TARGET` build arg.
+  be rebuilt with a different `API_PROXY_TARGET` build arg. The Dispatcher image also bakes
+  `NEXT_PUBLIC_BUDGETING_URL` (the launcher's Budgeting tile); it stays empty — tile reads
+  "Not configured" — until the same path-prefix flip that mounts Budgeting at `/budget`.
 - **The API must never be exposed publicly.** There is no CORS configuration anywhere in the
   stack by design — browsers reach the API only through a frontend's own origin via the
   server-side `/api/*` proxy. Whatever the host, only the three frontends get public ingress;
