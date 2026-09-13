@@ -23,8 +23,12 @@ public class UserChangedIntegrationEventHandlerTests
     }
 
     private static UserChangedIntegrationEvent Event(
-        Guid userId, string email = "planner@northernlink.ca", string role = Roles.Accountant) =>
-        new(userId, TestBudgeting.TenantId, email, role);
+        Guid userId,
+        string email = "planner@northernlink.ca",
+        string role = Roles.Accountant,
+        string? fullName = null,
+        string? jobTitle = null) =>
+        new(userId, TestBudgeting.TenantId, email, role, fullName, jobTitle);
 
     [Fact]
     public async Task A_first_event_inserts_the_replica_row()
@@ -55,9 +59,8 @@ public class UserChangedIntegrationEventHandlerTests
     [Fact]
     public async Task A_later_event_for_the_same_user_updates_in_place()
     {
-        // Identity.User is create-only today, so this path is unreachable until it grows a
-        // rename or role change. The test exists so the replica is already correct when it does —
-        // the alternative is discovering the handler duplicates rows on the day that ships.
+        // Live since profiles shipped: editing a profile republishes the whole user snapshot,
+        // so this is now the ordinary case rather than a path kept warm for later.
         var userId = Guid.NewGuid();
         await _handler.Handle(Event(userId), CancellationToken.None);
 
@@ -66,6 +69,53 @@ public class UserChangedIntegrationEventHandlerTests
         var stored = Assert.Single(_repository.Users);
         Assert.Equal("renamed@northernlink.ca", stored.Email);
         Assert.Equal(Roles.Owner, stored.Role);
+    }
+
+    [Fact]
+    public async Task A_first_event_stores_the_name_when_the_user_has_one()
+    {
+        var userId = Guid.NewGuid();
+
+        await _handler.Handle(Event(userId, fullName: "Léa Fontaine"), CancellationToken.None);
+
+        Assert.Equal("Léa Fontaine", Assert.Single(_repository.Users).FullName);
+    }
+
+    [Fact]
+    public async Task An_account_with_no_profile_replicates_as_null_not_blank()
+    {
+        // The whole display chain — owner picker, the three governance rows — falls back to the
+        // email on null. An empty string here would render as a blank name instead.
+        var userId = Guid.NewGuid();
+
+        await _handler.Handle(Event(userId), CancellationToken.None);
+
+        Assert.Null(Assert.Single(_repository.Users).FullName);
+    }
+
+    [Fact]
+    public async Task A_later_event_updates_the_name_in_place()
+    {
+        var userId = Guid.NewGuid();
+        await _handler.Handle(Event(userId, fullName: "Lea Fontaine"), CancellationToken.None);
+
+        await _handler.Handle(Event(userId, fullName: "Léa Fontaine"), CancellationToken.None);
+
+        Assert.Equal("Léa Fontaine", Assert.Single(_repository.Users).FullName);
+    }
+
+    [Fact]
+    public async Task A_later_event_with_no_name_clears_the_stored_one()
+    {
+        // The regression that catches an omitted assignment in UpsertAsync. Without it a name
+        // inserts once and can then never be corrected or removed — silently, with nothing
+        // logged, because the insert path would still look perfectly correct.
+        var userId = Guid.NewGuid();
+        await _handler.Handle(Event(userId, fullName: "Léa Fontaine"), CancellationToken.None);
+
+        await _handler.Handle(Event(userId, fullName: null), CancellationToken.None);
+
+        Assert.Null(Assert.Single(_repository.Users).FullName);
     }
 
     [Fact]

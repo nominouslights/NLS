@@ -39,7 +39,12 @@ internal sealed class UserLookupRepository(BudgetingDbContext context) : IUserLo
         }
         else
         {
+            // Every column the event carries is reassigned, nulls included: the event is a full
+            // snapshot, so an omission here would not leave a field stale — it would make it
+            // permanently unchangeable. A name would insert once and then never update or clear,
+            // silently, with nothing logged.
             existing.Email = user.Email;
+            existing.FullName = user.FullName;
             existing.Role = user.Role;
             existing.UpdatedAtUtc = user.UpdatedAtUtc;
         }

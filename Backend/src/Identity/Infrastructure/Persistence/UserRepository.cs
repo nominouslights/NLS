@@ -35,6 +35,17 @@ internal sealed class UserRepository(IdentityDbContext context) : IUserRepositor
             .FirstOrDefaultAsync(u => u.Id == id, cancellationToken);
     }
 
+    /// <summary>
+    /// Deliberately the plainest query in this file: no <c>IgnoreQueryFilters</c>, no
+    /// <see cref="SystemAccess"/>, no <c>AsNoTracking</c>. The caller is signed in, so the EF
+    /// tenant filter and the <c>users_tenant_isolation</c> policy both apply as designed, and the
+    /// result is tracked because the profile command saves through it. See
+    /// <see cref="IUserRepository.GetByIdForTenantAsync"/> for why this is not folded into
+    /// <see cref="GetByIdAsync"/>.
+    /// </summary>
+    public Task<User?> GetByIdForTenantAsync(Guid id, CancellationToken cancellationToken = default) =>
+        context.Users.FirstOrDefaultAsync(u => u.Id == id, cancellationToken);
+
     public async Task<bool> AnyAsync(CancellationToken cancellationToken = default)
     {
         await SystemAccess.EnableAsync(context, cancellationToken);

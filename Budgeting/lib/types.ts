@@ -88,10 +88,14 @@ export interface BudgetCode {
   glAccountCode: string | null;
   taxTreatment: BudgetTaxTreatment | null;
   budgetOwnerUserId: string | null;
+  /** Resolved server-side on every read. Null when that user has not set a profile name. */
+  budgetOwnerName: string | null;
   budgetOwnerEmail: string | null;
   reviewFrequency: BudgetReviewFrequency;
   active: boolean;
+  createdByName: string | null;
   createdByEmail: string | null;
+  modifiedByName: string | null;
   modifiedByEmail: string | null;
 }
 

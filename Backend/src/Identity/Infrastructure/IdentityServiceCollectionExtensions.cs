@@ -10,6 +10,9 @@ using NorthernLink.Identity.Application.Auth.Login;
 using NorthernLink.Identity.Application.Auth.Logout;
 using NorthernLink.Identity.Application.Auth.Refresh;
 using NorthernLink.Identity.Application.Auth.Setup;
+using NorthernLink.Identity.Application.Profile;
+using NorthernLink.Identity.Application.Profile.GetProfile;
+using NorthernLink.Identity.Application.Profile.UpdateProfile;
 using NorthernLink.Identity.Infrastructure.Auth;
 using NorthernLink.Identity.Infrastructure.Persistence;
 using NorthernLink.Shared.Kernel;
@@ -65,9 +68,11 @@ public static class IdentityServiceCollectionExtensions
         services.AddScoped<ICommandHandler<BootstrapAdminCommand, Guid>, BootstrapAdminCommandHandler>();
         services.AddScoped<ICommandHandler<GenerateBootstrapTokenCommand, GenerateBootstrapTokenResponse>, GenerateBootstrapTokenCommandHandler>();
         services.AddScoped<ICommandHandler<CreateFirstAdminCommand, LoginResponse>, CreateFirstAdminCommandHandler>();
+        services.AddScoped<ICommandHandler<UpdateMyProfileCommand, MyProfileResponse>, UpdateMyProfileCommandHandler>();
 
         // 4. Query handlers.
         services.AddScoped<IQueryHandler<GetSetupStatusQuery, SetupStatusResponse>, GetSetupStatusQueryHandler>();
+        services.AddScoped<IQueryHandler<GetMyProfileQuery, MyProfileResponse>, GetMyProfileQueryHandler>();
 
         return services;
     }

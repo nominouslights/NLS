@@ -23,7 +23,10 @@ internal sealed class InMemoryUserLookupRepository : IUserLookupRepository
         }
         else
         {
+            // Mirrors the real repository: every column the event carries is reassigned, nulls
+            // included, so a cleared name clears here too.
             existing.Email = user.Email;
+            existing.FullName = user.FullName;
             existing.Role = user.Role;
             existing.UpdatedAtUtc = user.UpdatedAtUtc;
         }

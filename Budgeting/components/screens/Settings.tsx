@@ -2,24 +2,46 @@
 
 import { useState } from "react";
 import { colors, fonts } from "@/lib/theme";
+import { ActionButton } from "@/components/ui/Button";
 import { DetailRow, Panel, SectionLabel } from "@/components/ui/Panel";
 import { StatusChip, MonoTag } from "@/components/ui/Chip";
+import { ErrorNotice } from "@/components/ErrorNotice";
+import ProfileForm from "@/components/ProfileForm";
 import { getClaims } from "@/lib/auth";
+import { updateMyProfile, type MyProfile } from "@/lib/api/identity";
 import { BUDGET_ROLES, hasBudgetAccess } from "@/lib/roles";
 import { EmptyNote, MockTag, Screen } from "@/components/screens/shared";
 
 // Tab strip mirroring Dispatcher's Settings screen.
 //
+// Profile leads because it is the one tab a user comes here to *change*; the rest are things to
+// look at. It lives here rather than on the nav rail because Settings already answers "who am I"
+// — the Session tab below shows the very claims that decided whether this console rendered —
+// and splitting the editable half onto its own rail item would put two answers to one question a
+// click apart. The rail is a domain rail (PLANNING / PERFORMANCE); a profile belongs to neither.
+//
 // The Session tab is not decoration: it shows the decoded token claims that decided whether
 // this console rendered at all, which makes the role gate inspectable by hand. It is the
 // fastest way to confirm that a Dispatcher account really is being rejected for the reason
-// you think it is.
+// you think it is. Note it reads the *token*, while Profile reads the database — which is why
+// a name saved a moment ago shows there and not here.
 
-const TABS = ["Session", "Thresholds", "Connectors"] as const;
+const TABS = ["Profile", "Session", "Thresholds", "Connectors"] as const;
 type Tab = (typeof TABS)[number];
 
-export default function Settings() {
-  const [tab, setTab] = useState<Tab>("Session");
+export default function Settings({
+  profile,
+  profileError,
+  onRetryProfile,
+  onProfileSaved,
+}: {
+  /** null while loading — Console owns the fetch, so the TopBar can show the name too. */
+  profile: MyProfile | null;
+  profileError: { message: string; code: string } | null;
+  onRetryProfile: () => void;
+  onProfileSaved: (profile: MyProfile) => void;
+}) {
+  const [tab, setTab] = useState<Tab>("Profile");
   const claims = getClaims();
 
   return (
@@ -58,6 +80,34 @@ export default function Settings() {
           );
         })}
       </div>
+
+      {tab === "Profile" && (
+        <>
+          {profileError && (
+            <>
+              <ErrorNotice
+                title="Couldn't load your profile"
+                message={profileError.message}
+                code={profileError.code}
+              />
+              <div style={{ marginTop: 10 }}>
+                <ActionButton onClick={onRetryProfile}>RETRY</ActionButton>
+              </div>
+            </>
+          )}
+          {profile === null && !profileError && <EmptyNote>Loading your profile…</EmptyNote>}
+          {profile !== null && !profileError && (
+            // Keyed on the user id so the form's state seeds from the profile with no syncing
+            // effect — it remounts if the signed-in account ever changes under it.
+            <ProfileForm
+              key={profile.userId}
+              profile={profile}
+              onSave={updateMyProfile}
+              onSaved={onProfileSaved}
+            />
+          )}
+        </>
+      )}
 
       {tab === "Session" && (
         <>

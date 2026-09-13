@@ -15,7 +15,7 @@ public sealed class GetBudgetOwnerCandidatesQueryHandler(IUserLookupRepository u
         var candidates = await users.ListAsync(cancellationToken);
 
         IReadOnlyList<BudgetOwnerOptionResponse> options = candidates
-            .Select(u => new BudgetOwnerOptionResponse(u.UserId, u.Email, u.Role))
+            .Select(u => new BudgetOwnerOptionResponse(u.UserId, u.Email, u.Role, u.FullName))
             .ToList();
 
         return Result.Success(options);
