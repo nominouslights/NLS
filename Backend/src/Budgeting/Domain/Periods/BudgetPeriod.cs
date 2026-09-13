@@ -12,7 +12,20 @@ namespace NorthernLink.Budgeting.Domain.Periods;
 /// one calendar month/quarter" invariant lives in one place. Periods within a tenant never
 /// share a day (a month inside an existing quarter is an overlap); the handler enforces
 /// that against the tenant's other periods, with a unique DB index as the race backstop.
-/// Always created <see cref="PeriodState.Draft"/> — Open/Lock transitions are a later story.
+/// <para>
+/// <b>Lifecycle is forward-only:</b> always created <see cref="PeriodState.Draft"/>, then
+/// <see cref="Transition"/> walks Draft → Finalized → Open → InReview → Closed one step at a
+/// time. Each step checks only that the period is in the one state it leaves from, so a skipped
+/// or repeated step fails with an error naming that rule (<see cref="BudgetPeriodErrors.NotDraft"/>
+/// and friends). Transitions are deliberately <em>not</em> gated on the plan being complete —
+/// finalizing an empty plan is allowed, and the dashboard's checklist makes the gap visible
+/// instead. Tightening that later is a change to the Finalize arm here, nowhere else.
+/// </para>
+/// <para>
+/// The plan is editable in Draft and Open only (<see cref="AllowsPlanChanges"/>). Finalizing
+/// signs the plan off; opening re-allows in-period adjustments; review and close freeze it.
+/// The allocation handlers ask this property rather than re-deriving the rule from the state.
+/// </para>
 /// </summary>
 public sealed class BudgetPeriod : AggregateRoot, ITenantScoped
 {
@@ -42,6 +55,12 @@ public sealed class BudgetPeriod : AggregateRoot, ITenantScoped
     public PeriodState State { get; private set; }
     public DateTimeOffset CreatedAtUtc { get; private set; }
     public DateTimeOffset UpdatedAtUtc { get; private set; }
+
+    /// <summary>
+    /// Whether allocation lines may be added, changed or removed: Draft (the plan is being
+    /// built) and Open (in-period adjustments). Finalized, InReview and Closed are read-only.
+    /// </summary>
+    public bool AllowsPlanChanges => State is PeriodState.Draft or PeriodState.Open;
 
     /// <summary>Creates a Draft period, deriving dates and label from (granularity, year, ordinal).</summary>
     public static Result<BudgetPeriod> Create(Guid tenantId, PeriodGranularity granularity, int year, int ordinal)
@@ -85,6 +104,35 @@ public sealed class BudgetPeriod : AggregateRoot, ITenantScoped
 
         period.Raise(new BudgetPeriodCreatedDomainEvent(period.Id, tenantId));
         return Result.Success(period);
+    }
+
+    /// <summary>
+    /// Moves the period one step forward. The table is the whole rule: each transition names
+    /// the state it leaves from and the state it lands in, and anything else is that
+    /// transition's own Conflict. On success stamps <see cref="UpdatedAtUtc"/> and raises
+    /// <see cref="BudgetPeriodStateChangedDomainEvent"/> carrying both ends of the step.
+    /// </summary>
+    public Result Transition(PeriodTransition transition, Guid? actorId)
+    {
+        var (from, to, error) = transition switch
+        {
+            PeriodTransition.Finalize => (PeriodState.Draft, PeriodState.Finalized, BudgetPeriodErrors.NotDraft),
+            PeriodTransition.Open => (PeriodState.Finalized, PeriodState.Open, BudgetPeriodErrors.NotFinalized),
+            PeriodTransition.BeginReview => (PeriodState.Open, PeriodState.InReview, BudgetPeriodErrors.NotOpen),
+            PeriodTransition.Close => (PeriodState.InReview, PeriodState.Closed, BudgetPeriodErrors.NotInReview),
+            _ => throw new ArgumentOutOfRangeException(nameof(transition), transition, "Unknown period transition."),
+        };
+
+        if (State != from)
+        {
+            return Result.Failure(error);
+        }
+
+        State = to;
+        UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        Raise(new BudgetPeriodStateChangedDomainEvent(Id, TenantId, from, to, actorId));
+        return Result.Success();
     }
 
     /// <summary>

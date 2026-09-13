@@ -135,6 +135,34 @@ Infrastructure:
 <!-- notes:clients:start -->
 <!-- notes:clients:end -->
 
+## Budgeting — Backend/src/Budgeting (93 files, +15 migration files)
+<!-- gen:budgeting:start -->
+Aggregates (Domain/): Allocations · Codes · Periods
+  (each: <Aggregate>.cs, <Aggregate>Errors.cs, enums/value objects, Events/)
+Use-case slices (Application/<Area>/<Slice>/ = Command|Query + Handler):
+| Area | Slices |
+|---|---|
+| Allocations | GetAllocations, Remove, Set |
+| Codes | Create, Delete, GetCodes, GetOwnerCandidates, SeedStarterSet, SetActive, Update |
+| Integration | — |
+| Periods | Create, GetPeriodById, GetPeriods, Transition |
+Area-level types — Allocations/: AllocationBudgetCodeUsageProbe, BudgetAllocationResponse, BudgetAllocationSetResult
+Area-level types — Codes/: BudgetCodeParentRule, BudgetCodeResponse, BudgetOwnerRule
+Area-level types — Integration/: UserChangedIntegrationEventHandler, UserLookup
+Area-level types — Periods/: BudgetPeriodResponse
+Abstractions: Application/Abstractions/ — 8 repository/read-service interfaces
+Infrastructure:
+  DI root: Infrastructure/BudgetingServiceCollectionExtensions.cs
+  Endpoints: BudgetingEndpoints.cs, EndpointResults.cs
+  Persistence: BudgetingDbContext, BudgetingDbContextFactory, 3×Configuration, 3×Repository, 3×ReadService, ReadModels (3), Projections (4)
+  Migrations: 15 files, latest 20260912213121_AddBudgetAllocations — DO NOT READ (generated)
+<!-- gen:budgeting:end -->
+<!-- notes:budgeting:start -->
+- Periods/Transition is ONE slice for all four forward-only lifecycle steps (Draft→Finalized→Open→InReview→Closed) via the `PeriodTransition` discriminator; allocation lines are editable only in Draft/Open (`BudgetPeriod.AllowsPlanChanges`).
+- `BudgetPeriodReadService` sums `PlannedRevenueCad`/`PlannedExpenseCad` from allocation lines by each code's *current* category at read time — a line snapshots only the immutable code string, nothing else from the code.
+- `AllocationBudgetCodeUsageProbe` (replaces NeverReferencedBudgetCodeUsageProbe) matches on code id OR string, so a code deleted and recreated under the same string still counts as used → `DELETE /codes/{id}` 409 InUse.
+<!-- notes:budgeting:end -->
+
 ## Drivers — Backend/src/Drivers (90 files, +11 migration files)
 <!-- gen:drivers:start -->
 Aggregates (Domain/): Clearances · Credentials · Drivers · Hos
@@ -322,7 +350,7 @@ Stub module — DI wired, no domain code or endpoints yet.
 | NorthernLink.ArchitectureTests (enforces domain-library boundaries) | 5 |
 | NorthernLink.Billing.Tests | 14 |
 | NorthernLink.Booking.Tests | 12 |
-| NorthernLink.Budgeting.Tests | 13 |
+| NorthernLink.Budgeting.Tests | 19 |
 | NorthernLink.Clients.Tests | 13 |
 | NorthernLink.Drivers.IntegrationTests | 7 |
 | NorthernLink.Drivers.Tests | 9 |
@@ -336,4 +364,5 @@ Stub module — DI wired, no domain code or endpoints yet.
 | NorthernLink.Trips.Tests | 41 |
 <!-- gen:tests:end -->
 <!-- notes:tests:start -->
+- Budgeting.Tests: `TestBudgeting.PeriodIn(state)` reaches a lifecycle state by walking the real transitions (no `State` back door); `StubBudgetCodeUsageProbe` isolates the delete handler, while `AllocationBudgetCodeUsageProbeTests` runs the real probe over `InMemoryBudgetAllocationRepository`.
 <!-- notes:tests:end -->

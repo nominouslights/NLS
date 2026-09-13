@@ -19,8 +19,12 @@ first, then re-copy; never edit the copy in place. Manifest + drift check: Budge
 | Settings.tsx | ~200 |
 | Variance.tsx | ~200 |
 | shared.tsx | ~200 |
+Sub-screen folders: screens/periods/ (5)
 <!-- gen:budgeting-screens:end -->
 <!-- notes:budgeting-screens:start -->
+- BudgetPeriods.tsx is only the master/detail host — the period dashboard lives in screens/periods/ (PeriodList, LifecycleStepper, PlanningChecklist, one AllocationSection per code category) and shows the server's planned totals.
+- Allocations.tsx shows the same real lines flat and sums its tiles client-side (it cannot refresh Console's period list); both it and the dashboard share BudgetAllocationFormModal.
+- After a transition or line save, the dashboard refetches the projection until the expected state/values appear (`stateAfter`) before refreshing the period list — reads are eventually consistent.
 <!-- notes:budgeting-screens:end -->
 
 ## Components — Budgeting/components
@@ -48,4 +52,5 @@ Top-level: auth, claims.test, claims, clipboard, data, format, nav, period, role
 Files: components/ProfileForm.test.tsx, components/RoleGate.test.tsx, lib/api/budgeting.test.ts, lib/api/identity.test.ts, lib/claims.test.ts, lib/roles.test.ts, vitest.config.ts
 <!-- gen:budgeting-tests:end -->
 <!-- notes:budgeting-tests:start -->
+- lib/api/budgeting.test.ts pins every client-side mirror of a server rule (period preview, code format, lifecycle order/next step, allocation validators and candidates) — change a Backend/src/Budgeting rule, change this test.
 <!-- notes:budgeting-tests:end -->

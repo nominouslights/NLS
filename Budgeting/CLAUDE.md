@@ -1,8 +1,9 @@
 # Budgeting — Zero-Based Budgeting Console
 
 Next.js 16 app on port **3003**, consuming the shared API. Scaffolded by US-6.0.1 (Track 6,
-Stage 6.0). Budget **periods** and **codes** are real; allocations, actuals and variance are
-still mock — see [Data](#data-periods-and-codes-are-real-the-rest-is-still-mock).
+Stage 6.0). Budget **periods**, **codes** and **allocations** are real — including the period
+lifecycle and the period dashboard; actuals and variance are still mock — see
+[Data](#data-periods-codes-and-allocations-are-real-actuals-and-variance-are-still-mock).
 
 ## Commands
 
@@ -55,8 +56,8 @@ Run it before touching anything on the list, and whenever a Dispatcher UI story 
 | `app/layout.tsx` | `Dispatcher/app/layout.tsx` | **no** — title/description only; the four Google Fonts `<link>` tags are byte-identical and must stay that way |
 | `lib/auth.ts` | `Dispatcher/lib/auth.ts` | **no** — see below |
 | `components/TopBar.tsx`, `AuthGate.tsx`, `LoginScreen.tsx`, `Console.tsx` | same paths | **no** — adapted |
-| `lib/nav.ts`, `lib/data.ts`, `lib/types.ts`, `lib/claims.ts`, `lib/roles.ts`, `lib/api/budgeting.ts`, `lib/api/identity.ts` | — | new |
-| `components/Brandmark.tsx`, `ErrorNotice.tsx`, `RoleGate.tsx`, `AccessDeniedScreen.tsx`, `SetupPendingScreen.tsx`, `BudgetPeriodFormModal.tsx`, `BudgetCodeFormModal.tsx`, `ProfileForm.tsx`, `screens/*` | — | new |
+| `lib/nav.ts`, `lib/data.ts`, `lib/money.ts`, `lib/types.ts`, `lib/claims.ts`, `lib/roles.ts`, `lib/api/budgeting.ts`, `lib/api/identity.ts` | — | new |
+| `components/Brandmark.tsx`, `ErrorNotice.tsx`, `RoleGate.tsx`, `AccessDeniedScreen.tsx`, `SetupPendingScreen.tsx`, `BudgetPeriodFormModal.tsx`, `BudgetCodeFormModal.tsx`, `BudgetAllocationFormModal.tsx`, `ProfileForm.tsx`, `screens/*`, `screens/periods/*` | — | new |
 
 `theme.ts` and the 12 `ui/` files are copied **unpruned**, including parts this app never uses
 (`ServiceType`, `DutyStatus`, `CorridorStepper`, the two upload fields). Pruning them would break
@@ -110,7 +111,7 @@ step; both have tests that fail if they diverge.
 ## Testing
 
 Vitest, added here as a **pilot for this app only** — it does not obligate Dispatcher to adopt
-it. Six files, and only two need a DOM:
+it. Seven files, and only two need a DOM:
 
 - `lib/roles.test.ts` — US-6.0.1's acceptance criterion: a Dispatcher account is rejected.
 - `lib/claims.test.ts` — JWT decoding, including the non-ASCII round trip (`atob` yields a binary
@@ -126,9 +127,17 @@ it. Six files, and only two need a DOM:
   no client test in this app mocks `request()`.
 - `lib/api/budgeting.test.ts` — the client-side mirrors of server rules stay pinned to the
   server: `previewPeriod` against `BudgetPeriod.Create`, `normalizeBudgetCode` /
-  `budgetCodeFormatError` against `BudgetCode.NormalizeCode` / `ValidateCode`, and
-  `parentCandidates` against `BudgetCodeParentRule`. Plus the →StatusKind mappings, the three
-  label maps, and `toBudgetCode`'s `isActive` → `active` rename.
+  `budgetCodeFormatError` against `BudgetCode.NormalizeCode` / `ValidateCode`,
+  `parentCandidates` against `BudgetCodeParentRule`, `PERIOD_STATE_ORDER` /
+  `nextTransition` / `stateAfter` against `BudgetPeriod.Transition`, `canEditAllocations`
+  against `BudgetPeriod.AllowsPlanChanges`, `allocationCandidates` against the `CodeRetired`
+  check plus the unique (period, code) index, and `allocationAmountError` /
+  `allocationJustificationError` against `BudgetAllocation.Validate`. Plus the →StatusKind
+  mappings (`periodKind` over all five states, `netKind`), the label maps, `toBudgetCode`'s
+  `isActive` → `active` rename, `toBudgetPeriod`'s two totals, `coverage` and
+  `planningProgress` (the dashboard's checklist and stepper derive from one tested function).
+- `lib/money.test.ts` — `formatDeltaCad` / `formatDeltaPct` always write the sign out, so a
+  signed figure never rests on colour.
 
   The single highest-value assertion in the app is in here: that `SERVICE_LINE_LABELS`' first six
   keys are spelled exactly as `TripServiceType`'s members. That spelling is the join key for
@@ -143,12 +152,55 @@ The server-side counterpart is
 backend test proves the *policy* rejects Dispatcher, this one proves the *console* does, and in
 Stage 6.0 the console is the gate a user actually meets.
 
-## Data: periods and codes are real, the rest is still mock
+## Data: periods, codes and allocations are real; actuals and variance are still mock
 
 **Budget periods come from the real API** (`GET/POST /api/budgeting/periods` via
 `lib/api/budgeting.ts`; `Console.tsx` owns the fetch and threads the list down as props) — the
-first Stage 6.1 slice. The wire carries no `planned`/`allocated` yet; `toBudgetPeriod` maps them
-to honest zeros until the allocations slice lands, and derives `pk` from `state` (`periodKind`).
+first Stage 6.1 slice. Each record now carries `plannedRevenueCad` / `plannedExpenseCad`, the
+server's sums of the period's allocation lines by code category; `toBudgetPeriod` maps them to
+`plannedRevenue` / `plannedExpense` and derives `pk` from `state` (`periodKind`).
+
+**The period lifecycle is real** — five states, forward only, in this order:
+**Draft → Finalized → Open → In review → Closed** (`PeriodState`; the C# enum spells the fourth
+`InReview`). Allocation lines can change **only while the period is Draft or Open** — finalizing
+signs the plan off, opening re-allows in-period adjustments, review and close freeze it
+(`BudgetPeriod.AllowsPlanChanges`; mirrored by `canEditAllocations`). Each state has exactly one
+way forward (`nextTransition`) and the dashboard offers exactly that one button, behind a
+two-click confirm. Transitions are **not** gated on plan completeness — finalizing an empty plan
+is allowed; the dashboard's checklist makes an empty plan visible instead.
+
+**Allocations are real** — one line per (period, code), **upserted by code**, with a
+**required justification** (zero-based: every line is argued from nothing, each period). The
+line's `category`, `name` and `serviceLine` are resolved from the code at read time, never
+snapshotted, so re-classifying a code moves its lines between the two totals retroactively. A
+line on a retired code stays (and still counts) but cannot be re-set until the code is restored
+(`CodeRetired`, 409). Amounts are `decimal(12,2)` server-side; this app enters whole dollars.
+
+The period and allocation routes (`BudgetAccess` group, `BudgetingEndpoints.cs`):
+
+| Route | |
+|---|---|
+| `GET /api/budgeting/periods` | ordered by `startsOn`; each row carries the two planned totals |
+| `GET /api/budgeting/periods/{id}` | one period (404) — the `POST` 201 `Location` target |
+| `POST /api/budgeting/periods/{id}/finalize` | Draft → Finalized; 409 `Budgeting.Period.NotDraft` |
+| `POST /api/budgeting/periods/{id}/open` | Finalized → Open; 409 `NotFinalized` |
+| `POST /api/budgeting/periods/{id}/begin-review` | Open → In review; 409 `NotOpen` |
+| `POST /api/budgeting/periods/{id}/close` | In review → Closed; 409 `NotInReview` |
+| `GET /api/budgeting/periods/{id}/allocations` | the period's lines, ordered by code (404) |
+| `PUT /api/budgeting/periods/{id}/allocations/{codeId}` | upsert `{ amountCad, justification }` → `{ id, created }`; 400 validation, 404 period/code, 409 `PeriodNotEditable` / `CodeRetired` |
+| `DELETE /api/budgeting/periods/{id}/allocations/{codeId}` | 204; 404 no such line; 409 `PeriodNotEditable` |
+
+Every 400/409 message is shown verbatim — the server's text names the rule. Reads are
+projections: after a transition the dashboard refetches the period until it reports the expected
+state (`stateAfter`); after a line changes it refetches the lines until the new **values** are
+visible (on edit the row was always there), and only then refreshes the period list, whose totals
+read from the same projection.
+
+`screens/BudgetPeriods.tsx` is the master/detail host; `screens/periods/*` is the dashboard
+(list, lifecycle stepper, planning checklist, one `AllocationSection` per category);
+`BudgetAllocationFormModal.tsx` is shared with `screens/Allocations.tsx`, which shows the same
+lines flat and sums its tiles from the lines on screen (it has no way to refresh Console's
+period list after a save). The dashboard shows the server's own totals.
 
 **Budget codes are real too** — the second slice, widened to US-6.1.1's full property set:
 
@@ -195,22 +247,23 @@ guessable from the form:
 on the string Trips and Billing already emit. `budgeting.test.ts` pins those six spellings; do not
 "tidy" `Nihb` into `NIHB`.
 
-`lib/data.ts` holds the not-yet-real remainder: allocations, actuals, variance. Its `budgetCodes`
-array survives **only** as the name-and-category lookup those three still need — the Budget Codes
-screen no longer reads it, and the array is now typed
-`Pick<BudgetCode, "id" | "code" | "name" | "category">` so it does not have to grow a
-plausible-looking value for every field the real entity gains. Conventions follow
-`Dispatcher/lib/data.ts`: flat exported const arrays, string ids, ISO date strings (never `Date`
-objects), whole-dollar numbers rendered through `formatCad`, and a `StatusKind` carried on every
-status-bearing row so rendering is a pure lookup. Its rows are keyed to mock period ids no real
-period will match, so screens on real periods show their empty states rather than fake figures —
-those screens keep their `MockTag`.
+`lib/data.ts` holds the not-yet-real remainder: actuals and variance. Its `budgetCodes` array
+survives **only** as the name-and-category lookup those two still need — the Budget Codes screen
+no longer reads it, and the array is typed `Pick<BudgetCode, "id" | "code" | "name" | "category">`
+so it does not have to grow a plausible-looking value for every field the real entity gains.
+Conventions follow `Dispatcher/lib/data.ts`: flat exported const arrays, string ids, ISO date
+strings (never `Date` objects), whole-dollar numbers rendered through `formatCad`, and a
+`StatusKind` carried on every status-bearing row so rendering is a pure lookup. Its rows are
+keyed to mock period ids no real period will match, so screens on real periods show their empty
+states rather than fake figures — those screens keep their `MockTag`.
 
 No screen invents an API shape. Each remaining array is replaced by additions to
 `lib/api/budgeting.ts` as its Stage 6.1 slice lands, and the screens keep their props.
 
 Variance thresholds (`varianceKind`) live in `lib/data.ts`, not in the Variance screen, so any
-future report agrees with the screen by construction.
+future report agrees with the screen by construction. The signed formatters
+(`formatDeltaCad` / `formatDeltaPct`) live in `lib/money.ts`, **not** in `lib/data.ts`, so a
+screen on real data (the dashboard's Net tile) never imports the mock module.
 
 ## Accessibility
 
@@ -256,9 +309,10 @@ Not used here on purpose: axe-core / pa11y / Lighthouse. They catch the automata
 
 - ~~The Budgeting backend domain library~~ — **exists since the create-budget-period story**:
   `Backend/src/Budgeting/` is listed in `ModuleGraph.DomainNames` and serves
-  `/api/budgeting/periods` (create + list; periods are Draft-only until the Open/Lock story).
-  The architecture tests still cross-check `DomainNames` against disk — any future module needs
-  the same paired change.
+  `/api/budgeting/periods` (create, list, get-by-id and the four lifecycle transitions —
+  ~~periods are Draft-only until the Open/Lock story~~ superseded by the five-state lifecycle
+  above). The architecture tests still cross-check `DomainNames` against disk — any future
+  module needs the same paired change.
 - ~~The `BudgetCode` table and its RLS policies~~ — **shipped**: `budgeting.budget_codes` +
   `rm_budget_codes` (migrations `AddBudgetCodes`, then `ExtendBudgetCodes` for US-6.1.1's full
   property set). The free-text `stream` field the first slice carried was replaced by the
@@ -276,10 +330,11 @@ Not used here on purpose: axe-core / pa11y / Lighthouse. They catch the automata
   stays pickable, and that fix still belongs in Identity. Whoever adds an email change, a role
   change or a deactivation must raise a domain event **and** extend
   `IdentityIntegrationEventMapper`, or every replica goes stale with no error anywhere.
-- `BudgetAllocation` / `ActualTransaction` tables and their RLS policies; QuickBooks actuals
-  reconciliation. The Stage 6.2 slice that adds allocations must also replace
-  `NeverReferencedBudgetCodeUsageProbe` — until it does, "has this code been used?" answers no,
-  which is true today and will silently stop being true.
+- ~~`BudgetAllocation`~~ — **shipped** (`budgeting.budget_allocations` + `rm_budget_allocations`,
+  migration `AddBudgetAllocations`), and with it `AllocationBudgetCodeUsageProbe` replaced
+  `NeverReferencedBudgetCodeUsageProbe`, so `DELETE /codes/{id}` now answers 409
+  `Budgeting.Code.InUse` for a code any period has ever planned. Still open: the
+  `ActualTransaction` table and its RLS policies; QuickBooks actuals reconciliation.
 - **Any QuickBooks automation.** All QBO work is manual for now, by decision. Automating GL
   validation means an Intuit OAuth flow, per-tenant token storage (there is no tenants table),
   a QBO client and a chart-of-accounts sync — a slice of its own, not a gap in this one.
@@ -291,8 +346,9 @@ Not used here on purpose: axe-core / pa11y / Lighthouse. They catch the automata
   contracts, POs and work orders) against this chart. They are unrelated strings today, not
   replicas of these rows; wiring them together is a cross-module story and needs an integration
   event, not a project reference.
-- Filtering the codes list, or hiding retired codes from the allocations picker — the list is
-  small enough to render whole, and there is no allocations picker yet.
+- Filtering the codes list — it is small enough to render whole. (~~Hiding retired codes from
+  the allocations picker~~ — done: `allocationCandidates` offers only active codes of the
+  section's category that are not already planned.)
 - CI/CD and the OVHcloud deployment target — there is no `.github/` anywhere in this repo yet;
   that is a platform-wide story covering every app at once.
 - OIDC/OpenIddict; the `SuperUser` claim from architecture Section 6.1.
