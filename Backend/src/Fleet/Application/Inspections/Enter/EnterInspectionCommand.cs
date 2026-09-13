@@ -39,5 +39,15 @@ public sealed record EnterInspectionCommand(
 /// <summary>One checklist row on an inspection request.</summary>
 public sealed record ChecklistItemInput(string? Group, string Item, bool Passed);
 
-/// <summary>One defect on an inspection request.</summary>
-public sealed record DefectInput(string Item, InspectionDefectSeverity Severity, string? Note);
+/// <summary>
+/// One defect on an inspection request. Resolution fields are deliberately absent: the wire can
+/// report a fault, never clear one — that stays with the resolve endpoint and work-order
+/// completion. <paramref name="RecurrenceOfInspectionId"/> is the one pointer a caller may set,
+/// for the Re-report path where a dispatcher knows a cleared fault is back and does not want to
+/// wait for the next DVIR.
+/// </summary>
+public sealed record DefectInput(
+    string Item,
+    InspectionDefectSeverity Severity,
+    string? Note,
+    Guid? RecurrenceOfInspectionId = null);

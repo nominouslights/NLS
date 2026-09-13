@@ -54,6 +54,10 @@ public sealed class VehicleInspectionConfiguration : IEntityTypeConfiguration<Ve
         {
             defect.ToJson("defects");
             defect.Property(d => d.Severity).HasConversion<string>();
+            // Resolution/recurrence fields are new properties on the same owned record, so they
+            // change the jsonb PAYLOAD only — no DDL. The reason serialises as its name, not an
+            // int, for the same reason Severity does: the column is read by humans.
+            defect.Property(d => d.ResolutionReason).HasConversion<string>();
         });
 
         // Pre-trip sections (moved off the manifest) — multi-selects as text arrays, scalars as columns.

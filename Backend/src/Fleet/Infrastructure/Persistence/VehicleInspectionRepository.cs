@@ -37,6 +37,12 @@ internal sealed class VehicleInspectionRepository(FleetDbContext context) : IVeh
     public Task<VehicleInspection?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         context.VehicleInspections.FirstOrDefaultAsync(i => i.Id == id, cancellationToken);
 
+    public Task<VehicleInspection?> GetByGeneratedWorkOrderIdAsync(
+        Guid workOrderId,
+        CancellationToken cancellationToken = default) =>
+        context.VehicleInspections
+            .FirstOrDefaultAsync(i => i.GeneratedWorkOrderId == workOrderId, cancellationToken);
+
     public void Add(VehicleInspection inspection) => context.VehicleInspections.Add(inspection);
 
     public void Remove(VehicleInspection inspection) => context.VehicleInspections.Remove(inspection);

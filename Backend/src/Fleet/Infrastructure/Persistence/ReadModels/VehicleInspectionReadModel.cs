@@ -93,6 +93,10 @@ public sealed class VehicleInspectionReadModelConfiguration : IEntityTypeConfigu
         {
             defect.ToJson("defects");
             defect.Property(d => d.Severity).HasConversion<string>();
+            // Must mirror VehicleInspectionConfiguration exactly: the same owned record is
+            // written on one side and read on the other, so a conversion configured on only one
+            // would have the projector write "RepairedUnderWorkOrder" and the reader expect 0.
+            defect.Property(d => d.ResolutionReason).HasConversion<string>();
         });
     }
 }

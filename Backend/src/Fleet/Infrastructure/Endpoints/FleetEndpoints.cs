@@ -38,6 +38,11 @@ public static partial class FleetEndpoints
         // Work orders — per-vehicle listing plus a fleet-wide group.
         vehicles.MapGet("{vehicleId:guid}/work-orders", GetVehicleWorkOrders);
 
+        // Defects on this vehicle, derived from its DVIRs. ?includeResolved=true for the full
+        // history. Nested under the vehicle even though the contract is an inspection DTO —
+        // the dispatcher asks "what is wrong with this truck", not "what did this DVIR say".
+        vehicles.MapGet("{vehicleId:guid}/defects", GetVehicleDefects);
+
         // Preventative maintenance, per vehicle: computed status/due/overhauls/history,
         // plan assignment, and the append-only completion log.
         vehicles.MapGet("{vehicleId:guid}/pm", GetVehiclePmStatus);
@@ -77,6 +82,10 @@ public static partial class FleetEndpoints
         inspections.MapPost("", EnterInspection);
         inspections.MapPut("{id:guid}", UpdateInspection);
         inspections.MapDelete("{id:guid}", RemoveInspection);
+
+        // Clear one defect. The item goes in the BODY, not the path — it is free text, and
+        // (inspection id, item) is the only address a defect has.
+        inspections.MapPost("{id:guid}/defects/resolve", ResolveInspectionDefect);
 
         // Fleet-wide compliance documents (dashboard compliance watch).
         app.MapGet("/api/fleet/documents", GetAllDocuments).RequireAuthorization();

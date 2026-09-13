@@ -27,9 +27,11 @@ using NorthernLink.Fleet.Application.Maintenance.Status.GetHistory;
 using NorthernLink.Fleet.Application.Maintenance.Status.GetOverhauls;
 using NorthernLink.Fleet.Application.Maintenance.Status.GetVehicleStatus;
 using NorthernLink.Fleet.Application.Inspections.Enter;
+using NorthernLink.Fleet.Application.Inspections.GetDefects;
 using NorthernLink.Fleet.Application.Inspections.GetInspections;
 using NorthernLink.Fleet.Application.Inspections.PropagateOdometer;
 using NorthernLink.Fleet.Application.Inspections.Remove;
+using NorthernLink.Fleet.Application.Inspections.ResolveDefect;
 using NorthernLink.Fleet.Application.Inspections.Update;
 using NorthernLink.Fleet.Application.Services;
 using NorthernLink.Fleet.Application.Services.Add;
@@ -96,6 +98,9 @@ public static class FleetServiceCollectionExtensions
         services.AddScoped<IVehicleReadService, VehicleReadService>();
         services.AddScoped<IVehicleInspectionRepository, VehicleInspectionRepository>();
         services.AddScoped<IVehicleInspectionReadService, VehicleInspectionReadService>();
+        // Defects are their own read concern (own endpoint, DTO, and recurrence derivation) —
+        // a separate interface over the same context, not another member on the inspection one.
+        services.AddScoped<IVehicleDefectReadService, VehicleDefectReadService>();
         services.AddScoped<IShopRepository, ShopRepository>();
         services.AddScoped<IShopReadService, ShopReadService>();
         services.AddScoped<IVehicleDocumentRepository, VehicleDocumentRepository>();
@@ -123,6 +128,8 @@ public static class FleetServiceCollectionExtensions
         services.AddScoped<ICommandHandler<EnterInspectionCommand, Guid>, EnterInspectionCommandHandler>();
         services.AddScoped<ICommandHandler<UpdateInspectionCommand>, UpdateInspectionCommandHandler>();
         services.AddScoped<ICommandHandler<RemoveInspectionCommand>, RemoveInspectionCommandHandler>();
+        services.AddScoped<IQueryHandler<GetVehicleDefectsQuery, IReadOnlyList<VehicleDefectResponse>>, GetVehicleDefectsQueryHandler>();
+        services.AddScoped<ICommandHandler<ResolveInspectionDefectCommand>, ResolveInspectionDefectCommandHandler>();
         services.AddScoped<ICommandHandler<PropagateInspectionOdometerCommand>, PropagateInspectionOdometerCommandHandler>();
         services.AddScoped<ICommandHandler<RegisterShopCommand, Guid>, RegisterShopCommandHandler>();
         services.AddScoped<ICommandHandler<UpdateShopCommand>, UpdateShopCommandHandler>();
