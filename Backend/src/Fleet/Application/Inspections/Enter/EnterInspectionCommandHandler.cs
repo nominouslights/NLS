@@ -24,7 +24,13 @@ public sealed class EnterInspectionCommandHandler(IVehicleInspectionRepository r
             .ToList();
 
         var defects = command.Defects
-            .Select(d => new InspectionDefect { Item = d.Item, Severity = d.Severity, Note = d.Note })
+            .Select(d => new InspectionDefect
+            {
+                Item = d.Item,
+                Severity = d.Severity,
+                Note = d.Note,
+                RecurrenceOfInspectionId = d.RecurrenceOfInspectionId,
+            })
             .ToList();
 
         var inspectionResult = VehicleInspection.Enter(

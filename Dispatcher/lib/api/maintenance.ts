@@ -87,7 +87,16 @@ export interface InspectionInput {
   performedAt?: string;
   odometerKm?: number | null;
   checklist: { group?: string | null; item: string; passed: boolean }[];
-  defects: { item: string; severity: DefectSeverityWire; note?: string | null }[];
+  /** `recurrenceOfInspectionId` is the one pointer the wire may set on a defect:
+   *  the Re-report path, where a dispatcher knows a cleared fault is back and
+   *  does not want to wait for the next DVIR. Resolution fields are deliberately
+   *  absent — the wire reports a fault, it never clears one. */
+  defects: {
+    item: string;
+    severity: DefectSeverityWire;
+    note?: string | null;
+    recurrenceOfInspectionId?: string | null;
+  }[];
   // Pre-trip
   weather?: InspectionWeather[];
   temperatureC?: string | null;
@@ -124,6 +133,85 @@ export function updateInspection(id: string, input: InspectionInput): Promise<vo
  *  false (re-gating completion). */
 export function deleteInspection(id: string): Promise<void> {
   return request<void>(`/api/fleet/inspections/${id}`, { method: "DELETE" });
+}
+
+// ---------------------------------------------------------------------------
+// Vehicle defects (Backend Fleet module — VehicleDefectResponse). One row per
+// defect, flattened out of the DVIR that reported it: a defect is not an entity
+// of its own, it lives inside its inspection's jsonb.
+//
+// THERE IS NO DEFECT ID. A row is keyed on `${inspectionId}:${item}` — that is
+// the React key, and the pair the resolve endpoint addresses.
+//
+// Rows arrive PRE-ORDERED from the server (OutOfService → Major → Minor, newest
+// reportedAt first within each). Do not re-sort them.
+// ---------------------------------------------------------------------------
+
+export type DefectResolutionReasonWire =
+  | "RepairedUnderWorkOrder" | "PreviouslyRepaired" | "ReportedInError" | "AcceptedMonitoring";
+
+/** The earlier, already-cleared report of the same fault this defect supersedes.
+ *  Derived per read on the backend by matching `item` on the same vehicle with a
+ *  strictly earlier `reportedAt` — nothing is stored. `explicit` is true when the
+ *  dispatcher deliberately re-reported it, false when the link was inferred from
+ *  the item name alone. */
+export interface PreviousResolutionWire {
+  inspectionId: string;
+  reportedAt: string;
+  resolvedAtUtc: string;
+  resolutionReason: string;
+  workOrderNumber: string | null;
+  explicit: boolean;
+}
+
+export interface VehicleDefectWire {
+  inspectionId: string;
+  vehicleId: string | null;
+  unit: string;
+  inspectionType: InspectionType;
+  tripNumber: string | null;
+  driverName: string;
+  /** The inspection's performedAt — when the driver found it, not when it was typed in. */
+  reportedAt: string;
+  item: string;
+  severity: DefectSeverityWire;
+  note: string | null;
+  // Repair underway — the inspection's work order, whatever its status. Present
+  // on open and resolved rows alike; a cancelled work order still shows here.
+  workOrderId: string | null;
+  workOrderNumber: string | null;
+  workOrderStatus: string | null;
+  // Resolution — all null while the defect is open. Resolution is FINAL: there
+  // is no reopen, so a fault that comes back is a NEW defect on a later
+  // inspection carrying `recurrence`.
+  resolutionReason: string | null;
+  resolutionNote: string | null;
+  resolvedBy: string | null;
+  resolvedAtUtc: string | null;
+  resolvedByWorkOrderId: string | null;
+  recurrence: PreviousResolutionWire | null;
+}
+
+/** GET /api/fleet/vehicles/{vehicleId}/defects — the vehicle's defects, derived
+ *  from its DVIRs. An unknown vehicle returns `200 []`, never a 404. */
+export function listVehicleDefects(vehicleId: string, includeResolved = false): Promise<VehicleDefectWire[]> {
+  const qs = includeResolved ? "?includeResolved=true" : "";
+  return request<VehicleDefectWire[]>(`/api/fleet/vehicles/${vehicleId}/defects${qs}`);
+}
+
+/** POST /api/fleet/inspections/{id}/defects/resolve — clears one defect. The
+ *  item travels in the BODY, not the path: it is free text, and half the row's
+ *  key. 404 for an unknown inspection or item, 409 when already resolved
+ *  (resolution is final). `resolvedBy` is client-supplied, following the same
+ *  convention as an inspection's `enteredBy`; it defaults to "Dispatch". */
+export function resolveInspectionDefect(
+  inspectionId: string,
+  body: { item: string; reason: DefectResolutionReasonWire; note?: string | null; resolvedBy?: string | null },
+): Promise<void> {
+  return request<void>(`/api/fleet/inspections/${inspectionId}/defects/resolve`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }
 
 // ---------------------------------------------------------------------------

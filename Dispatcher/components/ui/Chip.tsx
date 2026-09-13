@@ -19,7 +19,11 @@ export function ServiceChip({
   );
 }
 
-export function StatusChip({ kind, label }: { kind: StatusKind; label: string }) {
+/** Colour + icon + label status chip. `glyph` overrides the kind's default icon
+ *  for the case where two states legitimately share a colour and must still be
+ *  told apart at a glance — a defect's Major and Out-of-Service are both
+ *  vermillion, so Out-of-Service supplies its own ✕. Never a new colour. */
+export function StatusChip({ kind, label, glyph }: { kind: StatusKind; label: string; glyph?: string }) {
   const m = statusMeta(kind);
   return (
     <span style={chipStyle(m.bg, m.bd, m.t)}>
@@ -38,7 +42,7 @@ export function StatusChip({ kind, label }: { kind: StatusKind; label: string })
           color: m.bt,
         }}
       >
-        {m.g}
+        {glyph ?? m.g}
       </span>
       {label}
     </span>

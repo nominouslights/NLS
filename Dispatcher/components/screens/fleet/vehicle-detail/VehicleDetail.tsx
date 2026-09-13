@@ -9,6 +9,7 @@ import VehicleDocuments from "@/components/screens/fleet/VehicleDocuments";
 import VehicleServiceHistory from "@/components/screens/fleet/VehicleServiceHistory";
 import VehicleWorkOrders from "@/components/screens/fleet/VehicleWorkOrders";
 import VehicleInspections from "@/components/screens/fleet/VehicleInspections";
+import VehicleDefects from "@/components/screens/fleet/VehicleDefects";
 import VehiclePm from "@/components/screens/fleet/VehiclePm";
 import OverviewTab, { type OverviewTabProps } from "./OverviewTab";
 import { EmptyTabNote, PreviewCaption, TABS, tabIndex, type VehicleOption } from "./shared";
@@ -87,6 +88,7 @@ export default function VehicleDetail({ tab, setTab, vehicleOptions, ...overview
         <VehiclePm vehicle={f} onOpenWorkOrders={() => setTab(tabIndex("Work Orders"))} />
       )}
       {tab === tabIndex("Work Orders") && <VehicleWorkOrders vehicle={f} vehicles={vehicleOptions} />}
+      {tab === tabIndex("Open Defects") && <VehicleDefects vehicle={f} />}
       {tab === tabIndex("Inspections") && <VehicleInspections vehicle={f} vehicles={vehicleOptions} />}
 
       {/* DTC alerts (mock) */}

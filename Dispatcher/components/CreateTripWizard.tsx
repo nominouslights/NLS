@@ -49,6 +49,7 @@ import {
 import PassengerCsvImport from "@/components/manifest/PassengerCsvImport";
 import RiderPickerModal from "@/components/manifest/RiderPickerModal";
 import { ActionButton } from "@/components/ui/Button";
+import DefectsPanel from "@/components/fleet/DefectsPanel";
 
 // Create Trip — the 6-step wizard, now a real form submitting POST /api/trips.
 // Client/rate lookups come from the Clients API (active-contract summary),
@@ -633,6 +634,19 @@ export default function CreateTripWizard({
                       })),
                     ]}
                     hint={<span style={{ color: colors.textFaint }}>· only Active vehicles are assignable</span>}
+                  />
+                </div>
+                {/* Known unrepaired defects on the unit being committed to this
+                    run. READ-ONLY here by decision — no RESOLVE action inside
+                    the booking flow, because the fastest way to make a warning
+                    go away must never be to tag it "reported in error" while
+                    the clock is running. Warn only: NEXT stays enabled. */}
+                <div style={{ marginBottom: 18 }}>
+                  <DefectsPanel
+                    vehicleId={vehicleId || null}
+                    unit={vehicle?.unitNumber ?? null}
+                    variant="inline"
+                    maxRows={3}
                   />
                 </div>
                 <div

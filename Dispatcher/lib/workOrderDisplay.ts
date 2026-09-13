@@ -1,5 +1,6 @@
 import type { StatusKind } from "./theme";
 import type {
+  DefectResolutionReasonWire,
   DefectSeverityWire,
   InspectionResultWire,
   ServiceCategoryWire,
@@ -37,6 +38,40 @@ export const DEFECT_SEVERITY_LABEL: Record<DefectSeverityWire, string> = {
   Minor: "Minor",
   Major: "Major",
   OutOfService: "Out-of-Service",
+};
+
+/** Defect severity → chip colour + glyph. The LABEL stays in
+ *  DEFECT_SEVERITY_LABEL above so the chip and the printed NL-WO-01 line items
+ *  can never drift. Minor is gold; Major and Out-of-Service are BOTH vermillion
+ *  — they are told apart by glyph and label, never by a new colour. Minor and
+ *  Major take their kind's default glyph (◐ / ▲); Out-of-Service overrides it
+ *  with ✕ (U+2715, a Barlow glyph — not an emoji). */
+export const DEFECT_SEVERITY_META: Record<DefectSeverityWire, { kind: StatusKind; glyph?: string }> = {
+  Minor: { kind: "soon" },
+  Major: { kind: "over" },
+  OutOfService: { kind: "over", glyph: "✕" },
+};
+
+/** Work-order status → chip colour for a defect row's "repair underway" tag.
+ *  Status-only sibling of workOrderKindWire: VehicleDefectWire carries the
+ *  status string but no priority. Anything still in the shop reads as caution —
+ *  the defect is not cleared until the work order is completed. */
+export const DEFECT_WO_KIND: Record<WorkOrderStatusWire, StatusKind> = {
+  Open: "soon",
+  InProgress: "soon",
+  AwaitingParts: "soon",
+  Completed: "ontime",
+  Cancelled: "off",
+};
+
+/** Why a defect stopped being an open fault. RepairedUnderWorkOrder is stamped
+ *  by work-order completion, never chosen by hand — it is here because it comes
+ *  back on resolved rows. */
+export const DEFECT_RESOLUTION_LABEL: Record<DefectResolutionReasonWire, string> = {
+  RepairedUnderWorkOrder: "Repaired under work order",
+  PreviouslyRepaired: "Previously repaired",
+  ReportedInError: "Reported in error",
+  AcceptedMonitoring: "Accepted, monitoring",
 };
 
 export const OPEN_WIRE_STATUSES: WorkOrderStatusWire[] = ["Open", "InProgress", "AwaitingParts"];
