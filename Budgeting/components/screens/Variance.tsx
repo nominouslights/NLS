@@ -5,13 +5,8 @@ import { MonoTag } from "@/components/ui/Chip";
 import { DetailRow, Panel, SectionLabel } from "@/components/ui/Panel";
 import { formatCad } from "@/lib/api/format";
 import type { BudgetPeriod } from "@/lib/types";
-import {
-  budgetCodes,
-  formatDeltaCad,
-  formatDeltaPct,
-  variance,
-  varianceLabel,
-} from "@/lib/data";
+import { budgetCodes, variance, varianceLabel } from "@/lib/data";
+import { formatDeltaCad, formatDeltaPct } from "@/lib/money";
 import {
   EmptyNote,
   MockTag,

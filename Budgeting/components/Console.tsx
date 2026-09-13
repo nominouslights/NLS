@@ -25,9 +25,9 @@ import Settings from "@/components/screens/Settings";
 // back two periods should not lose that by glancing at Budget Codes.
 //
 // Periods are the app's first real data (GET /api/budgeting/periods) and live here too — fetched
-// once on mount, threaded down as props so every screen agrees on the list. Budget codes are real
-// too but are NOT hoisted: only the Budget Codes screen reads them, so it owns its own fetch.
-// Allocations, actuals and variance remain mock until their Stage 6.1 slices land.
+// once on mount, threaded down as props so every screen agrees on the list. Budget codes and
+// allocation lines are real too but are NOT hoisted: the screens that read them own their own
+// fetches. Actuals and variance remain mock until their Stage 6.1 slice lands.
 
 /** The period to open on: the one containing today, else the latest, else none. */
 function defaultPeriodId(periods: BudgetPeriod[]): string {
@@ -135,6 +135,7 @@ export default function Console() {
               periodId={periodId}
               onSelectPeriod={setPeriodId}
               onCreated={handlePeriodCreated}
+              onPeriodsRefreshed={applyLoaded}
             />
           )}
           {screen === "codes" && <BudgetCodes selId={codeSel} onSelect={setCodeSel} />}

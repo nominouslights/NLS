@@ -12,7 +12,7 @@ frontend or backend.**
 | `Backend/` | The one shared API — one class library per domain, composed by the API gateway | .NET 10, CQRS/DDD, PostgreSQL (DigitalOcean managed, no local instance), RabbitMQ |
 | `Dispatcher/` | Admin Web App (Dispatch Console) — currently a frontend-only prototype on mock data | Next.js 16, React 19 |
 | `Website/` | Public marketing site (northernlink shuttle & cargo) — static/prototype, no API calls yet | Next.js 16, React 19 |
-| `Budgeting/` | Zero-Based Budgeting console (Track 6) — real auth + role gate; budget periods and codes are live against the API, allocations/actuals/variance still mock. Deliberately holds **copies** of Dispatcher's design system — see its own `CLAUDE.md` | Next.js 16, React 19 |
+| `Budgeting/` | Zero-Based Budgeting console (Track 6) — real auth + role gate; budget periods, codes and allocations are live against the API, actuals/variance still mock. Deliberately holds **copies** of Dispatcher's design system — see its own `CLAUDE.md` | Next.js 16, React 19 |
 | `CommunityMobile/` | Community Mobile passenger app — design mockup only: 11 screens on hardcoded mock data (`lib/data/mock_data.dart`), no API/auth wiring, not orchestrated by `aspire run`. **SHELVED** by the Community Booking & Dispatch spec (2026-08): the passenger app ships as a Next.js PWA instead (future sibling folder); this mockup stays as the PWA's information-architecture reference. Payments for that flow are **Square + Interac e-Transfer** (Stripe is superseded) | Flutter 3.29, Dart 3.7 |
 | `AppHost/` | Local dev orchestrator — starts Postgres, RabbitMQ, the API, and Dispatcher together. Platform-level, not part of Backend — it depends on Backend and Dispatcher, not the other way around | .NET 10, Aspire |
 

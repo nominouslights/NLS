@@ -1,17 +1,23 @@
 import type { StatusKind } from "./theme";
 
-// Row types for the mock layer. The convention copied from Dispatcher/lib/types.ts: every row
+// Row types for the view layer. The convention copied from Dispatcher/lib/types.ts: every row
 // that renders a status carries its own StatusKind field (pk, vk, …) rather than having the
 // screen derive one. Rendering stays a pure lookup, and — the reason it matters here — the
 // colour can never be chosen without also choosing the glyph and label that travel with it.
 
-/** Draft → Open → Locked. A locked period is closed to new allocations. */
-export type PeriodState = "Draft" | "Open" | "Locked";
+/**
+ * Mirrors C# PeriodState. Five states, forward only, in this order:
+ * Draft → Finalized → Open → InReview → Closed. The plan (its allocation lines) can change only
+ * while the period is Draft or Open — finalizing signs it off, opening re-allows in-period
+ * adjustments, review and close freeze it. `BudgetPeriod.Transition` enforces the order; the
+ * client-side mirror is PERIOD_STATE_ORDER / nextTransition in lib/api/budgeting.ts.
+ */
+export type PeriodState = "Draft" | "Finalized" | "Open" | "InReview" | "Closed";
 
 /**
  * The view shape the screens render. Periods are real data (lib/api/budgeting.ts maps the wire
- * record to this): pk is derived client-side from state, and planned/allocated are not on the
- * wire yet — they stay zeros until the allocations slice of Stage 6.1 lands.
+ * record to this): pk is derived client-side from state, and the two planned totals are the
+ * server's sums of the period's allocation lines by code category.
  */
 export interface BudgetPeriod {
   id: string;
@@ -22,9 +28,10 @@ export interface BudgetPeriod {
   endsOn: string;
   state: PeriodState;
   pk: StatusKind;
-  /** Total planned, in whole CAD dollars. */
-  planned: number;
-  allocated: number;
+  /** Sum of the period's lines on Revenue codes, in CAD. */
+  plannedRevenue: number;
+  /** Sum of the period's lines on Expense codes, in CAD. */
+  plannedExpense: number;
 }
 
 /** Which side of the ledger a code governs. Mirrors C# BudgetCodeCategory. */
@@ -88,14 +95,8 @@ export interface BudgetCode {
   modifiedByEmail: string | null;
 }
 
-export interface Allocation {
-  id: string;
-  periodId: string;
-  /** Matches BudgetCode.code, not its id — that is what a person reads and types. */
-  code: string;
-  amount: number;
-  note: string;
-}
+// Allocation lines have no view type of their own: BudgetAllocationRecord in lib/api/budgeting.ts
+// is rendered directly, field for field, because nothing on it needs renaming.
 
 export interface ActualLine {
   id: string;

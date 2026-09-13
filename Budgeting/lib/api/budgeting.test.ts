@@ -1,19 +1,116 @@
 import { describe, expect, it } from "vitest";
 import {
+  allocationAmountError,
+  allocationCandidates,
+  allocationJustificationError,
   budgetCodeCategoryKind,
   budgetCodeFormatError,
+  canEditAllocations,
   costCentreApplies,
+  coverage,
+  netCad,
+  netKind,
+  netLabel,
+  nextTransition,
   normalizeBudgetCode,
   parentCandidates,
   periodKind,
+  planningProgress,
   previewPeriod,
+  stateAfter,
   toBudgetCode,
+  toBudgetPeriod,
+  ALLOCATION_JUSTIFICATION_MAX_LENGTH,
+  PERIOD_STATE_LABELS,
+  PERIOD_STATE_ORDER,
   REVIEW_FREQUENCY_LABELS,
   SERVICE_LINE_LABELS,
   TAX_TREATMENT_LABELS,
+  type BudgetAllocationRecord,
   type BudgetCodeRecord,
+  type BudgetPeriodRecord,
+  type LifecycleStep,
+  type LineStep,
+  type PeriodTransitionAction,
 } from "./budgeting";
-import type { BudgetCode } from "@/lib/types";
+import type { BudgetCode, BudgetCodeCategory, BudgetPeriod, PeriodState } from "@/lib/types";
+
+// Shared fixtures for the period and allocation helpers below.
+
+const periodRecord: BudgetPeriodRecord = {
+  id: "5f2b1e1c-0000-4000-8000-0000000000a1",
+  label: "FY2026 Q4",
+  granularity: "Quarter",
+  year: 2026,
+  ordinal: 4,
+  startsOn: "2026-10-01",
+  endsOn: "2026-12-31",
+  state: "Draft",
+  createdAtUtc: "2026-09-01T00:00:00+00:00",
+  updatedAtUtc: "2026-09-01T00:00:00+00:00",
+  plannedRevenueCad: 1_023_500,
+  plannedExpenseCad: 245_000,
+};
+
+const period = (state: PeriodState, plannedRevenue = 0, plannedExpense = 0): BudgetPeriod => ({
+  id: periodRecord.id,
+  label: periodRecord.label,
+  startsOn: periodRecord.startsOn,
+  endsOn: periodRecord.endsOn,
+  state,
+  pk: periodKind(state),
+  plannedRevenue,
+  plannedExpense,
+});
+
+const makeCode = (
+  id: string,
+  category: BudgetCodeCategory = "Expense",
+  active = true,
+): BudgetCode => ({
+  id,
+  code: id.toUpperCase(),
+  name: `Code ${id}`,
+  description: null,
+  category,
+  serviceLine: null,
+  costCentre: null,
+  parentCodeId: null,
+  parentCode: null,
+  parentName: null,
+  glAccountCode: null,
+  taxTreatment: null,
+  budgetOwnerUserId: null,
+  budgetOwnerEmail: null,
+  reviewFrequency: "Quarterly",
+  active,
+  createdByEmail: null,
+  modifiedByEmail: null,
+});
+
+const makeLine = (
+  budgetCodeId: string,
+  category: BudgetCodeCategory = "Expense",
+  isCodeActive = true,
+  amountCad = 1000,
+): BudgetAllocationRecord => ({
+  id: `line-${budgetCodeId}`,
+  periodId: periodRecord.id,
+  budgetCodeId,
+  code: budgetCodeId.toUpperCase(),
+  name: `Code ${budgetCodeId}`,
+  category,
+  serviceLine: null,
+  isCodeActive,
+  amountCad,
+  justification: "Because.",
+  createdBy: null,
+  createdByEmail: null,
+  modifiedBy: null,
+  modifiedByEmail: null,
+  createdAtUtc: "2026-09-01T00:00:00+00:00",
+  updatedAtUtc: "2026-09-01T00:00:00+00:00",
+});
 
 // previewPeriod is a display-only mirror of the server's derivation
 // (BudgetPeriod.Create in Backend/src/Budgeting) — these cases pin it to the
@@ -71,13 +168,99 @@ describe("previewPeriod", () => {
   });
 });
 
+// periodKind, PERIOD_STATE_ORDER, canEditAllocations, nextTransition and stateAfter all mirror
+// the C# PeriodState enum and BudgetPeriod.Transition / AllowsPlanChanges in
+// Backend/src/Budgeting/Domain/Periods. Five states, forward only.
+
 describe("periodKind", () => {
-  // The state→kind mapping the mock layer used to carry per row; every screen
-  // renders the kind's glyph + the state label together, never colour alone.
-  it("maps each period state to its status kind", () => {
-    expect(periodKind("Draft")).toBe("info");
-    expect(periodKind("Open")).toBe("ontime");
-    expect(periodKind("Locked")).toBe("off");
+  // Every screen renders the kind's glyph + the state label together, never colour alone. Draft
+  // and Finalized share "info" (the theme has five kinds and "over" means "problem"); the label
+  // and the stepper tell them apart.
+  it.each<[PeriodState, string]>([
+    ["Draft", "info"],
+    ["Finalized", "info"],
+    ["Open", "ontime"],
+    ["InReview", "soon"],
+    ["Closed", "off"],
+  ])("maps %s to %s", (state, kind) => {
+    expect(periodKind(state)).toBe(kind);
+  });
+});
+
+describe("PERIOD_STATE_ORDER and PERIOD_STATE_LABELS", () => {
+  it("lists the five states once each, in lifecycle order", () => {
+    expect(PERIOD_STATE_ORDER).toEqual(["Draft", "Finalized", "Open", "InReview", "Closed"]);
+    expect(new Set(PERIOD_STATE_ORDER).size).toBe(5);
+  });
+
+  it("labels every state in the order", () => {
+    for (const state of PERIOD_STATE_ORDER) {
+      expect(PERIOD_STATE_LABELS[state]).toBeTruthy();
+    }
+    expect(PERIOD_STATE_LABELS.InReview).toBe("In review");
+  });
+});
+
+describe("canEditAllocations", () => {
+  // Mirrors BudgetPeriod.AllowsPlanChanges: Draft or Open. The server answers 409
+  // Budgeting.Allocation.PeriodNotEditable everywhere else, so this is what hides the controls.
+  it.each<[PeriodState, boolean]>([
+    ["Draft", true],
+    ["Finalized", false],
+    ["Open", true],
+    ["InReview", false],
+    ["Closed", false],
+  ])("%s → editable %s", (state, editable) => {
+    expect(canEditAllocations(state)).toBe(editable);
+  });
+});
+
+describe("nextTransition and stateAfter", () => {
+  // The transition table in BudgetPeriod.Transition: each state has exactly one way forward and
+  // Closed has none. stateAfter is the refetch predicate after the POST.
+  it.each<[PeriodState, PeriodTransitionAction, PeriodState]>([
+    ["Draft", "finalize", "Finalized"],
+    ["Finalized", "open", "Open"],
+    ["Open", "begin-review", "InReview"],
+    ["InReview", "close", "Closed"],
+  ])("%s → %s → %s", (from, action, to) => {
+    const t = nextTransition(from);
+    expect(t?.action).toBe(action);
+    expect(t?.label).toBeTruthy();
+    expect(t?.confirmLabel).not.toBe(t?.label);
+    expect(stateAfter(action)).toBe(to);
+  });
+
+  it("offers nothing from Closed — the lifecycle is terminal there", () => {
+    expect(nextTransition("Closed")).toBeNull();
+  });
+
+  it("walks the whole order forward, one step per state", () => {
+    let state: PeriodState = PERIOD_STATE_ORDER[0];
+    const visited = [state];
+    for (let t = nextTransition(state); t !== null; t = nextTransition(state)) {
+      state = stateAfter(t.action);
+      visited.push(state);
+    }
+    expect(visited).toEqual(PERIOD_STATE_ORDER);
+  });
+});
+
+describe("toBudgetPeriod", () => {
+  it("maps the two totals, derives pk from state and leaves the dates untouched", () => {
+    const view = toBudgetPeriod(periodRecord);
+
+    expect(view.plannedRevenue).toBe(1_023_500);
+    expect(view.plannedExpense).toBe(245_000);
+    expect(view.pk).toBe("info");
+    expect(view.state).toBe("Draft");
+    expect(view.startsOn).toBe("2026-10-01");
+    expect(view.endsOn).toBe("2026-12-31");
+    expect(view.label).toBe("FY2026 Q4");
+  });
+
+  it.each<PeriodState>(PERIOD_STATE_ORDER)("derives pk for %s via periodKind", (state) => {
+    expect(toBudgetPeriod({ ...periodRecord, state }).pk).toBe(periodKind(state));
   });
 });
 
@@ -315,5 +498,208 @@ describe("toBudgetCode", () => {
 
     expect(child.parentCode).toBe("ZBB-REV");
     expect(child.parentName).toBe("Revenue rollup");
+  });
+});
+
+// allocationCandidates mirrors the CodeRetired check in SetBudgetAllocationCommandHandler
+// (BudgetAllocationErrors.CodeRetired) and the unique (tenant, period, code) index behind
+// upsert-by-code: the picker must never offer a code the server will refuse or that would
+// silently update an existing line.
+
+describe("allocationCandidates", () => {
+  const codes = [
+    makeCode("rev-a", "Revenue"),
+    makeCode("rev-b", "Revenue"),
+    makeCode("rev-retired", "Revenue", false),
+    makeCode("exp-a", "Expense"),
+  ];
+
+  it("offers only active codes of the requested category", () => {
+    expect(allocationCandidates(codes, [], "Revenue", null).map((c) => c.id)).toEqual([
+      "rev-a",
+      "rev-b",
+    ]);
+    expect(allocationCandidates(codes, [], "Expense", null).map((c) => c.id)).toEqual(["exp-a"]);
+  });
+
+  it("excludes a code that already carries a line in the period", () => {
+    const lines = [makeLine("rev-a", "Revenue")];
+
+    expect(allocationCandidates(codes, lines, "Revenue", null).map((c) => c.id)).toEqual(["rev-b"]);
+  });
+
+  it("keeps the code of the line being edited selectable", () => {
+    const lines = [makeLine("rev-a", "Revenue")];
+
+    expect(allocationCandidates(codes, lines, "Revenue", "rev-a").map((c) => c.id)).toEqual([
+      "rev-a",
+      "rev-b",
+    ]);
+  });
+
+  it("preserves the chart's order", () => {
+    const reversed = [...codes].reverse();
+
+    expect(allocationCandidates(reversed, [], "Revenue", null).map((c) => c.id)).toEqual([
+      "rev-b",
+      "rev-a",
+    ]);
+  });
+});
+
+// allocationAmountError / allocationJustificationError mirror BudgetAllocation.Validate
+// (AmountRequired / AmountNegative / AmountTooLarge / JustificationRequired /
+// JustificationTooLong). The whole-dollar rule is this app's own, stricter than the server's.
+
+describe("allocationAmountError", () => {
+  it.each(["0", "1", "612000", " 250 "])("accepts %j", (text) => {
+    expect(allocationAmountError(text)).toBeNull();
+  });
+
+  it.each(["", "   ", "abc"])("requires an amount for %j", (text) => {
+    expect(allocationAmountError(text)).toBe("Enter an amount.");
+  });
+
+  it("refuses cents — the app plans in whole dollars", () => {
+    expect(allocationAmountError("12.50")).toContain("whole dollars");
+  });
+
+  it("refuses a negative amount", () => {
+    expect(allocationAmountError("-1")).toContain("negative");
+  });
+
+  it("refuses an amount beyond decimal(12,2)", () => {
+    expect(allocationAmountError("1000000000")).toContain("too large");
+  });
+});
+
+describe("allocationJustificationError", () => {
+  it("accepts a justification", () => {
+    expect(allocationJustificationError("14 rotations confirmed")).toBeNull();
+  });
+
+  it.each(["", "   "])("requires one for %j — zero-based means argued from nothing", (text) => {
+    expect(allocationJustificationError(text)).toContain("Enter a justification");
+  });
+
+  it("accepts exactly the maximum and refuses one more", () => {
+    expect(allocationJustificationError("x".repeat(ALLOCATION_JUSTIFICATION_MAX_LENGTH))).toBeNull();
+    expect(
+      allocationJustificationError("x".repeat(ALLOCATION_JUSTIFICATION_MAX_LENGTH + 1)),
+    ).toContain("1000 characters or fewer");
+  });
+});
+
+// netCad / netKind / netLabel: the dashboard's Net tile. No server rule to mirror — the sums are
+// the server's — but the kind and label are what keep the tile from being colour alone.
+
+describe("netCad, netKind and netLabel", () => {
+  it("is planned revenue less planned expense", () => {
+    expect(netCad(period("Draft", 1_000, 250))).toBe(750);
+    expect(netCad(period("Draft", 250, 1_000))).toBe(-750);
+  });
+
+  it.each<[number, string, string]>([
+    [750, "ontime", "Surplus"],
+    [0, "info", "Balanced"],
+    [-750, "over", "Deficit"],
+  ])("net %d → %s / %s", (net, kind, label) => {
+    expect(netKind(net)).toBe(kind);
+    expect(netLabel(net)).toBe(label);
+  });
+});
+
+describe("coverage", () => {
+  const codes = [
+    makeCode("rev-a", "Revenue"),
+    makeCode("rev-b", "Revenue"),
+    makeCode("rev-retired", "Revenue", false),
+    makeCode("exp-a", "Expense"),
+  ];
+
+  it("counts planned active codes over active codes, per category", () => {
+    const lines = [makeLine("rev-a", "Revenue"), makeLine("exp-a", "Expense")];
+
+    expect(coverage(lines, codes, "Revenue")).toEqual({ planned: 1, active: 2 });
+    expect(coverage(lines, codes, "Expense")).toEqual({ planned: 1, active: 1 });
+  });
+
+  it("does not count a line on a retired code — nothing a planner can still act on", () => {
+    const lines = [makeLine("rev-retired", "Revenue", false)];
+
+    expect(coverage(lines, codes, "Revenue")).toEqual({ planned: 0, active: 2 });
+  });
+
+  it("is 0/0 for a category with no codes", () => {
+    expect(coverage([], [], "Expense")).toEqual({ planned: 0, active: 0 });
+  });
+});
+
+// planningProgress feeds the dashboard's checklist and stepper from one derivation: two line
+// steps (done once any line exists) then the five lifecycle states relative to PERIOD_STATE_ORDER.
+
+describe("planningProgress", () => {
+  const codes = [
+    makeCode("rev-a", "Revenue"),
+    makeCode("exp-a", "Expense"),
+    makeCode("exp-b", "Expense"),
+  ];
+  const lineSteps = (steps: ReturnType<typeof planningProgress>) =>
+    steps.filter((s): s is LineStep => s.group === "lines");
+  const lifecycle = (steps: ReturnType<typeof planningProgress>) =>
+    steps.filter((s): s is LifecycleStep => s.group === "lifecycle").map((s) => [s.id, s.status]);
+
+  it("marks both line steps pending for an empty Draft, and Draft current", () => {
+    const steps = planningProgress(period("Draft"), [], codes);
+
+    expect(lineSteps(steps).map((s) => [s.id, s.count, s.done])).toEqual([
+      ["revenue", 0, false],
+      ["expense", 0, false],
+    ]);
+    expect(lifecycle(steps)).toEqual([
+      ["Draft", "current"],
+      ["Finalized", "pending"],
+      ["Open", "pending"],
+      ["InReview", "pending"],
+      ["Closed", "pending"],
+    ]);
+  });
+
+  it("marks a line step done once it has a line, with coverage in the detail", () => {
+    const lines = [makeLine("rev-a", "Revenue"), makeLine("exp-a", "Expense")];
+    const steps = lineSteps(planningProgress(period("Draft"), lines, codes));
+
+    expect(steps.map((s) => [s.id, s.count, s.done])).toEqual([
+      ["revenue", 1, true],
+      ["expense", 1, true],
+    ]);
+    expect(steps[0].detail).toBe("1 of 1 active revenue codes planned");
+    expect(steps[1].detail).toBe("1 of 2 active expense codes planned");
+  });
+
+  it("marks the states before Open done and the ones after pending", () => {
+    expect(lifecycle(planningProgress(period("Open"), [], codes))).toEqual([
+      ["Draft", "done"],
+      ["Finalized", "done"],
+      ["Open", "current"],
+      ["InReview", "pending"],
+      ["Closed", "pending"],
+    ]);
+  });
+
+  it("marks everything done but Closed, which is current, at the end", () => {
+    expect(lifecycle(planningProgress(period("Closed"), [], codes))).toEqual([
+      ["Draft", "done"],
+      ["Finalized", "done"],
+      ["Open", "done"],
+      ["InReview", "done"],
+      ["Closed", "current"],
+    ]);
+  });
+
+  it("puts the two line steps first, then the five states in order", () => {
+    const steps = planningProgress(period("Draft"), [], codes);
+
+    expect(steps.map((s) => s.id)).toEqual(["revenue", "expense", ...PERIOD_STATE_ORDER]);
   });
 });

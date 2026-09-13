@@ -79,12 +79,13 @@ public sealed class BudgetCodeReadModelConfiguration : IEntityTypeConfiguration<
         builder.Property(c => c.UpdatedAtUtc).HasColumnName("updated_at_utc");
         builder.Property(c => c.Version).HasColumnName("version");
 
-        // The screen's default ordering, and the lookup a future allocations slice will make
-        // when it resolves an allocation's code string back to its row.
+        // The screen's default ordering. The allocation read services resolve a line's code by
+        // id (the primary key) rather than by this string, so the index is for the chart's own
+        // listing and for whatever later needs to look a code string back up.
         builder.HasIndex(c => new { c.TenantId, c.Code }).IsUnique();
 
-        // Forward-looking, like the unique index above: Stage 6.2's revenue-mix report groups the
-        // read side by service line, and that is the only query this index exists for.
+        // Forward-looking: the revenue-mix report groups the read side by service line, and
+        // that is the only query this index exists for.
         builder.HasIndex(c => new { c.TenantId, c.ServiceLine });
     }
 }
