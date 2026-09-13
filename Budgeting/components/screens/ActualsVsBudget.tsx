@@ -5,7 +5,8 @@ import { MonoTag } from "@/components/ui/Chip";
 import { MetricTile } from "@/components/ui/MetricTile";
 import { formatCad } from "@/lib/api/format";
 import type { BudgetPeriod } from "@/lib/types";
-import { actuals, budgetCodes, formatDeltaCad, varianceKind } from "@/lib/data";
+import { actuals, budgetCodes, varianceKind } from "@/lib/data";
+import { formatDeltaCad } from "@/lib/money";
 import {
   EmptyNote,
   MockTag,

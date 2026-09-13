@@ -201,7 +201,7 @@ export function MockTag() {
         color: colors.textDim,
         letterSpacing: ".04em",
       }}
-      title="Mock data — replaced as Stage 6.1 endpoints land (periods are already real)"
+      title="Mock data — replaced as Stage 6.1 endpoints land (periods, codes and allocations are already real)"
     >
       MOCK
     </span>

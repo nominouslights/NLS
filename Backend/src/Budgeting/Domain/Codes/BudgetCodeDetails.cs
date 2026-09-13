@@ -63,9 +63,10 @@ public sealed record BudgetCodeDetails
     /// <summary>
     /// What this code covers, and what it doesn't. Optional, and deliberately <em>not</em> the
     /// zero-based justification this field replaced: architecture §5.3 says codes are re-justified
-    /// <em>each period</em>, so the recurring justification belongs on the allocation (Stage 6.2),
-    /// which is where the per-period decision actually happens. What stays on the code is the
-    /// standing note — the part that does not change when the calendar does.
+    /// <em>each period</em>, so the recurring justification lives on the allocation line
+    /// (<c>BudgetAllocation.Justification</c>, required there), which is where the per-period
+    /// decision actually happens. What stays on the code is the standing note — the part that
+    /// does not change when the calendar does.
     /// </summary>
     public string? Description { get; init; }
 }

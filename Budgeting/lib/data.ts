@@ -1,9 +1,9 @@
-// MOCK DATA — the not-yet-real remainder of the Budgeting backend (Stage 6.1). Budget periods
-// are already real (lib/api/budgeting.ts); each remaining array here is replaced as its own
-// Stage 6.1 slice lands. Nothing in this file invents an API shape, and no screen should reach
-// past these exports to imagine one. Allocation/actual/variance rows are keyed to mock period
-// ids that no real period will ever match, so screens on real periods show their empty states
-// rather than a fake figure.
+// MOCK DATA — the not-yet-real remainder of the Budgeting backend (Stage 6.1). Budget periods,
+// codes and allocations are already real (lib/api/budgeting.ts); the actuals and variance here
+// are replaced when the QuickBooks reconciliation slice lands. Nothing in this file invents an
+// API shape, and no screen should reach past these exports to imagine one. Actual/variance rows
+// are keyed to mock period ids that no real period will ever match, so screens on real periods
+// show their empty states rather than a fake figure.
 //
 // Conventions copied from Dispatcher/lib/data.ts: flat exported const arrays of plain objects,
 // string ids, ISO date strings (never Date objects), amounts as plain whole-dollar numbers
@@ -14,16 +14,19 @@
 //
 // `budgetCodes` below is NOT what the Budget Codes screen renders any more — that screen is on
 // the real API (GET/POST/PUT/DELETE /api/budgeting/codes). The array survives only as the
-// name-and-category lookup for the allocation, actual and variance rows further down, which are
-// still mock and are keyed to these code strings. It goes when those slices land, not before.
+// name-and-category lookup for the actual and variance rows further down, which are still mock
+// and are keyed to these code strings. It goes when that slice lands, not before.
+//
+// The signed formatters (formatDeltaCad / formatDeltaPct) moved to lib/money.ts so a screen on
+// real data never imports this module.
 
-import type { Allocation, ActualLine, BudgetCode, VarianceRow } from "./types";
+import type { ActualLine, BudgetCode, VarianceRow } from "./types";
 import type { StatusKind } from "./theme";
 
 /**
  * Exactly the four fields the remaining mock screens read — Reports and ActualsVsBudget want the
- * name and category, Allocations and Variance want the id to jump to the real screen with. Typed
- * as a Pick rather than a full BudgetCode so this stays a lookup and does not have to grow a
+ * name and category, Variance wants the id to jump to the real screen with. Typed as a Pick
+ * rather than a full BudgetCode so this stays a lookup and does not have to grow a
  * plausible-looking value for every field the real entity gains.
  */
 type CodeLookupRow = Pick<BudgetCode, "id" | "code" | "name" | "category">;
@@ -79,16 +82,6 @@ export const budgetCodes: CodeLookupRow[] = [
   },
 ];
 
-export const allocations: Allocation[] = [
-  { id: "AL-4001", periodId: "BP-2603", code: "ZBB-CREW-01", amount: 612_000, note: "14 rotations confirmed" },
-  { id: "AL-4002", periodId: "BP-2603", code: "ZBB-NIHB-01", amount: 244_000, note: "Trailing 3-period mean" },
-  { id: "AL-4003", periodId: "BP-2603", code: "ZBB-CHTR-02", amount: 96_500, note: "6 charters booked" },
-  { id: "AL-4004", periodId: "BP-2603", code: "ZBB-COMM-01", amount: 71_000, note: "Backlog-sized" },
-  { id: "AL-4005", periodId: "BP-2603", code: "ZBB-FUEL-01", amount: 118_000, note: "142,000 km @ contracted rate" },
-  { id: "AL-4006", periodId: "BP-2603", code: "ZBB-MAINT-01", amount: 74_500, note: "PM + parts float" },
-  { id: "AL-4007", periodId: "BP-2603", code: "ZBB-WAGE-01", amount: 52_500, note: "Roster coverage" },
-];
-
 export const actuals: ActualLine[] = [
   { id: "AC-7001", periodId: "BP-2603", code: "ZBB-CREW-01", planned: 612_000, actual: 604_800 },
   { id: "AC-7002", periodId: "BP-2603", code: "ZBB-NIHB-01", planned: 244_000, actual: 261_300 },
@@ -119,19 +112,6 @@ export function varianceLabel(deltaPct: number | null): string {
   if (magnitude <= 5) return "On plan";
   if (magnitude <= 15) return "Watch";
   return "Over threshold";
-}
-
-/** Signed percentage, always carrying an explicit + or − so the sign never rests on colour. */
-export function formatDeltaPct(deltaPct: number | null): string {
-  if (deltaPct === null) return "—";
-  const sign = deltaPct > 0 ? "+" : deltaPct < 0 ? "−" : "";
-  return `${sign}${Math.abs(deltaPct).toFixed(1)}%`;
-}
-
-/** Signed dollar delta, same rule as formatDeltaPct: the sign is text, not a colour. */
-export function formatDeltaCad(delta: number): string {
-  const sign = delta > 0 ? "+" : delta < 0 ? "−" : "";
-  return `${sign}$${Math.abs(delta).toLocaleString("en-CA")}`;
 }
 
 /** Derived from `actuals` so the two can never disagree. */

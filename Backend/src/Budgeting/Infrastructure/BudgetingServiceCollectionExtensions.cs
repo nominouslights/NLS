@@ -11,6 +11,10 @@ using NorthernLink.Shared.Persistence.Projections;
 using NorthernLink.Shared.Tenancy;
 using NorthernLink.Budgeting.Application;
 using NorthernLink.Budgeting.Application.Abstractions;
+using NorthernLink.Budgeting.Application.Allocations;
+using NorthernLink.Budgeting.Application.Allocations.GetAllocations;
+using NorthernLink.Budgeting.Application.Allocations.Remove;
+using NorthernLink.Budgeting.Application.Allocations.Set;
 using NorthernLink.Budgeting.Application.Integration;
 using NorthernLink.Budgeting.Application.Codes;
 using NorthernLink.Budgeting.Application.Codes.Create;
@@ -22,7 +26,9 @@ using NorthernLink.Budgeting.Application.Codes.SetActive;
 using NorthernLink.Budgeting.Application.Codes.Update;
 using NorthernLink.Budgeting.Application.Periods;
 using NorthernLink.Budgeting.Application.Periods.Create;
+using NorthernLink.Budgeting.Application.Periods.GetPeriodById;
 using NorthernLink.Budgeting.Application.Periods.GetPeriods;
+using NorthernLink.Budgeting.Application.Periods.Transition;
 using NorthernLink.Budgeting.Infrastructure.Persistence;
 using NorthernLink.Budgeting.Infrastructure.Persistence.Projections;
 
@@ -64,15 +70,21 @@ public static class BudgetingServiceCollectionExtensions
         services.AddScoped<IBudgetPeriodReadService, BudgetPeriodReadService>();
         services.AddScoped<IBudgetCodeRepository, BudgetCodeRepository>();
         services.AddScoped<IBudgetCodeReadService, BudgetCodeReadService>();
+        services.AddScoped<IBudgetAllocationRepository, BudgetAllocationRepository>();
+        services.AddScoped<IBudgetAllocationReadService, BudgetAllocationReadService>();
         services.AddScoped<IUserLookupRepository, UserLookupRepository>();
 
-        // Nothing references a budget code yet, so "never referenced" is the true answer, not a
-        // stub. Stage 6.2 swaps in the allocation-aware implementation — see the class comment.
-        services.AddScoped<IBudgetCodeUsageProbe, NeverReferencedBudgetCodeUsageProbe>();
+        // Allocation lines reference codes by id and by string, so "is this code in use" is now
+        // a real question with a real answer — the delete-code path refuses with 409 InUse the
+        // moment any period has planned against the code. Actual transactions plug into the same
+        // probe when they arrive (see the class comment).
+        services.AddScoped<IBudgetCodeUsageProbe, AllocationBudgetCodeUsageProbe>();
 
         // 3. Command/query handlers — registered explicitly, one line per handler.
         services.AddScoped<ICommandHandler<CreateBudgetPeriodCommand, Guid>, CreateBudgetPeriodCommandHandler>();
+        services.AddScoped<ICommandHandler<TransitionBudgetPeriodCommand>, TransitionBudgetPeriodCommandHandler>();
         services.AddScoped<IQueryHandler<GetBudgetPeriodsQuery, IReadOnlyList<BudgetPeriodResponse>>, GetBudgetPeriodsQueryHandler>();
+        services.AddScoped<IQueryHandler<GetBudgetPeriodByIdQuery, BudgetPeriodResponse>, GetBudgetPeriodByIdQueryHandler>();
         services.AddScoped<ICommandHandler<CreateBudgetCodeCommand, Guid>, CreateBudgetCodeCommandHandler>();
         services.AddScoped<ICommandHandler<UpdateBudgetCodeCommand>, UpdateBudgetCodeCommandHandler>();
         services.AddScoped<ICommandHandler<SetBudgetCodeActiveCommand>, SetBudgetCodeActiveCommandHandler>();
@@ -80,13 +92,16 @@ public static class BudgetingServiceCollectionExtensions
         services.AddScoped<ICommandHandler<SeedStarterBudgetCodesCommand, int>, SeedStarterBudgetCodesCommandHandler>();
         services.AddScoped<IQueryHandler<GetBudgetCodesQuery, IReadOnlyList<BudgetCodeResponse>>, GetBudgetCodesQueryHandler>();
         services.AddScoped<IQueryHandler<GetBudgetOwnerCandidatesQuery, IReadOnlyList<BudgetOwnerOptionResponse>>, GetBudgetOwnerCandidatesQueryHandler>();
+        services.AddScoped<ICommandHandler<SetBudgetAllocationCommand, BudgetAllocationSetResult>, SetBudgetAllocationCommandHandler>();
+        services.AddScoped<ICommandHandler<RemoveBudgetAllocationCommand>, RemoveBudgetAllocationCommandHandler>();
+        services.AddScoped<IQueryHandler<GetBudgetAllocationsQuery, IReadOnlyList<BudgetAllocationResponse>>, GetBudgetAllocationsQueryHandler>();
 
         // 4. Integration event consumers — the Identity replica that keeps user_lookup current,
         //    so a budget code can name an accountable owner and its created_by/modified_by
         //    columns resolve to a readable email without referencing the Identity library.
-        //    Budgeting still publishes nothing: periods and codes are this module's private
-        //    state, and the free-text budget_code strings Clients and Fleet carry are theirs,
-        //    not replicas of these rows.
+        //    Budgeting still publishes nothing: periods, codes and allocations are this module's
+        //    private state, and the free-text budget_code strings Clients and Fleet carry are
+        //    theirs, not replicas of these rows.
         //
         //    Note the usual replay-the-whole-outbox-history behaviour buys nothing here:
         //    identity.outbox_messages was empty until Identity got its first mapper, so every
@@ -98,7 +113,8 @@ public static class BudgetingServiceCollectionExtensions
         //    the read-model rows for the aggregates the batch touched.
         services.AddProjections<BudgetingDbContext>(SchemaName, registry => registry
             .Project(new BudgetPeriodProjection())
-            .Project(new BudgetCodeProjection()));
+            .Project(new BudgetCodeProjection())
+            .Project(new BudgetAllocationProjection()));
 
         return services;
     }
