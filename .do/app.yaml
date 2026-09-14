@@ -215,8 +215,14 @@ databases:
 #      absolute /api/... that Next does not rewrite, so without it the calls leave the prefix
 #      and land on whichever component owns "/"). Website gets neither — it owns the root.
 #
-#        dispatcher: BASE_PATH=/dispatch, NEXT_PUBLIC_API_BASE_URL=/dispatch
+#        dispatcher: BASE_PATH=/dispatch, NEXT_PUBLIC_API_BASE_URL=/dispatch,
+#                    NEXT_PUBLIC_BUDGETING_URL=/budget
 #        budgeting:  BASE_PATH=/budget,   NEXT_PUBLIC_API_BASE_URL=/budget
+#
+#      NEXT_PUBLIC_BUDGETING_URL is the launcher's Budgeting tile target. It is baked at build
+#      like the others (no runtime env entry here does anything), and it stays unset until this
+#      same flip mounts Budgeting at /budget — set earlier, the tile is a dead link; unset, it
+#      renders "Not configured".
 #
 #   2. Wait for CI to publish the rebuilt images. Applying the spec first serves the
 #      still-root-mounted images under a prefix.

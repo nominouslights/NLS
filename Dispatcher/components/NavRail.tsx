@@ -1,16 +1,22 @@
 "use client";
 
 import { colors, fonts, statusMeta } from "@/lib/theme";
-import { NAV_GROUPS, type ScreenId } from "@/lib/nav";
+import { NAV_GROUPS, type NavGroup, type ScreenId } from "@/lib/nav";
 
 export default function NavRail({
   screen,
   collapsed,
   onSelect,
+  groups = NAV_GROUPS,
+  onHome,
 }: {
   screen: ScreenId;
   collapsed: boolean;
   onSelect: (id: ScreenId) => void;
+  /** The groups to render; defaults to the whole console's NAV_GROUPS. */
+  groups?: NavGroup[];
+  /** When set, an "All apps" row renders above the groups and calls this. */
+  onHome?: () => void;
 }) {
   return (
     <div
@@ -26,7 +32,61 @@ export default function NavRail({
       }}
     >
       <div style={{ flex: 1, overflowY: "auto", padding: "14px 0" }}>
-        {NAV_GROUPS.map((grp) => (
+        {onHome && (
+          // Back to the launcher. Same geometry as an item, but never the amber active style:
+          // it is a way out, not a place you are.
+          <div style={{ margin: "0 8px 6px", paddingBottom: 6, borderBottom: `1px solid ${colors.border}` }}>
+            <div
+              onClick={onHome}
+              title="All apps"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 11,
+                padding: collapsed ? "8px 0" : "8px 10px",
+                justifyContent: collapsed ? "center" : undefined,
+                margin: "1px 0",
+                borderRadius: 8,
+                cursor: "pointer",
+              }}
+            >
+              <span
+                style={{
+                  width: 26,
+                  height: 26,
+                  flex: "none",
+                  borderRadius: 7,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontFamily: fonts.mono,
+                  fontSize: 13,
+                  fontWeight: 500,
+                  background: colors.cardBg,
+                  color: colors.textDim,
+                  border: `1px solid ${colors.border}`,
+                }}
+              >
+                ⊞
+              </span>
+              <span
+                style={{
+                  fontFamily: fonts.body,
+                  fontSize: 13,
+                  fontWeight: 500,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  flex: 1,
+                  display: collapsed ? "none" : "block",
+                  color: colors.textMuted,
+                }}
+              >
+                All apps
+              </span>
+            </div>
+          </div>
+        )}
+        {groups.map((grp) => (
           <div key={grp.label} style={{ marginBottom: 6 }}>
             <div
               style={{
