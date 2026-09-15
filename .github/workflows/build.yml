@@ -91,6 +91,15 @@ jobs:
             build_args: |
               BASE_PATH=/budget
               NEXT_PUBLIC_API_BASE_URL=/budget
+          # Unlike the other frontends this one HAS a public/ (service worker + PWA icons), and
+          # its Dockerfile deliberately copies it into the runtime image rather than creating an
+          # empty one. Do not "align" that Dockerfile with the others — see DriverField/CLAUDE.md.
+          - name: driverfield
+            context: DriverField
+            dockerfile: DriverField/Dockerfile
+            build_args: |
+              BASE_PATH=/driver
+              NEXT_PUBLIC_API_BASE_URL=/driver
     steps:
       - uses: actions/checkout@v7
 
