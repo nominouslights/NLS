@@ -56,34 +56,56 @@ internal static class TripPlanningEndpoints
 {
     public static void MapTripPlanningEndpoints(this IEndpointRouteBuilder app)
     {
-        var trips = app.MapGroup("/api/trips").RequireAuthorization();
-        trips.MapGet("", GetTrips);
-        trips.MapGet("{id:guid}", GetTripById);
-        trips.MapGet("{id:guid}/activity", GetTripActivity);
-        trips.MapPost("", CreateTrip);
-        trips.MapPut("{id:guid}", UpdateTrip);
-        trips.MapPost("{id:guid}/assign", AssignTrip);
-        trips.MapPost("{id:guid}/status", ChangeTripStatus);
-        trips.MapPost("{id:guid}/finish", FinishTripOperations);
-        trips.MapPost("{id:guid}/close-without-billing", CloseTripWithoutBilling);
-        trips.MapPost("{id:guid}/demand", RecordTripDemand);
-        trips.MapPost("{id:guid}/merge-round-trip", MergeRoundTrip);
-        trips.MapPost("{id:guid}/unpair-round-trip", UnpairRoundTrip);
-        trips.MapPost("{id:guid}/deadhead-return", CreateDeadheadReturn);
+        // Two groups on the same "/api/trips" prefix, distinguished by route template. Group
+        // policies are ADDITIVE — a nested group ANDs with its parent — so a driver-facing route
+        // cannot be widened from inside a DispatchAccess group; it needs its own sibling.
+        //
+        // Planning writes: creating, editing, assigning and closing trips is dispatch work.
+        var tripPlanning = app.MapGroup("/api/trips")
+            .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
+        tripPlanning.MapPost("", CreateTrip);
+        tripPlanning.MapPut("{id:guid}", UpdateTrip);
+        tripPlanning.MapPost("{id:guid}/assign", AssignTrip);
+        tripPlanning.MapPost("{id:guid}/finish", FinishTripOperations);
+        tripPlanning.MapPost("{id:guid}/close-without-billing", CloseTripWithoutBilling);
+        tripPlanning.MapPost("{id:guid}/demand", RecordTripDemand);
+        tripPlanning.MapPost("{id:guid}/merge-round-trip", MergeRoundTrip);
+        tripPlanning.MapPost("{id:guid}/unpair-round-trip", UnpairRoundTrip);
+        tripPlanning.MapPost("{id:guid}/deadhead-return", CreateDeadheadReturn);
 
-        var routes = app.MapGroup("/api/trips/routes").RequireAuthorization();
+        // The driver-facing half: reading the board and advancing a trip's status from the cab.
+        //
+        // KNOWN GAP, deliberate: unlike /api/drivers these routes carry no {driverId}, and Trips
+        // cannot resolve a caller to a driver — Driver.UserId lives in the Drivers module and the
+        // driver_lookup replica here does not carry it. So a Driver-role caller can read any
+        // trip and change any trip's status, not only the trips assigned to them. That is a
+        // narrower hole than the bare authorize this replaces (no writes to routes, stops,
+        // templates, shipments or the client book), but it IS still a hole. Closing it means
+        // carrying UserId on drivers.driver-changed into driver_lookup and applying
+        // OwnRecordAccess against Trip.DriverId here.
+        var tripsOperating = app.MapGroup("/api/trips")
+            .RequireAuthorization(AuthorizationPolicies.DriverAccess);
+        tripsOperating.MapGet("", GetTrips);
+        tripsOperating.MapGet("{id:guid}", GetTripById);
+        tripsOperating.MapGet("{id:guid}/activity", GetTripActivity);
+        tripsOperating.MapPost("{id:guid}/status", ChangeTripStatus);
+
+        var routes = app.MapGroup("/api/trips/routes")
+            .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
         routes.MapGet("", GetRoutes);
         routes.MapPost("", CreateRoute);
         routes.MapPut("{id:guid}", UpdateRoute);
 
-        var stops = app.MapGroup("/api/trips/stops").RequireAuthorization();
+        var stops = app.MapGroup("/api/trips/stops")
+            .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
         stops.MapGet("", GetStops);
         stops.MapPost("", CreateStop);
         stops.MapPut("{id:guid}", UpdateStop);
         stops.MapPost("{id:guid}/activate", ActivateStop);
         stops.MapPost("{id:guid}/deactivate", DeactivateStop);
 
-        var templates = app.MapGroup("/api/trips/schedule-templates").RequireAuthorization();
+        var templates = app.MapGroup("/api/trips/schedule-templates")
+            .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
         templates.MapGet("", GetScheduleTemplates);
         templates.MapPost("", CreateScheduleTemplate);
         templates.MapPut("{id:guid}", UpdateScheduleTemplate);

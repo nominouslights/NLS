@@ -60,5 +60,26 @@ public static class Roles
     /// </summary>
     public static readonly string[] DispatchAccess = [Owner, Dispatcher, Supervisor];
 
+    /// <summary>
+    /// The Driver Field App's surface — <see cref="DispatchAccess"/> plus <see cref="Driver"/>.
+    /// A deliberate <b>superset</b>: dispatch staff must be able to see and act on everything a
+    /// driver can (working a driver's screen over the phone is routine), so this list is the
+    /// dispatch list widened, never a separate branch.
+    /// <para>
+    /// <b>Because it contains <see cref="Driver"/>, attaching this policy to an existing endpoint
+    /// group widens that group.</b> Driver-facing routes therefore get their own sibling
+    /// <c>MapGroup</c> on the same prefix rather than joining a dispatch-only one — ASP.NET group
+    /// policies are additive (a nested group ANDs with its parent), so access cannot be widened
+    /// from inside a narrowed group. See <c>DriversEndpoints.MapDriversEndpoints</c> for the shape.
+    /// </para>
+    /// <para>
+    /// Membership here is a route-level gate only. It says nothing about <i>whose</i> row the
+    /// caller may touch: a <see cref="Driver"/>-role caller on a <c>{driverId}</c> route must
+    /// additionally pass the caller-owns-this-row check (<c>OwnRecordAccess</c> in
+    /// <c>NorthernLink.Shared.Tenancy</c>, applied by <c>IDriverSelfAccess</c>).
+    /// </para>
+    /// </summary>
+    public static readonly string[] DriverAccess = [Owner, Dispatcher, Supervisor, Driver];
+
     public static bool IsKnown(string role) => Array.IndexOf(Internal, role) >= 0;
 }

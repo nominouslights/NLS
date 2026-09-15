@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
+using NorthernLink.Shared.Kernel;
 
 namespace NorthernLink.Fleet.Infrastructure.Endpoints;
 
@@ -15,7 +16,13 @@ public static partial class FleetEndpoints
 {
     public static IEndpointRouteBuilder MapFleetEndpoints(this IEndpointRouteBuilder app)
     {
-        var vehicles = app.MapGroup("/api/fleet/vehicles").RequireAuthorization();
+        // DispatchAccess throughout except the DVIR submit below. Vehicles carry registration,
+        // insurance, disposal and odometer writes; a bare RequireAuthorization let a Driver token
+        // reach all of them. Not listed in the approved plan's narrow-list, but narrowing is the
+        // conservative direction: the Driver Field App's vehicle needs are served by the
+        // inspection POST, and anything more gets its own sibling group when it is specified.
+        var vehicles = app.MapGroup("/api/fleet/vehicles")
+            .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
 
         vehicles.MapGet("", GetVehicles);
         vehicles.MapGet("{id:guid}", GetVehicleById);
@@ -49,10 +56,12 @@ public static partial class FleetEndpoints
         vehicles.MapGet("{vehicleId:guid}/pm/history", GetVehiclePmHistory);
 
         // Fleet-wide PM dashboard: every assigned, non-disposed vehicle with its due picture.
-        app.MapGet("/api/fleet/pm/due", GetFleetPmDue).RequireAuthorization();
+        app.MapGet("/api/fleet/pm/due", GetFleetPmDue)
+            .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
 
         // Preventative-maintenance plans — fleet-wide reference data assigned to vehicles.
-        var pmPlans = app.MapGroup("/api/fleet/pm-plans").RequireAuthorization();
+        var pmPlans = app.MapGroup("/api/fleet/pm-plans")
+            .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
 
         pmPlans.MapGet("", GetPmPlans);
         pmPlans.MapGet("{id:guid}", GetPmPlanById);
@@ -62,27 +71,42 @@ public static partial class FleetEndpoints
         // NL-01 when unassigned); reruns return the same plan id with no changes.
         pmPlans.MapPost("seed-defaults", SeedDefaultPmPlan);
 
-        var workOrders = app.MapGroup("/api/fleet/work-orders").RequireAuthorization();
+        var workOrders = app.MapGroup("/api/fleet/work-orders")
+            .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
         workOrders.MapGet("", GetAllWorkOrders);
         workOrders.MapPost("", CreateWorkOrder);
         workOrders.MapPost("{id:guid}/status", ChangeWorkOrderStatus);
         workOrders.MapPost("{id:guid}/complete", CompleteWorkOrder);
 
-        // Inspections: list DVIRs, and enter a pre-/post-trip inspection directly from the
-        // trip workflow (or, later, the Driver Field App). The reading advances the vehicle
-        // odometer intra-Fleet.
-        var inspections = app.MapGroup("/api/fleet/inspections").RequireAuthorization();
+        // Inspections, split across two sibling groups on one prefix. Listing every DVIR in the
+        // fleet, and correcting or deleting one after the fact, is a compliance-office job…
+        var inspectionRecords = app.MapGroup("/api/fleet/inspections")
+            .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
 
-        inspections.MapGet("", GetInspections);
-        inspections.MapPost("", EnterInspection);
-        inspections.MapPut("{id:guid}", UpdateInspection);
-        inspections.MapDelete("{id:guid}", RemoveInspection);
+        inspectionRecords.MapGet("", GetInspections);
+        inspectionRecords.MapPut("{id:guid}", UpdateInspection);
+        inspectionRecords.MapDelete("{id:guid}", RemoveInspection);
+
+        // …while submitting a pre-/post-trip inspection is the driver's own circle check, and is
+        // the reason DriverAccess exists. Entered from the trip workflow today, from the Driver
+        // Field App next; the reading advances the vehicle odometer intra-Fleet.
+        //
+        // No caller-owns-this-row check here, and none is needed: the route carries no
+        // {driverId}, an inspection is append-only, and the driver on it is a name the submitter
+        // supplies. A driver submitting a DVIR under someone else's name is a falsified record —
+        // a supervision problem, not something an ownership guard on a URL segment can catch.
+        var inspectionSubmission = app.MapGroup("/api/fleet/inspections")
+            .RequireAuthorization(AuthorizationPolicies.DriverAccess);
+
+        inspectionSubmission.MapPost("", EnterInspection);
 
         // Fleet-wide compliance documents (dashboard compliance watch).
-        app.MapGet("/api/fleet/documents", GetAllDocuments).RequireAuthorization();
+        app.MapGet("/api/fleet/documents", GetAllDocuments)
+            .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
 
         // Shops / parts partners — fleet-wide reference data reused on work orders.
-        var shops = app.MapGroup("/api/fleet/shops").RequireAuthorization();
+        var shops = app.MapGroup("/api/fleet/shops")
+            .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
 
         shops.MapGet("", GetShops);
         shops.MapPost("", RegisterShop);

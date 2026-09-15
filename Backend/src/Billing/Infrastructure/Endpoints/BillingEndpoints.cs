@@ -13,6 +13,7 @@ using NorthernLink.Billing.Application.Invoices.WriteOff;
 using NorthernLink.Billing.Application.Invoices.UpdateQboReference;
 using NorthernLink.Billing.Application.Invoices.Void;
 using NorthernLink.Billing.Domain.Invoices;
+using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Shared.Tenancy;
 
@@ -27,7 +28,13 @@ public static class BillingEndpoints
 {
     public static IEndpointRouteBuilder MapBillingEndpoints(this IEndpointRouteBuilder app)
     {
-        var invoices = app.MapGroup("/api/billing/invoices").RequireAuthorization();
+        // DispatchAccess, not a bare RequireAuthorization: invoices are every client's rates and
+        // volumes in one list, and a bare authorize let any authenticated account — a Driver
+        // token included — read the lot. Accountant and BoardMember are deliberately absent:
+        // this module is a QuickBooks prep worksheet driven from the Dispatch Console, and
+        // financial oversight has its own boundary (BudgetAccess on /api/budgeting).
+        var invoices = app.MapGroup("/api/billing/invoices")
+            .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
 
         invoices.MapGet("", GetInvoices);
         invoices.MapGet("{id:guid}", GetInvoiceById);
@@ -41,7 +48,8 @@ public static class BillingEndpoints
         invoices.MapPost("{id:guid}/void", VoidInvoice);
 
         // The billable-trip pool the drafts draw from (uninvoiced view for manual lines).
-        app.MapGet("/api/billing/billable-trips", GetBillableTrips).RequireAuthorization();
+        app.MapGet("/api/billing/billable-trips", GetBillableTrips)
+            .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
 
         return app;
     }

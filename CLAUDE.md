@@ -108,6 +108,21 @@ Collision protocol for parallel batches:
   problem. The browser only ever talks to the Dispatcher's own origin (`:3001`) — Next.js proxies
   `/api/*` server-side to the API, so there's no CORS configuration anywhere in the stack.
 
+### One-command test run (from the workspace root)
+- `node run-tests.mjs` — runs every suite in the workspace: `dotnet test` in `Backend/`, then
+  `npm test` in each frontend that declares one. Suites are **discovered**, not listed: a frontend
+  with no `test` script (`Website/` today) is skipped, but one that declares a suite and cannot run
+  it (no `node_modules`) is reported `BLOCKED` and fails the run — a suite that never ran must
+  never count as green. One summary line per suite, exit non-zero if any did not pass; failures
+  print their output tail, `--verbose` streams everything live, `--list` shows what would run.
+  ~25s warm on this machine.
+- `git config core.hooksPath .githooks` — **run once per clone**, opt-in and not automatic: it
+  points git at the versioned `.githooks/pre-push`, which runs the above before every push.
+  `.git/hooks/` is not versioned, so a fresh clone silently has no hook until this is set. CI has
+  no test gate by design (see Containers & Deployment), so this hook is the gate. `--no-verify`
+  bypasses it — the honest use is a backend failure caused by a stale DigitalOcean Trusted Sources
+  entry rather than by the code.
+
 ### Backend (`Backend/`)
 - `dotnet build` — build the whole solution (warnings are errors)
 - `dotnet test` — includes architecture tests that enforce domain-library boundaries
@@ -165,11 +180,13 @@ Collision protocol for parallel batches:
 - `npm run dev` — dev server on port **3003** (pinned in the script). Proxies `/api/*` to
   `http://localhost:5215` exactly as Dispatcher does, so it works against a manually-started API
   with no other setup. Also started by `aspire run`.
-- `npm test` — Vitest (this app only; Dispatcher has no test setup). Covers the Owner/Accountant
-  role gate, including the explicit "a Dispatcher account is rejected" case.
+- `npm test` — Vitest. Covers the Owner/Accountant role gate, including the explicit "a
+  Dispatcher account is rejected" case, the token → claims → gate seam end to end, and the live
+  `/api/budgeting` request layer (fetch-mocked, including transport's refresh-and-retry-once).
+  Dispatcher has its own Vitest suite too — `node run-tests.mjs` at the root runs both.
 - Scoped to **Owner and Accountant**. The client-side gate is a UX gate — the security boundary
-  is the `BudgetAccess` policy, registered in the gateway and attached to budgeting endpoints
-  when Stage 6.1 creates them. Read `Budgeting/CLAUDE.md` before working in here.
+  is the `BudgetAccess` policy, registered in the gateway and attached to the `/api/budgeting`
+  group (`BudgetingEndpoints.cs`); `BudgetingEndpointMetadataTests` pins that attachment. Read `Budgeting/CLAUDE.md` before working in here.
 
 ### CommunityMobile (`CommunityMobile/`)
 - `flutter run -d chrome` (or an iOS/Android simulator) — the only app not started by `aspire run`
@@ -201,8 +218,9 @@ server workload, and `AppHost/` stays a local-dev orchestrator: neither is conta
   pushes all four images to `ghcr.io/<owner>/northernlink-*`. No test gate, no deploy step — CI
   ends at the package registry, and the owner deploys from those images outside CI (a Kubernetes
   setup was tried and torn down for cost in Aug 2026; the replacement is **DigitalOcean App
-  Platform**, spec at `.do/app.yaml` — written but not yet deployed). Run `dotnet test` and
-  Budgeting's `npm test` locally before pushing.
+  Platform**, spec at `.do/app.yaml` — written but not yet deployed). Because nothing in CI runs
+  tests, `node run-tests.mjs` before pushing is the whole safety net — enable it as a pre-push
+  hook with `git config core.hooksPath .githooks` (see Commands).
 - `.do/app.yaml` is the App Platform spec: `doctl apps create --spec .do/app.yaml`, then
   `doctl apps update <app-id> --spec .do/app.yaml`. All four containers are components of **one**
   app because App Platform's private network is per-app — a component's name is its hostname on

@@ -7,10 +7,12 @@ import {
   periodKind,
   previewPeriod,
   toBudgetCode,
+  toBudgetPeriod,
   REVIEW_FREQUENCY_LABELS,
   SERVICE_LINE_LABELS,
   TAX_TREATMENT_LABELS,
   type BudgetCodeRecord,
+  type BudgetPeriodRecord,
 } from "./budgeting";
 import type { BudgetCode } from "@/lib/types";
 
@@ -80,6 +82,64 @@ describe("periodKind", () => {
   });
 });
 
+// toBudgetPeriod is the wire→view mapper Console.tsx runs over every row it fetches. Its
+// sibling toBudgetCode has four cases; this had none, and the two things it decides on the
+// screens' behalf are exactly the two a future allocations slice will be tempted to change.
+
+describe("toBudgetPeriod", () => {
+  const record: BudgetPeriodRecord = {
+    id: "7c3d2f1a-0000-4000-8000-000000000001",
+    label: "March 2026",
+    granularity: "Month",
+    year: 2026,
+    ordinal: 3,
+    startsOn: "2026-03-01",
+    endsOn: "2026-03-31",
+    state: "Open",
+    createdAtUtc: "2026-02-01T00:00:00+00:00",
+    updatedAtUtc: "2026-02-01T00:00:00+00:00",
+  };
+
+  it("carries the server-derived label and date range through unchanged", () => {
+    // The server derives startsOn/endsOn/label from granularity + year + ordinal. Nothing here
+    // re-derives them — previewPeriod exists for the modal's live preview only.
+    const view = toBudgetPeriod(record);
+
+    expect(view.id).toBe(record.id);
+    expect(view.label).toBe("March 2026");
+    expect(view.startsOn).toBe("2026-03-01");
+    expect(view.endsOn).toBe("2026-03-31");
+    expect(view.state).toBe("Open");
+  });
+
+  it("reports planned and allocated as honest zeros, not placeholders", () => {
+    // Neither figure is on the wire yet — they belong to the allocations story. Zero is the
+    // truthful answer today and makes the screens render their empty states; a plausible-looking
+    // number here would read as real budget data that nobody entered.
+    const view = toBudgetPeriod(record);
+
+    expect(view.planned).toBe(0);
+    expect(view.allocated).toBe(0);
+  });
+
+  it("derives pk from state via periodKind rather than reading it off the wire", () => {
+    // The wire carries no status kind. If pk ever stopped tracking state, a locked period would
+    // render with a live-plan chip — colour and glyph both saying the wrong thing.
+    expect(toBudgetPeriod({ ...record, state: "Draft" }).pk).toBe(periodKind("Draft"));
+    expect(toBudgetPeriod({ ...record, state: "Open" }).pk).toBe(periodKind("Open"));
+    expect(toBudgetPeriod({ ...record, state: "Locked" }).pk).toBe(periodKind("Locked"));
+
+    expect(toBudgetPeriod({ ...record, state: "Locked" }).pk).toBe("off");
+  });
+
+  it("drops the audit timestamps the screens do not render", () => {
+    const view = toBudgetPeriod(record) as Record<string, unknown>;
+
+    expect(view).not.toHaveProperty("createdAtUtc");
+    expect(view).not.toHaveProperty("granularity");
+  });
+});
+
 // normalizeBudgetCode and budgetCodeFormatError mirror the server's
 // BudgetCode.NormalizeCode / ValidateCode — these cases pin them to the same
 // rules so the modal's preview and its disabled-submit reasoning can never
@@ -107,8 +167,20 @@ describe("budgetCodeFormatError", () => {
     expect(budgetCodeFormatError(code)).toBe("Enter a code.");
   });
 
+  it("accepts a code of exactly 32 characters", () => {
+    // The server rejects on `normalizedCode.Length > CodeMaxLength`, so 32 is the last legal
+    // length. Testing only 33 leaves the boundary itself unpinned: a `>=` slipped in here would
+    // refuse a code the API would have accepted, and no test would notice.
+    expect(budgetCodeFormatError("A".repeat(32))).toBeNull();
+  });
+
   it("rejects a code over 32 characters", () => {
     expect(budgetCodeFormatError("A".repeat(33))).toContain("32 characters or fewer");
+  });
+
+  it("measures length after normalization, not before", () => {
+    // NormalizeCode trims first, so surrounding whitespace must not count toward the 32.
+    expect(budgetCodeFormatError(`  ${"A".repeat(32)}  `)).toBeNull();
   });
 
   it.each(["-LEADING", "TRAILING-", "HAS SPACE", "HAS_UNDERSCORE", "HAS/SLASH"])(
@@ -117,6 +189,20 @@ describe("budgetCodeFormatError", () => {
       expect(budgetCodeFormatError(code)).toContain("letters, digits and hyphens");
     },
   );
+
+  it.each([
+    ["an accented letter", "ZBB-CRÊW"],
+    ["a homoglyph in Cyrillic", "ZВВ-CREW"],
+    ["an en dash standing in for a hyphen", "ZBB–CREW"],
+    ["full-width digits", "ZBB-０１"],
+    ["an emoji", "ZBB-CREW-🚌"],
+  ])("rejects %s — the server is ASCII-only", (_label, code) => {
+    // ValidateCode loops with char.IsAsciiLetterOrDigit, so anything outside ASCII is a 400.
+    // Worth pinning because the two sneaky cases above look correct in the input field: the
+    // Cyrillic В and the en dash are pixel-near their ASCII counterparts, and without this the
+    // client would wave them through and let the planner meet a server error instead.
+    expect(budgetCodeFormatError(code)).toContain("letters, digits and hyphens");
+  });
 });
 
 describe("budgetCodeCategoryKind", () => {

@@ -47,8 +47,19 @@ function Arrow({ glyph, label, onClick }: { glyph: string; label: string; onClic
  * Period navigator for a list bounded by a month or a quarter: ‹ / › step one whole
  * period, and the granularity pills re-bucket around the period currently shown
  * (so Month→Quarter on August lands on that August's quarter, not today's).
+ * A caller locked to one granularity (e.g. the monthly accruals report) passes
+ * `granularities={["month"]}` — a single choice renders no pills at all.
  */
-export function PeriodNav({ period, onChange }: { period: Period; onChange: (next: Period) => void }) {
+export function PeriodNav({
+  period,
+  onChange,
+  granularities = ["month", "quarter"],
+}: {
+  period: Period;
+  onChange: (next: Period) => void;
+  /** Which granularity pills to offer; defaults to both. */
+  granularities?: Granularity[];
+}) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
       <Arrow glyph="‹" label="Previous period" onClick={() => onChange(stepPeriod(period, -1))} />
@@ -67,17 +78,19 @@ export function PeriodNav({ period, onChange }: { period: Period; onChange: (nex
       </span>
       <Arrow glyph="›" label="Next period" onClick={() => onChange(stepPeriod(period, 1))} />
 
-      <span style={{ display: "flex", gap: 6, marginLeft: 6 }}>
-        {GRANULARITIES.map((g) => (
-          <span
-            key={g.value}
-            onClick={() => onChange(withGranularity(period, g.value))}
-            style={pill(period.granularity === g.value)}
-          >
-            {g.label}
-          </span>
-        ))}
-      </span>
+      {granularities.length > 1 && (
+        <span style={{ display: "flex", gap: 6, marginLeft: 6 }}>
+          {GRANULARITIES.filter((g) => granularities.includes(g.value)).map((g) => (
+            <span
+              key={g.value}
+              onClick={() => onChange(withGranularity(period, g.value))}
+              style={pill(period.granularity === g.value)}
+            >
+              {g.label}
+            </span>
+          ))}
+        </span>
+      )}
     </div>
   );
 }

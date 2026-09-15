@@ -185,8 +185,44 @@ services:
       http_path: /
       initial_delay_seconds: 15
 
+  # -------------------------------------------------------------------------------------
+  # Zero-Based Budgeting console — mounted at /budget on the same hostname.
+  #
+  # Its image MUST be built with BASE_PATH=/budget and NEXT_PUBLIC_API_BASE_URL=/budget
+  # (.github/workflows/build.yml), and the ingress rule below MUST carry
+  # preserve_path_prefix: true. The two are one change. With the prefix stripped and no
+  # basePath in the image, the page renders but asks for root-relative /_next/static/... —
+  # which the "/" rule hands to dispatcher. Because Budgeting holds identical copies of
+  # Dispatcher's design system, turbopack emits identical chunk names for the shared code, so
+  # some of those requests SUCCEED and the console silently runs dispatcher's JavaScript while
+  # its own page chunks 404. That is the failure this pairing exists to prevent.
+  # -------------------------------------------------------------------------------------
+  - name: budgeting
+    image:
+      registry_type: GHCR
+      registry: nominouslights
+      repository: northernlink-budgeting
+      tag: latest
+      registry_credentials: EV[REPLACE_WITH_THE_LIVE_EV_BLOB]
+    http_port: 3000
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    # /budget, not "/" — once basePath is set the bare root 404s, and a 404 fails the check.
+    health_check:
+      http_path: /budget
+      initial_delay_seconds: 15
+
 ingress:
+  # ORDER MATTERS: the catch-all "/" rule goes LAST, or it swallows /budget.
   rules:
+    # preserve_path_prefix is REQUIRED. Without it App Platform strips /budget and the console,
+    # built with basePath /budget, 404s on the bare "/" it then receives.
+    - match:
+        path:
+          prefix: /budget
+      component:
+        name: budgeting
+        preserve_path_prefix: true
     - match:
         path:
           prefix: /
@@ -203,26 +239,23 @@ databases:
     production: true
 
 # -----------------------------------------------------------------------------------------
-# ADDING THE BUDGETING CONSOLE AND THE MARKETING SITE
+# ADDING THE MARKETING SITE
 #
-# Three frontends cannot share one hostname at the root, so they get path prefixes — and a
-# Next.js basePath is compiled into every asset URL at BUILD time. That makes this a single
-# coupled change; half of it deploys a console that 404s on its own JavaScript.
+# Budgeting is now mounted at /budget above. The remaining app is Website, and it is the
+# awkward one: it is written to own the root, but dispatcher currently holds "/".
 #
-#   1. .github/workflows/build.yml — add per-app build args. BASE_PATH and
-#      NEXT_PUBLIC_API_BASE_URL must always be equal: basePath moves the assets,
-#      NEXT_PUBLIC_API_BASE_URL moves the browser's fetches (lib/api/transport.ts sends an
-#      absolute /api/... that Next does not rewrite, so without it the calls leave the prefix
-#      and land on whichever component owns "/"). Website gets neither — it owns the root.
+# Giving Website the root is therefore the same coupled change all over again, this time for
+# the Dispatch Console:
 #
-#        dispatcher: BASE_PATH=/dispatch, NEXT_PUBLIC_API_BASE_URL=/dispatch
-#        budgeting:  BASE_PATH=/budget,   NEXT_PUBLIC_API_BASE_URL=/budget
+#   1. .github/workflows/build.yml — add build args to the `dispatcher` entry:
+#        BASE_PATH=/dispatch, NEXT_PUBLIC_API_BASE_URL=/dispatch   (always equal)
+#      Website gets neither: it owns the root and makes no API calls.
 #
-#   2. Wait for CI to publish the rebuilt images. Applying the spec first serves the
-#      still-root-mounted images under a prefix.
+#   2. Wait for CI to publish the rebuilt dispatcher image. Applying the spec first serves a
+#      still-root-mounted image under a prefix.
 #
-#   3. Here: add `budgeting` and `website` service blocks (same shape as `dispatcher`), and
-#      replace the single ingress rule above with three — catch-all LAST:
+#   3. Here: add a `website` service block (same shape as `budgeting`), and reorder the rules
+#      so the catch-all is LAST:
 #
 #        - match: {path: {prefix: /dispatch}}
 #          component: {name: dispatcher, preserve_path_prefix: true}
@@ -231,9 +264,9 @@ databases:
 #        - match: {path: {prefix: /}}
 #          component: {name: website}
 #
-#      preserve_path_prefix is REQUIRED: without it App Platform strips the prefix and a
-#      console with basePath "/dispatch" 404s on the bare "/" it then receives.
+#   4. Change dispatcher's health_check http_path to /dispatch. "/" 404s once a basePath is
+#      set, and a 404 fails the check.
 #
-#   4. Point each prefixed console's health_check http_path at its basePath. "/" 404s once a
-#      basePath is set, and a 404 fails the check.
+# Note that step 3 changes the Dispatch Console's public URL from / to /dispatch — bookmarks
+# and any saved links break. Budgeting is unaffected; it is already prefixed.
 # -----------------------------------------------------------------------------------------

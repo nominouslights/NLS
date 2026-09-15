@@ -31,25 +31,30 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # No build-args are passed today, and the images are root-mounted as a result.
-        #
-        # The /api/* proxy target needs none: each Dockerfile already defaults to
+        # The /api/* proxy target needs no arg: each Dockerfile already defaults to
         # http://northernlink-api:8080, which resolves on the deployment's private network (on
         # App Platform: a component named northernlink-api with internal_ports: [8080] — see
         # .do/app.yaml), so one value serves every environment.
         #
-        # BASE_PATH is the one that will need args, and it is left unset ON PURPOSE. A Next.js
-        # basePath is compiled into every asset URL at build time, so an image built with
-        # BASE_PATH=/dispatch only works when the ingress actually mounts it there. Passing it
-        # here would make `latest` mount-specific, and since every App Platform component
-        # tracks `latest`, the next unrelated redeploy would silently serve a /dispatch image
-        # under a "/" route and 404 on its own JavaScript.
+        # BASE_PATH is the arg that matters, because a Next.js basePath is compiled into every
+        # asset URL at build time. Who gets one is decided by WHICH COMPONENT OWNS "/" on the
+        # shared hostname app.northernlinkshuttleandcargo.com:
         #
-        # So the prefix flip is a coupled change, made in one sitting, never half:
-        #   1. add build_args here (BASE_PATH + NEXT_PUBLIC_API_BASE_URL, always equal)
-        #   2. add preserve_path_prefix: true to the matching ingress rule in .do/app.yaml
-        #   3. point each console's health_check http_path at its basePath — "/" now 404s
-        # Website never gets any of this: it owns the root and makes no API calls.
+        #   dispatcher  owns "/"      → no BASE_PATH. Root-relative assets are correct for it.
+        #   budgeting   mounted /budget → BASE_PATH + NEXT_PUBLIC_API_BASE_URL, always equal.
+        #   website     not deployed yet → nothing. If it ever takes the root, dispatcher moves
+        #               to /dispatch and gains args at the same time, in one sitting.
+        #
+        # Both budgeting args are required and must match: BASE_PATH moves the asset URLs,
+        # NEXT_PUBLIC_API_BASE_URL moves the browser's fetches (lib/api/transport.ts prefixes an
+        # absolute /api/... that Next does not rewrite, so without it the calls leave the prefix
+        # and land on whichever component owns "/").
+        #
+        # THIS IS COUPLED TO .do/app.yaml AND MUST NEVER SHIP HALF. The /budget ingress rule
+        # needs preserve_path_prefix: true and a health_check http_path of /budget. Ship the
+        # image without the spec and the page itself 404s (the app gets a stripped "/" it no
+        # longer serves); ship the spec without the image and the console 404s on its own
+        # JavaScript. Publish first, then apply the spec.
         include:
           # The API's build context is the REPOSITORY ROOT: Directory.Build.props and
           # Directory.Packages.props live above Backend/ and MSBuild walks up to find them.
@@ -65,6 +70,9 @@ jobs:
           - name: budgeting
             context: Budgeting
             dockerfile: Budgeting/Dockerfile
+            build_args: |
+              BASE_PATH=/budget
+              NEXT_PUBLIC_API_BASE_URL=/budget
     steps:
       - uses: actions/checkout@v7
 

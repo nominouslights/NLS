@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Microsoft.IdentityModel.JsonWebTokens;
+using NorthernLink.Identity.Infrastructure.Auth;
 using NorthernLink.Shared.Tenancy;
 
 namespace NorthernLink.Api.Tenancy;
@@ -31,6 +32,16 @@ public sealed class JwtCurrentActor(IHttpContextAccessor httpContextAccessor) : 
     }
 
     public string? Email => Principal?.FindFirst(JwtRegisteredClaimNames.Email)?.Value;
+
+    /// <summary>
+    /// Every <c>role</c> claim, read by <see cref="JwtAccessTokenIssuer.RoleClaimType"/> — the
+    /// short literal, for the same <c>MapInboundClaims = false</c> reason as <c>sub</c> above.
+    /// Reading the literal claim type rather than <c>ClaimsIdentity.RoleClaimType</c> keeps this
+    /// working even if a future handler is configured differently, and returning the raw values
+    /// (rather than answering <c>IsInRole</c>) leaves the comparison ordinal at the call site.
+    /// </summary>
+    public IReadOnlyCollection<string> Roles =>
+        Principal?.FindAll(JwtAccessTokenIssuer.RoleClaimType).Select(claim => claim.Value).ToArray() ?? [];
 
     private ClaimsPrincipal? Principal =>
         httpContextAccessor.HttpContext?.User is { Identity.IsAuthenticated: true } user ? user : null;

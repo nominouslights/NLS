@@ -22,9 +22,9 @@ const refsDir = path.resolve(scriptDir, '..', 'references');
 const stateDir = path.join(repoRoot, '.claude', 'state');
 const pendingLog = path.join(stateDir, 'codemap-pending.log');
 
-const TERRITORIES = ['Backend/', 'Dispatcher/', 'Budgeting/', 'Website/', 'AppHost/'];
-const KNOWN_TOP = new Set(['Backend', 'Dispatcher', 'Budgeting', 'Website', 'AppHost', 'CommunityMobile', '.github']);
-const REF_FILES = ['backend.md', 'dispatcher.md', 'budgeting.md', 'website-apphost.md'];
+const TERRITORIES = ['Backend/', 'Dispatcher/', 'Budgeting/', 'DriverField/', 'Website/', 'AppHost/'];
+const KNOWN_TOP = new Set(['Backend', 'Dispatcher', 'Budgeting', 'DriverField', 'Website', 'AppHost', 'CommunityMobile', '.github']);
+const REF_FILES = ['backend.md', 'dispatcher.md', 'budgeting.md', 'driverfield.md', 'website-apphost.md'];
 const MIGRATIONS_WARNING =
   'Migrations: DO NOT READ files under Infrastructure/Persistence/Migrations/ — generated 1,600–2,000-line Designer files. The map records count + latest name only.';
 
@@ -241,11 +241,13 @@ function libSection(appName, all) {
   return { key: `${appName.toLowerCase()}-lib`, heading: `Lib — ${appName}/lib (${files.length} files)`, lines };
 }
 
-function budgetingTestsSection(all) {
-  const files = under(all, 'Budgeting/').filter((p) => /\.test\.(ts|tsx)$/.test(p) || p === 'vitest.config.ts');
+function frontendTestsSection(app, all) {
+  const files = under(all, `${app}/`).filter(
+    (p) => /\.test\.(ts|tsx)$/.test(p) || /^vitest\.config\.m?ts$/.test(p),
+  );
   return {
-    key: 'budgeting-tests',
-    heading: `Tests — Budgeting (Vitest, the only frontend with tests)`,
+    key: `${app.toLowerCase()}-tests`,
+    heading: `Tests — ${app} (Vitest)`,
     lines: [`Files: ${files.sort().join(', ')}`],
   };
 }
@@ -351,7 +353,30 @@ function buildAll(all) {
         screensSection('Budgeting', all),
         componentsSection('Budgeting', all),
         libSection('Budgeting', all),
-        budgetingTestsSection(all),
+        frontendTestsSection('Budgeting', all),
+      ],
+    },
+    'driverfield.md': {
+      title: 'Code Map — DriverField (Driver Field App)',
+      intro: [
+        'Next.js 16 / React 19 installable PWA for a company-issued 10-inch LANDSCAPE tablet —',
+        'no phone breakpoints, no @media queries. Auth and the Driver role gate are real; every',
+        'other value on screen comes from lib/data.ts and each screen carries a MockTag.',
+        '',
+        '22 design-system files are a **verbatim copy of Dispatcher** — change Dispatcher first,',
+        'then re-copy; never edit the copy in place. NavRail is deliberately NOT copied (its',
+        'geometry is hardcoded); the rail here is components/DutyRail.tsx. Sizes live in',
+        'lib/tablet.ts, colours in the copied lib/theme.ts. Manifest + drift check:',
+        'DriverField/CLAUDE.md.',
+        '',
+        'lib/sync/ is the offline seam: real types, no-op bodies. Every screen mutation goes',
+        'through sync/queue.enqueue() so the offline batch stays additive.',
+      ],
+      sections: [
+        screensSection('DriverField', all),
+        componentsSection('DriverField', all),
+        libSection('DriverField', all),
+        frontendTestsSection('DriverField', all),
       ],
     },
     'website-apphost.md': {

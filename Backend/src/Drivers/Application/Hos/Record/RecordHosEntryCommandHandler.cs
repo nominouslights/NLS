@@ -16,7 +16,7 @@ public sealed class RecordHosEntryCommandHandler(IHosLogRepository repository)
             return Result.Failure<Guid>(DriverErrors.NotFound);
         }
 
-        var entryResult = HosLogEntry.RecordManualEntry(
+        var entryResult = HosLogEntry.Record(
             command.TenantId,
             command.DriverId,
             command.Date,
@@ -24,6 +24,7 @@ public sealed class RecordHosEntryCommandHandler(IHosLogRepository repository)
             command.OnDutyHours,
             command.DrivingHours,
             command.OffDutyHours,
+            command.Source,
             command.EnteredBy,
             command.Note);
 

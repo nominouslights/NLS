@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Shared.Tenancy;
 using NorthernLink.Clients.Application.Clients.Create;
@@ -32,7 +33,11 @@ public static class ClientsEndpoints
 {
     public static IEndpointRouteBuilder MapClientsEndpoints(this IEndpointRouteBuilder app)
     {
-        var clients = app.MapGroup("/api/clients").RequireAuthorization();
+        // DispatchAccess, not a bare RequireAuthorization: the client book — contracts, rates,
+        // purchase orders — is dispatch/office work. Every Dispatch Console user is
+        // Owner/Dispatcher/Supervisor, and the Driver Field App has no business here at all.
+        var clients = app.MapGroup("/api/clients")
+            .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
 
         clients.MapGet("", GetClients);
         clients.MapPost("", CreateClient);

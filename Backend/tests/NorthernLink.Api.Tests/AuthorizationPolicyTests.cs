@@ -54,9 +54,12 @@ public class AuthorizationPolicyTests
     /// US-6.0.1's acceptance criterion, server side: a Dispatcher account must be rejected from
     /// budgeting. Supervisor is named in the same criterion; the remaining roles are here so that
     /// widening BudgetAccess is a deliberate edit to this list rather than a silent side effect.
-    /// The frontend has its own counterpart test (Budgeting/lib/roles.test.ts) — in Stage 6.0 the
-    /// client gate is the one users actually hit, since no budgeting endpoint carries this policy
-    /// yet.
+    /// The frontend has its own counterpart test (Budgeting/lib/roles.test.ts), but it is a UX
+    /// gate: the security boundary is this policy, and the whole <c>/api/budgeting</c> group now
+    /// carries it (<c>BudgetingEndpoints.MapBudgetingEndpoints</c>). That attachment is pinned by
+    /// <c>BudgetingEndpointMetadataTests</c> in the Budgeting test project — deliberately not
+    /// here, because these tests evaluate policies in isolation and would stay green if every
+    /// endpoint lost its RequireAuthorization.
     /// </summary>
     [Theory]
     [InlineData(Roles.Dispatcher)]
@@ -101,6 +104,52 @@ public class AuthorizationPolicyTests
         Assert.False(await Allows(AuthorizationPolicies.DispatchAccess, Roles.LegacyAdmin));
     }
 
+    /// <summary>
+    /// DriverAccess is DispatchAccess widened with Driver, not a separate branch: dispatch staff
+    /// must be able to do everything a driver can (working a driver's screen over the phone is
+    /// routine), so all four roles are admitted.
+    /// </summary>
+    [Theory]
+    [InlineData(Roles.Driver)]
+    [InlineData(Roles.Dispatcher)]
+    [InlineData(Roles.Supervisor)]
+    [InlineData(Roles.Owner)]
+    public async Task DriverAccess_admits_the_field_and_dispatch_roles(string role) =>
+        Assert.True(await Allows(AuthorizationPolicies.DriverAccess, role));
+
+    /// <summary>
+    /// The back-office roles have no business on a duty log or a DVIR. Enumerated so that
+    /// widening DriverAccess is a deliberate edit to <c>Roles.DriverAccess</c> rather than a
+    /// silent side effect.
+    /// </summary>
+    [Theory]
+    [InlineData(Roles.Accountant)]
+    [InlineData(Roles.BoardMember)]
+    public async Task DriverAccess_denies_the_back_office_roles(string role) =>
+        Assert.False(await Allows(AuthorizationPolicies.DriverAccess, role));
+
+    [Fact]
+    public async Task DriverAccess_never_accepts_the_legacy_Admin_literal()
+    {
+        // The driver-facing groups were carved out long after RenameAdminRoleToOwner ran, so
+        // unlike AdminOnly there is no transitional window to honour here.
+        Assert.False(await Allows(AuthorizationPolicies.DriverAccess, Roles.LegacyAdmin));
+    }
+
+    /// <summary>
+    /// The relationship the group restructure depends on. DriverAccess CONTAINS DispatchAccess,
+    /// which is why adding it to an existing dispatch group would widen that group rather than
+    /// narrow it — driver-facing routes get their own sibling MapGroup instead. If this ever
+    /// stops holding, re-read every <c>.RequireAuthorization(DriverAccess)</c> call site.
+    /// </summary>
+    [Fact]
+    public void DriverAccess_is_a_strict_superset_of_DispatchAccess()
+    {
+        Assert.All(Roles.DispatchAccess, role => Assert.Contains(role, Roles.DriverAccess));
+        Assert.Contains(Roles.Driver, Roles.DriverAccess);
+        Assert.DoesNotContain(Roles.Driver, Roles.DispatchAccess);
+    }
+
     [Fact]
     public async Task AdminOnly_admits_Owner() =>
         Assert.True(await Allows(AuthorizationPolicies.AdminOnly, Roles.Owner));
@@ -125,6 +174,7 @@ public class AuthorizationPolicyTests
     [InlineData(AuthorizationPolicies.AdminOnly)]
     [InlineData(AuthorizationPolicies.BudgetAccess)]
     [InlineData(AuthorizationPolicies.DispatchAccess)]
+    [InlineData(AuthorizationPolicies.DriverAccess)]
     public async Task Unauthenticated_principals_satisfy_nothing(string policy)
     {
         var anonymous = new ClaimsPrincipal(new ClaimsIdentity());
@@ -138,6 +188,7 @@ public class AuthorizationPolicyTests
     [InlineData(AuthorizationPolicies.AdminOnly)]
     [InlineData(AuthorizationPolicies.BudgetAccess)]
     [InlineData(AuthorizationPolicies.DispatchAccess)]
+    [InlineData(AuthorizationPolicies.DriverAccess)]
     public void Every_policy_name_constant_resolves_to_a_registered_policy(string policy)
     {
         // A name constant with no matching AddPolicy call throws only when a request first hits

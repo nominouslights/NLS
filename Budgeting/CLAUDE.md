@@ -110,17 +110,46 @@ step; both have tests that fail if they diverge.
 ## Testing
 
 Vitest, added here as a **pilot for this app only** — it does not obligate Dispatcher to adopt
-it. Four files, and only one needs a DOM:
+it. Config is `vitest.config.mts` — the `.mts` extension is load-bearing (Vite loads a plain
+`.ts` config as CommonJS and warns), and it must therefore use `import.meta.dirname` for the
+`@` alias, never `__dirname`. `@types/node` declares `__dirname` globally, so TypeScript and
+`next build` both stay green while every `@/lib/...` import in the suite fails to resolve at
+run time. Seven files, and only one needs a DOM:
 
 - `lib/roles.test.ts` — US-6.0.1's acceptance criterion: a Dispatcher account is rejected.
 - `lib/claims.test.ts` — JWT decoding, including the non-ASCII round trip (`atob` yields a binary
-  string, so a naive decoder mangles accented emails) and malformed-token handling.
-- `components/RoleGate.test.tsx` — the gate applies the rule and offers a way out.
+  string, so a naive decoder mangles accented emails) and malformed-token handling. Plus the
+  claim **names**, mirrored from `JwtAccessTokenIssuer`'s `RoleClaimType` / `TenantIdClaimType` /
+  `TenantTypeClaimType` — without those the file only proves the decoder agrees with payloads it
+  wrote itself, and a backend rename would leave it green while every user hit access-denied.
+- `lib/accessSeam.test.ts` — the token → claims → role → gate chain end to end, unmocked. Each
+  link is covered on its own by the three files around it; this covers the seams between them,
+  including the `""` role a decodable-but-roleless token produces.
+- `components/RoleGate.test.tsx` — the gate applies the rule and offers a way out. Every denial
+  case asserts the denial screen **renders**, not just that the children are absent: absence
+  alone would also pass for a gate that showed nobody anything.
 - `lib/api/budgeting.test.ts` — the client-side mirrors of server rules stay pinned to the
   server: `previewPeriod` against `BudgetPeriod.Create`, `normalizeBudgetCode` /
-  `budgetCodeFormatError` against `BudgetCode.NormalizeCode` / `ValidateCode`, and
+  `budgetCodeFormatError` against `BudgetCode.NormalizeCode` / `ValidateCode` (both sides of the
+  32-character boundary, and the ASCII-only rule `char.IsAsciiLetterOrDigit` enforces), and
   `parentCandidates` against `BudgetCodeParentRule`. Plus the →StatusKind mappings, the three
-  label maps, and `toBudgetCode`'s `isActive` → `active` rename.
+  label maps, `toBudgetCode`'s `isActive` → `active` rename, and `toBudgetPeriod`'s honest
+  `planned`/`allocated` zeros and `state`-derived `pk`.
+- `lib/api/transport.test.ts` — the 401 refresh-and-retry path, with `fetch` and `lib/auth`
+  mocked. `request<T>`'s doc comment promises it "never loops"; these assert the exact attempt
+  count (two fetches, one refresh) so the promise is enforced rather than stated. Plus `ApiError`
+  construction — the parsed `{ code, message }` body, the `Http.<status>` fallback, and the
+  `Network.Unreachable`/status-0 branch that `Console.tsx` and `screens/BudgetCodes.tsx` both
+  branch on via `e instanceof ApiError`.
+- `lib/api/budgeting.requests.test.ts` — what each of the nine request functions puts on the
+  wire. Chiefly `setBudgetCodeActive`, whose route is built from a boolean (`activate` /
+  `deactivate`): an inverted ternary there returns 204 either way and silently activates a code
+  the planner asked to retire. Also pins that `deleteBudgetCode`'s 409 message reaches the caller
+  verbatim, since the server's wording is what names retirement as the alternative.
+
+`lib/api/transport.ts` is a **copied** file. Tests against it belong here (a test file is not on
+the copy manifest), but anything they reveal is a change to *Dispatcher's* source first, then a
+re-copy — never an edit in place.
 
   The single highest-value assertion in the app is in here: that `SERVICE_LINE_LABELS`' first six
   keys are spelled exactly as `TripServiceType`'s members. That spelling is the join key for

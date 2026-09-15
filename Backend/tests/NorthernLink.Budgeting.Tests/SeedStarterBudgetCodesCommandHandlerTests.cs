@@ -76,10 +76,16 @@ public class SeedStarterBudgetCodesCommandHandlerTests
     }
 
     [Fact]
-    public void The_starter_set_is_flat_so_seeding_needs_no_ordering()
+    public async Task The_starter_set_is_flat_so_seeding_needs_no_ordering()
     {
         // A parent in the seed table would make the single pass order-dependent and could leave a
-        // half-built hierarchy behind on a partial failure.
+        // half-built hierarchy behind on a partial failure. Seed first: asserting over an
+        // unseeded repository is Assert.All over an empty sequence, which passes whatever the
+        // handler does.
+        await SeedAsync();
+
+        Assert.NotEmpty(_repository.Codes);
+        Assert.Equal(StarterBudgetCodes.All.Count, _repository.Codes.Count);
         Assert.All(_repository.Codes, code => Assert.Null(code.ParentCodeId));
     }
 

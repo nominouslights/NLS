@@ -15,6 +15,7 @@ public sealed class DriverConfiguration : IEntityTypeConfiguration<Driver>
         builder.Property(d => d.Id).HasColumnName("id").ValueGeneratedNever();
 
         builder.Property(d => d.TenantId).HasColumnName("tenant_id");
+        builder.Property(d => d.UserId).HasColumnName("user_id");
         builder.Property(d => d.Name).HasColumnName("name").HasMaxLength(128);
         builder.Property(d => d.Phone).HasColumnName("phone").HasMaxLength(32);
         builder.Property(d => d.LicenceClass).HasColumnName("licence_class").HasMaxLength(32);
@@ -32,6 +33,16 @@ public sealed class DriverConfiguration : IEntityTypeConfiguration<Driver>
 
         // Roster lists sort/search by name; duplicates are legal (two J. Spences can drive).
         builder.HasIndex(d => new { d.TenantId, d.Name });
+
+        // One account, one driver — enforced in the database, not only in the link handler.
+        // PARTIAL (filtered on NOT NULL) because most rows have no login: a plain unique index
+        // would treat every unlinked driver as a duplicate null under some engines, and even
+        // where it does not, the filter keeps the index to the handful of rows that matter.
+        // Deliberately not scoped by tenant — a user id is globally unique, so the same account
+        // must not be able to drive under two tenants.
+        builder.HasIndex(d => d.UserId)
+            .IsUnique()
+            .HasFilter("user_id IS NOT NULL");
 
         // DomainEvents ignore + Version concurrency token come from ModuleDbContext's
         // central aggregate conventions.
