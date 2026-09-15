@@ -17,11 +17,18 @@ lifecycle and the period dashboard; actuals and variance are still mock — see
 
 `Budgeting/` deliberately holds **identical copies** of Dispatcher's design system. This was a
 decision, not an accident: extracting a shared package was the alternative and it was rejected
-for now (only two apps share this chrome, and there is no npm workspace at the repo root).
+for now (there is no npm workspace at the repo root and each app has its own lockfile).
 
 **The rule: change Dispatcher first, then re-copy. Never edit a copied file in place.** Drift
 here is a visible product bug — two consoles that no longer look like one platform — not a style
 nit.
+
+**`DriverField/` now holds copies too (2026-09), so a Dispatcher design-system change is a
+TWO-app re-copy.** Doing only this one leaves the Driver Field App silently behind. Its manifest
+is 22 files rather than 23 — it omits `NavRail.tsx`, whose geometry is hardcoded and unusable at
+tablet size — and it has its own drift check in `DriverField/CLAUDE.md`. Run both. The argument
+for extracting a shared package gets stronger with each app that copies; revisit it at the next
+one.
 
 Every copied file opens with a fixed 2-line header naming its source. The header is why the
 files are not byte-identical, so the check skips it:

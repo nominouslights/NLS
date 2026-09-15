@@ -46,7 +46,10 @@ reference file rather than guessing from this summary.
    self-hosted-over-SaaS monitoring stack (Sentry + Prometheus/Grafana + Loki + Uptime Kuma, all
    self-hosted).
 5. **Driver Field App is a company-issued Android tablet, landscape-only, 10-inch class —
-   never a BYOD/personal-phone app.** Don't build phone-responsive layouts for it.
+   never a BYOD/personal-phone app.** Don't build phone-responsive layouts for it. *(Unchanged by
+   the 2026-09 framework reversal: it is now an installable PWA **on that same tablet**, not a
+   native build and not a phone app. `DriverField/` has no `@media` query anywhere, deliberately —
+   a Next.js developer will reach for breakpoints by reflex, so this has to be said twice.)*
 6. **Status indicators never rely on color alone**, anywhere in any app. The established
    colorblind-safe palette: Teal `#009E73` (good/confirmed), Muted Gold `#E1B000`
    (caution/pending), Vermillion `#D55E00` (problem/overdue), Neutral Gray `#4A4A4A` with
@@ -54,6 +57,11 @@ reference file rather than guessing from this summary.
 7. **Offline-first for the Driver Field App is a hard requirement, not a nice-to-have** —
    local-first store, command queue with client-generated GUIDs for idempotency, visible sync
    status at all times. See reference file Section 8 for the full sync strategy.
+   *(The 2026-09 PWA reversal changes the MECHANISM — IndexedDB + a Service Worker, not SQLite via
+   `sqflite`/`drift` — and nothing else. **Staged, not weakened.** The scaffold ships the seam
+   (`DriverField/lib/sync/`) with no-op bodies and a sync pill that says "Sync off" rather than
+   showing a green check. Deferral is how a hard requirement quietly dies, so: the Driver Field
+   App does not work offline yet, and nobody should say otherwise until `queue.drain()` is real.)*
 8. **QuickBooks Online is read-only from the platform's perspective for accounting sync**, but
    the platform is the source of truth for Budget Codes (Section 5.3) — every transaction gets
    tagged, don't let untagged transactions accumulate.
@@ -85,15 +93,17 @@ Reporting & Analytics · Crew & Workforce Visibility · Budget & Financial Contr
 |---|---|---|---|
 | Community Booking PWA *(superseded the Flutter Community Mobile App — Community Booking & Dispatch spec, 2026-08; the `CommunityMobile/` mockup remains its IA reference)* | Consumer | Mobile-first web, installable (Next.js PWA) | Cached shell only |
 | Client Web App (Alamos) | Client | Web | No |
-| Driver Field App | Internal Driver + Partner Driver | Company-issued Android tablet only (Flutter) | **Yes — critical** |
+| Driver Field App *(superseded the Flutter decision — Driver Field App scaffold, 2026-09; `DriverField/` is a Next.js 16 PWA modelled on `Budgeting/`)* | Internal Driver + Partner Driver | Company-issued Android tablet only (installable Next.js PWA) | **Yes — critical, but NOT YET BUILT — seam only** |
 | Admin Web App | Internal (Admin) | Web | No |
 | Owner/Exec Desktop App | Internal (Admin), super-user only | Desktop (Electron recommended) | No |
 
 ## Quick Reference: Tech Stack
 
 Frontend: Next.js (repo is on 16; the reference doc predates this and says 15) · Backend: .NET 10,
-CQRS/DDD · Database: PostgreSQL + RLS · Mobile: Flutter for the Driver Field App only (the
-Community app is a Next.js PWA — superseded 2026-08) · Object storage: OVHcloud Object Storage
+CQRS/DDD · Database: PostgreSQL + RLS · Mobile: **Flutter now ships nowhere on this platform** —
+the Driver Field App is a Next.js 16 PWA (superseded 2026-09) and the Community app is a Next.js
+PWA (superseded 2026-08); `CommunityMobile/` is the only Flutter folder left and is already
+shelved as an IA reference · Object storage: OVHcloud Object Storage
 (S3-compatible) · Hosting: OVHcloud Canada (Beauharnois, QC) · Identity: self-hosted OIDC
 (OpenIddict) · Monitoring: self-hosted Sentry + Prometheus/Grafana + Loki + Uptime Kuma
 
