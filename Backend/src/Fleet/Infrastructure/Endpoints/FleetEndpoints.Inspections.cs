@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Http;
 using NorthernLink.Fleet.Application.Inspections.Enter;
+using NorthernLink.Fleet.Application.Inspections.GetDefects;
 using NorthernLink.Fleet.Application.Inspections.GetInspections;
 using NorthernLink.Fleet.Application.Inspections.Remove;
+using NorthernLink.Fleet.Application.Inspections.ResolveDefect;
 using NorthernLink.Fleet.Application.Inspections.Update;
 using NorthernLink.Fleet.Domain.Inspections;
 using NorthernLink.Shared.Messaging;
@@ -107,6 +109,58 @@ public static partial class FleetEndpoints
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
+    /// <summary>
+    /// A vehicle's defect backlog. An unknown vehicle id returns <c>200 []</c>, not 404 —
+    /// consistent with GetVehicleWorkOrders, and correct for a warn-only panel that must never
+    /// look like an error.
+    /// </summary>
+    private static async Task<IResult> GetVehicleDefects(
+        Guid vehicleId,
+        bool? includeResolved,
+        ITenantContext tenantContext,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(
+            new GetVehicleDefectsQuery(tenantId, vehicleId, includeResolved ?? false), cancellationToken);
+
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>
+    /// Clears one defect on this inspection. 404 when the inspection or the item is unknown,
+    /// 409 when it was already resolved (resolution is final — in practice this is a
+    /// double-click guard, since the panel removes the row optimistically).
+    /// </summary>
+    private static async Task<IResult> ResolveInspectionDefect(
+        Guid id,
+        ResolveDefectRequest request,
+        ITenantContext tenantContext,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var command = new ResolveInspectionDefectCommand(
+            tenantId,
+            id,
+            request.Item ?? string.Empty,
+            request.Reason,
+            request.Note,
+            request.ResolvedBy);
+
+        var result = await sender.Send(command, cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
     private static async Task<IResult> RemoveInspection(
         Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
     {
@@ -152,3 +206,16 @@ public sealed record InspectionRequest(
     bool? FuelAdded,
     decimal? FuelLitres,
     decimal? FuelCostCad);
+
+/// <summary>
+/// Request body for POST /api/fleet/inspections/{id}/defects/resolve. <see cref="Item"/> names
+/// the defect (trimmed, case-insensitive) because a defect has no id of its own — it is a jsonb
+/// element addressed by <c>(InspectionId, Item)</c>. <see cref="ResolvedBy"/> follows the same
+/// client-supplied convention as <c>EnteredBy</c> and defaults to "Dispatch"; the resolution
+/// timestamp is stamped server-side and is never taken from the body.
+/// </summary>
+public sealed record ResolveDefectRequest(
+    string? Item,
+    DefectResolutionReason Reason,
+    string? Note,
+    string? ResolvedBy);

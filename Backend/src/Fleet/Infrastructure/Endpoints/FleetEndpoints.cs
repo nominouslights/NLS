@@ -45,6 +45,11 @@ public static partial class FleetEndpoints
         // Work orders — per-vehicle listing plus a fleet-wide group.
         vehicles.MapGet("{vehicleId:guid}/work-orders", GetVehicleWorkOrders);
 
+        // Defects on this vehicle, derived from its DVIRs. ?includeResolved=true for the full
+        // history. Nested under the vehicle even though the contract is an inspection DTO —
+        // the dispatcher asks "what is wrong with this truck", not "what did this DVIR say".
+        vehicles.MapGet("{vehicleId:guid}/defects", GetVehicleDefects);
+
         // Preventative maintenance, per vehicle: computed status/due/overhauls/history,
         // plan assignment, and the append-only completion log.
         vehicles.MapGet("{vehicleId:guid}/pm", GetVehiclePmStatus);
@@ -86,6 +91,12 @@ public static partial class FleetEndpoints
         inspectionRecords.MapGet("", GetInspections);
         inspectionRecords.MapPut("{id:guid}", UpdateInspection);
         inspectionRecords.MapDelete("{id:guid}", RemoveInspection);
+
+        // Clear one defect. The item goes in the BODY, not the path — it is free text, and
+        // (inspection id, item) is the only address a defect has. This sits with the records
+        // group, not the submission one: clearing a defect is the compliance office answering a
+        // DVIR, not part of the driver's own circle check.
+        inspectionRecords.MapPost("{id:guid}/defects/resolve", ResolveInspectionDefect);
 
         // …while submitting a pre-/post-trip inspection is the driver's own circle check, and is
         // the reason DriverAccess exists. Entered from the trip workflow today, from the Driver

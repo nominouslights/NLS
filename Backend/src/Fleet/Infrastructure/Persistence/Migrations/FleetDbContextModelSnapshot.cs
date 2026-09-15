@@ -1944,6 +1944,18 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
 
                             b1.Property<string>("Note");
 
+                            b1.Property<Guid?>("RecurrenceOfInspectionId");
+
+                            b1.Property<string>("ResolutionNote");
+
+                            b1.Property<string>("ResolutionReason");
+
+                            b1.Property<DateTimeOffset?>("ResolvedAtUtc");
+
+                            b1.Property<string>("ResolvedBy");
+
+                            b1.Property<Guid?>("ResolvedByWorkOrderId");
+
                             b1.Property<string>("Severity")
                                 .IsRequired();
 
@@ -2247,6 +2259,18 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                                 .IsRequired();
 
                             b1.Property<string>("Note");
+
+                            b1.Property<Guid?>("RecurrenceOfInspectionId");
+
+                            b1.Property<string>("ResolutionNote");
+
+                            b1.Property<string>("ResolutionReason");
+
+                            b1.Property<DateTimeOffset?>("ResolvedAtUtc");
+
+                            b1.Property<string>("ResolvedBy");
+
+                            b1.Property<Guid?>("ResolvedByWorkOrderId");
 
                             b1.Property<string>("Severity")
                                 .IsRequired();

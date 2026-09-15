@@ -19,29 +19,7 @@ public class AmendInspectionTests
         int? odometerKm = 118_400,
         string unit = "U-04",
         string driverName = "J. Spence") =>
-        inspection.Amend(
-            InspectionSource.Dispatcher,
-            vehicleId: inspection.VehicleId,
-            unit,
-            driverName,
-            enteredBy: null,
-            performedAt: DateTimeOffset.UtcNow,
-            odometerKm,
-            checklistItems: [],
-            defects,
-            weather: [],
-            temperatureC: null,
-            roadConditions: [],
-            visibility: null,
-            roadAdvisories: null,
-            fuelLevel: null,
-            issues: [],
-            attestations: [],
-            driverSignatureName: null,
-            certifiedAt: null,
-            fuelAdded: false,
-            fuelLitres: null,
-            fuelCostCad: null);
+        TestInspections.AmendWith(inspection, defects, odometerKm, unit, driverName);
 
     [Fact]
     public void Amending_in_an_out_of_service_defect_flips_a_pass_to_a_fail()

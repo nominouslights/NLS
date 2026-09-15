@@ -36,19 +36,23 @@ internal sealed class BudgetCodeReadService(BudgetingDbContext context) : IBudge
             return [];
         }
 
-        var emailByUserId = await context.UserLookups
+        var displayByUserId = await context.UserLookups
             .AsNoTracking()
-            .ToDictionaryAsync(u => u.UserId, u => u.Email, cancellationToken);
+            .ToDictionaryAsync(
+                u => u.UserId, u => new UserDisplay(u.Email, u.FullName), cancellationToken);
 
         var parentsById = codes.ToDictionary(c => c.Id, c => (c.Code, c.Name));
 
-        return codes.Select(code => ToResponse(code, parentsById, emailByUserId)).ToList();
+        return codes.Select(code => ToResponse(code, parentsById, displayByUserId)).ToList();
     }
+
+    /// <summary>How a user id renders: the name when they have set one, and the email always.</summary>
+    private readonly record struct UserDisplay(string Email, string? FullName);
 
     private static BudgetCodeResponse ToResponse(
         BudgetCodeReadModel code,
         IReadOnlyDictionary<Guid, (string Code, string Name)> parentsById,
-        IReadOnlyDictionary<Guid, string> emailByUserId)
+        IReadOnlyDictionary<Guid, UserDisplay> displayByUserId)
     {
         // A parent id that resolves to nothing renders as null rather than throwing: the delete
         // handler refuses to orphan children, but a row written before that guard existed — or by
@@ -72,17 +76,33 @@ internal sealed class BudgetCodeReadService(BudgetingDbContext context) : IBudge
             code.GlAccountCode,
             code.TaxTreatment,
             code.BudgetOwnerUserId,
-            EmailFor(code.BudgetOwnerUserId, emailByUserId),
+            NameFor(code.BudgetOwnerUserId, displayByUserId),
+            EmailFor(code.BudgetOwnerUserId, displayByUserId),
             code.ReviewFrequency,
             code.IsActive,
             code.CreatedBy,
-            EmailFor(code.CreatedBy, emailByUserId),
+            NameFor(code.CreatedBy, displayByUserId),
+            EmailFor(code.CreatedBy, displayByUserId),
             code.ModifiedBy,
-            EmailFor(code.ModifiedBy, emailByUserId),
+            NameFor(code.ModifiedBy, displayByUserId),
+            EmailFor(code.ModifiedBy, displayByUserId),
             code.CreatedAtUtc,
             code.UpdatedAtUtc);
     }
 
-    private static string? EmailFor(Guid? userId, IReadOnlyDictionary<Guid, string> emailByUserId) =>
-        userId is { } id && emailByUserId.TryGetValue(id, out var email) ? email : null;
+    private static string? EmailFor(
+        Guid? userId, IReadOnlyDictionary<Guid, UserDisplay> displayByUserId) =>
+        Display(userId, displayByUserId)?.Email;
+
+    /// <summary>
+    /// Null both when the id names nobody in the replica and when that person has not set a
+    /// name — the caller falls back to the email either way, so the two cases need not differ.
+    /// </summary>
+    private static string? NameFor(
+        Guid? userId, IReadOnlyDictionary<Guid, UserDisplay> displayByUserId) =>
+        Display(userId, displayByUserId)?.FullName;
+
+    private static UserDisplay? Display(
+        Guid? userId, IReadOnlyDictionary<Guid, UserDisplay> displayByUserId) =>
+        userId is { } id && displayByUserId.TryGetValue(id, out var display) ? display : null;
 }

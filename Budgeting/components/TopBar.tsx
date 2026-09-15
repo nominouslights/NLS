@@ -1,6 +1,7 @@
 "use client";
 
 import { colors, fonts } from "@/lib/theme";
+import { initials } from "@/lib/format";
 import { getClaims, logout } from "@/lib/auth";
 import HeaderClock from "@/components/HeaderClock";
 
@@ -14,8 +15,9 @@ import HeaderClock from "@/components/HeaderClock";
 
 /**
  * Two initials from an email's local part: "l.fontaine@…" and "l_fontaine@…" both give "LF",
- * "owner@…" gives "OW". lib/format.ts's initials() expects a display name ("R. Kelsey"), and
- * the token carries no name claim — only an email.
+ * "owner@…" gives "OW". The fallback for anyone who has not set a profile name — which is every
+ * account until its owner visits Settings → Profile, so this is far from dead code. When a name
+ * does exist, lib/format.ts's initials() handles it, which is what it was always written for.
  */
 function emailInitials(email: string): string {
   const local = email.split("@")[0] ?? "";
@@ -28,13 +30,25 @@ function emailInitials(email: string): string {
 export default function TopBar({
   onToggleRail,
   onNewAllocation,
+  fullName,
 }: {
   onToggleRail: () => void;
   onNewAllocation: () => void;
+  /**
+   * The signed-in user's own name, from Console's profile fetch — null until it arrives, and for
+   * anyone who has not set one. It comes down as a prop rather than from getClaims() because it
+   * is not a token claim and because it can change while the app is running: saving the profile
+   * has to be visible here immediately, and getClaims() is explicitly non-reactive.
+   */
+  fullName: string | null;
 }) {
   const claims = getClaims();
   const email = claims?.email ?? "";
   const role = claims?.role ?? "";
+
+  // Email and role stay on the claims: neither can change without a new token, and a new token
+  // means a login or a refresh, both of which re-render through AuthGate.
+  const displayName = fullName?.trim() || email;
 
   return (
     <div
@@ -214,7 +228,7 @@ export default function TopBar({
             flex: "none",
           }}
         >
-          {emailInitials(email)}
+          {fullName?.trim() ? initials(fullName.trim()) : emailInitials(email)}
         </div>
         <div style={{ lineHeight: 1.15 }}>
           <div
@@ -229,7 +243,7 @@ export default function TopBar({
               textOverflow: "ellipsis",
             }}
           >
-            {email || "—"}
+            {displayName || "—"}
           </div>
           <div
             style={{

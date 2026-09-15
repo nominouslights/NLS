@@ -26,11 +26,13 @@ public class IdentityEndpointMetadataTests : IAsyncLifetime
     {
         var builder = WebApplication.CreateBuilder();
 
-        // The handler delegates take ISender / ITenantContext from DI; without registrations
-        // the endpoint builder cannot classify those parameters (services vs. body) and
-        // building the endpoints throws. The services are never resolved — the app never runs.
+        // The handler delegates take ISender / ITenantContext / ICurrentActor from DI; without
+        // registrations the endpoint builder cannot classify those parameters (services vs.
+        // body) and building the endpoints throws. The services are never resolved — the app
+        // never runs.
         builder.Services.AddScoped<ISender, Sender>();
         builder.Services.AddScoped<ITenantContext, StubTenantContext>();
+        builder.Services.AddScoped<ICurrentActor, StubCurrentActor>();
 
         _app = builder.Build();
         _app.MapIdentityEndpoints();
@@ -68,12 +70,18 @@ public class IdentityEndpointMetadataTests : IAsyncLifetime
         Assert.Equal("AdminOnly", authorizeData.Policy);
     }
 
-    [Fact]
-    public void Me_requires_authentication_but_no_particular_role()
+    [Theory]
+    [InlineData("GET", "/api/identity/auth/me")]
+    [InlineData("GET", "/api/identity/auth/profile")]
+    [InlineData("PUT", "/api/identity/auth/profile")]
+    public void Self_service_endpoints_require_authentication_but_no_particular_role(
+        string method, string pattern)
     {
-        // Any signed-in caller, whatever their role — a client that is about to be told "you may
-        // not be here" still has to be able to read the role that decided it.
-        var endpoint = Endpoint("GET", "/api/identity/auth/me");
+        // Any signed-in caller, whatever their role. For /me: a client about to be told "you may
+        // not be here" still has to read the role that decided it. For /profile: everyone owns a
+        // profile, and a policy here would refuse a console the day it grows the same screen.
+        // What keeps a caller to their own row is that the user id comes from the sub claim.
+        var endpoint = Endpoint(method, pattern);
 
         var authorizeData = endpoint.Metadata.GetMetadata<IAuthorizeData>();
 
@@ -101,5 +109,15 @@ public class IdentityEndpointMetadataTests : IAsyncLifetime
         public Guid? TenantId => null;
 
         public TenantType? TenantType => null;
+    }
+
+    private sealed class StubCurrentActor : ICurrentActor
+    {
+        public Guid? UserId => null;
+
+        public string? Email => null;
+
+        // Empty, never null — the contract's "no authenticated principal" case.
+        public IReadOnlyCollection<string> Roles => [];
     }
 }

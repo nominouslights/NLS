@@ -23,6 +23,19 @@ interface Row {
   defect: boolean;
   severity: DefectSeverityWire;
   note: string;
+  /** Set only on a re-reported row — the inspection whose resolution of this
+   *  same item this new report supersedes. */
+  recurrenceOfInspectionId?: string | null;
+}
+
+/** Re-report: a defect cleared on an earlier DVIR is back, and the dispatcher
+ *  does not want to wait for the next one. Resolution is final, so this records
+ *  a NEW defect pointed at the inspection it supersedes. */
+export interface InspectionPrefill {
+  item: string;
+  severity: DefectSeverityWire;
+  note?: string | null;
+  recurrenceOfInspectionId: string;
 }
 
 // Dispatcher data-entry for a pre/post-trip DVIR — the office fallback for when
@@ -35,6 +48,7 @@ export default function InspectionEntryModal({
   unit,
   type,
   odometerKm,
+  prefill,
   onClose,
   onSaved,
 }: {
@@ -42,6 +56,7 @@ export default function InspectionEntryModal({
   unit: string;
   type: InspectionType;
   odometerKm: number;
+  prefill?: InspectionPrefill;
   onClose: () => void;
   onSaved: (inspectionId: string) => void;
 }) {
@@ -71,9 +86,21 @@ export default function InspectionEntryModal({
     };
   }, []);
   const [odo, setOdo] = useState(String(odometerKm));
-  const [rows, setRows] = useState<Row[]>(
-    DVIR_CHECKLIST.map((item) => ({ item, defect: false, severity: "Minor", note: "" })),
-  );
+  const [rows, setRows] = useState<Row[]>(() => {
+    const base: Row[] = DVIR_CHECKLIST.map((item) => ({ item, defect: false, severity: "Minor", note: "" }));
+    if (!prefill) return base;
+    // A re-reported item may predate the current checklist (defect items are
+    // free text), so it is prepended when the standard list has no match.
+    const i = base.findIndex((r) => r.item.trim().toLowerCase() === prefill.item.trim().toLowerCase());
+    const filled: Row = {
+      item: i >= 0 ? base[i].item : prefill.item,
+      defect: true,
+      severity: prefill.severity,
+      note: prefill.note ?? "",
+      recurrenceOfInspectionId: prefill.recurrenceOfInspectionId,
+    };
+    return i >= 0 ? base.map((r, idx) => (idx === i ? filled : r)) : [filled, ...base];
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -83,7 +110,12 @@ export default function InspectionEntryModal({
 
   const defects = rows
     .filter((r) => r.defect)
-    .map((r) => ({ item: r.item, severity: r.severity, note: r.note.trim() || null }));
+    .map((r) => ({
+      item: r.item,
+      severity: r.severity,
+      note: r.note.trim() || null,
+      recurrenceOfInspectionId: r.recurrenceOfInspectionId ?? null,
+    }));
   const result: InspectionResultWire = defects.some(
     (d) => d.severity === "OutOfService" || d.severity === "Major",
   )
@@ -160,6 +192,26 @@ export default function InspectionEntryModal({
         recorded this DVIR on the backup paper form. Recorded as
         <span style={{ fontWeight: 600 }}> Dispatcher</span> entry.
       </div>
+
+      {prefill && (
+        <div
+          style={{
+            padding: "11px 14px",
+            background: statusMeta("soon").bg,
+            border: `1px solid ${statusMeta("soon").bd}`,
+            borderRadius: 10,
+            marginBottom: 16,
+            fontFamily: fonts.body,
+            fontSize: 12,
+            fontWeight: 600,
+            color: statusMeta("soon").t,
+            lineHeight: 1.5,
+          }}
+        >
+          {statusMeta("soon").g} Re-reporting &ldquo;{prefill.item}&rdquo; — it was cleared on an earlier
+          DVIR. Resolution is final, so this records a new defect citing that one.
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
         <SelectField

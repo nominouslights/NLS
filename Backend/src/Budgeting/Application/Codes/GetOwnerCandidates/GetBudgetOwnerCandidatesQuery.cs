@@ -11,7 +11,10 @@ public sealed record GetBudgetOwnerCandidatesQuery(Guid TenantId)
     : IQuery<IReadOnlyList<BudgetOwnerOptionResponse>>;
 
 /// <summary>
-/// One pickable owner. <paramref name="Email"/> is the display value because Identity's user
-/// aggregate has no name field — email is the only human-readable identifier an account has.
+/// One pickable owner. Both identifiers travel rather than one pre-resolved display string: a
+/// picker is exactly where two people with similar names have to be told apart, and
+/// <paramref name="Email"/> is the unique one. <paramref name="FullName"/> is null for anyone who
+/// has not set a profile, so the client's label falls back to the email.
 /// </summary>
-public sealed record BudgetOwnerOptionResponse(Guid UserId, string Email, string Role);
+public sealed record BudgetOwnerOptionResponse(
+    Guid UserId, string Email, string Role, string? FullName);

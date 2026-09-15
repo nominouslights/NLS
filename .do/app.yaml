@@ -251,6 +251,12 @@ databases:
 #        BASE_PATH=/dispatch, NEXT_PUBLIC_API_BASE_URL=/dispatch   (always equal)
 #      Website gets neither: it owns the root and makes no API calls.
 #
+#      Dispatcher already carries NEXT_PUBLIC_BUDGETING_URL=/budget — the launcher's Budgeting
+#      tile target, baked at build like the others (no runtime env entry here does anything).
+#      It was set in the same change that mounted Budgeting at /budget, because the two belong
+#      together: set earlier the tile is a dead link, left unset it renders "Not configured"
+#      while the console it points at is live.
+#
 #   2. Wait for CI to publish the rebuilt dispatcher image. Applying the spec first serves a
 #      still-root-mounted image under a prefix.
 #

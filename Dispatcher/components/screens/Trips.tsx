@@ -73,6 +73,7 @@ import { periodContaining, periodContains, periodLabel, type Period } from "@/li
 import ManifestEditorModal from "@/components/ManifestEditorModal";
 import TripInspectionModal from "@/components/TripInspectionModal";
 import SendPickupEmailModal from "@/components/SendPickupEmailModal";
+import DefectsPanel from "@/components/fleet/DefectsPanel";
 
 /** Label attributed to dispatcher-entered manifests/inspections (no user id yet). */
 const DISPATCHER_LABEL = "Dispatch";
@@ -1311,6 +1312,9 @@ export default function Trips({
   const [inspectionType, setInspectionType] = useState<"PreTrip" | "PostTrip" | null>(null);
   const [editingInspection, setEditingInspection] = useState<VehicleInspection | null>(null);
   const [removingInspection, setRemovingInspection] = useState<VehicleInspection | null>(null);
+  // Bumped whenever something that could change this vehicle's defect list
+  // lands — a DVIR entered or removed, or a different unit assigned.
+  const [defectsRefresh, setDefectsRefresh] = useState(0);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -1561,6 +1565,7 @@ export default function Trips({
   async function onAssignSaved(id: string, driverId: string | null, vehicleId: string | null) {
     await assignTrip(id, driverId, vehicleId);
     await reloadUntil(id, (trip) => trip !== undefined && trip.driverId === driverId && trip.vehicleId === vehicleId);
+    setDefectsRefresh((n) => n + 1);
   }
 
   async function onEditSaved(id: string, input: TripUpdateInput) {
@@ -1640,6 +1645,7 @@ export default function Trips({
         // best-effort — the flag will appear on the next detail refresh.
       }
     }
+    setDefectsRefresh((n) => n + 1);
   }
 
   /** After an inspection is removed (hard delete): refetch the trip's
@@ -1669,6 +1675,7 @@ export default function Trips({
         // best-effort — the flag will clear on the next detail refresh.
       }
     }
+    setDefectsRefresh((n) => n + 1);
   }
 
   function onChangeStatus(id: string, status: "InProgress" | "Cancelled", reason?: string | null) {
@@ -2380,6 +2387,15 @@ export default function Trips({
                   </div>
                 )}
               </Panel>
+
+              {/* unresolved defects on the assigned vehicle — warn only, never a gate */}
+              <DefectsPanel
+                vehicleId={t.vehicleId}
+                unit={t.vehicleUnit}
+                canResolve
+                maxRows={5}
+                refreshKey={defectsRefresh}
+              />
 
               {/* billing */}
               <Panel style={{ marginBottom: 12 }}>

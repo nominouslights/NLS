@@ -29,6 +29,11 @@ internal sealed class InMemoryVehicleInspectionRepository : IVehicleInspectionRe
     public Task<VehicleInspection?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         Task.FromResult(Inspections.FirstOrDefault(i => i.Id == id));
 
+    public Task<VehicleInspection?> GetByGeneratedWorkOrderIdAsync(
+        Guid workOrderId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(Inspections.FirstOrDefault(i => i.GeneratedWorkOrderId == workOrderId));
+
     public void Add(VehicleInspection inspection) => Inspections.Add(inspection);
 
     public void Remove(VehicleInspection inspection) => Inspections.Remove(inspection);

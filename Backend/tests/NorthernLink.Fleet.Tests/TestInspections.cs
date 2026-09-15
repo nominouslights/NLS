@@ -90,6 +90,41 @@ internal static class TestInspections
         return result.Value;
     }
 
+    /// <summary>
+    /// Amends through the real aggregate method, varying only what the caller cares about.
+    /// Shared by the amend tests and the amend-trap regression tests, so both drive exactly the
+    /// same call shape.
+    /// </summary>
+    public static Result AmendWith(
+        VehicleInspection inspection,
+        IReadOnlyList<InspectionDefect> defects,
+        int? odometerKm = 118_400,
+        string unit = "U-04",
+        string driverName = "J. Spence") =>
+        inspection.Amend(
+            InspectionSource.Dispatcher,
+            vehicleId: inspection.VehicleId,
+            unit,
+            driverName,
+            enteredBy: null,
+            performedAt: DateTimeOffset.UtcNow,
+            odometerKm,
+            checklistItems: [],
+            defects,
+            weather: [],
+            temperatureC: null,
+            roadConditions: [],
+            visibility: null,
+            roadAdvisories: null,
+            fuelLevel: null,
+            issues: [],
+            attestations: [],
+            driverSignatureName: null,
+            certifiedAt: null,
+            fuelAdded: false,
+            fuelLitres: null,
+            fuelCostCad: null);
+
     public static InspectionDefect Defect(InspectionDefectSeverity severity) => new()
     {
         Item = "Wipers & washer fluid",

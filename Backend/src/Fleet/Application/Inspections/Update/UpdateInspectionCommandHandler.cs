@@ -28,8 +28,16 @@ public sealed class UpdateInspectionCommandHandler(IVehicleInspectionRepository 
             .Select(c => new InspectionChecklistItem { Group = c.Group, Item = c.Item, Passed = c.Passed })
             .ToList();
 
+        // No resolution fields are carried across from the wire — the aggregate's merge is what
+        // preserves the existing stamps, and it discards anything a caller puts here.
         var defects = command.Defects
-            .Select(d => new InspectionDefect { Item = d.Item, Severity = d.Severity, Note = d.Note })
+            .Select(d => new InspectionDefect
+            {
+                Item = d.Item,
+                Severity = d.Severity,
+                Note = d.Note,
+                RecurrenceOfInspectionId = d.RecurrenceOfInspectionId,
+            })
             .ToList();
 
         var amendResult = inspection.Amend(

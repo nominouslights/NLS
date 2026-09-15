@@ -11,6 +11,7 @@ import { ModalShell } from "@/components/ui/ModalShell";
 import { MonoTag, StatusChip } from "@/components/ui/Chip";
 import { ActionButton } from "@/components/ui/Button";
 import WorkOrderModal from "@/components/WorkOrderModal";
+import { ResolveDefectModal } from "@/components/fleet/DefectsPanel";
 
 // Detail view of a live DVIR inspection — the full checklist (what passed and
 // what failed), with a "create work order" action on every failed item and one
@@ -39,6 +40,12 @@ export default function InspectionDetailModal({
   onClose: () => void;
 }) {
   const [woPrefill, setWoPrefill] = useState<WorkOrderPrefillWire | null>(null);
+  // Per-defect resolve. The inspection DTO carries no resolution fields, so a
+  // defect already cleared elsewhere still offers the action and the endpoint
+  // answers 409 — items cleared from HERE are remembered for this modal's life
+  // so the row reads back as resolved immediately.
+  const [resolving, setResolving] = useState<ChecklistRow | null>(null);
+  const [resolvedItems, setResolvedItems] = useState<string[]>([]);
 
   const typeLabel = inspection.type === "PreTrip" ? "Pre-Trip" : "Post-Trip";
   const rm = INSPECTION_RESULT_META[inspection.result] ?? INSPECTION_RESULT_META.Pass;
@@ -126,6 +133,12 @@ export default function InspectionDetailModal({
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
                 <StatusChip kind={isDefect ? "over" : "ontime"} label={isDefect ? "Defect" : "Pass"} />
+                {isDefect &&
+                  (resolvedItems.includes(c.item) ? (
+                    <StatusChip kind="ontime" label="Resolved" />
+                  ) : (
+                    <ActionButton onClick={() => setResolving(c)}>RESOLVE</ActionButton>
+                  ))}
                 {isDefect && canGenerate && (
                   <ActionButton
                     onClick={() =>
@@ -144,6 +157,20 @@ export default function InspectionDetailModal({
           );
         })}
       </div>
+
+      {resolving && (
+        <ResolveDefectModal
+          inspectionId={inspection.id}
+          item={resolving.item}
+          unit={inspection.unit}
+          severity={resolving.severity}
+          onClose={() => setResolving(null)}
+          onResolved={() => {
+            setResolvedItems((prev) => [...prev, resolving.item]);
+            setResolving(null);
+          }}
+        />
+      )}
 
       {woPrefill && (
         <WorkOrderModal

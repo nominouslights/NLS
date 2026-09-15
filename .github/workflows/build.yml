@@ -1,10 +1,11 @@
 name: build
 
-# Publishes the four deployable images to GHCR — that is this workflow's whole job, by the
+# Publishes the five deployable images to GHCR — that is this workflow's whole job, by the
 # owner's decision: CI ends at the package registry, and deployment happens outside CI from
-# those images. No deploy steps belong here, and no test gate either (run `dotnet test` and
-# Budgeting's `npm test` locally before pushing). CommunityMobile/ is excluded (Flutter design
-# mockup, not a server workload) and AppHost/ is excluded on purpose — it is the local dev
+# those images. No deploy steps belong here, and no test gate either (run `node run-tests.mjs`
+# at the repo root before pushing, or enable the pre-push hook with
+# `git config core.hooksPath .githooks`). CommunityMobile/ is excluded (Flutter design mockup,
+# not a server workload) and AppHost/ is excluded on purpose — it is the local dev
 # orchestrator, and its AppHost.cs is gitignored, so it does not exist in a CI checkout.
 
 on:
@@ -42,28 +43,45 @@ jobs:
         #
         #   dispatcher  owns "/"      → no BASE_PATH. Root-relative assets are correct for it.
         #   budgeting   mounted /budget → BASE_PATH + NEXT_PUBLIC_API_BASE_URL, always equal.
+        #   driverfield mounted /driver → same pair, same rules.
         #   website     not deployed yet → nothing. If it ever takes the root, dispatcher moves
         #               to /dispatch and gains args at the same time, in one sitting.
         #
-        # Both budgeting args are required and must match: BASE_PATH moves the asset URLs,
+        # Both prefixed args are required and must match: BASE_PATH moves the asset URLs,
         # NEXT_PUBLIC_API_BASE_URL moves the browser's fetches (lib/api/transport.ts prefixes an
         # absolute /api/... that Next does not rewrite, so without it the calls leave the prefix
         # and land on whichever component owns "/").
         #
-        # THIS IS COUPLED TO .do/app.yaml AND MUST NEVER SHIP HALF. The /budget ingress rule
-        # needs preserve_path_prefix: true and a health_check http_path of /budget. Ship the
-        # image without the spec and the page itself 404s (the app gets a stripped "/" it no
-        # longer serves); ship the spec without the image and the console 404s on its own
+        # A MIS-PREFIXED BUILD DOES NOT 404 — IT SERVES THE WRONG APP. Three frontends now carry
+        # byte-identical copies of Dispatcher's design system, so turbopack emits identical chunk
+        # names across them. Get a prefix wrong and a driver's tablet silently renders the
+        # DISPATCH CONSOLE, which is far worse than a missing page. After building, curl the
+        # image and grep the HTML for the expected prefix in /_next/static/ before shipping.
+        #
+        # THIS IS COUPLED TO .do/app.yaml AND MUST NEVER SHIP HALF. Each prefixed ingress rule
+        # needs preserve_path_prefix: true and a health_check http_path matching the prefix.
+        # Ship the image without the spec and the page itself 404s (the app gets a stripped "/"
+        # it no longer serves); ship the spec without the image and the app 404s on its own
         # JavaScript. Publish first, then apply the spec.
+        #
+        # Dispatcher additionally carries NEXT_PUBLIC_BUDGETING_URL=/budget: the launcher's
+        # Budgeting tile target. It belongs to the same coupled change that mounts Budgeting —
+        # set it before the mount and the tile is a dead link; leave it unset after, and the
+        # tile reads "Not configured" while the console it points at is live.
         include:
           # The API's build context is the REPOSITORY ROOT: Directory.Build.props and
           # Directory.Packages.props live above Backend/ and MSBuild walks up to find them.
           - name: api
             context: .
             dockerfile: Backend/Dockerfile
+          # No BASE_PATH: dispatcher owns "/". NEXT_PUBLIC_BUDGETING_URL is not a prefix for
+          # dispatcher itself — it is where its launcher's Budgeting tile points, and it is set
+          # here because this same change mounts Budgeting at /budget below.
           - name: dispatcher
             context: Dispatcher
             dockerfile: Dispatcher/Dockerfile
+            build_args: |
+              NEXT_PUBLIC_BUDGETING_URL=/budget
           - name: website
             context: Website
             dockerfile: Website/Dockerfile

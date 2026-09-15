@@ -15,6 +15,24 @@ public interface IUserRepository
 
     Task<User?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// A user of the <b>current tenant</b>, by id — the signed-in read/write path behind the
+    /// self-service profile. Unlike <see cref="GetByIdAsync"/> this deliberately does <i>not</i>
+    /// bypass the tenant query filter and does <i>not</i> opt into the <c>app.is_system</c> RLS
+    /// escape hatch: a caller holding an access token has a tenant, so both halves of dual
+    /// enforcement apply normally and a cross-tenant id simply returns null.
+    /// <para>
+    /// Keeping this separate rather than widening <see cref="GetByIdAsync"/> matters because
+    /// <c>SystemAccess</c> is sticky — it opens the connection so <c>app.is_system</c> survives
+    /// the rest of the unit of work. A profile write riding it would commit its audit, journal
+    /// and outbox rows past their tenant insert policies via the system arm instead of the tenant
+    /// arm: the right result for the wrong reason, and a genuine cross-tenant defect would be
+    /// invisible.
+    /// </para>
+    /// <para>Tracked, because the profile command mutates and saves through it.</para>
+    /// </summary>
+    Task<User?> GetByIdForTenantAsync(Guid id, CancellationToken cancellationToken = default);
+
     /// <summary>True when any user exists — backs the first-run setup-status check.</summary>
     Task<bool> AnyAsync(CancellationToken cancellationToken = default);
 

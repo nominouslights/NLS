@@ -1,26 +1,28 @@
 "use client";
 
 import { useState } from "react";
-import { colors, fonts, rowSurface, statusMeta } from "@/lib/theme";
+import { colors } from "@/lib/theme";
 import type { BudgetPeriod } from "@/lib/types";
-import { StatusChip } from "@/components/ui/Chip";
 import { ActionButton } from "@/components/ui/Button";
-import { formatCad } from "@/lib/api/format";
-import { formatUtcDate } from "@/lib/api/format";
 import type { BudgetPeriodRecord } from "@/lib/api/budgeting";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import BudgetPeriodFormModal from "@/components/BudgetPeriodFormModal";
-import { EmptyNote, Num, Screen } from "@/components/screens/shared";
+import { EmptyNote, Screen } from "@/components/screens/shared";
+import PeriodList from "@/components/screens/periods/PeriodList";
+import PeriodDashboard from "@/components/screens/periods/PeriodDashboard";
 
-// Budget periods and where each one stands — the first screen on real data
-// (GET /api/budgeting/periods; Console owns the fetch). Draft → Open → Locked, mapped onto the
-// shared status kinds: a locked period is finished ("off"), an open one is the live plan
-// ("ontime"), a draft is informational until someone opens it ("info"). Each row's kind is
-// carried on the row (BudgetPeriod.pk, derived in lib/api/budgeting.ts), so this screen never
-// picks a colour itself.
+// Budget periods and where each one stands — master/detail on real data, following the Budget
+// Codes screen (and Dispatcher's Clients and Trips): a left column of period rows and a right
+// dashboard pane on the tinted detailBg, split by a CSS grid with a top border.
 //
-// Planned/Allocated figures are honest zeros until the allocations slice of Stage 6.1 lands —
-// the wire has no such fields yet.
+// Console owns the period list (GET /api/budgeting/periods) and threads it down, because five
+// screens read it; the dashboard owns the selected period's lines, which only it reads. The
+// lifecycle is five states, forward only — Draft → Finalized → Open → In review → Closed — mapped
+// onto the shared status kinds in lib/api/budgeting.ts (periodKind) and carried on each row as
+// BudgetPeriod.pk, so nothing here picks a colour itself.
+//
+// Creating a period lands on its dashboard with no extra navigation: Console.handlePeriodCreated
+// already selects the new id, and the selected row is the one the dashboard shows.
 
 export default function BudgetPeriods({
   periods,
@@ -29,6 +31,7 @@ export default function BudgetPeriods({
   periodId,
   onSelectPeriod,
   onCreated,
+  onPeriodsRefreshed,
 }: {
   /** null while the first load is in flight. */
   periods: BudgetPeriod[] | null;
@@ -37,8 +40,15 @@ export default function BudgetPeriods({
   periodId: string;
   onSelectPeriod: (id: string) => void;
   onCreated: (records: BudgetPeriodRecord[], id: string) => void;
+  /** After a transition or a line change: Console's applyLoaded, which preserves the selection. */
+  onPeriodsRefreshed: (records: BudgetPeriodRecord[]) => void;
 }) {
   const [showCreate, setShowCreate] = useState(false);
+
+  const list = periods ?? [];
+  // periodId is "" until Console's first load picks one; falling back to the first row keeps the
+  // pane populated in that gap.
+  const selected = list.find((p) => p.id === periodId) ?? list[0] ?? null;
 
   return (
     <Screen
@@ -59,93 +69,35 @@ export default function BudgetPeriods({
         </div>
       )}
 
-      {periods === null && !error && (
-        <EmptyNote>Loading budget periods…</EmptyNote>
-      )}
+      {periods === null && !error && <EmptyNote>Loading budget periods…</EmptyNote>}
 
-      {periods !== null && periods.length === 0 && !error && (
+      {periods !== null && list.length === 0 && !error && (
         <EmptyNote>No budget periods yet — create one to start planning.</EmptyNote>
       )}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-        {(periods ?? []).map((p) => {
-          const active = p.id === periodId;
-          const m = statusMeta(p.pk);
-          const unallocated = p.planned - p.allocated;
-
-          return (
-            <div
-              key={p.id}
-              onClick={() => onSelectPeriod(p.id)}
-              style={{ ...rowSurface(active, m.c), padding: "13px 15px" }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                <div style={{ flex: "1 1 auto", minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontFamily: fonts.condensed,
-                      fontWeight: 700,
-                      fontSize: 17,
-                      color: colors.headingBright,
-                      lineHeight: 1.2,
-                    }}
-                  >
-                    {p.label}
-                  </div>
-                  <div
-                    style={{
-                      fontFamily: fonts.body,
-                      fontSize: 11.5,
-                      color: colors.textDim,
-                      marginTop: 2,
-                    }}
-                  >
-                    {formatUtcDate(p.startsOn)} — {formatUtcDate(p.endsOn)}
-                  </div>
-                </div>
-
-                <StatusChip kind={p.pk} label={p.state} />
-
-                <div style={{ display: "flex", gap: 22, flex: "none" }}>
-                  <Figure label="Planned" value={formatCad(p.planned)} />
-                  <Figure label="Allocated" value={formatCad(p.allocated)} />
-                  <Figure
-                    label="Unallocated"
-                    value={formatCad(unallocated)}
-                    // Amber is a fill/border colour, never text — theme.ts documents this, so
-                    // an unallocated balance uses amberText to stay AA on white.
-                    color={unallocated > 0 ? colors.amberText : colors.textSecondary}
-                  />
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      {selected && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "38% 1fr",
+            borderTop: `1px solid ${colors.border}`,
+            height: "100%",
+            minHeight: 0,
+          }}
+        >
+          <PeriodList periods={list} selectedId={selected.id} onSelect={onSelectPeriod} />
+          {/* Keyed by id so every confirm, modal and fetch resets when the selection changes. */}
+          <PeriodDashboard
+            key={selected.id}
+            period={selected}
+            onPeriodsRefreshed={onPeriodsRefreshed}
+          />
+        </div>
+      )}
 
       {showCreate && (
         <BudgetPeriodFormModal onClose={() => setShowCreate(false)} onSaved={onCreated} />
       )}
     </Screen>
-  );
-}
-
-function Figure({ label, value, color }: { label: string; value: string; color?: string }) {
-  return (
-    <div style={{ textAlign: "right" }}>
-      <div
-        style={{
-          fontFamily: fonts.semiCondensed,
-          fontSize: 9.5,
-          letterSpacing: ".14em",
-          textTransform: "uppercase",
-          color: colors.textLabel,
-          marginBottom: 2,
-        }}
-      >
-        {label}
-      </div>
-      <Num color={color}>{value}</Num>
-    </div>
   );
 }

@@ -11,6 +11,7 @@ export const TABS = [
   "Service History",
   "Preventive Maintenance",
   "Work Orders",
+  "Open Defects",
   "Inspections",
   "DTC Alerts",
   "Parts",

@@ -121,6 +121,16 @@ namespace NorthernLink.Identity.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(256)")
                         .HasColumnName("email");
 
+                    b.Property<string>("FullName")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("full_name");
+
+                    b.Property<string>("JobTitle")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("job_title");
+
                     b.Property<string>("PasswordHash")
                         .IsRequired()
                         .HasMaxLength(512)

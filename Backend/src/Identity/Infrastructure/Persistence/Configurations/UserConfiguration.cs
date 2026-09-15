@@ -20,6 +20,14 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(u => u.Role).HasColumnName("role").HasMaxLength(32);
         builder.Property(u => u.CreatedAtUtc).HasColumnName("created_at_utc");
 
+        // Nullable: every row predating profiles has no name, and null is what says so.
+        // The length is User.ProfileFieldMaxLength so the column and the domain rule cannot
+        // drift; Budgeting's user_lookup replica matches it for the same reason.
+        builder.Property(u => u.FullName)
+            .HasColumnName("full_name").HasMaxLength(User.ProfileFieldMaxLength);
+        builder.Property(u => u.JobTitle)
+            .HasColumnName("job_title").HasMaxLength(User.ProfileFieldMaxLength);
+
         builder.HasIndex(u => u.Email).IsUnique();
 
         // DomainEvents ignore + Version concurrency token come from ModuleDbContext's

@@ -1,69 +1,82 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { colors } from "@/lib/theme";
 import type { ScreenId } from "@/lib/nav";
-import { currentPeriod, type Period } from "@/lib/period";
+import { appForScreen, canUseApp, railGroupsFor, type AppId, type InternalApp } from "@/lib/apps";
+import { clearRetainedState } from "@/lib/appState";
+import { getRole } from "@/lib/claims";
+import type { Shell } from "@/components/apps/shell";
 import NavRail from "@/components/NavRail";
 import TopBar from "@/components/TopBar";
+import Home from "@/components/Home";
 import CreateTripWizard from "@/components/CreateTripWizard";
-import DispatchBoard from "@/components/screens/DispatchBoard";
-import LiveMap from "@/components/screens/LiveMap";
-import Trips from "@/components/screens/Trips";
-import Drivers from "@/components/screens/Drivers";
-import Fleet from "@/components/screens/Fleet";
-import Clients from "@/components/screens/Clients";
-import Riders from "@/components/screens/Riders";
-import Billing from "@/components/screens/Billing";
-import Reports from "@/components/screens/Reports";
-import type { ReportTabId } from "@/components/screens/reports/shared";
-import Manifests from "@/components/screens/Manifests";
-import RoutesSchedules from "@/components/screens/RoutesSchedules";
-import Stops from "@/components/screens/Stops";
-import Cargo, { type CargoTab } from "@/components/screens/Cargo";
-import Bookings from "@/components/screens/Bookings";
-import Incidents from "@/components/screens/Incidents";
-import Communications from "@/components/screens/Communications";
-import Settings from "@/components/screens/Settings";
+import TodayApp from "@/components/apps/TodayApp";
+import TripOpsApp from "@/components/apps/TripOpsApp";
+import FleetApp from "@/components/apps/FleetApp";
+import DriversApp from "@/components/apps/DriversApp";
+import CommunityBookingApp from "@/components/apps/CommunityBookingApp";
+import CommercialApp from "@/components/apps/CommercialApp";
+import AdminApp from "@/components/apps/AdminApp";
+
+// The console is a two-level shell: the Home launcher, then one app at a time, each rendering
+// its own NavRail group and screens (components/apps/*App.tsx; manifest in lib/apps.ts). The
+// apps' selection/period/tab state survives a trip Home in lib/appState.ts; the one selection
+// that crosses apps — the trip openTrip() lands on — stays here.
+
+type Location = ScreenId | "home";
 
 export default function Console() {
-  const [screen, setScreen] = useState<ScreenId>("dispatch");
+  const [location, setLocation] = useState<Location>("home");
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
-
   const [tripSelId, setTripSelId] = useState<string | null>(null); // Trips API Guid
-  // The Trips list's period and page live here, not in the screen: switching
-  // screens unmounts it, and a dispatcher who steps back three months should not
-  // lose that on a detour to the Fleet screen.
-  const [tripPeriod, setTripPeriod] = useState<Period>(() => currentPeriod("month"));
-  const [tripPage, setTripPage] = useState(1);
-  const [driverSel, setDriverSel] = useState(0);
-  // Cargo & Grocery tab + shipment selection live here (tripPeriod precedent):
-  // switching screens unmounts Cargo, and a dispatcher mid-shipment should not
-  // lose their place on a detour to Trips.
-  const [cargoTab, setCargoTab] = useState<CargoTab>("shipments");
-  const [cargoSelId, setCargoSelId] = useState<string | null>(null); // Shipments API Guid
-  const [fleetSelId, setFleetSelId] = useState<string | null>(null);
-  const [clientSel, setClientSel] = useState<string | null>(null); // Clients API Guid
-  const [invoiceSelId, setInvoiceSelId] = useState<string | null>(null); // Billing API Guid
-  // Both reports' selections live here for the same reason as tripPeriod: a
-  // dispatcher who built March's report should not lose it on a detour to
-  // another screen — including which of the two reports they were on.
-  const [reportTab, setReportTab] = useState<ReportTabId>("accruals");
-  const [reportClientId, setReportClientId] = useState<string | null>(null); // Clients API Guid
-  const [reportPeriod, setReportPeriod] = useState<Period>(() => currentPeriod("month"));
-  // The terminus report gets its OWN period, deliberately. Accruals is locked to
-  // a month and so renders no granularity pills; sharing one Period would let a
-  // quarter set here strand the accruals view stepping three months at a time
-  // with no way back — and print "Q3 2026" onto a monthly statement.
-  const [terminusStopId, setTerminusStopId] = useState<string | null>(null); // Stops API Guid
-  const [terminusPeriod, setTerminusPeriod] = useState<Period>(() => currentPeriod("month"));
-  const [incidentSel, setIncidentSel] = useState(0);
+  // Reopening an app returns to the screen it was left on.
+  const lastScreen = useRef<Partial<Record<AppId, ScreenId>>>({});
+
+  // Non-reactive on purpose (Budgeting's RoleGate precedent): the role changes only with the
+  // token, and every path that replaces the token re-renders through AuthGate. A UX gate only.
+  const role = getRole();
+
+  const screen = location === "home" ? null : location;
+  const app = screen === null ? null : appForScreen(screen);
+  // CREATE TRIP lands on Trip Operations → Trips, so a role that cannot open that app (an
+  // Accountant, say) would create a trip and be bounced Home without seeing it. Hide the button.
+  const canCreateTrip = canUseApp(appForScreen("trips"), role);
+
+  // Console unmounts only on sign-out: forget every app's retained state so the next account
+  // inherits nothing.
+  useEffect(() => () => clearRetainedState(), []);
+
+  function navigate(target: ScreenId) {
+    const targetApp = appForScreen(target);
+    if (!canUseApp(targetApp, role)) {
+      setLocation("home");
+      return;
+    }
+    lastScreen.current[targetApp.id] = target;
+    setLocation(target);
+  }
+
+  function openApp(a: InternalApp) {
+    navigate(lastScreen.current[a.id] ?? a.screens[0].id);
+  }
+
+  function goHome() {
+    setLocation("home");
+  }
 
   function openTrip(id: string | null) {
     setTripSelId(id);
-    setScreen("trips");
+    navigate("trips");
   }
+
+  const shell: Shell = {
+    openTrip,
+    createTrip: () => setWizardOpen(true),
+    navigate,
+    goHome,
+  };
 
   return (
     <div
@@ -76,10 +89,23 @@ export default function Console() {
         overflow: "hidden",
       }}
     >
-      <TopBar onToggleRail={() => setRailCollapsed((v) => !v)} onCreateTrip={() => setWizardOpen(true)} />
+      <TopBar
+        onToggleRail={() => setRailCollapsed((v) => !v)}
+        onCreateTrip={canCreateTrip ? () => setWizardOpen(true) : null}
+        onHome={goHome}
+        app={app && { label: app.label, code: app.code }}
+      />
 
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
-        <NavRail screen={screen} collapsed={railCollapsed} onSelect={setScreen} />
+        {app && screen && (
+          <NavRail
+            screen={screen}
+            collapsed={railCollapsed}
+            onSelect={navigate}
+            groups={railGroupsFor(app)}
+            onHome={goHome}
+          />
+        )}
 
         <div
           style={{
@@ -91,56 +117,21 @@ export default function Console() {
             overflow: "hidden",
           }}
         >
-          {screen === "dispatch" && <DispatchBoard onOpenTrip={openTrip} />}
-          {screen === "map" && <LiveMap onOpenTrip={() => openTrip(null)} />}
-          {screen === "trips" && (
-            <Trips
-              selectedId={tripSelId}
-              setSelectedId={setTripSelId}
-              onNewTrip={() => setWizardOpen(true)}
-              period={tripPeriod}
-              setPeriod={setTripPeriod}
-              page={tripPage}
-              setPage={setTripPage}
-            />
+          {app === null || screen === null ? (
+            <Home role={role} onOpenApp={openApp} />
+          ) : (
+            <>
+              {app.id === "today" && <TodayApp screen={screen} shell={shell} />}
+              {app.id === "tripOps" && (
+                <TripOpsApp screen={screen} shell={shell} tripSelId={tripSelId} setTripSelId={setTripSelId} />
+              )}
+              {app.id === "fleet" && <FleetApp screen={screen} shell={shell} />}
+              {app.id === "drivers" && <DriversApp screen={screen} shell={shell} />}
+              {app.id === "communityBooking" && <CommunityBookingApp screen={screen} shell={shell} />}
+              {app.id === "commercial" && <CommercialApp screen={screen} shell={shell} />}
+              {app.id === "admin" && <AdminApp screen={screen} shell={shell} />}
+            </>
           )}
-          {screen === "drivers" && <Drivers driverSel={driverSel} setDriverSel={setDriverSel} />}
-          {screen === "fleet" && <Fleet fleetSelId={fleetSelId} setFleetSelId={setFleetSelId} />}
-          {screen === "routes" && <RoutesSchedules onOpenTrip={openTrip} />}
-          {screen === "stops" && <Stops />}
-          {screen === "manifests" && <Manifests />}
-          {screen === "cargo" && (
-            <Cargo
-              tab={cargoTab}
-              setTab={setCargoTab}
-              selectedId={cargoSelId}
-              setSelectedId={setCargoSelId}
-              onOpenTrip={openTrip}
-            />
-          )}
-          {screen === "bookings" && <Bookings onOpenTrip={openTrip} />}
-          {screen === "clients" && (
-            <Clients clientSel={clientSel} setClientSel={setClientSel} onCreateTrip={() => setWizardOpen(true)} />
-          )}
-          {screen === "riders" && <Riders />}
-          {screen === "billing" && <Billing invoiceSelId={invoiceSelId} setInvoiceSelId={setInvoiceSelId} />}
-          {screen === "reports" && (
-            <Reports
-              tab={reportTab}
-              setTab={setReportTab}
-              clientId={reportClientId}
-              setClientId={setReportClientId}
-              period={reportPeriod}
-              setPeriod={setReportPeriod}
-              terminusStopId={terminusStopId}
-              setTerminusStopId={setTerminusStopId}
-              terminusPeriod={terminusPeriod}
-              setTerminusPeriod={setTerminusPeriod}
-            />
-          )}
-          {screen === "incidents" && <Incidents incidentSel={incidentSel} setIncidentSel={setIncidentSel} />}
-          {screen === "comms" && <Communications />}
-          {screen === "settings" && <Settings />}
         </div>
       </div>
 

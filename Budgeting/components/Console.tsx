@@ -6,6 +6,7 @@ import type { ScreenId } from "@/lib/nav";
 import type { BudgetPeriod } from "@/lib/types";
 import { ApiError } from "@/lib/api/transport";
 import { listBudgetPeriods, toBudgetPeriod, type BudgetPeriodRecord } from "@/lib/api/budgeting";
+import { getMyProfile, type MyProfile } from "@/lib/api/identity";
 import NavRail from "@/components/NavRail";
 import TopBar from "@/components/TopBar";
 import BudgetPeriods from "@/components/screens/BudgetPeriods";
@@ -25,9 +26,15 @@ import Settings from "@/components/screens/Settings";
 // back two periods should not lose that by glancing at Budget Codes.
 //
 // Periods are the app's first real data (GET /api/budgeting/periods) and live here too — fetched
-// once on mount, threaded down as props so every screen agrees on the list. Budget codes are real
-// too but are NOT hoisted: only the Budget Codes screen reads them, so it owns its own fetch.
-// Allocations, actuals and variance remain mock until their Stage 6.1 slices land.
+// once on mount, threaded down as props so every screen agrees on the list. Budget codes and
+// allocation lines are real too but are NOT hoisted: the screens that read them own their own
+// fetches. Actuals and variance remain mock until their Stage 6.1 slice lands.
+//
+// The signed-in user's profile is hoisted for a different reason than periods: two places render
+// it — Settings edits it, the TopBar shows it — and getClaims() cannot carry it. That is
+// deliberate; the name is not in the token (it would be up to fifteen minutes stale, so saving
+// would look broken) and lib/auth's onAuthChange is not the right channel either, since a
+// profile is not auth state and gates nothing. Ordinary props from here, as periods already do.
 
 /** The period to open on: the one containing today, else the latest, else none. */
 function defaultPeriodId(periods: BudgetPeriod[]): string {
@@ -87,6 +94,43 @@ export default function Console() {
     };
   }, [applyLoaded, applyLoadError]);
 
+  // null = still loading. The signed-in user's own account.
+  const [profile, setProfile] = useState<MyProfile | null>(null);
+  const [profileError, setProfileError] = useState<{ message: string; code: string } | null>(null);
+
+  const applyProfileError = useCallback((e: unknown) => {
+    setProfileError(
+      e instanceof ApiError
+        ? { message: e.message, code: e.code }
+        : { message: "Failed to load your profile.", code: "Unknown" },
+    );
+  }, []);
+
+  const applyProfile = useCallback((loaded: MyProfile) => {
+    setProfile(loaded);
+    setProfileError(null);
+  }, []);
+
+  /** Retry handler, mirroring loadPeriods. */
+  const loadProfile = useCallback(() => {
+    getMyProfile().then(applyProfile, applyProfileError);
+  }, [applyProfile, applyProfileError]);
+
+  useEffect(() => {
+    let active = true;
+    getMyProfile().then(
+      (loaded) => {
+        if (active) applyProfile(loaded);
+      },
+      (e) => {
+        if (active) applyProfileError(e);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [applyProfile, applyProfileError]);
+
   /** From the New Period modal: the fresh list already contains the new row — select it. */
   function handlePeriodCreated(records: BudgetPeriodRecord[], id: string) {
     setPeriods(records.map(toBudgetPeriod));
@@ -114,6 +158,7 @@ export default function Console() {
       <TopBar
         onToggleRail={() => setRailCollapsed((v) => !v)}
         onNewAllocation={() => setScreen("allocations")}
+        fullName={profile?.fullName ?? null}
       />
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         <NavRail screen={screen} collapsed={railCollapsed} onSelect={setScreen} />
@@ -135,6 +180,7 @@ export default function Console() {
               periodId={periodId}
               onSelectPeriod={setPeriodId}
               onCreated={handlePeriodCreated}
+              onPeriodsRefreshed={applyLoaded}
             />
           )}
           {screen === "codes" && <BudgetCodes selId={codeSel} onSelect={setCodeSel} />}
@@ -158,7 +204,14 @@ export default function Console() {
             />
           )}
           {screen === "reports" && <Reports periods={periodList} periodId={periodId} />}
-          {screen === "settings" && <Settings />}
+          {screen === "settings" && (
+            <Settings
+              profile={profile}
+              profileError={profileError}
+              onRetryProfile={loadProfile}
+              onProfileSaved={setProfile}
+            />
+          )}
         </div>
       </div>
     </div>

@@ -32,6 +32,16 @@ public interface IVehicleInspectionRepository
     /// <summary>Loads an inspection by id (tenant-filtered) — used to link a generated work order, amend, or remove.</summary>
     Task<VehicleInspection?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Loads the inspection whose defects generated this work order (tenant-filtered, like
+    /// <see cref="GetByIdAsync"/>) — the completion path's source of defects to auto-resolve.
+    /// Null is the normal case, not an error: a work order can be raised directly with no DVIR
+    /// behind it, and then there is simply nothing to resolve.
+    /// </summary>
+    Task<VehicleInspection?> GetByGeneratedWorkOrderIdAsync(
+        Guid workOrderId,
+        CancellationToken cancellationToken = default);
+
     void Add(VehicleInspection inspection);
 
     /// <summary>Hard-deletes an inspection. The aggregate must raise its removal event first.</summary>

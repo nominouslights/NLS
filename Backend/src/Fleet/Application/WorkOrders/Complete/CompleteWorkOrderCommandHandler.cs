@@ -6,9 +6,16 @@ using NorthernLink.Fleet.Domain.WorkOrders;
 
 namespace NorthernLink.Fleet.Application.WorkOrders.Complete;
 
+/// <summary>
+/// Logs the service record that resolved the work order and closes it — and, when the work order
+/// came from a DVIR, clears that DVIR's defects. Completion is the only point that asserts a
+/// mechanic actually touched the truck: creating or starting a work order shows as "repair
+/// underway" on the defects panel but leaves every defect open.
+/// </summary>
 public sealed class CompleteWorkOrderCommandHandler(
     IWorkOrderRepository workOrderRepository,
-    IServiceRecordRepository serviceRepository)
+    IServiceRecordRepository serviceRepository,
+    IVehicleInspectionRepository inspectionRepository)
     : ICommandHandler<CompleteWorkOrderCommand, Guid>
 {
     public async Task<Result<Guid>> Handle(CompleteWorkOrderCommand command, CancellationToken cancellationToken)
@@ -62,7 +69,17 @@ public sealed class CompleteWorkOrderCommandHandler(
             return Result.Failure<Guid>(completeResult.Error);
         }
 
-        // Both aggregates live on the same scoped DbContext — one save commits together.
+        // The repair is now evidence, so the defects it was raised against stop being open. No
+        // source inspection is the normal case for a directly-raised work order, not an error.
+        // Already-resolved defects are skipped inside the aggregate, so this is idempotent.
+        var sourceInspection = await inspectionRepository.GetByGeneratedWorkOrderIdAsync(
+            workOrder.Id, cancellationToken);
+
+        sourceInspection?.ResolveDefectsForWorkOrder(
+            workOrder.Id, command.PerformedBy, DateTimeOffset.UtcNow);
+
+        // All three aggregates live on the same scoped DbContext — one save commits together,
+        // the same pattern CreateWorkOrderCommandHandler uses for LinkWorkOrder.
         await workOrderRepository.SaveChangesAsync(cancellationToken);
         return Result.Success(service.Id);
     }

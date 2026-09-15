@@ -115,6 +115,16 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
             return NorthernLink.Shared.Kernel.Result.Failure<VehicleInspection>(InspectionErrors.DriverRequired);
         }
 
+        if (HasDuplicateItems(defects))
+        {
+            return NorthernLink.Shared.Kernel.Result.Failure<VehicleInspection>(InspectionErrors.DuplicateDefectItem);
+        }
+
+        // A freshly entered defect is never pre-resolved: allowing a resolution stamp in here
+        // would make the create path an unaudited back door around ResolveDefect. Recurrence
+        // pointers survive — re-reporting a cleared fault is a legitimate thing to say on entry.
+        var enteredDefects = defects.Select(StripResolution).ToList();
+
         var enteredByValue = string.IsNullOrWhiteSpace(enteredBy)
             ? source == InspectionSource.Dispatcher ? "Dispatch" : null
             : enteredBy.Trim();
@@ -132,9 +142,9 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
             ManifestId = null,
             PerformedAt = performedAt,
             OdometerKm = odometerKm,
-            Result = DeriveResult(defects),
+            Result = DeriveResult(enteredDefects),
             ChecklistItems = [.. checklistItems],
-            Defects = [.. defects],
+            Defects = enteredDefects,
             Weather = [.. weather],
             TemperatureC = Normalize(temperatureC),
             RoadConditions = [.. roadConditions],
@@ -163,6 +173,15 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
     /// that). Re-runs the same validation as <see cref="Enter"/> and re-derives
     /// <see cref="Result"/> from the corrected <paramref name="defects"/>. Raises
     /// <see cref="VehicleInspectionAmendedDomainEvent"/>.
+    ///
+    /// An amend re-states what the DVIR found; it must never re-state the maintenance history,
+    /// so <paramref name="defects"/> is MERGED against the current list rather than replacing it
+    /// — see <see cref="MergeResolutions"/> for the rule.
+    ///
+    /// Accepted limitation: if an amendment RENAMES an item ("Brakes" → "Brake lines") the match
+    /// fails and the resolution is not carried — the honest reading is that a renamed item is a
+    /// different defect. Unlike a silent wipe this is visible: the row simply comes back on
+    /// screen as open, where a dispatcher can re-resolve it.
     /// </summary>
     public Result Amend(
         InspectionSource source,
@@ -198,6 +217,15 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
             return NorthernLink.Shared.Kernel.Result.Failure(InspectionErrors.DriverRequired);
         }
 
+        // Duplicate guard first: Item is the key the merge below matches on, so two defects
+        // sharing one would silently collapse into a single resolution stamp.
+        if (HasDuplicateItems(defects))
+        {
+            return NorthernLink.Shared.Kernel.Result.Failure(InspectionErrors.DuplicateDefectItem);
+        }
+
+        var merged = MergeResolutions(Defects, defects);
+
         Source = source;
         EnteredBy = string.IsNullOrWhiteSpace(enteredBy)
             ? source == InspectionSource.Dispatcher ? "Dispatch" : null
@@ -207,9 +235,9 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
         DriverName = driverName.Trim();
         PerformedAt = performedAt;
         OdometerKm = odometerKm;
-        Result = DeriveResult(defects);
+        Result = DeriveResult(merged);
         ChecklistItems = [.. checklistItems];
-        Defects = [.. defects];
+        Defects = merged;
         Weather = [.. weather];
         TemperatureC = Normalize(temperatureC);
         RoadConditions = [.. roadConditions];
@@ -254,6 +282,141 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
         Raise(new VehicleInspectionWorkOrderLinkedDomainEvent(Id, workOrderId));
         return NorthernLink.Shared.Kernel.Result.Success();
     }
+
+    /// <summary>
+    /// Clears one open defect, addressed by <paramref name="item"/> (trimmed, case-insensitive —
+    /// the same matching the amend merge uses). There is no defect id to address it by: a defect
+    /// lives inside this aggregate's jsonb, so its key is <c>(InspectionId, Item)</c>.
+    ///
+    /// Resolution is FINAL. A second resolve fails with
+    /// <see cref="InspectionErrors.DefectAlreadyResolved"/> rather than re-stamping, and there is
+    /// deliberately no reopen: a fault that comes back is re-reported as a NEW defect on a later
+    /// inspection, pointing here via <see cref="InspectionDefect.RecurrenceOfInspectionId"/>, so
+    /// the original audit record stays intact.
+    /// </summary>
+    public Result ResolveDefect(
+        string item,
+        DefectResolutionReason reason,
+        string? note,
+        string resolvedBy,
+        DateTimeOffset atUtc)
+    {
+        var key = NormalizeItem(item);
+        var index = Defects.FindIndex(d => NormalizeItem(d.Item).Equals(key, StringComparison.OrdinalIgnoreCase));
+
+        if (index < 0)
+        {
+            return NorthernLink.Shared.Kernel.Result.Failure(InspectionErrors.DefectNotFound);
+        }
+
+        if (Defects[index].IsResolved)
+        {
+            return NorthernLink.Shared.Kernel.Result.Failure(InspectionErrors.DefectAlreadyResolved);
+        }
+
+        var updated = new List<InspectionDefect>(Defects);
+        updated[index] = updated[index] with
+        {
+            ResolutionReason = reason,
+            ResolutionNote = Normalize(note),
+            ResolvedBy = Normalize(resolvedBy),
+            ResolvedAtUtc = atUtc,
+            ResolvedByWorkOrderId = null,
+        };
+
+        Defects = updated;
+
+        Raise(new VehicleInspectionDefectsResolvedDomainEvent(Id, TenantId));
+        return NorthernLink.Shared.Kernel.Result.Success();
+    }
+
+    /// <summary>
+    /// Stamps every still-unresolved defect on this inspection as repaired under
+    /// <paramref name="workOrderId"/>. Called when that work order completes — creating or
+    /// starting one shows as "repair underway" but leaves the defects open, because only
+    /// completion asserts a mechanic actually touched the truck.
+    ///
+    /// Idempotent by construction: already-resolved defects are skipped, and a run that changes
+    /// nothing mutates nothing and raises no event (which matters — the audit pipeline rejects an
+    /// eventless write, so a no-op must also be a no-write).
+    /// </summary>
+    public void ResolveDefectsForWorkOrder(Guid workOrderId, string resolvedBy, DateTimeOffset atUtc)
+    {
+        if (Defects.All(d => d.IsResolved))
+        {
+            return;
+        }
+
+        Defects = [.. Defects.Select(d => d.IsResolved
+            ? d
+            : d with
+            {
+                ResolutionReason = DefectResolutionReason.RepairedUnderWorkOrder,
+                ResolutionNote = null,
+                ResolvedBy = Normalize(resolvedBy),
+                ResolvedAtUtc = atUtc,
+                ResolvedByWorkOrderId = workOrderId,
+            })];
+
+        Raise(new VehicleInspectionDefectsResolvedDomainEvent(Id, TenantId));
+    }
+
+    /// <summary>
+    /// Carries resolution stamps across an amendment. An amend re-states what the DVIR found; it
+    /// must never re-state the maintenance history. Incoming defects come off the wire and carry
+    /// no resolution fields, so a naive replace would silently un-resolve everything on the
+    /// inspection.
+    ///
+    /// Rule: match incoming to existing by Item (trimmed, case-insensitive) and copy the
+    /// resolution stamp onto the survivor. Item / Severity / Note always take the AMENDED values —
+    /// correcting a severity is the whole point of an amend. A defect the amendment drops takes
+    /// its resolution with it (the report of the fault is being retracted, so the record of
+    /// clearing it is meaningless). A defect the amendment adds starts unresolved.
+    ///
+    /// Resolution fields on the incoming records are discarded unconditionally, so no caller can
+    /// ever mark a defect resolved through this path — ResolveDefect and work-order completion
+    /// stay the only two ways in. RecurrenceOfInspectionId is NOT stripped: that one is
+    /// legitimately set from the wire when a dispatcher re-reports.
+    /// </summary>
+    private static List<InspectionDefect> MergeResolutions(
+        IReadOnlyList<InspectionDefect> existing,
+        IReadOnlyList<InspectionDefect> incoming)
+    {
+        var priorByItem = existing
+            .Where(d => d.IsResolved)
+            .GroupBy(d => NormalizeItem(d.Item), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+        return [.. incoming.Select(d => priorByItem.TryGetValue(NormalizeItem(d.Item), out var prior)
+            ? d with
+            {
+                ResolutionReason = prior.ResolutionReason,
+                ResolutionNote = prior.ResolutionNote,
+                ResolvedBy = prior.ResolvedBy,
+                ResolvedAtUtc = prior.ResolvedAtUtc,
+                ResolvedByWorkOrderId = prior.ResolvedByWorkOrderId,
+            }
+            : StripResolution(d))];
+    }
+
+    /// <summary>Nulls the five resolution fields; <c>RecurrenceOfInspectionId</c> is left alone.</summary>
+    private static InspectionDefect StripResolution(InspectionDefect defect) => defect with
+    {
+        ResolutionReason = null,
+        ResolutionNote = null,
+        ResolvedBy = null,
+        ResolvedAtUtc = null,
+        ResolvedByWorkOrderId = null,
+    };
+
+    /// <summary><c>Item</c> is the addressing key, so it must be unique within one inspection.</summary>
+    private static bool HasDuplicateItems(IReadOnlyList<InspectionDefect> defects) =>
+        defects
+            .Select(d => NormalizeItem(d.Item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count() != defects.Count;
+
+    private static string NormalizeItem(string? item) => item?.Trim() ?? string.Empty;
 
     /// <summary>The derivation rule: Pass / PassWithDefects (all Minor) / Fail (any Major or OutOfService).</summary>
     public static InspectionResult DeriveResult(IReadOnlyList<InspectionDefect> defects)

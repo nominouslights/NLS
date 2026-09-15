@@ -74,6 +74,14 @@ public class BudgetingEndpointMetadataTests : IAsyncLifetime
     [Theory]
     [InlineData("GET", "/api/budgeting/periods")]
     [InlineData("POST", "/api/budgeting/periods")]
+    [InlineData("GET", "/api/budgeting/periods/{id:guid}")]
+    [InlineData("POST", "/api/budgeting/periods/{id:guid}/finalize")]
+    [InlineData("POST", "/api/budgeting/periods/{id:guid}/open")]
+    [InlineData("POST", "/api/budgeting/periods/{id:guid}/begin-review")]
+    [InlineData("POST", "/api/budgeting/periods/{id:guid}/close")]
+    [InlineData("GET", "/api/budgeting/periods/{id:guid}/allocations")]
+    [InlineData("PUT", "/api/budgeting/periods/{id:guid}/allocations/{codeId:guid}")]
+    [InlineData("DELETE", "/api/budgeting/periods/{id:guid}/allocations/{codeId:guid}")]
     [InlineData("GET", "/api/budgeting/codes")]
     [InlineData("GET", "/api/budgeting/codes/owners")]
     [InlineData("POST", "/api/budgeting/codes")]
@@ -115,7 +123,7 @@ public class BudgetingEndpointMetadataTests : IAsyncLifetime
     {
         // Guards the guard: without this, an endpoint added to the group would be silently
         // absent from the Theory above (which asserts only the routes it names).
-        Assert.Equal(10, _endpoints.Count);
+        Assert.Equal(18, _endpoints.Count);
     }
 
     private sealed class StubTenantContext : ITenantContext

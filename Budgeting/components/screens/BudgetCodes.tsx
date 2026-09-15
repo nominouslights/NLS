@@ -9,12 +9,14 @@ import { DetailRow, Panel, SectionLabel } from "@/components/ui/Panel";
 import { ApiError } from "@/lib/api/transport";
 import {
   budgetCodeCategoryKind,
+  costCentreApplies,
   deleteBudgetCode,
   listBudgetCodes,
   listBudgetOwnerCandidates,
   seedStarterBudgetCodes,
   setBudgetCodeActive,
   toBudgetCode,
+  userDisplay,
   REVIEW_FREQUENCY_LABELS,
   SERVICE_LINE_LABELS,
   TAX_TREATMENT_LABELS,
@@ -30,9 +32,9 @@ import { EmptyNote, Screen } from "@/components/screens/shared";
 // detailBg, split by a CSS grid with a top border.
 //
 // This screen owns its own fetch rather than taking the list as a prop — unlike periods, which
-// Console hoists because five screens read them. Codes are read here and nowhere else; the four
-// screens that show a code name still read the mock lookup in lib/data.ts until their own Stage
-// 6.1 slices land.
+// Console hoists because five screens read them. The period dashboard and Allocations fetch the
+// chart too (for their pickers and coverage); the three mock screens (Actuals, Variance, Reports)
+// still read the lookup in lib/data.ts until their slice lands.
 //
 // Retiring is a flag flip and is the normal end of a code's life — a retired code stays listed,
 // because last period's allocations and actuals reference it by string and must keep resolving.
@@ -99,8 +101,9 @@ export default function BudgetCodes({
   }, [applyLoaded, applyLoadError]);
 
   const list = codes ?? [];
-  // selId can point at a code that no longer exists — or, when Allocations jumps here, at a mock
-  // id that never will. Falling back to the first row keeps the pane populated either way.
+  // selId can point at a code that has since been deleted — or, when Variance jumps here, at a
+  // mock id that never existed (Allocations jumps with real ids now). Falling back to the first
+  // row keeps the pane populated either way.
   const selected = list.find((c) => c.id === selId) ?? list[0] ?? null;
   const selectedHasChildren = selected !== null && list.some((c) => c.parentCodeId === selected.id);
 
@@ -342,7 +345,9 @@ export default function BudgetCodes({
                         selected.serviceLine ? SERVICE_LINE_LABELS[selected.serviceLine] : "Unassigned"
                       }
                     />
-                    <DetailRow label="Cost centre" value={selected.costCentre ?? "—"} />
+                    {costCentreApplies(selected.category) && (
+                      <DetailRow label="Cost centre" value={selected.costCentre ?? "—"} />
+                    )}
                     <DetailRow
                       label="Parent code"
                       value={
@@ -370,7 +375,14 @@ export default function BudgetCodes({
                 <Panel>
                   <SectionLabel>Governance</SectionLabel>
                   <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-                    <DetailRow label="Budget owner" value={selected.budgetOwnerEmail ?? "Unassigned"} />
+                    <DetailRow
+                      label="Budget owner"
+                      value={userDisplay(
+                        selected.budgetOwnerName,
+                        selected.budgetOwnerEmail,
+                        "Unassigned",
+                      )}
+                    />
                     <DetailRow
                       label="Review frequency"
                       value={REVIEW_FREQUENCY_LABELS[selected.reviewFrequency]}
@@ -384,8 +396,14 @@ export default function BudgetCodes({
                         />
                       }
                     />
-                    <DetailRow label="Created by" value={selected.createdByEmail ?? "—"} />
-                    <DetailRow label="Last modified by" value={selected.modifiedByEmail ?? "—"} />
+                    <DetailRow
+                      label="Created by"
+                      value={userDisplay(selected.createdByName, selected.createdByEmail, "—")}
+                    />
+                    <DetailRow
+                      label="Last modified by"
+                      value={userDisplay(selected.modifiedByName, selected.modifiedByEmail, "—")}
+                    />
                   </div>
                 </Panel>
 
