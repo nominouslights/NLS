@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Shared.Tenancy;
 using NorthernLink.Trips.Application.Riders.GetRiders;
@@ -20,7 +21,11 @@ internal static class RiderEndpoints
 {
     public static void MapRiderEndpoints(this IEndpointRouteBuilder app)
     {
-        var riders = app.MapGroup("/api/trips/riders").RequireAuthorization();
+        // DispatchAccess: the rider directory is every passenger the company carries, name by
+        // name, and seat rotation is a dispatch decision. A driver sees riders through the
+        // manifest for the trip they are on, never the whole directory.
+        var riders = app.MapGroup("/api/trips/riders")
+            .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
         riders.MapGet("", GetRiders);
         riders.MapPut("{id:guid}/rotation", SetRotation);
     }

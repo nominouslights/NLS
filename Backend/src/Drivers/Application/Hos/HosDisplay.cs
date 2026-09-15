@@ -42,4 +42,25 @@ public static class HosDisplay
         HosLogEntrySource.ManualPaperBackup => ManualPaperBackupSource,
         _ => source.ToString(),
     };
+
+    /// <summary>
+    /// Parses the friendly source string sent by the POST body — the exact inverse of
+    /// <see cref="SourceToWire"/>, accepting only the two strings it emits. Keeping the pair
+    /// symmetric makes the Dispatch Console's existing chip strings the contract, so there is one
+    /// vocabulary for HOS sources rather than a display one and a wire one that can drift.
+    /// <para>
+    /// <b>Absent means Manual (paper backup)</b>, preserving the behaviour from when the endpoint
+    /// hardcoded it: the Dispatch Console sends no source field, and defaulting the other way
+    /// would relabel every dispatcher entry as a driver submission and corrupt the HOS record.
+    /// </para>
+    /// <para>An unrecognized string is a validation error, never an exception — an offline Field
+    /// App replaying a queue must get a 400 it can park, not a 500.</para>
+    /// </summary>
+    public static Result<HosLogEntrySource> SourceFromWire(string? value) => value?.Trim() switch
+    {
+        null or "" => Result.Success(HosLogEntrySource.ManualPaperBackup),
+        DriverAppSource => Result.Success(HosLogEntrySource.DriverApp),
+        ManualPaperBackupSource => Result.Success(HosLogEntrySource.ManualPaperBackup),
+        _ => Result.Failure<HosLogEntrySource>(HosErrors.InvalidSource),
+    };
 }

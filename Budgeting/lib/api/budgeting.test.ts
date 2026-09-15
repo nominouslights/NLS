@@ -293,8 +293,20 @@ describe("budgetCodeFormatError", () => {
     expect(budgetCodeFormatError(code)).toBe("Enter a code.");
   });
 
+  it("accepts a code of exactly 32 characters", () => {
+    // The server rejects on `normalizedCode.Length > CodeMaxLength`, so 32 is the last legal
+    // length. Testing only 33 leaves the boundary itself unpinned: a `>=` slipped in here would
+    // refuse a code the API would have accepted, and no test would notice.
+    expect(budgetCodeFormatError("A".repeat(32))).toBeNull();
+  });
+
   it("rejects a code over 32 characters", () => {
     expect(budgetCodeFormatError("A".repeat(33))).toContain("32 characters or fewer");
+  });
+
+  it("measures length after normalization, not before", () => {
+    // NormalizeCode trims first, so surrounding whitespace must not count toward the 32.
+    expect(budgetCodeFormatError(`  ${"A".repeat(32)}  `)).toBeNull();
   });
 
   it.each(["-LEADING", "TRAILING-", "HAS SPACE", "HAS_UNDERSCORE", "HAS/SLASH"])(
@@ -303,6 +315,20 @@ describe("budgetCodeFormatError", () => {
       expect(budgetCodeFormatError(code)).toContain("letters, digits and hyphens");
     },
   );
+
+  it.each([
+    ["an accented letter", "ZBB-CRÊW"],
+    ["a homoglyph in Cyrillic", "ZВВ-CREW"],
+    ["an en dash standing in for a hyphen", "ZBB–CREW"],
+    ["full-width digits", "ZBB-０１"],
+    ["an emoji", "ZBB-CREW-🚌"],
+  ])("rejects %s — the server is ASCII-only", (_label, code) => {
+    // ValidateCode loops with char.IsAsciiLetterOrDigit, so anything outside ASCII is a 400.
+    // Worth pinning because the two sneaky cases above look correct in the input field: the
+    // Cyrillic В and the en dash are pixel-near their ASCII counterparts, and without this the
+    // client would wave them through and let the planner meet a server error instead.
+    expect(budgetCodeFormatError(code)).toContain("letters, digits and hyphens");
+  });
 });
 
 describe("budgetCodeCategoryKind", () => {

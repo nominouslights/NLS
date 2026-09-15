@@ -1,7 +1,7 @@
 # Northern Link Shuttle & Cargo — Platform Workspace
 
 Multi-app platform: one .NET API serving five client apps. This workspace root holds the shared
-backend and (currently) one frontend. Full architecture: see the `northern-link-architecture`
+backend and four frontends. Full architecture: see the `northern-link-architecture`
 skill (`.claude/skills/northern-link-architecture/`) — **consult it before any non-trivial work,
 frontend or backend.**
 
@@ -14,9 +14,13 @@ frontend or backend.**
 | `Website/` | Public marketing site (northernlink shuttle & cargo) — static/prototype, no API calls yet | Next.js 16, React 19 |
 | `Budgeting/` | Zero-Based Budgeting console (Track 6) — real auth + role gate; budget periods, codes and allocations are live against the API, actuals/variance still mock. Deliberately holds **copies** of Dispatcher's design system — see its own `CLAUDE.md` | Next.js 16, React 19 |
 | `CommunityMobile/` | Community Mobile passenger app — design mockup only: 11 screens on hardcoded mock data (`lib/data/mock_data.dart`), no API/auth wiring, not orchestrated by `aspire run`. **SHELVED** by the Community Booking & Dispatch spec (2026-08): the passenger app ships as a Next.js PWA instead (future sibling folder); this mockup stays as the PWA's information-architecture reference. Payments for that flow are **Square + Interac e-Transfer** (Stripe is superseded) | Flutter 3.29, Dart 3.7 |
-| `AppHost/` | Local dev orchestrator — starts Postgres, RabbitMQ, the API, and Dispatcher together. Platform-level, not part of Backend — it depends on Backend and Dispatcher, not the other way around | .NET 10, Aspire |
+| `DriverField/` | Driver Field App — installable **PWA** for a company-issued 10-inch **landscape** tablet. Real auth + Driver role gate; every other screen is mock (`lib/data.ts`), and each carries a `MockTag`. Offline-first is designed as a seam (`lib/sync/`) but **not implemented**. Holds **copies** of Dispatcher's design system — see its own `CLAUDE.md`. Next.js, not Flutter, by the owner's decision (2026-09) | Next.js 16, React 19 |
+| `AppHost/` | Local dev orchestrator — starts RabbitMQ, the API, and the Dispatcher / Budgeting / DriverField dev servers together (no local Postgres; every environment uses the managed DigitalOcean database). Platform-level, not part of Backend — it depends on Backend and the frontends, not the other way around. **Gitignored**, so a fresh clone recreates it by hand | .NET 10, Aspire |
 
-Future app folders (Driver Field App, Client Web App/Alamos, Owner Desktop)
+**`DriverField/` is the Driver Field App. `Backend/src/Drivers/` is the backend domain library.**
+They are different territories with different owners — do not read one as the other.
+
+Future app folders (Client Web App/Alamos, Owner Desktop, and the Community Booking PWA)
 will be added as siblings, and `AppHost/` will grow to orchestrate them too.
 
 File-level index: the `code-map` skill (`.claude/skills/code-map/`) — read the reference file for
@@ -38,6 +42,7 @@ One agent per territory; route by the folder being changed:
 | `Backend/` (API, domain libraries, EF Core, messaging, auth) | `backend-dev` |
 | `Dispatcher/` (Dispatch Console screens, components, design-system **source**) | `frontend-dev` |
 | `Budgeting/` (ZBB console, design-system **re-copies**, Vitest suite) | `budgeting-dev` |
+| `DriverField/` (Driver Field App, tablet components, offline seam, PWA shell) | `driver-dev` |
 | `Website/` (public marketing site) | `website-dev` |
 | `CommunityMobile/` (Flutter passenger app) | `mobile-dev` |
 | `AppHost/`, Dockerfiles, `.do/`, `.github/`, `Directory.*.props` | `platform-ops` |
@@ -49,10 +54,13 @@ Collision protocol for parallel batches:
 - **One agent per territory per batch.** Two agents needing the same folder run sequentially, or
   with `isolation: worktree` if they truly must run at once.
 - **Design-system flow is one-directional:** frontend-dev changes the Dispatcher source, then
-  budgeting-dev re-copies. Never both editing copies; never editing a Budgeting copy in place.
+  budgeting-dev **and** driver-dev re-copy. **Two apps hold copies now, so a Dispatcher
+  design-system change is a two-app re-copy** — schedule both, or one silently drifts. Never
+  editing copies in parallel with the source; never editing a copy in place.
 - **The API-contract seam:** the backend owns endpoint shapes (future OpenAPI spec). Frontends
   never invent them — screens without a real endpoint stay on their mock layer
-  (`Dispatcher/lib/data.ts`, `Budgeting/lib/data.ts`, `CommunityMobile/lib/data/mock_data.dart`).
+  (`Dispatcher/lib/data.ts`, `Budgeting/lib/data.ts`, `DriverField/lib/data.ts`,
+  `CommunityMobile/lib/data/mock_data.dart`).
 - **After any multi-agent batch, run the cross-check workflow**
   (`Workflow({name: "cross-check"})`, script at `.claude/workflows/cross-check.js`) — it audits
   the combined diff for territory violations, design-system drift, invented endpoints, and
@@ -83,15 +91,21 @@ Collision protocol for parallel batches:
   Identity, because a domain library may reference `NorthernLink.Shared` and nothing else.
   `User.Create` validates against them, and matching is case-sensitive everywhere (`RequireRole`
   compares ordinally, so `"owner"` must fail at creation rather than 403 every later request)
-- `Budgeting/` holds **identical copies** of Dispatcher's design system (`lib/theme.ts`,
-  `app/globals.css`, `components/ui/*`, `NavRail.tsx`, `HeaderClock.tsx`). Change Dispatcher
-  first, then re-copy — never edit the copy in place. Drift here is a visible product bug, not a
-  style nit; `Budgeting/CLAUDE.md` carries the one-command check
+- `Budgeting/` **and `DriverField/`** hold **identical copies** of Dispatcher's design system
+  (`lib/theme.ts`, `app/globals.css`, `components/ui/*`, `HeaderClock.tsx`, and `NavRail.tsx` in
+  Budgeting only — `DriverField/` deliberately omits it and ships its own `DutyRail.tsx`, because
+  NavRail's geometry is hardcoded and a tablet needs bigger). Change Dispatcher first, then
+  re-copy **into both** — never edit a copy in place. Drift here is a visible product bug, not a
+  style nit; each app's `CLAUDE.md` carries its own one-command check
+- **`DriverField/` splits the design system in two:** `lib/theme.ts` (a copy) owns colour and
+  type family; `lib/tablet.ts` (app-local, never copied) owns size and spacing. That split is
+  what lets the copies stay byte-identical while the app renders at twice the physical size.
+  Never enlarge a copied component, and never wrap one in `transform: scale()`
 
 ## Commands
 
 ### One-command local dev (from the workspace root)
-- `aspire run` — starts RabbitMQ, the API, and the Dispatcher dev server together via the Aspire
+- `aspire run` — starts RabbitMQ, the API, and the frontend dev servers together via the Aspire
   AppHost, with a dashboard URL printed to the console. Run from **anywhere in the repo, including
   this root** — the Aspire CLI auto-discovers the single AppHost project
   (`AppHost/NorthernLink.AppHost/`) and caches the result in `aspire.config.json` at this root.
@@ -107,6 +121,21 @@ Collision protocol for parallel batches:
   out, check DigitalOcean's Trusted Sources firewall for the DB cluster before assuming a code
   problem. The browser only ever talks to the Dispatcher's own origin (`:3001`) — Next.js proxies
   `/api/*` server-side to the API, so there's no CORS configuration anywhere in the stack.
+
+### One-command test run (from the workspace root)
+- `node run-tests.mjs` — runs every suite in the workspace: `dotnet test` in `Backend/`, then
+  `npm test` in each frontend that declares one. Suites are **discovered**, not listed: a frontend
+  with no `test` script (`Website/` today) is skipped, but one that declares a suite and cannot run
+  it (no `node_modules`) is reported `BLOCKED` and fails the run — a suite that never ran must
+  never count as green. One summary line per suite, exit non-zero if any did not pass; failures
+  print their output tail, `--verbose` streams everything live, `--list` shows what would run.
+  ~25s warm on this machine.
+- `git config core.hooksPath .githooks` — **run once per clone**, opt-in and not automatic: it
+  points git at the versioned `.githooks/pre-push`, which runs the above before every push.
+  `.git/hooks/` is not versioned, so a fresh clone silently has no hook until this is set. CI has
+  no test gate by design (see Containers & Deployment), so this hook is the gate. `--no-verify`
+  bypasses it — the honest use is a backend failure caused by a stale DigitalOcean Trusted Sources
+  entry rather than by the code.
 
 ### Backend (`Backend/`)
 - `dotnet build` — build the whole solution (warnings are errors)
@@ -169,17 +198,41 @@ Collision protocol for parallel batches:
 ### Website (`Website/`)
 - `npm run dev` — dev server on port **3002** (pinned in the script). No API proxy — the site is
   a prototype with static forms; a `/api/*` rewrite gets added only once real public endpoints
-  exist. Also started by `aspire run` alongside the Dispatcher.
+  exist. **Not currently started by `aspire run`** — the local `AppHost.cs` registers dispatcher,
+  budgeting and driverfield only. Run it by hand.
 
 ### Budgeting (`Budgeting/`)
 - `npm run dev` — dev server on port **3003** (pinned in the script). Proxies `/api/*` to
   `http://localhost:5215` exactly as Dispatcher does, so it works against a manually-started API
   with no other setup. Also started by `aspire run`.
-- `npm test` — Vitest (this app only; Dispatcher has no test setup). Covers the Owner/Accountant
-  role gate, including the explicit "a Dispatcher account is rejected" case.
+- `npm test` — Vitest. Covers the Owner/Accountant role gate, including the explicit "a
+  Dispatcher account is rejected" case, the token → claims → gate seam end to end, and the live
+  `/api/budgeting` request layer (fetch-mocked, including transport's refresh-and-retry-once).
+  Dispatcher has its own Vitest suite too — `node run-tests.mjs` at the root runs both.
 - Scoped to **Owner and Accountant**. The client-side gate is a UX gate — the security boundary
-  is the `BudgetAccess` policy, registered in the gateway and attached to budgeting endpoints
-  when Stage 6.1 creates them. Read `Budgeting/CLAUDE.md` before working in here.
+  is the `BudgetAccess` policy, registered in the gateway and attached to the `/api/budgeting`
+  group (`BudgetingEndpoints.cs`); `BudgetingEndpointMetadataTests` pins that attachment. Read `Budgeting/CLAUDE.md` before working in here.
+
+### DriverField (`DriverField/`)
+- `npm run dev` — dev server on port **3004** (pinned in the script). Proxies `/api/*` to
+  `http://localhost:5215` exactly as Dispatcher and Budgeting do. Also started by `aspire run`.
+- **Laid out for a fixed 1280×800 landscape tablet** — check it in the device toolbar at that
+  size, not a desktop window. There are no breakpoints and no `@media` query anywhere in the app
+  (architecture non-negotiable #5: company-issued, landscape-only, 10-inch, never BYOD), and a
+  portrait viewport gets a full-screen "rotate the tablet" panel rather than a phone layout.
+- `npm test` — Vitest. The four auth tests ported from Budgeting (with "an **Accountant** account
+  is rejected" as the acceptance criterion), plus the §5.4 eligibility engine, the CVDHS
+  hours-of-service bands tested on both sides of every boundary, and the `HosDisplay` wire-string
+  pins.
+- **Auth and the Driver role gate are the only live things.** Every other value comes from
+  `lib/data.ts` and every screen carries a `MockTag`. The app calls no domain endpoint.
+- **Offline-first is staged, not dropped.** `lib/sync/` ships real types with no-op bodies; every
+  screen mutation already goes through `queue.enqueue()`, which is what keeps the offline batch
+  additive. The sync pill says "Sync off" and must never be made to show a green check before the
+  sync actually exists.
+- A service worker registers **only in production builds**. If dev looks impossibly stale, check
+  for a registered worker before debugging the code. Read `DriverField/CLAUDE.md` before working
+  in here.
 
 ### CommunityMobile (`CommunityMobile/`)
 - `flutter run -d chrome` (or an iOS/Android simulator) — the only app not started by `aspire run`
@@ -196,7 +249,7 @@ Collision protocol for parallel batches:
 
 ## Containers & Deployment
 
-Four deployable images — the API and the three Next.js frontends. `CommunityMobile/` is not a
+Five deployable images — the API and the four Next.js frontends. `CommunityMobile/` is not a
 server workload, and `AppHost/` stays a local-dev orchestrator: neither is containerized, and
 `AppHost.cs` being gitignored means CI could not build it anyway.
 
@@ -204,15 +257,19 @@ server workload, and `AppHost/` stays a local-dev orchestrator: neither is conta
   not `Backend/`: MSBuild walks up to find `Directory.Build.props`/`Directory.Packages.props`,
   which live here. The Dockerfile publishes the API csproj alone (Shared + the ten domain
   libraries, no test projects) and never the solution or the root.
-- `docker build -t northernlink-dispatcher Dispatcher/` (likewise `Website/`, `Budgeting/`) —
-  each app's own directory is its context; there is no npm workspace and each has its own
-  lockfile.
+- `docker build -t northernlink-dispatcher Dispatcher/` (likewise `Website/`, `Budgeting/`,
+  `DriverField/`) — each app's own directory is its context; there is no npm workspace and each
+  has its own lockfile. `DriverField/`'s Dockerfile is the one that differs: it does **not**
+  `mkdir -p public`, and its `COPY … /app/public ./public` is load-bearing rather than a no-op,
+  because that app really has a `public/` (service worker + PWA icons) and `output: "standalone"`
+  does not copy it. Do not "align" it with the others.
 - `.github/workflows/build.yml` does exactly one thing, by the owner's decision: builds and
-  pushes all four images to `ghcr.io/<owner>/northernlink-*`. No test gate, no deploy step — CI
+  pushes all five images to `ghcr.io/<owner>/northernlink-*`. No test gate, no deploy step — CI
   ends at the package registry, and the owner deploys from those images outside CI (a Kubernetes
   setup was tried and torn down for cost in Aug 2026; the replacement is **DigitalOcean App
-  Platform**, spec at `.do/app.yaml` — written but not yet deployed). Run `dotnet test` and
-  Budgeting's `npm test` locally before pushing.
+  Platform**, spec at `.do/app.yaml` — written but not yet deployed). Because nothing in CI runs
+  tests, `node run-tests.mjs` before pushing is the whole safety net — enable it as a pre-push
+  hook with `git config core.hooksPath .githooks` (see Commands).
 - `.do/app.yaml` is the App Platform spec: `doctl apps create --spec .do/app.yaml`, then
   `doctl apps update <app-id> --spec .do/app.yaml`. All four containers are components of **one**
   app because App Platform's private network is per-app — a component's name is its hostname on
@@ -233,7 +290,7 @@ Four things that will bite whoever deploys these images, on any host:
   "Not configured" — until the same path-prefix flip that mounts Budgeting at `/budget`.
 - **The API must never be exposed publicly.** There is no CORS configuration anywhere in the
   stack by design — browsers reach the API only through a frontend's own origin via the
-  server-side `/api/*` proxy. Whatever the host, only the three frontends get public ingress;
+  server-side `/api/*` proxy. Whatever the host, only the frontends get public ingress;
   the API stays on the private network.
 - **Run exactly ONE API instance.** Each instance hosts eight `OutboxDispatcher` background
   services plus `TripGenerationWorker`, and `OutboxDispatcher` still has no

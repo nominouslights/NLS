@@ -88,9 +88,36 @@ public class UserRoleTests
     [Fact]
     public void BudgetAccess_is_a_subset_of_the_internal_roles()
     {
-        // A typo here would produce a policy that no user can ever satisfy — and since no
-        // endpoint carries BudgetAccess yet, nothing else would notice until Stage 6.1.
+        // A typo here would produce a policy that no user can ever satisfy: the whole
+        // /api/budgeting group carries BudgetAccess, so every budgeting request would 403 for
+        // everyone, with nothing pointing at the role list as the cause.
         Assert.All(Roles.BudgetAccess, role => Assert.Contains(role, Roles.Internal));
         Assert.Equal([Roles.Owner, Roles.Accountant], Roles.BudgetAccess);
+    }
+
+    [Fact]
+    public void DispatchAccess_is_a_subset_of_the_internal_roles()
+    {
+        // The counterpart to BudgetAccess above, and the wider blast radius of the two: this
+        // list gates all of /api/notifications (passenger emails, template authoring) and all
+        // of /api/booking. A role literal here that is not in Roles.Internal is a role no user
+        // can ever hold, so the policy would deny everyone, everywhere, silently.
+        Assert.All(Roles.DispatchAccess, role => Assert.Contains(role, Roles.Internal));
+        Assert.Equal([Roles.Owner, Roles.Dispatcher, Roles.Supervisor], Roles.DispatchAccess);
+    }
+
+    [Fact]
+    public void The_capability_role_sets_are_disjoint_where_they_are_meant_to_be()
+    {
+        // Accountant has budget access and no dispatch access; Dispatcher and Supervisor the
+        // reverse. Owner is the only role in both, and that overlap is the deliberate one —
+        // pinning it means widening either set trips a test rather than passing unnoticed.
+        var both = Roles.BudgetAccess.Intersect(Roles.DispatchAccess, StringComparer.Ordinal).ToList();
+
+        Assert.Equal([Roles.Owner], both);
+        Assert.DoesNotContain(Roles.Driver, Roles.BudgetAccess);
+        Assert.DoesNotContain(Roles.Driver, Roles.DispatchAccess);
+        Assert.DoesNotContain(Roles.LegacyAdmin, Roles.BudgetAccess);
+        Assert.DoesNotContain(Roles.LegacyAdmin, Roles.DispatchAccess);
     }
 }

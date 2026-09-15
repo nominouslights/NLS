@@ -17,11 +17,18 @@ lifecycle and the period dashboard; actuals and variance are still mock — see
 
 `Budgeting/` deliberately holds **identical copies** of Dispatcher's design system. This was a
 decision, not an accident: extracting a shared package was the alternative and it was rejected
-for now (only two apps share this chrome, and there is no npm workspace at the repo root).
+for now (there is no npm workspace at the repo root and each app has its own lockfile).
 
 **The rule: change Dispatcher first, then re-copy. Never edit a copied file in place.** Drift
 here is a visible product bug — two consoles that no longer look like one platform — not a style
 nit.
+
+**`DriverField/` now holds copies too (2026-09), so a Dispatcher design-system change is a
+TWO-app re-copy.** Doing only this one leaves the Driver Field App silently behind. Its manifest
+is 22 files rather than 23 — it omits `NavRail.tsx`, whose geometry is hardcoded and unusable at
+tablet size — and it has its own drift check in `DriverField/CLAUDE.md`. Run both. The argument
+for extracting a shared package gets stronger with each app that copies; revisit it at the next
+one.
 
 Every copied file opens with a fixed 2-line header naming its source. The header is why the
 files are not byte-identical, so the check skips it:
@@ -111,23 +118,35 @@ step; both have tests that fail if they diverge.
 ## Testing
 
 Vitest, added here as a **pilot for this app only** — it does not obligate Dispatcher to adopt
-it. Seven files, and only two need a DOM:
+it. Config is `vitest.config.mts` — the `.mts` extension is load-bearing (Vite loads a plain
+`.ts` config as CommonJS and warns), and it must therefore use `import.meta.dirname` for the
+`@` alias, never `__dirname`. `@types/node` declares `__dirname` globally, so TypeScript and
+`next build` both stay green while every `@/lib/...` import in the suite fails to resolve at
+run time. Ten files, and only two need a DOM:
 
 - `lib/roles.test.ts` — US-6.0.1's acceptance criterion: a Dispatcher account is rejected.
 - `lib/claims.test.ts` — JWT decoding, including the non-ASCII round trip (`atob` yields a binary
-  string, so a naive decoder mangles accented emails) and malformed-token handling.
-- `components/RoleGate.test.tsx` — the gate applies the rule and offers a way out.
-- `lib/api/identity.test.ts` — `normalizeProfileField` against `User.Normalize`,
-  `PROFILE_FIELD_MAX_LENGTH` against `User.ProfileFieldMaxLength`, and the
-  `profileDisplayName` name-then-email fallback.
+  string, so a naive decoder mangles accented emails) and malformed-token handling. Plus the
+  claim **names**, mirrored from `JwtAccessTokenIssuer`'s `RoleClaimType` / `TenantIdClaimType` /
+  `TenantTypeClaimType` — without those the file only proves the decoder agrees with payloads it
+  wrote itself, and a backend rename would leave it green while every user hit access-denied.
+- `lib/accessSeam.test.ts` — the token → claims → role → gate chain end to end, unmocked. Each
+  link is covered on its own by the three files around it; this covers the seams between them,
+  including the `""` role a decodable-but-roleless token produces.
+- `components/RoleGate.test.tsx` — the gate applies the rule and offers a way out. Every denial
+  case asserts the denial screen **renders**, not just that the children are absent: absence
+  alone would also pass for a gate that showed nobody anything.
 - `components/ProfileForm.test.tsx` — the profile form seeds from its props, refuses to save
   when nothing changed (including when the only change is whitespace, matching the server's
   no-op rule), sends `null` for a cleared field, and shows a refused save's message verbatim.
-  It takes `onSave` as a prop, so it injects a `vi.fn()` rather than stubbing the transport —
-  no client test in this app mocks `request()`.
+  It takes `onSave` as a prop, so it injects a `vi.fn()` rather than stubbing the transport.
+- `lib/api/identity.test.ts` — `normalizeProfileField` against `User.Normalize`,
+  `PROFILE_FIELD_MAX_LENGTH` against `User.ProfileFieldMaxLength`, and the
+  `profileDisplayName` name-then-email fallback.
 - `lib/api/budgeting.test.ts` — the client-side mirrors of server rules stay pinned to the
   server: `previewPeriod` against `BudgetPeriod.Create`, `normalizeBudgetCode` /
-  `budgetCodeFormatError` against `BudgetCode.NormalizeCode` / `ValidateCode`,
+  `budgetCodeFormatError` against `BudgetCode.NormalizeCode` / `ValidateCode` (both sides of the
+  32-character boundary, and the ASCII-only rule `char.IsAsciiLetterOrDigit` enforces),
   `parentCandidates` against `BudgetCodeParentRule`, `PERIOD_STATE_ORDER` /
   `nextTransition` / `stateAfter` against `BudgetPeriod.Transition`, `canEditAllocations`
   against `BudgetPeriod.AllowsPlanChanges`, `allocationCandidates` against the `CodeRetired`
@@ -136,8 +155,23 @@ it. Seven files, and only two need a DOM:
   mappings (`periodKind` over all five states, `netKind`), the label maps, `toBudgetCode`'s
   `isActive` → `active` rename, `toBudgetPeriod`'s two totals, `coverage` and
   `planningProgress` (the dashboard's checklist and stepper derive from one tested function).
+- `lib/api/transport.test.ts` — the 401 refresh-and-retry path, with `fetch` and `lib/auth`
+  mocked. `request<T>`'s doc comment promises it "never loops"; these assert the exact attempt
+  count (two fetches, one refresh) so the promise is enforced rather than stated. Plus `ApiError`
+  construction — the parsed `{ code, message }` body, the `Http.<status>` fallback, and the
+  `Network.Unreachable`/status-0 branch that `Console.tsx` and `screens/BudgetCodes.tsx` both
+  branch on via `e instanceof ApiError`.
+- `lib/api/budgeting.requests.test.ts` — what each of the nine request functions puts on the
+  wire. Chiefly `setBudgetCodeActive`, whose route is built from a boolean (`activate` /
+  `deactivate`): an inverted ternary there returns 204 either way and silently activates a code
+  the planner asked to retire. Also pins that `deleteBudgetCode`'s 409 message reaches the caller
+  verbatim, since the server's wording is what names retirement as the alternative.
 - `lib/money.test.ts` — `formatDeltaCad` / `formatDeltaPct` always write the sign out, so a
   signed figure never rests on colour.
+
+`lib/api/transport.ts` is a **copied** file. Tests against it belong here (a test file is not on
+the copy manifest), but anything they reveal is a change to *Dispatcher's* source first, then a
+re-copy — never an edit in place.
 
   The single highest-value assertion in the app is in here: that `SERVICE_LINE_LABELS`' first six
   keys are spelled exactly as `TripServiceType`'s members. That spelling is the join key for

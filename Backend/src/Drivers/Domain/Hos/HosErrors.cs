@@ -16,4 +16,8 @@ public static class HosErrors
 
     public static readonly Error InvalidDuty = Error.Validation(
         "Drivers.Hos.InvalidDuty", "A valid duty status (Off Duty, On Duty, Driving) is required.");
+
+    public static readonly Error InvalidSource = Error.Validation(
+        "Drivers.Hos.InvalidSource",
+        "A valid source (Driver App, Manual (paper backup)) is required; omit it for a manual entry.");
 }
