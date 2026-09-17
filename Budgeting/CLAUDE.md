@@ -133,9 +133,10 @@ it. Seven files, and only two need a DOM:
   against `BudgetPeriod.AllowsPlanChanges`, `allocationCandidates` against the `CodeRetired`
   check plus the unique (period, code) index, and `allocationAmountError` /
   `allocationJustificationError` against `BudgetAllocation.Validate`. Plus the →StatusKind
-  mappings (`periodKind` over all five states, `netKind`), the label maps, `toBudgetCode`'s
-  `isActive` → `active` rename, `toBudgetPeriod`'s two totals, `coverage` and
-  `planningProgress` (the dashboard's checklist and stepper derive from one tested function).
+  mappings (`periodKind` over all five states, `ZBB_BALANCE_KINDS`), the label maps,
+  `toBudgetCode`'s `isActive` → `active` rename, `toBudgetPeriod`'s two totals, `coverage`,
+  `zbbBalance` / `zbbBalanceDisplay` / `hasPlannedAmounts` (all three arms plus the empty plan)
+  and `planningProgress` (the dashboard's checklist and stepper derive from one tested function).
 - `lib/money.test.ts` — `formatDeltaCad` / `formatDeltaPct` always write the sign out, so a
   signed figure never rests on colour.
 
@@ -166,8 +167,10 @@ server's sums of the period's allocation lines by code category; `toBudgetPeriod
 signs the plan off, opening re-allows in-period adjustments, review and close freeze it
 (`BudgetPeriod.AllowsPlanChanges`; mirrored by `canEditAllocations`). Each state has exactly one
 way forward (`nextTransition`) and the dashboard offers exactly that one button, behind a
-two-click confirm. Transitions are **not** gated on plan completeness — finalizing an empty plan
-is allowed; the dashboard's checklist makes an empty plan visible instead.
+two-click confirm. Transitions are **not** gated on plan completeness — finalizing an empty or
+unbalanced plan is allowed; the dashboard's checklist, its balance banner and one extra sentence
+in the finalize confirmation make that a choice rather than an accident. **Warn, never block** —
+see [the ZBB balance rule](#the-zbb-balance-rule-every-planned-dollar-has-a-job).
 
 **Allocations are real** — one line per (period, code), **upserted by code**, with a
 **required justification** (zero-based: every line is argued from nothing, each period). The
@@ -196,11 +199,81 @@ state (`stateAfter`); after a line changes it refetches the lines until the new 
 visible (on edit the row was always there), and only then refreshes the period list, whose totals
 read from the same projection.
 
-`screens/BudgetPeriods.tsx` is the master/detail host; `screens/periods/*` is the dashboard
-(list, lifecycle stepper, planning checklist, one `AllocationSection` per category);
-`BudgetAllocationFormModal.tsx` is shared with `screens/Allocations.tsx`, which shows the same
-lines flat and sums its tiles from the lines on screen (it has no way to refresh Console's
-period list after a save). The dashboard shows the server's own totals.
+### A period is a full view, not a pane
+
+`screens/BudgetPeriods.tsx` is one screen with two modes, chosen by `openPeriodId`:
+
+- **list mode** — `screens/periods/PeriodList.tsx` at full width, one row per period carrying the
+  label, the dates, the state chip, both planned totals and the ZBB balance. The row is the way
+  in; clicking it opens the period.
+- **period mode** — the whole content area is `screens/periods/PeriodDashboard.tsx`, with
+  `← ALL PERIODS` in the header's right slot. `key={id}` still remounts it per period, so every
+  confirm, modal and fetch resets when a different period is opened.
+
+This replaced a `38% / 1fr` master/detail grid. A period is not a preview beside a list — it is
+where all the planning happens, and at 38% the list was charging the dashboard for width it
+needed. It is a take-over **inside the console**, not a browser window: neither console has URL
+routing, so a literal new tab would mean introducing routing here *and* in Dispatcher's shell.
+The dashboard's old right-pane treatment (tinted `detailBg`, left-only padding) became a bordered
+surface with balanced padding; the tokens are the same, the geometry is not.
+
+`openPeriodId` is hoisted into `Console.tsx` beside `periodId` for the reason Console's header
+comment already gives about selection state: stepping over to Budget Codes and back must not
+throw you out of the period you were working in. The two are distinct — `periodId` is what the
+other screens read and going back to the list never clears it.
+
+**There is no standalone Allocations screen.** It showed the same real lines flat, with its own
+period picker and its own client-summed tiles, and it could not refresh Console's period list
+after a save — two places doing one thing, which is the drift risk it was always going to
+become. Deleted, along with `ScreenId`'s `"allocations"`, its `NAV_GROUPS` entry (PLANNING is now
+two items) and TopBar's `+ NEW ALLOCATION` pill: allocations stopped being a place you navigate
+to, so a global shortcut had no destination. A line is added inside a period, where its category
+and the balance it moves are both already on screen. `BudgetAllocationFormModal.tsx` stays and is
+now the period view's alone.
+
+`screens/periods/*` is the rest of the dashboard (lifecycle stepper, ZBB balance banner, planning
+checklist, one `AllocationSection` per category). The dashboard shows the server's own totals.
+
+### The ZBB balance rule: every planned dollar has a job
+
+There is no top-down budget amount anywhere in this app, and there never was —
+`BudgetPeriodFormModal` asks only for granularity, year and ordinal. **The pool is the period's
+planned revenue lines**, so the plan balances when `plannedExpense === plannedRevenue`. Both
+totals are the server's sums; `zbbBalance(period)` in `lib/api/budgeting.ts` only judges them,
+returning `{ amount, state }` over `"balanced" | "unallocated" | "over"`.
+
+The arm that matters is **`unallocated`**. Its predecessor (`netCad` / `netKind` / `netLabel`)
+read a surplus as good news — `"ontime"`, the healthy kind. Under zero-based a surplus is revenue
+with no job, which is the exact failure the rule exists to catch, so it carries `"soon"` instead;
+`over` keeps `"over"` and `balanced` gets `"ontime"` (`ZBB_BALANCE_KINDS`). If you ever find
+yourself reinstating a "surplus is good" reading, that is the rule being undone.
+
+Two things the banner has to get right:
+
+- **Colour is never alone**, as everywhere else: the chip's glyph, the headline in words
+  (`Balanced` / `Unallocated $X` / `Over budget by $X`) and the signed total through
+  `formatDeltaCad` are three channels before the colour is the fourth.
+- **An empty plan is not a balanced one.** Zero equals zero is arithmetically balanced and the
+  wrong thing to tell a planner staring at nothing, so `zbbBalanceDisplay` takes a `hasLines` flag
+  and reads **"Nothing planned yet"** on the neutral kind. The dashboard answers it from the lines
+  it fetched; the period list, which has only the totals, answers from `hasPlannedAmounts`.
+
+`planningProgress` carries it as a third checklist row, "Every dollar assigned", done only when
+the state is `balanced` *and* there is at least one line. It is its own `BalanceStep` kind in the
+`ChecklistStep` union rather than a bent `LineStep`, because it is about the relationship between
+both totals rather than one category's lines. `PlanningChecklist.tsx` renders whatever
+`planningProgress` returns and re-derives nothing — each step's whole supporting sentence is
+written in `planningProgress`, so a fourth row is a change to one function, not to two files that
+must agree.
+
+**Finalize stays allowed when the plan does not balance.** That is deliberate and matches the
+existing choice that transitions are not gated on plan completeness: the console makes an
+unbalanced plan loud (banner, checklist row, and a sentence appended to the finalize confirmation
+naming the figure), and then lets the Owner sign it off. No client-side gate, and no backend rule
+— Part A of the ZBB restructure plan touches no backend code at all. Reversing this to "refuse"
+later would be a backend change (a new `BudgetPeriodErrors.PlanNotBalanced` in the finalize
+handler, which can see the allocation totals the aggregate cannot), and nothing written here
+would have to be undone first.
 
 **Budget codes are real too** — the second slice, widened to US-6.1.1's full property set:
 
@@ -263,7 +336,7 @@ No screen invents an API shape. Each remaining array is replaced by additions to
 Variance thresholds (`varianceKind`) live in `lib/data.ts`, not in the Variance screen, so any
 future report agrees with the screen by construction. The signed formatters
 (`formatDeltaCad` / `formatDeltaPct`) live in `lib/money.ts`, **not** in `lib/data.ts`, so a
-screen on real data (the dashboard's Net tile) never imports the mock module.
+screen on real data (the dashboard's ZBB balance banner) never imports the mock module.
 
 ## Accessibility
 

@@ -11,7 +11,6 @@ import NavRail from "@/components/NavRail";
 import TopBar from "@/components/TopBar";
 import BudgetPeriods from "@/components/screens/BudgetPeriods";
 import BudgetCodes from "@/components/screens/BudgetCodes";
-import Allocations from "@/components/screens/Allocations";
 import ActualsVsBudget from "@/components/screens/ActualsVsBudget";
 import Variance from "@/components/screens/Variance";
 import Reports from "@/components/screens/Reports";
@@ -23,7 +22,10 @@ import Settings from "@/components/screens/Settings";
 //
 // Selection and period state is hoisted here rather than kept inside the screens, following the
 // same reasoning as Dispatcher: switching screens unmounts them, and someone who has stepped
-// back two periods should not lose that by glancing at Budget Codes.
+// back two periods should not lose that by glancing at Budget Codes. openPeriodId is hoisted for
+// exactly that reason too — the Budget Periods screen is a full-view take-over rather than a
+// side-by-side pane, so "which period am I inside" is a place, and coming back from Budget Codes
+// to find yourself thrown out to the list would be the same lost work in a louder form.
 //
 // Periods are the app's first real data (GET /api/budgeting/periods) and live here too — fetched
 // once on mount, threaded down as props so every screen agrees on the list. Budget codes and
@@ -56,6 +58,12 @@ export default function Console() {
   const [periods, setPeriods] = useState<BudgetPeriod[] | null>(null);
   const [periodsError, setPeriodsError] = useState<{ message: string; code: string } | null>(null);
   const [periodId, setPeriodId] = useState<string>("");
+  /**
+   * The period the Budget Periods screen is *inside*, or null for the list. Distinct from
+   * periodId, which stays what the other screens read and is never cleared by stepping back to
+   * the list — leaving a period should not change which one Variance or Reports is showing.
+   */
+  const [openPeriodId, setOpenPeriodId] = useState<string | null>(null);
   const [codeSel, setCodeSel] = useState<string | null>(null);
 
   const applyLoaded = useCallback((records: BudgetPeriodRecord[]) => {
@@ -63,6 +71,9 @@ export default function Console() {
     setPeriods(rows);
     setPeriodsError(null);
     setPeriodId((prev) => (prev && rows.some((p) => p.id === prev) ? prev : defaultPeriodId(rows)));
+    // An open period that is no longer in the list cannot be shown; fall back to the list rather
+    // than to a blank pane.
+    setOpenPeriodId((prev) => (prev && rows.some((p) => p.id === prev) ? prev : null));
   }, []);
 
   const applyLoadError = useCallback((e: unknown) => {
@@ -131,10 +142,20 @@ export default function Console() {
     };
   }, [applyProfile, applyProfileError]);
 
-  /** From the New Period modal: the fresh list already contains the new row — select it. */
+  /**
+   * From the New Period modal: the fresh list already contains the new row — open it. Creating a
+   * period lands straight on its own view, which is where the planning actually happens.
+   */
   function handlePeriodCreated(records: BudgetPeriodRecord[], id: string) {
     setPeriods(records.map(toBudgetPeriod));
     setPeriodId(id);
+    setOpenPeriodId(id);
+  }
+
+  /** Opening a period is also what makes it the period every other screen is showing. */
+  function openPeriod(id: string) {
+    setPeriodId(id);
+    setOpenPeriodId(id);
   }
 
   function openCode(id: string | null) {
@@ -155,11 +176,7 @@ export default function Console() {
         overflow: "hidden",
       }}
     >
-      <TopBar
-        onToggleRail={() => setRailCollapsed((v) => !v)}
-        onNewAllocation={() => setScreen("allocations")}
-        fullName={profile?.fullName ?? null}
-      />
+      <TopBar onToggleRail={() => setRailCollapsed((v) => !v)} fullName={profile?.fullName ?? null} />
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         <NavRail screen={screen} collapsed={railCollapsed} onSelect={setScreen} />
         <div
@@ -177,21 +194,14 @@ export default function Console() {
               periods={periods}
               error={periodsError}
               onRetry={loadPeriods}
-              periodId={periodId}
-              onSelectPeriod={setPeriodId}
+              openPeriodId={openPeriodId}
+              onOpenPeriod={openPeriod}
+              onClosePeriod={() => setOpenPeriodId(null)}
               onCreated={handlePeriodCreated}
               onPeriodsRefreshed={applyLoaded}
             />
           )}
           {screen === "codes" && <BudgetCodes selId={codeSel} onSelect={setCodeSel} />}
-          {screen === "allocations" && (
-            <Allocations
-              periods={periodList}
-              periodId={periodId}
-              onSelectPeriod={setPeriodId}
-              onOpenCode={openCode}
-            />
-          )}
           {screen === "actuals" && (
             <ActualsVsBudget periods={periodList} periodId={periodId} onSelectPeriod={setPeriodId} />
           )}

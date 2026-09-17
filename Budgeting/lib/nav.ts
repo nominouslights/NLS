@@ -7,7 +7,6 @@
 export type ScreenId =
   | "periods"
   | "codes"
-  | "allocations"
   | "actuals"
   | "variance"
   | "reports"
@@ -33,7 +32,6 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: "periods", label: "Budget Periods", code: "BP" },
       { id: "codes", label: "Budget Codes", code: "BC" },
-      { id: "allocations", label: "Allocations", code: "AL" },
     ],
   },
   {

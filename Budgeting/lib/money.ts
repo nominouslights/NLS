@@ -1,6 +1,6 @@
 // Signed-money formatters. They live here, apart from lib/data.ts, so a screen on real data
-// (the period dashboard's Net tile) never has to import the mock module to print a signed
-// figure. The rule both enforce is the platform's: the sign is written out as text, never
+// (the period dashboard's ZBB balance banner) never has to import the mock module to print a
+// signed figure. The rule both enforce is the platform's: the sign is written out as text, never
 // implied by red-versus-green, so it survives grayscale and any colour-vision deficiency.
 
 /** Signed percentage, always carrying an explicit + or − so the sign never rests on colour. */

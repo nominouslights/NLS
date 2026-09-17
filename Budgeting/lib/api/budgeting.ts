@@ -1,4 +1,5 @@
 import { request } from "./transport";
+import { formatCad } from "./format";
 import type {
   BudgetCode,
   BudgetCodeCategory,
@@ -321,27 +322,99 @@ export function allocationCandidates(
   );
 }
 
-/** Planned revenue less planned expense, in CAD. Positive is a surplus. */
-export function netCad(period: BudgetPeriod): number {
-  return period.plannedRevenue - period.plannedExpense;
+/** The zero-based verdict on a period's plan. */
+export type ZbbBalanceState = "balanced" | "unallocated" | "over";
+
+export interface ZbbBalance {
+  /** plannedRevenue − plannedExpense, in CAD. Positive is revenue with no job yet. */
+  amount: number;
+  state: ZbbBalanceState;
 }
 
 /**
- * Net → status kind: a surplus is good ("ontime"), a balanced plan is neutral ("info"), a
- * deficit is the problem the tile exists to flag ("over"). Always rendered with netLabel and a
- * signed figure, never as colour alone.
+ * The zero-based rule, as the console states it. There is no top-down budget amount anywhere in
+ * this app — the pool *is* the period's planned revenue lines, and the plan is balanced when
+ * every dollar of that pool has been assigned to an expense line
+ * (plannedExpense === plannedRevenue).
+ *
+ * This replaced netCad / netKind / netLabel, which read a surplus as good news ("ontime"). Under
+ * zero-based a surplus is not good news: it is money with no job, which is precisely the failure
+ * the rule exists to catch. Hence "unallocated", carrying the caution kind, not the healthy one.
+ *
+ * Both totals are the server's own sums over the period's lines (BudgetPeriodResponse), so
+ * nothing is re-added here — only judged.
  */
-export function netKind(net: number): StatusKind {
-  if (net > 0) return "ontime";
-  if (net < 0) return "over";
-  return "info";
+export function zbbBalance(period: BudgetPeriod): ZbbBalance {
+  const amount = period.plannedRevenue - period.plannedExpense;
+  if (amount > 0) return { amount, state: "unallocated" };
+  if (amount < 0) return { amount, state: "over" };
+  return { amount, state: "balanced" };
 }
 
-/** Human label for the net position — rendered beside the colour and glyph. */
-export function netLabel(net: number): string {
-  if (net > 0) return "Surplus";
-  if (net < 0) return "Deficit";
-  return "Balanced";
+/**
+ * Balance state → status kind. Never the only channel: every render pairs it with the glyph
+ * StatusMeta carries, the words below, and the signed figure from formatDeltaCad.
+ */
+export const ZBB_BALANCE_KINDS: Record<ZbbBalanceState, StatusKind> = {
+  balanced: "ontime",
+  unallocated: "soon",
+  over: "over",
+};
+
+export interface ZbbBalanceDisplay {
+  kind: StatusKind;
+  /** "Balanced" / "Unallocated $12,000" / "Over budget by $12,000" / "Nothing planned yet". */
+  headline: string;
+  /** One sentence naming what that means and what to do about it. */
+  note: string;
+}
+
+/**
+ * Everything a view needs to render the balance, decided here so the banner, the list row and
+ * the checklist all say the same thing.
+ *
+ * `hasLines` exists because zero equals zero is arithmetically balanced and the wrong thing to
+ * tell someone staring at an empty plan — an unplanned period reads "Nothing planned yet" and
+ * carries the neutral kind, not the healthy one.
+ */
+export function zbbBalanceDisplay(balance: ZbbBalance, hasLines: boolean): ZbbBalanceDisplay {
+  if (!hasLines) {
+    return {
+      kind: "info",
+      headline: "Nothing planned yet",
+      note: "No lines have been planned against this period — an empty plan is not a balanced one.",
+    };
+  }
+  switch (balance.state) {
+    case "unallocated":
+      return {
+        kind: ZBB_BALANCE_KINDS.unallocated,
+        headline: `Unallocated ${formatCad(balance.amount)}`,
+        note: "Planned revenue with no job yet — assign it to expense lines until the plan balances.",
+      };
+    case "over":
+      return {
+        kind: ZBB_BALANCE_KINDS.over,
+        headline: `Over budget by ${formatCad(-balance.amount)}`,
+        note: "Assigned expense exceeds planned revenue — cut expense lines, or plan the revenue that pays for them.",
+      };
+    default:
+      return {
+        kind: ZBB_BALANCE_KINDS.balanced,
+        headline: "Balanced",
+        note: "Every planned dollar of revenue is assigned. That is the zero-based bar.",
+      };
+  }
+}
+
+/**
+ * Is anything planned against this period? The period list carries the two totals but not the
+ * lines, so it answers from the totals; the dashboard, which fetches the lines, answers exactly
+ * (lines.length > 0). The two disagree only for a plan made entirely of $0 lines, and "nothing
+ * planned yet" is the honest thing to say about that too.
+ */
+export function hasPlannedAmounts(period: BudgetPeriod): boolean {
+  return period.plannedRevenue !== 0 || period.plannedExpense !== 0;
 }
 
 /**
@@ -359,18 +432,43 @@ export function coverage(
   return { planned, active: activeIds.size };
 }
 
-/** A checklist row: are there any lines of this category yet? */
-export interface LineStep {
-  group: "lines";
-  id: "revenue" | "expense";
-  category: BudgetCodeCategory;
+/**
+ * A checklist row. `detail` is the whole supporting sentence, already written out, so
+ * PlanningChecklist stays a pure render of what this file decides rather than re-phrasing it.
+ */
+export interface ChecklistStepBase {
   label: string;
-  /** Lines of this category in the period, retired codes included. */
-  count: number;
-  /** "3 of 5 active revenue codes planned". */
   detail: string;
   done: boolean;
 }
+
+/** A checklist row: are there any lines of this category yet? */
+export interface LineStep extends ChecklistStepBase {
+  group: "lines";
+  id: "revenue" | "expense";
+  category: BudgetCodeCategory;
+  /** Lines of this category in the period, retired codes included. */
+  count: number;
+  /** "2 lines · 3 of 5 active revenue codes planned". */
+  detail: string;
+}
+
+/**
+ * The zero-based rule as a checklist row: every planned dollar of revenue has a job. Its own
+ * step kind rather than a third LineStep, because it is not about one category's lines — it is
+ * the relationship between both totals, and it is done or not for reasons a line count cannot
+ * express (an empty plan is not a balanced one).
+ */
+export interface BalanceStep extends ChecklistStepBase {
+  group: "balance";
+  id: "balance";
+  balance: ZbbBalance;
+  /** No lines at all — the reason zero-versus-zero is not reported as balanced. */
+  empty: boolean;
+}
+
+/** The rows PlanningChecklist renders: everything from planningProgress that is not lifecycle. */
+export type ChecklistStep = LineStep | BalanceStep;
 
 export type LifecycleStepStatus = "done" | "current" | "pending";
 
@@ -382,13 +480,16 @@ export interface LifecycleStep {
   status: LifecycleStepStatus;
 }
 
-export type PlanningStep = LineStep | LifecycleStep;
+export type PlanningStep = ChecklistStep | LifecycleStep;
 
 /**
- * Where the planner stands: the two line checklist rows (done once at least one line exists)
- * followed by the five lifecycle states, each done / current / pending relative to the period's
- * state in PERIOD_STATE_ORDER. Pure, so the dashboard's checklist and stepper are one tested
- * derivation rather than two ad hoc ones.
+ * Where the planner stands: the two line checklist rows (done once at least one line exists),
+ * then the zero-based balance row, then the five lifecycle states, each done / current / pending
+ * relative to the period's state in PERIOD_STATE_ORDER. Pure, so the dashboard's checklist and
+ * stepper are one tested derivation rather than two ad hoc ones.
+ *
+ * The balance row is a checklist row and nothing more: transitions stay ungated, so an unbalanced
+ * plan can still be finalized. Making it loud here is the whole mechanism.
  */
 export function planningProgress(
   period: BudgetPeriod,
@@ -398,15 +499,28 @@ export function planningProgress(
   const lineStep = (id: LineStep["id"], category: BudgetCodeCategory, label: string): LineStep => {
     const count = lines.filter((l) => l.category === category).length;
     const cov = coverage(lines, codes, category);
+    const plural = count === 1 ? "line" : "lines";
     return {
       group: "lines",
       id,
       category,
       label,
       count,
-      detail: `${cov.planned} of ${cov.active} active ${category.toLowerCase()} codes planned`,
+      detail: `${count} ${plural} · ${cov.planned} of ${cov.active} active ${category.toLowerCase()} codes planned`,
       done: count > 0,
     };
+  };
+
+  const balance = zbbBalance(period);
+  const empty = lines.length === 0;
+  const balanceStep: BalanceStep = {
+    group: "balance",
+    id: "balance",
+    label: "Every dollar assigned",
+    detail: zbbBalanceDisplay(balance, !empty).headline,
+    balance,
+    empty,
+    done: balance.state === "balanced" && !empty,
   };
 
   const currentIndex = PERIOD_STATE_ORDER.indexOf(period.state);
@@ -420,6 +534,7 @@ export function planningProgress(
   return [
     lineStep("revenue", "Revenue", "Revenue planned"),
     lineStep("expense", "Expense", "Expense budget set"),
+    balanceStep,
     ...lifecycle,
   ];
 }

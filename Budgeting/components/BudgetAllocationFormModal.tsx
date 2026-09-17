@@ -18,9 +18,11 @@ import { ModalShell } from "@/components/ui/ModalShell";
 import { NumberField, SelectField, TextAreaField } from "@/components/ui/Field";
 import { ActionButton } from "@/components/ui/Button";
 
-// Set-or-edit modal for one allocation line, shared by the period dashboard and the Allocations
-// screen. Follows BudgetCodeFormModal: one useState per field, server-side validation is
-// authoritative, and a 400 or 409 surfaces as the backend's own message in the banner.
+// Set-or-edit modal for one allocation line, opened from the period view and nowhere else — the
+// standalone Allocations screen it used to share is gone, because two places doing one thing was
+// the drift risk that screen was always going to become. Follows BudgetCodeFormModal: one
+// useState per field, server-side validation is authoritative, and a 400 or 409 surfaces as the
+// backend's own message in the banner.
 //
 // Two rules this form carries visibly because the server enforces both:
 //

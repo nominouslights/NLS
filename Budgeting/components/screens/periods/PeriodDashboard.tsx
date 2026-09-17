@@ -16,10 +16,8 @@ import {
   getBudgetPeriod,
   listBudgetAllocations,
   listBudgetCodes,
+  hasPlannedAmounts,
   listBudgetPeriods,
-  netCad,
-  netKind,
-  netLabel,
   nextTransition,
   planningProgress,
   refetchUntil,
@@ -27,25 +25,31 @@ import {
   stateAfter,
   toBudgetCode,
   transitionBudgetPeriod,
+  zbbBalance,
+  zbbBalanceDisplay,
   PERIOD_STATE_LABELS,
   type BudgetAllocationRecord,
   type BudgetPeriodRecord,
+  type ChecklistStep,
   type LifecycleStep,
-  type LineStep,
   type PeriodTransitionAction,
 } from "@/lib/api/budgeting";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import BudgetAllocationFormModal from "@/components/BudgetAllocationFormModal";
-import { EmptyNote } from "@/components/screens/shared";
+import { EmptyNote, Num } from "@/components/screens/shared";
 import LifecycleStepper from "@/components/screens/periods/LifecycleStepper";
 import PlanningChecklist from "@/components/screens/periods/PlanningChecklist";
 import AllocationSection from "@/components/screens/periods/AllocationSection";
 
-// The detail pane of the Budget Periods screen: one period, where it stands in its lifecycle,
-// what is planned against it, and the two things a planner does here — set lines, and move the
-// period forward. Owns its own fetch of the period's lines and the chart (both needed for
-// coverage and the picker), mounted per period by key from BudgetPeriods so every confirm and
-// modal resets when the selection changes.
+// Period mode of the Budget Periods screen: one period filling the whole content area — where it
+// stands in its lifecycle, what is planned against it, whether the plan balances, and the two
+// things a planner does here: set lines, and move the period forward. Owns its own fetch of the
+// period's lines and the chart (both needed for coverage and the picker), mounted per period by
+// key from BudgetPeriods so every confirm and modal resets when a different period is opened.
+//
+// It used to be the right-hand pane of a 38%/1fr grid, which is why it drew itself on the tinted
+// detailBg with left-only padding; at full width that tint is its own bordered surface, padded
+// evenly, sitting on the screen's mainBg.
 //
 // Two eventual-consistency rules, both inherited from the codes screen: after a transition,
 // refetch the period until it reports the expected state; after a line changes, refetch the lines
@@ -151,10 +155,15 @@ export default function PeriodDashboard({
 
   const steps = planningProgress(period, lines ?? [], codes ?? []);
   const lifecycleSteps = steps.filter((s): s is LifecycleStep => s.group === "lifecycle");
-  const lineSteps = steps.filter((s): s is LineStep => s.group === "lines");
+  const checklistSteps = steps.filter((s): s is ChecklistStep => s.group !== "lifecycle");
 
-  const net = netCad(period);
-  const netMeta = statusMeta(netKind(net));
+  // Until the lines arrive, "is anything planned?" is answered from the period's own totals, so
+  // the banner does not flash "Nothing planned yet" at a period that plainly has a plan.
+  const anythingPlanned = lines === null ? hasPlannedAmounts(period) : lines.length > 0;
+  const balance = zbbBalance(period);
+  const balanceDisplay = zbbBalanceDisplay(balance, anythingPlanned);
+  const balanceMeta = statusMeta(balanceDisplay.kind);
+  const balanced = balance.state === "balanced" && anythingPlanned;
   const revenueCoverage = coverage(lines ?? [], codes ?? [], "Revenue");
   const expenseCoverage = coverage(lines ?? [], codes ?? [], "Expense");
 
@@ -224,7 +233,15 @@ export default function PeriodDashboard({
   }
 
   return (
-    <div style={{ overflowY: "auto", padding: "22px 0 22px 26px", background: colors.detailBg }}>
+    <div
+      style={{
+        marginTop: 14,
+        padding: "18px 20px 20px",
+        background: colors.detailBg,
+        border: `1px solid ${colors.border}`,
+        borderRadius: 12,
+      }}
+    >
       {/* Header: label, dates, state chip, the one forward action. */}
       <div
         style={{
@@ -279,6 +296,12 @@ export default function PeriodDashboard({
           <span style={{ flex: "1 1 auto" }}>
             {TRANSITION_NOTES[transition.action]} Forward only — there is no step back. Click{" "}
             {transition.confirmLabel} to proceed.
+            {/* Warn, never block: an unbalanced plan can still be signed off, deliberately, and
+                the checklist plus this sentence are what make that a choice rather than an
+                accident. */}
+            {transition.action === "finalize" &&
+              !balanced &&
+              ` This plan does not balance — ${balanceDisplay.headline}. Finalizing is allowed anyway; the plan is signed off exactly as it stands.`}
           </span>
           <ActionButton onClick={() => setConfirmTransition(false)}>CANCEL</ActionButton>
         </div>
@@ -292,6 +315,31 @@ export default function PeriodDashboard({
           </div>
         </div>
       )}
+
+      {/* The zero-based verdict, and the loudest thing on the screen after the period's own name.
+          Colour is the fourth channel and never the only one: the chip carries StatusMeta's
+          glyph, the headline writes the state and its figure out in words, and the total beside
+          it writes its own + or − through formatDeltaCad. */}
+      <Panel style={{ margin: "10px 0 12px" }} borderColor={balanceMeta.bd}>
+        <SectionLabel>ZBB balance</SectionLabel>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <StatusChip kind={balanceDisplay.kind} label={balanceDisplay.headline} />
+          <Num size={14} weight={600} color={balanceMeta.t}>
+            {formatDeltaCad(balance.amount)}
+          </Num>
+          <span
+            style={{
+              flex: "1 1 260px",
+              fontFamily: fonts.body,
+              fontSize: 11.5,
+              color: colors.textSecondary,
+              lineHeight: 1.6,
+            }}
+          >
+            {balanceDisplay.note}
+          </span>
+        </div>
+      </Panel>
 
       <Panel style={{ margin: "10px 0 12px" }}>
         <SectionLabel>Lifecycle</SectionLabel>
@@ -322,16 +370,6 @@ export default function PeriodDashboard({
           value={formatCad(period.plannedExpense)}
           valueColor={colors.headingBright}
         />
-        {/* Net: glyph + "Surplus/Balanced/Deficit" label + a signed figure — the colour is the
-            fourth channel, never the only one. */}
-        <MetricTile
-          icon={netMeta.g}
-          iconBg={netMeta.bg}
-          iconColor={netMeta.t}
-          label={`Net · ${netLabel(net)}`}
-          value={formatDeltaCad(net)}
-          valueColor={netMeta.t}
-        />
         <MetricTile
           icon="◧"
           iconBg="rgba(31,111,178,.10)"
@@ -352,7 +390,7 @@ export default function PeriodDashboard({
 
       {loaded && (
         <div style={{ marginBottom: 14 }}>
-          <PlanningChecklist steps={lineSteps} />
+          <PlanningChecklist steps={checklistSteps} />
         </div>
       )}
 

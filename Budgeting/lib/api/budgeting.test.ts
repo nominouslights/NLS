@@ -8,9 +8,7 @@ import {
   canEditAllocations,
   costCentreApplies,
   coverage,
-  netCad,
-  netKind,
-  netLabel,
+  hasPlannedAmounts,
   nextTransition,
   normalizeBudgetCode,
   ownerLabel,
@@ -22,15 +20,19 @@ import {
   toBudgetCode,
   toBudgetPeriod,
   userDisplay,
+  zbbBalance,
+  zbbBalanceDisplay,
   ALLOCATION_JUSTIFICATION_MAX_LENGTH,
   PERIOD_STATE_LABELS,
   PERIOD_STATE_ORDER,
   REVIEW_FREQUENCY_LABELS,
   SERVICE_LINE_LABELS,
   TAX_TREATMENT_LABELS,
+  ZBB_BALANCE_KINDS,
   type BudgetAllocationRecord,
   type BudgetCodeRecord,
   type BudgetPeriodRecord,
+  type BalanceStep,
   type LifecycleStep,
   type LineStep,
   type PeriodTransitionAction,
@@ -592,22 +594,78 @@ describe("allocationJustificationError", () => {
   });
 });
 
-// netCad / netKind / netLabel: the dashboard's Net tile. No server rule to mirror — the sums are
-// the server's — but the kind and label are what keep the tile from being colour alone.
+// zbbBalance: the dashboard's balance banner and the list row's verdict. No server rule to
+// mirror — both totals are the server's own sums (BudgetPeriodResponse) — but the *judgement* on
+// them is the zero-based rule this console exists to enforce, so all three arms are pinned here.
+//
+// The arm worth staring at is "unallocated". Its predecessor (netKind) read a surplus as
+// "ontime", i.e. good news. Under zero-based, revenue with no expense line against it is the
+// failure the rule exists to catch, so it carries the caution kind instead.
 
-describe("netCad, netKind and netLabel", () => {
-  it("is planned revenue less planned expense", () => {
-    expect(netCad(period("Draft", 1_000, 250))).toBe(750);
-    expect(netCad(period("Draft", 250, 1_000))).toBe(-750);
+describe("zbbBalance", () => {
+  it("is planned revenue less planned expense: a surplus is unallocated money, not good news", () => {
+    expect(zbbBalance(period("Draft", 1_000, 250))).toEqual({ amount: 750, state: "unallocated" });
   });
 
-  it.each<[number, string, string]>([
-    [750, "ontime", "Surplus"],
-    [0, "info", "Balanced"],
-    [-750, "over", "Deficit"],
-  ])("net %d → %s / %s", (net, kind, label) => {
-    expect(netKind(net)).toBe(kind);
-    expect(netLabel(net)).toBe(label);
+  it("is over when assigned expense exceeds planned revenue", () => {
+    expect(zbbBalance(period("Draft", 250, 1_000))).toEqual({ amount: -750, state: "over" });
+  });
+
+  it("is balanced when every planned dollar of revenue is assigned", () => {
+    expect(zbbBalance(period("Draft", 1_000, 1_000))).toEqual({ amount: 0, state: "balanced" });
+  });
+
+  it("calls an unplanned period balanced — arithmetically true, which is why the views ask hasLines", () => {
+    expect(zbbBalance(period("Draft", 0, 0))).toEqual({ amount: 0, state: "balanced" });
+  });
+
+  it.each<["balanced" | "unallocated" | "over", string]>([
+    ["balanced", "ontime"],
+    ["unallocated", "soon"],
+    ["over", "over"],
+  ])("maps %s to the %s status kind", (state, kind) => {
+    expect(ZBB_BALANCE_KINDS[state]).toBe(kind);
+  });
+});
+
+describe("zbbBalanceDisplay", () => {
+  it("names the unallocated figure in words, not just in colour", () => {
+    const d = zbbBalanceDisplay(zbbBalance(period("Draft", 1_000, 250)), true);
+
+    expect(d.kind).toBe("soon");
+    expect(d.headline).toBe("Unallocated $750");
+  });
+
+  it("names the overspend figure the same way", () => {
+    const d = zbbBalanceDisplay(zbbBalance(period("Draft", 250, 1_000)), true);
+
+    expect(d.kind).toBe("over");
+    expect(d.headline).toBe("Over budget by $750");
+  });
+
+  it("reads Balanced only when there is a plan to balance", () => {
+    const d = zbbBalanceDisplay(zbbBalance(period("Draft", 1_000, 1_000)), true);
+
+    expect(d.kind).toBe("ontime");
+    expect(d.headline).toBe("Balanced");
+  });
+
+  it("reads \"Nothing planned yet\" for an empty plan — zero equals zero is the wrong thing to say", () => {
+    const d = zbbBalanceDisplay(zbbBalance(period("Draft", 0, 0)), false);
+
+    expect(d.kind).toBe("info");
+    expect(d.headline).toBe("Nothing planned yet");
+  });
+});
+
+// The period list has the two totals but not the lines, so it answers "is anything planned?"
+// from the totals; the dashboard, which fetches the lines, answers from lines.length.
+
+describe("hasPlannedAmounts", () => {
+  it("is false only when both totals are zero", () => {
+    expect(hasPlannedAmounts(period("Draft", 0, 0))).toBe(false);
+    expect(hasPlannedAmounts(period("Draft", 1_000, 0))).toBe(true);
+    expect(hasPlannedAmounts(period("Draft", 0, 1_000))).toBe(true);
   });
 });
 
@@ -638,7 +696,8 @@ describe("coverage", () => {
 });
 
 // planningProgress feeds the dashboard's checklist and stepper from one derivation: two line
-// steps (done once any line exists) then the five lifecycle states relative to PERIOD_STATE_ORDER.
+// steps (done once any line exists), the zero-based balance step, then the five lifecycle states
+// relative to PERIOD_STATE_ORDER.
 
 describe("planningProgress", () => {
   const codes = [
@@ -648,6 +707,8 @@ describe("planningProgress", () => {
   ];
   const lineSteps = (steps: ReturnType<typeof planningProgress>) =>
     steps.filter((s): s is LineStep => s.group === "lines");
+  const balanceStep = (steps: ReturnType<typeof planningProgress>) =>
+    steps.find((s): s is BalanceStep => s.group === "balance")!;
   const lifecycle = (steps: ReturnType<typeof planningProgress>) =>
     steps.filter((s): s is LifecycleStep => s.group === "lifecycle").map((s) => [s.id, s.status]);
 
@@ -675,8 +736,50 @@ describe("planningProgress", () => {
       ["revenue", 1, true],
       ["expense", 1, true],
     ]);
-    expect(steps[0].detail).toBe("1 of 1 active revenue codes planned");
-    expect(steps[1].detail).toBe("1 of 2 active expense codes planned");
+    // The whole supporting sentence is written here, not in PlanningChecklist, so the view can
+    // stay a pure render of what this function decides.
+    expect(steps[0].detail).toBe("1 line · 1 of 1 active revenue codes planned");
+    expect(steps[1].detail).toBe("1 line · 1 of 2 active expense codes planned");
+  });
+
+  // The third checklist row is the zero-based rule itself. It is a warning, never a gate:
+  // BudgetPeriod.Transition still finalizes an unbalanced plan, deliberately.
+
+  it("marks the balance step done only when the plan balances and has lines", () => {
+    const lines = [makeLine("rev-a", "Revenue", true, 1_000), makeLine("exp-a", "Expense", true, 1_000)];
+    const step = balanceStep(planningProgress(period("Draft", 1_000, 1_000), lines, codes));
+
+    expect(step.done).toBe(true);
+    expect(step.empty).toBe(false);
+    expect(step.balance).toEqual({ amount: 0, state: "balanced" });
+    expect(step.detail).toBe("Balanced");
+  });
+
+  it("leaves it pending, naming the figure, when revenue is not fully assigned", () => {
+    const lines = [makeLine("rev-a", "Revenue", true, 1_000)];
+    const step = balanceStep(planningProgress(period("Draft", 1_000, 250), lines, codes));
+
+    expect(step.done).toBe(false);
+    expect(step.balance.state).toBe("unallocated");
+    expect(step.detail).toBe("Unallocated $750");
+  });
+
+  it("leaves it pending when expense exceeds planned revenue", () => {
+    const lines = [makeLine("exp-a", "Expense", true, 1_000)];
+    const step = balanceStep(planningProgress(period("Draft", 250, 1_000), lines, codes));
+
+    expect(step.done).toBe(false);
+    expect(step.balance.state).toBe("over");
+    expect(step.detail).toBe("Over budget by $750");
+  });
+
+  it("refuses to call an empty plan balanced — zero equals zero is not an assigned dollar", () => {
+    const step = balanceStep(planningProgress(period("Draft", 0, 0), [], codes));
+
+    expect(step.balance.state).toBe("balanced");
+    expect(step.empty).toBe(true);
+    expect(step.done).toBe(false);
+    expect(step.detail).toBe("Nothing planned yet");
   });
 
   it("marks the states before Open done and the ones after pending", () => {
@@ -699,10 +802,15 @@ describe("planningProgress", () => {
     ]);
   });
 
-  it("puts the two line steps first, then the five states in order", () => {
+  it("puts the two line steps first, then the balance step, then the five states in order", () => {
     const steps = planningProgress(period("Draft"), [], codes);
 
-    expect(steps.map((s) => s.id)).toEqual(["revenue", "expense", ...PERIOD_STATE_ORDER]);
+    expect(steps.map((s) => s.id)).toEqual([
+      "revenue",
+      "expense",
+      "balance",
+      ...PERIOD_STATE_ORDER,
+    ]);
   });
 });
 

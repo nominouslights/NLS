@@ -6,12 +6,17 @@ import { getClaims, logout } from "@/lib/auth";
 import HeaderClock from "@/components/HeaderClock";
 
 // Adapted from Dispatcher/components/TopBar.tsx. Geometry, colours and spacing are unchanged —
-// the 56px bar, the wordmark, the 34px search field with its ⌘K tag, the clock, the bell, the
-// blue pill and the avatar block are what make the two consoles read as one product.
+// the 56px bar, the wordmark, the 34px search field with its ⌘K tag, the clock, the bell and
+// the avatar block are what make the two consoles read as one product.
 //
-// Three differences: the pill creates an allocation rather than a trip, the search placeholder
-// names budgeting things, and the identity block shows the real signed-in user instead of
-// Dispatcher's hardcoded "R. Kelsey / Owner · Dispatcher".
+// Three differences: Dispatcher's blue action pill has no counterpart here, the search
+// placeholder names budgeting things, and the identity block shows the real signed-in user
+// instead of Dispatcher's hardcoded "R. Kelsey / Owner · Dispatcher".
+//
+// The pill is removed rather than retargeted. It used to jump to a standalone Allocations
+// screen, and allocations have stopped being a place you navigate to: a line is added inside a
+// period, where its category and the ZBB balance it moves are both already on screen. A global
+// shortcut with no destination is worse than no shortcut.
 
 /**
  * Two initials from an email's local part: "l.fontaine@…" and "l_fontaine@…" both give "LF",
@@ -29,11 +34,9 @@ function emailInitials(email: string): string {
 
 export default function TopBar({
   onToggleRail,
-  onNewAllocation,
   fullName,
 }: {
   onToggleRail: () => void;
-  onNewAllocation: () => void;
   /**
    * The signed-in user's own name, from Console's profile fetch — null until it arrives, and for
    * anyone who has not set one. It comes down as a prop rather than from getClaims() because it
@@ -180,26 +183,6 @@ export default function TopBar({
         >
           3
         </span>
-      </div>
-      <div
-        onClick={onNewAllocation}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 7,
-          flex: "none",
-          padding: "8px 15px",
-          borderRadius: 8,
-          background: colors.blue,
-          color: "#FFFFFF",
-          fontFamily: fonts.condensed,
-          fontWeight: 700,
-          fontSize: 14,
-          letterSpacing: ".04em",
-          cursor: "pointer",
-        }}
-      >
-        <span style={{ fontSize: 15, lineHeight: 1 }}>+</span> NEW ALLOCATION
       </div>
       <div
         style={{

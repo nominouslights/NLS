@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { colors } from "@/lib/theme";
 import type { BudgetPeriod } from "@/lib/types";
 import { ActionButton } from "@/components/ui/Button";
 import type { BudgetPeriodRecord } from "@/lib/api/budgeting";
@@ -11,25 +10,36 @@ import { EmptyNote, Screen } from "@/components/screens/shared";
 import PeriodList from "@/components/screens/periods/PeriodList";
 import PeriodDashboard from "@/components/screens/periods/PeriodDashboard";
 
-// Budget periods and where each one stands — master/detail on real data, following the Budget
-// Codes screen (and Dispatcher's Clients and Trips): a left column of period rows and a right
-// dashboard pane on the tinted detailBg, split by a CSS grid with a top border.
+// Budget periods and where each one stands. Two modes in one screen, chosen by openPeriodId:
 //
-// Console owns the period list (GET /api/budgeting/periods) and threads it down, because five
-// screens read it; the dashboard owns the selected period's lines, which only it reads. The
-// lifecycle is five states, forward only — Draft → Finalized → Open → In review → Closed — mapped
-// onto the shared status kinds in lib/api/budgeting.ts (periodKind) and carried on each row as
-// BudgetPeriod.pk, so nothing here picks a colour itself.
+//   list mode   — every period at full width, one row each, with the planned totals and the
+//                 zero-based balance right there on the row.
+//   period mode — the whole content area *is* that one period: its header, lifecycle, ZBB
+//                 balance, planning checklist and its Revenue and Expense lines, with
+//                 "← ALL PERIODS" to come back.
 //
-// Creating a period lands on its dashboard with no extra navigation: Console.handlePeriodCreated
-// already selects the new id, and the selected row is the one the dashboard shows.
+// This replaced a 38%/1fr master/detail grid. A period is not a preview beside a list — it is
+// where all the work happens, and at 38% the list was paying for width the dashboard needed.
+// It is a take-over inside the console, not a browser window: neither console has URL routing,
+// so a literal new tab would mean introducing routing here and in Dispatcher's shell both.
+//
+// Console owns the period list (GET /api/budgeting/periods) and threads it down, because four
+// screens read it; it owns openPeriodId too, so stepping over to Budget Codes and back does not
+// throw you out of the period you were working in. The dashboard owns the open period's lines,
+// which only it reads. The lifecycle is five states, forward only — Draft → Finalized → Open →
+// In review → Closed — mapped onto the shared status kinds in lib/api/budgeting.ts (periodKind)
+// and carried on each row as BudgetPeriod.pk, so nothing here picks a colour itself.
+//
+// Creating a period opens it directly: Console.handlePeriodCreated selects the new id *and*
+// enters period mode, so the modal closes onto the plan you just made room for.
 
 export default function BudgetPeriods({
   periods,
   error,
   onRetry,
-  periodId,
-  onSelectPeriod,
+  openPeriodId,
+  onOpenPeriod,
+  onClosePeriod,
   onCreated,
   onPeriodsRefreshed,
 }: {
@@ -37,8 +47,10 @@ export default function BudgetPeriods({
   periods: BudgetPeriod[] | null;
   error: { message: string; code: string } | null;
   onRetry: () => void;
-  periodId: string;
-  onSelectPeriod: (id: string) => void;
+  /** The period being shown in full, or null for the list. Hoisted into Console. */
+  openPeriodId: string | null;
+  onOpenPeriod: (id: string) => void;
+  onClosePeriod: () => void;
   onCreated: (records: BudgetPeriodRecord[], id: string) => void;
   /** After a transition or a line change: Console's applyLoaded, which preserves the selection. */
   onPeriodsRefreshed: (records: BudgetPeriodRecord[]) => void;
@@ -46,18 +58,22 @@ export default function BudgetPeriods({
   const [showCreate, setShowCreate] = useState(false);
 
   const list = periods ?? [];
-  // periodId is "" until Console's first load picks one; falling back to the first row keeps the
-  // pane populated in that gap.
-  const selected = list.find((p) => p.id === periodId) ?? list[0] ?? null;
+  // Console drops openPeriodId when a reload no longer contains it, so this lookup failing means
+  // the list is still loading — the list mode's own loading note covers that.
+  const open = openPeriodId ? (list.find((p) => p.id === openPeriodId) ?? null) : null;
 
   return (
     <Screen
       eyebrow="Planning"
       title="Budget Periods"
       right={
-        <ActionButton variant="primary" onClick={() => setShowCreate(true)}>
-          + NEW PERIOD
-        </ActionButton>
+        open ? (
+          <ActionButton onClick={onClosePeriod}>← ALL PERIODS</ActionButton>
+        ) : (
+          <ActionButton variant="primary" onClick={() => setShowCreate(true)}>
+            + NEW PERIOD
+          </ActionButton>
+        )
       }
     >
       {error && (
@@ -75,24 +91,11 @@ export default function BudgetPeriods({
         <EmptyNote>No budget periods yet — create one to start planning.</EmptyNote>
       )}
 
-      {selected && (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "38% 1fr",
-            borderTop: `1px solid ${colors.border}`,
-            height: "100%",
-            minHeight: 0,
-          }}
-        >
-          <PeriodList periods={list} selectedId={selected.id} onSelect={onSelectPeriod} />
-          {/* Keyed by id so every confirm, modal and fetch resets when the selection changes. */}
-          <PeriodDashboard
-            key={selected.id}
-            period={selected}
-            onPeriodsRefreshed={onPeriodsRefreshed}
-          />
-        </div>
+      {open ? (
+        /* Keyed by id so every confirm, modal and fetch resets when a different period is opened. */
+        <PeriodDashboard key={open.id} period={open} onPeriodsRefreshed={onPeriodsRefreshed} />
+      ) : (
+        list.length > 0 && <PeriodList periods={list} onOpen={onOpenPeriod} />
       )}
 
       {showCreate && (
