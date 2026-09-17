@@ -4,6 +4,11 @@ using Microsoft.AspNetCore.Routing;
 using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Shared.Tenancy;
+using NorthernLink.Budgeting.Application.Actuals.Delete;
+using NorthernLink.Budgeting.Application.Actuals.GetActuals;
+using NorthernLink.Budgeting.Application.Actuals.GetRollup;
+using NorthernLink.Budgeting.Application.Actuals.Record;
+using NorthernLink.Budgeting.Application.Actuals.Update;
 using NorthernLink.Budgeting.Application.Allocations.GetAllocations;
 using NorthernLink.Budgeting.Application.Allocations.Remove;
 using NorthernLink.Budgeting.Application.Allocations.Set;
@@ -56,6 +61,21 @@ public static class BudgetingEndpoints
         budgeting.MapGet("periods/{id:guid}/allocations", GetAllocations);
         budgeting.MapPut("periods/{id:guid}/allocations/{codeId:guid}", SetAllocation);
         budgeting.MapDelete("periods/{id:guid}/allocations/{codeId:guid}", RemoveAllocation);
+
+        // Actuals — what was really spent or received, and the plan-against-spend rollup built
+        // from it. The two reads hang off a period because that is how the console navigates;
+        // the three writes do not, because a transaction carries no period — its date decides
+        // which period it counts in, and the handlers refuse a date no period covers (409).
+        //
+        // Note what is missing next to the allocation block above: no PeriodNotEditable. Actuals
+        // are accepted, corrected and removed against a period in any state, Closed included.
+        // Only the plan is frozen by the lifecycle; a closed period's actuals are exactly what a
+        // review is reading, and a late invoice does not care that someone pressed Close.
+        budgeting.MapGet("periods/{id:guid}/actuals", GetActuals);
+        budgeting.MapGet("periods/{id:guid}/rollup", GetRollup);
+        budgeting.MapPost("actuals", RecordActual);
+        budgeting.MapPut("actuals/{id:guid}", UpdateActual);
+        budgeting.MapDelete("actuals/{id:guid}", DeleteActual);
 
         // Codes. Retiring (activate/deactivate) is the normal end-of-life path and stays that
         // way: allocation lines reference codes by id and by string and must keep resolving, so a
@@ -191,6 +211,86 @@ public static class BudgetingEndpoints
         Guid id, Guid codeId, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken) =>
         SendCommand(
             tenantContext, sender, tenantId => new RemoveBudgetAllocationCommand(tenantId, id, codeId), cancellationToken);
+
+    private static async Task<IResult> GetActuals(
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(new GetActualTransactionsQuery(tenantId, id), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> GetRollup(
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(new GetBudgetRollupQuery(tenantId, id), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>
+    /// 201 with a Location header, unlike the allocation upsert: a transaction is a new resource
+    /// with an id the caller could not have predicted, so there is somewhere to point.
+    /// </summary>
+    private static async Task<IResult> RecordActual(
+        RecordActualTransactionRequest request,
+        ITenantContext tenantContext,
+        ICurrentActor currentActor,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var command = new RecordActualTransactionCommand(
+            tenantId,
+            request.BudgetCodeId,
+            request.AmountCad,
+            request.OccurredOn,
+            request.Description,
+            currentActor.UserId);
+
+        var result = await sender.Send(command, cancellationToken);
+        return result.IsSuccess
+            ? Results.Created($"/api/budgeting/actuals/{result.Value}", new EntityCreatedResponse(result.Value))
+            : EndpointResults.Problem(result.Error);
+    }
+
+    private static Task<IResult> UpdateActual(
+        Guid id,
+        RecordActualTransactionRequest request,
+        ITenantContext tenantContext,
+        ICurrentActor currentActor,
+        ISender sender,
+        CancellationToken cancellationToken) =>
+        SendCommand(
+            tenantContext,
+            sender,
+            tenantId => new UpdateActualTransactionCommand(
+                tenantId,
+                id,
+                request.BudgetCodeId,
+                request.AmountCad,
+                request.OccurredOn,
+                request.Description,
+                currentActor.UserId),
+            cancellationToken);
+
+    // No actor: a deleted row has nowhere to record who deleted it. See DeleteActualTransactionCommand.
+    private static Task<IResult> DeleteActual(
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken) =>
+        SendCommand(
+            tenantContext, sender, tenantId => new DeleteActualTransactionCommand(tenantId, id), cancellationToken);
 
     private static async Task<IResult> GetCodes(
         ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
@@ -360,6 +460,33 @@ public sealed record SetBudgetAllocationRequest(
 /// added the line and false when it rewrote one; <paramref name="Id"/> is the same either way.
 /// </summary>
 public sealed record BudgetAllocationSetResponse(Guid Id, bool Created);
+
+/// <summary>
+/// Request body for POST /api/budgeting/actuals and PUT /api/budgeting/actuals/{id} — one shape
+/// for both, because a correction rewrites exactly the fields an entry supplies. The transaction
+/// id comes from the route on the PUT, never the body.
+/// <para>
+/// The money fields are nullable on the wire so a missing one fails as a readable domain
+/// validation error (<c>AmountRequired</c>, <c>OccurredOnRequired</c>,
+/// <c>DescriptionRequired</c>) rather than a model-binding 400 with no code in it.
+/// </para>
+/// <para>
+/// <b>There is no period id here, and there is no source or external reference.</b> The period is
+/// derived from <see cref="OccurredOn"/> — that date is the only thing that ever says which
+/// period a transaction counts in — and everything recorded through this endpoint is
+/// <c>Manual</c>. Letting a caller name its own source would let it claim a QuickBooks
+/// transaction id and defeat the guard that stops a re-import doubling every figure.
+/// </para>
+/// <para>
+/// <b>There is no tax field, and there never will be.</b> The platform does not compute tax;
+/// <see cref="AmountCad"/> is the amount, exactly as recorded.
+/// </para>
+/// </summary>
+public sealed record RecordActualTransactionRequest(
+    Guid BudgetCodeId,
+    decimal? AmountCad,
+    DateOnly? OccurredOn,
+    string? Description);
 
 /// <summary>
 /// Request body for POST /api/budgeting/codes. Every string is nullable on the wire so a missing

@@ -1,3 +1,4 @@
+using NorthernLink.Budgeting.Domain.Actuals;
 using NorthernLink.Budgeting.Domain.Allocations;
 using NorthernLink.Budgeting.Domain.Codes;
 using NorthernLink.Budgeting.Domain.Periods;
@@ -144,6 +145,49 @@ internal static class TestBudgeting
         if (result.IsFailure)
         {
             throw new InvalidOperationException($"Test allocation invalid: {result.Error.Code}");
+        }
+
+        return result.Value;
+    }
+
+    /// <summary>
+    /// A date inside the period <see cref="CreatePeriod"/> and <see cref="PeriodIn"/> build by
+    /// default (Q4 2026 — 1 October to 31 December). Tests that record a transaction against the
+    /// default period use this, so "the date falls in the period" stays true by construction
+    /// rather than by two literals that could drift apart.
+    /// </summary>
+    public static readonly DateOnly InsideDefaultPeriod = new(2026, 11, 15);
+
+    /// <summary>
+    /// A valid recorded transaction. The code id defaults to a fresh guid because the aggregate
+    /// holds a bare id — a test that needs the transaction to point at a real code passes theirs
+    /// in. There is no period parameter and that is the point: a transaction stores no period,
+    /// only <paramref name="occurredOn"/>.
+    /// </summary>
+    public static ActualTransaction CreateActual(
+        Guid? budgetCodeId = null,
+        string code = "ZBB-FUEL-01",
+        decimal? amount = 480.50m,
+        DateOnly? occurredOn = null,
+        string? description = "Diesel, Yellowknife depot.",
+        ActualTransactionSource source = ActualTransactionSource.Manual,
+        string? externalReference = null,
+        Guid? actorId = null)
+    {
+        var result = ActualTransaction.Create(
+            TenantId,
+            budgetCodeId ?? Guid.NewGuid(),
+            code,
+            amount,
+            occurredOn ?? InsideDefaultPeriod,
+            description,
+            source,
+            externalReference,
+            actorId);
+
+        if (result.IsFailure)
+        {
+            throw new InvalidOperationException($"Test transaction invalid: {result.Error.Code}");
         }
 
         return result.Value;

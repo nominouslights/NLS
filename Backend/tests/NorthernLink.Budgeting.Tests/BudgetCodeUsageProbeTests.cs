@@ -1,4 +1,4 @@
-using NorthernLink.Budgeting.Application.Allocations;
+using NorthernLink.Budgeting.Application.Codes;
 using NorthernLink.Budgeting.Application.Codes.Delete;
 using NorthernLink.Budgeting.Domain.Codes;
 using Xunit;
@@ -6,20 +6,24 @@ using Xunit;
 namespace NorthernLink.Budgeting.Tests;
 
 /// <summary>
-/// AllocationBudgetCodeUsageProbe: a code counts as used when any line in any period carries its
-/// id <em>or</em> its string. The second half is the whole reason the probe takes both — a code
-/// deleted and recreated under the same string has a new id, and its old lines must still count.
-/// The last tests wire the real probe into <see cref="DeleteBudgetCodeCommandHandler"/> so the
-/// refusal is proven end to end, not only through <see cref="StubBudgetCodeUsageProbe"/>.
+/// BudgetCodeUsageProbe: a code counts as used when any allocation line in any period, or any
+/// recorded transaction, carries its id <em>or</em> its string. The id-or-string half is the whole
+/// reason the probe takes both — a code deleted and recreated under the same string has a new id,
+/// and its old rows must still count. The allocations-or-actuals half is the other: spend against
+/// a code pins it exactly as a plan does, or a hard delete would leave figures on a ledger screen
+/// resolving to nothing. The last tests wire the real probe into
+/// <see cref="DeleteBudgetCodeCommandHandler"/> so the refusal is proven end to end, not only
+/// through <see cref="StubBudgetCodeUsageProbe"/>.
 /// </summary>
-public class AllocationBudgetCodeUsageProbeTests
+public class BudgetCodeUsageProbeTests
 {
     private readonly InMemoryBudgetAllocationRepository _allocations = new();
-    private readonly AllocationBudgetCodeUsageProbe _probe;
+    private readonly InMemoryActualTransactionRepository _actuals = new();
+    private readonly BudgetCodeUsageProbe _probe;
 
-    public AllocationBudgetCodeUsageProbeTests()
+    public BudgetCodeUsageProbeTests()
     {
-        _probe = new AllocationBudgetCodeUsageProbe(_allocations);
+        _probe = new BudgetCodeUsageProbe(_allocations, _actuals);
     }
 
     [Fact]
@@ -65,6 +69,56 @@ public class AllocationBudgetCodeUsageProbeTests
         _allocations.Add(TestBudgeting.CreateAllocation(budgetCodeId: Guid.NewGuid(), code: "ZBB-CREW-01"));
 
         Assert.False(await _probe.IsReferencedAsync(Guid.NewGuid(), "zbb-crew-01"));
+    }
+
+    // --- The actuals half ---
+
+    [Fact]
+    public async Task A_transaction_carrying_the_id_makes_the_code_referenced_with_no_lines_at_all()
+    {
+        // Spend pins a code exactly as a plan does: deleting the code would leave this figure on
+        // the period's ledger resolving to nothing.
+        var codeId = Guid.NewGuid();
+        _actuals.Add(TestBudgeting.CreateActual(budgetCodeId: codeId, code: "ZBB-FUEL-01"));
+
+        Assert.True(await _probe.IsReferencedAsync(codeId, "ZBB-SOMETHING-ELSE"));
+        Assert.Empty(_allocations.Allocations);
+    }
+
+    [Fact]
+    public async Task A_transaction_carrying_only_the_string_makes_a_recreated_code_referenced()
+    {
+        _actuals.Add(TestBudgeting.CreateActual(budgetCodeId: Guid.NewGuid(), code: "ZBB-FUEL-01"));
+
+        Assert.True(await _probe.IsReferencedAsync(Guid.NewGuid(), "ZBB-FUEL-01"));
+    }
+
+    [Fact]
+    public async Task A_transaction_matching_neither_the_id_nor_the_string_does_not_count()
+    {
+        _actuals.Add(TestBudgeting.CreateActual(budgetCodeId: Guid.NewGuid(), code: "ZBB-FUEL-01"));
+
+        Assert.False(await _probe.IsReferencedAsync(Guid.NewGuid(), "ZBB-CREW-01"));
+    }
+
+    [Fact]
+    public async Task Deleting_a_code_with_spend_but_no_plan_is_refused_as_in_use()
+    {
+        // The gap the allocation-only probe left: a code nobody ever planned against but money
+        // was recorded on could be hard-deleted out from under its own transactions.
+        var codes = new InMemoryBudgetCodeRepository();
+        var code = TestBudgeting.CreateCode("ZBB-FUEL-01");
+        codes.Add(code);
+        _actuals.Add(TestBudgeting.CreateActual(budgetCodeId: code.Id, code: code.Code));
+        var handler = new DeleteBudgetCodeCommandHandler(codes, _probe);
+
+        var result = await handler.Handle(
+            new DeleteBudgetCodeCommand(TestBudgeting.TenantId, code.Id), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(BudgetCodeErrors.InUse, result.Error);
+        Assert.Single(codes.Codes);
+        Assert.Equal(0, codes.SaveChangesCallCount);
     }
 
     // --- End to end through the delete handler ---

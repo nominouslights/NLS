@@ -2,7 +2,10 @@
 
   <!-- Unit tests for the Budgeting library's Domain and Application layers — in-memory
        fakes, no EF/Postgres, no HTTP. Infrastructure is exercised end-to-end against the
-       real database instead. -->
+       real database instead, with one deliberate exception: ActualTransactionSchemaTests
+       builds the EF model (no connection is opened) to assert the unique external-reference
+       index, because "a re-import cannot double-count" is a guarantee that lives only in the
+       schema and no code path can be asked about it. -->
 
   <PropertyGroup>
     <IsPackable>false</IsPackable>
