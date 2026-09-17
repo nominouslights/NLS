@@ -18,8 +18,10 @@
 // ui-tablet counterpart is owed.
 //
 // Form factor is fixed by architecture non-negotiable #5: company-issued Android tablet,
-// landscape-only, 10-inch class, never BYOD. There is no phone breakpoint and no @media query
-// anywhere in this app.
+// landscape-only, 10-inch class, never BYOD. There is no phone breakpoint and no width-based
+// @media query anywhere in this app. (app/globals.css carries a prefers-reduced-motion block,
+// inherited from the Dispatcher copy — that is an accessibility preference, not a breakpoint,
+// and it stays.)
 // ---------------------------------------------------------------------------
 
 /** Minimum hit targets. `min` is the floor for anything tappable; `primary` for real actions. */
@@ -67,6 +69,38 @@ export const gap = {
 export const radius = {
   control: 8,
   panel: 12,
+} as const;
+
+/**
+ * One-question-per-screen geometry, for the DVIR wizard.
+ *
+ * The wizard is the only surface in this app that must fit 1280×800 with NO SCROLL AT ALL — a
+ * driver answering a legal attestation must never be able to leave part of the question off
+ * screen. (screens/shared.tsx's `Screen` gives its body `overflowY: "auto"`, which is exactly
+ * what the wizard must not have; only the review step scrolls.)
+ *
+ *   answerH    168  3× the 56px touch.primary floor. A gloved thumb in a moving vehicle gets a
+ *                   target it cannot miss, and three tiles still leave room for the question
+ *                   and the footer inside 800.
+ *   answerMinW 300  Usable width is 1280 − 200 (expanded rail) − 52 (2× gap.page) = 1028.
+ *                   Three at 300 plus two gap.row = 928 — fits expanded AND collapsed.
+ *   question    40  The type scale tops out at `metric: 34`, which is a NUMBER size. The
+ *                   question is prose and must out-rank every other string on screen; 40 keeps
+ *                   "Air system (if equipped)" on one line.
+ *   footerH     88  touch.primary 56 + 2×16 air. Same family as bar.height 72 without
+ *                   equalling it, so the two rows never read as one control strip.
+ *   barH         6  Thinner reads as decoration at 1280; thicker competes with the question.
+ *
+ * Height budget: bar.height 72 + header ~104 + barH 6 + body (answerH 168 + gap.section 20)
+ * + footerH 88 + padding 52 ≈ 510 used, ~290 slack — which absorbs the defect step's severity
+ * row and note field without scrolling.
+ */
+export const wizard = {
+  answerH: 168,
+  answerMinW: 300,
+  question: 40,
+  footerH: 88,
+  barH: 6,
 } as const;
 
 /**

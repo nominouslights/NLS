@@ -175,8 +175,26 @@ export function Heading({ children, right }: { children: ReactNode; right?: Reac
   );
 }
 
-/** Status chip at tablet size — colour, glyph and label, always all three. */
-export function TabletChip({ kind, label }: { kind: StatusKind; label: string }) {
+/**
+ * Status chip at tablet size — colour, glyph and label, always all three.
+ *
+ * `glyph` overrides the kind's default icon, mirroring the same prop on the copied
+ * components/ui/Chip.tsx's StatusChip and added for the same reason: two states may
+ * legitimately share a colour and must still be told apart at a glance. A defect's Major and
+ * Out-of-Service are both vermillion — lib/theme.ts is a protected copy, so a fifth StatusKind
+ * or a new hex is not an option — and Out-of-Service supplies its own ✕. See severityGlyph in
+ * lib/inspectionGate.ts. It overrides the ICON only: never a new colour, and never a substitute
+ * for the label.
+ */
+export function TabletChip({
+  kind,
+  label,
+  glyph,
+}: {
+  kind: StatusKind;
+  label: string;
+  glyph?: string;
+}) {
   const m = statusMeta(kind);
   return (
     <span
@@ -197,7 +215,7 @@ export function TabletChip({ kind, label }: { kind: StatusKind; label: string })
         whiteSpace: "nowrap",
       }}
     >
-      <span aria-hidden>{m.g}</span>
+      <span aria-hidden>{glyph ?? m.g}</span>
       {label}
     </span>
   );

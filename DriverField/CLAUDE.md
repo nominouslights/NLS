@@ -93,20 +93,40 @@ first.
 That split is what lets 22 files stay byte-identical while this app renders at roughly twice the
 physical size of a desktop console. `lib/tablet.ts` exports geometry only: `touch` (44 floor / 56
 primary / 64 rail), `bar.height` 72, `rail` 200-88 with 44px tiles, a type scale, `gap`, `radius`,
-and `viewport` 1280×800.
+`wizard` (the DVIR flow's one-question-per-screen geometry — 168px answer tiles, a 40px question,
+an 88px footer, a 6px bar), and `viewport` 1280×800.
 
 `components/ui-tablet/` holds enlarged primitives. It is **not** a fork of `components/ui/*`:
 where a copied primitive works at size (`Chip`, `Panel`, `ModalShell`, `MetricTile`) use the copy.
 Add here only when the desktop one is geometrically unusable — `TouchButton` (the copy is ~34px),
-`DutyControl`, `ThreeStateControl`, `TouchTile`, `StatusBanner`, `SyncPill`.
+`AnswerButton` (a 300×168 answer tile with a 34px glyph — not a prop on `StatusButton`, which is
+56px and padded to sit two in a card row), `DutyControl`, `TouchTile`, `StatusBanner`, `SyncPill`.
+
+`ThreeStateControl` was **deleted** with the DVIR questionnaire: its only consumer was the
+scrolling checklist it replaced, and a compact three-button row has no place in a one-question
+flow. Keeping an unrendered component would be the same "standing invitation to fix it" this file
+already warns about for `NavRail`. `CheckState` in `lib/types.ts` stays.
+
+**Two status chips carry an optional `glyph` override**, and the reason is worth knowing before
+adding a third: a defect's `Major` and `Out of Service` are **both** vermillion, because
+`lib/theme.ts` is a protected copy and a fifth `StatusKind` or a new hex is not an option. Sharing
+a colour is fine; sharing a colour *and* a glyph would leave the text label as the only
+differentiator, which grayscale and a glance both defeat. So `Out of Service` supplies its own
+`✕` through `severityGlyph()` in `lib/inspectionGate.ts` — pinned by a test asserting the two
+resolve to **different glyphs while sharing a colour**. The prop exists on the copied
+`components/ui/Chip.tsx`'s `StatusChip` (added in Dispatcher and re-copied into both apps) and on
+the app-local `TabletChip` and `AnswerButton`. It overrides the **icon only**: never a new colour,
+and never a substitute for the label.
 
 **Anti-pattern, named so nobody reinvents it:** never wrap a copied component in
 `transform: scale()` or a CSS override to enlarge it. It breaks text rendering and hides the
 signal you want — that the desktop primitive doesn't fit and a `ui-tablet` counterpart is owed.
 
-**No `@media` query anywhere in this app.** Architecture non-negotiable #5: company-issued
-Android tablet, landscape-only, 10-inch class, never BYOD. There is no phone to be responsive to,
-and building for one reopens the data-residency question that rule exists to close.
+**No width-based `@media` query anywhere in this app** — no breakpoints, at all. Architecture
+non-negotiable #5: company-issued Android tablet, landscape-only, 10-inch class, never BYOD. There
+is no phone to be responsive to, and building for one reopens the data-residency question that
+rule exists to close. (The one `@media` in the tree is `prefers-reduced-motion` in the copied
+`app/globals.css` — an accessibility preference, not a breakpoint. It stays.)
 
 **Landscape is enforced twice, and the second one is the real mechanism.**
 `app/manifest.ts` declares `orientation: "landscape"` — which applies to the *installed* PWA only.
@@ -167,6 +187,18 @@ in one screen and it is a rewrite.
 "Synced" while syncing nothing is exactly how a hard requirement dies between a demo and a
 deployment.
 
+**`lib/inspectionStore.ts` is deliberately NOT under `lib/sync/`, and the distinction is the
+point.** An in-progress DVIR **draft** is uncertified, private to the device, and costs 22
+re-answered questions if lost — so it lives in `localStorage`, synchronously, and survives a
+reload. A **certified** DVIR is the compliance record, and its home is the offline batch's
+IndexedDB queue with `navigator.storage.persist()`. Putting a draft under `lib/sync/` would make
+it look like the queue and invite the offline batch to migrate it; putting a queued DVIR in
+`localStorage` would be exactly the compliance failure named below. The transition between the two
+states is one function, and the order is not negotiable: **`enqueue()` → `recordCertification()` →
+`discardDraft()`** — if `enqueue` throws, the driver's 22 answers survive. `commandId` on a local
+certification is the offline batch's hook: `drain()` can mark one server-accepted by that id and
+the "Held on this device" banner starts telling a different truth with no API change.
+
 Three things the offline batch must not miss:
 - **`Idempotency-Key`.** Every `QueuedCommand` already carries a client-generated GUID. No backend
   endpoint honours an idempotency key today — none. The client sends it from day one so the server
@@ -222,8 +254,12 @@ fails to resolve at run time.
 | `components/RoleGate.test.tsx` | The gate applies the rule. Every denial asserts the denial screen **renders**, not just that children are absent |
 | `lib/eligibility.test.ts` | Each of the five §5.4 rules failing in isolation, and the verdict being conjunctive |
 | `lib/hos.test.ts` | CVDHS thresholds on **both sides** of every boundary. An off-by-one in a compliance figure is not cosmetic |
-| `lib/wire.test.ts` | Exact spelling of the duty and source strings against `HosDisplay`'s constants |
+| `lib/wire.test.ts` | Exact spelling of the duty and source strings against `HosDisplay`'s constants, and of the three inspection enums (`InspectionDefectSeverity`, `InspectionType`, `InspectionSource`) — including `"Out of Service"` → `"OutOfService"` |
 | `lib/sync/queue.test.ts` | Distinct client-generated id per `enqueue`; the no-op still satisfies the `SyncState` contract |
+| `lib/inspectionSteps.test.ts` | The DVIR wizard's step model: unique item ids, and a progress denominator that stays 22 however many defect follow-ups are injected |
+| `lib/inspectionStore.test.ts` | The draft: per-mode-per-vehicle keys, a reload, a version bump and a stale service day both discarding rather than migrating, unknown item ids dropped on load, and hostile storage failing honestly |
+| `lib/inspectionGate.test.ts` | `deriveResult` against `VehicleInspection.DeriveResult` and `odometerError` against `Vehicle.RecordOdometer`, both sides of each boundary; the boarding gate in both directions; **the negative pin** that this is deliberately *not* a sixth §5.4 rule |
+| `components/screens/Manifest.test.tsx` | The gate as a driver meets it — both buttons disabled with the reason **on screen**, the not-server-enforced admission present, and **a badge scan boarding nobody** |
 
 The governing rule, same as Budgeting's: **anything in this app that re-derives a server rule
 client-side belongs here, with the C# method it mirrors named in the test's comment.**
@@ -303,6 +339,21 @@ automatable subset and none of the colour-alone failures that actually matter he
 - **The §5.4 hide-vs-grey deviation.** §5.4 says an ineligible driver should never *see* an Open
   trip. This scaffold greys them and names the failing rule, because a screen that hides rows
   cannot demonstrate the engine it exists to prove. The real implementation filters server-side.
+- **Server enforcement of the pre-trip boarding gate.** `lib/inspectionGate.ts` hard-blocks Board
+  and No-show until a pre-trip is certified for the trip's vehicle today, and it is a **UX gate on
+  one device** — no backend endpoint requires a certified pre-trip before a manifest write. Named
+  on screen in two places (the Manifest/Today banner, and the review step) rather than left
+  implied, because a demo that looks authoritative here is worse than one that is visibly a
+  scaffold. It is also deliberately **not** a sixth §5.4 eligibility rule: §5.4 asks whether a
+  driver may *claim* an Open trip, this asks whether they may *start moving crew* on one they
+  already hold, and conflating them would grey out every Open trip. Backend ask, in order:
+  the precondition on the manifest write, and a tri-state for
+  `ChecklistItemInput.Passed` (there is no wire representation for an N/A item today, so N/A items
+  are **omitted** from the submitted checklist rather than sent as `passed: true`).
+- **Mutating `Vehicle.hasFailedDvir` from a local certification.** `lib/data.ts` is read-only by
+  rule, and making eligibility rule 3 read `inspectionStore` would create a
+  `data.ts → inspectionGate.ts → data.ts` import cycle. The server owns the flag; the consequence
+  is named on screen instead.
 - **GPS / position ingest.** No endpoint exists.
 - **Push notifications.** No registration endpoint; `/api/notifications` is DispatchAccess email.
 - **Flutter.** Reversed 2026-09 — see the architecture skill's decision register.

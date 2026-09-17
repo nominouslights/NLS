@@ -47,7 +47,13 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "COMPLIANCE",
     collapsedLabel: "CMP",
     items: [
-      { id: "inspection", label: "Pre-Trip", code: "PT" },
+      // ONE rail entry for both modes. `label` is the neutral fallback; DutyRail overrides it
+      // with what is actually due (inspectionDue()) — static data here, derived state there,
+      // the same shape as the existing incidents badge special-case.
+      //
+      // `code: "DV"` and not "PT": "PT" is a lie whenever a post-trip is what is owed, and
+      // "IN" is taken by Incidents. Final codes: TD TR MF DV HS IN VH MP — no collision.
+      { id: "inspection", label: "Inspection", code: "DV" },
       { id: "hours", label: "Hours", code: "HS" },
       { id: "incidents", label: "Incidents", code: "IN" },
       { id: "vehicle", label: "Vehicle", code: "VH" },

@@ -7,8 +7,12 @@ import { Panel } from "@/components/ui/Panel";
 import { StatusButton } from "@/components/ui-tablet/TouchButton";
 import { StatusBanner } from "@/components/ui-tablet/StatusBanner";
 import { Screen, MockTag, CardRow, FieldLine, TabletChip, EmptyNote, Heading } from "./shared";
+import { BoardingGateBanner } from "./inspection/BoardingGateBanner";
 import { enqueue } from "@/lib/sync/queue";
+import { boardingGate } from "@/lib/inspectionGate";
+import { useInspectionStoreHydrated } from "@/lib/useInspectionStore";
 import { activeTrip, badgeIndex, manifestFor, trips } from "@/lib/data";
+import type { InspectionMode } from "@/lib/types";
 
 // The passenger manifest, and the badge-scan panel from architecture §5.2.
 //
@@ -26,10 +30,29 @@ import { activeTrip, badgeIndex, manifestFor, trips } from "@/lib/data";
 // Also unbuilt on the backend: boarding is a whole-document PUT of the manifest today, not a
 // per-passenger action, and there is no no-show flag anywhere. Both are queued as commands here
 // so the screen is already shaped for the endpoints it needs rather than the ones that exist.
+//
+// THE PRE-TRIP GATE. NSC Standard 11 says you may not operate before inspecting, so Board and
+// No-show are HARD-BLOCKED until a pre-trip is certified for THIS TRIP'S vehicle today. Three
+// write paths guard on it, and the third is the one worth naming: submitScan() is a second
+// route into board(), and a badge scan that boards someone past a closed gate is the easiest
+// bypass to ship by accident. lib/inspectionGate.ts owns the rule; it is a UX gate on one
+// device and the banner says so.
 
-export default function Manifest({ tripId }: { tripId: string | null }) {
+export default function Manifest({
+  tripId,
+  onStartInspection,
+}: {
+  tripId: string | null;
+  onStartInspection: (mode: InspectionMode) => void;
+}) {
   const trip = trips.find((t) => t.id === tripId) ?? activeTrip;
   const rows = manifestFor(trip.id);
+
+  // THE TRIP'S vehicle, not assignedVehicleId: a driver may hold a trip on a different unit,
+  // and the pre-trip that matters is the one for the vehicle they are about to load.
+  const hydrated = useInspectionStoreHydrated();
+  const gate = hydrated ? boardingGate(trip.vehicleId) : null;
+  const gateOpen = gate?.open ?? false;
 
   const [boarded, setBoarded] = useState<Record<string, boolean>>(
     Object.fromEntries(rows.map((r) => [r.id, r.boarded])),
@@ -43,19 +66,31 @@ export default function Manifest({ tripId }: { tripId: string | null }) {
   const boardedCount = rows.filter((r) => boarded[r.id]).length;
   const firstBoard = boardedCount === 0;
 
+  // Belt and braces: the buttons are already disabled, but a guard in the write path is what
+  // makes the gate true rather than merely visible.
   async function board(rowId: string, on: boolean) {
+    if (!gateOpen) return;
     await enqueue("manifest.board", { tripId: trip.id, manifestRowId: rowId, boarded: on });
     setBoarded((b) => ({ ...b, [rowId]: on }));
     if (on) setNoShow((n) => ({ ...n, [rowId]: false }));
   }
 
   async function markNoShow(rowId: string, on: boolean) {
+    if (!gateOpen) return;
     await enqueue("manifest.board", { tripId: trip.id, manifestRowId: rowId, noShow: on });
     setNoShow((n) => ({ ...n, [rowId]: on }));
     if (on) setBoarded((b) => ({ ...b, [rowId]: false }));
   }
 
   async function submitScan() {
+    // THE SECOND ROUTE INTO board(), and the one a disabled button does not cover: a hardware
+    // scanner types into the field and sends Enter with nothing tapped. It gets its own guard
+    // and its own test.
+    if (!gateOpen) {
+      setScanNote(gate?.shortReason ?? "Boarding is not available yet.");
+      setScan("");
+      return;
+    }
     const badge = badgeIndex.get(scan.trim());
     if (!badge) {
       setScanNote(`No crew member on this manifest carries badge ${scan.trim() || "—"}.`);
@@ -83,7 +118,11 @@ export default function Manifest({ tripId }: { tripId: string | null }) {
         </div>
       }
     >
-      {firstBoard && (
+      {gate ? <BoardingGateBanner gate={gate} onStartInspection={onStartInspection} /> : null}
+
+      {/* SUPPRESSED while the gate is closed: "the first boarding starts this trip" is noise
+          when boarding is impossible, and two stacked banners bury the one that matters. */}
+      {gateOpen && firstBoard && (
         <StatusBanner kind="info" title="The first boarding starts this trip.">
           Marking anyone aboard sets {trip.tripNumber} to In Transit — architecture §5.2, so a
           driver never has to update status separately. Not wired to the server in this build.
@@ -154,12 +193,16 @@ export default function Manifest({ tripId }: { tripId: string | null }) {
                   kind="ontime"
                   label="Board"
                   active={isBoarded}
+                  disabled={!gateOpen}
+                  disabledReason={gate?.shortReason}
                   onClick={() => void board(row.id, !isBoarded)}
                 />
                 <StatusButton
                   kind="over"
                   label="No-show"
                   active={isNoShow}
+                  disabled={!gateOpen}
+                  disabledReason={gate?.shortReason}
                   onClick={() => void markNoShow(row.id, !isNoShow)}
                 />
               </div>

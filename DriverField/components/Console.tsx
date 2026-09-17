@@ -3,8 +3,10 @@
 import { useState } from "react";
 import { colors } from "@/lib/theme";
 import type { ScreenId } from "@/lib/nav";
-import type { DutyState } from "@/lib/types";
+import type { DutyState, InspectionMode } from "@/lib/types";
 import { currentDuty, incidents } from "@/lib/data";
+import { inspectionDue } from "@/lib/inspectionGate";
+import { useInspectionStoreHydrated } from "@/lib/useInspectionStore";
 import TopBar from "@/components/TopBar";
 import DutyRail from "@/components/DutyRail";
 import Today from "@/components/screens/Today";
@@ -35,6 +37,24 @@ export default function Console() {
   const [duty, setDuty] = useState<DutyState>(currentDuty.duty);
   const [activeScreenTripId, setActiveScreenTripId] = useState<string | null>(null);
 
+  // Hoisted on exactly the same grounds as activeScreenTripId: more than one screen needs it.
+  // Manifest and Today WRITE it (their "Start pre-trip inspection" action), Inspection READS
+  // it. `null` means "whatever inspectionDue() says", so the rail entry and a cold open agree.
+  //
+  // Nothing else about the inspection is hoisted — the draft lives at module level in
+  // lib/inspectionStore.ts precisely so it need not be.
+  const [inspectionMode, setInspectionMode] = useState<InspectionMode | null>(null);
+
+  const startInspection = (mode: InspectionMode) => {
+    setInspectionMode(mode);
+    setScreen("inspection");
+  };
+
+  // One subscription so the rail badge tracks the draft store. See lib/useInspectionStore.ts
+  // for why this is useSyncExternalStore and not an effect.
+  const inspectionHydrated = useInspectionStoreHydrated();
+  const due = inspectionHydrated ? inspectionDue() : null;
+
   const openIncidents = incidents.filter((i) => i.status !== "Closed").length;
 
   return (
@@ -57,6 +77,7 @@ export default function Console() {
           collapsed={railCollapsed}
           onToggleCollapsed={() => setRailCollapsed((c) => !c)}
           pendingIncidents={openIncidents}
+          inspectionDue={due}
         />
 
         <div style={{ flex: 1, minWidth: 0, background: colors.mainBg }}>
@@ -68,6 +89,7 @@ export default function Console() {
                 setActiveScreenTripId(id);
                 setScreen("manifest");
               }}
+              onStartInspection={startInspection}
             />
           )}
           {screen === "trips" && (
@@ -78,8 +100,10 @@ export default function Console() {
               }}
             />
           )}
-          {screen === "manifest" && <Manifest tripId={activeScreenTripId} />}
-          {screen === "inspection" && <Inspection />}
+          {screen === "manifest" && (
+            <Manifest tripId={activeScreenTripId} onStartInspection={startInspection} />
+          )}
+          {screen === "inspection" && <Inspection mode={inspectionMode} />}
           {screen === "hours" && <Hours duty={duty} onDutyChange={setDuty} />}
           {screen === "incidents" && <Incidents />}
           {screen === "vehicle" && <Vehicle />}

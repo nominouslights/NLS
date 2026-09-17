@@ -14,9 +14,23 @@ export type HosSource = "Driver App" | "Manual (paper backup)";
 
 export type TripMode = "Open" | "Assigned";
 
+/**
+ * DISPLAY strings, not wire values. InspectionDefectSeverity in
+ * Backend/src/Fleet/Domain/Inspections/InspectionDefectSeverity.cs is
+ * `Minor | Major | OutOfService` — no spaces. Cross the boundary through
+ * `severityToWire()` in lib/inspectionGate.ts, never by sending one of these; the default
+ * System.Text.Json enum converter would reject "Out of Service". Pinned in lib/wire.test.ts.
+ */
 export type DefectSeverity = "Minor" | "Major" | "Out of Service";
 
 export type CheckState = "pass" | "defect" | "na";
+
+/**
+ * Wire-shaped, matching InspectionType in
+ * Backend/src/Fleet/Domain/Inspections/InspectionType.cs (`PreTrip | PostTrip`). Distinct from
+ * DvirSubmission.type, which is display prose ("Pre-Trip"). Pinned in lib/wire.test.ts.
+ */
+export type InspectionMode = "PreTrip" | "PostTrip";
 
 export interface DriverProfile {
   id: string;
@@ -127,15 +141,34 @@ export interface HosEntry {
   note: string;
 }
 
+/**
+ * `id` is what answers, drafts and the resume pointer key on; `label` is both what the driver
+ * reads and the `Item` string ChecklistItemInput carries. Separate deliberately: the old code
+ * keyed answers by the display string, so two groups sharing an item name collided and the
+ * group was lost from the payload even though ChecklistItemInput has a Group field.
+ */
+export interface ChecklistItem {
+  id: string;
+  label: string;
+}
+
 export interface ChecklistGroup {
   group: string;
-  items: string[];
+  items: ChecklistItem[];
 }
 
 export interface DvirSubmission {
   id: string;
   performedAt: string;
+  /** Display prose — "Pre-Trip" / "Post-Trip". Read `mode` for anything that branches. */
   type: string;
+  /**
+   * Wire-shaped, matching InspectionType. Distinct from `type`, which is display prose. The
+   * boarding gate branches on this, and prose is not a contract.
+   */
+  mode: InspectionMode;
+  /** Join key for the gate — `unit` is free text and cannot be matched against a Vehicle row. */
+  vehicleId: string;
   unit: string;
   odometerKm: number;
   result: string;
