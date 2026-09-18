@@ -1,3 +1,4 @@
+using System.Globalization;
 using NorthernLink.Shared.Kernel;
 
 namespace NorthernLink.Budgeting.Domain.Codes;
@@ -92,4 +93,37 @@ public static class BudgetCodeErrors
     public static readonly Error InUse = Error.Conflict(
         "Budgeting.Code.InUse",
         "This budget code is referenced by budget allocations or actual transactions and cannot be deleted. Retire it instead — a retired code stays listed so existing rows keep resolving.");
+
+    /// <summary>
+    /// Retirement refused because a period still using the code has not closed. The blocking
+    /// periods are named in the message rather than merely counted, because "a period is still
+    /// open" leaves the user hunting and "FY2026 Q3 is still open" is something they can act on
+    /// immediately. Built at call time rather than as a static field for exactly that reason —
+    /// the labels are not known until the rule has run.
+    /// </summary>
+    /// <param name="periodLabels">
+    /// The blocking periods' display labels, earliest first. The list is capped in the message
+    /// (see <see cref="MaxNamedPeriods"/>): a code that a dozen periods use needs the rule and a
+    /// couple of examples, not a paragraph of period names.
+    /// </param>
+    public static Error PeriodNotClosed(IReadOnlyList<string> periodLabels) => Error.Conflict(
+        "Budgeting.Code.PeriodNotClosed",
+        $"This budget code is still used by {DescribePeriods(periodLabels)}. A budget code can only be retired once every period that uses it is closed — until then its plan and its transactions have to keep resolving to a live code.");
+
+    /// <summary>How many blocking periods the message names before it summarizes the rest.</summary>
+    public const int MaxNamedPeriods = 3;
+
+    // Invariant culture on the count for the same reason the length messages above are spelled
+    // out rather than interpolated: the process's culture is not the user's, and a thousands
+    // separator chosen by the server is not something the console can undo.
+    private static string DescribePeriods(IReadOnlyList<string> periodLabels) => periodLabels.Count switch
+    {
+        0 => "a period that is not closed yet",
+        1 => $"{periodLabels[0]}, which is not closed yet",
+        <= MaxNamedPeriods =>
+            $"{string.Join(", ", periodLabels.Take(periodLabels.Count - 1))} and {periodLabels[^1]}, which are not closed yet",
+        _ =>
+            $"{string.Join(", ", periodLabels.Take(MaxNamedPeriods))} and " +
+            $"{(periodLabels.Count - MaxNamedPeriods).ToString(CultureInfo.InvariantCulture)} more periods that are not closed yet",
+    };
 }

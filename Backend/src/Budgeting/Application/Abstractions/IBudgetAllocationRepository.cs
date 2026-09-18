@@ -19,6 +19,20 @@ public interface IBudgetAllocationRepository
     /// </summary>
     Task<bool> ExistsForCodeAsync(Guid budgetCodeId, string code, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// The distinct periods that have planned against the code — by id <b>or</b> by string, the
+    /// same match <see cref="ExistsForCodeAsync"/> makes, so "which rows belong to this code" has
+    /// one answer across the module rather than two.
+    /// <para>
+    /// Serves the retirement rule, which needs to know <em>which</em> periods reference the code
+    /// and what state each is in. <see cref="IBudgetCodeUsageProbe"/> deliberately cannot answer
+    /// that — it returns a bool, and widening it to carry period state would make "is this code
+    /// referenced" mean two different things at its two call sites.
+    /// </para>
+    /// </summary>
+    Task<IReadOnlyList<Guid>> GetPeriodIdsForCodeAsync(
+        Guid budgetCodeId, string code, CancellationToken cancellationToken = default);
+
     void Add(BudgetAllocation allocation);
 
     /// <summary>Hard delete — the line is a plan entry, not history; the journal keeps its final snapshot.</summary>

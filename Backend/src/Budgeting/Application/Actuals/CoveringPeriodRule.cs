@@ -43,7 +43,10 @@ public static class CoveringPeriodRule
     {
         var all = await periods.GetAllAsync(cancellationToken);
 
-        return all.Any(period => period.StartsOn <= occurredOn && occurredOn <= period.EndsOn)
+        // BudgetPeriod.Covers, not an inline comparison: the retirement rule maps transaction
+        // dates onto periods too, and two copies of "inclusive on both ends" would eventually
+        // disagree about a boundary day.
+        return all.Any(period => period.Covers(occurredOn))
             ? Result.Success()
             : Result.Failure(ActualTransactionErrors.NoPeriodCoversDate);
     }

@@ -224,11 +224,22 @@ guessable from the form:
   reference a code by string, so renaming would orphan every row already tagged. The edit modal
   renders it as read-only text rather than a disabled input, because disabled reads as "not right
   now" when the truth is "not ever". A mistyped code is retire-and-recreate.
-- **Retiring is the normal end of a code's life.** A retired code stays listed so last period's
-  rows keep resolving. `DELETE` exists only for a code created in error that nothing has ever
-  referenced; `IBudgetCodeUsageProbe` turns it into a 409 the moment that stops being true, and
-  the server's message names retirement as the alternative. The UI puts it behind a two-click
-  confirm.
+- **Retiring is the normal end of a code's life, but it is no longer unconditional.** A retired
+  code stays listed so last period's rows keep resolving. `DELETE` exists only for a code created
+  in error that nothing has ever referenced; `IBudgetCodeUsageProbe` turns it into a 409
+  `Budgeting.Code.InUse` the moment that stops being true — an allocation line **or** an actual
+  transaction counts — and the server's message names retirement as the alternative. The UI puts
+  it behind a two-click confirm.
+  **`deactivate` now also answers 409 `Budgeting.Code.PeriodNotClosed`** while any period using
+  the code is still open: a code can only be retired once every period referencing it — again, by
+  a line *or* a transaction — is `Closed`. Retiring a code out from under a live plan would leave
+  a planner holding lines the server then refuses every edit to. The message names the blocking
+  periods by label (capped at three, then "and N more"), so show it verbatim — it is the only
+  thing telling the user which period to close. Two consequences worth knowing before filing a
+  bug: a code used by a **Draft or Open** period can be retired once its line is removed, which
+  the user can do because the plan is still editable; a code used by a **Finalized or In-review**
+  period cannot be retired until that period closes, because its plan is frozen — and that is the
+  point, not a deadlock. `activate` is unaffected.
 - **The hierarchy is one level deep**, guarded from both directions: a parent must be top-level,
   *and* a code that already has children cannot be given a parent (otherwise the chain is built
   bottom-up). `parentCandidates` in `lib/api/budgeting.ts` mirrors this so the picker never offers

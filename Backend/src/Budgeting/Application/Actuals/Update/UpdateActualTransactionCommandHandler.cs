@@ -15,15 +15,27 @@ namespace NorthernLink.Budgeting.Application.Actuals.Update;
 /// NotFound) — it is what the request is addressed to.</item>
 /// <item><b>A period covers the new date.</b> Moving a transaction's date is how it moves between
 /// periods, so a correction can strand a row exactly as a bad entry can.</item>
-/// <item><b>The code exists and is active.</b> A correction onto a retired code is a new decision
-/// against a code no longer offered, so it is refused the same way a first entry is — including
-/// when the row is already on that code and only its description is being fixed. Restoring the
-/// code or picking another is the way through, and either leaves a clearer record than a
-/// correction quietly landing somewhere nobody offers.</item>
+/// <item><b>The code exists, and is active <em>if the edit moves the transaction onto it</em>.</b>
+/// See below — this is narrower than the record path's check, deliberately.</item>
 /// </list>
+/// <para>
+/// <b>A retired code blocks a move onto it, never an edit that leaves it alone.</b> Putting new
+/// spend on a retired code is a new decision against a code nobody offers any more, so that is
+/// refused exactly as a first entry is. But a transaction already sitting on a code that has
+/// since been retired must stay correctable: a retired code must never stand between anyone and
+/// fixing a fact. Without the narrowing, a typo in a description on historical data would be
+/// unfixable without restoring a code the tenant has deliberately taken out of use.
+/// </para>
+/// <para>
+/// <c>BudgetCodeRetirementRule</c> makes that situation rarer — a code cannot be retired while a
+/// period using it is still open — but not impossible, because actuals stay editable in a Closed
+/// period by design, and a Closed period is precisely where a code is free to be retired.
+/// </para>
+/// <para>
 /// As on the record path, the period's <em>state</em> is deliberately never consulted: a closed
 /// period's actuals must stay correctable, because that is when anyone is looking closely enough
 /// to spot an error. Only the plan is frozen by the lifecycle.
+/// </para>
 /// </summary>
 public sealed class UpdateActualTransactionCommandHandler(
     IActualTransactionRepository transactions,
@@ -62,7 +74,11 @@ public sealed class UpdateActualTransactionCommandHandler(
             return Result.Failure(BudgetCodeErrors.NotFound);
         }
 
-        if (!code.IsActive)
+        // Only a move onto a retired code is refused. Compared against the row's current code, not
+        // against the request's own field, so "did this edit change anything" is answered by the
+        // stored state rather than by what the caller chose to send.
+        var movesToAnotherCode = code.Id != transaction.BudgetCodeId;
+        if (movesToAnotherCode && !code.IsActive)
         {
             return Result.Failure(ActualTransactionErrors.CodeRetired);
         }

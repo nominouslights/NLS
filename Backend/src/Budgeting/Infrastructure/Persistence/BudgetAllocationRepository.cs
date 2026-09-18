@@ -19,6 +19,17 @@ internal sealed class BudgetAllocationRepository(BudgetingDbContext context) : I
         context.BudgetAllocations.AnyAsync(
             a => a.BudgetCodeId == budgetCodeId || a.Code == code, cancellationToken);
 
+    // Same id-or-string match as ExistsForCodeAsync, and over the write table for the same
+    // reason: the retirement check runs in the request that would retire the code, and the
+    // projection may still be a poll behind.
+    public async Task<IReadOnlyList<Guid>> GetPeriodIdsForCodeAsync(
+        Guid budgetCodeId, string code, CancellationToken cancellationToken = default) =>
+        await context.BudgetAllocations
+            .Where(a => a.BudgetCodeId == budgetCodeId || a.Code == code)
+            .Select(a => a.PeriodId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
     public void Add(BudgetAllocation allocation) => context.BudgetAllocations.Add(allocation);
 
     public void Remove(BudgetAllocation allocation) => context.BudgetAllocations.Remove(allocation);

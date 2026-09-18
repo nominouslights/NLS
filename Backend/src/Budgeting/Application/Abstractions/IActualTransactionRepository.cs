@@ -20,6 +20,19 @@ public interface IActualTransactionRepository
     /// </summary>
     Task<bool> ExistsForCodeAsync(Guid budgetCodeId, string code, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// The distinct dates on which anything was recorded against the code — by id <b>or</b> by
+    /// string, the same match <see cref="ExistsForCodeAsync"/> makes.
+    /// <para>
+    /// <b>Dates, not period ids</b>, because a transaction stores no period: the caller maps each
+    /// date onto the period covering it. That is the same derivation every other read makes, so
+    /// the retirement rule and the period view can never disagree about which period a
+    /// transaction belongs to.
+    /// </para>
+    /// </summary>
+    Task<IReadOnlyList<DateOnly>> GetDatesForCodeAsync(
+        Guid budgetCodeId, string code, CancellationToken cancellationToken = default);
+
     void Add(ActualTransaction transaction);
 
     /// <summary>

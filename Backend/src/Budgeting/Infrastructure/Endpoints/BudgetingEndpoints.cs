@@ -78,11 +78,16 @@ public static class BudgetingEndpoints
         budgeting.MapDelete("actuals/{id:guid}", DeleteActual);
 
         // Codes. Retiring (activate/deactivate) is the normal end-of-life path and stays that
-        // way: allocation lines reference codes by id and by string and must keep resolving, so a
-        // code that has ever been used is retired, never deleted. DELETE exists only for the
-        // narrow case retirement does not cover — a code created in error and never referenced —
-        // and IBudgetCodeUsageProbe (now backed by the allocation table) turns it into a 409 the
-        // moment any period has planned against the code.
+        // way: allocation lines and actual transactions reference codes by id and by string and
+        // must keep resolving, so a code that has ever been used is retired, never deleted.
+        // DELETE exists only for the narrow case retirement does not cover — a code created in
+        // error and never referenced — and IBudgetCodeUsageProbe turns it into a 409 InUse the
+        // moment any period has planned against the code or any spend has been recorded on it.
+        //
+        // deactivate additionally answers 409 PeriodNotClosed while any period using the code is
+        // still open: retiring a code out from under a live plan would leave a planner holding
+        // lines they can no longer edit. The message names the blocking periods. activate carries
+        // no such check — restoring a code takes nothing away from anyone.
         budgeting.MapGet("codes", GetCodes);
         budgeting.MapGet("codes/owners", GetOwnerCandidates);
         budgeting.MapPost("codes", CreateCode);

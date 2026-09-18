@@ -19,6 +19,17 @@ internal sealed class ActualTransactionRepository(BudgetingDbContext context) : 
         context.ActualTransactions.AnyAsync(
             t => t.BudgetCodeId == budgetCodeId || t.Code == code, cancellationToken);
 
+    // Same id-or-string match, and over the write table for the same reason. Distinct dates
+    // rather than rows: a code with a thousand fuel purchases in one period still only names one
+    // period in the refusal message.
+    public async Task<IReadOnlyList<DateOnly>> GetDatesForCodeAsync(
+        Guid budgetCodeId, string code, CancellationToken cancellationToken = default) =>
+        await context.ActualTransactions
+            .Where(t => t.BudgetCodeId == budgetCodeId || t.Code == code)
+            .Select(t => t.OccurredOn)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
     public void Add(ActualTransaction transaction) => context.ActualTransactions.Add(transaction);
 
     public void Remove(ActualTransaction transaction) => context.ActualTransactions.Remove(transaction);

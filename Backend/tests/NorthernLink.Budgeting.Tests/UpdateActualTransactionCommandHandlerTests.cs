@@ -9,8 +9,9 @@ namespace NorthernLink.Budgeting.Tests;
 
 /// <summary>
 /// UpdateActualTransactionCommandHandler: the correction path. Same guards as recording plus the
-/// row itself, and the same deliberate absence — the period's state is never consulted, so a
-/// closed period's books stay correctable.
+/// row itself, and two deliberate narrowings in the same direction — the period's state is never
+/// consulted, and a retired code blocks only a <em>move</em> onto it. Both say the same thing: a
+/// fact must always be correctable, whatever has happened to the period or the code since.
 /// </summary>
 public class UpdateActualTransactionCommandHandlerTests
 {
@@ -151,17 +152,47 @@ public class UpdateActualTransactionCommandHandlerTests
     }
 
     [Fact]
-    public async Task A_row_whose_own_code_was_retired_since_cannot_be_corrected_in_place_either()
+    public async Task A_row_whose_own_code_was_retired_since_is_still_correctable_in_place()
     {
-        // Same call the allocation set handler makes: a correction is a new decision against a
-        // code nobody offers any more, and the way out is to restore the code or move the row.
+        // Narrower than the record path on purpose: a retired code must never stand between
+        // anyone and fixing a fact. The edit does not move the transaction anywhere, so the
+        // retirement is none of its business.
         Assert.True(_fuel.SetActive(false, TestBudgeting.ActorId).IsSuccess);
 
         var result = await UpdateAsync(description: "Just fixing a typo.");
 
-        Assert.True(result.IsFailure);
-        Assert.Equal(ActualTransactionErrors.CodeRetired, result.Error);
-        Assert.Equal("Diesel.", _transaction.Description);
+        Assert.True(result.IsSuccess);
+        Assert.Equal("Just fixing a typo.", _transaction.Description);
+        Assert.Equal(_fuel.Id, _transaction.BudgetCodeId);
+        Assert.Equal(1, _transactions.SaveChangesCallCount);
+    }
+
+    [Fact]
+    public async Task The_amount_and_the_date_are_correctable_on_a_retired_code_too()
+    {
+        // The whole row stays correctable, not just its prose — a wrong figure on historical data
+        // is the correction that matters most.
+        Assert.True(_fuel.SetActive(false, TestBudgeting.ActorId).IsSuccess);
+
+        var result = await UpdateAsync(amount: 612.75m, occurredOn: new DateOnly(2026, 12, 2));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(612.75m, _transaction.AmountCad);
+        Assert.Equal(new DateOnly(2026, 12, 2), _transaction.OccurredOn);
+    }
+
+    [Fact]
+    public async Task Moving_a_row_off_a_retired_code_onto_a_live_one_is_allowed()
+    {
+        // The escape hatch the narrowing has to leave open: a row stranded on a retired code can
+        // be re-pointed at a live one without anyone restoring the retired code first.
+        Assert.True(_fuel.SetActive(false, TestBudgeting.ActorId).IsSuccess);
+
+        var result = await UpdateAsync(codeId: _maintenance.Id, description: "Miscoded.");
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(_maintenance.Id, _transaction.BudgetCodeId);
+        Assert.Equal("ZBB-MAINT-01", _transaction.Code);
     }
 
     // --- The asymmetry ---

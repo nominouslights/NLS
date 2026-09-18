@@ -21,6 +21,15 @@ internal sealed class InMemoryActualTransactionRepository : IActualTransactionRe
         Task.FromResult(Transactions.Any(t =>
             t.BudgetCodeId == budgetCodeId || string.Equals(t.Code, code, StringComparison.Ordinal)));
 
+    // Same id-or-string match as ExistsForCodeAsync, distinct like the real query's Distinct().
+    public Task<IReadOnlyList<DateOnly>> GetDatesForCodeAsync(
+        Guid budgetCodeId, string code, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<DateOnly>>(Transactions
+            .Where(t => t.BudgetCodeId == budgetCodeId || string.Equals(t.Code, code, StringComparison.Ordinal))
+            .Select(t => t.OccurredOn)
+            .Distinct()
+            .ToList());
+
     public void Add(ActualTransaction transaction) => Transactions.Add(transaction);
 
     public void Remove(ActualTransaction transaction) => Transactions.Remove(transaction);
