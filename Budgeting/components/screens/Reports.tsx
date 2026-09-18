@@ -5,7 +5,7 @@ import { Panel, SectionLabel } from "@/components/ui/Panel";
 import { StatusChip } from "@/components/ui/Chip";
 import { formatCad } from "@/lib/api/format";
 import type { BudgetPeriod } from "@/lib/types";
-import { actuals, budgetCodes, varianceKind } from "@/lib/data";
+import { budgetCodes, variance, varianceKind } from "@/lib/data";
 import { MockTag, Num, Screen, periodLabel } from "@/components/screens/shared";
 
 // Placeholder report cards. The first one is real enough to be worth building now: revenue mix
@@ -31,7 +31,10 @@ export default function Reports({
   const revenueCodes = new Set(
     budgetCodes.filter((c) => c.category === "Revenue").map((c) => c.code),
   );
-  const revenueLines = actuals.filter((a) => a.periodId === periodId && revenueCodes.has(a.code));
+  // The mock variance rows carry the same planned/actual pair the removed `actuals` array did,
+  // so the revenue mix reads them instead. This card stays mock until it is rebuilt on the
+  // rollup endpoint — see lib/data.ts.
+  const revenueLines = variance.filter((v) => v.periodId === periodId && revenueCodes.has(v.code));
   const totalRevenue = revenueLines.reduce((sum, r) => sum + r.actual, 0);
 
   return (

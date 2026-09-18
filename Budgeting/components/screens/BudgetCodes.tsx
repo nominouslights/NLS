@@ -32,14 +32,20 @@ import { EmptyNote, Screen } from "@/components/screens/shared";
 // detailBg, split by a CSS grid with a top border.
 //
 // This screen owns its own fetch rather than taking the list as a prop — unlike periods, which
-// Console hoists because five screens read them. The period dashboard and Allocations fetch the
-// chart too (for their pickers and coverage); the three mock screens (Actuals, Variance, Reports)
-// still read the lookup in lib/data.ts until their slice lands.
+// Console hoists because five screens read them. The period dashboard and Actuals vs Budget fetch
+// the chart too (for their pickers, coverage and rollup); the two still-mock screens (Variance,
+// Reports) read the lookup in lib/data.ts until their slice lands.
 //
 // Retiring is a flag flip and is the normal end of a code's life — a retired code stays listed,
 // because last period's allocations and actuals reference it by string and must keep resolving.
 // Deleting exists only for a code created in error that nothing has ever used, and the server
 // answers 409 the moment that stops being true.
+//
+// **Retiring is no longer unconditional either.** The server refuses a deactivate with 409
+// Budgeting.Code.PeriodNotClosed while any period that plans or spends against the code is not
+// Closed, and that message is the only thing naming *which* period must close — so a failed
+// action carries the server's text under its own heading, rather than the load banner's "Budget
+// codes / RETRY", which would invite the user to retry a load they never asked for.
 
 export default function BudgetCodes({
   selId,
@@ -51,7 +57,13 @@ export default function BudgetCodes({
   // null = still loading.
   const [codes, setCodes] = useState<BudgetCode[] | null>(null);
   const [owners, setOwners] = useState<BudgetOwnerOption[]>([]);
-  const [error, setError] = useState<{ message: string; code: string } | null>(null);
+  /** `retry` distinguishes a failed load (offer RETRY) from a refused action (offer DISMISS). */
+  const [error, setError] = useState<{
+    title: string;
+    message: string;
+    code: string;
+    retry: boolean;
+  } | null>(null);
   const [editing, setEditing] = useState<BudgetCode | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -67,8 +79,22 @@ export default function BudgetCodes({
     setCodes((prev) => prev ?? []);
     setError(
       e instanceof ApiError
-        ? { message: e.message, code: e.code }
-        : { message: "Failed to load budget codes.", code: "Unknown" },
+        ? { title: "Budget codes", message: e.message, code: e.code, retry: true }
+        : { title: "Budget codes", message: "Failed to load budget codes.", code: "Unknown", retry: true },
+    );
+  }, []);
+
+  /**
+   * A refused action, shown under its own heading with the server's message verbatim. That text
+   * is load-bearing for two refusals in particular: PeriodNotClosed names the periods that must
+   * close before the code can be retired, and InUse names retirement as the alternative to a
+   * delete. Paraphrasing either would leave the user with no way to find the way out.
+   */
+  const applyActionError = useCallback((title: string, e: unknown) => {
+    setError(
+      e instanceof ApiError
+        ? { title, message: e.message, code: e.code, retry: false }
+        : { title, message: "Something went wrong — please try again.", code: "Unknown", retry: false },
     );
   }, []);
 
@@ -118,7 +144,7 @@ export default function BudgetCodes({
     setConfirmDeleteId(null); // a pending confirmation never survives a selection change
   }
 
-  async function runAction(action: () => Promise<unknown>) {
+  async function runAction(title: string, action: () => Promise<unknown>) {
     if (busy) return;
     setBusy(true);
     setError(null);
@@ -127,16 +153,20 @@ export default function BudgetCodes({
       // Re-read rather than patching local state, so the row reflects what the server stored.
       applyLoaded(await listBudgetCodes());
     } catch (e) {
-      applyLoadError(e);
+      applyActionError(title, e);
     } finally {
       setBusy(false);
     }
   }
 
+  // A refused retire is the interesting one: 409 Budgeting.Code.PeriodNotClosed names every
+  // period still using the code, and that list is the whole instruction for what to do next.
   const toggleActive = (target: BudgetCode) =>
-    runAction(() => setBudgetCodeActive(target.id, !target.active));
+    runAction(target.active ? "Retire budget code" : "Restore budget code", () =>
+      setBudgetCodeActive(target.id, !target.active),
+    );
 
-  const seedStarterSet = () => runAction(seedStarterBudgetCodes);
+  const seedStarterSet = () => runAction("Starter set", seedStarterBudgetCodes);
 
   async function confirmDelete(target: BudgetCode) {
     if (confirmDeleteId !== target.id) {
@@ -144,9 +174,9 @@ export default function BudgetCodes({
       return;
     }
     setConfirmDeleteId(null);
-    // A 409 (children, or the code has been used) surfaces through applyLoadError with the
-    // server's own message, which already names retirement as the alternative.
-    await runAction(() => deleteBudgetCode(target.id));
+    // A 409 (children, or the code has been used) surfaces with the server's own message, which
+    // already names retirement as the alternative.
+    await runAction("Delete budget code", () => deleteBudgetCode(target.id));
     onSelect(null);
   }
 
@@ -168,9 +198,13 @@ export default function BudgetCodes({
     >
       {error && (
         <div style={{ marginBottom: 12 }}>
-          <ErrorNotice title="Budget codes" message={error.message} code={error.code} />
+          <ErrorNotice title={error.title} message={error.message} code={error.code} />
           <div style={{ marginTop: 9 }}>
-            <ActionButton onClick={load}>RETRY</ActionButton>
+            {error.retry ? (
+              <ActionButton onClick={load}>RETRY</ActionButton>
+            ) : (
+              <ActionButton onClick={() => setError(null)}>DISMISS</ActionButton>
+            )}
           </div>
         </div>
       )}
@@ -188,7 +222,7 @@ export default function BudgetCodes({
             </ActionButton>
             <span style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim }}>
               Creates a starter chart covering each service line and the main cost categories.
-              Every code can then be edited or retired.
+              Every code can then be edited, and retired once the periods using it have closed.
             </span>
           </div>
         </div>
@@ -315,7 +349,8 @@ export default function BudgetCodes({
                     }}
                   >
                     Deleting is permanent and is only for a code created in error. If this code has
-                    ever been used, retire it instead — click anything else to cancel.
+                    ever been used, retire it instead — which the server allows once every period
+                    using it is closed. Click anything else to cancel.
                   </div>
                 )}
 
@@ -407,10 +442,18 @@ export default function BudgetCodes({
                   </div>
                 </Panel>
 
-                {!selected.active && (
+                {selected.active ? (
+                  <Note>
+                    Retiring is the normal end of a code&apos;s life, but not at any moment: the server
+                    refuses it while a period that plans or spends against this code is still
+                    open, and the refusal names the periods to close first. A Draft or Open period
+                    can release the code sooner by removing its line.
+                  </Note>
+                ) : (
                   <Note>
                     Retired codes stay listed on purpose — allocations and actuals already tagged
-                    with this code still resolve to it.
+                    with this code still resolve to it. A transaction already on this code stays
+                    correctable; no new one can be recorded against it.
                   </Note>
                 )}
 

@@ -846,3 +846,297 @@ export function toBudgetCode(r: BudgetCodeRecord): BudgetCode {
     modifiedByEmail: r.modifiedByEmail,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Actual transactions — what was really spent or received, and the rollup that
+// sets a period's plan against it. Mirrors the backend's
+// ActualTransactionResponse, BudgetRollupRowResponse and
+// RecordActualTransactionRequest.
+//
+// The single design point to carry over from the backend: **there is no period
+// id on a transaction.** The period is derived from occurredOn and never
+// stored, so moving a transaction between periods is a date correction and
+// nothing else. That is why every write here is addressed to /actuals rather
+// than to a period, and why the date field needs its own client-side check
+// (actualDateError) — a date in no period is refused, not stored orphaned.
+// ---------------------------------------------------------------------------
+
+/** Wire enum. Fixed at creation server-side; nothing in this app can set it. */
+export type ActualTransactionSource = "Manual" | "QuickBooks";
+
+/**
+ * Mirrors ActualTransactionResponse. Rendered directly, field for field, with no view type of
+ * its own — the same reason BudgetAllocationRecord has none: nothing on it needs renaming, and a
+ * mapper that only copied fields would be one more place for the contract to drift.
+ *
+ * `name`, `category`, `serviceLine` and `isCodeActive` describe the *code* and are resolved from
+ * the chart on every read; `code` is the transaction's own snapshot of the code string, which is
+ * what lets a row whose code was deleted and recreated still read.
+ */
+export interface ActualTransactionRecord {
+  id: string;
+  budgetCodeId: string;
+  /** Immutable string snapshot of the code, re-taken only when the row is moved to another code. */
+  code: string;
+  name: string;
+  category: BudgetCodeCategory;
+  serviceLine: BudgetServiceLine | null;
+  /** False once the code is retired — the row stays correctable, but cannot move onto that code. */
+  isCodeActive: boolean;
+  amountCad: number;
+  /** ISO date. The only thing that says which period this counts in. */
+  occurredOn: string;
+  description: string;
+  source: ActualTransactionSource;
+  /** The originating system's id — null for everything entered here. */
+  externalReference: string | null;
+  createdBy: string | null;
+  createdByEmail: string | null;
+  modifiedBy: string | null;
+  modifiedByEmail: string | null;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+}
+
+/**
+ * Mirrors BudgetRollupRowResponse — one row per code, both sides of the outer join included: a
+ * planned code with no spend comes back with actualCad 0, and a code spent against but never
+ * planned comes back with plannedCad 0. That second row is the one zero-based budgeting exists
+ * to surface, so nothing here filters it out.
+ *
+ * `deltaCad` is the server's own actual − planned. **No band, no percentage, no status** — those
+ * thresholds are the console's (varianceKind in lib/data.ts), and a server that shipped its own
+ * would put two answers to one question in the product.
+ */
+export interface BudgetRollupRowRecord {
+  budgetCodeId: string;
+  code: string;
+  name: string;
+  category: BudgetCodeCategory;
+  plannedCad: number;
+  actualCad: number;
+  /** actualCad − plannedCad, as the server computed it. */
+  deltaCad: number;
+}
+
+/**
+ * POST /api/budgeting/actuals and PUT /api/budgeting/actuals/{id} body
+ * (RecordActualTransactionRequest) — one shape for both, because a correction rewrites exactly
+ * the fields an entry supplies.
+ *
+ * No period id (the date decides it), no source and no external reference (everything entered
+ * here is Manual, and a caller that could name its own source could claim a QuickBooks id and
+ * defeat the re-import guard). **And no tax field of any kind** — the platform never computes
+ * tax; amountCad is the amount exactly as recorded.
+ */
+export interface ActualTransactionInput {
+  budgetCodeId: string;
+  /** 0 ≤ x ≤ 999,999,999.99; the server rounds to 2 dp. */
+  amountCad: number;
+  /** ISO date (YYYY-MM-DD). Must fall inside an existing period — see actualDateError. */
+  occurredOn: string;
+  description: string;
+}
+
+/** GET → 200, ordered by date then code server-side; 404 when the period does not exist. */
+export function listActualTransactions(periodId: string): Promise<ActualTransactionRecord[]> {
+  return request<ActualTransactionRecord[]>(`/api/budgeting/periods/${periodId}/actuals`);
+}
+
+/** GET → 200, one row per code, ordered by code; 404 when the period does not exist. */
+export function budgetRollup(periodId: string): Promise<BudgetRollupRowRecord[]> {
+  return request<BudgetRollupRowRecord[]>(`/api/budgeting/periods/${periodId}/rollup`);
+}
+
+/**
+ * POST → 201 { id } (id only; the row lands on the next projection read). 400 on validation
+ * (Budgeting.Actual.AmountRequired / AmountNegative / AmountTooLarge / OccurredOnRequired /
+ * DescriptionRequired / DescriptionTooLong), 404 for an unknown code, 409
+ * Budgeting.Actual.NoPeriodCoversDate / CodeRetired — show the server's message verbatim.
+ */
+export async function recordActualTransaction(input: ActualTransactionInput): Promise<string> {
+  const res = await request<{ id: string }>("/api/budgeting/actuals", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return res.id;
+}
+
+/**
+ * PUT → 204. Same body and the same refusals as recording, plus 404
+ * Budgeting.Actual.NotFound — with one narrowing: CodeRetired applies only when the edit moves
+ * the transaction *onto* a retired code. A row already sitting on one stays correctable in
+ * place, because a retired code must never stand between anyone and fixing a fact.
+ */
+export function updateActualTransaction(id: string, input: ActualTransactionInput): Promise<void> {
+  return request<void>(`/api/budgeting/actuals/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+/** DELETE → 204; 404 Budgeting.Actual.NotFound. */
+export function removeActualTransaction(id: string): Promise<void> {
+  return request<void>(`/api/budgeting/actuals/${id}`, { method: "DELETE" });
+}
+
+/** Mirrors ActualTransaction.DescriptionMaxLength. */
+export const ACTUAL_DESCRIPTION_MAX_LENGTH = 300;
+
+/** Mirrors ActualTransaction.AmountMax (decimal(12,2)). */
+export const ACTUAL_AMOUNT_MAX = 999_999_999.99;
+
+/** How a transaction's origin reads. Manual is everything this console records. */
+export const ACTUAL_SOURCE_LABELS: Record<ActualTransactionSource, string> = {
+  Manual: "Entered here",
+  QuickBooks: "QuickBooks",
+};
+
+/**
+ * Client-side check of the amount text before a round trip, mirroring ActualTransaction.Validate
+ * (AmountRequired / AmountNegative / AmountTooLarge). Same shape as allocationAmountError,
+ * including the one rule stricter than the server's: this app enters whole dollars, because
+ * every figure renders through formatCad at 0 dp and a silently-rounded entry is worse than a
+ * refused one. The server re-checks and its answer is the one that counts.
+ *
+ * "Negative" is worth its own message rather than a generic one: the server refuses a minus sign
+ * because the code's category — not the sign — says which side of the ledger a figure lands on,
+ * so an expense is a positive amount on an expense code.
+ */
+export function actualAmountError(text: string): string | null {
+  if (text.trim() === "") return "Enter an amount.";
+  const n = Number(text);
+  if (!Number.isFinite(n)) return "Enter an amount.";
+  if (!Number.isInteger(n)) return "Enter whole dollars — no cents.";
+  if (n < 0) {
+    return "The amount cannot be negative — record an expense as a positive amount on an expense code.";
+  }
+  if (n > ACTUAL_AMOUNT_MAX) return "The amount is too large.";
+  return null;
+}
+
+/** Mirrors ActualTransaction.Validate's DescriptionRequired / DescriptionTooLong. */
+export function actualDescriptionError(text: string): string | null {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return "Say what this transaction was for.";
+  if (trimmed.length > ACTUAL_DESCRIPTION_MAX_LENGTH) {
+    return `The description must be ${ACTUAL_DESCRIPTION_MAX_LENGTH} characters or fewer.`;
+  }
+  return null;
+}
+
+/**
+ * The period a date counts in, or null. Mirrors BudgetPeriod.Covers — inclusive on both ends —
+ * and relies, exactly as CoveringPeriodRule does, on CreateBudgetPeriodCommandHandler refusing
+ * any period that shares a day with an existing one: a date is covered at most once, so "the
+ * first match" is "the match".
+ *
+ * ISO date strings are compared as strings on purpose. YYYY-MM-DD sorts lexicographically the
+ * same way it sorts chronologically, and constructing a Date here would reintroduce the
+ * timezone shift lib/period.ts exists to avoid.
+ */
+export function periodCovering(periods: BudgetPeriod[], occurredOn: string): BudgetPeriod | null {
+  if (!occurredOn) return null;
+  return periods.find((p) => p.startsOn <= occurredOn && occurredOn <= p.endsOn) ?? null;
+}
+
+/**
+ * The date rule, said before the save rather than discovered by a 409. Mirrors
+ * CoveringPeriodRule.ValidateAsync (ActualTransactionErrors.NoPeriodCoversDate): a transaction
+ * whose date falls in no period is refused, because the period view is the only place actuals
+ * are ever listed and an orphan row is one nothing in the product could ever show again.
+ *
+ * The form knows every period, so it can say this while the date is being typed. The server
+ * still re-checks — it sees periods this client may not have refetched — and its message is
+ * shown verbatim when it does.
+ */
+export function actualDateError(occurredOn: string, periods: BudgetPeriod[]): string | null {
+  if (occurredOn.trim() === "") return "Enter the date the money moved.";
+  if (periodCovering(periods, occurredOn) === null) {
+    return "No budget period covers that date, so this transaction would never show up anywhere. Create the period first, or check the date.";
+  }
+  return null;
+}
+
+/**
+ * The codes the transaction picker may offer, mirroring the two handlers' asymmetric retired
+ * check. RecordActualTransactionCommandHandler refuses a retired code outright
+ * (ActualTransactionErrors.CodeRetired): new spend is a new decision against a code nobody
+ * offers any more. UpdateActualTransactionCommandHandler refuses only a *move onto* a retired
+ * code, so the row's own code stays selectable however long ago it was retired — otherwise a
+ * typo in a description on historical data would be unfixable without restoring a code the
+ * tenant deliberately took out of use.
+ *
+ * Both categories are offered: a transaction is revenue or expense according to its code, and
+ * the entry form does not make the user pick a side first. Order is the caller's (the chart, by
+ * code).
+ */
+export function actualCodeCandidates(
+  codes: BudgetCode[],
+  currentCodeId: string | null,
+): BudgetCode[] {
+  return codes.filter((c) => c.active || c.id === currentCodeId);
+}
+
+/** One category's rollup rows and their totals. */
+export interface BudgetRollupGroup {
+  category: BudgetCodeCategory;
+  /** In the server's order (by code). */
+  rows: BudgetRollupRowRecord[];
+  plannedCad: number;
+  actualCad: number;
+  /** Sum of the rows' own deltas, so the total can never disagree with the column above it. */
+  deltaCad: number;
+}
+
+/** The rollup as the screen renders it: revenue and expense, never summed together. */
+export interface BudgetRollup {
+  revenue: BudgetRollupGroup;
+  expense: BudgetRollupGroup;
+  /** Nothing planned and nothing spent — the screen's empty state. */
+  empty: boolean;
+}
+
+/**
+ * Groups the rollup by category, the way the period dashboard groups its lines, and totals each
+ * side separately.
+ *
+ * **The two sides are never added together.** A single "planned" figure spanning revenue and
+ * expense is a number with no meaning — it would read as a budget while being the sum of money
+ * coming in and money going out — and the ZBB balance banner on the period dashboard is the one
+ * place those two totals are compared, deliberately, as a difference rather than a sum.
+ *
+ * Every row lands in one of the two groups: the wire category is a two-member union, and the
+ * server falls back to Expense for a row whose code the chart no longer has.
+ */
+export function toBudgetRollup(rows: BudgetRollupRowRecord[]): BudgetRollup {
+  const group = (category: BudgetCodeCategory): BudgetRollupGroup => {
+    const groupRows = rows.filter((r) => r.category === category);
+    return {
+      category,
+      rows: groupRows,
+      plannedCad: groupRows.reduce((sum, r) => sum + r.plannedCad, 0),
+      actualCad: groupRows.reduce((sum, r) => sum + r.actualCad, 0),
+      deltaCad: groupRows.reduce((sum, r) => sum + r.deltaCad, 0),
+    };
+  };
+
+  return { revenue: group("Revenue"), expense: group("Expense"), empty: rows.length === 0 };
+}
+
+/**
+ * A rollup figure's delta as a share of what was planned, ×100 — the input to varianceKind's
+ * bands. Null when nothing was planned, which is the case that matters: a code spent against
+ * but never planned has no baseline to vary from, so it reports "no baseline" rather than an
+ * infinite overrun. The other end — planned but never spent — is a plain −100%, which is a real
+ * and reportable figure, not a missing one.
+ *
+ * Client-side arithmetic with no server counterpart: the rollup endpoint ships the two amounts
+ * and the signed difference and deliberately ships no band or percentage.
+ */
+export function rollupDeltaPct(row: {
+  plannedCad: number;
+  deltaCad: number;
+}): number | null {
+  return row.plannedCad === 0 ? null : (row.deltaCad / row.plannedCad) * 100;
+}

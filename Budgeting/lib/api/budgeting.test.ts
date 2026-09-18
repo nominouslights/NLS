@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  actualAmountError,
+  actualCodeCandidates,
+  actualDateError,
+  actualDescriptionError,
   allocationAmountError,
   allocationCandidates,
   allocationJustificationError,
@@ -13,15 +17,19 @@ import {
   normalizeBudgetCode,
   ownerLabel,
   parentCandidates,
+  periodCovering,
   periodKind,
   planningProgress,
   previewPeriod,
+  rollupDeltaPct,
   stateAfter,
   toBudgetCode,
   toBudgetPeriod,
+  toBudgetRollup,
   userDisplay,
   zbbBalance,
   zbbBalanceDisplay,
+  ACTUAL_DESCRIPTION_MAX_LENGTH,
   ALLOCATION_JUSTIFICATION_MAX_LENGTH,
   PERIOD_STATE_LABELS,
   PERIOD_STATE_ORDER,
@@ -32,12 +40,17 @@ import {
   type BudgetAllocationRecord,
   type BudgetCodeRecord,
   type BudgetPeriodRecord,
+  type BudgetRollupRowRecord,
   type BalanceStep,
   type LifecycleStep,
   type LineStep,
   type PeriodTransitionAction,
 } from "./budgeting";
 import type { BudgetCode, BudgetCodeCategory, BudgetPeriod, PeriodState } from "@/lib/types";
+// The variance bands are the console's, not the server's — the rollup endpoint ships no band at
+// all — and they still live beside the last mock array. The rollup tests below assert that the
+// percentage this file computes lands in the band the Variance screen would show for it.
+import { varianceKind, varianceLabel } from "@/lib/data";
 
 // Shared fixtures for the period and allocation helpers below.
 
@@ -854,5 +867,232 @@ describe("userDisplay", () => {
     // Both null is what an unassigned budget owner looks like, and what a user id that is no
     // longer in the replica looks like. The caller decides the word.
     expect(userDisplay(null, null, "Unassigned")).toBe("Unassigned");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Actual transactions. Everything below re-derives a rule the server owns, so each block names
+// the C# it mirrors — that naming is the only thing keeping the two copies honest.
+// ---------------------------------------------------------------------------
+
+const rollupRow = (
+  code: string,
+  category: BudgetCodeCategory,
+  plannedCad: number,
+  actualCad: number,
+): BudgetRollupRowRecord => ({
+  budgetCodeId: `id-${code}`,
+  code,
+  name: `Code ${code}`,
+  category,
+  plannedCad,
+  actualCad,
+  // As the server computes it (BudgetRollupBuilder.ToRow): actual − planned, plainly.
+  deltaCad: actualCad - plannedCad,
+});
+
+// toBudgetRollup / rollupDeltaPct: the console's half of the rollup. The server ships both sides
+// of the outer join (BudgetRollupBuilder.Build) and no band at all, so what is pinned here is
+// the grouping, the per-category totals, and the percentage that feeds varianceKind's bands.
+
+describe("toBudgetRollup", () => {
+  const rows = [
+    rollupRow("REV-A", "Revenue", 100_000, 90_000),
+    rollupRow("REV-B", "Revenue", 0, 12_000),
+    rollupRow("EXP-A", "Expense", 40_000, 0),
+    rollupRow("EXP-B", "Expense", 10_000, 11_000),
+  ];
+
+  it("splits the rows by category and never sums the two sides together", () => {
+    const rollup = toBudgetRollup(rows);
+
+    expect(rollup.revenue.rows.map((r) => r.code)).toEqual(["REV-A", "REV-B"]);
+    expect(rollup.expense.rows.map((r) => r.code)).toEqual(["EXP-A", "EXP-B"]);
+    expect(rollup.revenue.plannedCad).toBe(100_000);
+    expect(rollup.revenue.actualCad).toBe(102_000);
+    expect(rollup.expense.plannedCad).toBe(50_000);
+    expect(rollup.expense.actualCad).toBe(11_000);
+  });
+
+  it("keeps a code spent against but never planned — the row zero-based budgeting exists to surface", () => {
+    const unplanned = toBudgetRollup(rows).revenue.rows.find((r) => r.code === "REV-B");
+
+    expect(unplanned).toBeDefined();
+    expect(unplanned!.plannedCad).toBe(0);
+    expect(unplanned!.deltaCad).toBe(12_000);
+  });
+
+  it("keeps a code planned but never spent against", () => {
+    const unspent = toBudgetRollup(rows).expense.rows.find((r) => r.code === "EXP-A");
+
+    expect(unspent).toBeDefined();
+    expect(unspent!.actualCad).toBe(0);
+    expect(unspent!.deltaCad).toBe(-40_000);
+  });
+
+  it("totals each side from the rows' own deltas, so a total cannot disagree with its column", () => {
+    const rollup = toBudgetRollup(rows);
+
+    expect(rollup.revenue.deltaCad).toBe(2_000);
+    expect(rollup.expense.deltaCad).toBe(-39_000);
+  });
+
+  it("reports an empty rollup, which is the screen's empty state", () => {
+    expect(toBudgetRollup([]).empty).toBe(true);
+    expect(toBudgetRollup(rows).empty).toBe(false);
+  });
+});
+
+describe("rollupDeltaPct", () => {
+  it("has no baseline for a code with actuals but no plan", () => {
+    // planned 0 is not an infinite overrun — varianceKind(null) is the "off" band, "No baseline".
+    expect(rollupDeltaPct(rollupRow("REV-B", "Revenue", 0, 12_000))).toBeNull();
+    expect(varianceKind(rollupDeltaPct(rollupRow("REV-B", "Revenue", 0, 12_000)))).toBe("off");
+    expect(varianceLabel(null)).toBe("No baseline");
+  });
+
+  it("reports a plain −100% for a code with a plan but no actuals", () => {
+    expect(rollupDeltaPct(rollupRow("EXP-A", "Expense", 40_000, 0))).toBe(-100);
+    expect(varianceKind(-100)).toBe("over");
+  });
+
+  it("is the signed delta as a share of what was planned", () => {
+    expect(rollupDeltaPct(rollupRow("EXP-B", "Expense", 10_000, 11_000))).toBeCloseTo(10, 10);
+    expect(rollupDeltaPct(rollupRow("REV-A", "Revenue", 100_000, 90_000))).toBeCloseTo(-10, 10);
+  });
+});
+
+// periodCovering / actualDateError mirror CoveringPeriodRule.ValidateAsync and
+// BudgetPeriod.Covers (inclusive on both ends). A transaction whose date falls in no period is
+// refused rather than stored orphaned, and the form says so before the round trip.
+
+describe("periodCovering", () => {
+  const q4 = period("Open");
+  const q1 = {
+    ...period("Draft"),
+    id: "period-q1",
+    label: "FY2027 Q1",
+    startsOn: "2027-01-01",
+    endsOn: "2027-03-31",
+  };
+  const periods = [q4, q1];
+
+  it("includes both end days — BudgetPeriod.Covers is inclusive", () => {
+    expect(periodCovering(periods, "2026-10-01")?.id).toBe(q4.id);
+    expect(periodCovering(periods, "2026-12-31")?.id).toBe(q4.id);
+  });
+
+  it("finds the period a date falls inside", () => {
+    expect(periodCovering(periods, "2026-11-15")?.id).toBe(q4.id);
+    expect(periodCovering(periods, "2027-02-02")?.id).toBe(q1.id);
+  });
+
+  it("returns null for a date in the gap between periods, and for no date at all", () => {
+    expect(periodCovering(periods, "2025-12-31")).toBeNull();
+    expect(periodCovering(periods, "")).toBeNull();
+  });
+});
+
+describe("actualDateError", () => {
+  const periods = [period("Open")];
+
+  it("accepts a date inside a period", () => {
+    expect(actualDateError("2026-11-15", periods)).toBeNull();
+  });
+
+  it("requires a date", () => {
+    expect(actualDateError("", periods)).toContain("Enter the date");
+  });
+
+  it("refuses a date no period covers, naming the way out", () => {
+    // Mirrors ActualTransactionErrors.NoPeriodCoversDate — the server's own 409 message is
+    // shown verbatim when it still comes back; this is the same rule, said sooner.
+    const problem = actualDateError("2030-01-01", periods);
+
+    expect(problem).toContain("No budget period covers that date");
+    expect(problem).toContain("Create the period first");
+  });
+});
+
+// actualCodeCandidates mirrors the asymmetry between the two handlers:
+// RecordActualTransactionCommandHandler refuses a retired code outright
+// (ActualTransactionErrors.CodeRetired), while UpdateActualTransactionCommandHandler refuses
+// only a move ONTO one — so a row already sitting on a retired code stays correctable in place.
+
+describe("actualCodeCandidates", () => {
+  const codes = [
+    makeCode("rev-a", "Revenue"),
+    makeCode("exp-a", "Expense"),
+    makeCode("exp-retired", "Expense", false),
+    makeCode("rev-retired", "Revenue", false),
+  ];
+
+  it("offers only active codes for a new transaction, both categories", () => {
+    expect(actualCodeCandidates(codes, null).map((c) => c.id)).toEqual(["rev-a", "exp-a"]);
+  });
+
+  it("keeps the edited row's own code selectable even once it is retired", () => {
+    expect(actualCodeCandidates(codes, "exp-retired").map((c) => c.id)).toEqual([
+      "rev-a",
+      "exp-a",
+      "exp-retired",
+    ]);
+  });
+
+  it("still offers no other retired code while editing — a move onto one is refused", () => {
+    expect(actualCodeCandidates(codes, "exp-retired").map((c) => c.id)).not.toContain(
+      "rev-retired",
+    );
+  });
+
+  it("preserves the chart's order", () => {
+    const reversed = [...codes].reverse();
+
+    expect(actualCodeCandidates(reversed, null).map((c) => c.id)).toEqual(["exp-a", "rev-a"]);
+  });
+});
+
+// actualAmountError / actualDescriptionError mirror ActualTransaction.Validate (AmountRequired /
+// AmountNegative / AmountTooLarge / DescriptionRequired / DescriptionTooLong). The whole-dollar
+// rule is this app's own, stricter than the server's, exactly as it is for allocations.
+
+describe("actualAmountError", () => {
+  it.each(["0", "1", "139400", " 250 "])("accepts %j", (text) => {
+    expect(actualAmountError(text)).toBeNull();
+  });
+
+  it.each(["", "   ", "abc"])("requires an amount for %j", (text) => {
+    expect(actualAmountError(text)).toBe("Enter an amount.");
+  });
+
+  it("refuses cents — the app enters whole dollars", () => {
+    expect(actualAmountError("12.50")).toContain("whole dollars");
+  });
+
+  it("refuses a negative amount, naming the convention that replaces the minus sign", () => {
+    // ActualTransactionErrors.AmountNegative: an expense is a positive amount on an expense
+    // code, so the sign has no second job to do.
+    expect(actualAmountError("-1")).toContain("positive amount on an expense code");
+  });
+
+  it("refuses an amount beyond decimal(12,2)", () => {
+    expect(actualAmountError("1000000000")).toContain("too large");
+  });
+});
+
+describe("actualDescriptionError", () => {
+  it("accepts a description", () => {
+    expect(actualDescriptionError("Fuel, Norman Wells depot, invoice 4471")).toBeNull();
+  });
+
+  it.each(["", "   "])("requires one for %j", (text) => {
+    expect(actualDescriptionError(text)).toContain("what this transaction was for");
+  });
+
+  it("accepts exactly the maximum and refuses one more", () => {
+    expect(actualDescriptionError("x".repeat(ACTUAL_DESCRIPTION_MAX_LENGTH))).toBeNull();
+    expect(actualDescriptionError("x".repeat(ACTUAL_DESCRIPTION_MAX_LENGTH + 1))).toContain(
+      "300 characters or fewer",
+    );
   });
 });

@@ -1,9 +1,10 @@
 # Budgeting — Zero-Based Budgeting Console
 
 Next.js 16 app on port **3003**, consuming the shared API. Scaffolded by US-6.0.1 (Track 6,
-Stage 6.0). Budget **periods**, **codes** and **allocations** are real — including the period
-lifecycle and the period dashboard; actuals and variance are still mock — see
-[Data](#data-periods-codes-and-allocations-are-real-actuals-and-variance-are-still-mock).
+Stage 6.0). Budget **periods**, **codes**, **allocations** and **actual transactions** are real —
+including the period lifecycle, the period dashboard and the plan-against-spend rollup. **Variance
+is the last mock screen** — see
+[Data](#data-everything-but-variance-is-real).
 
 ## Commands
 
@@ -57,7 +58,7 @@ Run it before touching anything on the list, and whenever a Dispatcher UI story 
 | `lib/auth.ts` | `Dispatcher/lib/auth.ts` | **no** — see below |
 | `components/TopBar.tsx`, `AuthGate.tsx`, `LoginScreen.tsx`, `Console.tsx` | same paths | **no** — adapted |
 | `lib/nav.ts`, `lib/data.ts`, `lib/money.ts`, `lib/types.ts`, `lib/claims.ts`, `lib/roles.ts`, `lib/api/budgeting.ts`, `lib/api/identity.ts` | — | new |
-| `components/Brandmark.tsx`, `ErrorNotice.tsx`, `RoleGate.tsx`, `AccessDeniedScreen.tsx`, `SetupPendingScreen.tsx`, `BudgetPeriodFormModal.tsx`, `BudgetCodeFormModal.tsx`, `BudgetAllocationFormModal.tsx`, `ProfileForm.tsx`, `screens/*`, `screens/periods/*` | — | new |
+| `components/Brandmark.tsx`, `ErrorNotice.tsx`, `RoleGate.tsx`, `AccessDeniedScreen.tsx`, `SetupPendingScreen.tsx`, `BudgetPeriodFormModal.tsx`, `BudgetCodeFormModal.tsx`, `BudgetAllocationFormModal.tsx`, `ActualTransactionFormModal.tsx`, `ProfileForm.tsx`, `screens/*`, `screens/periods/*` | — | new |
 
 `theme.ts` and the 12 `ui/` files are copied **unpruned**, including parts this app never uses
 (`ServiceType`, `DutyStatus`, `CorridorStepper`, the two upload fields). Pruning them would break
@@ -132,7 +133,15 @@ it. Seven files, and only two need a DOM:
   `nextTransition` / `stateAfter` against `BudgetPeriod.Transition`, `canEditAllocations`
   against `BudgetPeriod.AllowsPlanChanges`, `allocationCandidates` against the `CodeRetired`
   check plus the unique (period, code) index, and `allocationAmountError` /
-  `allocationJustificationError` against `BudgetAllocation.Validate`. Plus the →StatusKind
+  `allocationJustificationError` against `BudgetAllocation.Validate`; and, for actuals,
+  `periodCovering` / `actualDateError` against `CoveringPeriodRule` + `BudgetPeriod.Covers`,
+  `actualCodeCandidates` against the *asymmetric* retired check (refused outright when recording,
+  refused only for a move **onto** a retired code when correcting), and `actualAmountError` /
+  `actualDescriptionError` against `ActualTransaction.Validate`. `toBudgetRollup` /
+  `rollupDeltaPct` mirror no server rule — the rollup ships no band — so what is pinned there is
+  the console's own half: the category split, the per-side totals, and both outer-join arms (a
+  code with actuals but no plan reports *no baseline*, never an infinite overrun; a code with a
+  plan but no actuals reports a plain −100%). Plus the →StatusKind
   mappings (`periodKind` over all five states, `ZBB_BALANCE_KINDS`), the label maps,
   `toBudgetCode`'s `isActive` → `active` rename, `toBudgetPeriod`'s two totals, `coverage`,
   `zbbBalance` / `zbbBalanceDisplay` / `hasPlannedAmounts` (all three arms plus the empty plan)
@@ -153,7 +162,7 @@ The server-side counterpart is
 backend test proves the *policy* rejects Dispatcher, this one proves the *console* does, and in
 Stage 6.0 the console is the gate a user actually meets.
 
-## Data: periods, codes and allocations are real; actuals and variance are still mock
+## Data: everything but Variance is real
 
 **Budget periods come from the real API** (`GET/POST /api/budgeting/periods` via
 `lib/api/budgeting.ts`; `Console.tsx` owns the fetch and threads the list down as props) — the
@@ -198,6 +207,68 @@ projections: after a transition the dashboard refetches the period until it repo
 state (`stateAfter`); after a line changes it refetches the lines until the new **values** are
 visible (on edit the row was always there), and only then refreshes the period list, whose totals
 read from the same projection.
+
+### Actuals are real, by hand — not by QuickBooks
+
+**Actual transactions are entered in this console** (Actuals vs Budget → `+ RECORD TRANSACTION`).
+That is worth stating plainly because the old `lib/data.ts` header promised they would arrive
+"when the QuickBooks reconciliation slice lands": they did not wait for it. A QBO pull is a later
+slice of its own, and until it exists every actual on this platform was typed by a person.
+
+One transaction is *this much, against this code, on this day, for this reason*. Four things about
+it are not guessable from the form, and all four are the server's:
+
+- **There is no period on a transaction.** The period is *derived* from `occurredOn` and never
+  stored — `CreateBudgetPeriodCommandHandler` refuses overlapping periods, so a date maps to at
+  most one period, and "the period's actuals" is a range query that can never disagree with the
+  period's own dates. Correcting the date is therefore the only way to move a transaction between
+  periods, and it is why the writes are addressed to `/actuals` rather than to a period.
+- **A date in no period is refused** (409 `Budgeting.Actual.NoPeriodCoversDate`), not stored
+  orphaned — the period view is the only place actuals are listed, so such a row is one the
+  product could never show again. The form knows every period, so it names the period a date
+  counts in *while the date is being picked* (`periodCovering`) and refuses an uncovered one
+  before the round trip; the server still re-checks and its message is shown verbatim.
+- **Expenses are positive amounts on expense codes.** The code's category says which side of the
+  ledger a figure lands on, so the minus sign has no second job and a negative amount is refused
+  (`Budgeting.Actual.AmountNegative`).
+- **Actuals are not frozen by the period lifecycle.** A closed period still takes and still
+  corrects transactions, deliberately: an invoice dated the 30th lands on the 6th, and a closed
+  period's actuals are exactly what a review is reading. Only the *plan* is frozen.
+
+The retired-code rule is **asymmetric**, and the form mirrors both halves (`actualCodeCandidates`):
+new spend cannot go on a retired code, but a row already sitting on one stays correctable in place
+as long as the edit does not move it to another code — a retired code must never stand between
+anyone and fixing a fact.
+
+The actuals routes (`BudgetAccess` group, `BudgetingEndpoints.cs`):
+
+| Route | |
+|---|---|
+| `GET /api/budgeting/periods/{id}/actuals` | the period's transactions, by date then code (404) |
+| `GET /api/budgeting/periods/{id}/rollup` | one row per code: `plannedCad`, `actualCad`, `deltaCad` (404) |
+| `POST /api/budgeting/actuals` | `{ budgetCodeId, amountCad, occurredOn, description }` → 201 `{ id }` |
+| `PUT /api/budgeting/actuals/{id}` | same body; 204. 404 `NotFound`, 409 `NoPeriodCoversDate` / `CodeRetired` |
+| `DELETE /api/budgeting/actuals/{id}` | 204 |
+
+**No period id, no source, no external reference, and no tax field of any kind** on that body. The
+first three are the server's to decide (everything entered here is `Manual`, and a caller that
+could name its own source could claim a QuickBooks id and defeat the re-import guard); the last is
+the platform rule — the platform never computes tax, and `amountCad` is the amount exactly as
+recorded.
+
+The rollup is the whole of Actuals vs Budget. It includes **both sides of the outer join** — a
+code planned but not spent against, and a code spent against but never planned — and that second
+row is what a planner opens the screen to find. It ships **no variance band and no percentage**:
+those thresholds are the console's (`varianceKind` / `varianceLabel`), and a server that shipped
+its own would put two answers to one question in the product. `toBudgetRollup` groups the rows by
+category the way the period dashboard groups its lines and **never adds the two sides together** —
+a "total planned" spanning revenue and expense would be money in and money out in one figure. The
+only place the two totals meet is the ZBB balance banner, as a difference.
+
+Writes follow the same eventual-consistency discipline as allocations: the modal refetches the
+**target** period's transactions until the new values are visible — the target, because a
+corrected date may have moved the row out of the period on screen — and only then does the screen
+refresh the rollup, whose totals read from the same projection.
 
 ### A period is a full view, not a pane
 
@@ -331,23 +402,34 @@ guessable from the form:
 on the string Trips and Billing already emit. `budgeting.test.ts` pins those six spellings; do not
 "tidy" `Nihb` into `NIHB`.
 
-`lib/data.ts` holds the not-yet-real remainder: actuals and variance. Its `budgetCodes` array
-survives **only** as the name-and-category lookup those two still need — the Budget Codes screen
-no longer reads it, and the array is typed `Pick<BudgetCode, "id" | "code" | "name" | "category">`
-so it does not have to grow a plausible-looking value for every field the real entity gains.
-Conventions follow `Dispatcher/lib/data.ts`: flat exported const arrays, string ids, ISO date
-strings (never `Date` objects), whole-dollar numbers rendered through `formatCad`, and a
-`StatusKind` carried on every status-bearing row so rendering is a pure lookup. Its rows are
-keyed to mock period ids no real period will match, so screens on real periods show their empty
-states rather than fake figures — those screens keep their `MockTag`.
+`lib/data.ts` holds the not-yet-real remainder, and it is down to **one array**: `variance`. The
+`actuals` array is gone — actuals are real now — and `variance` no longer derives from it, because
+deriving a mock from a mock that had been deleted was the only thing standing between this slice
+and a broken build. It carries its own literal planned/actual pairs and fills `delta`, `deltaPct`
+and `vk` from one function, so a row's colour can never disagree with its own numbers. Its rows
+stay keyed to mock period ids no real period will match, so a real period shows the empty state
+rather than fake figures, and `Variance.tsx` and `Reports.tsx` keep their `MockTag`. (Reports'
+revenue-mix card read `actuals` too; it reads the same pairs off `variance` now, and goes real
+when it is rebuilt on the rollup endpoint — which already ships the triple it needs.)
 
-No screen invents an API shape. Each remaining array is replaced by additions to
-`lib/api/budgeting.ts` as its Stage 6.1 slice lands, and the screens keep their props.
+Its `budgetCodes` array survives **only** as the name-and-category lookup those two screens need —
+the Budget Codes screen no longer reads it, and the array is typed
+`Pick<BudgetCode, "id" | "code" | "name" | "category">` so it does not have to grow a
+plausible-looking value for every field the real entity gains. Conventions follow
+`Dispatcher/lib/data.ts`: flat exported const arrays, string ids, ISO date strings (never `Date`
+objects), whole-dollar numbers rendered through `formatCad`, and a `StatusKind` carried on every
+status-bearing row so rendering is a pure lookup.
 
-Variance thresholds (`varianceKind`) live in `lib/data.ts`, not in the Variance screen, so any
-future report agrees with the screen by construction. The signed formatters
-(`formatDeltaCad` / `formatDeltaPct`) live in `lib/money.ts`, **not** in `lib/data.ts`, so a
-screen on real data (the dashboard's ZBB balance banner) never imports the mock module.
+No screen invents an API shape. The last array is replaced by additions to
+`lib/api/budgeting.ts` when the variance slice lands, and the screens keep their props.
+
+**`varianceKind` / `varianceLabel` are not mock**, and they stay in `lib/data.ts` on purpose: they
+are the console's variance bands, and Actuals vs Budget — on real data since this slice — reads
+them from there so the two screens and any future report can never disagree about what "on plan"
+means. That is the one sanctioned import of the mock module from a real screen, and it ends when
+the last mock array does. The signed formatters (`formatDeltaCad` / `formatDeltaPct`) live in
+`lib/money.ts`, **not** in `lib/data.ts`, so printing a signed figure never requires reaching into
+that module at all.
 
 ## Accessibility
 
@@ -364,8 +446,11 @@ grep -rn "statusMeta(" components lib | grep -v components/ui/
 grep -rn "#009E73\|#E1B000\|#D55E00\|#7A8899" components lib app | grep -v lib/theme.ts
 ```
 
-`components/screens/Variance.tsx` is the file to re-check hardest after any edit: a coloured
-delta with no sign and no glyph is the exact failure this rule exists to prevent.
+`components/screens/Variance.tsx` and `components/screens/ActualsVsBudget.tsx` are the files to
+re-check hardest after any edit: both are full of signed figures, and a coloured delta with no
+sign and no glyph is the exact failure this rule exists to prevent. Actuals vs Budget calls
+`statusMeta` nowhere — every band it shows goes through `StatusChip`, which pairs the glyph with
+the band's words — and every delta prints through `formatDeltaCad`.
 
 Known hazards documented in `theme.ts`: `colors.amber` is a fill/border/icon colour only — use
 `colors.amberText` when amber must be text; `colors.textFaint` is decorative only.
@@ -375,6 +460,7 @@ Known hazards documented in `theme.ts`: `colors.amber` is a fill/border/icon col
 | Date | Check | Result |
 |---|---|---|
 | 2026-08-04 | Code audit (both greps above) | **Pass** — every call site pairs colour with glyph + label; protected hexes appear only in `theme.ts` and in copied decorative elements that carry adjacent text |
+| 2026-09-18 | Code audit (both greps above), after wiring Actuals vs Budget to the rollup | **Pass** — no new `statusMeta` call sites and no new protected hexes; the new screen and modal carry every band as a `StatusChip` and every delta through `formatDeltaCad` |
 | — | Grayscale (DevTools → Rendering → Achromatopsia) | **Not yet run** |
 | — | Deuteranopia / Protanopia / Tritanopia | **Not yet run** |
 | — | Side-by-side against Dispatcher at equal width | **Not yet run** |
@@ -417,8 +503,11 @@ Not used here on purpose: axe-core / pa11y / Lighthouse. They catch the automata
 - ~~`BudgetAllocation`~~ — **shipped** (`budgeting.budget_allocations` + `rm_budget_allocations`,
   migration `AddBudgetAllocations`), and with it `AllocationBudgetCodeUsageProbe` replaced
   `NeverReferencedBudgetCodeUsageProbe`, so `DELETE /codes/{id}` now answers 409
-  `Budgeting.Code.InUse` for a code any period has ever planned. Still open: the
-  `ActualTransaction` table and its RLS policies; QuickBooks actuals reconciliation.
+  `Budgeting.Code.InUse` for a code any period has ever planned.
+- ~~The `ActualTransaction` table and its RLS policies~~ — **shipped**
+  (`budgeting.actual_transactions` + `rm_actual_transactions`, migration `AddActualTransactions`),
+  with the five routes above and `BudgetCodeRetirementRule` alongside them. Still open:
+  QuickBooks actuals reconciliation, and rebuilding Variance on the rollup endpoint.
 - **Any QuickBooks automation.** All QBO work is manual for now, by decision. Automating GL
   validation means an Intuit OAuth flow, per-tenant token storage (there is no tenants table),
   a QBO client and a chart-of-accounts sync — a slice of its own, not a gap in this one.

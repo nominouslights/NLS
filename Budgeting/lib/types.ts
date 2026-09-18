@@ -102,13 +102,9 @@ export interface BudgetCode {
 // Allocation lines have no view type of their own: BudgetAllocationRecord in lib/api/budgeting.ts
 // is rendered directly, field for field, because nothing on it needs renaming.
 
-export interface ActualLine {
-  id: string;
-  periodId: string;
-  code: string;
-  planned: number;
-  actual: number;
-}
+// Actual transactions have no view type here either: ActualTransactionRecord in
+// lib/api/budgeting.ts is the real wire shape and is rendered directly. The mock `ActualLine`
+// that used to sit here is gone with the mock array it described.
 
 export interface VarianceRow {
   id: string;
