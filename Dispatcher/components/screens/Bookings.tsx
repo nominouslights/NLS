@@ -31,10 +31,11 @@ import {
 } from "@/lib/api/booking";
 import { getRole } from "@/lib/claims";
 import { PageHeader, Panel, SectionLabel, DetailRow } from "@/components/ui/Panel";
-import { StatusChip } from "@/components/ui/Chip";
+import { MonoTag, StatusChip } from "@/components/ui/Chip";
 import { ActionButton } from "@/components/ui/Button";
 import { MonthGrid } from "@/components/ui/MonthGrid";
 import { NumberField, SelectField, TextAreaField, TextField, FieldLabel } from "@/components/ui/Field";
+import BookingDetail from "@/components/screens/booking/BookingDetail";
 
 // Booking Calendar (US-B.6–8) — community seat bookings per corridor per date.
 // Left: corridor selector + month grid with a per-day demand badge. Right: the
@@ -117,7 +118,17 @@ function monthKeyOf(year: number, month: number, corridorId: string): string {
 // Screen
 // ---------------------------------------------------------------------------
 
-export default function Bookings({ onOpenTrip }: { onOpenTrip: (id: string) => void }) {
+export default function Bookings({
+  onOpenTrip,
+  bookingSelId,
+  setBookingSelId,
+}: {
+  onOpenTrip: (id: string) => void;
+  /** The opened booking (detail view) — retained by CommunityBookingApp so a
+   *  detour Home lands back on it. null = the calendar. */
+  bookingSelId: string | null;
+  setBookingSelId: (id: string | null) => void;
+}) {
   const now = new Date();
   const today = todayIso();
   const isOwner = getRole() === "Owner";
@@ -271,6 +282,23 @@ export default function Bookings({ onOpenTrip }: { onOpenTrip: (id: string) => v
   const refreshAll = useCallback(async () => {
     await Promise.all([loadDay(), loadMonth()]);
   }, [loadDay, loadMonth]);
+
+  // The detail view replaces the calendar but is rendered INSIDE this screen
+  // (after every hook above), so corridor / month / selected-day state stays
+  // alive underneath. Going back refreshes the day panel + month badges so any
+  // confirm / cancel / paid done on the detail is reflected immediately.
+  if (bookingSelId) {
+    return (
+      <BookingDetail
+        key={bookingSelId}
+        bookingId={bookingSelId}
+        onBack={() => {
+          setBookingSelId(null);
+          void refreshAll();
+        }}
+      />
+    );
+  }
 
   const summaryByDate = new Map<string, CalendarDaySummary>();
   if (monthData && monthData.key === monthKey) {
@@ -532,6 +560,7 @@ export default function Bookings({ onOpenTrip }: { onOpenTrip: (id: string) => v
               onRetry={loadDay}
               onChanged={refreshAll}
               onOpenTrip={onOpenTrip}
+              onOpenBooking={setBookingSelId}
               routeStops={route?.stops ?? []}
               isOwner={isOwner}
               past={selDate < today}
@@ -555,6 +584,7 @@ function DayPanel({
   onRetry,
   onChanged,
   onOpenTrip,
+  onOpenBooking,
   routeStops,
   isOwner,
   past,
@@ -566,6 +596,7 @@ function DayPanel({
   onRetry: () => void;
   onChanged: () => Promise<void>;
   onOpenTrip: (id: string) => void;
+  onOpenBooking: (id: string) => void;
   routeStops: TripStop[];
   isOwner: boolean;
   past: boolean;
@@ -746,7 +777,14 @@ function DayPanel({
 
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {detail.bookings.map((b) => (
-            <BookingRow key={b.id} booking={b} busy={busyId === b.id} anyBusy={busyId !== null} onAct={act} />
+            <BookingRow
+              key={b.id}
+              booking={b}
+              busy={busyId === b.id}
+              anyBusy={busyId !== null}
+              onAct={act}
+              onOpen={onOpenBooking}
+            />
           ))}
         </div>
       </Panel>
@@ -756,9 +794,12 @@ function DayPanel({
           date={date}
           corridorId={detail.corridorId}
           routeStops={routeStops}
-          onCreated={async () => {
+          onCreated={async (id) => {
+            // A new booking lands on its detail screen — after the day panel
+            // and month badges have refreshed, so BACK shows the new row.
             setShowCreate(false);
             await onChanged();
+            onOpenBooking(id);
           }}
         />
       )}
@@ -775,11 +816,13 @@ function BookingRow({
   busy,
   anyBusy,
   onAct,
+  onOpen,
 }: {
   booking: BookingRecord;
   busy: boolean;
   anyBusy: boolean;
   onAct: (id: string, fn: (id: string) => Promise<void>) => Promise<void>;
+  onOpen: (id: string) => void;
 }) {
   const b = booking;
   const cancelled = b.status === "Cancelled";
@@ -798,6 +841,7 @@ function BookingRow({
         <span style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: 600, color: colors.textPrimary }}>
           {b.customerName}
         </span>
+        <MonoTag>{b.reference}</MonoTag>
         <span style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.textDim }}>
           {b.passengers.length} pax
         </span>
@@ -815,18 +859,25 @@ function BookingRow({
           {b.notes}
         </div>
       )}
-      {!cancelled && (
-        <div style={{ display: "flex", gap: 8, marginTop: 9 }}>
-          {b.status === "Unconfirmed" && (
-            <ActionButton variant="success" disabled={anyBusy} onClick={() => void onAct(b.id, confirmBooking)}>
-              {busy ? "WORKING…" : "CONFIRM"}
+      {/* OPEN is available on every row — a cancelled booking still opens
+          read-only (its passes are void, and the detail says so). */}
+      <div style={{ display: "flex", gap: 8, marginTop: 9, flexWrap: "wrap" }}>
+        <ActionButton variant="secondary" disabled={anyBusy} onClick={() => onOpen(b.id)}>
+          OPEN
+        </ActionButton>
+        {!cancelled && (
+          <>
+            {b.status === "Unconfirmed" && (
+              <ActionButton variant="success" disabled={anyBusy} onClick={() => void onAct(b.id, confirmBooking)}>
+                {busy ? "WORKING…" : "CONFIRM"}
+              </ActionButton>
+            )}
+            <ActionButton variant="destructive" disabled={anyBusy} onClick={() => void onAct(b.id, cancelBooking)}>
+              {busy ? "WORKING…" : "CANCEL BOOKING"}
             </ActionButton>
-          )}
-          <ActionButton variant="destructive" disabled={anyBusy} onClick={() => void onAct(b.id, cancelBooking)}>
-            {busy ? "WORKING…" : "CANCEL BOOKING"}
-          </ActionButton>
-        </div>
-      )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -986,7 +1037,8 @@ function CreateBookingForm({
   date: string;
   corridorId: string;
   routeStops: TripStop[];
-  onCreated: () => Promise<void>;
+  /** Receives the new booking's id (createBooking's 201 body). */
+  onCreated: (id: string) => Promise<void>;
 }) {
   // --- customer (search-as-you-type, or create-new expansion) ---
   const [custQuery, setCustQuery] = useState("");
@@ -1101,7 +1153,7 @@ function CreateBookingForm({
         passengers.push({ name: r.name.trim(), phone: r.phone.trim() || null, isBillingCustomer: false });
       }
 
-      await createBooking({
+      const id = await createBooking({
         customerId,
         corridorId,
         serviceDate: date,
@@ -1111,7 +1163,7 @@ function CreateBookingForm({
         paymentMethod,
         notes: notes.trim() || null,
       });
-      await onCreated();
+      await onCreated(id);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Failed to create the booking — please try again.");
     } finally {

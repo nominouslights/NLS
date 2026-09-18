@@ -22,8 +22,18 @@ public static class EmailDispatchErrors
         "Notifications.Dispatch.ClientRequired",
         "A client accruals dispatch requires the client's id and name.");
 
-    /// <summary>The email-history endpoint was called with neither a tripId nor a clientId filter.</summary>
+    /// <summary>A booking-passes dispatch without its anchor — the booking id + reference snapshot.</summary>
+    public static readonly Error BookingRequired = Error.Validation(
+        "Notifications.Dispatch.BookingRequired",
+        "A booking passes dispatch requires the booking's id and reference.");
+
+    /// <summary>A booking-passes send whose pass sheet lists no travellers — nothing to issue.</summary>
+    public static readonly Error NoTravellers = Error.Validation(
+        "Notifications.Dispatch.NoTravellers",
+        "A booking passes email needs at least one traveller.");
+
+    /// <summary>The email-history endpoint was called with no tripId, clientId or bookingId filter.</summary>
     public static readonly Error HistoryFilterRequired = Error.Validation(
         "Notifications.Dispatch.HistoryFilterRequired",
-        "Provide a tripId or clientId query parameter.");
+        "Provide a tripId, clientId or bookingId query parameter.");
 }

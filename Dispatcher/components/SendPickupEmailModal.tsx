@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { colors, fonts, statusMeta } from "@/lib/theme";
+import { colors, fonts } from "@/lib/theme";
 import { ApiError } from "@/lib/api/transport";
 import {
   corridorLabel,
@@ -25,10 +25,10 @@ import {
   sendTripPickupEmail,
   type EmailDispatchRecord,
   type EmailPreviewResult,
-  type EmailRecipientResult,
   type EmailTemplateRecord,
   type PickupReportPreviewResult,
 } from "@/lib/api/notifications";
+import { fmtUtcDateTime, RecipientOutcomeRow } from "@/components/email/RecipientOutcomeRow";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { SelectField } from "@/components/ui/Field";
 import { ActionButton } from "@/components/ui/Button";
@@ -48,37 +48,6 @@ import { SectionLabel } from "@/components/ui/Panel";
  *  supplied value on the wire and would blank the time out. */
 function timeMerge(time: string | null): string | undefined {
   return time ? hhmm(time) : undefined;
-}
-
-function fmtUtcDateTime(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("en-CA", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-  });
-}
-
-/** Per-recipient outcome line — colour + glyph + label, never colour alone. */
-function RecipientOutcomeRow({ r }: { r: EmailRecipientResult }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-      <StatusChip kind={r.status === "Sent" ? "ontime" : "over"} label={r.status === "Sent" ? "Sent" : "Failed"} />
-      <span style={{ fontFamily: fonts.body, fontSize: 12, fontWeight: 500, color: colors.textSecondary }}>
-        {r.passengerName}
-      </span>
-      <span style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textDim }}>{r.email}</span>
-      {r.errorMessage && (
-        <span style={{ fontFamily: fonts.body, fontSize: 11, color: statusMeta("over").t, flexBasis: "100%" }}>
-          {r.errorCode ? `${r.errorCode} · ` : ""}
-          {r.errorMessage}
-        </span>
-      )}
-    </div>
-  );
 }
 
 export default function SendPickupEmailModal({

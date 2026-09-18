@@ -50,6 +50,27 @@ internal static class TestNotifications
                 "INV-2026-081", "QBO-4417", "Paid", "Aug 1 – Aug 31, 2026", "$2,900.00"),
         ]);
 
+    /// <summary>A two-traveller community booking pass sheet, every field populated.</summary>
+    public static BookingPassSheet SampleBookingPassSheet(
+        string reference = "NL-7K3M2Q",
+        string customerName = "Doris Spence",
+        string? notes = "Wheelchair-accessible seating requested.",
+        IReadOnlyList<BookingPassTraveller>? travellers = null) => new(
+        reference,
+        "Tuesday, September 15, 2026",
+        "Thompson ↔ Lynn Lake",
+        "Thompson Depot",
+        "Lynn Lake Terminal",
+        customerName,
+        "E-Transfer",
+        "Unpaid",
+        notes,
+        travellers ??
+        [
+            new BookingPassTraveller("Doris Spence", "204-555-0199", "1 of 2"),
+            new BookingPassTraveller("Sam Spence", null, "2 of 2"),
+        ]);
+
     public static EmailTemplate CreateTemplate(
         string name = "Community pickup",
         NotificationServiceType serviceType = NotificationServiceType.Community,
