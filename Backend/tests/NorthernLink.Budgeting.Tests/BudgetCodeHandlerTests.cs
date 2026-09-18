@@ -21,7 +21,14 @@ public class BudgetCodeHandlerTests
     {
         _create = new CreateBudgetCodeCommandHandler(_repository, _users);
         _update = new UpdateBudgetCodeCommandHandler(_repository, _users);
-        _setActive = new SetBudgetCodeActiveCommandHandler(_repository);
+        // Nothing in this class plans or spends against a code, so the retirement rule's three
+        // collaborators are all empty and every retire here is unblocked. The rule's own arms
+        // live in BudgetCodeRetirementRuleTests.
+        _setActive = new SetBudgetCodeActiveCommandHandler(
+            _repository,
+            new InMemoryBudgetAllocationRepository(),
+            new InMemoryActualTransactionRepository(),
+            new InMemoryBudgetPeriodRepository());
     }
 
     private Guid AddUser(string email = "planner@northernlink.ca")

@@ -136,6 +136,16 @@ public sealed class BudgetPeriod : AggregateRoot, ITenantScoped
     }
 
     /// <summary>
+    /// Whether this period's inclusive date range contains the given day. The one definition of
+    /// "this date belongs to this period" on the platform — actual transactions store no period
+    /// id and derive theirs from <c>OccurredOn</c> through this method, so a second copy of the
+    /// comparison anywhere would be a second answer to the same question. Inclusive on both
+    /// ends, like <see cref="Overlaps"/>: a transaction dated on the first or last day of the
+    /// period is inside it, not in the gap between two periods.
+    /// </summary>
+    public bool Covers(DateOnly day) => StartsOn <= day && day <= EndsOn;
+
+    /// <summary>
     /// Whether this period's inclusive date range intersects the given inclusive range —
     /// a same-day boundary counts, so a month inside an existing quarter overlaps with no
     /// special casing (mirror of <c>Contract.Overlaps</c>, minus the open-ended arm: budget

@@ -22,6 +22,15 @@ internal sealed class InMemoryBudgetAllocationRepository : IBudgetAllocationRepo
         Task.FromResult(Allocations.Any(a =>
             a.BudgetCodeId == budgetCodeId || string.Equals(a.Code, code, StringComparison.Ordinal)));
 
+    // Same id-or-string match as ExistsForCodeAsync, distinct like the real query's Distinct().
+    public Task<IReadOnlyList<Guid>> GetPeriodIdsForCodeAsync(
+        Guid budgetCodeId, string code, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<Guid>>(Allocations
+            .Where(a => a.BudgetCodeId == budgetCodeId || string.Equals(a.Code, code, StringComparison.Ordinal))
+            .Select(a => a.PeriodId)
+            .Distinct()
+            .ToList());
+
     public void Add(BudgetAllocation allocation) => Allocations.Add(allocation);
 
     public void Remove(BudgetAllocation allocation) => Allocations.Remove(allocation);
