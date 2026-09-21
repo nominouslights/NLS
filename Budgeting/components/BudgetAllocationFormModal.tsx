@@ -28,9 +28,11 @@ import { ActionButton } from "@/components/ui/Button";
 //      of the section's category that do not already carry a line (allocationCandidates); in
 //      edit mode the code is fixed text, not a disabled input — to plan a different code you add
 //      another line, or remove this one.
-//   2. **Justification is required.** Zero-based means the amount is argued from nothing each
-//      period, so an empty justification is refused before the round trip, and the server
-//      refuses it again (Budgeting.Allocation.JustificationRequired).
+//   2. **Justification is required.** Zero-based means the argument is made fresh each period,
+//      so an empty justification is refused before the round trip, and the server refuses it
+//      again (Budgeting.Allocation.JustificationRequired). This is also what a line copied from
+//      an earlier period meets: CopyInto brings the amount and leaves the justification empty,
+//      so the copied line opens here already needing one — that is the feature, not a bug.
 //
 // The whole-dollar check is this app's convention rather than the server's rule — see
 // allocationAmountError.
@@ -181,7 +183,9 @@ export default function BudgetAllocationFormModal({
       </div>
 
       <Note>
-        Zero-based: this line is argued from nothing, not carried forward from last period. The
+        Zero-based: the amount may be seeded from an earlier period as a starting position, but
+        the argument for it never is — last period&apos;s reasoning is not this period&apos;s.
+        A copied line arrives with no justification and cannot be saved until you write one. The
         justification is stored with the line and shown on the period&apos;s dashboard.
       </Note>
     </ModalShell>

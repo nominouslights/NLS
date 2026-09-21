@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  copyBudgetAllocations,
   createBudgetCode,
   createBudgetPeriod,
   deleteBudgetCode,
@@ -163,6 +164,114 @@ describe("period requests", () => {
       year: 2026,
       ordinal: 4,
     });
+  });
+});
+
+describe("copyBudgetAllocations", () => {
+  // POST periods/{id}/allocations/copy, mapped inside the BudgetAccess group in
+  // BudgetingEndpoints.cs and handled by CopyBudgetAllocationsCommandHandler. The route is the
+  // one place a literal segment sits beside a {codeId:guid} route on the same path — the :guid
+  // constraint is what keeps "copy" from binding as a code id — so the exact string is worth
+  // pinning here.
+  const TARGET = "5f2b1e1c-0000-4000-8000-0000000000a1";
+  const SOURCE = "5f2b1e1c-0000-4000-8000-0000000000a2";
+
+  it("posts to the target period's copy route with the source in the body", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        copied: 11,
+        skippedAlreadyPlanned: 0,
+        skippedRetiredCode: 0,
+        sourceLineCount: 11,
+      }),
+    );
+
+    await copyBudgetAllocations(TARGET, { sourcePeriodId: SOURCE });
+
+    expect(callPath()).toBe(`/api/budgeting/periods/${TARGET}/allocations/copy`);
+    expect(callInit().method).toBe("POST");
+    expect(JSON.parse(String(callInit().body))).toEqual({ sourcePeriodId: SOURCE });
+  });
+
+  it("puts the TARGET in the route and the SOURCE in the body, never the other way round", async () => {
+    // The reason the source is an object rather than a bare second string: two same-typed guids
+    // swap silently, the server answers 200 either way, and the planner's new Draft quietly
+    // overwrites nothing while last quarter's period gains lines. Named at the call site, the
+    // mistake is unwriteable.
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        copied: 0,
+        skippedAlreadyPlanned: 0,
+        skippedRetiredCode: 0,
+        sourceLineCount: 0,
+      }),
+    );
+
+    await copyBudgetAllocations(TARGET, { sourcePeriodId: SOURCE });
+
+    expect(callPath()).toContain(TARGET);
+    expect(callPath()).not.toContain(SOURCE);
+    expect(String(callInit().body)).toContain(SOURCE);
+    expect(String(callInit().body)).not.toContain(TARGET);
+  });
+
+  it("returns the four counts, which always sum to sourceLineCount", async () => {
+    const body = {
+      copied: 8,
+      skippedAlreadyPlanned: 2,
+      skippedRetiredCode: 1,
+      sourceLineCount: 11,
+    };
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, body));
+
+    const result = await copyBudgetAllocations(TARGET, { sourcePeriodId: SOURCE });
+
+    expect(result).toEqual(body);
+    expect(result.copied + result.skippedAlreadyPlanned + result.skippedRetiredCode).toBe(
+      result.sourceLineCount,
+    );
+  });
+
+  it("treats an empty source period as a 200 with zeroes, not an error", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        copied: 0,
+        skippedAlreadyPlanned: 0,
+        skippedRetiredCode: 0,
+        sourceLineCount: 0,
+      }),
+    );
+
+    await expect(copyBudgetAllocations(TARGET, { sourcePeriodId: SOURCE })).resolves.toEqual({
+      copied: 0,
+      skippedAlreadyPlanned: 0,
+      skippedRetiredCode: 0,
+      sourceLineCount: 0,
+    });
+  });
+
+  it.each<[number, string, string]>([
+    [400, "Budgeting.Allocation.CopySourceRequired", "Choose a period to copy from."],
+    [
+      400,
+      "Budgeting.Allocation.CopySourceIsTarget",
+      "A period cannot be copied onto itself. Choose a different source period.",
+    ],
+    [404, "Budgeting.Allocation.CopySourceNotFound", "The period to copy from was not found."],
+    [
+      409,
+      "Budgeting.Allocation.PeriodNotEditable",
+      "The plan can only change while the period is Draft or Open.",
+    ],
+  ])("surfaces the %d %s message verbatim", async (status, code, message) => {
+    // Every 400/409 in this app is shown as the server wrote it: the wording is what names the
+    // rule, and CopySourceNotFound exists precisely so the console can say WHICH of the two
+    // period ids was wrong.
+    fetchMock.mockResolvedValueOnce(jsonResponse(status, { code, message }));
+
+    await expect(
+      copyBudgetAllocations(TARGET, { sourcePeriodId: SOURCE }),
+    ).rejects.toMatchObject({ code, message, status });
   });
 });
 

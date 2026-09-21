@@ -3,36 +3,44 @@ import {
   allocationAmountError,
   allocationCandidates,
   allocationJustificationError,
+  assignmentState,
   budgetCodeCategoryKind,
   budgetCodeFormatError,
   canEditAllocations,
+  copyOutcomeSummary,
+  copySourceCandidates,
   costCentreApplies,
   coverage,
-  netCad,
-  netKind,
-  netLabel,
+  defaultCopySource,
+  leftToAssignCad,
+  needsJustification,
   nextTransition,
   normalizeBudgetCode,
   ownerLabel,
   parentCandidates,
   periodKind,
+  planBalanced,
   planningProgress,
   previewPeriod,
   stateAfter,
   toBudgetCode,
   toBudgetPeriod,
+  unjustifiedLines,
   userDisplay,
   ALLOCATION_JUSTIFICATION_MAX_LENGTH,
+  ASSIGNMENT_KINDS,
+  ASSIGNMENT_LABELS,
   PERIOD_STATE_LABELS,
   PERIOD_STATE_ORDER,
   REVIEW_FREQUENCY_LABELS,
   SERVICE_LINE_LABELS,
   TAX_TREATMENT_LABELS,
+  type AssignmentState,
   type BudgetAllocationRecord,
   type BudgetCodeRecord,
   type BudgetPeriodRecord,
+  type ChecklistStep,
   type LifecycleStep,
-  type LineStep,
   type PeriodTransitionAction,
 } from "./budgeting";
 import type { BudgetCode, BudgetCodeCategory, BudgetPeriod, PeriodState } from "@/lib/types";
@@ -618,22 +626,217 @@ describe("allocationJustificationError", () => {
   });
 });
 
-// netCad / netKind / netLabel: the dashboard's Net tile. No server rule to mirror — the sums are
-// the server's — but the kind and label are what keep the tile from being colour alone.
+// leftToAssignCad / assignmentState / ASSIGNMENT_KINDS / ASSIGNMENT_LABELS: the dashboard's
+// headline tile, Ramsey's step 3. These REPLACE the deleted netCad / netKind / netLabel tests
+// rather than adapting them, because the semantics invert: netKind(0) asserted "info" (a
+// balanced plan is neutral) and the rule now is "ontime" (under zero-based budgeting $0 left is
+// the GOAL). Editing that assertion in place would have hidden the inversion behind a one-word
+// diff; deleting the block makes the change visible in review.
+//
+// No server rule to mirror here — the two totals are the server's sums — but the four-state
+// classification is what keeps the tile honest, and the kind + label are what keep it from
+// being colour alone.
 
-describe("netCad, netKind and netLabel", () => {
+describe("leftToAssignCad", () => {
   it("is planned revenue less planned expense", () => {
-    expect(netCad(period("Draft", 1_000, 250))).toBe(750);
-    expect(netCad(period("Draft", 250, 1_000))).toBe(-750);
+    expect(leftToAssignCad(period("Draft", 1_000, 250))).toBe(750);
+    expect(leftToAssignCad(period("Draft", 250, 1_000))).toBe(-750);
+  });
+});
+
+describe("assignmentState", () => {
+  it.each<[string, BudgetPeriod, AssignmentState, string, string]>([
+    ["nothing planned at all", period("Draft", 0, 0), "empty", "info", "Nothing planned yet"],
+    ["every dollar given a job", period("Draft", 1_000, 1_000), "balanced", "ontime", "All assigned"],
+    ["dollars still spare", period("Draft", 1_000, 600), "unassigned", "soon", "To assign"],
+    ["more assigned than earned", period("Draft", 1_000, 1_400), "over", "over", "Over-assigned"],
+  ])("%s → %s", (_why, p, state, kind, label) => {
+    expect(assignmentState(p)).toBe(state);
+    expect(ASSIGNMENT_KINDS[state]).toBe(kind);
+    expect(ASSIGNMENT_LABELS[state]).toBe(label);
   });
 
-  it.each<[number, string, string]>([
-    [750, "ontime", "Surplus"],
-    [0, "info", "Balanced"],
-    [-750, "over", "Deficit"],
-  ])("net %d → %s / %s", (net, kind, label) => {
-    expect(netKind(net)).toBe(kind);
-    expect(netLabel(net)).toBe(label);
+  it("tells an empty period apart from a balanced one, though both sit at zero", () => {
+    // The whole reason the state exists: left === 0 is ambiguous, and a tile reading
+    // "All assigned ✓" over a period with nothing in it states the opposite of the truth.
+    const empty = period("Draft", 0, 0);
+    const balanced = period("Draft", 4_200, 4_200);
+
+    expect(leftToAssignCad(empty)).toBe(leftToAssignCad(balanced));
+    expect(assignmentState(empty)).toBe("empty");
+    expect(assignmentState(balanced)).toBe("balanced");
+  });
+
+  it("is not empty when a period plans expenses against no revenue", () => {
+    expect(assignmentState(period("Draft", 0, 900))).toBe("over");
+  });
+});
+
+describe("planBalanced", () => {
+  it("is true only for a balanced plan", () => {
+    expect(planBalanced(period("Draft", 1_000, 1_000))).toBe(true);
+    expect(planBalanced(period("Draft", 1_000, 600))).toBe(false);
+    expect(planBalanced(period("Draft", 1_000, 1_400))).toBe(false);
+  });
+
+  it("is FALSE for an empty plan, which is what makes finalize warn on an untouched period", () => {
+    expect(leftToAssignCad(period("Draft", 0, 0))).toBe(0);
+    expect(planBalanced(period("Draft", 0, 0))).toBe(false);
+  });
+});
+
+// needsJustification / unjustifiedLines mirror BudgetAllocation.NeedsJustification
+// (`Justification.Length == 0`) — which is exactly the value BudgetAllocation.CopyInto writes —
+// widened to Validate's IsNullOrWhiteSpace, so a line of spaces counts as unargued here too
+// rather than only at the save that would refuse it (JustificationRequired).
+
+describe("needsJustification and unjustifiedLines", () => {
+  const withJustification = (justification: string): BudgetAllocationRecord => ({
+    ...makeLine("exp-a"),
+    justification,
+  });
+
+  it("is true for the empty string a copied line arrives with", () => {
+    expect(needsJustification(withJustification(""))).toBe(true);
+  });
+
+  it("is true for whitespace, matching Validate's IsNullOrWhiteSpace", () => {
+    expect(needsJustification(withJustification("   "))).toBe(true);
+  });
+
+  it("is false once somebody has argued the line", () => {
+    expect(needsJustification(withJustification("Two extra runs a week."))).toBe(false);
+  });
+
+  it("counts only the unargued lines", () => {
+    const lines = [
+      withJustification(""),
+      { ...makeLine("exp-b"), justification: "Quoted." },
+      { ...makeLine("exp-c"), justification: " " },
+    ];
+
+    expect(unjustifiedLines(lines).map((l) => l.budgetCodeId)).toEqual(["exp-a", "exp-c"]);
+  });
+
+  it("is empty for a period with no lines", () => {
+    expect(unjustifiedLines([])).toEqual([]);
+  });
+});
+
+// copySourceCandidates / defaultCopySource mirror CopyBudgetAllocationsCommandHandler's guards.
+// Only CopySourceIsTarget narrows the list: the handler checks AllowsPlanChanges on the TARGET
+// and deliberately not on the source, so a Closed period is a legal source.
+
+describe("copySourceCandidates", () => {
+  const march = { ...period("Closed", 9_000, 9_000), id: "p-march", startsOn: "2026-03-01" };
+  const april = { ...period("InReview"), id: "p-april", startsOn: "2026-04-01" };
+  const may = { ...period("Draft"), id: "p-may", startsOn: "2026-05-01" };
+  const all = [march, april, may];
+
+  it("excludes the target and nothing else", () => {
+    expect(copySourceCandidates(all, "p-may").map((p) => p.id)).toEqual(["p-march", "p-april"]);
+  });
+
+  it("OFFERS a Closed period — the server checks editability on the target only", () => {
+    // The asymmetry a reader gets backwards. Copying a closed period's plan into a fresh Draft
+    // is the entire point of the feature, so filtering by canEditAllocations here would refuse
+    // the most common case with no error anywhere to explain it.
+    expect(canEditAllocations(march.state)).toBe(false);
+    expect(copySourceCandidates(all, "p-may")).toContain(march);
+  });
+
+  it("offers every other state too", () => {
+    expect(copySourceCandidates(all, "p-march").map((p) => p.state)).toEqual(["InReview", "Draft"]);
+  });
+
+  it("is empty when the target is the only period there is", () => {
+    expect(copySourceCandidates([may], "p-may")).toEqual([]);
+  });
+});
+
+describe("defaultCopySource", () => {
+  const march = { ...period("Closed"), id: "p-march", startsOn: "2026-03-01" };
+  const april = { ...period("Closed"), id: "p-april", startsOn: "2026-04-01" };
+  const may = { ...period("Draft"), id: "p-may", startsOn: "2026-05-01" };
+
+  it("pre-selects the latest period before the target — 'last period'", () => {
+    expect(defaultCopySource([march, april, may], "p-may")?.id).toBe("p-april");
+  });
+
+  it("falls back to the latest candidate when the target is the earliest", () => {
+    expect(defaultCopySource([march, april, may], "p-march")?.id).toBe("p-may");
+  });
+
+  it("is null when there is nothing to copy from", () => {
+    expect(defaultCopySource([may], "p-may")).toBeNull();
+  });
+});
+
+// copyOutcomeSummary reports every bucket the server counts, because the invariant
+// copied + skippedAlreadyPlanned + skippedRetiredCode === sourceLineCount (pinned server-side in
+// CopyBudgetAllocationsCommandHandlerTests) is only reassuring if the user can see it add up.
+
+describe("copyOutcomeSummary", () => {
+  it("reports a clean copy, naming the missing justifications", () => {
+    expect(
+      copyOutcomeSummary({
+        copied: 11,
+        skippedAlreadyPlanned: 0,
+        skippedRetiredCode: 0,
+        sourceLineCount: 11,
+      }),
+    ).toBe("Copied 11 lines, each with no justification yet. 11 lines in the source period.");
+  });
+
+  it("omits a skip clause that is zero rather than writing '0 skipped'", () => {
+    const summary = copyOutcomeSummary({
+      copied: 3,
+      skippedAlreadyPlanned: 2,
+      skippedRetiredCode: 0,
+      sourceLineCount: 5,
+    });
+
+    expect(summary).toContain("2 lines already planned here and left untouched");
+    expect(summary).not.toContain("retired");
+  });
+
+  it("names both skip reasons when both happened", () => {
+    const summary = copyOutcomeSummary({
+      copied: 1,
+      skippedAlreadyPlanned: 1,
+      skippedRetiredCode: 1,
+      sourceLineCount: 3,
+    });
+
+    expect(summary).toContain("1 line already planned here and left untouched");
+    expect(summary).toContain("1 line on retired codes");
+    expect(summary).toContain("3 lines in the source period");
+  });
+
+  it("says nothing was copied rather than claiming a copy, when every line was skipped", () => {
+    expect(
+      copyOutcomeSummary({
+        copied: 0,
+        skippedAlreadyPlanned: 4,
+        skippedRetiredCode: 0,
+        sourceLineCount: 4,
+      }),
+    ).toBe(
+      "Nothing was copied — skipped 4 lines already planned here and left untouched. 4 lines in the source period.",
+    );
+  });
+
+  it("treats an empty source as a success, not a failure", () => {
+    // The server answers 200 with four zeroes for an empty source period, so the console must
+    // say "nothing to copy" rather than raise an error for a button that worked.
+    expect(
+      copyOutcomeSummary({
+        copied: 0,
+        skippedAlreadyPlanned: 0,
+        skippedRetiredCode: 0,
+        sourceLineCount: 0,
+      }),
+    ).toBe("That period has no lines to copy — nothing was added.");
   });
 });
 
@@ -663,8 +866,13 @@ describe("coverage", () => {
   });
 });
 
-// planningProgress feeds the dashboard's checklist and stepper from one derivation: two line
-// steps (done once any line exists) then the five lifecycle states relative to PERIOD_STATE_ORDER.
+// planningProgress feeds the dashboard's zero-based checklist and stepper from one derivation:
+// four checklist rows (revenue, expense, balance, argued) then the five lifecycle states
+// relative to PERIOD_STATE_ORDER. Step 4 of zero-based budgeting — track all month — gets no row
+// on purpose: actuals are still mock, and a row that can never turn green is worse than a gap.
+//
+// Each row carries its own kind and status word, so PlanningChecklist renders branch-free and
+// the colour decision is tested here rather than in a component.
 
 describe("planningProgress", () => {
   const codes = [
@@ -672,17 +880,21 @@ describe("planningProgress", () => {
     makeCode("exp-a", "Expense"),
     makeCode("exp-b", "Expense"),
   ];
-  const lineSteps = (steps: ReturnType<typeof planningProgress>) =>
-    steps.filter((s): s is LineStep => s.group === "lines");
+  const checklist = (steps: ReturnType<typeof planningProgress>) =>
+    steps.filter((s): s is ChecklistStep => s.group === "checklist");
+  const row = (steps: ReturnType<typeof planningProgress>, id: ChecklistStep["id"]) =>
+    checklist(steps).find((s) => s.id === id)!;
   const lifecycle = (steps: ReturnType<typeof planningProgress>) =>
     steps.filter((s): s is LifecycleStep => s.group === "lifecycle").map((s) => [s.id, s.status]);
 
   it("marks both line steps pending for an empty Draft, and Draft current", () => {
     const steps = planningProgress(period("Draft"), [], codes);
 
-    expect(lineSteps(steps).map((s) => [s.id, s.count, s.done])).toEqual([
-      ["revenue", 0, false],
-      ["expense", 0, false],
+    expect(checklist(steps).map((s) => [s.id, s.kind, s.status])).toEqual([
+      ["revenue", "info", "Pending"],
+      ["expense", "info", "Pending"],
+      ["balance", "info", "Nothing planned yet"],
+      ["argued", "info", "Pending"],
     ]);
     expect(lifecycle(steps)).toEqual([
       ["Draft", "current"],
@@ -693,16 +905,57 @@ describe("planningProgress", () => {
     ]);
   });
 
-  it("marks a line step done once it has a line, with coverage in the detail", () => {
+  it("marks a line step done once it has a line, with the count and coverage in the detail", () => {
     const lines = [makeLine("rev-a", "Revenue"), makeLine("exp-a", "Expense")];
-    const steps = lineSteps(planningProgress(period("Draft"), lines, codes));
+    const steps = planningProgress(period("Draft"), lines, codes);
 
-    expect(steps.map((s) => [s.id, s.count, s.done])).toEqual([
-      ["revenue", 1, true],
-      ["expense", 1, true],
-    ]);
-    expect(steps[0].detail).toBe("1 of 1 active revenue codes planned");
-    expect(steps[1].detail).toBe("1 of 2 active expense codes planned");
+    expect(row(steps, "revenue").status).toBe("Done");
+    expect(row(steps, "revenue").kind).toBe("ontime");
+    expect(row(steps, "revenue").detail).toBe("1 line · 1 of 1 active revenue codes planned");
+    expect(row(steps, "expense").detail).toBe("1 line · 1 of 2 active expense codes planned");
+  });
+
+  it("writes the balance row's signed figure out, and never leaves the sign to colour", () => {
+    const unassigned = row(planningProgress(period("Draft", 10_000, 5_800), [], codes), "balance");
+    expect(unassigned.status).toBe("To assign");
+    expect(unassigned.kind).toBe("soon");
+    expect(unassigned.detail).toBe("Left to assign +$4,200 — give the rest a job.");
+
+    const over = row(planningProgress(period("Draft", 10_000, 11_000), [], codes), "balance");
+    expect(over.status).toBe("Over-assigned");
+    expect(over.kind).toBe("over");
+    expect(over.detail).toBe(
+      "Left to assign −$1,000 — this plan assigns more than it plans to earn.",
+    );
+
+    const balanced = row(planningProgress(period("Draft", 10_000, 10_000), [], codes), "balance");
+    expect(balanced.status).toBe("All assigned");
+    expect(balanced.kind).toBe("ontime");
+    expect(balanced.detail).toBe("Left to assign $0 — every planned dollar has a job.");
+  });
+
+  it("counts the lines a copy left unargued, and says why they are unargued", () => {
+    const lines = [
+      makeLine("rev-a", "Revenue"),
+      { ...makeLine("exp-a", "Expense"), justification: "" },
+      { ...makeLine("exp-b", "Expense"), justification: "   " },
+    ];
+    const argued = row(planningProgress(period("Draft", 1_000, 2_000), lines, codes), "argued");
+
+    expect(argued.kind).toBe("soon");
+    expect(argued.status).toBe("Needs work");
+    expect(argued.detail).toBe(
+      "2 of 3 lines still need a justification — a copied line brings its amount, not its argument.",
+    );
+  });
+
+  it("marks the argued row done once every line carries an argument", () => {
+    const lines = [makeLine("rev-a", "Revenue"), makeLine("exp-a", "Expense")];
+    const argued = row(planningProgress(period("Draft", 1_000, 1_000), lines, codes), "argued");
+
+    expect(argued.kind).toBe("ontime");
+    expect(argued.status).toBe("Done");
+    expect(argued.detail).toBe("All 2 lines carry a justification.");
   });
 
   it("marks the states before Open done and the ones after pending", () => {
@@ -725,10 +978,23 @@ describe("planningProgress", () => {
     ]);
   });
 
-  it("puts the two line steps first, then the five states in order", () => {
+  it("puts the four checklist rows first, then the five states in order", () => {
     const steps = planningProgress(period("Draft"), [], codes);
 
-    expect(steps.map((s) => s.id)).toEqual(["revenue", "expense", ...PERIOD_STATE_ORDER]);
+    expect(steps.map((s) => s.id)).toEqual([
+      "revenue",
+      "expense",
+      "balance",
+      "argued",
+      ...PERIOD_STATE_ORDER,
+    ]);
+  });
+
+  it("has no row for step 4 of zero-based budgeting — actuals are still mock", () => {
+    const ids = checklist(planningProgress(period("Draft"), [], codes)).map((s) => s.id);
+
+    expect(ids).toHaveLength(4);
+    expect(ids).not.toContain("tracked");
   });
 });
 
