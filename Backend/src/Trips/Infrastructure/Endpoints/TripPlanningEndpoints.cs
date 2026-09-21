@@ -11,6 +11,7 @@ using NorthernLink.Trips.Application.Routes.GetRoutes;
 using NorthernLink.Trips.Application.Routes.Update;
 using NorthernLink.Trips.Application.Schedules.AddException;
 using NorthernLink.Trips.Application.Schedules.Create;
+using NorthernLink.Trips.Application.Schedules.GenerateTrips;
 using NorthernLink.Trips.Application.Schedules.GetExceptions;
 using NorthernLink.Trips.Application.Schedules.GetScheduleTemplates;
 using NorthernLink.Trips.Application.Schedules.RemoveException;
@@ -115,6 +116,10 @@ internal static class TripPlanningEndpoints
         templates.MapPost("{id:guid}/exceptions", AddScheduleException);
         templates.MapPut("{id:guid}/exceptions/{exceptionId:guid}", UpdateScheduleException);
         templates.MapDelete("{id:guid}/exceptions/{exceptionId:guid}", RemoveScheduleException);
+        // On-demand generation: the same code path as the background worker, driven to a
+        // dispatcher-chosen date. Preview is a pure read (no dry-run flag on the POST).
+        templates.MapGet("{id:guid}/generate/preview", PreviewScheduleTripGeneration); // ?through=yyyy-MM-dd
+        templates.MapPost("{id:guid}/generate", GenerateScheduleTrips);                // body { through }
     }
 
     // ---- Trips ----
@@ -742,6 +747,46 @@ internal static class TripPlanningEndpoints
         var result = await sender.Send(new SetScheduleTemplateActiveCommand(id, false), cancellationToken);
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
+
+    /// <summary>
+    /// What a generate through <paramref name="through"/> would create — same guards and
+    /// counts as the POST, nothing persisted. Errors carry the dispatcher-facing message the
+    /// dialog shows verbatim.
+    /// </summary>
+    private static async Task<IResult> PreviewScheduleTripGeneration(
+        Guid id, DateOnly through, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(
+            new PreviewScheduleTripGenerationQuery(tenantId, id, through), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>
+    /// Generates the template's trips from today through the body's date (inclusive), skipping
+    /// occurrences that already exist. 409 (GenerationConflict) when a concurrent run beat this
+    /// one — re-preview and retry.
+    /// </summary>
+    private static async Task<IResult> GenerateScheduleTrips(
+        Guid id,
+        GenerateScheduleTripsRequest request,
+        ITenantContext tenantContext,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(
+            new GenerateScheduleTripsCommand(tenantId, id, request.Through), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
 }
 
 /// <summary>Body of a successful trip creation (201, with Location header).</summary>
@@ -774,6 +819,15 @@ public sealed record ScheduleExceptionRequest(
     TimeOnly? DepartureTime,
     TimeOnly? ReturnDepartureTime,
     string? Note);
+
+/// <summary>
+/// Request body for POST /api/trips/schedule-templates/{id}/generate. <c>through</c> is the
+/// last service date to generate (inclusive, <c>yyyy-MM-dd</c>): from today up to
+/// <see cref="ScheduleTemplate.MaxGenerateAheadDays"/> days ahead. The response is a
+/// <c>ScheduleTripGenerationResult</c>; GET .../generate/preview?through= returns the same
+/// shape without creating anything.
+/// </summary>
+public sealed record GenerateScheduleTripsRequest(DateOnly Through);
 
 /// <summary>Body of a successful stop creation (201, with Location header).</summary>
 public sealed record StopCreatedResponse(Guid Id);

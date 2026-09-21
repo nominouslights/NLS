@@ -22,6 +22,8 @@ internal sealed class PurchaseOrderProjection : ClientsProjection<PurchaseOrder,
         row.Issued = source.Issued;
         row.Expiry = source.Expiry;
         row.AmountCad = source.AmountCad;
+        row.RoundTripRateCad = source.RoundTripRateCad;
+        row.OneWayRateCad = source.OneWayRateCad;
         row.Note = source.Note;
         row.CreatedAtUtc = source.CreatedAtUtc;
         row.UpdatedAtUtc = source.UpdatedAtUtc;

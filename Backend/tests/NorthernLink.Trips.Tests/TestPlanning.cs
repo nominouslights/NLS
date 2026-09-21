@@ -1,4 +1,5 @@
 using NorthernLink.Shared.Kernel;
+using NorthernLink.Trips.Application.Integration;
 using NorthernLink.Trips.Domain.Manifests;
 using NorthernLink.Trips.Domain.Routes;
 using NorthernLink.Trips.Domain.Schedules;
@@ -50,12 +51,14 @@ internal static class TestPlanning
         IReadOnlyList<int>? daysOfMonth = null,
         TripServiceType serviceType = TripServiceType.ContractCrew,
         int? seatsCapacity = 12,
-        int? seatsMinimum = null)
+        int? seatsMinimum = null,
+        Guid? defaultDriverId = null,
+        string? defaultVehicleUnit = VehicleUnit)
     {
         var result = CreateTemplateResult(
             daysOfWeek, departureTime, returnDepartureTime, returnNextDay, generationHorizonDays,
             routeId, recurrenceKind, intervalDays, anchorDate, daysOfMonth,
-            serviceType, seatsCapacity, seatsMinimum);
+            serviceType, seatsCapacity, seatsMinimum, defaultDriverId, defaultVehicleUnit);
         var template = result.Value;
 
         if (!active)
@@ -83,7 +86,9 @@ internal static class TestPlanning
         IReadOnlyList<int>? daysOfMonth = null,
         TripServiceType serviceType = TripServiceType.ContractCrew,
         int? seatsCapacity = 12,
-        int? seatsMinimum = null) =>
+        int? seatsMinimum = null,
+        Guid? defaultDriverId = null,
+        string? defaultVehicleUnit = VehicleUnit) =>
         ScheduleTemplate.Create(
             TenantId,
             "Alamos crew shuttle",
@@ -101,9 +106,32 @@ internal static class TestPlanning
             returnNextDay: returnNextDay,
             seatsCapacity: seatsCapacity,
             seatsMinimum: seatsMinimum,
-            defaultVehicleUnit: "U-04",
-            defaultDriverId: null,
+            defaultVehicleUnit: defaultVehicleUnit,
+            defaultDriverId: defaultDriverId,
             generationHorizonDays: generationHorizonDays);
+
+    /// <summary>The baseline driver as an Active driver_lookup row — what a template's default driver resolves to.</summary>
+    public static DriverLookup ActiveDriver(string status = DriverLookup.ActiveStatus) => new()
+    {
+        DriverId = DriverId,
+        TenantId = TenantId,
+        Name = DriverName,
+        LicenceClass = "Class 4",
+        Status = status,
+        UpdatedAtUtc = DateTimeOffset.UtcNow,
+    };
+
+    /// <summary>The baseline unit as a vehicle_lookup row; <paramref name="seats"/> is what generated trips snapshot.</summary>
+    public static VehicleLookup ActiveVehicle(int seats = 12, string status = VehicleLookup.ActiveStatus) => new()
+    {
+        VehicleId = VehicleId,
+        TenantId = TenantId,
+        UnitNumber = VehicleUnit,
+        Status = status,
+        RequiredLicenceClass = "Class 4",
+        SeatingCapacity = seats,
+        UpdatedAtUtc = DateTimeOffset.UtcNow,
+    };
 
     /// <summary>
     /// A valid scheduled trip; override the arguments a test cares about. Null

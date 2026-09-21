@@ -217,9 +217,11 @@ Collision protocol for parallel batches:
 - `npm run dev` — dev server on port **3004** (pinned in the script). Proxies `/api/*` to
   `http://localhost:5215` exactly as Dispatcher and Budgeting do. Also started by `aspire run`.
 - **Laid out for a fixed 1280×800 landscape tablet** — check it in the device toolbar at that
-  size, not a desktop window. There are no breakpoints and no `@media` query anywhere in the app
-  (architecture non-negotiable #5: company-issued, landscape-only, 10-inch, never BYOD), and a
-  portrait viewport gets a full-screen "rotate the tablet" panel rather than a phone layout.
+  size, not a desktop window. There are no breakpoints and no width-based `@media` query anywhere
+  in the app (architecture non-negotiable #5: company-issued, landscape-only, 10-inch, never
+  BYOD; the one `@media` in the tree is `prefers-reduced-motion` in the copied `app/globals.css`,
+  an accessibility preference rather than a breakpoint), and a portrait viewport gets a
+  full-screen "rotate the tablet" panel rather than a phone layout.
 - `npm test` — Vitest. The four auth tests ported from Budgeting (with "an **Accountant** account
   is rejected" as the acceptance criterion), plus the §5.4 eligibility engine, the CVDHS
   hours-of-service bands tested on both sides of every boundary, and the `HosDisplay` wire-string
@@ -271,7 +273,7 @@ server workload, and `AppHost/` stays a local-dev orchestrator: neither is conta
   tests, `node run-tests.mjs` before pushing is the whole safety net — enable it as a pre-push
   hook with `git config core.hooksPath .githooks` (see Commands).
 - `.do/app.yaml` is the App Platform spec: `doctl apps create --spec .do/app.yaml`, then
-  `doctl apps update <app-id> --spec .do/app.yaml`. All four containers are components of **one**
+  `doctl apps update <app-id> --spec .do/app.yaml`. All the containers are components of **one**
   app because App Platform's private network is per-app — a component's name is its hostname on
   that LAN, so the API component must be named `northernlink-api` with `internal_ports: [8080]`
   for the frontends' baked `http://northernlink-api:8080` to resolve. It carries no `http_port`

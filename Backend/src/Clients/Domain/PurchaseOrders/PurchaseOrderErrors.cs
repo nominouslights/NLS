@@ -16,4 +16,12 @@ public static class PurchaseOrderErrors
 
     public static readonly Error InvalidAmount = Error.Validation(
         "Clients.PurchaseOrder.InvalidAmount", "The PO amount must be greater than zero.");
+
+    public static readonly Error InvalidRoundTripRate = Error.Validation(
+        "Clients.PurchaseOrder.InvalidRoundTripRate",
+        "The PO round-trip rate must be greater than zero.");
+
+    public static readonly Error InvalidOneWayRate = Error.Validation(
+        "Clients.PurchaseOrder.InvalidOneWayRate",
+        "The PO one-way rate must be greater than zero.");
 }

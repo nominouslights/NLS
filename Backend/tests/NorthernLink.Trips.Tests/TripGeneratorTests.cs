@@ -615,4 +615,76 @@ public class TripGeneratorTests
         Assert.Equal(TripDirection.Inbound, draft.Direction);
         Assert.Equal(new TimeOnly(15, 0), draft.DepartureTime);
     }
+
+    // ----- Explicit window (on-demand generation) -----
+
+    [Fact]
+    public void Explicit_window_expands_past_the_template_horizon()
+    {
+        // Horizon 7, but the dispatcher asked for four weeks: 20 weekdays.
+        var template = TestPlanning.CreateTemplate(generationHorizonDays: 7);
+
+        var drafts = TripGenerator.Generate(template, NoExisting, TestPlanning.Monday, TestPlanning.Monday.AddDays(28));
+
+        Assert.Equal(20, drafts.Count);
+        Assert.Equal(TestPlanning.Monday, drafts[0].ServiceDate);
+        Assert.Equal(TestPlanning.Monday.AddDays(25), drafts[^1].ServiceDate); // Friday of week 4
+        Assert.DoesNotContain(drafts, d => d.ServiceDate.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday);
+    }
+
+    [Fact]
+    public void ExtraRun_is_in_or_out_of_the_explicit_window_not_the_horizon()
+    {
+        var template = TestPlanning.CreateTemplate(daysOfWeek: [DayOfWeek.Monday], generationHorizonDays: 7);
+        var extraDate = TestPlanning.Monday.AddDays(30);
+        template.AddException(extraDate, ScheduleExceptionKind.ExtraRun, new TimeOnly(9, 0), null, null);
+
+        // A window ending before the extra run ignores it...
+        var narrow = TripGenerator.Generate(template, NoExisting, TestPlanning.Monday, TestPlanning.Monday.AddDays(30));
+        Assert.DoesNotContain(narrow, d => d.ServiceDate == extraDate);
+
+        // ...and one ending after it includes it.
+        var wide = TripGenerator.Generate(template, NoExisting, TestPlanning.Monday, TestPlanning.Monday.AddDays(31));
+        var extra = Assert.Single(wide, d => d.ServiceDate == extraDate);
+        Assert.Equal(new TimeOnly(9, 0), extra.DepartureTime);
+    }
+
+    [Fact]
+    public void Three_argument_overload_is_the_template_horizon_window()
+    {
+        var template = TestPlanning.CreateTemplate(
+            departureTime: new TimeOnly(6, 30),
+            returnDepartureTime: new TimeOnly(17, 30),
+            generationHorizonDays: 10);
+        template.AddException(TestPlanning.Monday.AddDays(2), ScheduleExceptionKind.Skip, null, null, null);
+        template.AddException(TestPlanning.Monday.AddDays(5), ScheduleExceptionKind.ExtraRun, new TimeOnly(9, 0), null, null);
+
+        var byHorizon = TripGenerator.Generate(template, NoExisting, TestPlanning.Monday);
+        var byWindow = TripGenerator.Generate(
+            template, NoExisting, TestPlanning.Monday, TestPlanning.Monday.AddDays(10));
+
+        Assert.Equal(byWindow, byHorizon);
+    }
+
+    [Fact]
+    public void MonthlyDays_walks_every_month_an_explicit_window_touches()
+    {
+        // Window [2026-07-20, 2026-10-01): Jul 15 is before the start; Aug/Sep both fire twice.
+        var template = TestPlanning.CreateTemplate(
+            recurrenceKind: ScheduleRecurrenceKind.MonthlyDays,
+            daysOfMonth: [1, 15],
+            generationHorizonDays: 7);
+
+        var drafts = TripGenerator.Generate(template, NoExisting, TestPlanning.Monday, new DateOnly(2026, 10, 1));
+
+        Assert.Equal(
+            new[]
+            {
+                new DateOnly(2026, 8, 1),
+                new DateOnly(2026, 8, 15),
+                new DateOnly(2026, 9, 1),
+                new DateOnly(2026, 9, 15),
+            },
+            OutboundDates(drafts));
+    }
 }

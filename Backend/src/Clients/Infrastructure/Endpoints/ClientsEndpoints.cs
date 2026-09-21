@@ -296,6 +296,8 @@ public static class ClientsEndpoints
             request.Issued,
             request.Expiry,
             request.AmountCad,
+            request.RoundTripRateCad,
+            request.OneWayRateCad,
             request.Note);
 
         var result = await sender.Send(command, cancellationToken);
@@ -305,7 +307,7 @@ public static class ClientsEndpoints
     }
 
     private static async Task<IResult> UpdatePurchaseOrder(
-        Guid id, Guid poId, PurchaseOrderRequest request, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+        Guid id, Guid poId, UpdatePurchaseOrderRequest request, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
     {
         if (tenantContext.TenantId is not { } tenantId)
         {
@@ -319,6 +321,8 @@ public static class ClientsEndpoints
             request.Issued,
             request.Expiry,
             request.AmountCad,
+            request.RoundTripRateCad,
+            request.OneWayRateCad,
             request.Note);
 
         var result = await sender.Send(command, cancellationToken);
@@ -381,10 +385,60 @@ public sealed record ClientContactRequest(
     bool ReceivesEmailReports,
     bool ReceivesAccrualsReports);
 
-/// <summary>Request body for POST/PUT /api/clients/{id}/purchase-orders.</summary>
+/// <summary>
+/// Request body for POST /api/clients/{id}/purchase-orders. Each PO carries its own negotiated
+/// terms: <see cref="RoundTripRateCad"/> and <see cref="OneWayRateCad"/> are both optional and
+/// independent (one, both, or neither), must be greater than zero when present, and are quoted
+/// <b>tax-inclusive</b> — the platform computes no GST/HST/PST. A null term falls back at
+/// pricing time: round trip → the contract's rate per round trip, one way → half the effective
+/// round-trip rate.
+/// <para>
+/// Every field is optional here because creating a PO from nothing but a number and a date is a
+/// legitimate thing to do — the terms often arrive later. The <b>update</b> body deliberately
+/// does not work that way; see <see cref="UpdatePurchaseOrderRequest"/>.
+/// </para>
+/// </summary>
 public sealed record PurchaseOrderRequest(
     string? PoNumber,
     DateOnly Issued,
     DateOnly? Expiry,
     decimal? AmountCad,
+    decimal? RoundTripRateCad,
+    decimal? OneWayRateCad,
     string? Note);
+
+/// <summary>
+/// Request body for PUT /api/clients/{id}/purchase-orders/{poId}. Same fields as
+/// <see cref="PurchaseOrderRequest"/>, but every member is <c>required</c>: the key must be
+/// present in the JSON, though its value may be null.
+/// <para>
+/// PUT replaces the whole purchase order, so a field left out of the body is a field cleared.
+/// That is correct PUT semantics and it stays — what is not acceptable is it happening
+/// <i>silently</i> on a money field. A quietly wiped <see cref="RoundTripRateCad"/> does not
+/// fail: pricing falls back to the contract's rate and produces a plausible-looking figure that
+/// someone then hand-keys into QuickBooks. A wrong invoice that looks right is far worse than a
+/// 400, so omitting a key is rejected at the boundary and an explicit <c>null</c> is how a term
+/// is cleared on purpose.
+/// </para>
+/// <para>
+/// Required members are enforced by System.Text.Json during binding, which surfaces as a 400 —
+/// pinned by <c>PurchaseOrderRequestContractTests</c> so the guarantee cannot regress into a 500
+/// or, worse, back into a silent clear.
+/// </para>
+/// </summary>
+public sealed record UpdatePurchaseOrderRequest
+{
+    public required string? PoNumber { get; init; }
+
+    public required DateOnly Issued { get; init; }
+
+    public required DateOnly? Expiry { get; init; }
+
+    public required decimal? AmountCad { get; init; }
+
+    public required decimal? RoundTripRateCad { get; init; }
+
+    public required decimal? OneWayRateCad { get; init; }
+
+    public required string? Note { get; init; }
+}

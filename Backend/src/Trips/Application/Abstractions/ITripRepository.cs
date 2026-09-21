@@ -1,3 +1,4 @@
+using NorthernLink.Trips.Domain.Manifests;
 using NorthernLink.Trips.Domain.Trips;
 
 namespace NorthernLink.Trips.Application.Abstractions;
@@ -53,6 +54,27 @@ public interface ITripRepository
     /// in an application-level existence check alone.
     /// </summary>
     Task<bool> TryAddForBookingDayAsync(Trip trip, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The occurrence keys (service date + direction) already materialized from one template
+    /// within <c>[from, toExclusive)</c> — the set <c>TripGenerator</c> skips so generation is
+    /// idempotent. Only template-generated legs carry a direction, so directionless trips are
+    /// excluded by the query. Tenant-scoped (query filter + RLS).
+    /// </summary>
+    Task<IReadOnlySet<(DateOnly ServiceDate, TripDirection Direction)>> GetGeneratedOccurrenceKeysAsync(
+        Guid templateId,
+        DateOnly from,
+        DateOnly toExclusive,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Adds and SAVES one template's freshly generated legs as a single transaction, absorbing
+    /// the (tenant, template, service date, direction) unique-index race DB-atomically: false
+    /// when a concurrent run (the worker, or another dispatcher) already materialized one of
+    /// them — nothing is persisted and the caller reports the conflict. Mirrors
+    /// <see cref="TryAddForBookingDayAsync"/>.
+    /// </summary>
+    Task<bool> TryAddGeneratedAsync(IReadOnlyList<Trip> trips, CancellationToken cancellationToken = default);
 
     Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }

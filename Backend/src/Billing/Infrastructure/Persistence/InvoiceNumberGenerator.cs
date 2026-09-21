@@ -10,15 +10,29 @@ namespace NorthernLink.Billing.Infrastructure.Persistence;
 /// unique index on (tenant_id, invoice_number) is the authoritative guard against a
 /// concurrent duplicate. The count bypasses the tenant query filter and matches the
 /// explicit tenant id so the sequence stays correct wherever it is called from.
+/// <para>
+/// The batch is issued from a single count: the count is a database query, so invoices added
+/// to the change tracker but not yet saved are invisible to it. Deriving every number in the
+/// batch from one count — rather than counting once per invoice — is what keeps the numbers in
+/// one generation unique.
+/// </para>
 /// </summary>
 internal sealed class InvoiceNumberGenerator(BillingDbContext context) : IInvoiceNumberGenerator
 {
-    public async Task<string> NextInvoiceNumberAsync(Guid tenantId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<string>> NextInvoiceNumbersAsync(
+        Guid tenantId,
+        int count,
+        CancellationToken cancellationToken = default)
     {
+        if (count <= 0)
+        {
+            return [];
+        }
+
         var issued = await context.Invoices
             .IgnoreQueryFilters()
             .CountAsync(i => i.TenantId == tenantId, cancellationToken);
 
-        return $"INV-{issued + 1:D4}";
+        return [.. Enumerable.Range(issued + 1, count).Select(n => $"INV-{n:D4}")];
     }
 }

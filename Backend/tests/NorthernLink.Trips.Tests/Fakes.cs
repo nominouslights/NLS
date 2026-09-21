@@ -61,11 +61,71 @@ internal sealed class FakeTripRepository : ITripRepository
         return Task.FromResult(true);
     }
 
+    public Task<IReadOnlySet<(DateOnly ServiceDate, TripDirection Direction)>> GetGeneratedOccurrenceKeysAsync(
+        Guid templateId, DateOnly from, DateOnly toExclusive, CancellationToken cancellationToken = default)
+    {
+        IReadOnlySet<(DateOnly ServiceDate, TripDirection Direction)> keys = Trips
+            .Where(t => t.ScheduleTemplateId == templateId
+                && t.ServiceDate >= from
+                && t.ServiceDate < toExclusive
+                && t.Direction is not null)
+            .Select(t => (t.ServiceDate, t.Direction!.Value))
+            .ToHashSet();
+        return Task.FromResult(keys);
+    }
+
+    /// <summary>
+    /// Mirrors the (tenant, template, service date, direction) unique index: a collision with
+    /// an existing trip OR between two trips in the batch rejects the whole batch with false
+    /// (events cleared, nothing added) — the real save is one transaction.
+    /// </summary>
+    public Task<bool> TryAddGeneratedAsync(IReadOnlyList<Trip> trips, CancellationToken cancellationToken = default)
+    {
+        var claimed = Trips
+            .Where(t => t.Direction is not null)
+            .Select(t => (t.TenantId, t.ScheduleTemplateId, t.ServiceDate, t.Direction!.Value))
+            .ToHashSet();
+
+        var collides = trips.Any(t =>
+            t.Direction is null
+            || !claimed.Add((t.TenantId, t.ScheduleTemplateId, t.ServiceDate, t.Direction.Value)));
+        if (collides)
+        {
+            foreach (var trip in trips)
+            {
+                trip.ClearDomainEvents();
+            }
+
+            return Task.FromResult(false);
+        }
+
+        Trips.AddRange(trips);
+        SaveCount++;
+        return Task.FromResult(true);
+    }
+
     public Task SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         SaveCount++;
         return Task.CompletedTask;
     }
+}
+
+/// <summary>Sequential trip numbers, shared by every handler test that mints one.</summary>
+internal sealed class FakeTripNumberGenerator : ITripNumberGenerator
+{
+    private int _next = 5000;
+
+    public Task<string> NextAsync(Guid tenantId, CancellationToken cancellationToken = default) =>
+        Task.FromResult($"TR-{++_next}");
+}
+
+/// <summary>Deterministic clock for the generation handlers' "today".</summary>
+internal sealed class FakeClock(DateTimeOffset now) : TimeProvider
+{
+    public DateTimeOffset UtcNow { get; set; } = now;
+
+    public override DateTimeOffset GetUtcNow() => UtcNow;
 }
 
 /// <summary>
@@ -149,6 +209,9 @@ internal sealed class FakeVehicleLookupRepository : IVehicleLookupRepository
 
     public Task<VehicleLookup?> GetAsync(Guid vehicleId, CancellationToken cancellationToken = default) =>
         Task.FromResult(Vehicles.FirstOrDefault(v => v.VehicleId == vehicleId));
+
+    public Task<VehicleLookup?> GetByUnitNumberAsync(string unitNumber, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Vehicles.FirstOrDefault(v => v.UnitNumber == unitNumber));
 
     public Task UpsertAsync(VehicleLookup vehicle, CancellationToken cancellationToken = default)
     {

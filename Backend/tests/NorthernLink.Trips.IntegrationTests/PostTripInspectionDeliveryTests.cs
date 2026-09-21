@@ -10,6 +10,7 @@ using NorthernLink.Shared.Persistence.Auditing;
 using NorthernLink.Shared.Tenancy;
 using NorthernLink.Trips.Application.Abstractions;
 using NorthernLink.Trips.Application.Integration;
+using NorthernLink.Trips.Domain.Manifests;
 using NorthernLink.Trips.Domain.Routes;
 using NorthernLink.Trips.Domain.Trips;
 using NorthernLink.Trips.Infrastructure;
@@ -208,6 +209,26 @@ public class PostTripInspectionDeliveryTests(PostgresFixture fixture)
         public async Task<bool> TryAddForBookingDayAsync(Trip trip, CancellationToken cancellationToken = default)
         {
             context.Trips.Add(trip);
+            await context.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+
+        public async Task<IReadOnlySet<(DateOnly ServiceDate, TripDirection Direction)>> GetGeneratedOccurrenceKeysAsync(
+            Guid templateId, DateOnly from, DateOnly toExclusive, CancellationToken cancellationToken = default)
+        {
+            var existing = await context.Trips
+                .Where(t => t.ScheduleTemplateId == templateId
+                    && t.ServiceDate >= from
+                    && t.ServiceDate < toExclusive
+                    && t.Direction != null)
+                .Select(t => new { t.ServiceDate, t.Direction })
+                .ToListAsync(cancellationToken);
+            return existing.Select(t => (t.ServiceDate, t.Direction!.Value)).ToHashSet();
+        }
+
+        public async Task<bool> TryAddGeneratedAsync(IReadOnlyList<Trip> trips, CancellationToken cancellationToken = default)
+        {
+            context.Trips.AddRange(trips);
             await context.SaveChangesAsync(cancellationToken);
             return true;
         }

@@ -24,6 +24,8 @@ internal sealed class PurchaseOrderReadService(ClientsDbContext context) : IPurc
             p.Issued,
             p.Expiry,
             p.AmountCad,
+            p.RoundTripRateCad,
+            p.OneWayRateCad,
             p.Note,
             p.CreatedAtUtc,
             p.UpdatedAtUtc)).ToList();

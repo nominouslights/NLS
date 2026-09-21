@@ -140,19 +140,39 @@ export function getInvoice(id: string): Promise<InvoiceDetailRecord> {
   return request<InvoiceDetailRecord>(`/api/billing/invoices/${id}`);
 }
 
-/** POST → 201 { id }. Draft pulls uninvoiced completed round trips at the
- *  contract rate. Errors surfaced inline by the generate dialog:
+/** One worksheet created by a draft run (GeneratedInvoiceDraft). */
+export interface GeneratedInvoiceDraft {
+  invoiceId: string;
+  invoiceNumber: string;
+  /** null = the no-PO worksheet (no trip PO and no contract default). */
+  poNumber: string | null;
+  lineCount: number;
+  totalCad: number;
+  /** ADVISORY review flags only — a non-empty array never means the draft
+   *  failed. Render them as caution chips, never as an error. */
+  warnings: string[];
+}
+
+/** POST → 201 GenerateDraftInvoicesResponse. Draft generation creates ONE
+ *  WORKSHEET PER PURCHASE ORDER — each PO is its own spending authorisation with
+ *  its own rates — so the response is a list, ordered by PO number with the
+ *  null-PO draft last, and never empty. A single-PO client gets a one-element
+ *  list, which the dialog treats exactly as it always treated one draft.
+ *  Errors surfaced inline by the generate dialog:
  *  Billing.Invoice.NoActiveContract / Billing.Invoice.NotRoundTripBilled. */
-export async function generateDraftInvoice(
+export async function generateDraftInvoices(
   clientId: string,
   periodStart: string,
   periodEnd: string,
-): Promise<string> {
-  const res = await request<{ id: string }>("/api/billing/invoices/generate-draft", {
-    method: "POST",
-    body: JSON.stringify({ clientId, periodStart, periodEnd }),
-  });
-  return res.id;
+): Promise<GeneratedInvoiceDraft[]> {
+  const res = await request<{ invoices: GeneratedInvoiceDraft[] }>(
+    "/api/billing/invoices/generate-draft",
+    {
+      method: "POST",
+      body: JSON.stringify({ clientId, periodStart, periodEnd }),
+    },
+  );
+  return res.invoices;
 }
 
 /** PUT → 204. Draft only (409 Billing.Invoice.NotDraft otherwise); a trip

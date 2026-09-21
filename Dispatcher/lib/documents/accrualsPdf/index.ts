@@ -1,11 +1,14 @@
 // NL-ACC-01 Accruals Report — composes the printable HTML from the section
-// builders. This is a monthly per-client statement of trips by billing state
-// with real invoice amounts where invoiced/paid and clearly-marked contract-
-// rate estimates elsewhere — NOT an invoice, and it says so in its banner.
+// builders. This is a monthly per-client statement that LEADS with upcoming work
+// not yet done and monies owed, closes the month with one settled line, carries
+// real invoice amounts where invoiced/paid and clearly-marked contract-rate
+// estimates elsewhere — NOT an invoice, and it says so in its banner.
 //
 // Page assembly (US-Letter):
-//   header (+ degradation notes) + Report Details + Summary
-//   + per-bucket detail tables + Reconciliation + Invoices Referenced + footer
+//   header (+ degradation notes) + Report Details
+//   + the two headline figures + Purchase Orders + Summary (section-grouped)
+//   + per-section detail tables + the settled one-liner
+//   + Reconciliation + Invoices Referenced + footer
 //
 // It renders the same AccrualsReport the Reports screen shows and the
 // clipboard export copies (lib/billing/accruals.ts) — one derivation, so the
@@ -21,8 +24,10 @@ import {
   detailsBlock,
   footer,
   header,
+  headlineBlock,
   invoicesBlock,
   notesBlock,
+  purchaseOrdersBlock,
   reconciliationBlock,
   summaryBlock,
 } from "./sections";
@@ -35,6 +40,8 @@ export function accrualsReportHtml(report: AccrualsReport, company: CompanyInfo)
     ${header(company, report)}
     ${notesBlock(report)}
     ${detailsBlock(report)}
+    ${headlineBlock(report)}
+    ${purchaseOrdersBlock(report)}
     ${summaryBlock(report)}
     ${bucketsBlock(report)}
     ${reconciliationBlock(report)}

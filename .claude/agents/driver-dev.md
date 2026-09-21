@@ -44,8 +44,10 @@ to enlarge it — that breaks text rendering and hides the signal that a `ui-tab
 owed. `components/ui-tablet/` is app-local and never copied anywhere.
 
 Touch floors: 44px for anything tappable, 56px for real actions, 64px for rail rows.
-**No `@media` query anywhere in this app** — architecture non-negotiable #5 is landscape-only,
-10-inch, company-issued, never BYOD. Verify at exactly 1280×800 in the device toolbar.
+**No width-based `@media` query anywhere in this app** — no breakpoints at all; architecture
+non-negotiable #5 is landscape-only, 10-inch, company-issued, never BYOD. (The
+`prefers-reduced-motion` block in the copied `app/globals.css` is an accessibility preference and
+stays.) Verify at exactly 1280×800 in the device toolbar.
 
 ## The sync rule
 
