@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Routing;
 using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Shared.Tenancy;
+using NorthernLink.Budgeting.Application.Allocations.CopyFromPeriod;
 using NorthernLink.Budgeting.Application.Allocations.GetAllocations;
 using NorthernLink.Budgeting.Application.Allocations.Remove;
 using NorthernLink.Budgeting.Application.Allocations.Set;
@@ -56,6 +57,17 @@ public static class BudgetingEndpoints
         budgeting.MapGet("periods/{id:guid}/allocations", GetAllocations);
         budgeting.MapPut("periods/{id:guid}/allocations/{codeId:guid}", SetAllocation);
         budgeting.MapDelete("periods/{id:guid}/allocations/{codeId:guid}", RemoveAllocation);
+
+        // Seed this period's plan from an earlier one — amounts across, justifications cleared
+        // (see CopyBudgetAllocationsCommandHandler). 200 with counts rather than 201, the
+        // codes/starter-set precedent: it adds many lines or none and has no single new resource
+        // to point a Location at.
+        //
+        // No collision with PUT .../allocations/{codeId:guid} above: different verb, and the
+        // :guid constraint means the literal "copy" can never bind as a code id. A future
+        // POST .../allocations/{codeId} WOULD collide with this route — if one is ever added,
+        // constrain it (`{codeId:guid}`) or this route stops being reachable.
+        budgeting.MapPost("periods/{id:guid}/allocations/copy", CopyAllocations);
 
         // Codes. Retiring (activate/deactivate) is the normal end-of-life path and stays that
         // way: allocation lines reference codes by id and by string and must keep resolving, so a
@@ -183,6 +195,38 @@ public static class BudgetingEndpoints
         var result = await sender.Send(command, cancellationToken);
         return result.IsSuccess
             ? Results.Ok(new BudgetAllocationSetResponse(result.Value.AllocationId, result.Value.Created))
+            : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>
+    /// Copies an earlier period's plan into this one: 200 with a full account of every source
+    /// line (copied / skipped because the code is already planned here / skipped because the code
+    /// is retired or gone), which always sums to <c>sourceLineCount</c>. An empty source period
+    /// is a 200 with zeroes, not an error.
+    /// </summary>
+    private static async Task<IResult> CopyAllocations(
+        Guid id,
+        CopyBudgetAllocationsRequest request,
+        ITenantContext tenantContext,
+        ICurrentActor currentActor,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var command = new CopyBudgetAllocationsCommand(
+            tenantId, id, request.SourcePeriodId, currentActor.UserId);
+
+        var result = await sender.Send(command, cancellationToken);
+        return result.IsSuccess
+            ? Results.Ok(new BudgetAllocationCopyResponse(
+                result.Value.Copied,
+                result.Value.SkippedAlreadyPlanned,
+                result.Value.SkippedRetiredCode,
+                result.Value.SourceLineCount))
             : EndpointResults.Problem(result.Error);
     }
 
@@ -360,6 +404,26 @@ public sealed record SetBudgetAllocationRequest(
 /// added the line and false when it rewrote one; <paramref name="Id"/> is the same either way.
 /// </summary>
 public sealed record BudgetAllocationSetResponse(Guid Id, bool Created);
+
+/// <summary>
+/// Request body for POST /api/budgeting/periods/{id}/allocations/copy. The target period comes
+/// from the route; this names the period to copy <em>from</em>. Nullable on the wire so an
+/// omitted or null value fails as a readable <c>Budgeting.Allocation.CopySourceRequired</c>
+/// rather than binding to <c>Guid.Empty</c> and reporting a not-found for the all-zeroes id.
+/// </summary>
+public sealed record CopyBudgetAllocationsRequest(Guid? SourcePeriodId);
+
+/// <summary>
+/// Body of a successful copy. <paramref name="Copied"/> plus the two skip counts always equals
+/// <paramref name="SourceLineCount"/> — the console reports all four so a skipped line never
+/// reads as a line that vanished. Every copied line arrives with an <b>empty justification</b>
+/// and must be argued before it can be saved again.
+/// </summary>
+public sealed record BudgetAllocationCopyResponse(
+    int Copied,
+    int SkippedAlreadyPlanned,
+    int SkippedRetiredCode,
+    int SourceLineCount);
 
 /// <summary>
 /// Request body for POST /api/budgeting/codes. Every string is nullable on the wire so a missing

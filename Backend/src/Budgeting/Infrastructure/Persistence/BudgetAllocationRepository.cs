@@ -19,6 +19,15 @@ internal sealed class BudgetAllocationRepository(BudgetingDbContext context) : I
         context.BudgetAllocations.AnyAsync(
             a => a.BudgetCodeId == budgetCodeId || a.Code == code, cancellationToken);
 
+    // Served by the leading (tenant_id, period_id) columns of the unique index. Tracked, not
+    // AsNoTracking: the copy handler calls CopyInto on the source lines, and the target lines it
+    // reads back are the same entities a concurrent write in this unit of work would touch.
+    public async Task<IReadOnlyList<BudgetAllocation>> ListForPeriodAsync(
+        Guid periodId, CancellationToken cancellationToken = default) =>
+        await context.BudgetAllocations
+            .Where(a => a.PeriodId == periodId)
+            .ToListAsync(cancellationToken);
+
     public void Add(BudgetAllocation allocation) => context.BudgetAllocations.Add(allocation);
 
     public void Remove(BudgetAllocation allocation) => context.BudgetAllocations.Remove(allocation);
