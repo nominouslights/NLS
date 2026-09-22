@@ -13,6 +13,10 @@ export type InspectionResultWire = "Pass" | "PassWithDefects" | "Fail";
 export type InspectionType = "PreTrip" | "PostTrip";
 export type InspectionSourceWire = "DriverApp" | "Dispatcher";
 export type DefectSeverityWire = "Minor" | "Major" | "OutOfService";
+/** NL-PTI-01's tri-state answer for one checklist row (Fleet `ChecklistItemState`).
+ *  Serialised as the enum NAME, not its ordinal — the backend maps it with
+ *  `HasConversion<string>()` and `ToString()`s it into the response. */
+export type ChecklistItemStateWire = "Ok" | "Defect" | "NotApplicable";
 export type InspectionWeather = "Clear" | "Cloudy" | "Rain" | "Snow" | "Fog" | "ExtremeCold";
 export type InspectionRoadCondition = "Dry" | "Wet" | "Icy" | "SnowCovered" | "Muddy";
 export type InspectionVisibility = "Good" | "Reduced" | "Poor";
@@ -21,7 +25,13 @@ export type InspectionFuelLevel = "Full" | "ThreeQuarters" | "Half" | "Quarter";
 export interface InspectionChecklistItemWire {
   group: string | null;
   item: string;
+  /** "Not a defect" — TRUE for a NotApplicable row as well as an Ok one. */
   passed: boolean;
+  /** The backend sends its EffectiveState, so a row stored before the tri-state
+   *  existed still reports "Ok"/"Defect" rather than null. Typed nullable anyway:
+   *  a client must never assume a field it did not itself write. */
+  state: ChecklistItemStateWire | null;
+  note: string | null;
 }
 
 export interface InspectionDefectWire {
@@ -62,6 +72,13 @@ export interface VehicleInspection {
   fuelCostCad: number | null;
   generatedWorkOrderId: string | null;
   createdAtUtc: string;
+  // NL-PTI-01 sign-offs. The carrier acknowledgement trio is populated only on a
+  // report that was signed off, which only a `Fail` can be; `certificationStatement`
+  // is the §10 attestation sentence as it read on the day the driver signed it.
+  carrierAcknowledgedBy: string | null;
+  carrierAcknowledgedAtUtc: string | null;
+  carrierAcknowledgementNote: string | null;
+  certificationStatement: string | null;
 }
 
 /** GET /api/fleet/inspections — filter by unit and/or trip number. */
@@ -86,7 +103,17 @@ export interface InspectionInput {
   enteredBy?: string | null;
   performedAt?: string;
   odometerKm?: number | null;
-  checklist: { group?: string | null; item: string; passed: boolean }[];
+  /** `state` and `note` are the NL-PTI-01 tri-state answer and its free-text note,
+   *  and both are optional: a row that supplies `state` has its `passed` re-derived
+   *  server-side (`passed == state != "Defect"`), so the two can never be sent out
+   *  of step. A caller that omits `state` keeps the older passed-only behaviour. */
+  checklist: {
+    group?: string | null;
+    item: string;
+    passed: boolean;
+    state?: ChecklistItemStateWire | null;
+    note?: string | null;
+  }[];
   /** `recurrenceOfInspectionId` is the one pointer the wire may set on a defect:
    *  the Re-report path, where a dispatcher knows a cleared fault is back and
    *  does not want to wait for the next DVIR. Resolution fields are deliberately
@@ -107,6 +134,9 @@ export interface InspectionInput {
   // Post-trip
   issues?: string[];
   attestations?: boolean[];
+  /** The §10 certification sentence the driver signed, stored verbatim with the
+   *  record so a reprint years later shows the wording that was actually certified. */
+  certificationStatement?: string | null;
   driverSignatureName?: string | null;
   certifiedAt?: string | null;
   fuelAdded?: boolean;
@@ -209,6 +239,25 @@ export function resolveInspectionDefect(
   body: { item: string; reason: DefectResolutionReasonWire; note?: string | null; resolvedBy?: string | null },
 ): Promise<void> {
   return request<void>(`/api/fleet/inspections/${inspectionId}/defects/resolve`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/** POST /api/fleet/inspections/{id}/carrier-acknowledgement — signs the NL-PTI-01
+ *  carrier acknowledgement line: the carrier's representative confirming they were
+ *  shown a report carrying a Major or Out-of-Service defect. One per report and
+ *  FINAL — a second call answers 409. 404 for an unknown inspection, 400 when the
+ *  report is not a `Fail` or the name is blank.
+ *
+ *  `acknowledgedBy` is client-supplied like `enteredBy`/`resolvedBy`, but unlike
+ *  those two it has NO "Dispatch" fallback: the name IS the signature, so an empty
+ *  one is rejected. The timestamp is stamped server-side, never sent. */
+export function acknowledgeInspectionCarrier(
+  inspectionId: string,
+  body: { acknowledgedBy: string; note?: string | null },
+): Promise<void> {
+  return request<void>(`/api/fleet/inspections/${inspectionId}/carrier-acknowledgement`, {
     method: "POST",
     body: JSON.stringify(body),
   });

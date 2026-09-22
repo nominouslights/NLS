@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { colors, fonts, rowSurface, SERVICE_SHORT, statusMeta, svcMeta } from "@/lib/theme";
 import {
+  acknowledgeInspectionCarrier,
   ApiError,
   deleteInspection,
   getTripManifest,
@@ -1252,6 +1253,91 @@ function RemoveInspectionModal({
 }
 
 // ---------------------------------------------------------------------------
+// Carrier acknowledgement (Form NL-PTI-01) — the carrier's representative
+// confirming they were shown a report carrying a Major defect. One per report and
+// FINAL, so there is no un-acknowledge. The name is the signature and has no
+// "Dispatch" fallback, which is why this asks for it rather than assuming it.
+// ---------------------------------------------------------------------------
+
+function AcknowledgeCarrierModal({
+  trip,
+  inspection,
+  onClose,
+  onConfirmed,
+}: {
+  trip: TripRecord;
+  inspection: VehicleInspection;
+  onClose: () => void;
+  onConfirmed: () => Promise<void>;
+}) {
+  const [name, setName] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    if (busy) return;
+    if (!name.trim()) {
+      setError("Enter the name of the carrier representative — the name is the signature.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await acknowledgeInspectionCarrier(inspection.id, {
+        acknowledgedBy: name.trim(),
+        note: note.trim() || null,
+      });
+      await onConfirmed();
+      onClose();
+    } catch (e) {
+      setError(
+        e instanceof ApiError && e.code === "Fleet.Inspection.CarrierAlreadyAcknowledged"
+          ? "This report was already acknowledged — the acknowledgement is final and cannot be re-signed."
+          : e instanceof ApiError
+            ? e.message
+            : "Failed to record the acknowledgement — please try again.",
+      );
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ModalShell
+      eyebrow={`Fleet · ${trip.tripNumber} · Carrier acknowledgement`}
+      title="Acknowledge Inspection Report"
+      onClose={onClose}
+      error={error}
+      maxWidth={520}
+      footer={
+        <>
+          <ActionButton onClick={onClose}>CANCEL</ActionButton>
+          <ActionButton variant="primary" onClick={submit} disabled={busy}>
+            {busy ? "SIGNING…" : "ACKNOWLEDGE"}
+          </ActionButton>
+        </>
+      }
+    >
+      <div style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textSecondary, lineHeight: 1.6, marginBottom: 14 }}>
+        Records that the carrier&apos;s representative was shown the{" "}
+        {inspection.type === "PostTrip" ? "post-trip" : "pre-trip"} report{" "}
+        {inspection.driverName} recorded on {fmtUtcDateTime(inspection.performedAt)}. One per report, and final — there
+        is no un-acknowledge.
+      </div>
+      <div style={{ display: "grid", gap: 12 }}>
+        <TextField
+          label="Carrier representative"
+          value={name}
+          onChange={setName}
+          placeholder="Full name of the person signing"
+        />
+        <TextAreaField label="Note (optional)" value={note} onChange={setNote} rows={2} />
+      </div>
+    </ModalShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Screen
 // ---------------------------------------------------------------------------
 
@@ -1312,6 +1398,8 @@ export default function Trips({
   const [inspectionType, setInspectionType] = useState<"PreTrip" | "PostTrip" | null>(null);
   const [editingInspection, setEditingInspection] = useState<VehicleInspection | null>(null);
   const [removingInspection, setRemovingInspection] = useState<VehicleInspection | null>(null);
+  /** The Fail report whose carrier acknowledgement line is being signed. */
+  const [acknowledgingInspection, setAcknowledgingInspection] = useState<VehicleInspection | null>(null);
   // Bumped whenever something that could change this vehicle's defect list
   // lands — a DVIR entered or removed, or a different unit assigned.
   const [defectsRefresh, setDefectsRefresh] = useState(0);
@@ -2372,6 +2460,28 @@ export default function Trips({
                             {insp.odometerKm != null ? ` · ${insp.odometerKm.toLocaleString("en-CA")} km` : ""}
                             {` · ${fmtUtcDateTime(insp.performedAt)}`}
                           </span>
+                          {/* NL-PTI-01 carrier acknowledgement — only a Fail report
+                              is acknowledged, and only once. Stays available after
+                              the run: the carrier rep signs when they see it. */}
+                          {insp.result === "Fail" &&
+                            (insp.carrierAcknowledgedBy ? (
+                              <>
+                                <StatusChip kind="ontime" label="Carrier acknowledged" />
+                                <span style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim }}>
+                                  {insp.carrierAcknowledgedBy}
+                                  {insp.carrierAcknowledgedAtUtc
+                                    ? ` · ${fmtUtcDateTime(insp.carrierAcknowledgedAtUtc)}`
+                                    : ""}
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <StatusChip kind="soon" label="Carrier acknowledgement due" />
+                                <ActionButton onClick={() => setAcknowledgingInspection(insp)}>
+                                  ACKNOWLEDGE (CARRIER)
+                                </ActionButton>
+                              </>
+                            ))}
                           {/* Edit / remove only while the run hasn't happened yet. */}
                           {!isOperationallyClosed(t) && (
                             <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
@@ -2674,6 +2784,14 @@ export default function Trips({
                   inspection={removingInspection}
                   onClose={() => setRemovingInspection(null)}
                   onConfirmed={() => onInspectionRemoved(t.id, t.tripNumber, removingInspection)}
+                />
+              )}
+              {acknowledgingInspection && (
+                <AcknowledgeCarrierModal
+                  trip={t}
+                  inspection={acknowledgingInspection}
+                  onClose={() => setAcknowledgingInspection(null)}
+                  onConfirmed={() => onInspectionSaved(t.id, t.tripNumber, false)}
                 />
               )}
               {modal === "edit" && (
