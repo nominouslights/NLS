@@ -191,6 +191,12 @@ namespace NorthernLink.Booking.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(16)")
                         .HasColumnName("payment_status");
 
+                    b.Property<string>("Reference")
+                        .IsRequired()
+                        .HasMaxLength(9)
+                        .HasColumnType("character varying(9)")
+                        .HasColumnName("reference");
+
                     b.Property<DateOnly>("ServiceDate")
                         .HasColumnType("date")
                         .HasColumnName("service_date");
@@ -217,6 +223,9 @@ namespace NorthernLink.Booking.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("TenantId", "CustomerId");
+
+                    b.HasIndex("TenantId", "Reference")
+                        .IsUnique();
 
                     b.HasIndex("TenantId", "CorridorId", "ServiceDate");
 

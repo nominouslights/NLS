@@ -3,6 +3,7 @@ using Npgsql;
 using NorthernLink.Booking.Application.Abstractions;
 using NorthernLink.Booking.Application.Integration;
 using NorthernLink.Booking.Domain.BookingDays;
+using NorthernLink.Booking.Domain.Bookings;
 using NorthernLink.Booking.Domain.Customers;
 using NorthernLink.Booking.Domain.Settings;
 
@@ -27,6 +28,9 @@ internal sealed class BookingRepository(BookingDbContext context) : IBookingRepo
         context.Bookings
             .Include(b => b.Passengers)
             .FirstOrDefaultAsync(b => b.Id == id, cancellationToken);
+
+    public Task<bool> ReferenceExistsAsync(BookingReference reference, CancellationToken cancellationToken = default) =>
+        context.Bookings.AnyAsync(b => b.Reference == reference, cancellationToken);
 
     public void Add(Domain.Bookings.Booking booking) => context.Bookings.Add(booking);
 

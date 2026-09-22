@@ -205,6 +205,99 @@ public class EmailDispatchTests
         Assert.Equal(EmailDispatchStatus.PartiallyFailed, result.Value.Status);
     }
 
+    // ---- Booking passes recording -----------------------------------------------------------
+
+    private static Result<EmailDispatch> RecordPasses(params DispatchRecipient[] recipients) =>
+        EmailDispatch.RecordBookingPasses(
+            Guid.NewGuid(),
+            TestNotifications.TenantId,
+            Guid.NewGuid(),
+            "NL-7K3M2Q",
+            recipients);
+
+    [Fact]
+    public void RecordBookingPasses_anchors_on_the_booking_only_and_tags_the_passes_service_type()
+    {
+        var dispatchId = Guid.NewGuid();
+        var bookingId = Guid.NewGuid();
+        var result = EmailDispatch.RecordBookingPasses(
+            dispatchId,
+            TestNotifications.TenantId,
+            bookingId,
+            "  NL-7K3M2Q  ",
+            [Recipient("a@example.com", DispatchRecipientStatus.Sent)]);
+
+        Assert.True(result.IsSuccess);
+        var dispatch = result.Value;
+        Assert.Equal(dispatchId, dispatch.Id);
+        Assert.Equal(bookingId, dispatch.BookingId);
+        Assert.Equal("NL-7K3M2Q", dispatch.BookingReference); // trimmed
+        Assert.Equal(NotificationServiceType.CommunityBookingPasses, dispatch.ServiceType);
+        Assert.Null(dispatch.TripId);
+        Assert.Null(dispatch.TripNumber);
+        Assert.Null(dispatch.ManifestId);
+        Assert.Null(dispatch.TemplateId);
+        Assert.Null(dispatch.TemplateName);
+        Assert.Null(dispatch.ClientId);
+        Assert.Null(dispatch.ClientName);
+        var recorded = Assert.IsType<EmailDispatchRecordedDomainEvent>(Assert.Single(dispatch.DomainEvents));
+        Assert.Equal(dispatchId, recorded.DispatchId);
+    }
+
+    [Fact]
+    public void RecordBookingPasses_rejects_an_empty_booking_id()
+    {
+        var result = EmailDispatch.RecordBookingPasses(
+            Guid.NewGuid(),
+            TestNotifications.TenantId,
+            Guid.Empty,
+            "NL-7K3M2Q",
+            [Recipient("a@example.com", DispatchRecipientStatus.Sent)]);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(EmailDispatchErrors.BookingRequired, result.Error);
+    }
+
+    [Fact]
+    public void RecordBookingPasses_rejects_a_blank_booking_reference()
+    {
+        var result = EmailDispatch.RecordBookingPasses(
+            Guid.NewGuid(),
+            TestNotifications.TenantId,
+            Guid.NewGuid(),
+            "  ",
+            [Recipient("a@example.com", DispatchRecipientStatus.Sent)]);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(EmailDispatchErrors.BookingRequired, result.Error);
+    }
+
+    [Fact]
+    public void RecordBookingPasses_enforces_the_same_recipient_bounds()
+    {
+        var none = RecordPasses();
+        Assert.True(none.IsFailure);
+        Assert.Equal(EmailDispatchErrors.NoRecipients, none.Error);
+
+        var tooMany = RecordPasses(Enumerable.Range(0, EmailDispatch.MaxRecipients + 1)
+            .Select(i => Recipient($"p{i}@example.com", DispatchRecipientStatus.Sent))
+            .ToArray());
+        Assert.True(tooMany.IsFailure);
+        Assert.Equal(EmailDispatchErrors.TooManyRecipients, tooMany.Error);
+    }
+
+    [Fact]
+    public void RecordBookingPasses_derives_status_from_recipient_outcomes()
+    {
+        Assert.Equal(EmailDispatchStatus.Sent, RecordPasses(
+            Recipient("a@example.com", DispatchRecipientStatus.Sent)).Value.Status);
+        Assert.Equal(EmailDispatchStatus.PartiallyFailed, RecordPasses(
+            Recipient("a@example.com", DispatchRecipientStatus.Sent),
+            Recipient("b@example.com", DispatchRecipientStatus.Failed)).Value.Status);
+        Assert.Equal(EmailDispatchStatus.Failed, RecordPasses(
+            Recipient("a@example.com", DispatchRecipientStatus.Failed)).Value.Status);
+    }
+
     [Theory]
     [InlineData("dddddddd-dddd-dddd-dddd-dddddddddddd")]
     [InlineData(null)]

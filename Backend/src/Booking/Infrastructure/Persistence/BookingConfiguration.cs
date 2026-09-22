@@ -20,6 +20,16 @@ public sealed class BookingConfiguration : IEntityTypeConfiguration<Domain.Booki
         builder.Property(b => b.Id).HasColumnName("id").ValueGeneratedNever();
 
         builder.Property(b => b.TenantId).HasColumnName("tenant_id");
+
+        // The reference is a record VO stored as its 9-char string; re-hydration goes back
+        // through Create so a hand-edited row that breaks the format fails loudly on read.
+        builder.Property(b => b.Reference)
+            .HasColumnName("reference")
+            .HasMaxLength(BookingReference.Length)
+            .HasConversion(
+                reference => reference.Value,
+                value => BookingReference.Create(value).Value);
+
         builder.Property(b => b.CustomerId).HasColumnName("customer_id");
         builder.Property(b => b.CustomerName).HasColumnName("customer_name").HasMaxLength(200);
         builder.Property(b => b.CorridorId).HasColumnName("corridor_id");
@@ -72,6 +82,10 @@ public sealed class BookingConfiguration : IEntityTypeConfiguration<Domain.Booki
 
         builder.HasIndex(b => new { b.TenantId, b.CorridorId, b.ServiceDate });
         builder.HasIndex(b => new { b.TenantId, b.CustomerId });
+
+        // Per-tenant uniqueness of the customer-facing reference — the backstop behind the
+        // create handler's collision guard.
+        builder.HasIndex(b => new { b.TenantId, b.Reference }).IsUnique();
     }
 }
 

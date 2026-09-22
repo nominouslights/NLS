@@ -21,6 +21,12 @@ public interface IBookingRepository
 {
     Task<Domain.Bookings.Booking?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Whether a booking in the ambient tenant already carries this reference — the create
+    /// handler's collision guard (the unique index is the backstop for an in-flight race).
+    /// </summary>
+    Task<bool> ReferenceExistsAsync(BookingReference reference, CancellationToken cancellationToken = default);
+
     void Add(Domain.Bookings.Booking booking);
 
     Task SaveChangesAsync(CancellationToken cancellationToken = default);

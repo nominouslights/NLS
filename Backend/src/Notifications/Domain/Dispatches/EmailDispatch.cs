@@ -7,11 +7,13 @@ namespace NorthernLink.Notifications.Domain.Dispatches;
 /// One send action — the immutable history record dispatchers see when they reopen a send
 /// dialog. The aggregate id IS the client-generated dispatch id, which is what makes the send
 /// endpoints idempotent: a replayed POST finds this row and returns it instead of emailing
-/// everyone twice. Two shapes share the row: a trip pickup send (<see cref="Record"/> — trip
-/// id/number + template id/name set, from the manifest dialog) and a client accruals send
-/// (<see cref="RecordClientAccruals"/> — no trip and no template, client id/name required).
-/// All context fields are opaque snapshots from the caller — Notifications never queries
-/// Trips or Clients. Per-recipient outcomes are embedded as jsonb via
+/// everyone twice. Three shapes share the row: a trip pickup send (<see cref="Record"/> — trip
+/// id/number + template id/name set, from the manifest dialog), a client accruals send
+/// (<see cref="RecordClientAccruals"/> — no trip and no template, client id/name required),
+/// and a community booking-passes send (<see cref="RecordBookingPasses"/> — anchored on the
+/// booking id + reference only; trip, template and client all null). All context fields are
+/// opaque snapshots from the caller — Notifications never queries Trips, Clients or Booking.
+/// Per-recipient outcomes are embedded as jsonb via
 /// <see cref="DispatchRecipient"/>; <see cref="Status"/> is derived from them, never stored
 /// independently.
 /// </summary>
@@ -42,6 +44,13 @@ public sealed class EmailDispatch : AggregateRoot, ITenantScoped
     public NotificationServiceType ServiceType { get; private set; }
     public Guid? ClientId { get; private set; }
     public string? ClientName { get; private set; }
+
+    /// <summary>The community booking a passes send belongs to (null for the other two shapes).</summary>
+    public Guid? BookingId { get; private set; }
+
+    /// <summary>The booking's customer-facing reference (NL-XXXXXX) snapshotted at send time.</summary>
+    public string? BookingReference { get; private set; }
+
     public EmailDispatchStatus Status { get; private set; }
     public DateTimeOffset SentAtUtc { get; private set; }
     public IReadOnlyList<DispatchRecipient> Recipients => _recipients;
@@ -119,6 +128,45 @@ public sealed class EmailDispatch : AggregateRoot, ITenantScoped
             ServiceType = serviceType,
             ClientId = clientId,
             ClientName = clientName.Trim(),
+            Status = DeriveStatus(recipients),
+            SentAtUtc = DateTimeOffset.UtcNow,
+        };
+        dispatch._recipients.AddRange(recipients);
+
+        dispatch.Raise(new EmailDispatchRecordedDomainEvent(dispatchId, tenantId));
+        return Result.Success(dispatch);
+    }
+
+    /// <summary>
+    /// Records a completed community booking-passes send. No trip, no manifest, no template,
+    /// no client — the booking (id + reference snapshot) is the anchor and is therefore
+    /// required; the service type is always <see cref="NotificationServiceType.CommunityBookingPasses"/>.
+    /// Same idempotency contract as <see cref="Record"/>: <paramref name="dispatchId"/> is the
+    /// client-generated key and becomes the aggregate id.
+    /// </summary>
+    public static Result<EmailDispatch> RecordBookingPasses(
+        Guid dispatchId,
+        Guid tenantId,
+        Guid bookingId,
+        string bookingReference,
+        IReadOnlyList<DispatchRecipient> recipients)
+    {
+        if (bookingId == Guid.Empty || string.IsNullOrWhiteSpace(bookingReference))
+        {
+            return Result.Failure<EmailDispatch>(EmailDispatchErrors.BookingRequired);
+        }
+
+        if (ValidateRecipients(recipients) is { } recipientError)
+        {
+            return Result.Failure<EmailDispatch>(recipientError);
+        }
+
+        var dispatch = new EmailDispatch(dispatchId)
+        {
+            TenantId = tenantId,
+            ServiceType = NotificationServiceType.CommunityBookingPasses,
+            BookingId = bookingId,
+            BookingReference = bookingReference.Trim(),
             Status = DeriveStatus(recipients),
             SentAtUtc = DateTimeOffset.UtcNow,
         };

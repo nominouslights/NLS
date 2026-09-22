@@ -18,8 +18,14 @@ import { SERVICE_TYPE_LABELS, svcForServiceType, type ClientServiceType } from "
 /** The Clients module's ServiceType plus Notifications-only entries (declared
  *  per-module backend-side). CommunityBookingAtRisk is a notification purpose,
  *  not a trip service: the "trip at risk — seats needed" email sent when a
- *  community booking day reverts (an override template for the built-in body). */
-export type NotificationServiceType = ClientServiceType | "CommunityBookingAtRisk";
+ *  community booking day reverts (an override template for the built-in body).
+ *  CommunityBookingPasses is likewise a purpose, not a service: the traveller
+ *  passes emailed to a community booking's customer (a built-in composer, no
+ *  template — never offered as a template target). */
+export type NotificationServiceType =
+  | ClientServiceType
+  | "CommunityBookingAtRisk"
+  | "CommunityBookingPasses";
 
 export type EmailDispatchStatus = "Sent" | "PartiallyFailed" | "Failed";
 export type EmailRecipientStatus = "Sent" | "Failed";
@@ -149,7 +155,9 @@ export interface EmailRecipientResult {
  *  are data the dispatcher must see. Trip pickup dispatches carry trip/template
  *  references; client accruals dispatches carry NONE of the four (all null) and
  *  are anchored by clientId instead — and on those, each recipient's
- *  passengerName field carries the CONTACT's display name. */
+ *  passengerName field carries the CONTACT's display name. Booking-pass
+ *  dispatches are anchored by bookingId/bookingReference alone (trip, template
+ *  and client all null), with passengerName again the contact's name. */
 export interface EmailDispatchRecord {
   id: string;
   tripId: string | null;
@@ -159,6 +167,8 @@ export interface EmailDispatchRecord {
   templateName: string | null;
   serviceType: NotificationServiceType;
   clientId: string | null;
+  bookingId: string | null;
+  bookingReference: string | null;
   status: EmailDispatchStatus;
   sentAtUtc: string;
   recipients: EmailRecipientResult[];
@@ -252,6 +262,71 @@ export interface ClientAccrualsPreviewResult {
   htmlBody: string;
   textBody: string;
   pdfBase64: string;
+  recipientCount: number;
+  recipients: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Booking passes email — the pass sheet travels as pre-formatted strings
+// (date label, seat "1 of 3", payment labels): the backend composes one
+// bordered pass block per traveller into an HTML-only email (no PDF), doing
+// zero Booking lookups of its own. Compose the sheet with passesEmailPayload
+// (lib/booking/passes.ts) so it can never disagree with the detail screen or
+// the printed NL-BP-01 sheet.
+// ---------------------------------------------------------------------------
+
+/** One traveller's pass on the wire (BookingPassTravellerRequest). */
+export interface BookingPassTravellerPayload {
+  name: string;
+  phone: string | null;
+  /** "1 of 3" — position in the booking, pre-formatted. */
+  seat: string;
+}
+
+/** Wire shape of the pass sheet (BookingPassSheetRequest) — strings only. */
+export interface BookingPassSheetPayload {
+  reference: string;
+  /** "Tuesday, September 15, 2026" — the long service-date label. */
+  serviceDate: string;
+  corridorName: string;
+  pickup: string;
+  dropoff: string;
+  customerName: string;
+  paymentMethod: string;
+  paymentStatus: string;
+  notes: string | null;
+  travellers: BookingPassTravellerPayload[];
+}
+
+/** One recipient: address + the display name recorded in history. */
+export interface PassRecipientInput {
+  email: string;
+  contactName: string;
+}
+
+/** POST /api/notifications/emails/booking-passes body
+ *  (SendBookingPassesEmailRequest). dispatchId is a CLIENT-generated GUID:
+ *  replaying the same id returns the stored dispatch without re-sending.
+ *  Recipients: validated, deduped case-insensitively, 1–16 distinct. */
+export interface SendBookingPassesEmailInput {
+  dispatchId: string;
+  bookingId: string;
+  bookingReference: string;
+  sheet: BookingPassSheetPayload;
+  recipients: PassRecipientInput[];
+}
+
+/** POST /api/notifications/emails/booking-passes/preview body — the send
+ *  request MINUS dispatchId (a preview records nothing). Same composer as the
+ *  send, so the preview is byte-for-byte what the customer would receive. */
+export type BookingPassesPreviewInput = Omit<SendBookingPassesEmailInput, "dispatchId">;
+
+/** Preview response — HTML-only (no PDF pane); recipients echoes the deduped
+ *  addresses a send would use. */
+export interface BookingPassesPreviewResult {
+  subject: string;
+  htmlBody: string;
+  textBody: string;
   recipientCount: number;
   recipients: string[];
 }
@@ -357,6 +432,35 @@ export function previewClientAccrualsEmail(
   });
 }
 
+/** POST → 200 EmailDispatchResponse (also on partial/total provider failure —
+ *  read the per-recipient outcomes). Replaying the same dispatchId returns the
+ *  stored dispatch without re-sending. 400 Notifications.Dispatch.
+ *  {BookingRequired|NoRecipients|InvalidRecipientEmail|TooManyRecipients|NoTravellers}. */
+export function sendBookingPassesEmail(input: SendBookingPassesEmailInput): Promise<EmailDispatchRecord> {
+  return request<EmailDispatchRecord>("/api/notifications/emails/booking-passes", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+/** POST → 200 { subject, htmlBody, textBody, recipientCount, recipients }.
+ *  Renders exactly what the passes email would contain WITHOUT sending
+ *  anything (no dispatch is created). Same recipient validation as the send. */
+export function previewBookingPassesEmail(input: BookingPassesPreviewInput): Promise<BookingPassesPreviewResult> {
+  return request<BookingPassesPreviewResult>("/api/notifications/emails/booking-passes/preview", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+/** GET /api/notifications/emails?bookingId={id} → the booking's pass sends,
+ *  newest first. One of tripId/clientId/bookingId is required by the endpoint
+ *  (precedence tripId > clientId > bookingId). */
+export function listBookingEmailDispatches(bookingId: string): Promise<EmailDispatchRecord[]> {
+  const q = new URLSearchParams({ bookingId });
+  return request<EmailDispatchRecord[]>(`/api/notifications/emails?${q.toString()}`);
+}
+
 /** GET /api/notifications/emails?tripId={id} → dispatches, newest first. */
 export function listTripEmailDispatches(tripId: string): Promise<EmailDispatchRecord[]> {
   const q = new URLSearchParams({ tripId });
@@ -387,13 +491,30 @@ export { refetchUntil } from "./shared";
 export const NOTIFICATION_SERVICE_TYPE_LABELS: Record<NotificationServiceType, string> = {
   ...SERVICE_TYPE_LABELS,
   CommunityBookingAtRisk: "Community — booking at risk",
+  CommunityBookingPasses: "Community — booking passes",
 };
+
+/** The Notifications-only purposes: sends with a built-in composer and no
+ *  template. Screens that list templates or offer template targets use this
+ *  to label them explicitly (never the raw enum) and to exclude them. */
+export type NotificationOnlyServiceType = Exclude<NotificationServiceType, ClientServiceType>;
+
+export const NOTIFICATION_ONLY_SERVICE_TYPES: readonly NotificationOnlyServiceType[] = [
+  "CommunityBookingAtRisk",
+  "CommunityBookingPasses",
+];
+
+export function isNotificationOnlyServiceType(
+  serviceType: NotificationServiceType,
+): serviceType is NotificationOnlyServiceType {
+  return (NOTIFICATION_ONLY_SERVICE_TYPES as readonly string[]).includes(serviceType);
+}
 
 /** Notification service type → the console's theme service key (svcMeta).
  *  Notifications-only entries render under the service they belong to
- *  (CommunityBookingAtRisk → community). */
+ *  (CommunityBookingAtRisk / CommunityBookingPasses → community). */
 export function svcForNotificationServiceType(serviceType: NotificationServiceType): ServiceType {
-  if (serviceType === "CommunityBookingAtRisk") return "community";
+  if (isNotificationOnlyServiceType(serviceType)) return "community";
   return svcForServiceType(serviceType);
 }
 

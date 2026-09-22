@@ -5,7 +5,9 @@ namespace NorthernLink.Notifications.Application.Dispatches;
 /// endpoints (whatever the outcome) and by the email-history query. Trip pickup dispatches
 /// carry <paramref name="TripId"/>/<paramref name="TripNumber"/> and
 /// <paramref name="TemplateId"/>/<paramref name="TemplateName"/>; client accruals dispatches
-/// carry neither (all four null) and are anchored by <paramref name="ClientId"/> instead.
+/// carry neither (all four null) and are anchored by <paramref name="ClientId"/> instead;
+/// community booking-passes dispatches are anchored by <paramref name="BookingId"/> +
+/// <paramref name="BookingReference"/> with trip, template and client all null.
 /// <paramref name="ServiceType"/> is the <c>NotificationServiceType</c> name as a string;
 /// <paramref name="Status"/> is Sent, PartiallyFailed, or Failed.
 /// </summary>
@@ -18,6 +20,8 @@ public sealed record EmailDispatchResponse(
     string? TemplateName,
     string ServiceType,
     Guid? ClientId,
+    Guid? BookingId,
+    string? BookingReference,
     string Status,
     DateTimeOffset SentAtUtc,
     List<RecipientResult> Recipients);

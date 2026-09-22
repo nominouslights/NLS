@@ -5,10 +5,13 @@ using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Shared.Tenancy;
 using NorthernLink.Notifications.Application.Dispatches;
+using NorthernLink.Notifications.Application.Dispatches.GetBookingEmailHistory;
 using NorthernLink.Notifications.Application.Dispatches.GetClientEmailHistory;
 using NorthernLink.Notifications.Application.Dispatches.GetTripEmailHistory;
+using NorthernLink.Notifications.Application.Dispatches.PreviewBookingPassesEmail;
 using NorthernLink.Notifications.Application.Dispatches.PreviewClientAccrualsEmail;
 using NorthernLink.Notifications.Application.Dispatches.PreviewTripPickupReport;
+using NorthernLink.Notifications.Application.Dispatches.SendBookingPassesEmail;
 using NorthernLink.Notifications.Application.Dispatches.SendClientAccrualsEmail;
 using NorthernLink.Notifications.Application.Dispatches.SendTripPickupEmail;
 using NorthernLink.Notifications.Application.Templates.Activate;
@@ -48,11 +51,13 @@ public static class NotificationsEndpoints
         notifications.MapPost("templates/{id:guid}/activate", ActivateTemplate);
         notifications.MapPost("templates/{id:guid}/deactivate", DeactivateTemplate);
 
-        // Emails — sends + previews + history (filtered by trip or by client).
+        // Emails — sends + previews + history (filtered by trip, by client, or by booking).
         notifications.MapPost("emails/trip-pickup", SendTripPickupEmail);
         notifications.MapPost("emails/trip-pickup/report-preview", PreviewTripPickupReport);
         notifications.MapPost("emails/client-accruals", SendClientAccrualsEmail);
         notifications.MapPost("emails/client-accruals/preview", PreviewClientAccrualsEmail);
+        notifications.MapPost("emails/booking-passes", SendBookingPassesEmail);
+        notifications.MapPost("emails/booking-passes/preview", PreviewBookingPassesEmail);
         notifications.MapGet("emails", GetEmailHistory);
 
         return app;
@@ -284,16 +289,55 @@ public static class NotificationsEndpoints
         return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
     }
 
-    private static async Task<IResult> GetEmailHistory(
-        Guid? tripId, Guid? clientId, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    private static async Task<IResult> SendBookingPassesEmail(
+        SendBookingPassesEmailRequest request, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
     {
         if (tenantContext.TenantId is not { } tenantId)
         {
             return Results.Unauthorized();
         }
 
-        // One filter is required; tripId wins when both are supplied (the trip view is the
-        // narrower, older contract).
+        var command = new SendBookingPassesEmailCommand(
+            tenantId,
+            request.DispatchId,
+            request.BookingId,
+            request.BookingReference ?? string.Empty,
+            ToSheet(request.Sheet),
+            ToPassRecipients(request.Recipients));
+
+        var result = await sender.Send(command, cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> PreviewBookingPassesEmail(
+        PreviewBookingPassesEmailRequest request, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var query = new PreviewBookingPassesEmailQuery(
+            tenantId,
+            request.BookingId,
+            request.BookingReference ?? string.Empty,
+            ToSheet(request.Sheet),
+            ToPassRecipients(request.Recipients));
+
+        var result = await sender.Query(query, cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> GetEmailHistory(
+        Guid? tripId, Guid? clientId, Guid? bookingId, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        // One filter is required; precedence tripId > clientId > bookingId when several are
+        // supplied (the trip view is the narrowest, oldest contract).
         if (tripId is { } trip)
         {
             var result = await sender.Query(new GetTripEmailHistoryQuery(tenantId, trip), cancellationToken);
@@ -306,8 +350,37 @@ public static class NotificationsEndpoints
             return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
         }
 
+        if (bookingId is { } booking)
+        {
+            var result = await sender.Query(new GetBookingEmailHistoryQuery(tenantId, booking), cancellationToken);
+            return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+        }
+
         return EndpointResults.Problem(EmailDispatchErrors.HistoryFilterRequired);
     }
+
+    /// <summary>Normalizes the nullable request tree into the Application's non-null pass sheet.</summary>
+    private static BookingPassSheet ToSheet(BookingPassSheetRequest? sheet) => new(
+        sheet?.Reference ?? string.Empty,
+        sheet?.ServiceDate ?? string.Empty,
+        sheet?.CorridorName ?? string.Empty,
+        sheet?.Pickup ?? string.Empty,
+        sheet?.Dropoff ?? string.Empty,
+        sheet?.CustomerName ?? string.Empty,
+        sheet?.PaymentMethod ?? string.Empty,
+        sheet?.PaymentStatus ?? string.Empty,
+        string.IsNullOrWhiteSpace(sheet?.Notes) ? null : sheet.Notes,
+        (sheet?.Travellers ?? [])
+            .Select(traveller => new BookingPassTraveller(
+                traveller.Name ?? string.Empty,
+                string.IsNullOrWhiteSpace(traveller.Phone) ? null : traveller.Phone,
+                traveller.Seat ?? string.Empty))
+            .ToList());
+
+    private static List<PassRecipientInput> ToPassRecipients(List<PassRecipientRequest>? recipients) =>
+        (recipients ?? [])
+            .Select(r => new PassRecipientInput(r.Email ?? string.Empty, r.ContactName ?? string.Empty))
+            .ToList();
 
     /// <summary>Normalizes the nullable request tree into the Application's non-null report record.</summary>
     private static ClientAccrualsReport ToReport(ClientAccrualsReportRequest? report) => new(
@@ -486,6 +559,59 @@ public sealed record PreviewClientAccrualsEmailRequest(
 
 /// <summary>One selected client contact: address plus the display name recorded in history.</summary>
 public sealed record AccrualsRecipientRequest(string? Email, string? ContactName);
+
+/// <summary>
+/// Request body for POST /api/notifications/emails/booking-passes. DispatchId is a
+/// client-generated GUID — the idempotency key; replaying it returns the stored dispatch
+/// without re-sending. BookingId + BookingReference (the NL-XXXXXX snapshot) anchor the
+/// recorded dispatch. Sheet is the fully composed, pre-formatted pass sheet (the frontend
+/// derives it — Notifications holds no booking data); Recipients are the pre-resolved
+/// addresses (1–16 after de-duplication). HTML email only, no attachment.
+/// </summary>
+public sealed record SendBookingPassesEmailRequest(
+    Guid DispatchId,
+    Guid BookingId,
+    string? BookingReference,
+    BookingPassSheetRequest? Sheet,
+    List<PassRecipientRequest>? Recipients);
+
+/// <summary>
+/// Request body for POST /api/notifications/emails/booking-passes/preview. Mirrors
+/// <see cref="SendBookingPassesEmailRequest"/> minus <c>DispatchId</c> — a preview records
+/// nothing, so there is no idempotency key. Composes the email with the exact send-time
+/// composition and returns it without sending anything.
+/// </summary>
+public sealed record PreviewBookingPassesEmailRequest(
+    Guid BookingId,
+    string? BookingReference,
+    BookingPassSheetRequest? Sheet,
+    List<PassRecipientRequest>? Recipients);
+
+/// <summary>
+/// The pass sheet as posted by the frontend — pre-formatted strings only (ServiceDate like
+/// "Tuesday, September 15, 2026", PaymentStatus like "Paid"); the backend renders it
+/// verbatim, HTML-encoded. One traveller per seat.
+/// </summary>
+public sealed record BookingPassSheetRequest(
+    string? Reference,
+    string? ServiceDate,
+    string? CorridorName,
+    string? Pickup,
+    string? Dropoff,
+    string? CustomerName,
+    string? PaymentMethod,
+    string? PaymentStatus,
+    string? Notes,
+    List<BookingPassTravellerRequest>? Travellers);
+
+/// <summary>One traveller's pass line: name, optional phone, seat label ("1 of 3").</summary>
+public sealed record BookingPassTravellerRequest(
+    string? Name,
+    string? Phone,
+    string? Seat);
+
+/// <summary>One selected recipient: address plus the display name recorded in history.</summary>
+public sealed record PassRecipientRequest(string? Email, string? ContactName);
 
 /// <summary>
 /// The flat accruals report as posted by the frontend — pre-formatted strings only (labels,
