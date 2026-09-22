@@ -19,6 +19,16 @@ public interface IBudgetAllocationRepository
     /// </summary>
     Task<bool> ExistsForCodeAsync(Guid budgetCodeId, string code, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Every one of the tenant's lines in that period, in no guaranteed order. The copy handler's
+    /// working set — it reads the source period's whole plan and the target's whole plan, then
+    /// decides per line. Write-side rather than the <c>rm_</c> projection for the same reason
+    /// <see cref="ExistsForCodeAsync"/> is: the copy writes in the same request, and the
+    /// projection may still be a poll behind.
+    /// </summary>
+    Task<IReadOnlyList<BudgetAllocation>> ListForPeriodAsync(
+        Guid periodId, CancellationToken cancellationToken = default);
+
     void Add(BudgetAllocation allocation);
 
     /// <summary>Hard delete — the line is a plan entry, not history; the journal keeps its final snapshot.</summary>

@@ -9,9 +9,16 @@ import HeaderClock from "@/components/HeaderClock";
 // the 56px bar, the wordmark, the 34px search field with its ⌘K tag, the clock, the bell, the
 // blue pill and the avatar block are what make the two consoles read as one product.
 //
-// Three differences: the pill creates an allocation rather than a trip, the search placeholder
+// Three differences: the pill creates a budget period rather than a trip, the search placeholder
 // names budgeting things, and the identity block shows the real signed-in user instead of
 // Dispatcher's hardcoded "R. Kelsey / Owner · Dispatcher".
+//
+// The pill is the console's one global create action, so its target has to be unambiguous from
+// anywhere. A period is: allocations are planned per category on a period's dashboard and need a
+// category, a period AND a code, so "+ NEW ALLOCATION" had no single destination and used to
+// swap the whole main pane. A period is also Ramsey's step 5 — make the new budget before the
+// month begins. Removing the pill was the wrong answer: it is part of what makes the two
+// consoles read as one product.
 
 /**
  * Two initials from an email's local part: "l.fontaine@…" and "l_fontaine@…" both give "LF",
@@ -29,11 +36,12 @@ function emailInitials(email: string): string {
 
 export default function TopBar({
   onToggleRail,
-  onNewAllocation,
+  onNewPeriod,
   fullName,
 }: {
   onToggleRail: () => void;
-  onNewAllocation: () => void;
+  /** Opens the New Period modal on the Budget Periods screen — see the note above. */
+  onNewPeriod: () => void;
   /**
    * The signed-in user's own name, from Console's profile fetch — null until it arrives, and for
    * anyone who has not set one. It comes down as a prop rather than from getClaims() because it
@@ -182,7 +190,7 @@ export default function TopBar({
         </span>
       </div>
       <div
-        onClick={onNewAllocation}
+        onClick={onNewPeriod}
         style={{
           display: "flex",
           alignItems: "center",
@@ -199,7 +207,7 @@ export default function TopBar({
           cursor: "pointer",
         }}
       >
-        <span style={{ fontSize: 15, lineHeight: 1 }}>+</span> NEW ALLOCATION
+        <span style={{ fontSize: 15, lineHeight: 1 }}>+</span> NEW PERIOD
       </div>
       <div
         style={{

@@ -151,21 +151,36 @@ run time. Ten files, and only two need a DOM:
   `nextTransition` / `stateAfter` against `BudgetPeriod.Transition`, `canEditAllocations`
   against `BudgetPeriod.AllowsPlanChanges`, `allocationCandidates` against the `CodeRetired`
   check plus the unique (period, code) index, and `allocationAmountError` /
-  `allocationJustificationError` against `BudgetAllocation.Validate`. Plus the →StatusKind
-  mappings (`periodKind` over all five states, `netKind`), the label maps, `toBudgetCode`'s
-  `isActive` → `active` rename, `toBudgetPeriod`'s two totals, `coverage` and
-  `planningProgress` (the dashboard's checklist and stepper derive from one tested function).
+  `allocationJustificationError` against `BudgetAllocation.Validate`, `needsJustification` /
+  `unjustifiedLines` against `BudgetAllocation.NeedsJustification` + `CopyInto`, and
+  `copySourceCandidates` / `defaultCopySource` against
+  `CopyBudgetAllocationsCommandHandler`'s `CopySourceIsTarget` guard — including the case that a
+  **Closed period is offered**, because the server checks editability on the target only. Plus
+  the →StatusKind mappings (`periodKind` over all five states, `assignmentState` /
+  `ASSIGNMENT_KINDS` over all four), `planBalanced` (an empty plan is **not** balanced),
+  `copyOutcomeSummary`, the label maps, `toBudgetCode`'s `isActive` → `active` rename,
+  `toBudgetPeriod`'s two totals, `coverage` and `planningProgress` (the dashboard's zero-based
+  checklist and stepper derive from one tested function).
+
+  `netCad` / `netKind` / `netLabel` and their tests were **deleted**, not adapted, when the Net
+  tile became "Left to assign": `netKind(0)` was `info` and `balanced` is now `ontime`, because
+  under zero-based budgeting $0 is the goal rather than the neutral case. Adapting an assertion
+  through a semantic inversion hides the inversion.
 - `lib/api/transport.test.ts` — the 401 refresh-and-retry path, with `fetch` and `lib/auth`
   mocked. `request<T>`'s doc comment promises it "never loops"; these assert the exact attempt
   count (two fetches, one refresh) so the promise is enforced rather than stated. Plus `ApiError`
   construction — the parsed `{ code, message }` body, the `Http.<status>` fallback, and the
   `Network.Unreachable`/status-0 branch that `Console.tsx` and `screens/BudgetCodes.tsx` both
   branch on via `e instanceof ApiError`.
-- `lib/api/budgeting.requests.test.ts` — what each of the nine request functions puts on the
-  wire. Chiefly `setBudgetCodeActive`, whose route is built from a boolean (`activate` /
-  `deactivate`): an inverted ternary there returns 204 either way and silently activates a code
-  the planner asked to retire. Also pins that `deleteBudgetCode`'s 409 message reaches the caller
-  verbatim, since the server's wording is what names retirement as the alternative.
+- `lib/api/budgeting.requests.test.ts` — what each request function puts on the wire. Chiefly
+  `setBudgetCodeActive`, whose route is built from a boolean (`activate` / `deactivate`): an
+  inverted ternary there returns 204 either way and silently activates a code the planner asked
+  to retire. Likewise `copyBudgetAllocations`, which takes the source as an **object**
+  (`{ sourcePeriodId }`) rather than a bare second string: two same-typed guids swap silently and
+  copy backwards with a 200 on the wire and no error on either side. It also pins the route, the
+  four counts and each 400/409/404 message verbatim. Also pins that `deleteBudgetCode`'s 409
+  message reaches the caller verbatim, since the server's wording is what names retirement as the
+  alternative.
 - `lib/money.test.ts` — `formatDeltaCad` / `formatDeltaPct` always write the sign out, so a
   signed figure never rests on colour.
 
@@ -223,6 +238,20 @@ The period and allocation routes (`BudgetAccess` group, `BudgetingEndpoints.cs`)
 | `GET /api/budgeting/periods/{id}/allocations` | the period's lines, ordered by code (404) |
 | `PUT /api/budgeting/periods/{id}/allocations/{codeId}` | upsert `{ amountCad, justification }` → `{ id, created }`; 400 validation, 404 period/code, 409 `PeriodNotEditable` / `CodeRetired` |
 | `DELETE /api/budgeting/periods/{id}/allocations/{codeId}` | 204; 404 no such line; 409 `PeriodNotEditable` |
+| `POST /api/budgeting/periods/{id}/allocations/copy` | seed this period's plan from an earlier one — body `{ sourcePeriodId }` → 200 `{ copied, skippedAlreadyPlanned, skippedRetiredCode, sourceLineCount }` (the first three always sum to the fourth); 400 `CopySourceRequired` / `CopySourceIsTarget`, 404 `CopySourceNotFound` (the **source**) or `Budgeting.Period.NotFound` (the **target**), 409 `PeriodNotEditable` |
+
+**The copy brings the amounts and clears every justification.** `BudgetAllocation.CopyInto` sets
+`Justification = string.Empty`, so a copied line arrives `NeedsJustification` and `PUT
+.../allocations/{codeId}` keeps refusing it with 400 `JustificationRequired` until somebody
+argues it. That is the feature, not a gap: zero-based means last period's reasoning is not this
+period's. The dashboard shows those lines with a "Needs justification" chip, counts them in the
+checklist's "Every line argued" row, and names them in the finalize warning.
+
+**Editability is checked on the target only.** A Closed period is a perfectly legal *source* —
+copying a closed plan into a fresh Draft is the whole point — so `copySourceCandidates` offers
+periods in every state and excludes only the target itself. Do not "fix" it with
+`canEditAllocations`; the asymmetry is deliberate and documented on
+`CopyBudgetAllocationsCommandHandler`.
 
 Every 400/409 message is shown verbatim — the server's text names the rule. Reads are
 projections: after a transition the dashboard refetches the period until it reports the expected
@@ -231,10 +260,16 @@ visible (on edit the row was always there), and only then refreshes the period l
 read from the same projection.
 
 `screens/BudgetPeriods.tsx` is the master/detail host; `screens/periods/*` is the dashboard
-(list, lifecycle stepper, planning checklist, one `AllocationSection` per category);
-`BudgetAllocationFormModal.tsx` is shared with `screens/Allocations.tsx`, which shows the same
-lines flat and sums its tiles from the lines on screen (it has no way to refresh Console's
-period list after a save). The dashboard shows the server's own totals.
+(list, lifecycle stepper, zero-based checklist, the copy-from-an-earlier-period panel, one
+`AllocationSection` per category), and it is the **one** place a period is planned.
+`BudgetAllocationFormModal.tsx` opens from there. The dashboard shows the server's own totals,
+never sums re-derived from the lines on screen.
+
+There is no separate Allocations screen and no `"allocations"` `ScreenId`: a second place to do
+the same job could not refresh Console's period list after a save, so its tiles trailed the
+dashboard's. The TopBar pill is `+ NEW PERIOD` — the console's one global create action, with
+the only create target that is unambiguous from any screen — and its `showCreate` state is
+hoisted into `Console.tsx` so both it and the screen's own pill open the same modal.
 
 **Budget codes are real too** — the second slice, widened to US-6.1.1's full property set:
 

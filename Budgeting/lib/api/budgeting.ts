@@ -9,6 +9,9 @@ import type {
   PeriodState,
 } from "@/lib/types";
 import type { StatusKind } from "@/lib/theme";
+// The checklist's balance row writes its own signed figure, so the sign is text in the tested
+// derivation rather than something a component might forget to add.
+import { formatDeltaCad } from "@/lib/money";
 
 // ---------------------------------------------------------------------------
 // Budgeting API client — contract owned by Backend/ (Budgeting module,
@@ -263,6 +266,139 @@ export function removeBudgetAllocation(periodId: string, codeId: string): Promis
   });
 }
 
+// ---------------------------------------------------------------------------
+// Copy an earlier period's plan into this one — Ramsey's step 5, "make the new
+// budget before the month begins", without rebuilding eleven lines by hand.
+// Mirrors CopyBudgetAllocationsCommandHandler and BudgetAllocationCopyResult.
+// ---------------------------------------------------------------------------
+
+/**
+ * Mirrors BudgetAllocationCopyResult. The server guarantees
+ * `copied + skippedAlreadyPlanned + skippedRetiredCode === sourceLineCount` — a skip nobody
+ * counted reads as data loss, so copyOutcomeSummary reports every bucket.
+ */
+export interface BudgetAllocationCopyResult {
+  copied: number;
+  /** Source lines whose code this period already plans — skipped, never overwritten. */
+  skippedAlreadyPlanned: number;
+  /** Source lines on a code retired since, or gone from the chart entirely. */
+  skippedRetiredCode: number;
+  sourceLineCount: number;
+}
+
+/**
+ * The source period, as an object rather than a bare second string. Two same-typed guids in a
+ * `copy(a, b)` signature swap silently and copy backwards — with a 200 on the wire and no error
+ * on either side — which is the same hazard setBudgetCodeActive's two-route shape exists to
+ * catch. Naming the source at every call site is the whole point of the wrapper.
+ */
+export interface BudgetAllocationCopySource {
+  sourcePeriodId: string;
+}
+
+/**
+ * POST periods/{targetPeriodId}/allocations/copy → 200 with the four counts. Errors, all shown
+ * verbatim: 400 Budgeting.Allocation.CopySourceRequired / CopySourceIsTarget, 404
+ * Budgeting.Allocation.CopySourceNotFound (the SOURCE) or Budgeting.Period.NotFound (the TARGET),
+ * 409 Budgeting.Allocation.PeriodNotEditable when the target is not Draft or Open.
+ *
+ * An empty source period is a 200 with all four counts zero, not an error — the button worked.
+ */
+export function copyBudgetAllocations(
+  targetPeriodId: string,
+  source: BudgetAllocationCopySource,
+): Promise<BudgetAllocationCopyResult> {
+  return request<BudgetAllocationCopyResult>(
+    `/api/budgeting/periods/${targetPeriodId}/allocations/copy`,
+    { method: "POST", body: JSON.stringify({ sourcePeriodId: source.sourcePeriodId }) },
+  );
+}
+
+/**
+ * The periods that may be offered as a copy source, mirroring
+ * CopyBudgetAllocationsCommandHandler's guards. Only ONE thing is excluded: the target itself
+ * (BudgetAllocationErrors.CopySourceIsTarget).
+ *
+ * **A Closed period IS offered, and so is every other state.** The server checks
+ * `AllowsPlanChanges` on the TARGET only — there is a deliberate, documented absence of any
+ * editability check on the source, because copying a closed period's plan into a fresh Draft is
+ * the entire point of the feature. That asymmetry is the thing a reader gets backwards; do not
+ * "fix" it by filtering on canEditAllocations here.
+ *
+ * Order is the caller's (the server lists periods by startsOn ascending).
+ */
+export function copySourceCandidates(
+  periods: BudgetPeriod[],
+  targetPeriodId: string,
+): BudgetPeriod[] {
+  return periods.filter((p) => p.id !== targetPeriodId);
+}
+
+/**
+ * The source pre-selected in the picker: the latest candidate that starts before the target,
+ * i.e. "last period" — falling back to the latest candidate of any date, then to none. Purely a
+ * convenience; the planner can pick any candidate.
+ */
+export function defaultCopySource(
+  periods: BudgetPeriod[],
+  targetPeriodId: string,
+): BudgetPeriod | null {
+  const candidates = copySourceCandidates(periods, targetPeriodId);
+  if (candidates.length === 0) return null;
+  const target = periods.find((p) => p.id === targetPeriodId) ?? null;
+  const earlier = target ? candidates.filter((p) => p.startsOn < target.startsOn) : [];
+  const pool = earlier.length > 0 ? earlier : candidates;
+  return pool.reduce((a, b) => (a.startsOn >= b.startsOn ? a : b));
+}
+
+/** "1 line" / "3 lines" — used by every clause of copyOutcomeSummary. */
+function lineCount(n: number): string {
+  return `${n} ${n === 1 ? "line" : "lines"}`;
+}
+
+/**
+ * What a completed copy is told back to the planner, in plain sentences. Every bucket the server
+ * reports is named, because the invariant
+ * `copied + skippedAlreadyPlanned + skippedRetiredCode === sourceLineCount` is only reassuring
+ * if the user can see it adds up. Clauses for a zero skip are omitted rather than written as
+ * "0 skipped", and an empty source says so rather than reading as a failure.
+ */
+export function copyOutcomeSummary(result: BudgetAllocationCopyResult): string {
+  if (result.sourceLineCount === 0) {
+    return "That period has no lines to copy — nothing was added.";
+  }
+
+  const skips: string[] = [];
+  if (result.skippedAlreadyPlanned > 0) {
+    skips.push(`${lineCount(result.skippedAlreadyPlanned)} already planned here and left untouched`);
+  }
+  if (result.skippedRetiredCode > 0) {
+    skips.push(`${lineCount(result.skippedRetiredCode)} on retired codes`);
+  }
+
+  const head =
+    result.copied === 0
+      ? "Nothing was copied"
+      : `Copied ${lineCount(result.copied)}, each with no justification yet`;
+  const tail = skips.length > 0 ? ` — skipped ${skips.join(" and ")}.` : ".";
+  return `${head}${tail} ${lineCount(result.sourceLineCount)} in the source period.`;
+}
+
+/**
+ * Whether a line still has to be argued. Mirrors BudgetAllocation.NeedsJustification
+ * (`Justification.Length == 0`), which is exactly what BudgetAllocation.CopyInto produces — but
+ * trimmed here to match Validate's `IsNullOrWhiteSpace`, so a line of spaces counts as unargued
+ * on both sides rather than only on the save that would refuse it.
+ */
+export function needsJustification(line: BudgetAllocationRecord): boolean {
+  return line.justification.trim().length === 0;
+}
+
+/** The period's lines that still carry no argument — the checklist's count and the finalize warning. */
+export function unjustifiedLines(lines: BudgetAllocationRecord[]): BudgetAllocationRecord[] {
+  return lines.filter(needsJustification);
+}
+
 /** Mirrors BudgetAllocation.JustificationMaxLength. */
 export const ALLOCATION_JUSTIFICATION_MAX_LENGTH = 1000;
 
@@ -321,27 +457,70 @@ export function allocationCandidates(
   );
 }
 
-/** Planned revenue less planned expense, in CAD. Positive is a surplus. */
-export function netCad(period: BudgetPeriod): number {
+// ---------------------------------------------------------------------------
+// "Left to assign" — Ramsey's step 3, subtract until you reach zero.
+//
+// This REPLACES the old netCad / netKind / netLabel trio, which were deleted
+// rather than adapted, because the semantics invert: netKind(0) was "info" (a
+// balanced plan is the neutral case) and balanced is now "ontime" (under
+// zero-based budgeting, $0 left is the GOAL). Two tiles doing the same
+// arithmetic with opposite colour semantics — surplus = good vs. unassigned =
+// work still to do — is the contradiction that makes a console untrustworthy,
+// so there is one tile and one derivation. Their tests were deleted for the
+// same reason: adapting an assertion through a semantic inversion hides the
+// inversion.
+// ---------------------------------------------------------------------------
+
+/**
+ * Planned revenue that has not been given a job yet, in CAD. Positive means dollars are still
+ * unassigned; negative means the plan assigns more than it plans to earn. Arithmetically the old
+ * `netCad`, read the other way round: zero is the target, not a happy surplus.
+ */
+export function leftToAssignCad(period: BudgetPeriod): number {
   return period.plannedRevenue - period.plannedExpense;
 }
 
 /**
- * Net → status kind: a surplus is good ("ontime"), a balanced plan is neutral ("info"), a
- * deficit is the problem the tile exists to flag ("over"). Always rendered with netLabel and a
- * signed figure, never as colour alone.
+ * The four states of a plan's balance. `left === 0` on its own is **ambiguous** — an empty
+ * period and a perfectly balanced one both sit at zero — and a tile reading "All assigned ✓"
+ * over a period with nothing in it is a lie. So `empty` is classified first, off the period's
+ * own server totals, which also means the tile needs nothing from the async lines fetch.
  */
-export function netKind(net: number): StatusKind {
-  if (net > 0) return "ontime";
-  if (net < 0) return "over";
-  return "info";
+export type AssignmentState = "empty" | "balanced" | "unassigned" | "over";
+
+export function assignmentState(period: BudgetPeriod): AssignmentState {
+  if (period.plannedRevenue === 0 && period.plannedExpense === 0) return "empty";
+  const left = leftToAssignCad(period);
+  if (left === 0) return "balanced";
+  return left > 0 ? "unassigned" : "over";
 }
 
-/** Human label for the net position — rendered beside the colour and glyph. */
-export function netLabel(net: number): string {
-  if (net > 0) return "Surplus";
-  if (net < 0) return "Deficit";
-  return "Balanced";
+/**
+ * State → status kind. Typed Record so a new state is a compile error here rather than a blank
+ * tile. `balanced → "ontime"` is the deliberate inversion of the deleted `netKind(0) === "info"`.
+ */
+export const ASSIGNMENT_KINDS: Record<AssignmentState, StatusKind> = {
+  empty: "info",
+  balanced: "ontime",
+  unassigned: "soon",
+  over: "over",
+};
+
+/** The written label beside the colour and the glyph — the tile is never colour alone. */
+export const ASSIGNMENT_LABELS: Record<AssignmentState, string> = {
+  empty: "Nothing planned yet",
+  balanced: "All assigned",
+  unassigned: "To assign",
+  over: "Over-assigned",
+};
+
+/**
+ * Whether the plan balances to exactly zero. True for `balanced` ONLY — an **empty plan is not
+ * balanced**, even though its arithmetic also lands on zero. That is precisely what makes the
+ * finalize warning fire on an untouched period instead of congratulating it.
+ */
+export function planBalanced(period: BudgetPeriod): boolean {
+  return assignmentState(period) === "balanced";
 }
 
 /**
@@ -359,17 +538,46 @@ export function coverage(
   return { planned, active: activeIds.size };
 }
 
-/** A checklist row: are there any lines of this category yet? */
-export interface LineStep {
-  group: "lines";
-  id: "revenue" | "expense";
-  category: BudgetCodeCategory;
+// ---------------------------------------------------------------------------
+// The zero-based checklist. Four rows, mapped onto the five steps of zero-based
+// budgeting as they apply to a shuttle and cargo company:
+//
+//   1. List income            → "Revenue planned"
+//   2. List expenses          → "Expense budget set" (every line already
+//                               carries a required justification, which is
+//                               stricter than most ZBB tools)
+//   3. Subtract to reach zero → "Every dollar assigned"  ← the row this file
+//                               existed without for too long
+//   4. Track all month        → NO ROW. Actuals are still mock (lib/data.ts);
+//                               a row that could never turn green is worse
+//                               than an honest gap.
+//   5. New budget each period → the lifecycle stepper plus the copy panel
+//
+// "Every line argued" is the fifth row and belongs to step 2: a copied line
+// arrives with its amount and no argument, so the count of unargued lines is
+// what keeps the copy button from quietly turning ZBB into rollover budgeting.
+//
+// Ramsey's household scaffolding (Giving, the Four Walls, the Baby Steps) does
+// NOT map onto a shuttle company, so there are deliberately no expense
+// priority tiers here.
+//
+// Each row carries its own `kind` and `status`, so the colour decision lives in
+// this one tested function and PlanningChecklist renders branch-free.
+// ---------------------------------------------------------------------------
+
+export type ChecklistStepId = "revenue" | "expense" | "balance" | "argued";
+
+/** A row of the zero-based checklist. */
+export interface ChecklistStep {
+  group: "checklist";
+  id: ChecklistStepId;
   label: string;
-  /** Lines of this category in the period, retired codes included. */
-  count: number;
-  /** "3 of 5 active revenue codes planned". */
+  /** The sentence beside the label — counts, coverage, and what is left to do. */
   detail: string;
-  done: boolean;
+  /** Status kind for the row's chip. Decided here, never in the component. */
+  kind: StatusKind;
+  /** The chip's written label, so the row survives grayscale. */
+  status: string;
 }
 
 export type LifecycleStepStatus = "done" | "current" | "pending";
@@ -382,31 +590,67 @@ export interface LifecycleStep {
   status: LifecycleStepStatus;
 }
 
-export type PlanningStep = LineStep | LifecycleStep;
+export type PlanningStep = ChecklistStep | LifecycleStep;
+
+/** The balance row's sentence, one per assignment state. */
+const BALANCE_DETAILS: Record<AssignmentState, (left: string) => string> = {
+  empty: () => "Nothing planned yet — list the income first, then give every dollar a job.",
+  balanced: (left) => `Left to assign ${left} — every planned dollar has a job.`,
+  unassigned: (left) => `Left to assign ${left} — give the rest a job.`,
+  over: (left) => `Left to assign ${left} — this plan assigns more than it plans to earn.`,
+};
 
 /**
- * Where the planner stands: the two line checklist rows (done once at least one line exists)
- * followed by the five lifecycle states, each done / current / pending relative to the period's
- * state in PERIOD_STATE_ORDER. Pure, so the dashboard's checklist and stepper are one tested
- * derivation rather than two ad hoc ones.
+ * Where the planner stands: the four zero-based checklist rows (revenue, expense, balance,
+ * argued) followed by the five lifecycle states, each done / current / pending relative to the
+ * period's state in PERIOD_STATE_ORDER. Pure, so the dashboard's checklist and stepper are one
+ * tested derivation rather than several ad hoc ones.
  */
 export function planningProgress(
   period: BudgetPeriod,
   lines: BudgetAllocationRecord[],
   codes: BudgetCode[],
 ): PlanningStep[] {
-  const lineStep = (id: LineStep["id"], category: BudgetCodeCategory, label: string): LineStep => {
+  const lineStep = (
+    id: "revenue" | "expense",
+    category: BudgetCodeCategory,
+    label: string,
+  ): ChecklistStep => {
     const count = lines.filter((l) => l.category === category).length;
     const cov = coverage(lines, codes, category);
     return {
-      group: "lines",
+      group: "checklist",
       id,
-      category,
       label,
-      count,
-      detail: `${cov.planned} of ${cov.active} active ${category.toLowerCase()} codes planned`,
-      done: count > 0,
+      detail: `${lineCount(count)} · ${cov.planned} of ${cov.active} active ${category.toLowerCase()} codes planned`,
+      kind: count > 0 ? "ontime" : "info",
+      status: count > 0 ? "Done" : "Pending",
     };
+  };
+
+  const state = assignmentState(period);
+  const balanceStep: ChecklistStep = {
+    group: "checklist",
+    id: "balance",
+    label: "Every dollar assigned",
+    detail: BALANCE_DETAILS[state](formatDeltaCad(leftToAssignCad(period))),
+    kind: ASSIGNMENT_KINDS[state],
+    status: ASSIGNMENT_LABELS[state],
+  };
+
+  const unargued = unjustifiedLines(lines).length;
+  const arguedStep: ChecklistStep = {
+    group: "checklist",
+    id: "argued",
+    label: "Every line argued",
+    detail:
+      lines.length === 0
+        ? "No lines yet — nothing to argue."
+        : unargued > 0
+          ? `${unargued} of ${lineCount(lines.length)} still need a justification — a copied line brings its amount, not its argument.`
+          : `All ${lineCount(lines.length)} carry a justification.`,
+    kind: lines.length === 0 ? "info" : unargued > 0 ? "soon" : "ontime",
+    status: lines.length === 0 ? "Pending" : unargued > 0 ? "Needs work" : "Done",
   };
 
   const currentIndex = PERIOD_STATE_ORDER.indexOf(period.state);
@@ -420,6 +664,8 @@ export function planningProgress(
   return [
     lineStep("revenue", "Revenue", "Revenue planned"),
     lineStep("expense", "Expense", "Expense budget set"),
+    balanceStep,
+    arguedStep,
     ...lifecycle,
   ];
 }
