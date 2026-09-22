@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using NorthernLink.Shared.IntegrationEvents.Booking;
 using NorthernLink.Trips.Application.Abstractions;
 using NorthernLink.Trips.Application.Integration;
+using NorthernLink.Trips.Domain.Manifests;
 using NorthernLink.Trips.Domain.Routes;
 using NorthernLink.Trips.Domain.Trips;
 using Xunit;
@@ -156,6 +157,13 @@ public class BookingDayConfirmedIntegrationEventHandlerTests
 
         public Task<bool> TryAddForBookingDayAsync(Trip trip, CancellationToken cancellationToken = default) =>
             inner.TryAddForBookingDayAsync(trip, cancellationToken);
+
+        public Task<IReadOnlySet<(DateOnly ServiceDate, TripDirection Direction)>> GetGeneratedOccurrenceKeysAsync(
+            Guid templateId, DateOnly from, DateOnly toExclusive, CancellationToken cancellationToken = default) =>
+            inner.GetGeneratedOccurrenceKeysAsync(templateId, from, toExclusive, cancellationToken);
+
+        public Task<bool> TryAddGeneratedAsync(IReadOnlyList<Trip> trips, CancellationToken cancellationToken = default) =>
+            inner.TryAddGeneratedAsync(trips, cancellationToken);
 
         public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
             inner.SaveChangesAsync(cancellationToken);

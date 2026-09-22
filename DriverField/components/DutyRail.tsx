@@ -1,6 +1,6 @@
 "use client";
 
-import { colors, fonts, statusMeta } from "@/lib/theme";
+import { colors, fonts, statusMeta, type StatusKind } from "@/lib/theme";
 import { rail, touch, type } from "@/lib/tablet";
 import { NAV_GROUPS, type ScreenId } from "@/lib/nav";
 
@@ -25,15 +25,25 @@ export default function DutyRail({
   collapsed,
   onToggleCollapsed,
   pendingIncidents,
+  inspectionDue,
 }: {
   active: ScreenId;
   onSelect: (id: ScreenId) => void;
   collapsed: boolean;
   onToggleCollapsed: () => void;
   pendingIncidents: number;
+  /**
+   * What the single Inspection entry should say, derived by lib/inspectionGate.ts. Mirrors
+   * `pendingIncidents`: lib/nav.ts holds static data and the rail overrides it with derived
+   * state, rather than putting derived state in a const array.
+   *
+   * `badgeKind` is the part that had to be generalised. The badge renderer below used to be
+   * hardcoded to statusMeta("over"), which is right for a gating pre-trip and over-signals for
+   * a post-trip merely owed at the end of a shift — and a badge that always shouts is a badge
+   * nobody reads.
+   */
+  inspectionDue: { label: string; badge: string | null; badgeKind: StatusKind } | null;
 }) {
-  const over = statusMeta("over");
-
   return (
     <div
       style={{
@@ -64,9 +74,19 @@ export default function DutyRail({
 
             {group.items.map((item) => {
               const isActive = item.id === active;
-              const badge = item.id === "incidents" && pendingIncidents > 0
-                ? String(pendingIncidents)
-                : item.badge;
+
+              // Two special cases, both "static nav data overridden by derived state".
+              const label =
+                item.id === "inspection" && inspectionDue ? inspectionDue.label : item.label;
+              const badge =
+                item.id === "incidents" && pendingIncidents > 0
+                  ? String(pendingIncidents)
+                  : item.id === "inspection" && inspectionDue
+                    ? inspectionDue.badge
+                    : item.badge;
+              const badgeKind: StatusKind =
+                item.id === "inspection" && inspectionDue ? inspectionDue.badgeKind : "over";
+              const bm = statusMeta(badgeKind);
 
               return (
                 <button
@@ -119,7 +139,7 @@ export default function DutyRail({
                         color: isActive ? colors.headingBright : colors.textSecondary,
                       }}
                     >
-                      {item.label}
+                      {label}
                     </span>
                   )}
 
@@ -137,12 +157,14 @@ export default function DutyRail({
                         gap: 3,
                         fontFamily: fonts.mono,
                         fontSize: 13,
-                        color: over.t,
-                        background: over.bg,
-                        border: `1px solid ${over.bd}`,
+                        color: bm.t,
+                        background: bm.bg,
+                        border: `1px solid ${bm.bd}`,
                       }}
                     >
-                      <span aria-hidden>{over.g}</span>
+                      {/* Colour + glyph + label, all three: the glyph comes from the kind and
+                          the badge text is a word ("DUE", "OPEN") or a count. */}
+                      <span aria-hidden>{bm.g}</span>
                       {badge}
                     </span>
                   ) : null}

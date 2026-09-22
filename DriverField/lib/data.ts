@@ -588,40 +588,83 @@ export function hosRemaining(entries: HosEntry[] = hosEntries): HosRemaining {
 
 // --- inspections (DVIR, NSC Standard 11) -----------------------------------
 
+/**
+ * The 22 checklist items, grouped the way NSC Standard 11 is written.
+ *
+ * Each item carries a STABLE ID as well as its label, and the ids are the load-bearing half.
+ * Answers, the persisted draft and the wizard's resume pointer all key on `id`; `label` is both
+ * what the driver reads and the `Item` string ChecklistItemInput carries. Before this, answers
+ * were keyed by the display string — so two groups sharing an item name would collide, and
+ * renaming "Tires and wheels" would orphan every stored draft. Ids follow the file's prefixed
+ * convention (TRP-, HOS-, DVR-) with a two-letter group code; lib/inspectionSteps.test.ts pins
+ * that they are unique across all five groups.
+ */
 export const dvirChecklist: ChecklistGroup[] = [
   {
     group: "Under Hood",
-    items: ["Engine oil level", "Coolant level", "Belts and hoses", "Battery / cables"],
+    items: [
+      { id: "CHK-UH-1", label: "Engine oil level" },
+      { id: "CHK-UH-2", label: "Coolant level" },
+      { id: "CHK-UH-3", label: "Belts and hoses" },
+      { id: "CHK-UH-4", label: "Battery / cables" },
+    ],
   },
   {
     group: "Exterior",
-    items: ["Tires and wheels", "Lamps and reflectors", "Mirrors", "Body and glass", "Wipers"],
+    items: [
+      { id: "CHK-EX-1", label: "Tires and wheels" },
+      { id: "CHK-EX-2", label: "Lamps and reflectors" },
+      { id: "CHK-EX-3", label: "Mirrors" },
+      { id: "CHK-EX-4", label: "Body and glass" },
+      { id: "CHK-EX-5", label: "Wipers" },
+    ],
   },
   {
     group: "Brakes & Steering",
-    items: ["Service brake", "Parking brake", "Air system (if equipped)", "Steering play"],
+    items: [
+      { id: "CHK-BS-1", label: "Service brake" },
+      { id: "CHK-BS-2", label: "Parking brake" },
+      { id: "CHK-BS-3", label: "Air system (if equipped)" },
+      { id: "CHK-BS-4", label: "Steering play" },
+    ],
   },
   {
     group: "Interior & Safety",
     items: [
-      "Seatbelts",
-      "Emergency exits",
-      "Fire extinguisher",
-      "First aid kit",
-      "Heater / defroster",
+      { id: "CHK-IS-1", label: "Seatbelts" },
+      { id: "CHK-IS-2", label: "Emergency exits" },
+      { id: "CHK-IS-3", label: "Fire extinguisher" },
+      { id: "CHK-IS-4", label: "First aid kit" },
+      { id: "CHK-IS-5", label: "Heater / defroster" },
     ],
   },
   {
     group: "Winter Readiness",
-    items: ["Block heater cord", "Traction aids", "Survival kit", "Extra fuel"],
+    items: [
+      { id: "CHK-WR-1", label: "Block heater cord" },
+      { id: "CHK-WR-2", label: "Traction aids" },
+      { id: "CHK-WR-3", label: "Survival kit" },
+      { id: "CHK-WR-4", label: "Extra fuel" },
+    ],
   },
 ];
 
+/**
+ * Historical submissions. `mode` and `vehicleId` are what the boarding gate reads: `type` is
+ * display prose ("Pre-Trip") and `unit` is free text, and neither is a join key or a contract.
+ *
+ * DVR-8101 is deliberately dated YESTERDAY (2026-09-11), not today. A gate that is already
+ * satisfied on first paint cannot be demonstrated — the same argument this file already makes
+ * for greying ineligible trips rather than hiding them. lib/inspectionGate.test.ts pins it, so
+ * restoring the old date fails a test that says why.
+ */
 export const dvirSubmissions: DvirSubmission[] = [
   {
     id: "DVR-8101",
-    performedAt: "2026-09-12T06:05:00",
+    performedAt: "2026-09-11T06:05:00",
     type: "Pre-Trip",
+    mode: "PreTrip",
+    vehicleId: "VEH-11",
     unit: "NL-01",
     odometerKm: 184_920,
     result: "Pass with defects",
@@ -632,6 +675,8 @@ export const dvirSubmissions: DvirSubmission[] = [
     id: "DVR-8102",
     performedAt: "2026-09-11T19:50:00",
     type: "Post-Trip",
+    mode: "PostTrip",
+    vehicleId: "VEH-11",
     unit: "NL-01",
     odometerKm: 184_612,
     result: "Pass",
@@ -642,6 +687,8 @@ export const dvirSubmissions: DvirSubmission[] = [
     id: "DVR-8103",
     performedAt: "2026-09-08T06:10:00",
     type: "Pre-Trip",
+    mode: "PreTrip",
+    vehicleId: "VEH-16",
     unit: "NL-06",
     odometerKm: 268_431,
     result: "Fail",

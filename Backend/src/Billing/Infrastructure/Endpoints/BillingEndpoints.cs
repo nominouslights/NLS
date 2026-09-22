@@ -113,9 +113,18 @@ public static class BillingEndpoints
             new GenerateDraftInvoiceCommand(tenantId, request.ClientId, request.PeriodStart, request.PeriodEnd),
             cancellationToken);
 
-        return result.IsSuccess
-            ? Results.Created($"/api/billing/invoices/{result.Value}", new { id = result.Value })
-            : EndpointResults.Problem(result.Error);
+        if (result.IsFailure)
+        {
+            return EndpointResults.Problem(result.Error);
+        }
+
+        // One worksheet per purchase order, so the body is a list. There is always at least one
+        // entry, and the Location header points at the first — enough for the console to
+        // navigate somewhere sensible while still showing the whole set.
+        var created = result.Value.Invoices;
+        return Results.Created(
+            $"/api/billing/invoices/{created[0].InvoiceId}",
+            new GenerateDraftInvoicesResponse(created));
     }
 
     private static async Task<IResult> ReplaceLines(
@@ -267,6 +276,14 @@ public static class BillingEndpoints
     // Request bodies — module-local contracts, mirrored by the frontend's typed client.
 
     public sealed record GenerateDraftInvoiceRequest(Guid ClientId, DateOnly PeriodStart, DateOnly PeriodEnd);
+
+    /// <summary>
+    /// Body of a successful POST /generate-draft. Generation produces one worksheet per
+    /// effective purchase order, so this is a list — never a single id.
+    /// <c>Warnings</c> are advisory strings (today: the PO's authorized value being exceeded)
+    /// and never mean the worksheet failed to generate.
+    /// </summary>
+    public sealed record GenerateDraftInvoicesResponse(IReadOnlyList<GeneratedInvoiceDraft> Invoices);
 
     public sealed record InvoiceLineRequest(
         Guid? LineId,

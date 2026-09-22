@@ -315,12 +315,19 @@ public static class NotificationsEndpoints
         report?.PeriodLabel ?? string.Empty,
         report?.PreparedDate ?? string.Empty,
         (report?.Notes ?? []).Select(note => note ?? string.Empty).ToList(),
+        (report?.Headline ?? [])
+            .Select(figure => new AccrualsHeadlineFigure(
+                figure.Label ?? string.Empty,
+                figure.AmountCad ?? string.Empty,
+                figure.Detail ?? string.Empty))
+            .ToList(),
         (report?.Summary ?? [])
             .Select(row => new AccrualsSummaryRow(
                 row.BucketLabel ?? string.Empty,
                 row.RoundTrips ?? string.Empty,
                 row.ActualCad ?? string.Empty,
-                row.EstimatedCad ?? string.Empty))
+                row.EstimatedCad ?? string.Empty,
+                row.Emphasis ?? false))
             .ToList(),
         (report?.Buckets ?? [])
             .Select(bucket => new AccrualsReportBucket(
@@ -482,24 +489,41 @@ public sealed record AccrualsRecipientRequest(string? Email, string? ContactName
 
 /// <summary>
 /// The flat accruals report as posted by the frontend — pre-formatted strings only (labels,
-/// dates, amounts with any "est." markings baked in); the backend renders it verbatim.
+/// dates, amounts with any "est." markings baked in); the backend renders it verbatim, in the
+/// order given. Every member is nullable and normalized in <c>ToReport</c>, so an older client
+/// that posts no <c>headline</c> still renders: the block is skipped exactly as an empty
+/// section is today.
 /// </summary>
 public sealed record ClientAccrualsReportRequest(
     string? ClientName,
     string? PeriodLabel,
     string? PreparedDate,
     List<string?>? Notes,
+    List<AccrualsHeadlineFigureRequest>? Headline,
     List<AccrualsSummaryRowRequest>? Summary,
     List<AccrualsReportBucketRequest>? Buckets,
     List<AccrualsReconciliationRowRequest>? Reconciliation,
     List<AccrualsInvoiceRowRequest>? Invoices);
 
-/// <summary>One bucket's line in the summary table.</summary>
+/// <summary>
+/// One leading figure the report opens with — label, pre-formatted CAD amount (any "est."
+/// marking baked in) and a one-line detail.
+/// </summary>
+public sealed record AccrualsHeadlineFigureRequest(
+    string? Label,
+    string? AmountCad,
+    string? Detail);
+
+/// <summary>
+/// One line in the summary table. <c>Emphasis</c> marks a section subtotal row (omitted or
+/// false = a bucket row nested under one).
+/// </summary>
 public sealed record AccrualsSummaryRowRequest(
     string? BucketLabel,
     string? RoundTrips,
     string? ActualCad,
-    string? EstimatedCad);
+    string? EstimatedCad,
+    bool? Emphasis);
 
 /// <summary>One billing-state bucket's detail section.</summary>
 public sealed record AccrualsReportBucketRequest(

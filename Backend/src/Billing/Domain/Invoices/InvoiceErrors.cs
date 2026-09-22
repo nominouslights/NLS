@@ -80,4 +80,13 @@ public static class InvoiceErrors
 
     public static readonly Error InvalidStatusFilter = Error.Validation(
         "Billing.Invoice.InvalidStatusFilter", "Unknown invoice status filter.");
+
+    /// <summary>
+    /// Guards the one-generation-many-worksheets split: a trip appearing in two drafts of the
+    /// same generation would be billed twice. Structurally impossible (the builder partitions
+    /// trips by PO), so reaching this means the grouping broke, not that the caller did.
+    /// </summary>
+    public static readonly Error TripClaimedTwice = Error.Conflict(
+        "Billing.Invoice.TripClaimedTwice",
+        "Draft generation priced the same trip on two worksheets; no invoices were created.");
 }

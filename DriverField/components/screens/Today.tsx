@@ -7,7 +7,10 @@ import { TouchTile } from "@/components/ui-tablet/TouchTile";
 import { DutyControl } from "@/components/ui-tablet/DutyControl";
 import { TouchButton } from "@/components/ui-tablet/TouchButton";
 import { Screen, MockTag, Heading, TabletChip, FieldLine, CardRow } from "./shared";
-import type { DutyState } from "@/lib/types";
+import { BoardingGateBanner } from "./inspection/BoardingGateBanner";
+import type { DutyState, InspectionMode } from "@/lib/types";
+import { boardingGate } from "@/lib/inspectionGate";
+import { useInspectionStoreHydrated } from "@/lib/useInspectionStore";
 import {
   assignedTrips,
   assignedVehicle,
@@ -20,18 +23,28 @@ import {
 
 // The screen a driver opens on. Answers four questions without a tap: how many hours do I have
 // left, what is next, what am I driving, and is anything wrong with it.
+//
+// It also carries the boarding gate's blocking banner, above the tile row — the same block
+// Manifest shows, so a driver learns what is owed before walking to the vehicle rather than
+// after sitting down with a manifest open.
 
 export default function Today({
   duty,
   onDutyChange,
   onOpenTrip,
+  onStartInspection,
 }: {
   duty: DutyState;
   onDutyChange: (next: DutyState) => void;
   onOpenTrip: (tripId: string) => void;
+  onStartInspection: (mode: InspectionMode) => void;
 }) {
   const hos = hosRemaining();
   const next = assignedTrips[0];
+
+  // The gate reads localStorage, so it waits for hydration — see lib/useInspectionStore.ts.
+  const hydrated = useInspectionStoreHydrated();
+  const gate = hydrated ? boardingGate(next.vehicleId) : null;
 
   return (
     <Screen
@@ -39,6 +52,8 @@ export default function Today({
       title={`Good morning, ${currentDriver.name}`}
       right={<MockTag />}
     >
+      {gate ? <BoardingGateBanner gate={gate} onStartInspection={onStartInspection} /> : null}
+
       <div style={{ display: "flex", gap: gap.row, marginBottom: gap.section }}>
         <TouchTile
           label="Driving left today"

@@ -7,7 +7,7 @@ import {
   defaultBillingPeriod,
   directionMeta,
   formatInvoiceCad,
-  generateDraftInvoice,
+  generateDraftInvoices,
   getInvoice,
   invoiceChip,
   invoiceClipboardText,
@@ -25,6 +25,7 @@ import {
   voidInvoice,
   writeOffInvoice,
   type BillableTripRecord,
+  type GeneratedInvoiceDraft,
   type InvoiceDetailRecord,
   type InvoiceLineInput,
   type InvoiceSummaryRecord,
@@ -33,7 +34,14 @@ import { copyToClipboard } from "@/lib/clipboard";
 import { printInvoicePrepSheet } from "@/lib/documents/invoicePdf";
 import type { LoadedTrip, TripDetailMap } from "@/lib/billing/tripDetail";
 import { getTrip, getTripManifest, shortDateLabel, type ManifestPassenger } from "@/lib/api/trips";
-import { getClient, listClients, type ClientRecord } from "@/lib/api/clients";
+import {
+  getClient,
+  listClients,
+  listPurchaseOrders,
+  type ClientRecord,
+  type PurchaseOrderRecord,
+} from "@/lib/api/clients";
+import { previewDraftsByPo, type PoDraftPreview } from "@/lib/billing/accruals";
 import { PageHeader, Panel, SectionLabel } from "@/components/ui/Panel";
 import { StatusBadge, StatusChip } from "@/components/ui/Chip";
 import { ActionButton } from "@/components/ui/Button";
@@ -567,15 +575,133 @@ function MarkEnteredModal({
 
 // ---------------------------------------------------------------------------
 // Generate-draft dialog — client + billing period → POST generate-draft, with
-// a live preview of the uninvoiced billable trips the draft would draw from.
+// a live preview of the uninvoiced billable trips the draft would draw from,
+// grouped into the worksheets it would create: ONE PER PURCHASE ORDER, because
+// each PO is its own spending authorisation with its own rates and its own value
+// to draw down. A client whose work all sits under one PO shows one row and
+// reads exactly as it always did. Work with no trip PO and no contract default
+// is its own "No PO" worksheet — shown, never hidden.
+//
+// The split and its amounts come from previewDraftsByPo (lib/billing/accruals.ts)
+// — the same grouping and rate resolution the accruals report prices with, so
+// the preview cannot promise a split the generated drafts disagree with.
 // ---------------------------------------------------------------------------
+
+/** One prospective worksheet. Colour never stands alone: the PO number and the
+ *  tallies are words, and the chip beside them carries its own label. */
+function PoDraftRow({ row }: { row: PoDraftPreview }) {
+  const tallies = [
+    `${row.roundTrips} round trip${row.roundTrips === 1 ? "" : "s"}`,
+    `${row.legCount} leg${row.legCount === 1 ? "" : "s"}`,
+  ];
+  if (row.oneWayCount > 0) tallies.push(`${row.oneWayCount} unpaired`);
+  if (row.manualLegCount > 0) tallies.push(`${row.manualLegCount} manual`);
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        flexWrap: "wrap",
+        padding: "8px 12px",
+        background: colors.cardBg,
+        borderTop: `1px solid ${colors.borderSubtle}`,
+        fontFamily: fonts.body,
+        fontSize: 12,
+      }}
+    >
+      <span style={{ fontFamily: fonts.mono, color: colors.skyBlue, flex: "none" }}>
+        {row.poNumber ?? "No PO"}
+      </span>
+      <span style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textDim, flex: "none" }}>
+        {row.termsLabel}
+      </span>
+      <span style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textDim, marginLeft: "auto" }}>
+        {tallies.join(" · ")}
+      </span>
+      {row.unpriced ? (
+        <StatusChip kind="soon" label="Not priced — no rate on the PO or contract" />
+      ) : (
+        <span style={{ fontFamily: fonts.mono, fontWeight: 600, color: colors.textSecondary, flex: "none" }}>
+          {formatInvoiceCad(row.estimatedCad)} est.
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** One worksheet the run actually created — same reading order and the same
+ *  "No PO" wording as the preview row above, with real line counts and totals
+ *  instead of estimates. `warnings` are ADVISORY review flags (the invoice's own
+ *  words): caution chips, never an error, and never a reason the draft failed. */
+function CreatedDraftRow({ draft, onOpen }: { draft: GeneratedInvoiceDraft; onOpen: () => void }) {
+  return (
+    <div
+      style={{
+        padding: "9px 12px",
+        background: colors.cardBg,
+        borderTop: `1px solid ${colors.borderSubtle}`,
+        fontFamily: fonts.body,
+        fontSize: 12,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <span style={{ fontFamily: fonts.mono, color: colors.skyBlue, flex: "none" }}>
+          {draft.poNumber ?? "No PO"}
+        </span>
+        <span style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.textSecondary, flex: "none" }}>
+          {draft.invoiceNumber}
+        </span>
+        <span style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textDim }}>
+          {draft.lineCount} line{draft.lineCount === 1 ? "" : "s"}
+        </span>
+        <span
+          style={{
+            fontFamily: fonts.mono,
+            fontWeight: 600,
+            color: colors.textSecondary,
+            marginLeft: "auto",
+            flex: "none",
+          }}
+        >
+          {formatInvoiceCad(draft.totalCad)}
+        </span>
+        <span
+          onClick={onOpen}
+          style={{
+            fontFamily: fonts.semiCondensed,
+            fontWeight: 600,
+            fontSize: 10,
+            letterSpacing: ".08em",
+            textTransform: "uppercase",
+            color: colors.blue,
+            cursor: "pointer",
+            flex: "none",
+          }}
+        >
+          Open
+        </span>
+      </div>
+      {draft.warnings.length > 0 && (
+        <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 6 }}>
+          {draft.warnings.map((w, i) => (
+            <StatusChip key={i} kind="soon" label={w} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function GenerateDraftModal({
   onClose,
   onCreated,
 }: {
   onClose: () => void;
-  onCreated: (id: string) => void;
+  /** Open a created draft. `warnings` are the run's ADVISORY review flags for
+   *  that worksheet — carried through so a single-worksheet run (which flows
+   *  straight through without a result step) does not silently drop them. */
+  onCreated: (id: string, warnings: string[]) => void;
 }) {
   const [clients, setClients] = useState<ClientRecord[] | null>(null);
   const [clientId, setClientId] = useState("");
@@ -584,10 +710,19 @@ function GenerateDraftModal({
   const [end, setEnd] = useState(initial.end);
   // Preview results keyed by the client+period they were fetched for, so a
   // changed selection simply stops matching (no synchronous state resets).
-  const [preview, setPreview] = useState<{ key: string; rows: BillableTripRecord[] } | null>(null);
+  const [preview, setPreview] = useState<{
+    key: string;
+    rows: BillableTripRecord[];
+    /** null = the PO fetch failed: the split still shows, priced at the contract
+     *  rate, rather than the preview disappearing. */
+    purchaseOrders: PurchaseOrderRecord[] | null;
+  } | null>(null);
   const [previewError, setPreviewError] = useState<{ key: string; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set once a run has created 2+ worksheets: the dialog becomes a result step
+  // listing them. A single worksheet never gets here — it opens straight away.
+  const [result, setResult] = useState<GeneratedInvoiceDraft[] | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -623,9 +758,14 @@ function GenerateDraftModal({
     if (!previewKey) return;
     let active = true;
     const [cid, from, to] = previewKey.split("|");
-    listBillableTrips({ clientId: cid, uninvoiced: true, from, to }).then(
-      (rows) => {
-        if (active) setPreview({ key: previewKey, rows });
+    // The client's POs ride along: their rates price the preview and their
+    // numbers decide how many worksheets the draft run would create.
+    Promise.all([
+      listBillableTrips({ clientId: cid, uninvoiced: true, from, to }),
+      listPurchaseOrders(cid).catch((): PurchaseOrderRecord[] | null => null),
+    ]).then(
+      ([rows, purchaseOrders]) => {
+        if (active) setPreview({ key: previewKey, rows, purchaseOrders });
       },
       (e) => {
         if (active)
@@ -640,8 +780,22 @@ function GenerateDraftModal({
     };
   }, [previewKey]);
 
-  const previewRows = preview !== null && preview.key === previewKey ? preview.rows : null;
+  const loadedPreview = preview !== null && preview.key === previewKey ? preview : null;
+  const previewRows = loadedPreview?.rows ?? null;
   const previewErr = previewError !== null && previewError.key === previewKey ? previewError.message : null;
+
+  // The worksheets the run would create — one per PO, the No-PO one included.
+  const poDrafts = useMemo(
+    () =>
+      loadedPreview
+        ? previewDraftsByPo({
+            legs: loadedPreview.rows,
+            contract: selected?.activeContract ?? null,
+            purchaseOrders: loadedPreview.purchaseOrders ?? [],
+          })
+        : null,
+    [loadedPreview, selected],
+  );
 
   async function submit() {
     if (busy) return;
@@ -651,13 +805,26 @@ function GenerateDraftModal({
     setBusy(true);
     setError(null);
     try {
-      const id = await generateDraftInvoice(clientId, start, end);
-      // Reads are eventually consistent — wait until the new draft is visible.
-      await refetchUntil(
-        () => getInvoice(id).then((d) => d, () => null),
-        (d) => d !== null,
+      // One call, one worksheet PER PO back — ordered by PO with the no-PO
+      // worksheet last, and never empty.
+      const drafts = await generateDraftInvoices(clientId, start, end);
+      // Reads are eventually consistent — wait until every new draft is visible.
+      await Promise.all(
+        drafts.map((d) =>
+          refetchUntil(
+            () => getInvoice(d.invoiceId).then((inv) => inv, () => null),
+            (inv) => inv !== null,
+          ),
+        ),
       );
-      onCreated(id);
+      // The common case is one worksheet, and it must not read as a new
+      // workflow: it opens straight through, exactly as before per-PO drafting.
+      if (drafts.length === 1) {
+        onCreated(drafts[0].invoiceId, drafts[0].warnings);
+        return;
+      }
+      setResult(drafts);
+      setBusy(false);
     } catch (e) {
       if (e instanceof ApiError) {
         if (e.code === "Billing.Invoice.NoActiveContract") {
@@ -672,6 +839,72 @@ function GenerateDraftModal({
       }
       setBusy(false);
     }
+  }
+
+  // Result step — only for a run that created more than one worksheet. Nothing
+  // here is an error: the run succeeded, and each row's warnings are advisory
+  // review flags carried straight from the generated invoice lines.
+  if (result !== null) {
+    const total = result.reduce((s, d) => s + d.totalCad, 0);
+    return (
+      <ModalShell
+        eyebrow="Business · Billing"
+        title={`${result.length} Draft Worksheets Created`}
+        onClose={onClose}
+        maxWidth={640}
+        footer={
+          <>
+            <ActionButton onClick={onClose}>CLOSE</ActionButton>
+            <ActionButton
+              variant="primary"
+              onClick={() => onCreated(result[0].invoiceId, result[0].warnings)}
+            >
+              OPEN {result[0].invoiceNumber}
+            </ActionButton>
+          </>
+        }
+      >
+        <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textSecondary, lineHeight: 1.6 }}>
+          One worksheet per purchase order — each PO is its own spending authorisation at its own
+          rates. Every one is editable while it is still Draft; open each to review its lines before
+          keying it into QuickBooks.
+        </div>
+        <div
+          style={{
+            marginTop: 14,
+            border: `1px solid ${colors.borderSubtle}`,
+            borderRadius: 9,
+            overflow: "hidden",
+          }}
+        >
+          {result.map((d) => (
+            <CreatedDraftRow
+              key={d.invoiceId}
+              draft={d}
+              onOpen={() => onCreated(d.invoiceId, d.warnings)}
+            />
+          ))}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+              padding: "8px 12px",
+              borderTop: `1px solid ${colors.borderSubtle}`,
+              background: colors.cardBgActive,
+              fontFamily: fonts.mono,
+              fontSize: 10.5,
+              color: colors.textMuted,
+            }}
+          >
+            <span>
+              {result.length} worksheet{result.length === 1 ? "" : "s"}
+            </span>
+            <span>{formatInvoiceCad(total)} across all POs</span>
+          </div>
+        </div>
+      </ModalShell>
+    );
   }
 
   return (
@@ -716,6 +949,40 @@ function GenerateDraftModal({
         <DateField label="Period start" value={start} onChange={setStart} />
         <DateField label="Period end" value={end} onChange={setEnd} />
       </div>
+
+      {/* the worksheets this run would create — one per purchase order */}
+      {poDrafts !== null && poDrafts.length > 0 && (
+        <div style={{ marginTop: 18 }}>
+          <SectionLabel>
+            {poDrafts.length === 1
+              ? "Worksheet this run would create"
+              : `Worksheets this run would create — one per PO (${poDrafts.length})`}
+          </SectionLabel>
+          {loadedPreview?.purchaseOrders === null && (
+            <div style={{ marginBottom: 8 }}>
+              <StatusChip
+                kind="soon"
+                label="Purchase orders unavailable — amounts shown at the contract rate"
+              />
+            </div>
+          )}
+          <div
+            style={{
+              border: `1px solid ${colors.borderSubtle}`,
+              borderRadius: 9,
+              overflow: "hidden",
+            }}
+          >
+            {poDrafts.map((row) => (
+              <PoDraftRow key={row.poNumber ?? "no-po"} row={row} />
+            ))}
+          </div>
+          <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim, marginTop: 7, lineHeight: 1.5 }}>
+            Each purchase order is its own spending authorisation, so each gets its own worksheet at
+            its own rates. Amounts are estimates at those rates — the generated draft governs.
+          </div>
+        </div>
+      )}
 
       {/* uninvoiced billable-trip preview for the selection */}
       <div style={{ marginTop: 18 }}>
@@ -1875,6 +2142,9 @@ export default function Billing({
   const [rows, setRows] = useState<InvoiceSummaryRecord[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [generateOpen, setGenerateOpen] = useState(false);
+  // Advisory review flags from the draft run, pinned to the draft they came
+  // from — never an error, and never blocking anything.
+  const [draftNotice, setDraftNotice] = useState<{ id: string; warnings: string[] } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -2117,7 +2387,25 @@ export default function Billing({
         {/* detail */}
         <div style={{ minHeight: 0, overflowY: "auto", padding: "22px 26px", background: colors.detailBg }}>
           {invoiceSelId ? (
-            <InvoiceDetail key={invoiceSelId} id={invoiceSelId} onMutated={load} />
+            <>
+              {/* advisory review flags from the run that generated this draft —
+                  the invoice's own words, caution not error */}
+              {draftNotice?.id === invoiceSelId && (
+                <Panel borderColor="rgba(225,176,0,.45)" style={{ marginBottom: 14 }}>
+                  <SectionLabel>Review flags from draft generation</SectionLabel>
+                  <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
+                    {draftNotice.warnings.map((w, i) => (
+                      <StatusChip key={i} kind="soon" label={w} />
+                    ))}
+                  </div>
+                  <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim, marginTop: 8 }}>
+                    Advisory only — the draft generated normally. Review the flagged lines before
+                    keying it into QuickBooks.
+                  </div>
+                </Panel>
+              )}
+              <InvoiceDetail key={invoiceSelId} id={invoiceSelId} onMutated={load} />
+            </>
           ) : (
             rows !== null &&
             !loadError && (
@@ -2132,9 +2420,13 @@ export default function Billing({
       {generateOpen && (
         <GenerateDraftModal
           onClose={() => setGenerateOpen(false)}
-          onCreated={(id) => {
+          onCreated={(id, warnings) => {
             setGenerateOpen(false);
             setInvoiceSelId(id);
+            // Advisory review flags from the run, kept with the draft they belong
+            // to so a single-worksheet run (which skips the result step) still
+            // shows them. Cleared as soon as another invoice is selected.
+            setDraftNotice(warnings.length > 0 ? { id, warnings } : null);
             void load();
           }}
         />

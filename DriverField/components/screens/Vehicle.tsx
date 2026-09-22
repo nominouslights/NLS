@@ -8,6 +8,7 @@ import { TouchButton } from "@/components/ui-tablet/TouchButton";
 import { StatusBanner } from "@/components/ui-tablet/StatusBanner";
 import { Screen, MockTag, Heading, CardRow, FieldLine, TabletChip, EmptyNote } from "./shared";
 import { enqueue } from "@/lib/sync/queue";
+import { severityGlyph } from "@/lib/inspectionGate";
 import { assignedVehicle, fuelEntries, vehicleDefects } from "@/lib/data";
 
 // The narrow Fleet slice architecture §6 allows the Driver Field App: vehicle status and fault
@@ -113,7 +114,10 @@ export default function Vehicle() {
               <FieldLine label={d.item} value={d.note} />
             </div>
             <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 10 }}>
-              <TabletChip kind={d.dk} label={d.severity} />
+              {/* Major and Out of Service are both vermillion (lib/theme.ts is a protected
+                  copy), so the glyph is what separates them — ✕ for out-of-service. Same
+                  override, same reason, as the review step's severity chips. */}
+              <TabletChip kind={d.dk} glyph={severityGlyph(d.severity)} label={d.severity} />
               <span style={{ fontFamily: fonts.mono, fontSize: 14, color: colors.textDim, width: 90 }}>
                 {d.workOrder ?? "No WO"}
               </span>

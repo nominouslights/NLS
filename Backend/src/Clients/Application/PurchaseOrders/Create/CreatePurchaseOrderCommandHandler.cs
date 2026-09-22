@@ -25,6 +25,8 @@ public sealed class CreatePurchaseOrderCommandHandler(
             command.Issued,
             command.Expiry,
             command.AmountCad,
+            command.RoundTripRateCad,
+            command.OneWayRateCad,
             command.Note);
 
         if (purchaseOrderResult.IsFailure)

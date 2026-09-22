@@ -1,12 +1,17 @@
 namespace NorthernLink.Billing.Application.Abstractions;
 
 /// <summary>
-/// Issues the next "INV-…" number in the tenant's sequence. The number is provisional
-/// until the invoice saves — the unique index on (tenant_id, invoice_number) is the
-/// authoritative guard against a concurrent duplicate (the Fleet retirement-certificate
-/// sequencing precedent).
+/// Per-tenant invoice numbering. Reserves a whole batch in one call because one generation
+/// request now produces one worksheet per purchase order: numbering derives from the count of
+/// persisted invoices, so calling a single-number method N times before SaveChanges would hand
+/// back the same number N times.
 /// </summary>
 public interface IInvoiceNumberGenerator
 {
-    Task<string> NextInvoiceNumberAsync(Guid tenantId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// The next <paramref name="count"/> invoice numbers, in order, all unique within the
+    /// batch and continuing the tenant's sequence.
+    /// </summary>
+    Task<IReadOnlyList<string>> NextInvoiceNumbersAsync(
+        Guid tenantId, int count, CancellationToken cancellationToken = default);
 }

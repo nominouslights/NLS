@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { hosEntries } from "./data";
-import type { DutyState, HosSource } from "./types";
+import { dvirSubmissions, hosEntries, vehicleDefects } from "./data";
+import { INSPECTION_SOURCE_WIRE, severityToWire, type DefectSeverityWire } from "./inspectionGate";
+import type { DefectSeverity, DutyState, HosSource, InspectionMode } from "./types";
 
 // Wire-string pins.
 //
@@ -63,5 +64,84 @@ describe("HOS source strings", () => {
       if (e.source === "Manual (paper backup)") expect(e.enteredBy).toBeTruthy();
       else expect(e.enteredBy).toBeNull();
     }
+  });
+});
+
+// --- inspections -----------------------------------------------------------
+//
+// The DVIR wire strings, mirroring three enums in Backend/src/Fleet/Domain/Inspections/:
+// InspectionDefectSeverity.cs, InspectionType.cs and InspectionSource.cs. These are serialised
+// by the default System.Text.Json enum converter, which matches MEMBER NAMES — so a display
+// string with a space in it is rejected outright, and a plausible-looking near-miss like
+// "Pre-Trip" is rejected the same way. Nothing in TypeScript can catch it: the app compiles,
+// builds and renders perfectly while every submission 400s.
+
+const SEVERITY_WIRE: DefectSeverityWire[] = ["Minor", "Major", "OutOfService"];
+
+const INSPECTION_TYPE_WIRE: InspectionMode[] = ["PreTrip", "PostTrip"];
+
+const ALL_SEVERITIES: DefectSeverity[] = ["Minor", "Major", "Out of Service"];
+
+describe("defect severity strings", () => {
+  it("are exactly InspectionDefectSeverity's three members", () => {
+    expect(SEVERITY_WIRE).toEqual(["Minor", "Major", "OutOfService"]);
+  });
+
+  it("maps the display string 'Out of Service' to 'OutOfService'", () => {
+    // THE latent bug this block was added for. lib/types.ts's DefectSeverity is a DISPLAY type
+    // ("Out of Service", with spaces) because that is what a driver reads; the enum member has
+    // none. Sending the display string straight through is a 400 nobody would see until a
+    // driver in a dead zone could not file a defect.
+    expect(severityToWire("Out of Service")).toBe("OutOfService");
+    expect(severityToWire("Minor")).toBe("Minor");
+    expect(severityToWire("Major")).toBe("Major");
+  });
+
+  it("emits no wire value containing a space", () => {
+    for (const severity of ALL_SEVERITIES) {
+      expect(severityToWire(severity)).not.toContain(" ");
+      expect(SEVERITY_WIRE).toContain(severityToWire(severity));
+    }
+  });
+
+  it("covers every severity in the mock layer", () => {
+    // Same coverage shape as the duty-value check above: a severity that appears on screen but
+    // cannot cross the boundary is a screen that cannot be wired up.
+    for (const defect of vehicleDefects) {
+      expect(SEVERITY_WIRE).toContain(severityToWire(defect.severity));
+    }
+  });
+});
+
+describe("inspection type strings", () => {
+  it("are exactly InspectionType's two members", () => {
+    expect(INSPECTION_TYPE_WIRE).toEqual(["PreTrip", "PostTrip"]);
+  });
+
+  it("are not the display prose the screen shows", () => {
+    // DvirSubmission carries BOTH: `type` is prose for the driver, `mode` is the wire value the
+    // boarding gate and the payload branch on. Sending the prose is the same class of failure
+    // as sending "Out of Service".
+    expect(INSPECTION_TYPE_WIRE).not.toContain("Pre-Trip" as unknown as InspectionMode);
+    expect(INSPECTION_TYPE_WIRE).not.toContain("Post-Trip" as unknown as InspectionMode);
+    expect(INSPECTION_TYPE_WIRE.every((t) => !t.includes("-"))).toBe(true);
+  });
+
+  it("covers every mode in the mock layer, and each row's prose matches its mode", () => {
+    for (const submission of dvirSubmissions) {
+      expect(INSPECTION_TYPE_WIRE).toContain(submission.mode);
+      expect(submission.type.replace("-", "")).toBe(submission.mode);
+    }
+  });
+});
+
+describe("inspection source string", () => {
+  it("is exactly 'DriverApp'", () => {
+    // The backend defaults Source to Dispatcher. A driver submission must say so explicitly or
+    // the inspection is attributed to a dispatcher who never touched the vehicle — the same
+    // failure the HOS source pin above exists for, in a compliance record.
+    expect(INSPECTION_SOURCE_WIRE).toBe("DriverApp");
+    expect(INSPECTION_SOURCE_WIRE).not.toBe("Driver App");
+    expect(INSPECTION_SOURCE_WIRE).not.toContain(" ");
   });
 });

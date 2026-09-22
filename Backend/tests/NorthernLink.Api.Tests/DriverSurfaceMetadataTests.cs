@@ -169,6 +169,8 @@ public class DriverSurfaceMetadataTests : IAsyncLifetime
     [InlineData("POST", "/api/trips/routes")]
     [InlineData("PUT", "/api/trips/stops/{id:guid}")]
     [InlineData("POST", "/api/trips/schedule-templates")]
+    [InlineData("POST", "/api/trips/schedule-templates/{id:guid}/generate")]
+    [InlineData("GET", "/api/trips/schedule-templates/{id:guid}/generate/preview")]
     [InlineData("POST", "/api/trips/shipments")]
     [InlineData("GET", "/api/trips/riders")]
     [InlineData("POST", "/api/trips")]
