@@ -25,7 +25,7 @@ constraint and the offline-first requirement are **unchanged** — only the fram
 
 Same decision as `Budgeting/`, and for the same reason: extracting a shared package was the
 alternative and was rejected — there is no npm workspace at the root and every app has its own
-lockfile. So **22 files here are byte-identical copies of Dispatcher's**, each carrying a fixed
+lockfile. So **23 files here are byte-identical copies of Dispatcher's**, each carrying a fixed
 two-line header:
 
 ```
@@ -38,7 +38,7 @@ a copied file in place.** Drift here is a visible product bug, not a style nit.
 
 | Copied file | |
 |---|---|
-| `lib/` | `theme.ts` `format.ts` `period.ts` `useToday.ts` `clipboard.ts` |
+| `lib/` | `theme.ts` `format.ts` `period.ts` `useToday.ts` `clipboard.ts` `inspectionForm.ts` |
 | `lib/api/` | `transport.ts` `format.ts` `shared.ts` |
 | `app/` | `globals.css` |
 | `components/` | `HeaderClock.tsx` |
@@ -49,6 +49,7 @@ The one-command drift check, from the repo root — prints nothing when in step:
 ```sh
 for f in \
   lib/theme.ts lib/format.ts lib/period.ts lib/useToday.ts lib/clipboard.ts \
+  lib/inspectionForm.ts \
   lib/api/transport.ts lib/api/format.ts lib/api/shared.ts app/globals.css \
   components/HeaderClock.tsx \
   components/ui/Button.tsx components/ui/Chip.tsx components/ui/CorridorStepper.tsx \
@@ -61,10 +62,20 @@ done
 ```
 
 `tail -n +3` skips the two-line header. Copies stay **unpruned** — `CorridorStepper`, `MonthGrid`,
-`PeriodNav`, `ImageUploadField` and `theme.ts`'s `ServiceType`/`DutyStatus` all ship unused. Dead
-exports cost nothing; a broken byte-diff costs the premise.
+`PeriodNav`, `ImageUploadField`, `theme.ts`'s `ServiceType`/`DutyStatus` and `inspectionForm.ts`'s
+`NL_PTI_01`/`PRE_TRIP_VALIDITY_HOURS` all ship unused or only partly used. Dead exports cost
+nothing; a broken byte-diff costs the premise.
 
-**`NavRail.tsx` is deliberately NOT copied — that is why this list is 22 and Budgeting's is 23.**
+**`lib/inspectionForm.ts` is a copy for a harder reason than style.** It is the NL-PTI-01
+catalogue — the legal form itself, and the `key` field on every row is a **wire value** stored as
+`InspectionChecklistItem.Item`. Drift between this copy and Dispatcher's source does not make the
+tablet look different from the console; it makes the two collect **different legal forms**, and
+files defects against item strings the console cannot address. `lib/inspectionForm.copy.test.ts`
+diffs the two files from disk as a second backstop to the loop above, because the loop is a
+command somebody has to remember to run and the suite is not.
+
+**`NavRail.tsx` is deliberately NOT copied**, which is why Budgeting's list carries it and this
+one does not.
 Its geometry is hardcoded in the component (`width: collapsed ? 72 : 236`, 26px code tiles, 13px
 labels, `"8px 18px"` row padding) with nothing driven from `lib/nav.ts`. A driver rail needs 64px
 rows and 44px tiles, unreachable without editing the copy — the one thing the rule forbids.
@@ -90,7 +101,7 @@ first.
 > No hex literal ever enters `tablet.ts`; no number in `theme.ts` is ever changed to suit this
 > app.**
 
-That split is what lets 22 files stay byte-identical while this app renders at roughly twice the
+That split is what lets 23 files stay byte-identical while this app renders at roughly twice the
 physical size of a desktop console. `lib/tablet.ts` exports geometry only: `touch` (44 floor / 56
 primary / 64 rail), `bar.height` 72, `rail` 200-88 with 44px tiles, a type scale, `gap`, `radius`,
 `wizard` (the DVIR flow's one-question-per-screen geometry — 168px answer tiles, a 40px question,
@@ -188,14 +199,15 @@ in one screen and it is a rewrite.
 deployment.
 
 **`lib/inspectionStore.ts` is deliberately NOT under `lib/sync/`, and the distinction is the
-point.** An in-progress DVIR **draft** is uncertified, private to the device, and costs 22
-re-answered questions if lost — so it lives in `localStorage`, synchronously, and survives a
+point.** An in-progress DVIR **draft** is uncertified, private to the device, and costs a driver the
+whole NL-PTI-01 walk-around (67–80 questions, depending on unit and mode) if lost — so it lives
+in `localStorage`, synchronously, and survives a
 reload. A **certified** DVIR is the compliance record, and its home is the offline batch's
 IndexedDB queue with `navigator.storage.persist()`. Putting a draft under `lib/sync/` would make
 it look like the queue and invite the offline batch to migrate it; putting a queued DVIR in
 `localStorage` would be exactly the compliance failure named below. The transition between the two
 states is one function, and the order is not negotiable: **`enqueue()` → `recordCertification()` →
-`discardDraft()`** — if `enqueue` throws, the driver's 22 answers survive. `commandId` on a local
+`discardDraft()`** — if `enqueue` throws, the driver's whole walk-around survives. `commandId` on a local
 certification is the offline batch's hook: `drain()` can mark one server-accepted by that id and
 the "Held on this device" banner starts telling a different truth with no API change.
 
@@ -256,7 +268,8 @@ fails to resolve at run time.
 | `lib/hos.test.ts` | CVDHS thresholds on **both sides** of every boundary. An off-by-one in a compliance figure is not cosmetic |
 | `lib/wire.test.ts` | Exact spelling of the duty and source strings against `HosDisplay`'s constants, and of the three inspection enums (`InspectionDefectSeverity`, `InspectionType`, `InspectionSource`) — including `"Out of Service"` → `"OutOfService"` |
 | `lib/sync/queue.test.ts` | Distinct client-generated id per `enqueue`; the no-op still satisfies the `SyncState` contract |
-| `lib/inspectionSteps.test.ts` | The DVIR wizard's step model: unique item ids, and a progress denominator that stays 22 however many defect follow-ups are injected |
+| `lib/inspectionForm.copy.test.ts` | The NL-PTI-01 copy is byte-identical to `Dispatcher/lib/inspectionForm.ts` below its two-line header, read from disk. Drift means the tablet and the console collect **different legal forms** |
+| `lib/inspectionSteps.test.ts` | The DVIR wizard's step model: unique item keys, the four real denominators (NL-01 pre 67, NL-01 post 73, NL-02 pre 74, NL-02 post 80) **derived, never written as a literal**, and a denominator that cannot be inflated however many defect follow-ups are injected |
 | `lib/inspectionStore.test.ts` | The draft: per-mode-per-vehicle keys, a reload, a version bump and a stale service day both discarding rather than migrating, unknown item ids dropped on load, and hostile storage failing honestly |
 | `lib/inspectionGate.test.ts` | `deriveResult` against `VehicleInspection.DeriveResult` and `odometerError` against `Vehicle.RecordOdometer`, both sides of each boundary; the boarding gate in both directions; **the negative pin** that this is deliberately *not* a sixth §5.4 rule |
 | `components/screens/Manifest.test.tsx` | The gate as a driver meets it — both buttons disabled with the reason **on screen**, the not-server-enforced admission present, and **a badge scan boarding nobody** |
@@ -346,10 +359,10 @@ automatable subset and none of the colour-alone failures that actually matter he
   implied, because a demo that looks authoritative here is worse than one that is visibly a
   scaffold. It is also deliberately **not** a sixth §5.4 eligibility rule: §5.4 asks whether a
   driver may *claim* an Open trip, this asks whether they may *start moving crew* on one they
-  already hold, and conflating them would grey out every Open trip. Backend ask, in order:
-  the precondition on the manifest write, and a tri-state for
-  `ChecklistItemInput.Passed` (there is no wire representation for an N/A item today, so N/A items
-  are **omitted** from the submitted checklist rather than sent as `passed: true`).
+  already hold, and conflating them would grey out every Open trip. Remaining backend ask: the
+  precondition on the manifest write. (The other ask — a tri-state for `ChecklistItemInput.Passed`,
+  so an N/A row need not be omitted — **landed**: `ChecklistItemState` is `Ok | Defect |
+  NotApplicable` and every row now carries `state` and `note`.)
 - **Mutating `Vehicle.hasFailedDvir` from a local certification.** `lib/data.ts` is read-only by
   rule, and making eligibility rule 3 read `inspectionStore` would create a
   `data.ts → inspectionGate.ts → data.ts` import cycle. The server owns the flag; the consequence

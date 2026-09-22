@@ -33,13 +33,23 @@
 import { assignedVehicleId, dvirSubmissions, today, vehicles } from "./data";
 import { certifiedToday, hasDraft } from "./inspectionStore";
 import { statusMeta, type StatusKind } from "./theme";
-import type { DefectSeverity, InspectionMode } from "./types";
+import type { CheckState, DefectSeverity, InspectionMode } from "./types";
 
 /** Mirrors InspectionResult — Backend/src/Fleet/Domain/Inspections/InspectionResult.cs. */
 export type InspectionResultName = "Pass" | "PassWithDefects" | "Fail";
 
 /** Mirrors InspectionDefectSeverity's MEMBER NAMES — no spaces. Never the display strings. */
 export type DefectSeverityWire = "Minor" | "Major" | "OutOfService";
+
+/**
+ * Mirrors ChecklistItemState — Backend/src/Fleet/Domain/Inspections/ChecklistItemState.cs.
+ *
+ * NL-PTI-01's three boxes, as the wire spells them. Before this enum existed there was only
+ * `ChecklistItemInput.Passed`, a bool, and this app OMITTED every N/A row from the submission
+ * rather than send `passed: true` for a row that does not apply — a false attestation in a
+ * compliance record. The tri-state landed, so N/A is carried now and nothing is dropped.
+ */
+export type ChecklistItemStateWire = "Ok" | "Defect" | "NotApplicable";
 
 /**
  * Mirrors InspectionSource — Backend/src/Fleet/Domain/Inspections/InspectionSource.cs.
@@ -85,6 +95,36 @@ export function severityToWire(severity: DefectSeverity): DefectSeverityWire {
     case "Out of Service":
       return "OutOfService";
   }
+}
+
+/**
+ * The screen's tri-state → the wire's. The screen's values are lowercase because they key a
+ * draft; the wire's are C# member names. Pinned in lib/wire.test.ts.
+ */
+export function checkStateToWire(state: CheckState): ChecklistItemStateWire {
+  switch (state) {
+    case "pass":
+      return "Ok";
+    case "defect":
+      return "Defect";
+    case "na":
+      return "NotApplicable";
+  }
+}
+
+/**
+ * Mirrors VehicleInspection.NormalizeChecklist —
+ * Backend/src/Fleet/Domain/Inspections/VehicleInspection.cs:510, which re-derives
+ * `Passed = state != ChecklistItemState.Defect` for any row that supplies a state.
+ *
+ * `ChecklistItemInput.Passed` is still a non-nullable `bool`, so it is sent alongside `state`;
+ * deriving it the same way the aggregate does is what stops a caller sending the two out of
+ * step. NOTE THE DIRECTION: an N/A row is `passed: true`, which is only safe BECAUSE `state`
+ * travels with it — the bool alone would be the false attestation this app used to avoid by
+ * omitting the row entirely.
+ */
+export function checkStatePassed(state: CheckState): boolean {
+  return checkStateToWire(state) !== "Defect";
 }
 
 /**

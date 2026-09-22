@@ -11,6 +11,7 @@ import {
   recordCertification,
   setAnswer,
   setDefect,
+  setNote,
   setOdometer,
   setStep,
   startDraft,
@@ -18,22 +19,28 @@ import {
   type InspectionDraft,
   type LocalCertification,
 } from "./inspectionStore";
-import { dvirChecklist, today } from "./data";
+import { today } from "./data";
+import { itemsFor } from "./inspectionForm";
 
 // The DVIR draft store.
 //
-// What is being protected here is a driver's 22 answers and the honesty of a compliance
-// record. Every test below is a failure mode somebody would otherwise hit in a vehicle:
-// yesterday's pre-trip resuming into today's certification, a vehicle reassignment silently
-// re-attributing answers, a renamed checklist item resurrecting from storage into a payload,
-// or storage quietly failing while the screen says the draft is saved.
+// What is being protected here is a driver's whole NL-PTI-01 walk-around — 67 to 80 answers
+// depending on the unit and the half of the form — and the honesty of a compliance record.
+// Every test below is a failure mode somebody would otherwise hit in a vehicle: yesterday's
+// pre-trip resuming into today's certification, a vehicle reassignment silently re-attributing
+// answers, a retired form row resurrecting from storage into a payload, or storage quietly
+// failing while the screen says the draft is saved.
 //
 // NOTE ON ORDER: the hostile-storage block runs LAST on purpose. storageFailed() is a sticky
 // module flag — once storage has failed, this session says so forever — so a test that trips it
 // cannot run before the tests that assert it is clear.
 
-const ITEM_A = dvirChecklist[0].items[0].id;
-const ITEM_B = dvirChecklist[1].items[0].id;
+// Real NL-PTI-01 wire keys, taken from the catalogue rather than typed out: the key is the
+// value stored as InspectionChecklistItem.Item, and a made-up one would be dropped on load by
+// the very validation several of these tests are about.
+const NL01_PRE = itemsFor("NL-01", "PreTrip");
+const ITEM_A = NL01_PRE[0].items[0].key;
+const ITEM_B = NL01_PRE[1].items[0].key;
 
 function seed(key: string, value: unknown): void {
   window.localStorage.setItem(key, JSON.stringify(value));
@@ -47,6 +54,7 @@ function validDraft(over: Partial<InspectionDraft> = {}): InspectionDraft {
     startedOn: today,
     startedAt: `${today}T06:02:00.000Z`,
     answers: { [ITEM_A]: "pass" },
+    notes: {},
     defects: {},
     odometerKm: 184_930,
     stepId: `check:${ITEM_A}`,
@@ -146,6 +154,32 @@ describe("mutations", () => {
     expect(getDraft("PreTrip", "VEH-11")?.defects).toEqual({});
   });
 
+  it("records a per-row note independently of the answer", () => {
+    // NL-PTI-01 has a Notes column on EVERY row, so an Ok or an N/A can carry a remark without
+    // being a defect. It rides the wire as ChecklistItemInput.Note.
+    setAnswer("PreTrip", "VEH-11", ITEM_A, "na");
+    setNote("PreTrip", "VEH-11", ITEM_A, "Not fitted to this unit.");
+
+    const draft = getDraft("PreTrip", "VEH-11");
+    expect(draft?.answers[ITEM_A]).toBe("na");
+    expect(draft?.notes[ITEM_A]).toBe("Not fitted to this unit.");
+    expect(draft?.defects).toEqual({});
+  });
+
+  it("does NOT prune the note when the answer changes, unlike the defect", () => {
+    // The asymmetry is deliberate. A defect on an item since marked Pass is a false entry in a
+    // compliance record; a note is the driver's own words about the row and survives them
+    // changing their mind about the box.
+    setAnswer("PreTrip", "VEH-11", ITEM_A, "defect");
+    setNote("PreTrip", "VEH-11", ITEM_A, "Weeping at the seam.");
+    setDefect("PreTrip", "VEH-11", ITEM_A, { severity: "Major", note: "x" });
+    setAnswer("PreTrip", "VEH-11", ITEM_A, "pass");
+
+    const draft = getDraft("PreTrip", "VEH-11");
+    expect(draft?.defects).toEqual({});
+    expect(draft?.notes[ITEM_A]).toBe("Weeping at the seam.");
+  });
+
   it("starts a draft on the first mutation, so no caller has to remember to", () => {
     expect(hasDraft("PreTrip", "VEH-11")).toBe(false);
     setAnswer("PreTrip", "VEH-11", ITEM_A, "pass");
@@ -176,7 +210,9 @@ describe("reload", () => {
 describe("draft rejection", () => {
   it("discards a draft from an older store version, and removes the key", () => {
     // Discarded, never migrated — a half-migrated legal attestation is worse than re-answering.
-    seed(draftKey("PreTrip", "VEH-11"), validDraft({ v: 0 }));
+    // v1 is the concrete case: its answers are keyed by the invented 22-item list's ids, which
+    // address rows form NL-PTI-01 does not have. There is no correspondence to migrate.
+    seed(draftKey("PreTrip", "VEH-11"), validDraft({ v: 1 }));
 
     expect(getDraft("PreTrip", "VEH-11")).toBeNull();
     expect(window.localStorage.getItem(draftKey("PreTrip", "VEH-11"))).toBeNull();
@@ -206,19 +242,22 @@ describe("draft rejection", () => {
     expect(getDraft("PreTrip", "VEH-11")).toBeNull();
   });
 
-  it("drops answers and defects for item ids that are not on the checklist", () => {
-    // A renamed or removed checklist item must not be able to resurrect from storage into a
-    // compliance payload. The whole draft is kept; only the unknown rows go.
+  it("drops answers, notes and defects for item keys that are not in the catalogue", () => {
+    // A row retired from the form must not be able to resurrect from storage into a compliance
+    // payload — the exact hazard of replacing a 22-item list with an 80-row one. The whole
+    // draft is kept; only the unknown rows go.
     seed(
       draftKey("PreTrip", "VEH-11"),
       validDraft({
-        answers: { [ITEM_A]: "pass", "CHK-GONE-9": "pass" },
-        defects: { "CHK-GONE-9": { severity: "Major", note: "from a previous build" } },
+        answers: { [ITEM_A]: "pass", "CHK-UH-1": "pass" },
+        notes: { [ITEM_A]: "topped up", "CHK-UH-1": "from a previous build" },
+        defects: { "CHK-UH-1": { severity: "Major", note: "from a previous build" } },
       }),
     );
 
     const draft = getDraft("PreTrip", "VEH-11");
     expect(draft?.answers).toEqual({ [ITEM_A]: "pass" });
+    expect(draft?.notes).toEqual({ [ITEM_A]: "topped up" });
     expect(draft?.defects).toEqual({});
   });
 

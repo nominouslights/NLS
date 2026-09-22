@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { colors, fonts, rowSurface, SERVICE_SHORT, statusMeta, svcMeta } from "@/lib/theme";
 import {
+  acknowledgeInspectionCarrier,
   ApiError,
   deleteInspection,
   getTripManifest,
@@ -61,6 +62,7 @@ import { contractRateLabel, getClient, type ActiveContractSummary } from "@/lib/
 // renders candidate/invoice legs from the same helper).
 import { directionMeta } from "@/lib/api/billing";
 import { printTripManifest } from "@/lib/documents/tripManifestPdf";
+import { printDriverPackage } from "@/lib/documents/driverPackagePdf";
 import { ServiceChip, StatusBadge, StatusChip } from "@/components/ui/Chip";
 import { CorridorStepper } from "@/components/ui/CorridorStepper";
 import { Panel, SectionLabel, DetailRow } from "@/components/ui/Panel";
@@ -1252,6 +1254,91 @@ function RemoveInspectionModal({
 }
 
 // ---------------------------------------------------------------------------
+// Carrier acknowledgement (Form NL-PTI-01) — the carrier's representative
+// confirming they were shown a report carrying a Major defect. One per report and
+// FINAL, so there is no un-acknowledge. The name is the signature and has no
+// "Dispatch" fallback, which is why this asks for it rather than assuming it.
+// ---------------------------------------------------------------------------
+
+function AcknowledgeCarrierModal({
+  trip,
+  inspection,
+  onClose,
+  onConfirmed,
+}: {
+  trip: TripRecord;
+  inspection: VehicleInspection;
+  onClose: () => void;
+  onConfirmed: () => Promise<void>;
+}) {
+  const [name, setName] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    if (busy) return;
+    if (!name.trim()) {
+      setError("Enter the name of the carrier representative — the name is the signature.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await acknowledgeInspectionCarrier(inspection.id, {
+        acknowledgedBy: name.trim(),
+        note: note.trim() || null,
+      });
+      await onConfirmed();
+      onClose();
+    } catch (e) {
+      setError(
+        e instanceof ApiError && e.code === "Fleet.Inspection.CarrierAlreadyAcknowledged"
+          ? "This report was already acknowledged — the acknowledgement is final and cannot be re-signed."
+          : e instanceof ApiError
+            ? e.message
+            : "Failed to record the acknowledgement — please try again.",
+      );
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ModalShell
+      eyebrow={`Fleet · ${trip.tripNumber} · Carrier acknowledgement`}
+      title="Acknowledge Inspection Report"
+      onClose={onClose}
+      error={error}
+      maxWidth={520}
+      footer={
+        <>
+          <ActionButton onClick={onClose}>CANCEL</ActionButton>
+          <ActionButton variant="primary" onClick={submit} disabled={busy}>
+            {busy ? "SIGNING…" : "ACKNOWLEDGE"}
+          </ActionButton>
+        </>
+      }
+    >
+      <div style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textSecondary, lineHeight: 1.6, marginBottom: 14 }}>
+        Records that the carrier&apos;s representative was shown the{" "}
+        {inspection.type === "PostTrip" ? "post-trip" : "pre-trip"} report{" "}
+        {inspection.driverName} recorded on {fmtUtcDateTime(inspection.performedAt)}. One per report, and final — there
+        is no un-acknowledge.
+      </div>
+      <div style={{ display: "grid", gap: 12 }}>
+        <TextField
+          label="Carrier representative"
+          value={name}
+          onChange={setName}
+          placeholder="Full name of the person signing"
+        />
+        <TextAreaField label="Note (optional)" value={note} onChange={setNote} rows={2} />
+      </div>
+    </ModalShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Screen
 // ---------------------------------------------------------------------------
 
@@ -1312,6 +1399,8 @@ export default function Trips({
   const [inspectionType, setInspectionType] = useState<"PreTrip" | "PostTrip" | null>(null);
   const [editingInspection, setEditingInspection] = useState<VehicleInspection | null>(null);
   const [removingInspection, setRemovingInspection] = useState<VehicleInspection | null>(null);
+  /** The Fail report whose carrier acknowledgement line is being signed. */
+  const [acknowledgingInspection, setAcknowledgingInspection] = useState<VehicleInspection | null>(null);
   // Bumped whenever something that could change this vehicle's defect list
   // lands — a DVIR entered or removed, or a different unit assigned.
   const [defectsRefresh, setDefectsRefresh] = useState(0);
@@ -1891,6 +1980,13 @@ export default function Trips({
   // it's safe to gate the ENTER buttons on the one-each-per-trip guard.
   const hasPreTrip = inspections.some((i) => i.type === "PreTrip");
   const hasPostTrip = inspections.some((i) => i.type === "PostTrip");
+  // The two inspections the driver package prints. A plain `find` on purpose:
+  // there is at most ONE pre-trip and ONE post-trip per trip (that is exactly
+  // what the ENTER buttons above are gated on), so sorting and taking the
+  // latest would invent a multiplicity the system does not have. `null` here is
+  // a real answer — the package prints a blank NL-PTI-01 for it.
+  const preTripInspection = inspections.find((i) => i.type === "PreTrip") ?? null;
+  const postTripInspection = inspections.find((i) => i.type === "PostTrip") ?? null;
   const activity = t && activityState?.tripId === t.id ? activityState.rows : [];
 
   // Manifest may be present on the trip (manifestId) but not yet fetched into
@@ -1909,6 +2005,12 @@ export default function Trips({
   const canSendPickupEmail = !!t && manifest !== null && manifest.passengers.length > 0 && t.status !== "Cancelled";
   // Shipments on the selected cargo trip (null = still loading).
   const tripShipments = t && tripShipmentsState?.tripId === t.id ? tripShipmentsState.rows : null;
+  // A CARGO trip whose shipments have not arrived yet. The driver package would
+  // print with an empty freight block and nobody would know it was incomplete,
+  // so the button waits instead — which also keeps its click handler
+  // synchronous (an await there would lose the pop-up gesture). A passenger
+  // trip never fetches shipments, so it is never pending.
+  const cargoShipmentsPending = tripIsCargo && tripShipments === null;
   // START gate: a driver, then the service-specific half of the backend
   // en-route guard — passenger runs need a linked manifest with ≥1 passenger,
   // Cargo/Grocery runs need ≥1 LIVE assigned shipment instead (cancelled or
@@ -2372,6 +2474,28 @@ export default function Trips({
                             {insp.odometerKm != null ? ` · ${insp.odometerKm.toLocaleString("en-CA")} km` : ""}
                             {` · ${fmtUtcDateTime(insp.performedAt)}`}
                           </span>
+                          {/* NL-PTI-01 carrier acknowledgement — only a Fail report
+                              is acknowledged, and only once. Stays available after
+                              the run: the carrier rep signs when they see it. */}
+                          {insp.result === "Fail" &&
+                            (insp.carrierAcknowledgedBy ? (
+                              <>
+                                <StatusChip kind="ontime" label="Carrier acknowledged" />
+                                <span style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim }}>
+                                  {insp.carrierAcknowledgedBy}
+                                  {insp.carrierAcknowledgedAtUtc
+                                    ? ` · ${fmtUtcDateTime(insp.carrierAcknowledgedAtUtc)}`
+                                    : ""}
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <StatusChip kind="soon" label="Carrier acknowledgement due" />
+                                <ActionButton onClick={() => setAcknowledgingInspection(insp)}>
+                                  ACKNOWLEDGE (CARRIER)
+                                </ActionButton>
+                              </>
+                            ))}
                           {/* Edit / remove only while the run hasn't happened yet. */}
                           {!isOperationallyClosed(t) && (
                             <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
@@ -2599,6 +2723,37 @@ export default function Trips({
                 <ActionButton onClick={() => printTripManifest(manifest)}>
                   {manifest ? "PRINT TRIP MANIFEST" : "PRINT BLANK MANIFEST"}
                 </ActionButton>
+                {/* The whole driver package: cover + manifest + itinerary +
+                    pre-trip + post-trip, each part blank-form-printed when it
+                    has no record. Deliberately NOT gated on tripEditable — a
+                    closed trip's records can still be viewed and printed, and
+                    downloading the package after the fact is the audit case.
+                    The label is fixed (unlike the manifest button's
+                    filled/blank pair) because all four parts always print.
+
+                    onClick is SYNCHRONOUS and must stay that way:
+                    openPrintDocument calls window.open, and after an await
+                    Safari and Firefox no longer treat it as a user gesture and
+                    block the tab silently. Everything it reads is already in
+                    state. */}
+                <ActionButton
+                  disabled={cargoShipmentsPending}
+                  onClick={() =>
+                    printDriverPackage({
+                      trip: t,
+                      manifest,
+                      preTrip: preTripInspection,
+                      postTrip: postTripInspection,
+                      // Shipments only ride cargo/grocery trips, and the fetch
+                      // above is guarded to match — a passenger trip's
+                      // incidental cargo is already on the manifest's §3, so []
+                      // here is correct and the freight block omits itself.
+                      shipments: tripIsCargo ? (tripShipments ?? []) : [],
+                    })
+                  }
+                >
+                  {cargoShipmentsPending ? "LOADING…" : "PRINT DRIVER PACKAGE"}
+                </ActionButton>
                 {(t.status === "Scheduled" || t.status === "InProgress") && (
                   <ActionButton variant="destructive" onClick={() => setModal("cancel")}>
                     CANCEL
@@ -2674,6 +2829,14 @@ export default function Trips({
                   inspection={removingInspection}
                   onClose={() => setRemovingInspection(null)}
                   onConfirmed={() => onInspectionRemoved(t.id, t.tripNumber, removingInspection)}
+                />
+              )}
+              {acknowledgingInspection && (
+                <AcknowledgeCarrierModal
+                  trip={t}
+                  inspection={acknowledgingInspection}
+                  onClose={() => setAcknowledgingInspection(null)}
+                  onConfirmed={() => onInspectionSaved(t.id, t.tripNumber, false)}
                 />
               )}
               {modal === "edit" && (

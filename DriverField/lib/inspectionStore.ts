@@ -7,7 +7,8 @@
 //   ---------------|----------------------------------|-----------------------------------
 //   State          | Uncertified, private to the      | Certified — it IS the compliance
 //                  | device                           | record
-//   Cost of loss   | Re-answer 22 questions           | A COMPLIANCE FAILURE
+//   Cost of loss   | Re-answer the whole NL-PTI-01    | A COMPLIANCE FAILURE
+//                  | walk-around (67-80 questions)    |
 //   Home           | localStorage — synchronous,      | IndexedDB + navigator.storage
 //                  | survives reload, ~2KB            | .persist(), the offline batch's job
 //
@@ -22,7 +23,7 @@
 //
 // ORDER ON SUBMIT, and it is not negotiable:
 //   enqueue(...)  →  recordCertification({ commandId, … })  →  discardDraft(...)
-// If enqueue throws, the driver's 22 answers survive.
+// If enqueue throws, the driver's whole walk-around survives.
 //
 // READING FROM REACT: one useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot),
 // mirroring lib/sync/status.ts and components/ui-tablet/SyncPill.tsx. NOT useEffect +
@@ -35,7 +36,9 @@
 // telling a different truth with no change to this file's API.
 // ---------------------------------------------------------------------------
 
-import { dvirChecklist, today } from "./data";
+import { today } from "./data";
+// The NL-PTI-01 catalogue, a byte-identical copy of Dispatcher's. Item keys are WIRE VALUES.
+import { NL_PTI_01 } from "./inspectionForm";
 import type { CheckState, DefectSeverity, InspectionMode } from "./types";
 // Type-only, so there is no runtime import cycle with inspectionGate.ts (which imports
 // certifiedToday from here). `import type` is erased at compile time.
@@ -43,9 +46,13 @@ import type { InspectionResultName } from "./inspectionGate";
 
 /**
  * Bumped whenever the shape below changes. A draft written by an older version is DISCARDED,
- * never migrated — a half-migrated legal attestation is worse than re-answering 22 questions.
+ * never migrated — a half-migrated legal attestation is worse than re-answering the walk-around.
+ *
+ * v2: the checklist became form NL-PTI-01. Every item key changed (22 invented ids → 80
+ * catalogue keys) and `notes` was added, so a v1 draft's answers address rows that no longer
+ * exist. Discarding is not merely the convention here, it is the only honest option.
  */
-export const INSPECTION_STORE_VERSION = 1;
+export const INSPECTION_STORE_VERSION = 2;
 
 /** Follows lib/auth.ts's `nl.driverfield.refreshToken` convention. */
 const DRAFT_KEY_PREFIX = "nl.driverfield.inspectionDraft";
@@ -59,8 +66,9 @@ const CERTIFIED_LIMIT = 20;
  *
  * Keying mode AND vehicle into the key rather than holding one blob buys three things: a mode
  * switch cannot clobber the other mode's draft, a mid-shift vehicle reassignment orphans the
- * old draft instead of silently re-attributing 22 answers to a different vehicle, and
- * discardDraft removes exactly one key.
+ * old draft instead of silently re-attributing a walk-around to a different vehicle (which
+ * matters more now that the two units answer DIFFERENT forms), and discardDraft removes
+ * exactly one key.
  */
 export function draftKey(mode: InspectionMode, vehicleId: string): string {
   return `${DRAFT_KEY_PREFIX}.${mode}.${vehicleId}`;
@@ -81,6 +89,16 @@ export interface InspectionDraft {
   /** ISO, device clock. Becomes PerformedAt on the wire. */
   startedAt: string;
   answers: Record<string, CheckState>;
+  /**
+   * The per-row remark, keyed by item key and INDEPENDENT of `answers`. NL-PTI-01 has a Notes
+   * column on every row, so an Ok or N/A row can carry one too ("spare fitted", "not fitted to
+   * this unit") — it is not a defect field. It rides the wire as ChecklistItemInput.Note.
+   *
+   * Deliberately NOT pruned when an answer changes, unlike `defects`: a defect record on an
+   * item since marked Pass would be a false entry in a compliance record, whereas a note the
+   * driver typed is their own words about the row and survives them changing their mind.
+   */
+  notes: Record<string, string>;
   defects: Record<string, DraftDefect>;
   odometerKm: number | null;
   /** A step ID, never an index — an injected defect step shifts every later index. */
@@ -203,8 +221,15 @@ function removeRaw(key: string): void {
 
 // --- draft validation ------------------------------------------------------
 
+/**
+ * Every item key the catalogue knows, across BOTH units and BOTH halves of the form — the
+ * unnarrowed superset, deliberately. Narrowing this by unit and mode would make a draft started
+ * against NL-02 lose rows the moment the assigned vehicle changed, which is the silent
+ * re-attribution draftKey() already exists to prevent; the key check here is only about rows
+ * that no longer exist ANYWHERE.
+ */
 const KNOWN_ITEM_IDS: ReadonlySet<string> = new Set(
-  dvirChecklist.flatMap((g) => g.items.map((i) => i.id)),
+  NL_PTI_01.flatMap((g) => g.items.map((i) => i.key)),
 );
 
 const CHECK_STATES: ReadonlySet<string> = new Set<CheckState>(["pass", "defect", "na"]);
@@ -220,8 +245,8 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 /**
  * VALIDATION, NOT A CAST. Anything in localStorage was written by a program that may no longer
- * exist. Beyond the version and identity checks, this DROPS any answer or defect whose itemId
- * is not in dvirChecklist, so a renamed or removed checklist item cannot resurrect from storage
+ * exist. Beyond the version and identity checks, this DROPS any answer, note or defect whose
+ * item key is not in NL_PTI_01, so a row retired from the form cannot resurrect from storage
  * and reach a compliance payload.
  */
 function validateDraft(
@@ -243,6 +268,14 @@ function validateDraft(
     if (!KNOWN_ITEM_IDS.has(itemId)) continue;
     if (typeof state === "string" && CHECK_STATES.has(state)) {
       answers[itemId] = state as CheckState;
+    }
+  }
+
+  const notes: Record<string, string> = {};
+  if (isPlainObject(parsed.notes)) {
+    for (const [itemId, note] of Object.entries(parsed.notes)) {
+      if (!KNOWN_ITEM_IDS.has(itemId)) continue;
+      if (typeof note === "string") notes[itemId] = note;
     }
   }
 
@@ -271,6 +304,7 @@ function validateDraft(
     startedOn: parsed.startedOn,
     startedAt: parsed.startedAt,
     answers,
+    notes,
     defects,
     odometerKm,
     stepId: parsed.stepId,
@@ -359,6 +393,7 @@ export function startDraft(
     startedOn: asOf,
     startedAt: new Date().toISOString(),
     answers: {},
+    notes: {},
     defects: {},
     odometerKm: null,
     stepId: "odometer",
@@ -390,6 +425,7 @@ function update(
       startedOn: asOf,
       startedAt: new Date().toISOString(),
       answers: {},
+      notes: {},
       defects: {},
       odometerKm: null,
       stepId: "odometer",
@@ -421,6 +457,24 @@ export function setAnswer(
     }
     return { ...draft, answers: { ...draft.answers, [itemId]: state }, defects };
   });
+}
+
+/**
+ * Records the per-row note — NL-PTI-01's Notes column, which every row has whatever it was
+ * answered. Separate from the defect note (DefectInput.Note): one describes the ROW, the other
+ * describes the FAULT, and a Major defect legitimately carries both.
+ */
+export function setNote(
+  mode: InspectionMode,
+  vehicleId: string,
+  itemId: string,
+  note: string,
+  asOf: string = today,
+): InspectionDraft {
+  return update(mode, vehicleId, asOf, (draft) => ({
+    ...draft,
+    notes: { ...draft.notes, [itemId]: note },
+  }));
 }
 
 export function setDefect(

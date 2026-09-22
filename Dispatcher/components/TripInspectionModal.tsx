@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { colors, fonts, statusMeta } from "@/lib/theme";
 import {
   ApiError,
   createInspection,
   updateInspection,
-  type DefectSeverityWire,
   type InspectionFuelLevel,
   type InspectionInput,
   type InspectionRoadCondition,
@@ -17,23 +16,35 @@ import {
 } from "@/lib/api";
 import type { TripRecord } from "@/lib/api/trips";
 import { listDrivers } from "@/lib/api/drivers";
-import {
-  ATTESTATIONS,
-  POST_TRIP_ITEMS,
-  PRE_TRIP_GROUPS,
-} from "@/lib/tripManifestChecklist";
+import { NL_PTI_01_CERTIFICATION, itemsFor, type InspectionFormMode } from "@/lib/inspectionForm";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { ActionButton } from "@/components/ui/Button";
 import { SectionLabel } from "@/components/ui/Panel";
 import { FieldLabel, NumberField, SelectField, TextAreaField, TextField } from "@/components/ui/Field";
 import { OptChip } from "@/components/manifest/manifestRows";
-import ChecklistGroupEditor, { type ChecklistRow, groupResult } from "@/components/inspection/ChecklistGroupEditor";
+import ChecklistGroupEditor, {
+  groupResult,
+  unansweredCount,
+  type ChecklistRow,
+} from "@/components/inspection/ChecklistGroupEditor";
+import {
+  areaLegendKeys,
+  checklistWire,
+  defectsWire,
+  isRetiredFormRecord,
+  itemsOutsideForm,
+  rowsFor,
+  rowsFromRecord,
+} from "@/components/inspection/checklistRows";
+import RetiredFormChecklist from "@/components/inspection/RetiredFormChecklist";
 
 // Trip-context Fleet inspection entry. Posts a real Fleet VehicleInspection
 // (POST /api/fleet/inspections) tagged with the trip's tripNumber + vehicleId,
-// source "Dispatcher". Pre-trip carries the checklist + odometer + weather/road/
-// fuel; post-trip carries the checklist + odometer + issues + attestations +
-// signature + fuel-added. Salvaged from the retired Manual Trip Entry form.
+// source "Dispatcher". Both halves of the form are now the SAME thing — the
+// NL-PTI-01 catalogue narrowed by `itemsFor(unit, mode)`, where the post-trip
+// mode simply adds the Close-Out group. Pre-trip additionally carries
+// weather/road/fuel; post-trip carries issues, fuel-added and the §10
+// certification.
 
 const WEATHER_OPTIONS: { value: InspectionWeather; label: string }[] = [
   { value: "Clear", label: "Clear" },
@@ -61,19 +72,6 @@ const FUEL_LEVELS: { value: InspectionFuelLevel; label: string }[] = [
   { value: "Quarter", label: "1/4" },
 ];
 
-function initialChecklistRows(): ChecklistRow[] {
-  return PRE_TRIP_GROUPS.flatMap((g) =>
-    g.items.map((it) => ({
-      groupKey: g.key,
-      itemKey: it.key,
-      label: it.label,
-      fail: false,
-      severity: "Minor" as const,
-      note: "",
-    })),
-  );
-}
-
 function nowLocal(): string {
   const d = new Date();
   const p = (n: number) => String(n).padStart(2, "0");
@@ -87,33 +85,6 @@ function isoToLocal(iso: string | null): string {
   if (Number.isNaN(d.getTime())) return nowLocal();
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
-/** Rebuild the editable pre-trip checklist rows from a saved inspection —
- *  fail/severity/note come from the recorded checklist passes + defects. */
-function checklistRowsFromExisting(existing: VehicleInspection): ChecklistRow[] {
-  const passedByItem = new Map(existing.checklist.map((c) => [c.item, c.passed]));
-  const defectByItem = new Map(existing.defects.map((d) => [d.item, d]));
-  return PRE_TRIP_GROUPS.flatMap((g) =>
-    g.items.map((it) => {
-      const defect = defectByItem.get(it.key);
-      const passed = passedByItem.get(it.key);
-      return {
-        groupKey: g.key,
-        itemKey: it.key,
-        label: it.label,
-        fail: passed === false || defect != null,
-        severity: (defect?.severity ?? "Minor") as DefectSeverityWire,
-        note: defect?.note ?? "",
-      };
-    }),
-  );
-}
-
-/** Rebuild the post-trip checklist booleans (in POST_TRIP_ITEMS order). */
-function postChecksFromExisting(existing: VehicleInspection): boolean[] {
-  const passedByItem = new Map(existing.checklist.map((c) => [c.item, c.passed]));
-  return POST_TRIP_ITEMS.map((item) => passedByItem.get(item) ?? true);
 }
 
 export default function TripInspectionModal({
@@ -136,7 +107,32 @@ export default function TripInspectionModal({
   // In edit mode the inspection type comes from the record itself (immutable).
   const insType: InspectionType = existing?.type ?? type;
   const isPre = insType === "PreTrip";
+  const mode: InspectionFormMode = isPre ? "PreTrip" : "PostTrip";
   const defaultDriver = existing?.driverName ?? trip.driverName ?? "";
+
+  // The unit narrows the form. A trip with no vehicle assigned genuinely has no
+  // unit, and `itemsFor` answers that with the full superset on purpose — never
+  // the narrower NL-01 form (see its docblock).
+  //
+  // In edit mode the unit comes from the RECORD, not the trip: reassigning the
+  // trip's vehicle afterwards must not change which rows the saved record is
+  // rebuilt against, or rows it really answered would render unanswered.
+  const unit = existing ? existing.unit || null : trip.vehicleUnit;
+  const groups = useMemo(() => itemsFor(unit, mode), [unit, mode]);
+  const legendKeys = useMemo(() => areaLegendKeys(groups), [groups]);
+
+  // A record written against the retired NL-TM-01 checklist cannot be rebuilt
+  // into current-catalogue rows without inventing a correspondence, so it opens
+  // read-only. See `isRetiredFormRecord`.
+  const retired = existing != null && isRetiredFormRecord(existing);
+  // Rows rebuilt from the record, and anything it answered that they do not cover.
+  const rebuilt = useMemo(
+    () => (existing && !retired ? rowsFromRecord(existing, unit, mode) : []),
+    [existing, retired, unit, mode],
+  );
+  const outsideForm = existing && !retired ? itemsOutsideForm(existing, rebuilt) : [];
+  /** Either data-loss shape disables editing — nothing is remapped or dropped. */
+  const readOnly = retired || outsideForm.length > 0;
 
   // Driver roster (Active) — default to the trip's (or edited record's) driver.
   const [driverOptions, setDriverOptions] = useState<string[]>(
@@ -163,7 +159,7 @@ export default function TripInspectionModal({
 
   const [odometer, setOdometer] = useState(existing?.odometerKm != null ? String(existing.odometerKm) : "");
   const [checklist, setChecklist] = useState<ChecklistRow[]>(() =>
-    existing && existing.type === "PreTrip" ? checklistRowsFromExisting(existing) : initialChecklistRows(),
+    existing ? rebuilt : rowsFor(unit, mode),
   );
 
   // Pre-trip sections
@@ -175,13 +171,7 @@ export default function TripInspectionModal({
   const [fuelLevel, setFuelLevel] = useState<InspectionFuelLevel | null>(existing?.fuelLevel ?? null);
 
   // Post-trip sections
-  const [postChecks, setPostChecks] = useState<boolean[]>(() =>
-    existing && existing.type === "PostTrip" ? postChecksFromExisting(existing) : POST_TRIP_ITEMS.map(() => true),
-  );
   const [issues, setIssues] = useState<string[]>(existing?.issues ?? []);
-  const [attest, setAttest] = useState<boolean[]>(
-    existing && existing.attestations.length === ATTESTATIONS.length ? existing.attestations : ATTESTATIONS.map(() => false),
-  );
   const [signature, setSignature] = useState(existing?.driverSignatureName ?? trip.driverName ?? "");
   const [certifiedAt, setCertifiedAt] = useState(existing ? isoToLocal(existing.certifiedAt) : nowLocal());
   const [fuelAdded, setFuelAdded] = useState(existing?.fuelAdded ?? false);
@@ -195,20 +185,19 @@ export default function TripInspectionModal({
     setChecklist((prev) => prev.map((r) => (r.itemKey === itemKey ? { ...r, ...patch } : r)));
   }
 
-  const result = isPre
-    ? groupResult(checklist)
-    : postChecks.every(Boolean)
-      ? "Pass"
-      : "Pass with defects";
+  const result = groupResult(checklist);
   const resultMeta = statusMeta(result === "Pass" ? "ontime" : result === "Fail" ? "over" : "soon");
+  const unanswered = unansweredCount(checklist);
 
   function validate(): string | null {
     if (!driverName.trim()) return "Select the driver who performed the inspection.";
-    if (isPre) {
-      const failNoNote = checklist.find((r) => r.fail && !r.note.trim());
-      if (failNoNote) return `FAIL items need a note — add one for "${failNoNote.label}".`;
-    } else {
-      if (!attest.every(Boolean)) return "All post-trip attestations must be checked.";
+    const defectNoNote = checklist.find((r) => r.state === "Defect" && !r.note.trim());
+    if (defectNoNote) return `Defect rows need a note — add one for "${defectNoNote.label}".`;
+    // With 67–80 rows, "something is unanswered" is not actionable. Say how many.
+    if (unanswered > 0) {
+      return `${unanswered} of ${checklist.length} checks ${unanswered === 1 ? "is" : "are"} unanswered — every row needs OK, Defect or N-A.`;
+    }
+    if (!isPre) {
       if (!signature.trim()) return "Driver signature name is required.";
       if (fuelAdded && !(parseFloat(fuelLitres) > 0)) return "Fuel was added — enter the litres.";
     }
@@ -226,14 +215,9 @@ export default function TripInspectionModal({
       driverName: driverName.trim(),
       enteredBy,
       odometerKm: Number.isFinite(odo) ? odo : null,
-      checklist: isPre
-        ? checklist.map((r) => ({ group: r.groupKey, item: r.itemKey, passed: !r.fail }))
-        : POST_TRIP_ITEMS.map((item, i) => ({ group: null, item, passed: postChecks[i] })),
-      defects: isPre
-        ? checklist
-            .filter((r) => r.fail)
-            .map((r) => ({ item: r.itemKey, severity: r.severity, note: r.note.trim() || null }))
-        : [],
+      // Every row, in both modes — close-out rows are ordinary checklist rows now.
+      checklist: checklistWire(checklist),
+      defects: defectsWire(checklist),
     };
     if (isPre) {
       return {
@@ -250,7 +234,11 @@ export default function TripInspectionModal({
     return {
       ...base,
       issues: issues.map((s) => s.trim()).filter(Boolean),
-      attestations: attest,
+      // One §10 certification sentence replaces the five NL-TM-01 attestations.
+      // The sentence itself is stored with the record; `attestations` keeps one
+      // true so the wire field still reads "certified".
+      attestations: [true],
+      certificationStatement: NL_PTI_01_CERTIFICATION,
       driverSignatureName: signature.trim(),
       certifiedAt: Number.isNaN(cert.getTime()) ? null : cert.toISOString(),
       fuelAdded,
@@ -260,7 +248,7 @@ export default function TripInspectionModal({
   }
 
   async function submit() {
-    if (busy) return;
+    if (busy || readOnly) return;
     const problem = validate();
     if (problem) {
       setError(problem);
@@ -308,228 +296,234 @@ export default function TripInspectionModal({
       footer={
         <>
           <span style={{ marginRight: "auto", fontFamily: fonts.body, fontSize: 12, color: colors.textDim }}>
-            Result:{" "}
-            <span style={{ color: resultMeta.t, fontWeight: 700 }}>
-              {resultMeta.g} {result}
-            </span>
+            {readOnly ? (
+              "Read-only — editing is disabled for this record"
+            ) : (
+              <>
+                {unanswered > 0 ? `${unanswered} unanswered · ` : ""}Result:{" "}
+                <span style={{ color: resultMeta.t, fontWeight: 700 }}>
+                  {resultMeta.g} {result}
+                </span>
+              </>
+            )}
           </span>
-          <ActionButton onClick={onClose}>CANCEL</ActionButton>
-          <ActionButton variant="primary" onClick={submit} disabled={busy}>
-            {busy ? "SAVING…" : existing ? "SAVE CHANGES" : "SAVE INSPECTION"}
-          </ActionButton>
+          <ActionButton onClick={onClose}>{readOnly ? "CLOSE" : "CANCEL"}</ActionButton>
+          {!readOnly && (
+            <ActionButton variant="primary" onClick={submit} disabled={busy}>
+              {busy ? "SAVING…" : existing ? "SAVE CHANGES" : "SAVE INSPECTION"}
+            </ActionButton>
+          )}
         </>
       }
     >
-      {!trip.vehicleId && (
-        <div
-          style={{
-            padding: "11px 14px",
-            background: statusMeta("soon").bg,
-            border: `1px solid ${statusMeta("soon").bd}`,
-            borderRadius: 10,
-            marginBottom: 16,
-            fontFamily: fonts.body,
-            fontSize: 12,
-            fontWeight: 600,
-            color: statusMeta("soon").t,
-          }}
-        >
-          ◐ No vehicle is assigned to this trip — the inspection will be recorded without a vehicle link (odometer
-          will not advance). Assign a vehicle first for full linkage.
-        </div>
-      )}
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 18 }}>
-        <SelectField
-          label="Driver"
-          value={driverName}
-          onChange={setDriverName}
-          options={driverOptions.map((n) => ({ value: n, label: n }))}
-        />
-        <NumberField
-          label={isPre ? "Odometer start (km)" : "Odometer end (km)"}
-          value={odometer}
-          onChange={setOdometer}
-          min={0}
-          step={1}
-        />
-      </div>
-
-      {isPre ? (
+      {readOnly && existing ? (
         <>
-          <SectionLabel>Pre-trip checklist</SectionLabel>
-          {PRE_TRIP_GROUPS.map((g) => (
-            <ChecklistGroupEditor
-              key={g.group}
-              group={g}
-              rows={checklist.filter((r) => r.groupKey === g.key)}
-              onPatch={patchRow}
-            />
-          ))}
-
-          <SectionLabel>Weather &amp; road conditions</SectionLabel>
-          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 14, marginBottom: 14 }}>
-            <div>
-              <FieldLabel>Weather (all that apply)</FieldLabel>
-              <div style={{ display: "flex", gap: 7, flexWrap: "wrap", paddingTop: 4 }}>
-                {WEATHER_OPTIONS.map((w) => (
-                  <OptChip
-                    key={w.value}
-                    active={weather.includes(w.value)}
-                    label={w.label}
-                    onClick={() =>
-                      setWeather((cur) => (cur.includes(w.value) ? cur.filter((x) => x !== w.value) : [...cur, w.value]))
-                    }
-                  />
-                ))}
-              </div>
-            </div>
-            <NumberField label="Temperature (°C)" value={temperatureC} onChange={setTemperatureC} step={1} />
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 14, marginBottom: 14 }}>
-            <div>
-              <FieldLabel>Road conditions (all that apply)</FieldLabel>
-              <div style={{ display: "flex", gap: 7, flexWrap: "wrap", paddingTop: 4 }}>
-                {ROAD_OPTIONS.map((r) => (
-                  <OptChip
-                    key={r.value}
-                    active={roadConditions.includes(r.value)}
-                    label={r.label}
-                    onClick={() =>
-                      setRoadConditions((cur) =>
-                        cur.includes(r.value) ? cur.filter((x) => x !== r.value) : [...cur, r.value],
-                      )
-                    }
-                  />
-                ))}
-              </div>
-            </div>
-            <div>
-              <FieldLabel>Visibility</FieldLabel>
-              <div style={{ display: "flex", gap: 7, flexWrap: "wrap", paddingTop: 4 }}>
-                {VISIBILITY_OPTIONS.map((v) => (
-                  <OptChip key={v} active={visibility === v} label={v} onClick={() => setVisibility((c) => (c === v ? null : v))} />
-                ))}
-              </div>
-            </div>
-          </div>
-          <div style={{ marginBottom: 14 }}>
-            <TextAreaField label="Road advisories" value={roadAdvisories} onChange={setRoadAdvisories} rows={2} />
-          </div>
-          <div>
-            <FieldLabel>Fuel level</FieldLabel>
-            <div style={{ display: "flex", gap: 7, paddingTop: 4, flexWrap: "wrap" }}>
-              {FUEL_LEVELS.map((f) => (
-                <OptChip key={f.value} active={fuelLevel === f.value} label={f.label} onClick={() => setFuelLevel((c) => (c === f.value ? null : f.value))} />
-              ))}
-            </div>
-          </div>
+          <Caution kind="over">
+            {retired
+              ? "Recorded against a retired form revision — editing is disabled. Remove and re-enter to move this record to NL-PTI-01."
+              : `This record answers ${outsideForm.length} ${outsideForm.length === 1 ? "row" : "rows"} the current form does not show for ${unit ?? "this unit"} — editing is disabled so those answers cannot be dropped. Remove and re-enter to move this record to the form as it now reads.`}
+          </Caution>
+          <RetiredFormChecklist inspection={existing} />
         </>
       ) : (
         <>
-          <SectionLabel>Post-trip checklist</SectionLabel>
-          <div style={{ marginBottom: 16 }}>
-            {POST_TRIP_ITEMS.map((item, i) => (
-              <CheckRow
-                key={item}
-                checked={postChecks[i]}
-                label={item}
-                onToggle={() => setPostChecks((cur) => cur.map((v, x) => (x === i ? !v : v)))}
-              />
-            ))}
+          {!trip.vehicleId && (
+            <Caution kind="soon">
+              No vehicle is assigned to this trip — the inspection will be recorded without a vehicle link (odometer
+              will not advance). Assign a vehicle first for full linkage.
+            </Caution>
+          )}
+
+          {!unit && (
+            <Caution kind="soon">
+              No unit assigned — showing the full form; mark bus-only rows N/A.
+            </Caution>
+          )}
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 18 }}>
+            <SelectField
+              label="Driver"
+              value={driverName}
+              onChange={setDriverName}
+              options={driverOptions.map((n) => ({ value: n, label: n }))}
+            />
+            <NumberField
+              label={isPre ? "Odometer start (km)" : "Odometer end (km)"}
+              value={odometer}
+              onChange={setOdometer}
+              min={0}
+              step={1}
+            />
           </div>
 
-          <SectionLabel>Issues / defects</SectionLabel>
-          <div style={{ marginBottom: 16 }}>
-            {issues.map((line, i) => (
-              <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "end", marginBottom: 8 }}>
-                <TextField label={`Issue ${i + 1}`} value={line} onChange={(v) => setIssues((cur) => cur.map((x, y) => (y === i ? v : x)))} />
-                <div style={{ paddingBottom: 6 }}>
-                  <span
-                    onClick={() => setIssues((cur) => cur.filter((_, x) => x !== i))}
-                    style={{
-                      width: 30,
-                      height: 30,
-                      borderRadius: 7,
-                      border: `1px solid ${colors.borderStrong}`,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      color: colors.textMuted,
-                      cursor: "pointer",
-                      fontSize: 14,
-                    }}
-                  >
-                    ✕
-                  </span>
-                </div>
-              </div>
-            ))}
-            <ActionButton onClick={() => setIssues((cur) => [...cur, ""])}>+ ADD ISSUE</ActionButton>
-          </div>
-
-          <SectionLabel>Fuel added</SectionLabel>
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 14, marginBottom: 16 }}>
-            <div style={{ display: "flex", gap: 7 }}>
-              <OptChip active={fuelAdded} label="Yes" onClick={() => setFuelAdded(true)} />
-              <OptChip active={!fuelAdded} label="No" onClick={() => setFuelAdded(false)} />
-            </div>
-            {fuelAdded && (
-              <div style={{ display: "grid", gridTemplateColumns: "150px 150px", gap: 14 }}>
-                <NumberField label="Litres" value={fuelLitres} onChange={setFuelLitres} min={0} step={1} />
-                <NumberField label="Fuel cost (CAD)" value={fuelCostCad} onChange={setFuelCostCad} min={0} step={1} />
-              </div>
-            )}
-          </div>
-
-          <SectionLabel>Certification</SectionLabel>
-          <div style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textDim, margin: "6px 0 8px" }}>
-            I certify that (check each attestation):
-          </div>
-          {ATTESTATIONS.map((a, i) => (
-            <CheckRow
-              key={a}
-              checked={attest[i]}
-              label={`(${i + 1}) ${a}`}
-              onToggle={() => setAttest((cur) => cur.map((v, x) => (x === i ? !v : v)))}
+          <SectionLabel>
+            {isPre ? "Pre-trip checklist" : "Post-trip checklist"} · Form NL-PTI-01 · {checklist.length} checks
+          </SectionLabel>
+          {groups.map((g) => (
+            <ChecklistGroupEditor
+              key={g.key}
+              group={g}
+              rows={checklist.filter((r) => r.groupKey === g.key)}
+              onPatch={patchRow}
+              legend={legendKeys.has(g.key)}
             />
           ))}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
-            <TextField label="Driver signature name" value={signature} onChange={setSignature} />
-            <TextField label="Certified date / time" value={certifiedAt} onChange={setCertifiedAt} mono placeholder="YYYY-MM-DD HH:MM" />
-          </div>
+
+          {isPre ? (
+            <>
+              <SectionLabel>Weather &amp; road conditions</SectionLabel>
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 14, marginBottom: 14 }}>
+                <div>
+                  <FieldLabel>Weather (all that apply)</FieldLabel>
+                  <div style={{ display: "flex", gap: 7, flexWrap: "wrap", paddingTop: 4 }}>
+                    {WEATHER_OPTIONS.map((w) => (
+                      <OptChip
+                        key={w.value}
+                        active={weather.includes(w.value)}
+                        label={w.label}
+                        onClick={() =>
+                          setWeather((cur) => (cur.includes(w.value) ? cur.filter((x) => x !== w.value) : [...cur, w.value]))
+                        }
+                      />
+                    ))}
+                  </div>
+                </div>
+                <NumberField label="Temperature (°C)" value={temperatureC} onChange={setTemperatureC} step={1} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 14, marginBottom: 14 }}>
+                <div>
+                  <FieldLabel>Road conditions (all that apply)</FieldLabel>
+                  <div style={{ display: "flex", gap: 7, flexWrap: "wrap", paddingTop: 4 }}>
+                    {ROAD_OPTIONS.map((r) => (
+                      <OptChip
+                        key={r.value}
+                        active={roadConditions.includes(r.value)}
+                        label={r.label}
+                        onClick={() =>
+                          setRoadConditions((cur) =>
+                            cur.includes(r.value) ? cur.filter((x) => x !== r.value) : [...cur, r.value],
+                          )
+                        }
+                      />
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <FieldLabel>Visibility</FieldLabel>
+                  <div style={{ display: "flex", gap: 7, flexWrap: "wrap", paddingTop: 4 }}>
+                    {VISIBILITY_OPTIONS.map((v) => (
+                      <OptChip key={v} active={visibility === v} label={v} onClick={() => setVisibility((c) => (c === v ? null : v))} />
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div style={{ marginBottom: 14 }}>
+                <TextAreaField label="Road advisories" value={roadAdvisories} onChange={setRoadAdvisories} rows={2} />
+              </div>
+              <div>
+                <FieldLabel>Fuel level</FieldLabel>
+                <div style={{ display: "flex", gap: 7, paddingTop: 4, flexWrap: "wrap" }}>
+                  {FUEL_LEVELS.map((f) => (
+                    <OptChip key={f.value} active={fuelLevel === f.value} label={f.label} onClick={() => setFuelLevel((c) => (c === f.value ? null : f.value))} />
+                  ))}
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <SectionLabel>Issues / defects</SectionLabel>
+              <div style={{ marginBottom: 16 }}>
+                {issues.map((line, i) => (
+                  <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "end", marginBottom: 8 }}>
+                    <TextField label={`Issue ${i + 1}`} value={line} onChange={(v) => setIssues((cur) => cur.map((x, y) => (y === i ? v : x)))} />
+                    <div style={{ paddingBottom: 6 }}>
+                      <span
+                        onClick={() => setIssues((cur) => cur.filter((_, x) => x !== i))}
+                        style={{
+                          width: 30,
+                          height: 30,
+                          borderRadius: 7,
+                          border: `1px solid ${colors.borderStrong}`,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          color: colors.textMuted,
+                          cursor: "pointer",
+                          fontSize: 14,
+                        }}
+                      >
+                        ✕
+                      </span>
+                    </div>
+                  </div>
+                ))}
+                <ActionButton onClick={() => setIssues((cur) => [...cur, ""])}>+ ADD ISSUE</ActionButton>
+              </div>
+
+              <SectionLabel>Fuel added</SectionLabel>
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 14, marginBottom: 16 }}>
+                <div style={{ display: "flex", gap: 7 }}>
+                  <OptChip active={fuelAdded} label="Yes" onClick={() => setFuelAdded(true)} />
+                  <OptChip active={!fuelAdded} label="No" onClick={() => setFuelAdded(false)} />
+                </div>
+                {fuelAdded && (
+                  <div style={{ display: "grid", gridTemplateColumns: "150px 150px", gap: 14 }}>
+                    <NumberField label="Litres" value={fuelLitres} onChange={setFuelLitres} min={0} step={1} />
+                    <NumberField label="Fuel cost (CAD)" value={fuelCostCad} onChange={setFuelCostCad} min={0} step={1} />
+                  </div>
+                )}
+              </div>
+
+              <SectionLabel>Certification (Form NL-PTI-01, §10)</SectionLabel>
+              <div
+                style={{
+                  padding: "11px 14px",
+                  background: colors.inputBg,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 10,
+                  margin: "6px 0 4px",
+                  fontFamily: fonts.body,
+                  fontSize: 12.5,
+                  color: colors.textSecondary,
+                  lineHeight: 1.6,
+                }}
+              >
+                {NL_PTI_01_CERTIFICATION}
+              </div>
+              <div style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim, marginBottom: 6 }}>
+                Signing below records this sentence verbatim with the inspection.
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 8 }}>
+                <TextField label="Driver signature name" value={signature} onChange={setSignature} />
+                <TextField label="Certified date / time" value={certifiedAt} onChange={setCertifiedAt} mono placeholder="YYYY-MM-DD HH:MM" />
+              </div>
+            </>
+          )}
         </>
       )}
     </ModalShell>
   );
 }
 
-function CheckRow({ checked, label, onToggle }: { checked: boolean; label: string; onToggle: () => void }) {
-  const m = statusMeta("ontime");
+/** Colour + icon + label caution/warning line. */
+function Caution({ kind, children }: { kind: "soon" | "over"; children: React.ReactNode }) {
+  const m = statusMeta(kind);
   return (
     <div
-      onClick={onToggle}
-      style={{ display: "flex", gap: 9, alignItems: "flex-start", cursor: "pointer", padding: "5px 0", userSelect: "none" }}
+      style={{
+        padding: "11px 14px",
+        background: m.bg,
+        border: `1px solid ${m.bd}`,
+        borderRadius: 10,
+        marginBottom: 16,
+        fontFamily: fonts.body,
+        fontSize: 12,
+        fontWeight: 600,
+        color: m.t,
+        lineHeight: 1.5,
+      }}
     >
-      <span
-        style={{
-          width: 18,
-          height: 18,
-          flex: "none",
-          borderRadius: 5,
-          border: `1px solid ${checked ? m.bd : colors.borderStrong}`,
-          background: checked ? m.c : colors.inputBg,
-          color: m.bt,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: 11,
-          fontWeight: 800,
-        }}
-      >
-        {checked ? "✓" : ""}
-      </span>
-      <span style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textSecondary, lineHeight: 1.45 }}>{label}</span>
+      {m.g} {children}
     </div>
   );
 }

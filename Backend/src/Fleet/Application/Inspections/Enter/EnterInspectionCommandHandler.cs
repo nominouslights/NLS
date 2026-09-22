@@ -19,8 +19,17 @@ public sealed class EnterInspectionCommandHandler(IVehicleInspectionRepository r
             return Result.Failure<Guid>(InspectionErrors.DuplicateForTrip(command.Type));
         }
 
+        // Passed is copied through as sent and then re-derived by the aggregate whenever State is
+        // present — the invariant lives there, not here.
         var checklist = command.Checklist
-            .Select(c => new InspectionChecklistItem { Group = c.Group, Item = c.Item, Passed = c.Passed })
+            .Select(c => new InspectionChecklistItem
+            {
+                Group = c.Group,
+                Item = c.Item,
+                Passed = c.Passed,
+                State = c.State,
+                Note = c.Note,
+            })
             .ToList();
 
         var defects = command.Defects
@@ -63,7 +72,8 @@ public sealed class EnterInspectionCommandHandler(IVehicleInspectionRepository r
             command.CertifiedAt?.ToUniversalTime(),
             command.FuelAdded,
             command.FuelLitres,
-            command.FuelCostCad);
+            command.FuelCostCad,
+            command.CertificationStatement);
 
         if (inspectionResult.IsFailure)
         {

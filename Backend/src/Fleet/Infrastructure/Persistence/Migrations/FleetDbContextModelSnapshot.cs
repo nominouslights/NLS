@@ -109,6 +109,25 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                         .HasColumnType("boolean[]")
                         .HasColumnName("attestations");
 
+                    b.Property<DateTimeOffset?>("CarrierAcknowledgedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("carrier_acknowledged_at_utc");
+
+                    b.Property<string>("CarrierAcknowledgedBy")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("carrier_acknowledged_by");
+
+                    b.Property<string>("CarrierAcknowledgementNote")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("carrier_acknowledgement_note");
+
+                    b.Property<string>("CertificationStatement")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("certification_statement");
+
                     b.Property<DateTimeOffset?>("CertifiedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("certified_at");
@@ -1336,6 +1355,22 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                         .HasColumnType("boolean[]")
                         .HasColumnName("attestations");
 
+                    b.Property<DateTimeOffset?>("CarrierAcknowledgedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("carrier_acknowledged_at_utc");
+
+                    b.Property<string>("CarrierAcknowledgedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("carrier_acknowledged_by");
+
+                    b.Property<string>("CarrierAcknowledgementNote")
+                        .HasColumnType("text")
+                        .HasColumnName("carrier_acknowledgement_note");
+
+                    b.Property<string>("CertificationStatement")
+                        .HasColumnType("text")
+                        .HasColumnName("certification_statement");
+
                     b.Property<DateTimeOffset?>("CertifiedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("certified_at");
@@ -1920,7 +1955,11 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                             b1.Property<string>("Item")
                                 .IsRequired();
 
+                            b1.Property<string>("Note");
+
                             b1.Property<bool>("Passed");
+
+                            b1.Property<string>("State");
 
                             b1.HasKey("VehicleInspectionId", "__synthesizedOrdinal");
 
@@ -2236,7 +2275,11 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                             b1.Property<string>("Item")
                                 .IsRequired();
 
+                            b1.Property<string>("Note");
+
                             b1.Property<bool>("Passed");
+
+                            b1.Property<string>("State");
 
                             b1.HasKey("VehicleInspectionReadModelId", "__synthesizedOrdinal");
 

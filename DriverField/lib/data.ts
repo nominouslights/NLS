@@ -27,7 +27,6 @@
 
 import type { StatusKind } from "./theme";
 import type {
-  ChecklistGroup,
   ClientContract,
   Clearance,
   Credential,
@@ -589,65 +588,18 @@ export function hosRemaining(entries: HosEntry[] = hosEntries): HosRemaining {
 // --- inspections (DVIR, NSC Standard 11) -----------------------------------
 
 /**
- * The 22 checklist items, grouped the way NSC Standard 11 is written.
+ * THE CHECKLIST ITSELF IS NOT HERE. It is form NL-PTI-01, copied byte-for-byte from
+ * `Dispatcher/lib/inspectionForm.ts` into `lib/inspectionForm.ts` — 80 rows across 12
+ * sub-groups, narrowed per unit and per half of the form by `itemsFor(unit, mode)`.
  *
- * Each item carries a STABLE ID as well as its label, and the ids are the load-bearing half.
- * Answers, the persisted draft and the wizard's resume pointer all key on `id`; `label` is both
- * what the driver reads and the `Item` string ChecklistItemInput carries. Before this, answers
- * were keyed by the display string — so two groups sharing an item name would collide, and
- * renaming "Tires and wheels" would orphan every stored draft. Ids follow the file's prefixed
- * convention (TRP-, HOS-, DVR-) with a two-letter group code; lib/inspectionSteps.test.ts pins
- * that they are unique across all five groups.
+ * It deliberately does NOT live in this file, unlike every other value on every other screen.
+ * A locally-invented 22-item list used to, and that is exactly what went wrong: the tablet and
+ * the Dispatch Console collected different legal forms, addressed by different `Item` strings,
+ * so a defect filed here could not be matched to a row there. The catalogue is a copy of one
+ * source of truth for that reason, and the copy is diffed by `lib/inspectionForm.copy.test.ts`
+ * as well as by the drift loop in DriverField/CLAUDE.md. Never edit the copy; change Dispatcher
+ * and re-copy.
  */
-export const dvirChecklist: ChecklistGroup[] = [
-  {
-    group: "Under Hood",
-    items: [
-      { id: "CHK-UH-1", label: "Engine oil level" },
-      { id: "CHK-UH-2", label: "Coolant level" },
-      { id: "CHK-UH-3", label: "Belts and hoses" },
-      { id: "CHK-UH-4", label: "Battery / cables" },
-    ],
-  },
-  {
-    group: "Exterior",
-    items: [
-      { id: "CHK-EX-1", label: "Tires and wheels" },
-      { id: "CHK-EX-2", label: "Lamps and reflectors" },
-      { id: "CHK-EX-3", label: "Mirrors" },
-      { id: "CHK-EX-4", label: "Body and glass" },
-      { id: "CHK-EX-5", label: "Wipers" },
-    ],
-  },
-  {
-    group: "Brakes & Steering",
-    items: [
-      { id: "CHK-BS-1", label: "Service brake" },
-      { id: "CHK-BS-2", label: "Parking brake" },
-      { id: "CHK-BS-3", label: "Air system (if equipped)" },
-      { id: "CHK-BS-4", label: "Steering play" },
-    ],
-  },
-  {
-    group: "Interior & Safety",
-    items: [
-      { id: "CHK-IS-1", label: "Seatbelts" },
-      { id: "CHK-IS-2", label: "Emergency exits" },
-      { id: "CHK-IS-3", label: "Fire extinguisher" },
-      { id: "CHK-IS-4", label: "First aid kit" },
-      { id: "CHK-IS-5", label: "Heater / defroster" },
-    ],
-  },
-  {
-    group: "Winter Readiness",
-    items: [
-      { id: "CHK-WR-1", label: "Block heater cord" },
-      { id: "CHK-WR-2", label: "Traction aids" },
-      { id: "CHK-WR-3", label: "Survival kit" },
-      { id: "CHK-WR-4", label: "Extra fuel" },
-    ],
-  },
-];
 
 /**
  * Historical submissions. `mode` and `vehicleId` are what the boarding gate reads: `type` is

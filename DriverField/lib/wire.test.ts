@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { dvirSubmissions, hosEntries, vehicleDefects } from "./data";
-import { INSPECTION_SOURCE_WIRE, severityToWire, type DefectSeverityWire } from "./inspectionGate";
-import type { DefectSeverity, DutyState, HosSource, InspectionMode } from "./types";
+import {
+  checkStatePassed,
+  checkStateToWire,
+  INSPECTION_SOURCE_WIRE,
+  severityToWire,
+  type ChecklistItemStateWire,
+  type DefectSeverityWire,
+} from "./inspectionGate";
+import type {
+  CheckState,
+  DefectSeverity,
+  DutyState,
+  HosSource,
+  InspectionMode,
+} from "./types";
 
 // Wire-string pins.
 //
@@ -131,6 +144,50 @@ describe("inspection type strings", () => {
     for (const submission of dvirSubmissions) {
       expect(INSPECTION_TYPE_WIRE).toContain(submission.mode);
       expect(submission.type.replace("-", "")).toBe(submission.mode);
+    }
+  });
+});
+
+const CHECKLIST_STATE_WIRE: ChecklistItemStateWire[] = ["Ok", "Defect", "NotApplicable"];
+
+const ALL_CHECK_STATES: CheckState[] = ["pass", "defect", "na"];
+
+describe("checklist item state strings", () => {
+  it("are exactly ChecklistItemState's three members", () => {
+    // Backend/src/Fleet/Domain/Inspections/ChecklistItemState.cs. NL-PTI-01's three boxes, in
+    // declaration order. Before this enum existed there was only a `Passed` bool, and this app
+    // OMITTED every N/A row from a submission rather than assert `passed: true` for a row that
+    // does not apply — a false attestation in a compliance record.
+    expect(CHECKLIST_STATE_WIRE).toEqual(["Ok", "Defect", "NotApplicable"]);
+  });
+
+  it("maps the screen's lowercase draft values onto them", () => {
+    // The screen's values are lowercase because they key a localStorage draft; the wire's are
+    // C# member names. Sending "na" or "pass" is the same class of failure as sending
+    // "Out of Service".
+    expect(checkStateToWire("pass")).toBe("Ok");
+    expect(checkStateToWire("defect")).toBe("Defect");
+    expect(checkStateToWire("na")).toBe("NotApplicable");
+  });
+
+  it("emits no wire value containing a space, for any answer", () => {
+    for (const state of ALL_CHECK_STATES) {
+      expect(checkStateToWire(state)).not.toContain(" ");
+      expect(CHECKLIST_STATE_WIRE).toContain(checkStateToWire(state));
+    }
+  });
+
+  it("derives `passed` exactly as VehicleInspection.NormalizeChecklist does", () => {
+    // VehicleInspection.cs:510 — `Passed = state != ChecklistItemState.Defect`. ChecklistItemInput
+    // still requires the bool, so the client sends both; deriving it any other way would let the
+    // two disagree. NOTE THE N/A CASE: `passed: true`, which is only honest because `state`
+    // travels with it.
+    expect(checkStatePassed("pass")).toBe(true);
+    expect(checkStatePassed("na")).toBe(true);
+    expect(checkStatePassed("defect")).toBe(false);
+
+    for (const state of ALL_CHECK_STATES) {
+      expect(checkStatePassed(state)).toBe(checkStateToWire(state) !== "Defect");
     }
   });
 });
