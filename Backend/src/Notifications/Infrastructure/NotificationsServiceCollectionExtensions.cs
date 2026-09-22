@@ -13,10 +13,13 @@ using NorthernLink.Notifications.Application;
 using NorthernLink.Notifications.Application.Abstractions;
 using NorthernLink.Notifications.Application.Integration;
 using NorthernLink.Notifications.Application.Dispatches;
+using NorthernLink.Notifications.Application.Dispatches.GetBookingEmailHistory;
 using NorthernLink.Notifications.Application.Dispatches.GetClientEmailHistory;
 using NorthernLink.Notifications.Application.Dispatches.GetTripEmailHistory;
+using NorthernLink.Notifications.Application.Dispatches.PreviewBookingPassesEmail;
 using NorthernLink.Notifications.Application.Dispatches.PreviewClientAccrualsEmail;
 using NorthernLink.Notifications.Application.Dispatches.PreviewTripPickupReport;
+using NorthernLink.Notifications.Application.Dispatches.SendBookingPassesEmail;
 using NorthernLink.Notifications.Application.Dispatches.SendClientAccrualsEmail;
 using NorthernLink.Notifications.Application.Dispatches.SendTripPickupEmail;
 using NorthernLink.Notifications.Application.Templates;
@@ -109,8 +112,11 @@ public static class NotificationsServiceCollectionExtensions
         services.AddScoped<IQueryHandler<PreviewTripPickupReportQuery, PickupReportPreviewResponse>, PreviewTripPickupReportQueryHandler>();
         services.AddScoped<ICommandHandler<SendClientAccrualsEmailCommand, EmailDispatchResponse>, SendClientAccrualsEmailCommandHandler>();
         services.AddScoped<IQueryHandler<PreviewClientAccrualsEmailQuery, AccrualsEmailPreviewResponse>, PreviewClientAccrualsEmailQueryHandler>();
+        services.AddScoped<ICommandHandler<SendBookingPassesEmailCommand, EmailDispatchResponse>, SendBookingPassesEmailCommandHandler>();
+        services.AddScoped<IQueryHandler<PreviewBookingPassesEmailQuery, BookingPassesEmailPreviewResponse>, PreviewBookingPassesEmailQueryHandler>();
         services.AddScoped<IQueryHandler<GetTripEmailHistoryQuery, IReadOnlyList<EmailDispatchResponse>>, GetTripEmailHistoryQueryHandler>();
         services.AddScoped<IQueryHandler<GetClientEmailHistoryQuery, IReadOnlyList<EmailDispatchResponse>>, GetClientEmailHistoryQueryHandler>();
+        services.AddScoped<IQueryHandler<GetBookingEmailHistoryQuery, IReadOnlyList<EmailDispatchResponse>>, GetBookingEmailHistoryQueryHandler>();
 
         // 5. Integration event consumers — the module's first: booking.booking-day-reverted
         //    (a storing event, polled from the booking outbox) drives the automated

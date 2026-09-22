@@ -25,6 +25,8 @@ internal sealed class EmailDispatchProjection : NotificationsProjection<EmailDis
         row.ServiceType = source.ServiceType.ToString();
         row.ClientId = source.ClientId;
         row.ClientName = source.ClientName;
+        row.BookingId = source.BookingId;
+        row.BookingReference = source.BookingReference;
         row.Status = source.Status.ToString();
         row.SentAtUtc = source.SentAtUtc;
         row.Recipients = [.. source.Recipients];

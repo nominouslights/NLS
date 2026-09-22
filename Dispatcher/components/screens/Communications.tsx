@@ -8,6 +8,7 @@ import { ActionButton } from "@/components/ui/Button";
 import { ApiError } from "@/lib/api/transport";
 import { refetchUntil } from "@/lib/api/trips";
 import {
+  isNotificationOnlyServiceType,
   listEmailTemplates,
   NOTIFICATION_SERVICE_TYPE_LABELS,
   svcForNotificationServiceType,
@@ -229,13 +230,13 @@ export default function Communications() {
                     <StatusChip kind={t.isActive ? "ontime" : "off"} label={t.isActive ? "Active" : "Inactive"} />
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                    {/* Notifications-only types (e.g. CommunityBookingAtRisk) carry
-                        their own label so the purpose is explicit, never the raw
-                        enum string. */}
+                    {/* Notifications-only types (CommunityBookingAtRisk,
+                        CommunityBookingPasses) carry their own label so the
+                        purpose is explicit, never the raw enum string. */}
                     <ServiceChip
                       svc={svcForNotificationServiceType(t.serviceType)}
                       label={
-                        t.serviceType === "CommunityBookingAtRisk"
+                        isNotificationOnlyServiceType(t.serviceType)
                           ? NOTIFICATION_SERVICE_TYPE_LABELS[t.serviceType]
                           : undefined
                       }

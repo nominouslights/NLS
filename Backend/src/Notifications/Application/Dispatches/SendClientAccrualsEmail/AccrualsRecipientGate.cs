@@ -10,7 +10,9 @@ namespace NorthernLink.Notifications.Application.Dispatches.SendClientAccrualsEm
 /// address (case-insensitive; the first occurrence's name wins), and enforces the 1–16
 /// dispatch cap on the distinct list. Shared so a preview can never accept a recipient list
 /// the send would reject — the same guarantee <c>PickupEmailReportComposer</c> gives for
-/// report content.
+/// report content. Also the implementation behind
+/// <c>SendBookingPassesEmail.BookingPassesRecipientGate</c>, which maps its own recipient
+/// type through here so the module keeps one regex and one cap.
 /// </summary>
 public static partial class AccrualsRecipientGate
 {

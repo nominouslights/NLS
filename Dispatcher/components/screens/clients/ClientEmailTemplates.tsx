@@ -5,6 +5,7 @@ import { colors, fonts } from "@/lib/theme";
 import { ApiError } from "@/lib/api";
 import { refetchUntil } from "@/lib/api/trips";
 import {
+  isNotificationOnlyServiceType,
   listEmailTemplates,
   NOTIFICATION_SERVICE_TYPE_LABELS,
   svcForNotificationServiceType,
@@ -133,12 +134,13 @@ export default function ClientEmailTemplates({ clientId, clientName }: { clientI
                 <StatusChip kind={t.isActive ? "ontime" : "off"} label={t.isActive ? "Active" : "Inactive"} />
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                {/* Notifications-only types (e.g. CommunityBookingAtRisk) carry
-                    their own label — never the raw enum string. */}
+                {/* Notifications-only types (CommunityBookingAtRisk,
+                    CommunityBookingPasses) carry their own label — never the
+                    raw enum string. */}
                 <ServiceChip
                   svc={svcForNotificationServiceType(t.serviceType)}
                   label={
-                    t.serviceType === "CommunityBookingAtRisk"
+                    isNotificationOnlyServiceType(t.serviceType)
                       ? NOTIFICATION_SERVICE_TYPE_LABELS[t.serviceType]
                       : undefined
                   }

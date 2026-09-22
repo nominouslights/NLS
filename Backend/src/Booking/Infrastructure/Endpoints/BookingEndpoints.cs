@@ -8,6 +8,7 @@ using NorthernLink.Booking.Application.Bookings;
 using NorthernLink.Booking.Application.Bookings.Cancel;
 using NorthernLink.Booking.Application.Bookings.Confirm;
 using NorthernLink.Booking.Application.Bookings.Create;
+using NorthernLink.Booking.Application.Bookings.GetById;
 using NorthernLink.Booking.Application.Bookings.Update;
 using NorthernLink.Booking.Application.BookingDays.Guarantee;
 using NorthernLink.Booking.Application.Calendar.GetDay;
@@ -58,8 +59,9 @@ public static class BookingEndpoints
         // not pricing policy. Idempotent; {id} is the BookingDay id from the calendar responses.
         booking.MapPost("days/{id:guid}/guarantee", GuaranteeDay);
 
-        // Bookings.
+        // Bookings. The GET is the detail screen's read (and the create's Location target).
         booking.MapPost("bookings", CreateBooking);
+        booking.MapGet("bookings/{id:guid}", GetBookingById);
         booking.MapPut("bookings/{id:guid}", UpdateBooking);
         booking.MapPost("bookings/{id:guid}/confirm", ConfirmBooking);
         booking.MapPost("bookings/{id:guid}/cancel", CancelBooking);
@@ -215,6 +217,18 @@ public static class BookingEndpoints
         return result.IsSuccess
             ? Results.Created($"/api/booking/bookings/{result.Value}", new EntityCreatedResponse(result.Value))
             : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> GetBookingById(
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(new GetBookingByIdQuery(tenantId, id), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
     }
 
     private static async Task<IResult> UpdateBooking(

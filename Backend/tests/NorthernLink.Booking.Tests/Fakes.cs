@@ -2,6 +2,8 @@ using NorthernLink.Booking.Application.Abstractions;
 using NorthernLink.Booking.Application.Bookings;
 using NorthernLink.Booking.Application.Integration;
 using NorthernLink.Booking.Domain.BookingDays;
+using NorthernLink.Booking.Domain.Bookings;
+using NorthernLink.Booking.Domain.Customers;
 using NorthernLink.Booking.Domain.Settings;
 using BookingAggregate = NorthernLink.Booking.Domain.Bookings.Booking;
 
@@ -51,6 +53,19 @@ internal sealed class FakeClock(DateTimeOffset now) : TimeProvider
     public override DateTimeOffset GetUtcNow() => UtcNow;
 }
 
+/// <summary>In-memory fake of the customer write repository.</summary>
+internal sealed class InMemoryCustomerRepository : ICustomerRepository
+{
+    public List<Customer> Customers { get; } = [];
+
+    public Task<Customer?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Customers.FirstOrDefault(c => c.Id == id));
+
+    public void Add(Customer customer) => Customers.Add(customer);
+
+    public Task SaveChangesAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
 /// <summary>In-memory fake of the booking write repository.</summary>
 internal sealed class InMemoryBookingRepository : IBookingRepository
 {
@@ -58,8 +73,24 @@ internal sealed class InMemoryBookingRepository : IBookingRepository
 
     public int SaveChangesCallCount { get; private set; }
 
+    /// <summary>Every reference the handler asked about, in order — the collision tests count these.</summary>
+    public List<BookingReference> ReferenceChecks { get; } = [];
+
+    /// <summary>
+    /// Collision hook: returns true to report the candidate as already taken. Null (default)
+    /// falls back to the stored bookings, i.e. no collision unless one was actually added.
+    /// </summary>
+    public Func<BookingReference, bool>? ReferenceCollides { get; set; }
+
     public Task<BookingAggregate?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         Task.FromResult(Bookings.FirstOrDefault(b => b.Id == id));
+
+    public Task<bool> ReferenceExistsAsync(BookingReference reference, CancellationToken cancellationToken = default)
+    {
+        ReferenceChecks.Add(reference);
+        var exists = ReferenceCollides?.Invoke(reference) ?? Bookings.Any(b => b.Reference == reference);
+        return Task.FromResult(exists);
+    }
 
     public void Add(BookingAggregate booking) => Bookings.Add(booking);
 
@@ -134,6 +165,12 @@ internal sealed class FakeBookingReadService : IBookingReadService
 
     /// <summary>Customer email per customer id (absent/null = customer has no email).</summary>
     public Dictionary<Guid, string?> EmailsByCustomerId { get; } = [];
+
+    /// <summary>Canned detail responses by booking id for the GetById handler tests.</summary>
+    public Dictionary<Guid, BookingDetailResponse> Details { get; } = [];
+
+    public Task<BookingDetailResponse?> GetByIdAsync(Guid bookingId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Details.GetValueOrDefault(bookingId));
 
     public Task<IReadOnlyList<BookingResponse>> GetForDateAsync(
         Guid corridorId, DateOnly serviceDate, CancellationToken cancellationToken = default) =>

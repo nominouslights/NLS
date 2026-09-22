@@ -7,7 +7,8 @@ namespace NorthernLink.Notifications.Infrastructure.Persistence.ReadModels;
 /// <summary>
 /// Read-side projection of an email dispatch into <c>notifications.rm_email_dispatches</c> —
 /// the send-history rows (trip pickup sends carry trip + template context; client accruals
-/// sends carry neither and anchor on <see cref="ClientId"/>). The recipients jsonb is carried
+/// sends carry neither and anchor on <see cref="ClientId"/>; booking-passes sends anchor on
+/// <see cref="BookingId"/> alone). The recipients jsonb is carried
 /// verbatim and re-mapped with the same <c>OwnsMany(...).ToJson(...)</c> shape as the
 /// aggregate, so this read model is KEYED (on <see cref="Id"/>) — a keyless entity can't own
 /// a jsonb collection.
@@ -24,6 +25,8 @@ public sealed class EmailDispatchReadModel
     public string ServiceType { get; set; } = null!;
     public Guid? ClientId { get; set; }
     public string? ClientName { get; set; }
+    public Guid? BookingId { get; set; }
+    public string? BookingReference { get; set; }
     public string Status { get; set; } = null!;
     public DateTimeOffset SentAtUtc { get; set; }
     public List<DispatchRecipient> Recipients { get; set; } = [];
@@ -48,6 +51,8 @@ public sealed class EmailDispatchReadModelConfiguration : IEntityTypeConfigurati
         builder.Property(d => d.ServiceType).HasColumnName("service_type");
         builder.Property(d => d.ClientId).HasColumnName("client_id");
         builder.Property(d => d.ClientName).HasColumnName("client_name");
+        builder.Property(d => d.BookingId).HasColumnName("booking_id");
+        builder.Property(d => d.BookingReference).HasColumnName("booking_reference");
         builder.Property(d => d.Status).HasColumnName("status");
         builder.Property(d => d.SentAtUtc).HasColumnName("sent_at_utc");
         builder.Property(d => d.Version).HasColumnName("version");
@@ -60,5 +65,6 @@ public sealed class EmailDispatchReadModelConfiguration : IEntityTypeConfigurati
 
         builder.HasIndex(d => new { d.TenantId, d.TripId });
         builder.HasIndex(d => new { d.TenantId, d.ClientId });
+        builder.HasIndex(d => new { d.TenantId, d.BookingId });
     }
 }
