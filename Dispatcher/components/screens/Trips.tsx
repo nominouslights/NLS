@@ -62,6 +62,7 @@ import { contractRateLabel, getClient, type ActiveContractSummary } from "@/lib/
 // renders candidate/invoice legs from the same helper).
 import { directionMeta } from "@/lib/api/billing";
 import { printTripManifest } from "@/lib/documents/tripManifestPdf";
+import { printDriverPackage } from "@/lib/documents/driverPackagePdf";
 import { ServiceChip, StatusBadge, StatusChip } from "@/components/ui/Chip";
 import { CorridorStepper } from "@/components/ui/CorridorStepper";
 import { Panel, SectionLabel, DetailRow } from "@/components/ui/Panel";
@@ -1979,6 +1980,13 @@ export default function Trips({
   // it's safe to gate the ENTER buttons on the one-each-per-trip guard.
   const hasPreTrip = inspections.some((i) => i.type === "PreTrip");
   const hasPostTrip = inspections.some((i) => i.type === "PostTrip");
+  // The two inspections the driver package prints. A plain `find` on purpose:
+  // there is at most ONE pre-trip and ONE post-trip per trip (that is exactly
+  // what the ENTER buttons above are gated on), so sorting and taking the
+  // latest would invent a multiplicity the system does not have. `null` here is
+  // a real answer — the package prints a blank NL-PTI-01 for it.
+  const preTripInspection = inspections.find((i) => i.type === "PreTrip") ?? null;
+  const postTripInspection = inspections.find((i) => i.type === "PostTrip") ?? null;
   const activity = t && activityState?.tripId === t.id ? activityState.rows : [];
 
   // Manifest may be present on the trip (manifestId) but not yet fetched into
@@ -1997,6 +2005,12 @@ export default function Trips({
   const canSendPickupEmail = !!t && manifest !== null && manifest.passengers.length > 0 && t.status !== "Cancelled";
   // Shipments on the selected cargo trip (null = still loading).
   const tripShipments = t && tripShipmentsState?.tripId === t.id ? tripShipmentsState.rows : null;
+  // A CARGO trip whose shipments have not arrived yet. The driver package would
+  // print with an empty freight block and nobody would know it was incomplete,
+  // so the button waits instead — which also keeps its click handler
+  // synchronous (an await there would lose the pop-up gesture). A passenger
+  // trip never fetches shipments, so it is never pending.
+  const cargoShipmentsPending = tripIsCargo && tripShipments === null;
   // START gate: a driver, then the service-specific half of the backend
   // en-route guard — passenger runs need a linked manifest with ≥1 passenger,
   // Cargo/Grocery runs need ≥1 LIVE assigned shipment instead (cancelled or
@@ -2708,6 +2722,37 @@ export default function Trips({
                     blank NL-TM-01 form (printTripManifest handles null). */}
                 <ActionButton onClick={() => printTripManifest(manifest)}>
                   {manifest ? "PRINT TRIP MANIFEST" : "PRINT BLANK MANIFEST"}
+                </ActionButton>
+                {/* The whole driver package: cover + manifest + itinerary +
+                    pre-trip + post-trip, each part blank-form-printed when it
+                    has no record. Deliberately NOT gated on tripEditable — a
+                    closed trip's records can still be viewed and printed, and
+                    downloading the package after the fact is the audit case.
+                    The label is fixed (unlike the manifest button's
+                    filled/blank pair) because all four parts always print.
+
+                    onClick is SYNCHRONOUS and must stay that way:
+                    openPrintDocument calls window.open, and after an await
+                    Safari and Firefox no longer treat it as a user gesture and
+                    block the tab silently. Everything it reads is already in
+                    state. */}
+                <ActionButton
+                  disabled={cargoShipmentsPending}
+                  onClick={() =>
+                    printDriverPackage({
+                      trip: t,
+                      manifest,
+                      preTrip: preTripInspection,
+                      postTrip: postTripInspection,
+                      // Shipments only ride cargo/grocery trips, and the fetch
+                      // above is guarded to match — a passenger trip's
+                      // incidental cargo is already on the manifest's §3, so []
+                      // here is correct and the freight block omits itself.
+                      shipments: tripIsCargo ? (tripShipments ?? []) : [],
+                    })
+                  }
+                >
+                  {cargoShipmentsPending ? "LOADING…" : "PRINT DRIVER PACKAGE"}
                 </ActionButton>
                 {(t.status === "Scheduled" || t.status === "InProgress") && (
                   <ActionButton variant="destructive" onClick={() => setModal("cancel")}>
