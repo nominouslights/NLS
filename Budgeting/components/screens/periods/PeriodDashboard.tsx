@@ -11,27 +11,32 @@ import { formatCad, formatUtcDate } from "@/lib/api/format";
 import { formatDeltaCad } from "@/lib/money";
 import { ApiError } from "@/lib/api/transport";
 import {
+  assignmentState,
   canEditAllocations,
+  copyBudgetAllocations,
   coverage,
   getBudgetPeriod,
+  leftToAssignCad,
   listBudgetAllocations,
   listBudgetCodes,
   listBudgetPeriods,
-  netCad,
-  netKind,
-  netLabel,
   nextTransition,
+  planBalanced,
   planningProgress,
   refetchUntil,
   removeBudgetAllocation,
   stateAfter,
   toBudgetCode,
   transitionBudgetPeriod,
+  unjustifiedLines,
+  ASSIGNMENT_KINDS,
+  ASSIGNMENT_LABELS,
   PERIOD_STATE_LABELS,
+  type BudgetAllocationCopyResult,
   type BudgetAllocationRecord,
   type BudgetPeriodRecord,
+  type ChecklistStep,
   type LifecycleStep,
-  type LineStep,
   type PeriodTransitionAction,
 } from "@/lib/api/budgeting";
 import { ErrorNotice } from "@/components/ErrorNotice";
@@ -39,6 +44,7 @@ import BudgetAllocationFormModal from "@/components/BudgetAllocationFormModal";
 import { EmptyNote } from "@/components/screens/shared";
 import LifecycleStepper from "@/components/screens/periods/LifecycleStepper";
 import PlanningChecklist from "@/components/screens/periods/PlanningChecklist";
+import CopyFromPeriodPanel from "@/components/screens/periods/CopyFromPeriodPanel";
 import AllocationSection from "@/components/screens/periods/AllocationSection";
 
 // The detail pane of the Budget Periods screen: one period, where it stands in its lifecycle,
@@ -72,11 +78,26 @@ const TRANSITION_VARIANTS: Record<PeriodTransitionAction, "primary" | "success" 
   close: "primary",
 };
 
+/**
+ * The one confirm in flight, as a discriminated union rather than three independent booleans
+ * that each had to remember to reset the other two. Copy made a fourth mutually-exclusive
+ * confirm, at which point "one at a time" had to become structural instead of a convention
+ * maintained by hand at every call site.
+ */
+type PendingConfirm =
+  | { kind: "transition" }
+  | { kind: "remove"; codeId: string }
+  | { kind: "copy" }
+  | null;
+
 export default function PeriodDashboard({
   period,
+  periods,
   onPeriodsRefreshed,
 }: {
   period: BudgetPeriod;
+  /** The whole list, for the copy panel's source picker. Threaded from Console via BudgetPeriods. */
+  periods: BudgetPeriod[];
   /** Console's applyLoaded: replaces the list while preserving the selection. */
   onPeriodsRefreshed: (records: BudgetPeriodRecord[]) => void;
 }) {
@@ -87,10 +108,8 @@ export default function PeriodDashboard({
   const [codes, setCodes] = useState<BudgetCode[] | null>(null);
   const [error, setError] = useState<{ message: string; code: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  /** Two-click transition: the first click flips the label, the second sends the command. */
-  const [confirmTransition, setConfirmTransition] = useState(false);
-  /** Two-click remove: holds the code id awaiting confirmation. */
-  const [confirmRemoveCodeId, setConfirmRemoveCodeId] = useState<string | null>(null);
+  /** Two-click confirms — transition, remove and copy — exactly one of which can be pending. */
+  const [confirm, setConfirm] = useState<PendingConfirm>(null);
   const [modal, setModal] = useState<{
     category: BudgetCodeCategory;
     line: BudgetAllocationRecord | null;
@@ -151,23 +170,49 @@ export default function PeriodDashboard({
 
   const steps = planningProgress(period, lines ?? [], codes ?? []);
   const lifecycleSteps = steps.filter((s): s is LifecycleStep => s.group === "lifecycle");
-  const lineSteps = steps.filter((s): s is LineStep => s.group === "lines");
+  const checklistSteps = steps.filter((s): s is ChecklistStep => s.group === "checklist");
 
-  const net = netCad(period);
-  const netMeta = statusMeta(netKind(net));
+  // Left to assign, not "net": under zero-based budgeting $0 is the target, not the neutral
+  // case. Classified off the period's own server totals (assignmentState), so the tile is right
+  // before the lines fetch lands — and so an empty period reads "Nothing planned yet" rather
+  // than claiming everything is assigned.
+  const assignment = assignmentState(period);
+  const assignmentMeta = statusMeta(ASSIGNMENT_KINDS[assignment]);
+  const left = leftToAssignCad(period);
+  const unargued = unjustifiedLines(lines ?? []).length;
   const revenueCoverage = coverage(lines ?? [], codes ?? [], "Revenue");
   const expenseCoverage = coverage(lines ?? [], codes ?? [], "Expense");
+
+  // Finalize warns but never blocks — the rule that transitions are not gated on plan
+  // completeness is unchanged, and the button below is never disabled because of this.
+  const finalizeConcerns: string[] = [];
+  if (!planBalanced(period)) {
+    finalizeConcerns.push(
+      assignment === "empty"
+        ? "Nothing is planned in this period yet."
+        : assignment === "over"
+          ? `${formatDeltaCad(left)} more is assigned than this period plans to earn.`
+          : `${formatDeltaCad(left)} is still unassigned. Zero-based budgeting balances to exactly $0 — every dollar of planned revenue needs a job.`,
+    );
+  }
+  if (unargued > 0) {
+    finalizeConcerns.push(
+      `${unargued} ${unargued === 1 ? "line" : "lines"} still ${unargued === 1 ? "carries" : "carry"} no justification — copied from an earlier period and not yet argued.`,
+    );
+  }
+  const finalizeWarning = transition?.action === "finalize" && finalizeConcerns.length > 0;
+  const warningKind = planBalanced(period) ? "soon" : ASSIGNMENT_KINDS[assignment];
+  const warningLabel = planBalanced(period) ? "Unargued lines" : ASSIGNMENT_LABELS[assignment];
 
   const refreshPeriods = () => listBudgetPeriods().then(onPeriodsRefreshed, applyError);
 
   async function runTransition() {
     if (!transition || busy) return;
-    if (!confirmTransition) {
-      setConfirmTransition(true);
-      setConfirmRemoveCodeId(null);
+    if (confirm?.kind !== "transition") {
+      setConfirm({ kind: "transition" });
       return;
     }
-    setConfirmTransition(false);
+    setConfirm(null);
     setBusy(true);
     setError(null);
     try {
@@ -188,12 +233,11 @@ export default function PeriodDashboard({
 
   async function removeLine(line: BudgetAllocationRecord) {
     if (busy) return;
-    if (confirmRemoveCodeId !== line.budgetCodeId) {
-      setConfirmRemoveCodeId(line.budgetCodeId);
-      setConfirmTransition(false);
+    if (confirm?.kind !== "remove" || confirm.codeId !== line.budgetCodeId) {
+      setConfirm({ kind: "remove", codeId: line.budgetCodeId });
       return;
     }
-    setConfirmRemoveCodeId(null);
+    setConfirm(null);
     setBusy(true);
     setError(null);
     try {
@@ -211,9 +255,43 @@ export default function PeriodDashboard({
     }
   }
 
+  /**
+   * Seed this period's plan from an earlier one. Returns the server's counts for the panel to
+   * report, or null when the request was refused — in which case the banner above already
+   * carries the server's own message (CopySourceRequired / CopySourceIsTarget /
+   * CopySourceNotFound / Period.NotFound / PeriodNotEditable), which names the rule.
+   */
+  async function runCopy(sourcePeriodId: string): Promise<BudgetAllocationCopyResult | null> {
+    if (busy) return null;
+    const before = lines?.length ?? 0;
+    setConfirm(null);
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await copyBudgetAllocations(periodId, { sourcePeriodId });
+      // Skip the refetch entirely when nothing was copied. A bulk write needs a COUNT predicate,
+      // and "at least `copied` more rows" can never be satisfied by a successful no-op — the
+      // button would hang until the retry loop gave up on a request that worked perfectly.
+      if (result.copied > 0) {
+        const rows = await refetchUntil(
+          () => listBudgetAllocations(periodId),
+          (rows) => rows.length >= before + result.copied,
+        );
+        setLines(rows);
+        // The tiles read the server's own totals, so the period list has to follow the lines.
+        onPeriodsRefreshed(await listBudgetPeriods());
+      }
+      return result;
+    } catch (e) {
+      applyError(e);
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function openModal(category: BudgetCodeCategory, line: BudgetAllocationRecord | null) {
-    setConfirmTransition(false);
-    setConfirmRemoveCodeId(null);
+    setConfirm(null);
     setModal({ category, line });
   }
 
@@ -258,29 +336,56 @@ export default function PeriodDashboard({
             onClick={runTransition}
             disabled={busy}
           >
-            {busy ? "WORKING…" : confirmTransition ? transition.confirmLabel : transition.label}
+            {busy
+              ? "WORKING…"
+              : confirm?.kind === "transition"
+                ? transition.confirmLabel
+                : transition.label}
           </ActionButton>
         )}
       </div>
 
-      {confirmTransition && transition && (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            marginBottom: 12,
-            fontFamily: fonts.body,
-            fontSize: 11.5,
-            color: colors.textSecondary,
-            lineHeight: 1.6,
-          }}
-        >
-          <span style={{ flex: "1 1 auto" }}>
-            {TRANSITION_NOTES[transition.action]} Forward only — there is no step back. Click{" "}
-            {transition.confirmLabel} to proceed.
-          </span>
-          <ActionButton onClick={() => setConfirmTransition(false)}>CANCEL</ActionButton>
+      {confirm?.kind === "transition" && transition && (
+        <div style={{ marginBottom: 12 }}>
+          {/* Finalizing an incomplete plan is allowed — the server does not gate transitions on
+              plan completeness and neither does this screen. The warning is led by a StatusChip
+              so it is never colour alone, and the button above stays enabled throughout. */}
+          {finalizeWarning && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 10,
+                marginBottom: 8,
+                fontFamily: fonts.body,
+                fontSize: 11.5,
+                color: colors.textSecondary,
+                lineHeight: 1.6,
+              }}
+            >
+              <StatusChip kind={warningKind} label={warningLabel} />
+              <span style={{ flex: "1 1 auto" }}>
+                {finalizeConcerns.join(" ")} You can finalize anyway — nothing here blocks it.
+              </span>
+            </div>
+          )}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              fontFamily: fonts.body,
+              fontSize: 11.5,
+              color: colors.textSecondary,
+              lineHeight: 1.6,
+            }}
+          >
+            <span style={{ flex: "1 1 auto" }}>
+              {TRANSITION_NOTES[transition.action]} Forward only — there is no step back. Click{" "}
+              {transition.confirmLabel} to proceed.
+            </span>
+            <ActionButton onClick={() => setConfirm(null)}>CANCEL</ActionButton>
+          </div>
         </div>
       )}
 
@@ -322,15 +427,17 @@ export default function PeriodDashboard({
           value={formatCad(period.plannedExpense)}
           valueColor={colors.headingBright}
         />
-        {/* Net: glyph + "Surplus/Balanced/Deficit" label + a signed figure — the colour is the
-            fourth channel, never the only one. */}
+        {/* Left to assign — the headline of a zero-based plan, third so the row reads as the
+            arithmetic: revenue → expense → what is left. Glyph + written state + a signed
+            figure + the tinted border: four channels, and the colour is never the only one. */}
         <MetricTile
-          icon={netMeta.g}
-          iconBg={netMeta.bg}
-          iconColor={netMeta.t}
-          label={`Net · ${netLabel(net)}`}
-          value={formatDeltaCad(net)}
-          valueColor={netMeta.t}
+          icon={assignmentMeta.g}
+          iconBg={assignmentMeta.bg}
+          iconColor={assignmentMeta.t}
+          label={`Left to assign · ${ASSIGNMENT_LABELS[assignment]}`}
+          value={formatDeltaCad(left)}
+          valueColor={assignmentMeta.t}
+          borderColor={assignmentMeta.bd}
         />
         <MetricTile
           icon="◧"
@@ -352,8 +459,23 @@ export default function PeriodDashboard({
 
       {loaded && (
         <div style={{ marginBottom: 14 }}>
-          <PlanningChecklist steps={lineSteps} />
+          <PlanningChecklist steps={checklistSteps} />
         </div>
+      )}
+
+      {/* Zero-based step 5: a fresh plan each period, seeded from an earlier one rather than
+          rebuilt line by line. Only while the period accepts plan changes — the same rule the
+          server enforces on the copy's TARGET. */}
+      {loaded && editable && (
+        <CopyFromPeriodPanel
+          period={period}
+          periods={periods}
+          busy={busy}
+          confirming={confirm?.kind === "copy"}
+          onRequestConfirm={() => setConfirm({ kind: "copy" })}
+          onCancelConfirm={() => setConfirm(null)}
+          onCopy={runCopy}
+        />
       )}
 
       {!editable && (
@@ -374,7 +496,7 @@ export default function PeriodDashboard({
             lines={lines.filter((l) => l.category === "Revenue")}
             editable={editable}
             busy={busy}
-            confirmRemoveCodeId={confirmRemoveCodeId}
+            confirmRemoveCodeId={confirm?.kind === "remove" ? confirm.codeId : null}
             onAdd={() => openModal("Revenue", null)}
             onEdit={(line) => openModal("Revenue", line)}
             onRemove={removeLine}
@@ -384,7 +506,7 @@ export default function PeriodDashboard({
             lines={lines.filter((l) => l.category === "Expense")}
             editable={editable}
             busy={busy}
-            confirmRemoveCodeId={confirmRemoveCodeId}
+            confirmRemoveCodeId={confirm?.kind === "remove" ? confirm.codeId : null}
             onAdd={() => openModal("Expense", null)}
             onEdit={(line) => openModal("Expense", line)}
             onRemove={removeLine}

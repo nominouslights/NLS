@@ -65,13 +65,14 @@ public static class BillingServiceCollectionExtensions
         services.AddHostedService<OutboxDispatcher<BillingDbContext>>();
         services.AddScoped<IInvoiceRepository, InvoiceRepository>();
         services.AddScoped<IContractSnapshotRepository, ContractSnapshotRepository>();
+        services.AddScoped<IPurchaseOrderSnapshotRepository, PurchaseOrderSnapshotRepository>();
         services.AddScoped<IBillableTripRepository, BillableTripRepository>();
         services.AddScoped<IInvoiceNumberGenerator, InvoiceNumberGenerator>();
         services.AddScoped<IInvoiceReadService, InvoiceReadService>();
         services.AddScoped<IBillableTripReadService, BillableTripReadService>();
 
         // 3. Command/query handlers — registered explicitly, one line per handler.
-        services.AddScoped<ICommandHandler<GenerateDraftInvoiceCommand, Guid>, GenerateDraftInvoiceCommandHandler>();
+        services.AddScoped<ICommandHandler<GenerateDraftInvoiceCommand, GenerateDraftInvoicesResult>, GenerateDraftInvoiceCommandHandler>();
         services.AddScoped<ICommandHandler<ReplaceInvoiceLinesCommand>, ReplaceInvoiceLinesCommandHandler>();
         services.AddScoped<ICommandHandler<MarkInvoiceEnteredCommand>, MarkInvoiceEnteredCommandHandler>();
         services.AddScoped<ICommandHandler<UpdateInvoiceQboReferenceCommand>, UpdateInvoiceQboReferenceCommandHandler>();
@@ -83,8 +84,13 @@ public static class BillingServiceCollectionExtensions
         services.AddScoped<IQueryHandler<GetInvoiceByIdQuery, InvoiceResponse>, GetInvoiceByIdQueryHandler>();
         services.AddScoped<IQueryHandler<GetBillableTripsQuery, IReadOnlyList<BillableTripResponse>>, GetBillableTripsQueryHandler>();
 
-        // 4. Integration event consumers — the module's replicas: contract snapshots from
-        //    Clients, billable trips from Trips (cross-domain, events-only; both idempotent).
+        // 4. Integration event consumers — the module's replicas: contract and purchase-order
+        //    snapshots from Clients, billable trips from Trips (cross-domain, events-only; all
+        //    idempotent).
+        //    Purchase orders are the one replica with a delete path: a PO has no lifecycle and is
+        //    genuinely removable, so an upsert-only consumer would keep pricing work against
+        //    withdrawn terms. Both PO events are storing/projecting, not chain-reaction, so they
+        //    stay off BusPublicationRegistry and arrive by outbox polling like everything else.
         //    Storing/projecting events, so they arrive by polling the producer outboxes
         //    in-database, not via RabbitMQ.
         //
@@ -98,6 +104,8 @@ public static class BillingServiceCollectionExtensions
         //    routing_key = 'trips.trip-completed' AND processing_status = 'Pending'` is 0.
         services.AddOutboxPollingConsumer<BillingDbContext>(SchemaName, subscriptions => subscriptions
             .On<ContractChangedIntegrationEvent, ContractChangedIntegrationEventHandler>()
+            .On<PurchaseOrderChangedIntegrationEvent, PurchaseOrderChangedIntegrationEventHandler>()
+            .On<PurchaseOrderDeletedIntegrationEvent, PurchaseOrderDeletedIntegrationEventHandler>()
             .On<TripCompletedIntegrationEvent, TripCompletedIntegrationEventHandler>()
             .On<TripReadyForBillingIntegrationEvent, TripReadyForBillingIntegrationEventHandler>()
             .On<TripClosedWithoutBillingIntegrationEvent, TripClosedWithoutBillingIntegrationEventHandler>()

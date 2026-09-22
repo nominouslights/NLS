@@ -26,9 +26,10 @@ public class UserChangedIntegrationEventHandlerTests
         Guid userId,
         string email = "planner@northernlink.ca",
         string role = Roles.Accountant,
+        Guid? tenantId = null,
         string? fullName = null,
         string? jobTitle = null) =>
-        new(userId, TestBudgeting.TenantId, email, role, fullName, jobTitle);
+        new(userId, tenantId ?? TestBudgeting.TenantId, email, role, fullName, jobTitle);
 
     [Fact]
     public async Task A_first_event_inserts_the_replica_row()
@@ -125,5 +126,50 @@ public class UserChangedIntegrationEventHandlerTests
         await _handler.Handle(Event(Guid.NewGuid(), "b@northernlink.ca"), CancellationToken.None);
 
         Assert.Equal(2, _repository.Users.Count);
+    }
+
+    [Fact]
+    public async Task The_same_user_id_in_two_tenants_stays_two_rows()
+    {
+        // The one place in the codebase where tenant scoping is NOT delegated to the EF query
+        // filter: UserLookupRepository.UpsertAsync runs IgnoreQueryFilters() (the handler's
+        // DbContext captured a null tenant before the ambient push) and therefore carries its
+        // own `u.UserId == user.UserId && u.TenantId == user.TenantId` predicate. Drop the
+        // tenant half and one user id arriving for two tenants collapses to a single row —
+        // one tenant's replica silently overwritten by another's. Nothing else pins that
+        // predicate, so this test is the guard.
+        var userId = Guid.NewGuid();
+        var otherTenantId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+
+        await _handler.Handle(
+            Event(userId, "shared@northernlink.ca", Roles.Accountant), CancellationToken.None);
+        await _handler.Handle(
+            Event(userId, "other-tenant@northernlink.ca", Roles.Owner, otherTenantId),
+            CancellationToken.None);
+
+        Assert.Equal(2, _repository.Users.Count);
+        var mine = Assert.Single(_repository.Users, u => u.TenantId == TestBudgeting.TenantId);
+        Assert.Equal("shared@northernlink.ca", mine.Email);
+        Assert.Equal(Roles.Accountant, mine.Role);
+        var theirs = Assert.Single(_repository.Users, u => u.TenantId == otherTenantId);
+        Assert.Equal("other-tenant@northernlink.ca", theirs.Email);
+        Assert.Equal(Roles.Owner, theirs.Role);
+    }
+
+    [Fact]
+    public async Task A_replica_row_is_only_visible_to_its_own_tenant()
+    {
+        // The read half of the same rule: GetAsync/ListAsync go through the EF query filter
+        // (BudgetingDbContext: u.TenantId == TenantId), so another tenant's row must not be
+        // reachable even though it shares the user id.
+        var userId = Guid.NewGuid();
+        var otherTenantId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+
+        await _handler.Handle(
+            Event(userId, "other-tenant@northernlink.ca", Roles.Owner, otherTenantId),
+            CancellationToken.None);
+
+        Assert.Null(await _repository.GetAsync(userId, CancellationToken.None));
+        Assert.Empty(await _repository.ListAsync(CancellationToken.None));
     }
 }

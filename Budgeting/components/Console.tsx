@@ -11,7 +11,6 @@ import NavRail from "@/components/NavRail";
 import TopBar from "@/components/TopBar";
 import BudgetPeriods from "@/components/screens/BudgetPeriods";
 import BudgetCodes from "@/components/screens/BudgetCodes";
-import Allocations from "@/components/screens/Allocations";
 import ActualsVsBudget from "@/components/screens/ActualsVsBudget";
 import Variance from "@/components/screens/Variance";
 import Reports from "@/components/screens/Reports";
@@ -56,7 +55,14 @@ export default function Console() {
   const [periods, setPeriods] = useState<BudgetPeriod[] | null>(null);
   const [periodsError, setPeriodsError] = useState<{ message: string; code: string } | null>(null);
   const [periodId, setPeriodId] = useState<string>("");
+  // codeSel survives the removal of the Allocations screen — Variance still jumps to a code.
   const [codeSel, setCodeSel] = useState<string | null>(null);
+  /**
+   * The New Period modal's visibility, hoisted out of BudgetPeriods because two things open it:
+   * the screen's own pill and the TopBar's global one, which has to be able to open it from any
+   * screen. Period state is already hoisted here for the same "more than one caller" reason.
+   */
+  const [showCreate, setShowCreate] = useState(false);
 
   const applyLoaded = useCallback((records: BudgetPeriodRecord[]) => {
     const rows = records.map(toBudgetPeriod);
@@ -135,6 +141,13 @@ export default function Console() {
   function handlePeriodCreated(records: BudgetPeriodRecord[], id: string) {
     setPeriods(records.map(toBudgetPeriod));
     setPeriodId(id);
+    // The modal calls onClose itself right after this, so the flag is cleared there.
+  }
+
+  /** The TopBar pill: the console's one global create action. Lands on the new period's dashboard. */
+  function openNewPeriod() {
+    setScreen("periods");
+    setShowCreate(true);
   }
 
   function openCode(id: string | null) {
@@ -157,7 +170,7 @@ export default function Console() {
     >
       <TopBar
         onToggleRail={() => setRailCollapsed((v) => !v)}
-        onNewAllocation={() => setScreen("allocations")}
+        onNewPeriod={openNewPeriod}
         fullName={profile?.fullName ?? null}
       />
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
@@ -181,17 +194,12 @@ export default function Console() {
               onSelectPeriod={setPeriodId}
               onCreated={handlePeriodCreated}
               onPeriodsRefreshed={applyLoaded}
+              showCreate={showCreate}
+              onShowCreate={() => setShowCreate(true)}
+              onCloseCreate={() => setShowCreate(false)}
             />
           )}
           {screen === "codes" && <BudgetCodes selId={codeSel} onSelect={setCodeSel} />}
-          {screen === "allocations" && (
-            <Allocations
-              periods={periodList}
-              periodId={periodId}
-              onSelectPeriod={setPeriodId}
-              onOpenCode={openCode}
-            />
-          )}
           {screen === "actuals" && (
             <ActualsVsBudget periods={periodList} periodId={periodId} onSelectPeriod={setPeriodId} />
           )}

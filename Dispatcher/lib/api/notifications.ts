@@ -193,14 +193,20 @@ export interface AccrualsEmailReport {
   clientName: string;
   periodLabel: string;
   preparedDate: string;
-  /** Degradation banners (manual billing, failed fetches, unpaired legs). */
+  /** Degradation banners (manual billing, failed fetches, half-rate groups). */
   notes: string[];
+  /** The two leading figures — upcoming expenses first, then monies owed. */
+  headline: { label: string; amountCad: string; detail: string }[];
   summary: {
     bucketLabel: string;
     roundTrips: string;
     actualCad: string;
     estimatedCad: string;
+    /** True for a section subtotal row; false for a bucket row nested under it. */
+    emphasis: boolean;
   }[];
+  /** Per-trip detail tables, in section order — emitted only for the sections
+   *  that carry detail (settled work is a summary row, never a table). */
   buckets: {
     label: string;
     rows: {

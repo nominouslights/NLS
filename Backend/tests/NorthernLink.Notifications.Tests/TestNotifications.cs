@@ -9,7 +9,10 @@ internal static class TestNotifications
 {
     public static readonly Guid TenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
-    /// <summary>A small but fully populated accruals report — every section has a row.</summary>
+    /// <summary>
+    /// A small but fully populated accruals report — every section has a row, including the two
+    /// leading headline figures and a summary grouped into emphasised section subtotals.
+    /// </summary>
     public static ClientAccrualsReport SampleAccrualsReport(
         string clientName = "Vale Manitoba Operations",
         string periodLabel = "August 2026") => new(
@@ -17,10 +20,18 @@ internal static class TestNotifications
         periodLabel,
         "August 29, 2026",
         Notes: ["Estimates use the contract rate of $1,450.00 per round trip."],
+        Headline:
+        [
+            new AccrualsHeadlineFigure("Upcoming expenses", "$2,900.00 est.", "2 round trips · 1 unpriced"),
+            new AccrualsHeadlineFigure("Monies owed", "$1,450.00", "1 round trip ready for billing"),
+        ],
+        // Section subtotals carry Emphasis; the bucket rows nested under them do not.
         Summary:
         [
-            new AccrualsSummaryRow("Paid", "2", "$2,900.00", "—"),
-            new AccrualsSummaryRow("Ready for billing", "1", "—", "$1,450.00 est."),
+            new AccrualsSummaryRow("Monies owed", "1", "—", "$1,450.00 est.", Emphasis: true),
+            new AccrualsSummaryRow("Ready for billing", "1", "—", "$1,450.00 est.", Emphasis: false),
+            new AccrualsSummaryRow("Settled this month", "2", "$2,900.00", "—", Emphasis: true),
+            new AccrualsSummaryRow("Paid", "2", "$2,900.00", "—", Emphasis: false),
         ],
         Buckets:
         [

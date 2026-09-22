@@ -21,6 +21,9 @@ internal sealed class InMemoryBudgetCodeRepository : IBudgetCodeRepository
     public Task<bool> HasChildrenAsync(Guid parentCodeId, CancellationToken cancellationToken = default) =>
         Task.FromResult(Codes.Any(c => c.ParentCodeId == parentCodeId));
 
+    public Task<IReadOnlyList<BudgetCode>> GetAllAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<BudgetCode>>(Codes.ToList());
+
     public void Add(BudgetCode budgetCode) => Codes.Add(budgetCode);
 
     public void Remove(BudgetCode budgetCode) => Codes.Remove(budgetCode);

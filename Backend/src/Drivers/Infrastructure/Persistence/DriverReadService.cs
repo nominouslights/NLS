@@ -27,8 +27,19 @@ internal sealed class DriverReadService(DriversDbContext context) : IDriverReadS
         return driver is null ? null : ToResponse(driver);
     }
 
+    public async Task<DriverResponse?> GetDriverByUserAsync(
+        Guid userId, CancellationToken cancellationToken = default)
+    {
+        var driver = await context.DriverReadModels
+            .AsNoTracking()
+            .FirstOrDefaultAsync(d => d.UserId == userId, cancellationToken);
+
+        return driver is null ? null : ToResponse(driver);
+    }
+
     private static DriverResponse ToResponse(DriverReadModel d) => new(
         d.Id,
+        d.UserId,
         d.Name,
         d.Phone,
         d.LicenceClass,

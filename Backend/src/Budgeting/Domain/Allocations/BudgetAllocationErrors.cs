@@ -38,4 +38,21 @@ public static class BudgetAllocationErrors
     public static readonly Error CodeRetired = Error.Conflict(
         "Budgeting.Allocation.CodeRetired",
         "That budget code is retired and cannot take new allocations. Restore it or pick another code.");
+
+    // --- Copy-from-an-earlier-period guards. Two period ids are in play, so the source gets its
+    // own NotFound rather than reusing BudgetPeriodErrors.NotFound: the console has to be able to
+    // say *which* period was wrong, and "the period was not found" for a request that names two
+    // of them is the kind of message that costs somebody an afternoon. ---
+
+    public static readonly Error CopySourceRequired = Error.Validation(
+        "Budgeting.Allocation.CopySourceRequired",
+        "Choose a period to copy from.");
+
+    public static readonly Error CopySourceIsTarget = Error.Validation(
+        "Budgeting.Allocation.CopySourceIsTarget",
+        "A period cannot be copied onto itself. Choose a different source period.");
+
+    public static readonly Error CopySourceNotFound = Error.NotFound(
+        "Budgeting.Allocation.CopySourceNotFound",
+        "The period to copy from was not found.");
 }

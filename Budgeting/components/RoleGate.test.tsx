@@ -59,7 +59,12 @@ describe("RoleGate", () => {
         </RoleGate>,
       );
 
+      // Both halves are needed. Absence of the children alone would also pass for a gate that
+      // rendered null for everyone — which is a broken console, not a working denial.
       expect(screen.queryByText("budget console contents")).toBeNull();
+      expect(screen.getByText("This console is restricted.")).toBeTruthy();
+      expect(screen.getByText(new RegExp(`signed in as ${role}`))).toBeTruthy();
+      expect(screen.getByText("SIGN OUT")).toBeTruthy();
     },
   );
 
@@ -86,5 +91,29 @@ describe("RoleGate", () => {
     );
 
     expect(screen.queryByText("budget console contents")).toBeNull();
+    // ...and says so, with a way out. Without these the test would pass for a gate that showed
+    // nobody anything, and a user with an unreadable token would face a blank page.
+    expect(screen.getByText("This console is restricted.")).toBeTruthy();
+    expect(screen.getByText(/an account without budget access/)).toBeTruthy();
+    expect(screen.getByText("SIGN OUT")).toBeTruthy();
+  });
+
+  it("blocks the empty role a decodable token with no role claim produces", () => {
+    // null is what getRole returns with no session at all; "" is what it returns for a token
+    // that decoded fine but carried no usable role claim (claims.ts converts a missing or
+    // wrongly-typed role to ""). The real path emits both, so both need covering — and "" is
+    // the one that reaches AccessDeniedScreen's `role.trim()` fallback.
+    getRole.mockReturnValue("");
+
+    render(
+      <RoleGate>
+        <div>budget console contents</div>
+      </RoleGate>,
+    );
+
+    expect(screen.queryByText("budget console contents")).toBeNull();
+    expect(screen.getByText("This console is restricted.")).toBeTruthy();
+    expect(screen.getByText(/an account without budget access/)).toBeTruthy();
+    expect(screen.getByText("SIGN OUT")).toBeTruthy();
   });
 });

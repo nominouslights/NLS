@@ -17,11 +17,18 @@ lifecycle and the period dashboard; actuals and variance are still mock — see
 
 `Budgeting/` deliberately holds **identical copies** of Dispatcher's design system. This was a
 decision, not an accident: extracting a shared package was the alternative and it was rejected
-for now (only two apps share this chrome, and there is no npm workspace at the repo root).
+for now (there is no npm workspace at the repo root and each app has its own lockfile).
 
 **The rule: change Dispatcher first, then re-copy. Never edit a copied file in place.** Drift
 here is a visible product bug — two consoles that no longer look like one platform — not a style
 nit.
+
+**`DriverField/` now holds copies too (2026-09), so a Dispatcher design-system change is a
+TWO-app re-copy.** Doing only this one leaves the Driver Field App silently behind. Its manifest
+is 22 files rather than 23 — it omits `NavRail.tsx`, whose geometry is hardcoded and unusable at
+tablet size — and it has its own drift check in `DriverField/CLAUDE.md`. Run both. The argument
+for extracting a shared package gets stronger with each app that copies; revisit it at the next
+one.
 
 Every copied file opens with a fixed 2-line header naming its source. The header is why the
 files are not byte-identical, so the check skips it:
@@ -111,33 +118,75 @@ step; both have tests that fail if they diverge.
 ## Testing
 
 Vitest, added here as a **pilot for this app only** — it does not obligate Dispatcher to adopt
-it. Seven files, and only two need a DOM:
+it. Config is `vitest.config.mts` — the `.mts` extension is load-bearing (Vite loads a plain
+`.ts` config as CommonJS and warns), and it must therefore use `import.meta.dirname` for the
+`@` alias, never `__dirname`. `@types/node` declares `__dirname` globally, so TypeScript and
+`next build` both stay green while every `@/lib/...` import in the suite fails to resolve at
+run time. Ten files, and only two need a DOM:
 
 - `lib/roles.test.ts` — US-6.0.1's acceptance criterion: a Dispatcher account is rejected.
 - `lib/claims.test.ts` — JWT decoding, including the non-ASCII round trip (`atob` yields a binary
-  string, so a naive decoder mangles accented emails) and malformed-token handling.
-- `components/RoleGate.test.tsx` — the gate applies the rule and offers a way out.
-- `lib/api/identity.test.ts` — `normalizeProfileField` against `User.Normalize`,
-  `PROFILE_FIELD_MAX_LENGTH` against `User.ProfileFieldMaxLength`, and the
-  `profileDisplayName` name-then-email fallback.
+  string, so a naive decoder mangles accented emails) and malformed-token handling. Plus the
+  claim **names**, mirrored from `JwtAccessTokenIssuer`'s `RoleClaimType` / `TenantIdClaimType` /
+  `TenantTypeClaimType` — without those the file only proves the decoder agrees with payloads it
+  wrote itself, and a backend rename would leave it green while every user hit access-denied.
+- `lib/accessSeam.test.ts` — the token → claims → role → gate chain end to end, unmocked. Each
+  link is covered on its own by the three files around it; this covers the seams between them,
+  including the `""` role a decodable-but-roleless token produces.
+- `components/RoleGate.test.tsx` — the gate applies the rule and offers a way out. Every denial
+  case asserts the denial screen **renders**, not just that the children are absent: absence
+  alone would also pass for a gate that showed nobody anything.
 - `components/ProfileForm.test.tsx` — the profile form seeds from its props, refuses to save
   when nothing changed (including when the only change is whitespace, matching the server's
   no-op rule), sends `null` for a cleared field, and shows a refused save's message verbatim.
-  It takes `onSave` as a prop, so it injects a `vi.fn()` rather than stubbing the transport —
-  no client test in this app mocks `request()`.
+  It takes `onSave` as a prop, so it injects a `vi.fn()` rather than stubbing the transport.
+- `lib/api/identity.test.ts` — `normalizeProfileField` against `User.Normalize`,
+  `PROFILE_FIELD_MAX_LENGTH` against `User.ProfileFieldMaxLength`, and the
+  `profileDisplayName` name-then-email fallback.
 - `lib/api/budgeting.test.ts` — the client-side mirrors of server rules stay pinned to the
   server: `previewPeriod` against `BudgetPeriod.Create`, `normalizeBudgetCode` /
-  `budgetCodeFormatError` against `BudgetCode.NormalizeCode` / `ValidateCode`,
+  `budgetCodeFormatError` against `BudgetCode.NormalizeCode` / `ValidateCode` (both sides of the
+  32-character boundary, and the ASCII-only rule `char.IsAsciiLetterOrDigit` enforces),
   `parentCandidates` against `BudgetCodeParentRule`, `PERIOD_STATE_ORDER` /
   `nextTransition` / `stateAfter` against `BudgetPeriod.Transition`, `canEditAllocations`
   against `BudgetPeriod.AllowsPlanChanges`, `allocationCandidates` against the `CodeRetired`
   check plus the unique (period, code) index, and `allocationAmountError` /
-  `allocationJustificationError` against `BudgetAllocation.Validate`. Plus the →StatusKind
-  mappings (`periodKind` over all five states, `netKind`), the label maps, `toBudgetCode`'s
-  `isActive` → `active` rename, `toBudgetPeriod`'s two totals, `coverage` and
-  `planningProgress` (the dashboard's checklist and stepper derive from one tested function).
+  `allocationJustificationError` against `BudgetAllocation.Validate`, `needsJustification` /
+  `unjustifiedLines` against `BudgetAllocation.NeedsJustification` + `CopyInto`, and
+  `copySourceCandidates` / `defaultCopySource` against
+  `CopyBudgetAllocationsCommandHandler`'s `CopySourceIsTarget` guard — including the case that a
+  **Closed period is offered**, because the server checks editability on the target only. Plus
+  the →StatusKind mappings (`periodKind` over all five states, `assignmentState` /
+  `ASSIGNMENT_KINDS` over all four), `planBalanced` (an empty plan is **not** balanced),
+  `copyOutcomeSummary`, the label maps, `toBudgetCode`'s `isActive` → `active` rename,
+  `toBudgetPeriod`'s two totals, `coverage` and `planningProgress` (the dashboard's zero-based
+  checklist and stepper derive from one tested function).
+
+  `netCad` / `netKind` / `netLabel` and their tests were **deleted**, not adapted, when the Net
+  tile became "Left to assign": `netKind(0)` was `info` and `balanced` is now `ontime`, because
+  under zero-based budgeting $0 is the goal rather than the neutral case. Adapting an assertion
+  through a semantic inversion hides the inversion.
+- `lib/api/transport.test.ts` — the 401 refresh-and-retry path, with `fetch` and `lib/auth`
+  mocked. `request<T>`'s doc comment promises it "never loops"; these assert the exact attempt
+  count (two fetches, one refresh) so the promise is enforced rather than stated. Plus `ApiError`
+  construction — the parsed `{ code, message }` body, the `Http.<status>` fallback, and the
+  `Network.Unreachable`/status-0 branch that `Console.tsx` and `screens/BudgetCodes.tsx` both
+  branch on via `e instanceof ApiError`.
+- `lib/api/budgeting.requests.test.ts` — what each request function puts on the wire. Chiefly
+  `setBudgetCodeActive`, whose route is built from a boolean (`activate` / `deactivate`): an
+  inverted ternary there returns 204 either way and silently activates a code the planner asked
+  to retire. Likewise `copyBudgetAllocations`, which takes the source as an **object**
+  (`{ sourcePeriodId }`) rather than a bare second string: two same-typed guids swap silently and
+  copy backwards with a 200 on the wire and no error on either side. It also pins the route, the
+  four counts and each 400/409/404 message verbatim. Also pins that `deleteBudgetCode`'s 409
+  message reaches the caller verbatim, since the server's wording is what names retirement as the
+  alternative.
 - `lib/money.test.ts` — `formatDeltaCad` / `formatDeltaPct` always write the sign out, so a
   signed figure never rests on colour.
+
+`lib/api/transport.ts` is a **copied** file. Tests against it belong here (a test file is not on
+the copy manifest), but anything they reveal is a change to *Dispatcher's* source first, then a
+re-copy — never an edit in place.
 
   The single highest-value assertion in the app is in here: that `SERVICE_LINE_LABELS`' first six
   keys are spelled exactly as `TripServiceType`'s members. That spelling is the join key for
@@ -189,6 +238,20 @@ The period and allocation routes (`BudgetAccess` group, `BudgetingEndpoints.cs`)
 | `GET /api/budgeting/periods/{id}/allocations` | the period's lines, ordered by code (404) |
 | `PUT /api/budgeting/periods/{id}/allocations/{codeId}` | upsert `{ amountCad, justification }` → `{ id, created }`; 400 validation, 404 period/code, 409 `PeriodNotEditable` / `CodeRetired` |
 | `DELETE /api/budgeting/periods/{id}/allocations/{codeId}` | 204; 404 no such line; 409 `PeriodNotEditable` |
+| `POST /api/budgeting/periods/{id}/allocations/copy` | seed this period's plan from an earlier one — body `{ sourcePeriodId }` → 200 `{ copied, skippedAlreadyPlanned, skippedRetiredCode, sourceLineCount }` (the first three always sum to the fourth); 400 `CopySourceRequired` / `CopySourceIsTarget`, 404 `CopySourceNotFound` (the **source**) or `Budgeting.Period.NotFound` (the **target**), 409 `PeriodNotEditable` |
+
+**The copy brings the amounts and clears every justification.** `BudgetAllocation.CopyInto` sets
+`Justification = string.Empty`, so a copied line arrives `NeedsJustification` and `PUT
+.../allocations/{codeId}` keeps refusing it with 400 `JustificationRequired` until somebody
+argues it. That is the feature, not a gap: zero-based means last period's reasoning is not this
+period's. The dashboard shows those lines with a "Needs justification" chip, counts them in the
+checklist's "Every line argued" row, and names them in the finalize warning.
+
+**Editability is checked on the target only.** A Closed period is a perfectly legal *source* —
+copying a closed plan into a fresh Draft is the whole point — so `copySourceCandidates` offers
+periods in every state and excludes only the target itself. Do not "fix" it with
+`canEditAllocations`; the asymmetry is deliberate and documented on
+`CopyBudgetAllocationsCommandHandler`.
 
 Every 400/409 message is shown verbatim — the server's text names the rule. Reads are
 projections: after a transition the dashboard refetches the period until it reports the expected
@@ -197,10 +260,16 @@ visible (on edit the row was always there), and only then refreshes the period l
 read from the same projection.
 
 `screens/BudgetPeriods.tsx` is the master/detail host; `screens/periods/*` is the dashboard
-(list, lifecycle stepper, planning checklist, one `AllocationSection` per category);
-`BudgetAllocationFormModal.tsx` is shared with `screens/Allocations.tsx`, which shows the same
-lines flat and sums its tiles from the lines on screen (it has no way to refresh Console's
-period list after a save). The dashboard shows the server's own totals.
+(list, lifecycle stepper, zero-based checklist, the copy-from-an-earlier-period panel, one
+`AllocationSection` per category), and it is the **one** place a period is planned.
+`BudgetAllocationFormModal.tsx` opens from there. The dashboard shows the server's own totals,
+never sums re-derived from the lines on screen.
+
+There is no separate Allocations screen and no `"allocations"` `ScreenId`: a second place to do
+the same job could not refresh Console's period list after a save, so its tiles trailed the
+dashboard's. The TopBar pill is `+ NEW PERIOD` — the console's one global create action, with
+the only create target that is unambiguous from any screen — and its `showCreate` state is
+hoisted into `Console.tsx` so both it and the screen's own pill open the same modal.
 
 **Budget codes are real too** — the second slice, widened to US-6.1.1's full property set:
 

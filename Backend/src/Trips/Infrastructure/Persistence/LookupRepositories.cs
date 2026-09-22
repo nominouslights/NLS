@@ -50,6 +50,10 @@ internal sealed class VehicleLookupRepository(TripsDbContext context) : IVehicle
         context.VehicleLookups.AsNoTracking()
             .FirstOrDefaultAsync(v => v.VehicleId == vehicleId, cancellationToken);
 
+    public Task<VehicleLookup?> GetByUnitNumberAsync(string unitNumber, CancellationToken cancellationToken = default) =>
+        context.VehicleLookups.AsNoTracking()
+            .FirstOrDefaultAsync(v => v.UnitNumber == unitNumber, cancellationToken);
+
     public async Task UpsertAsync(VehicleLookup vehicle, CancellationToken cancellationToken = default)
     {
         var existing = await context.VehicleLookups

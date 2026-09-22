@@ -484,8 +484,12 @@ Read models power the Admin and Owner dashboards without hammering the transacti
 This is the one app where offline-first is not optional — cellular coverage between Thompson,
 Lynn Lake, and the Alamos mine site is patchy by design of geography, not a corner case.
 
-- **Local-first store** on the tablet (SQLite) mirrors the subset of data the driver needs for
-  their assigned trips.
+- **Local-first store** on the tablet (**IndexedDB** — this said SQLite when the app was going to
+  be Flutter; the 2026-09 PWA reversal changes the storage engine and nothing else in this
+  section) mirrors the subset of data the driver needs for their assigned trips.
+  IndexedDB adds one obligation SQLite did not have: it is **evictable** unless
+  `navigator.storage.persist()` has been granted. A queued DVIR disappearing because the browser
+  reclaimed space is a compliance failure, not a lost draft — call it, and handle refusal visibly.
 - **Command queue**: every action (DVIR submission, manifest update, fault report, cargo log
   entry) is written locally first, queued, and synced when connectivity returns.
 - **Idempotent commands**: each queued command carries a client-generated GUID so retried syncs
@@ -593,16 +597,18 @@ carry them as literal values and are **gitignored** — a fresh clone needs both
 | Backend API | .NET 10, CQRS/DDD — one class library per domain, composed by the API gateway |
 | Database | PostgreSQL (+ RLS for tenant isolation) |
 | Object storage | OVHcloud Object Storage (S3-compatible) |
-| Mobile — Community App | **Flutter — decided.** Personal device (passenger's own phone), iOS/Android |
-| Mobile — Driver Field App | **Flutter — decided, company-issued tablet only.** Deployed exclusively on Northern Link-owned, MDM-enrolled tablets — **not** a BYOD (bring-your-own-device) app, and not intended for a driver's personal phone. This keeps company/client data off personal devices (a real PIPEDA-relevant simplification), ensures consistent hardware for badge-scan check-in (Feature 3.2/3.4), and matches the existing operational pattern already established for the Zello Work / Starlink tablet setup |
+| Mobile — Community App | ~~Flutter~~ → **Next.js PWA — superseded 2026-08** by the Community Booking & Dispatch spec. Personal device (passenger's own phone), installable from the browser |
+| Mobile — Driver Field App | ~~Flutter~~ → **Next.js PWA — superseded 2026-09**, company-issued tablet only. **Every word of the original rationale still holds and is unchanged by the reversal:** deployed exclusively on Northern Link-owned, MDM-enrolled tablets — **not** a BYOD (bring-your-own-device) app, and not intended for a driver's personal phone. This keeps company/client data off personal devices (a real PIPEDA-relevant simplification), ensures consistent hardware for badge-scan check-in (Feature 3.2/3.4), and matches the existing operational pattern already established for the Zello Work / Starlink tablet setup. Only the framework changed. What the PWA form does cost, and what must be answered before the offline batch: **badge scanning** (a hardware HID/Bluetooth scanner works fine — it types like a keyboard — but Web NFC is Chrome-on-Android-only and `BarcodeDetector` is Chromium-only, so **confirm the badge technology**), **kiosk lockdown** (an installed WebAPK pins via Android managed configuration, but is not an MDM-pushed APK), **storage eviction** (see Section 8), and **background sync** (`SyncManager` is Chromium-only and unreliable — the queue must drain on app open). Implemented at `DriverField/` |
 | Desktop (Owner/Exec App) | **Access restricted to super-user roles only** (Owner, Accountant, future Board) — see 6.1. Technical approach still open; recommend a lightweight Electron wrapper reusing the Admin Web App's Next.js dashboard code rather than a separate native build, given the very small, low-churn user base |
 | Hosting | OVHcloud Canada, Beauharnois QC |
 | Identity | Self-hosted OIDC (OpenIddict recommended) — confirmed |
 | Monitoring/Observability | **Recommended stack** — see Section 11.1 |
 
-*Both Flutter apps share the same offline-storage approach (SQLite via `sqflite`/`drift`), which
-matters most for the Driver Field App given its offline-first requirement, but keeps the codebase
-patterns consistent across both.*
+*~~Both Flutter apps share the same offline-storage approach (SQLite via `sqflite`/`drift`).~~
+**No longer true, and this was the sentence most likely to mislead — neither app is Flutter any
+more.** Both are Next.js PWAs, and the Driver Field App's offline store is IndexedDB (Section 8).
+The consistency argument survives in a different form: all four frontends are now Next.js, and
+three of them share Dispatcher's design system by verbatim copy.*
 
 ---
 
@@ -612,10 +618,14 @@ These are real decisions, not defaults I've silently picked — worth a delibera
 the roadmap locks them in:
 
 1. ~~Identity provider~~ — **Resolved**: self-host OIDC for now.
-2. ~~Mobile app framework~~ — **Resolved, then partially superseded (2026-08)**: Flutter stands
-   for the Driver Field App; the Community App was re-decided as a **Next.js PWA** by the
-   Community Booking & Dispatch spec (the Flutter `CommunityMobile/` mockup is shelved as its
-   IA reference).
+2. ~~Mobile app framework~~ — **Resolved, then fully superseded (2026-08, 2026-09)**: the
+   Community App was re-decided as a **Next.js PWA** (Aug 2026, Community Booking & Dispatch
+   spec); the Driver Field App followed (Sep 2026, owner's decision, scaffolded at
+   `DriverField/`). **Flutter now ships nowhere on this platform** — `CommunityMobile/` is the
+   only Flutter folder left and is already shelved as an IA reference. Device policy (company
+   tablet, landscape, 10-inch, never BYOD) and the offline-first requirement are **unchanged** —
+   only the framework moved. See Section 12 for what the PWA form costs and what must be
+   confirmed before the offline batch.
 3. ~~Desktop app approach~~ — **Resolved (access model)**: restricted to super-user roles (Owner,
    Accountant, future Board). Technical implementation recommended as Electron wrapping the Admin
    Web App's Next.js code, given the small user base — confirm if you want a different approach.
@@ -655,6 +665,31 @@ the roadmap locks them in:
     produced a real isolation bug and a `42704` migration failure on fresh databases. CQRS read
     models are ordinary projector-maintained tables (`rm_*`) precisely so they can carry the same
     policy as everything else.
+
+13. **Driver Field App v1 scope** — **Decided (2026-09)**: shell plus mock screens, with real
+    authentication and a real `DriverAccess` role gate. Offline-first is designed as an explicit
+    seam (`DriverField/lib/sync/` — real types, no-op bodies, every screen mutation already
+    routed through `queue.enqueue()`) but **implemented in a later batch**. Recorded here so that
+    "the driver app exists" is never read as "drivers can work offline", and so the offline work
+    has a decision to point at rather than being quietly forgotten. Open items that gate it:
+    confirm the **badge technology** (Section 12), honour an `Idempotency-Key` server-side (no
+    endpoint anywhere does today, and there is no `processed_commands` table), call
+    `navigator.storage.persist()` (Section 8), and self-host the four Google fonts so a first run
+    in a dead zone does not fall back to the wrong families.
+
+14. **Driver-facing API authorization** — **Decided (2026-09)**, recorded because it fixed a live
+    hole rather than adding a feature. A `Driver`-role token previously satisfied the bare
+    `.RequireAuthorization()` on `/api/trips`, `/api/fleet`, `/api/clients` and `/api/billing`,
+    so a driver could create routes, delete stops, register drivers, write work orders and read
+    every invoice. The fix has three parts, and **the first alone is not the fix**: (a) a
+    `DriverAccess` policy, which *widens* rather than narrows because it contains `Driver`;
+    (b) a **group restructure** — dispatcher-shaped routes narrowed to `DispatchAccess`, with
+    driver-facing routes given their own sibling `MapGroup` (ASP.NET group policies are additive,
+    so you cannot widen inside a narrowed group); and (c) **own-record enforcement**, so a Driver
+    token reaches only its own driver row. `Driver.UserId` on the Drivers aggregate is what makes
+    (c) answerable — `GET /api/drivers/me` resolves the `sub` claim against it, with no Identity
+    claim and no cross-module replica. A `DriverSurfaceMetadataTests` walk of the endpoint data
+    source is what stops the hole reopening.
 
 ---
 

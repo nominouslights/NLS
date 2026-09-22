@@ -22,7 +22,9 @@ namespace NorthernLink.Budgeting.Domain.Allocations;
 /// <b>Justification is required.</b> This is zero-based budgeting: every line is argued from
 /// zero, each period, and a line without its argument is not a plan — it is a number. The
 /// justification that used to sit on the code moved here for that reason (see
-/// <c>BudgetCodeDetails.Description</c>).
+/// <c>BudgetCodeDetails.Description</c>). The single exception is <see cref="CopyInto"/>, which
+/// carries an earlier period's amount forward with an <em>empty</em> justification on purpose —
+/// read its doc comment before touching it.
 /// </para>
 /// <para>
 /// No <c>Delete()</c>: removal is a hard delete driven by the synthetic aggregate-deleted journal
@@ -61,6 +63,18 @@ public sealed class BudgetAllocation : AggregateRoot, ITenantScoped
 
     /// <summary>Why this amount, argued from zero. Trimmed, required.</summary>
     public string Justification { get; private set; }
+
+    /// <summary>
+    /// Whether this line is still waiting for its argument — true only for a line produced by
+    /// <see cref="CopyInto"/>, which is the one path that stores an empty justification.
+    /// <para>
+    /// Get-only with no backing field, so EF Core never maps it — exactly the reason
+    /// <c>BudgetPeriod.AllowsPlanChanges</c> needs no column either. <b>Adding a setter or a
+    /// backing field here would make it a mapped property and demand a migration</b> for a value
+    /// that is a pure function of <see cref="Justification"/>.
+    /// </para>
+    /// </summary>
+    public bool NeedsJustification => Justification.Length == 0;
 
     /// <summary>
     /// Who created and last changed this line, from the access token's <c>sub</c> claim — never
@@ -141,6 +155,64 @@ public sealed class BudgetAllocation : AggregateRoot, ITenantScoped
         allocation.Raise(new BudgetAllocationCreatedDomainEvent(
             allocation.Id, tenantId, periodId, budgetCodeId, code, allocation.AmountCad, actorId));
         return Result.Success(allocation);
+    }
+
+    /// <summary>
+    /// Copies this line into another period, <b>carrying the amount and deliberately dropping the
+    /// argument</b>: same tenant, same budget code (id and string), same
+    /// <see cref="AmountCad"/> — and <see cref="Justification"/> set to <see cref="string.Empty"/>.
+    /// <para>
+    /// <b>This is the one place the aggregate's headline invariant is broken on purpose, and that
+    /// is the feature — do not "fix" it by routing through <see cref="Create"/>.</b>
+    /// <see cref="Validate"/> rejects an empty justification, so <see cref="Create"/> physically
+    /// cannot produce a copied line. Zero-based budgeting means the amount may be seeded from an
+    /// earlier period as a <em>starting position</em>, but the argument for it is never inherited:
+    /// last quarter's reasoning is not this quarter's reasoning, and a copy that brought the
+    /// justification along would turn ZBB into rollover budgeting with extra steps.
+    /// </para>
+    /// <para>
+    /// The copied line is therefore <see cref="NeedsJustification"/> until somebody argues it, and
+    /// <c>SetBudgetAllocationCommandHandler</c> — which runs <see cref="Validate"/> first — will
+    /// refuse to save it again with <c>JustificationRequired</c> until they do. The empty string is
+    /// legal in the database (<c>justification varchar(1000) NOT NULL</c>), so this needs no
+    /// schema change.
+    /// </para>
+    /// <para>
+    /// An <em>instance</em> method rather than a static factory, so the copy cannot be handed a
+    /// mismatched tenant, code id or code string — they come from the line being copied, and only
+    /// the period and the actor are supplied. Nothing here can fail, so it returns a bare
+    /// <see cref="BudgetAllocation"/> rather than a <see cref="Result{TValue}"/>: the amount was
+    /// already validated and rounded when the source line was written. Raises
+    /// <see cref="BudgetAllocationCreatedDomainEvent"/> exactly as <see cref="Create"/> does — the
+    /// copy is a new line with its own id, and the read model is built from that event.
+    /// </para>
+    /// <para>
+    /// Whether the target period accepts plan changes, whether the code is still active, and
+    /// whether the target already plans this code are all the copy handler's checks — the
+    /// aggregate can see none of them, the same division <see cref="Create"/> lives under.
+    /// </para>
+    /// </summary>
+    public BudgetAllocation CopyInto(Guid periodId, Guid? actorId)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var copy = new BudgetAllocation
+        {
+            TenantId = TenantId,
+            PeriodId = periodId,
+            BudgetCodeId = BudgetCodeId,
+            Code = Code,
+            // Already rounded when the source line was created or updated; re-rounding an
+            // already-cent-rounded value is a no-op, so it is carried straight across.
+            AmountCad = AmountCad,
+            Justification = string.Empty,
+            CreatedBy = actorId,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+        };
+
+        copy.Raise(new BudgetAllocationCreatedDomainEvent(
+            copy.Id, TenantId, periodId, BudgetCodeId, Code, AmountCad, actorId));
+        return copy;
     }
 
     /// <summary>

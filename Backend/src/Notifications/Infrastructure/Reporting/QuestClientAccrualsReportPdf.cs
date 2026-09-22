@@ -9,10 +9,13 @@ namespace NorthernLink.Notifications.Infrastructure.Reporting;
 /// <summary>
 /// <see cref="IClientAccrualsReportPdf"/> backed by QuestPDF (Community license, set once at
 /// DI time in <c>AddNotifications</c>). Renders a single-document report: a header block with
-/// the client and period, any notes, the bucket summary table, one detail table per bucket,
-/// the reconciliation section, and the referenced invoices.
+/// the client and period, any notes, the leading headline figures, the summary table, one
+/// detail table per bucket, the reconciliation section, and the referenced invoices.
 /// Every value is an already-formatted string from the flat <see cref="ClientAccrualsReport"/>
-/// — no domain lookups, and empty sections are simply skipped (an empty month still renders).
+/// — no domain lookups, and empty sections are simply skipped (an empty month still renders,
+/// and a report with no headline figures simply has no headline block).
+/// Lists print in the order they arrive: the frontend owns section grouping and ordering, and
+/// this renderer never re-sorts, re-groups or totals anything.
 /// </summary>
 public sealed class QuestClientAccrualsReportPdf : IClientAccrualsReportPdf
 {
@@ -87,6 +90,13 @@ public sealed class QuestClientAccrualsReportPdf : IClientAccrualsReportPdf
                 });
             }
 
+            // The figures the report leads with — what is coming, and what is owed. Skipped
+            // entirely when the client sends none, so an older payload renders unchanged.
+            if (report.Headline.Count > 0)
+            {
+                column.Item().Element(block => ComposeHeadline(block, report.Headline));
+            }
+
             if (report.Summary.Count > 0)
             {
                 column.Item().Element(block => ComposeSummary(block, report.Summary));
@@ -109,6 +119,39 @@ public sealed class QuestClientAccrualsReportPdf : IClientAccrualsReportPdf
         });
     }
 
+    /// <summary>
+    /// The leading figures, side by side above the summary — each a boxed label, a large bare
+    /// CAD amount and a one-line detail. Monochrome throughout: the figures carry no status
+    /// semantics, so no status colors appear, and every amount is printed exactly as supplied
+    /// (no arithmetic here, and no tax anywhere — QuickBooks owns tax).
+    /// </summary>
+    private static void ComposeHeadline(IContainer container, IReadOnlyList<AccrualsHeadlineFigure> headline)
+    {
+        container.Row(row =>
+        {
+            row.Spacing(10);
+
+            foreach (var figure in headline)
+            {
+                row.RelativeItem().Border(1).BorderColor(Colors.Grey.Lighten1).Padding(8).Column(figureColumn =>
+                {
+                    figureColumn.Item().Text(figure.Label).FontSize(9).SemiBold().FontColor(MutedColor);
+                    figureColumn.Item().PaddingTop(3).Text(figure.AmountCad).FontSize(18).Bold();
+
+                    if (figure.Detail.Length > 0)
+                    {
+                        figureColumn.Item().PaddingTop(3).Text(figure.Detail).FontSize(8).FontColor(MutedColor);
+                    }
+                });
+            }
+        });
+    }
+
+    /// <summary>
+    /// The summary table. A row with <see cref="AccrualsSummaryRow.Emphasis"/> set is a section
+    /// subtotal and reads as a heading; the rows beneath it are indented bucket lines. The
+    /// frontend supplies the grouping and the order — this only honours the flag.
+    /// </summary>
     private static void ComposeSummary(IContainer container, IReadOnlyList<AccrualsSummaryRow> summary)
     {
         container.Column(column =>
@@ -135,10 +178,12 @@ public sealed class QuestClientAccrualsReportPdf : IClientAccrualsReportPdf
 
                 foreach (var row in summary)
                 {
-                    table.Cell().Element(BodyCell).Text(row.BucketLabel);
-                    table.Cell().Element(BodyCell).AlignRight().Text(row.RoundTrips);
-                    table.Cell().Element(BodyCell).AlignRight().Text(row.ActualCad);
-                    table.Cell().Element(BodyCell).AlignRight().Text(row.EstimatedCad);
+                    Func<IContainer, IContainer> cell = row.Emphasis ? SummarySectionCell : BodyCell;
+
+                    table.Cell().Element(cell).PaddingLeft(row.Emphasis ? 0 : 10).Text(row.BucketLabel);
+                    table.Cell().Element(cell).AlignRight().Text(row.RoundTrips);
+                    table.Cell().Element(cell).AlignRight().Text(row.ActualCad);
+                    table.Cell().Element(cell).AlignRight().Text(row.EstimatedCad);
                 }
             });
         });
@@ -282,4 +327,15 @@ public sealed class QuestClientAccrualsReportPdf : IClientAccrualsReportPdf
         .BorderColor(Colors.Grey.Lighten3)
         .PaddingVertical(3)
         .PaddingHorizontal(2);
+
+    // A summary row that heads a section: semibold and a slightly stronger rule, so the
+    // subtotal reads as a heading above its indented bucket lines. Weight and rule only —
+    // no color carries the distinction.
+    private static IContainer SummarySectionCell(IContainer container) => container
+        .BorderBottom(1)
+        .BorderColor(Colors.Grey.Lighten1)
+        .PaddingTop(5)
+        .PaddingBottom(3)
+        .PaddingHorizontal(2)
+        .DefaultTextStyle(x => x.SemiBold());
 }

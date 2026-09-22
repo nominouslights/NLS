@@ -5,7 +5,11 @@ import type { BudgetCodeCategory } from "@/lib/types";
 import { MonoTag, StatusChip } from "@/components/ui/Chip";
 import { ActionButton } from "@/components/ui/Button";
 import { formatCad } from "@/lib/api/format";
-import { SERVICE_LINE_LABELS, type BudgetAllocationRecord } from "@/lib/api/budgeting";
+import {
+  needsJustification,
+  SERVICE_LINE_LABELS,
+  type BudgetAllocationRecord,
+} from "@/lib/api/budgeting";
 import { EmptyNote, Num, TableHead } from "@/components/screens/shared";
 
 // One category's lines on the period dashboard — rendered twice, Revenue then Expense. Rows are
@@ -14,6 +18,11 @@ import { EmptyNote, Num, TableHead } from "@/components/screens/shared";
 // code is restored. When the period is not editable the add and remove controls are simply
 // absent — the dashboard explains why in one note above both sections, so this component does
 // not repeat it.
+//
+// A line copied from an earlier period arrives with its amount and an EMPTY justification
+// (BudgetAllocation.CopyInto) — a value nothing in this app rendered before the copy existed,
+// and one that used to produce a dangling " · " and a blank second line. It now gets a
+// "Needs justification" chip plus placeholder text, so the gap reads as the work it is.
 
 export default function AllocationSection({
   category,
@@ -86,6 +95,7 @@ export default function AllocationSection({
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {lines.map((l) => {
               const confirming = confirmRemoveCodeId === l.budgetCodeId;
+              const unargued = needsJustification(l);
               return (
                 <div
                   key={l.id}
@@ -115,6 +125,7 @@ export default function AllocationSection({
                         {l.name}
                       </span>
                       {!l.isCodeActive && <StatusChip kind="off" label="Retired" />}
+                      {unargued && <StatusChip kind="soon" label="Needs justification" />}
                     </div>
                     <div
                       style={{
@@ -126,7 +137,13 @@ export default function AllocationSection({
                       }}
                     >
                       {l.serviceLine ? `${SERVICE_LINE_LABELS[l.serviceLine]} · ` : ""}
-                      {l.justification}
+                      {/* The justification slot always carries text, so the separator above can
+                          never dangle: an unargued line shows what is missing instead of a blank. */}
+                      <span style={unargued ? { fontStyle: "italic" } : undefined}>
+                        {unargued
+                          ? "Carried over from an earlier period — argue this line before it can be saved."
+                          : l.justification}
+                      </span>
                     </div>
                   </div>
                   <div style={{ width: 150, textAlign: "right", flex: "none" }}>

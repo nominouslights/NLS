@@ -401,9 +401,13 @@ export function updateRoute(id: string, input: RouteInput & { active: boolean })
 }
 
 // ---------------------------------------------------------------------------
-// Schedule templates — a backend worker generates trips from ACTIVE templates
-// (~every 30 min, GenerationHorizonDays ahead, default 7). Template edits
-// affect not-yet-generated trips only.
+// Schedule templates — trips materialize from ACTIVE templates two ways that
+// share one backend code path: a worker keeps the near horizon topped up
+// (~every 30 min, GenerationHorizonDays ahead, default 7), and a dispatcher
+// can generate further ahead on demand — up to 12 months — through the
+// preview/generate pair below (idempotent: occurrences that already exist are
+// skipped). Template edits and Special Dates affect not-yet-generated dates
+// only; a trip that already exists is fixed and is edited/cancelled from Trips.
 // ---------------------------------------------------------------------------
 
 export type DayName =
@@ -539,6 +543,41 @@ export function updateScheduleTemplate(id: string, input: ScheduleTemplateInput)
 export function setScheduleTemplateActive(id: string, active: boolean): Promise<void> {
   return request<void>(`/api/trips/schedule-templates/${id}/${active ? "activate" : "deactivate"}`, {
     method: "POST",
+  });
+}
+
+/** Mirrors ScheduleTripGenerationResult (Trips module). Dates are "yyyy-MM-dd";
+ *  `through` is inclusive. From the preview, `tripCount` is how many trips WOULD
+ *  be created; from generate, how many WERE. `alreadyExisted` counts occurrences
+ *  in the window the template had already materialized (skipped, never touched).
+ *  `outbound`/`inbound` split `tripCount` by direction (inbound is 0 for a
+ *  one-way template); first/last service date are null when `tripCount` is 0. */
+export interface ScheduleTripGenerationResult {
+  from: string;
+  through: string;
+  tripCount: number;
+  alreadyExisted: number;
+  outbound: number;
+  inbound: number;
+  firstServiceDate: string | null;
+  lastServiceDate: string | null;
+}
+
+/** GET {id}/generate/preview?through=yyyy-MM-dd — runs every generation guard
+ *  (inactive template, window, route, default driver/vehicle) and counts, but
+ *  never persists. Errors arrive as ApiError with the same codes generate uses. */
+export function previewScheduleTripGeneration(id: string, through: string): Promise<ScheduleTripGenerationResult> {
+  const qs = new URLSearchParams({ through });
+  return request<ScheduleTripGenerationResult>(`/api/trips/schedule-templates/${id}/generate/preview?${qs}`);
+}
+
+/** POST {id}/generate { through } — materializes every missing occurrence from
+ *  today (UTC, the worker's convention) through the date inclusive. 409
+ *  GenerationConflict means another run landed first: re-preview and retry. */
+export function generateScheduleTrips(id: string, through: string): Promise<ScheduleTripGenerationResult> {
+  return request<ScheduleTripGenerationResult>(`/api/trips/schedule-templates/${id}/generate`, {
+    method: "POST",
+    body: JSON.stringify({ through }),
   });
 }
 

@@ -14,9 +14,13 @@ using NorthernLink.Drivers.Application.Credentials.Remove;
 using NorthernLink.Drivers.Application.Credentials.SetImage;
 using NorthernLink.Drivers.Application.Drivers;
 using NorthernLink.Drivers.Application.Drivers.ChangeStatus;
+using NorthernLink.Drivers.Application.Drivers.GetByUser;
 using NorthernLink.Drivers.Application.Drivers.GetDriverById;
 using NorthernLink.Drivers.Application.Drivers.GetDrivers;
+using NorthernLink.Drivers.Application.Drivers.LinkUser;
 using NorthernLink.Drivers.Application.Drivers.Register;
+using NorthernLink.Drivers.Application.Drivers.SelfAccess;
+using NorthernLink.Drivers.Application.Drivers.UnlinkUser;
 using NorthernLink.Drivers.Application.Drivers.Update;
 using NorthernLink.Drivers.Application.Hos;
 using NorthernLink.Drivers.Application.Hos.GetForDriver;
@@ -70,12 +74,20 @@ public static class DriversServiceCollectionExtensions
         services.AddScoped<IHosLogRepository, HosLogRepository>();
         services.AddScoped<IHosLogReadService, HosLogReadService>();
 
+        // The caller-owns-this-row guard for the {driverId} routes on the DriverAccess group.
+        // Not a handler — endpoints call it BEFORE dispatching, so a denial never reaches a
+        // command handler at all.
+        services.AddScoped<IDriverSelfAccess, DriverSelfAccess>();
+
         // 3. Command/query handlers — registered explicitly, one line per handler.
         services.AddScoped<ICommandHandler<RegisterDriverCommand, Guid>, RegisterDriverCommandHandler>();
         services.AddScoped<ICommandHandler<UpdateDriverCommand>, UpdateDriverCommandHandler>();
         services.AddScoped<ICommandHandler<ChangeDriverStatusCommand>, ChangeDriverStatusCommandHandler>();
         services.AddScoped<IQueryHandler<GetDriversQuery, IReadOnlyList<DriverResponse>>, GetDriversQueryHandler>();
         services.AddScoped<IQueryHandler<GetDriverByIdQuery, DriverResponse>, GetDriverByIdQueryHandler>();
+        services.AddScoped<IQueryHandler<GetDriverByUserQuery, DriverResponse>, GetDriverByUserQueryHandler>();
+        services.AddScoped<ICommandHandler<LinkDriverUserCommand>, LinkDriverUserCommandHandler>();
+        services.AddScoped<ICommandHandler<UnlinkDriverUserCommand>, UnlinkDriverUserCommandHandler>();
         services.AddScoped<ICommandHandler<AddDriverCredentialCommand, Guid>, AddDriverCredentialCommandHandler>();
         services.AddScoped<ICommandHandler<RemoveDriverCredentialCommand>, RemoveDriverCredentialCommandHandler>();
         services.AddScoped<ICommandHandler<SetDriverCredentialImageCommand>, SetDriverCredentialImageCommandHandler>();

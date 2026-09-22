@@ -14,22 +14,34 @@ import {
 import {
   contractRateLabel,
   listClients,
+  listPurchaseOrders,
   renewalChipFor,
   type ClientRecord,
+  type PurchaseOrderRecord,
 } from "@/lib/api/clients";
 import { corridorLabel, listTrips, shortDateLabel, todayIso, type TripRecord } from "@/lib/api/trips";
 import {
   ACCRUAL_BUCKET_META,
   ACCRUALS_ESTIMATE_NOTE,
   ACCRUALS_TAX_NOTE,
+  AMOUNT_FLAG_META,
   AMOUNT_NOTE_META,
+  PO_FLAG_META,
+  accrualHeadlines,
+  accrualSectionAmountLabel,
+  accrualSectionDetail,
   accrualsClipboardText,
   buildAccrualsReport,
   groupAmountLabel,
+  groupPoLabel,
   groupRefLabel,
   groupRouteLabel,
+  poCommitmentDetail,
   type AccrualBucket,
   type AccrualGroup,
+  type AccrualHeadline,
+  type AccrualPoCommitment,
+  type AccrualSection,
   type AccrualsReport,
 } from "@/lib/billing/accruals";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -44,15 +56,22 @@ import { SelectField } from "@/components/ui/Field";
 import { PeriodNav } from "@/components/ui/PeriodNav";
 
 // Client Accruals — the monthly per-client accruals report, one of the two
-// reports the Reports screen hosts: every trip in the month
-// bucketed by billing state (paid / invoiced / ready / scheduled / upcoming),
-// real invoice amounts where invoiced or paid, clearly-marked contract-rate
-// estimates elsewhere, and a reconciliation section for cancelled/written-off
-// trips. The derivation lives in lib/billing/accruals.ts, shared with the
-// printed NL-ACC-01 sheet and the clipboard export so all three agree.
+// reports the Reports screen hosts. It answers two questions in order:
+// what upcoming work is not yet done (a headline figure over the upcoming +
+// scheduled buckets, estimated at each purchase order's own rates with the
+// contract rate as the fallback), and what is still owed (the ready + invoiced
+// buckets, real invoice amounts plus clearly-marked estimates). A purchase-order
+// block sits under the headline: what each PO authorises against what this month
+// draws down on it. Settled work closes the month on ONE line — it still has to
+// reconcile, but it is not what the report is for, so it has no per-trip table.
+// Cancelled and written-off trips keep their reconciliation section.
+//
+// The derivation lives in lib/billing/accruals.ts — sections, subtotals and both
+// headline strings included — shared with the printed NL-ACC-01 sheet, the
+// clipboard export and the emailed PDF so all four agree on every dollar.
 
 /** Pseudo-table column template shared by the header row and every group row. */
-const GRID_COLS = "88px 170px 1fr 90px 140px 150px";
+const GRID_COLS = "88px 170px 1fr 150px 140px 150px";
 
 // ---------------------------------------------------------------------------
 // Row pieces
@@ -78,15 +97,30 @@ function LegLine({ leg }: { leg: TripRecord }) {
   );
 }
 
-/** Amount cell: real dollars, "$X est.", or the spelled-out unpriced reason
- *  as a chip (colour + glyph + text — never colour alone). A plain "—" means
- *  the banner notes explain it (manual billing / no contract / no rate). */
+/** Amount cell: real dollars, "$X est." — with the amount flag chip BESIDE the
+ *  figure when the group is unpaired (it has an amount: the PO's one-way rate
+ *  per leg, exactly what the invoice will bill) or split across two POs — or the
+ *  spelled-out unpriced reason as a chip (colour + glyph + text, never colour
+ *  alone). A plain "—" means the banner notes explain it (manual billing / no
+ *  contract / no rate on the PO or the contract). */
 function AmountCell({ group }: { group: AccrualGroup }) {
   const label = groupAmountLabel(group);
   if (label !== null) {
+    const flag = group.amountFlag ? AMOUNT_FLAG_META[group.amountFlag] : null;
     return (
-      <div style={{ ...cellStyle, textAlign: "right", color: colors.textSecondary, fontWeight: 600 }}>
-        {label}
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "flex-end",
+          gap: 3,
+          minWidth: 0,
+        }}
+      >
+        <div style={{ ...cellStyle, textAlign: "right", color: colors.textSecondary, fontWeight: 600 }}>
+          {label}
+        </div>
+        {flag && <StatusChip kind={flag.kind} label={flag.label} />}
       </div>
     );
   }
@@ -122,7 +156,14 @@ function GroupRow({ group, last }: { group: AccrualGroup; last: boolean }) {
       <div style={{ ...cellStyle, fontFamily: fonts.body, fontSize: 12, color: colors.textMuted }}>
         {groupRouteLabel(group)}
       </div>
-      <div style={cellStyle}>{group.legs[0].poNumber ?? "—"}</div>
+      {/* the EFFECTIVE PO that priced this group — a pricing fact now, not a
+          reference string — with any PO warning as colour + glyph + text */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0 }}>
+        <div style={cellStyle}>{groupPoLabel(group)}</div>
+        {group.poFlags.map((f) => (
+          <StatusChip key={f} kind={PO_FLAG_META[f].kind} label={PO_FLAG_META[f].label} />
+        ))}
+      </div>
       <div style={cellStyle}>{groupRefLabel(group)}</div>
       <AmountCell group={group} />
     </div>
@@ -130,43 +171,152 @@ function GroupRow({ group, last }: { group: AccrualGroup; last: boolean }) {
 }
 
 // ---------------------------------------------------------------------------
-// Summary tile — sibling of Billing's ReceivableTile (kept local on purpose).
-// The status kind pairs a colour with the StatusChip's glyph and text label,
-// so the bucket distinction never rests on colour alone.
+// Headline tile — sibling of Billing's ReceivableTile and of the Terminus
+// report's FigureTile, all kept local to their screen on purpose. Two tiles
+// only: upcoming expenses, then monies owed. Both strings come from the shared
+// derivation (accrualHeadlines), so a tile can never state a figure the printed
+// sheet or the emailed PDF disagrees with. The status kind pairs its colour with
+// the StatusChip's glyph and text label, so the distinction between "coming" and
+// "owed" never rests on colour alone.
 // ---------------------------------------------------------------------------
 
-function AccrualTile({ bucket }: { bucket: AccrualBucket }) {
-  const n = bucket.groups.length;
-  const sublines: string[] = [`${n} round trip${n === 1 ? "" : "s"}`];
-  if (bucket.estimatedCad > 0) sublines.push(`incl. ${formatInvoiceCad(bucket.estimatedCad)} est.`);
-  if (bucket.unpricedCount > 0) sublines.push(`${bucket.unpricedCount} unpriced`);
+function HeadlineTile({ headline }: { headline: AccrualHeadline }) {
   return (
     <div
       style={{
-        flex: "1 1 160px",
-        padding: "11px 14px",
+        flex: "1 1 240px",
+        padding: "13px 16px",
         background: colors.cardBg,
         border: `1px solid ${colors.border}`,
         borderRadius: 11,
         boxShadow: colors.shadowCard,
       }}
     >
-      <StatusChip kind={bucket.kind} label={bucket.label} />
+      <StatusChip kind={headline.kind} label={headline.label} />
       <div
         style={{
           fontFamily: fonts.condensed,
           fontWeight: 700,
-          fontSize: 21,
+          fontSize: 27,
           color: colors.headingBright,
           fontVariantNumeric: "tabular-nums",
-          marginTop: 7,
+          marginTop: 8,
         }}
       >
-        {formatInvoiceCad(bucket.actualCad + bucket.estimatedCad)}
+        {headline.amountCad}
       </div>
-      <div style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.textDim, marginTop: 3, minHeight: 13 }}>
-        {sublines.join(" · ") || " "}
+      <div style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textDim, marginTop: 3, minHeight: 14 }}>
+        {headline.detail}
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Purchase-order authorisation — what each PO authorises against what this
+// month draws down on it. This is the point of the upcoming-expenses headline:
+// a PO about to be overspent is visible before the run happens. Every row pairs
+// its status colour with the StatusChip's glyph and a spelled-out figure, and a
+// breach is a warning only — nothing here blocks anything.
+// ---------------------------------------------------------------------------
+
+function PoCommitmentRow({ commitment }: { commitment: AccrualPoCommitment }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 11,
+        flexWrap: "wrap",
+        padding: "8px 12px",
+        marginBottom: 5,
+        background: colors.cardBg,
+        border: `1px solid ${
+          commitment.overageCad !== null ? "rgba(213,94,0,.4)" : colors.borderSubtle
+        }`,
+        borderRadius: 9,
+      }}
+    >
+      <span style={{ ...cellStyle, fontWeight: 600, color: colors.headingBright, minWidth: 110 }}>
+        {commitment.poNumber ?? "No PO"}
+      </span>
+      <span style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.textMuted }}>
+        {commitment.termsLabel}
+      </span>
+      <span style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textDim, marginLeft: "auto" }}>
+        {poCommitmentDetail(commitment)}
+      </span>
+      <StatusChip kind={commitment.kind} label={commitment.label} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Section header + the settled closing line. A section is a reading grouping
+// over the same bucket objects (lib/billing/accruals.ts) — chip, hint and the
+// section's own subtotal, above its buckets' tables. The settled section has no
+// table at all: one line, deliberately.
+// ---------------------------------------------------------------------------
+
+/** Subtotal figure styling shared by the section header and the settled line. */
+function tallyStyle(size: number) {
+  return {
+    fontFamily: fonts.condensed,
+    fontWeight: 700,
+    fontSize: size,
+    color: colors.headingBright,
+    fontVariantNumeric: "tabular-nums" as const,
+  };
+}
+
+function SectionHeader({ section }: { section: AccrualSection }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 11,
+        flexWrap: "wrap",
+        marginTop: 22,
+        paddingBottom: 6,
+        borderBottom: `1px solid ${colors.border}`,
+      }}
+    >
+      <StatusChip kind={section.kind} label={section.label} />
+      <span style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim }}>{section.hint}</span>
+      <span style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textDim, marginLeft: "auto" }}>
+        {accrualSectionDetail(section)}
+      </span>
+      <span style={tallyStyle(16)}>{accrualSectionAmountLabel(section)}</span>
+    </div>
+  );
+}
+
+/** Settled this month — one closing summary line, no per-trip detail table. The
+ *  month still reconciles (the printed summary carries every bucket and
+ *  Invoices Referenced still lists the invoices) without re-listing work that
+ *  needs no action. */
+function SettledLine({ section }: { section: AccrualSection }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 11,
+        flexWrap: "wrap",
+        marginTop: 18,
+        padding: "9px 14px",
+        background: colors.cardBg,
+        border: `1px solid ${colors.borderSubtle}`,
+        borderRadius: 9,
+      }}
+    >
+      <StatusChip kind={section.kind} label={section.label} />
+      <span style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim }}>{section.hint}</span>
+      <span style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textDim, marginLeft: "auto" }}>
+        {accrualSectionDetail(section)}
+      </span>
+      <span style={tallyStyle(15)}>{accrualSectionAmountLabel(section)}</span>
     </div>
   );
 }
@@ -273,6 +423,9 @@ export default function ClientAccruals({
     today: string;
     trips: TripRecord[];
     invoices: InvoiceDetailRecord[];
+    /** null = the PO fetch failed: pricing degrades to the contract rate and
+     *  the report raises a banner, rather than the report blanking. */
+    purchaseOrders: PurchaseOrderRecord[] | null;
   } | null>(null);
   const [dataError, setDataError] = useState<{ key: string; message: string } | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -283,7 +436,14 @@ export default function ClientAccruals({
     const [cid, from, to] = dataKey.split("|");
     (async () => {
       // listTrips unpaged returns the complete match — one call per month.
-      const page = await listTrips({ from, to, clientId: cid });
+      // The client's purchase orders ride alongside: their rates are what the
+      // estimates are priced at, and their values are what the upcoming figure
+      // is measured against. A failed PO fetch degrades to contract-rate
+      // pricing with a banner (null below) — it never blanks the report.
+      const [page, purchaseOrders] = await Promise.all([
+        listTrips({ from, to, clientId: cid }),
+        listPurchaseOrders(cid).catch((): PurchaseOrderRecord[] | null => null),
+      ]);
       // Then the distinct invoices the trips' billing states reference: the
       // real amounts live on their lines. One failed detail fetch degrades
       // that invoice's amounts to "unavailable", not the whole report.
@@ -305,6 +465,7 @@ export default function ClientAccruals({
         today: todayIso(),
         trips: page.items,
         invoices: fetched.filter((inv): inv is InvoiceDetailRecord => inv !== null),
+        purchaseOrders,
       });
     })().catch((e) => {
       if (active)
@@ -330,6 +491,8 @@ export default function ClientAccruals({
             today: loaded.today,
             trips: loaded.trips,
             invoices: loaded.invoices,
+            purchaseOrders: loaded.purchaseOrders ?? [],
+            purchaseOrdersUnavailable: loaded.purchaseOrders === null,
           })
         : null,
     [loaded, selected, period],
@@ -361,7 +524,7 @@ export default function ClientAccruals({
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }} className="detailfade">
       <div style={{ flex: "none", padding: "20px 26px 6px" }}>
         <PageHeader
-          eyebrow="Business · Monthly client accruals"
+          eyebrow="Business · Upcoming work and monies owed, by client"
           title="Reports"
           right={
             <div style={{ display: "flex", gap: 10 }}>
@@ -444,11 +607,13 @@ export default function ClientAccruals({
         {/* no selection yet */}
         {!clientId && (
           <Panel style={{ marginTop: 14 }}>
-            <SectionLabel>Monthly accruals by client</SectionLabel>
+            <SectionLabel>Upcoming work and monies owed, by client</SectionLabel>
             <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textMuted, lineHeight: 1.6 }}>
-              Pick a client to build their accruals report for the month shown: every trip bucketed by
-              billing state, real invoice amounts where invoiced or paid, contract-rate estimates
-              (clearly marked) elsewhere, and a reconciliation of cancelled and written-off trips.
+              Pick a client to build their accruals report for the month shown. It leads with the work
+              not yet done and what it is estimated to cost, then what is still owed — issued invoices
+              plus runs complete but not yet billed. Settled work closes the month on one line, and
+              cancelled or written-off trips are reconciled below. Estimates are contract-rate and
+              always marked as such; issued invoice amounts govern.
             </div>
           </Panel>
         )}
@@ -513,12 +678,26 @@ export default function ClientAccruals({
               </Panel>
             )}
 
-            {/* summary tiles — one per bucket, always all five */}
+            {/* the two headline figures — upcoming expenses, then monies owed */}
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
-              {report.buckets.map((b) => (
-                <AccrualTile key={b.id} bucket={b} />
+              {accrualHeadlines(report).map((h) => (
+                <HeadlineTile key={h.id} headline={h} />
               ))}
             </div>
+
+            {/* purchase orders — authorised value vs this month's work */}
+            {report.poCommitments.length > 0 && (
+              <Panel style={{ marginTop: 14 }}>
+                <SectionLabel>Purchase orders — authorised value vs this month&rsquo;s work</SectionLabel>
+                {report.poCommitments.map((c) => (
+                  <PoCommitmentRow key={c.poNumber ?? "no-po"} commitment={c} />
+                ))}
+                <div style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim, lineHeight: 1.6 }}>
+                  Upcoming figures are estimates at each PO&rsquo;s effective rates. A PO over its
+                  authorised value is flagged for review — nothing is blocked.
+                </div>
+              </Panel>
+            )}
 
             {/* empty month still renders — and still prints */}
             {emptyMonth && (
@@ -530,12 +709,38 @@ export default function ClientAccruals({
               </Panel>
             )}
 
-            {/* per-bucket detail tables (non-empty buckets only) */}
-            {report.buckets
-              .filter((b) => b.groups.length > 0)
-              .map((b) => (
-                <BucketSection key={b.id} bucket={b} />
+            {/* sections in reading order: upcoming work, then monies owed, each
+                with its non-empty buckets' detail tables — then settled work as
+                one closing line with no table at all. An empty month skips them
+                entirely: the nil-statement panel above has already said so. */}
+            {!emptyMonth &&
+              report.sections
+              .filter((s) => s.detail)
+              .map((s) => (
+                <div key={s.id}>
+                  <SectionHeader section={s} />
+                  {s.buckets.filter((b) => b.groups.length > 0).length === 0 ? (
+                    <div
+                      style={{
+                        fontFamily: fonts.body,
+                        fontSize: 12.5,
+                        color: colors.textDim,
+                        marginTop: 10,
+                      }}
+                    >
+                      Nothing in this section for {periodLabel(report.period)}.
+                    </div>
+                  ) : (
+                    s.buckets
+                      .filter((b) => b.groups.length > 0)
+                      .map((b) => <BucketSection key={b.id} bucket={b} />)
+                  )}
+                </div>
               ))}
+            {!emptyMonth &&
+              report.sections
+                .filter((s) => !s.detail)
+                .map((s) => <SettledLine key={s.id} section={s} />)}
 
             {/* reconciliation — listed so the month adds up, never counted */}
             {(report.cancelled.length > 0 || report.writtenOff.length > 0) && (

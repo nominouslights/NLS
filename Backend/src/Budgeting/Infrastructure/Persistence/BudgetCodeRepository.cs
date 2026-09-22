@@ -20,6 +20,11 @@ internal sealed class BudgetCodeRepository(BudgetingDbContext context) : IBudget
     public Task<bool> HasChildrenAsync(Guid parentCodeId, CancellationToken cancellationToken = default) =>
         context.BudgetCodes.AnyAsync(c => c.ParentCodeId == parentCodeId, cancellationToken);
 
+    // The whole chart in one query — a tenant's chart is a dozen-odd rows, and the copy handler
+    // would otherwise issue one GetByIdAsync per source line.
+    public async Task<IReadOnlyList<BudgetCode>> GetAllAsync(CancellationToken cancellationToken = default) =>
+        await context.BudgetCodes.ToListAsync(cancellationToken);
+
     public void Add(BudgetCode budgetCode) => context.BudgetCodes.Add(budgetCode);
 
     public void Remove(BudgetCode budgetCode) => context.BudgetCodes.Remove(budgetCode);

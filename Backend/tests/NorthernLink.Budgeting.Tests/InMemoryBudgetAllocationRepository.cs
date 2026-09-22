@@ -22,6 +22,14 @@ internal sealed class InMemoryBudgetAllocationRepository : IBudgetAllocationRepo
         Task.FromResult(Allocations.Any(a =>
             a.BudgetCodeId == budgetCodeId || string.Equals(a.Code, code, StringComparison.Ordinal)));
 
+    // A copy of the list, like the real repository's ToListAsync: the copy handler iterates the
+    // source lines while adding to the repository, and a live view would be a mutation-during-
+    // enumeration bug the real thing does not have.
+    public Task<IReadOnlyList<BudgetAllocation>> ListForPeriodAsync(
+        Guid periodId, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<BudgetAllocation>>(
+            Allocations.Where(a => a.PeriodId == periodId).ToList());
+
     public void Add(BudgetAllocation allocation) => Allocations.Add(allocation);
 
     public void Remove(BudgetAllocation allocation) => Allocations.Remove(allocation);

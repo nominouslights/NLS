@@ -12,6 +12,7 @@ using NorthernLink.Shared.Tenancy;
 using NorthernLink.Budgeting.Application;
 using NorthernLink.Budgeting.Application.Abstractions;
 using NorthernLink.Budgeting.Application.Allocations;
+using NorthernLink.Budgeting.Application.Allocations.CopyFromPeriod;
 using NorthernLink.Budgeting.Application.Allocations.GetAllocations;
 using NorthernLink.Budgeting.Application.Allocations.Remove;
 using NorthernLink.Budgeting.Application.Allocations.Set;
@@ -94,6 +95,7 @@ public static class BudgetingServiceCollectionExtensions
         services.AddScoped<IQueryHandler<GetBudgetOwnerCandidatesQuery, IReadOnlyList<BudgetOwnerOptionResponse>>, GetBudgetOwnerCandidatesQueryHandler>();
         services.AddScoped<ICommandHandler<SetBudgetAllocationCommand, BudgetAllocationSetResult>, SetBudgetAllocationCommandHandler>();
         services.AddScoped<ICommandHandler<RemoveBudgetAllocationCommand>, RemoveBudgetAllocationCommandHandler>();
+        services.AddScoped<ICommandHandler<CopyBudgetAllocationsCommand, BudgetAllocationCopyResult>, CopyBudgetAllocationsCommandHandler>();
         services.AddScoped<IQueryHandler<GetBudgetAllocationsQuery, IReadOnlyList<BudgetAllocationResponse>>, GetBudgetAllocationsQueryHandler>();
 
         // 4. Integration event consumers — the Identity replica that keeps user_lookup current,

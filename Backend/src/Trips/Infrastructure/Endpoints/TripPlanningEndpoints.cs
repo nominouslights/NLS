@@ -11,6 +11,7 @@ using NorthernLink.Trips.Application.Routes.GetRoutes;
 using NorthernLink.Trips.Application.Routes.Update;
 using NorthernLink.Trips.Application.Schedules.AddException;
 using NorthernLink.Trips.Application.Schedules.Create;
+using NorthernLink.Trips.Application.Schedules.GenerateTrips;
 using NorthernLink.Trips.Application.Schedules.GetExceptions;
 using NorthernLink.Trips.Application.Schedules.GetScheduleTemplates;
 using NorthernLink.Trips.Application.Schedules.RemoveException;
@@ -56,34 +57,56 @@ internal static class TripPlanningEndpoints
 {
     public static void MapTripPlanningEndpoints(this IEndpointRouteBuilder app)
     {
-        var trips = app.MapGroup("/api/trips").RequireAuthorization();
-        trips.MapGet("", GetTrips);
-        trips.MapGet("{id:guid}", GetTripById);
-        trips.MapGet("{id:guid}/activity", GetTripActivity);
-        trips.MapPost("", CreateTrip);
-        trips.MapPut("{id:guid}", UpdateTrip);
-        trips.MapPost("{id:guid}/assign", AssignTrip);
-        trips.MapPost("{id:guid}/status", ChangeTripStatus);
-        trips.MapPost("{id:guid}/finish", FinishTripOperations);
-        trips.MapPost("{id:guid}/close-without-billing", CloseTripWithoutBilling);
-        trips.MapPost("{id:guid}/demand", RecordTripDemand);
-        trips.MapPost("{id:guid}/merge-round-trip", MergeRoundTrip);
-        trips.MapPost("{id:guid}/unpair-round-trip", UnpairRoundTrip);
-        trips.MapPost("{id:guid}/deadhead-return", CreateDeadheadReturn);
+        // Two groups on the same "/api/trips" prefix, distinguished by route template. Group
+        // policies are ADDITIVE — a nested group ANDs with its parent — so a driver-facing route
+        // cannot be widened from inside a DispatchAccess group; it needs its own sibling.
+        //
+        // Planning writes: creating, editing, assigning and closing trips is dispatch work.
+        var tripPlanning = app.MapGroup("/api/trips")
+            .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
+        tripPlanning.MapPost("", CreateTrip);
+        tripPlanning.MapPut("{id:guid}", UpdateTrip);
+        tripPlanning.MapPost("{id:guid}/assign", AssignTrip);
+        tripPlanning.MapPost("{id:guid}/finish", FinishTripOperations);
+        tripPlanning.MapPost("{id:guid}/close-without-billing", CloseTripWithoutBilling);
+        tripPlanning.MapPost("{id:guid}/demand", RecordTripDemand);
+        tripPlanning.MapPost("{id:guid}/merge-round-trip", MergeRoundTrip);
+        tripPlanning.MapPost("{id:guid}/unpair-round-trip", UnpairRoundTrip);
+        tripPlanning.MapPost("{id:guid}/deadhead-return", CreateDeadheadReturn);
 
-        var routes = app.MapGroup("/api/trips/routes").RequireAuthorization();
+        // The driver-facing half: reading the board and advancing a trip's status from the cab.
+        //
+        // KNOWN GAP, deliberate: unlike /api/drivers these routes carry no {driverId}, and Trips
+        // cannot resolve a caller to a driver — Driver.UserId lives in the Drivers module and the
+        // driver_lookup replica here does not carry it. So a Driver-role caller can read any
+        // trip and change any trip's status, not only the trips assigned to them. That is a
+        // narrower hole than the bare authorize this replaces (no writes to routes, stops,
+        // templates, shipments or the client book), but it IS still a hole. Closing it means
+        // carrying UserId on drivers.driver-changed into driver_lookup and applying
+        // OwnRecordAccess against Trip.DriverId here.
+        var tripsOperating = app.MapGroup("/api/trips")
+            .RequireAuthorization(AuthorizationPolicies.DriverAccess);
+        tripsOperating.MapGet("", GetTrips);
+        tripsOperating.MapGet("{id:guid}", GetTripById);
+        tripsOperating.MapGet("{id:guid}/activity", GetTripActivity);
+        tripsOperating.MapPost("{id:guid}/status", ChangeTripStatus);
+
+        var routes = app.MapGroup("/api/trips/routes")
+            .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
         routes.MapGet("", GetRoutes);
         routes.MapPost("", CreateRoute);
         routes.MapPut("{id:guid}", UpdateRoute);
 
-        var stops = app.MapGroup("/api/trips/stops").RequireAuthorization();
+        var stops = app.MapGroup("/api/trips/stops")
+            .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
         stops.MapGet("", GetStops);
         stops.MapPost("", CreateStop);
         stops.MapPut("{id:guid}", UpdateStop);
         stops.MapPost("{id:guid}/activate", ActivateStop);
         stops.MapPost("{id:guid}/deactivate", DeactivateStop);
 
-        var templates = app.MapGroup("/api/trips/schedule-templates").RequireAuthorization();
+        var templates = app.MapGroup("/api/trips/schedule-templates")
+            .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
         templates.MapGet("", GetScheduleTemplates);
         templates.MapPost("", CreateScheduleTemplate);
         templates.MapPut("{id:guid}", UpdateScheduleTemplate);
@@ -93,6 +116,10 @@ internal static class TripPlanningEndpoints
         templates.MapPost("{id:guid}/exceptions", AddScheduleException);
         templates.MapPut("{id:guid}/exceptions/{exceptionId:guid}", UpdateScheduleException);
         templates.MapDelete("{id:guid}/exceptions/{exceptionId:guid}", RemoveScheduleException);
+        // On-demand generation: the same code path as the background worker, driven to a
+        // dispatcher-chosen date. Preview is a pure read (no dry-run flag on the POST).
+        templates.MapGet("{id:guid}/generate/preview", PreviewScheduleTripGeneration); // ?through=yyyy-MM-dd
+        templates.MapPost("{id:guid}/generate", GenerateScheduleTrips);                // body { through }
     }
 
     // ---- Trips ----
@@ -720,6 +747,46 @@ internal static class TripPlanningEndpoints
         var result = await sender.Send(new SetScheduleTemplateActiveCommand(id, false), cancellationToken);
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
+
+    /// <summary>
+    /// What a generate through <paramref name="through"/> would create — same guards and
+    /// counts as the POST, nothing persisted. Errors carry the dispatcher-facing message the
+    /// dialog shows verbatim.
+    /// </summary>
+    private static async Task<IResult> PreviewScheduleTripGeneration(
+        Guid id, DateOnly through, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(
+            new PreviewScheduleTripGenerationQuery(tenantId, id, through), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>
+    /// Generates the template's trips from today through the body's date (inclusive), skipping
+    /// occurrences that already exist. 409 (GenerationConflict) when a concurrent run beat this
+    /// one — re-preview and retry.
+    /// </summary>
+    private static async Task<IResult> GenerateScheduleTrips(
+        Guid id,
+        GenerateScheduleTripsRequest request,
+        ITenantContext tenantContext,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(
+            new GenerateScheduleTripsCommand(tenantId, id, request.Through), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
 }
 
 /// <summary>Body of a successful trip creation (201, with Location header).</summary>
@@ -752,6 +819,15 @@ public sealed record ScheduleExceptionRequest(
     TimeOnly? DepartureTime,
     TimeOnly? ReturnDepartureTime,
     string? Note);
+
+/// <summary>
+/// Request body for POST /api/trips/schedule-templates/{id}/generate. <c>through</c> is the
+/// last service date to generate (inclusive, <c>yyyy-MM-dd</c>): from today up to
+/// <see cref="ScheduleTemplate.MaxGenerateAheadDays"/> days ahead. The response is a
+/// <c>ScheduleTripGenerationResult</c>; GET .../generate/preview?through= returns the same
+/// shape without creating anything.
+/// </summary>
+public sealed record GenerateScheduleTripsRequest(DateOnly Through);
 
 /// <summary>Body of a successful stop creation (201, with Location header).</summary>
 public sealed record StopCreatedResponse(Guid Id);

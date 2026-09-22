@@ -90,6 +90,26 @@ public class TripBillingReconcileTests(PostgresFixture fixture)
             return true;
         }
 
+        public async Task<IReadOnlySet<(DateOnly ServiceDate, TripDirection Direction)>> GetGeneratedOccurrenceKeysAsync(
+            Guid templateId, DateOnly from, DateOnly toExclusive, CancellationToken cancellationToken = default)
+        {
+            var existing = await context.Trips
+                .Where(t => t.ScheduleTemplateId == templateId
+                    && t.ServiceDate >= from
+                    && t.ServiceDate < toExclusive
+                    && t.Direction != null)
+                .Select(t => new { t.ServiceDate, t.Direction })
+                .ToListAsync(cancellationToken);
+            return existing.Select(t => (t.ServiceDate, t.Direction!.Value)).ToHashSet();
+        }
+
+        public async Task<bool> TryAddGeneratedAsync(IReadOnlyList<Trip> trips, CancellationToken cancellationToken = default)
+        {
+            context.Trips.AddRange(trips);
+            await context.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+
         public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
             context.SaveChangesAsync(cancellationToken);
     }

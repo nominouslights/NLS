@@ -1,6 +1,7 @@
 using NorthernLink.Billing.Domain.BillableTrips;
 using NorthernLink.Billing.Domain.Contracts;
 using NorthernLink.Billing.Domain.Invoices;
+using NorthernLink.Billing.Domain.PurchaseOrders;
 
 namespace NorthernLink.Billing.Tests;
 
@@ -10,12 +11,16 @@ public static class TestBilling
     public static readonly Guid TenantId = Guid.NewGuid();
     public static readonly Guid ClientId = Guid.NewGuid();
 
+    /// <summary>The PO number both the default contract and the default trip carry.</summary>
+    public const string DefaultPo = "PO-7781";
+
     public static ContractSnapshot Contract(
         string billingModel = ContractSnapshot.RoundTripRateBillingModel,
         decimal? rate = 120m,
         DateOnly? startDate = null,
         DateOnly? endDate = null,
-        string status = "Active") => new()
+        string status = "Active",
+        string? defaultPoNumber = DefaultPo) => new()
     {
         Id = Guid.NewGuid(),
         TenantId = TenantId,
@@ -28,8 +33,32 @@ public static class TestBilling
         BudgetCode = "ZBB-CREW-01",
         BillingFrequency = "Monthly",
         NetTermsDays = 30,
-        DefaultPoNumber = "PO-7781",
+        DefaultPoNumber = defaultPoNumber,
         Status = status,
+        UpdatedAtUtc = DateTimeOffset.UtcNow,
+    };
+
+    /// <summary>
+    /// A PO replica row. <paramref name="roundTripRateCad"/> / <paramref name="oneWayRateCad"/>
+    /// default to null — "no PO term", so the contract fallback applies.
+    /// </summary>
+    public static PurchaseOrderSnapshot PurchaseOrder(
+        string poNumber = DefaultPo,
+        DateOnly? issued = null,
+        DateOnly? expiry = null,
+        decimal? amountCad = null,
+        decimal? roundTripRateCad = null,
+        decimal? oneWayRateCad = null) => new()
+    {
+        Id = Guid.NewGuid(),
+        TenantId = TenantId,
+        ClientId = ClientId,
+        PoNumber = poNumber,
+        Issued = issued ?? new DateOnly(2026, 1, 1),
+        Expiry = expiry,
+        AmountCad = amountCad,
+        RoundTripRateCad = roundTripRateCad,
+        OneWayRateCad = oneWayRateCad,
         UpdatedAtUtc = DateTimeOffset.UtcNow,
     };
 
@@ -40,7 +69,8 @@ public static class TestBilling
         Guid? invoiceId = null,
         DateTimeOffset? completedAtUtc = null,
         string? direction = null,
-        bool isEmptyLeg = false) => new()
+        bool isEmptyLeg = false,
+        string? poNumber = DefaultPo) => new()
     {
         Id = Guid.NewGuid(),
         TenantId = TenantId,
@@ -56,7 +86,7 @@ public static class TestBilling
         RoundTripKey = roundTripKey,
         Direction = direction,
         IsEmptyLeg = isEmptyLeg,
-        PoNumber = "PO-7781",
+        PoNumber = poNumber,
         CompletedAtUtc = completedAtUtc ?? serviceDate.ToDateTime(new TimeOnly(18, 0), DateTimeKind.Utc),
         InvoiceId = invoiceId,
     };
@@ -65,14 +95,17 @@ public static class TestBilling
     public static (BillableTrip Outbound, BillableTrip Return) RoundTrip(
         DateOnly serviceDate,
         string key,
-        string tripNumberPrefix = "TR-48")
+        string tripNumberPrefix = "TR-48",
+        string? poNumber = DefaultPo)
     {
         var outbound = Trip(serviceDate, key, $"{tripNumberPrefix}O",
             completedAtUtc: serviceDate.ToDateTime(new TimeOnly(9, 0), DateTimeKind.Utc),
-            direction: "Outbound");
+            direction: "Outbound",
+            poNumber: poNumber);
         var returnLeg = Trip(serviceDate, key, $"{tripNumberPrefix}R",
             completedAtUtc: serviceDate.ToDateTime(new TimeOnly(18, 0), DateTimeKind.Utc),
-            direction: "Inbound");
+            direction: "Inbound",
+            poNumber: poNumber);
         return (outbound, returnLeg);
     }
 

@@ -365,7 +365,11 @@ export default function ClientDetail({
           </Panel>
 
           <div style={{ marginBottom: 16 }}>
-            <ClientPoDashboard clientId={client.id} clientName={client.name} />
+            <ClientPoDashboard
+              clientId={client.id}
+              clientName={client.name}
+              contract={client.activeContract}
+            />
           </div>
 
           <div style={{ display: "flex", gap: 9 }}>

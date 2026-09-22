@@ -4,12 +4,15 @@ import { useEffect, useState } from "react";
 import { colors, fonts, rowSurface, statusMeta } from "@/lib/theme";
 import { ApiError, formatCad, formatUtcDate } from "@/lib/api";
 import {
+  contractRoundTripRateCad,
   deletePurchaseOrder,
   listPurchaseOrders,
   poExpiryKindFor,
+  poTermsLabel,
   refetchUntil,
   sortPurchaseOrders,
-  type PurchaseOrderInput,
+  type ActiveContractSummary,
+  type PurchaseOrderUpdateInput,
   type PurchaseOrderRecord,
 } from "@/lib/api/clients";
 import { Panel, SectionLabel } from "@/components/ui/Panel";
@@ -19,15 +22,34 @@ import { ActionButton } from "@/components/ui/Button";
 import PoFormModal from "@/components/PoFormModal";
 import { poExpiryLabel } from "./shared";
 
-// PO expiry dashboard for a single client — KPI row (valid / expiring /
-// expired) plus a purchase-order list with real CRUD against the Clients API
-// (/api/clients/{id}/purchase-orders). Expiry chips are derived client-side
-// from `expiry` (docStatusFor thresholds — Fleet document-expiry pattern),
-// never stored.
+// PO dashboard for a single client — KPI row (valid / expiring / expired /
+// inheriting the contract rate) plus a purchase-order list with real CRUD
+// against the Clients API (/api/clients/{id}/purchase-orders). Expiry chips are
+// derived client-side from `expiry` (docStatusFor thresholds — Fleet
+// document-expiry pattern), never stored.
+//
+// Each PO carries its OWN pricing terms (roundTripRateCad / oneWayRateCad), and
+// what this screen shows is the EFFECTIVE terms, not the stored fields: a blank
+// round-trip rate reads as the contract's, and a blank one-way rate shows the ½
+// figure it will actually bill at. A blank field that silently means "half of
+// something else" is how a pricing bug reaches an invoice — so the wording comes
+// from poTermsLabel(), the same helper the accruals report prices and prints
+// from (lib/api/clients.ts).
 
 type Editor = { mode: "new" } | { mode: "edit"; po: PurchaseOrderRecord } | null;
 
-export default function ClientPoDashboard({ clientId, clientName }: { clientId: string; clientName: string }) {
+export default function ClientPoDashboard({
+  clientId,
+  clientName,
+  contract,
+}: {
+  clientId: string;
+  clientName: string;
+  /** The client's active contract — the fallback rate a PO inherits when it
+   *  records no round-trip rate of its own. */
+  contract: ActiveContractSummary | null;
+}) {
+  const contractRate = contractRoundTripRateCad(contract);
   // Keyed by clientId so switching clients reads as "loading" until this
   // client's fetch lands.
   const [posState, setPosState] = useState<{ clientId: string; rows: PurchaseOrderRecord[] } | null>(null);
@@ -78,18 +100,20 @@ export default function ClientPoDashboard({ clientId, clientName }: { clientId: 
   // Reads are eventually consistent projections — refetch with a short retry
   // until the mutation is visible (refetchUntil). Matching the submitted body
   // (not just the id) covers edits, where the stale row still has the old id.
-  function poMatches(p: PurchaseOrderRecord, poId: string, input: PurchaseOrderInput): boolean {
+  function poMatches(p: PurchaseOrderRecord, poId: string, input: PurchaseOrderUpdateInput): boolean {
     return (
       p.id === poId &&
       p.poNumber === input.poNumber &&
       p.issued === input.issued &&
       (p.expiry ?? null) === (input.expiry ?? null) &&
       (p.amountCad ?? null) === (input.amountCad ?? null) &&
+      (p.roundTripRateCad ?? null) === (input.roundTripRateCad ?? null) &&
+      (p.oneWayRateCad ?? null) === (input.oneWayRateCad ?? null) &&
       (p.note ?? null) === (input.note ?? null)
     );
   }
 
-  async function onSaved(poId: string, input: PurchaseOrderInput) {
+  async function onSaved(poId: string, input: PurchaseOrderUpdateInput) {
     await runAction(async () => {
       const rows = await refetchUntil(
         () => listPurchaseOrders(clientId),
@@ -114,13 +138,17 @@ export default function ClientPoDashboard({ clientId, clientName }: { clientId: 
   const valid = kinds.filter((k) => k === "ontime").length;
   const soon = kinds.filter((k) => k === "soon").length;
   const expired = kinds.filter((k) => k === "over").length;
+  // POs with no round-trip rate of their own bill at the contract rate — worth a
+  // tile, because that inheritance is invisible in the stored record.
+  const inheriting = (pos ?? []).filter((p) => p.roundTripRateCad == null).length;
 
   return (
     <div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 16 }}>
         <MetricTile icon="✓" iconBg="rgba(0,158,115,.16)" iconColor={statusMeta("ontime").t} label="Valid POs" value={valid} valueColor={colors.headingBright} />
         <MetricTile icon="◐" iconBg="rgba(225,176,0,.18)" iconColor={statusMeta("soon").t} label="Expiring soon" value={soon} valueColor={statusMeta("soon").t} borderColor={soon > 0 ? "rgba(225,176,0,.4)" : undefined} />
         <MetricTile icon="▲" iconBg="rgba(213,94,0,.16)" iconColor={statusMeta("over").t} label="Expired" value={expired} valueColor={statusMeta("over").t} borderColor={expired > 0 ? "rgba(213,94,0,.35)" : undefined} />
+        <MetricTile icon="◈" iconBg="rgba(74,74,74,.14)" iconColor={statusMeta("off").t} label="Rate from contract" value={inheriting} valueColor={colors.headingBright} />
       </div>
 
       <Panel>
@@ -160,7 +188,7 @@ export default function ClientPoDashboard({ clientId, clientName }: { clientId: 
                 key={p.id}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "150px 1fr 120px 150px 110px",
+                  gridTemplateColumns: "150px 1fr 150px 150px 110px",
                   gap: 12,
                   alignItems: "center",
                   padding: "10px 12px",
@@ -178,10 +206,18 @@ export default function ClientPoDashboard({ clientId, clientName }: { clientId: 
                     Issued {formatUtcDate(p.issued)}
                     {p.expiry ? ` · expires ${formatUtcDate(p.expiry)}` : " · no expiry"}
                   </div>
+                  {/* EFFECTIVE terms, not the stored fields — an inherited rate
+                      says where it came from, and a ½ one-way rate says so. */}
+                  <div style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textMuted, marginTop: 2 }}>
+                    {poTermsLabel(p, contractRate)}
+                  </div>
                 </div>
-                <span style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.textSecondary, textAlign: "right" }}>
-                  {p.amountCad != null ? formatCad(p.amountCad) : "—"}
-                </span>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
+                  <span style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.textSecondary }}>
+                    {p.amountCad != null ? formatCad(p.amountCad) : "—"}
+                  </span>
+                  {p.amountCad == null && <StatusChip kind="off" label="No value recorded" />}
+                </div>
                 <div style={{ display: "flex", justifyContent: "flex-end" }}>
                   <StatusChip kind={kind} label={poExpiryLabel(kind)} />
                 </div>
@@ -225,6 +261,7 @@ export default function ClientPoDashboard({ clientId, clientName }: { clientId: 
         <PoFormModal
           clientId={clientId}
           clientName={clientName}
+          contractRateCad={contractRate}
           onClose={() => setEditor(null)}
           onSaved={onSaved}
         />
@@ -233,6 +270,7 @@ export default function ClientPoDashboard({ clientId, clientName }: { clientId: 
         <PoFormModal
           clientId={clientId}
           clientName={clientName}
+          contractRateCad={contractRate}
           existing={editor.po}
           onClose={() => setEditor(null)}
           onSaved={onSaved}

@@ -288,4 +288,149 @@ public class BudgetAllocationTests
         Assert.Equal(BudgetAllocationErrors.JustificationRequired, line.Update(1m, null, null).Error);
         Assert.Equal(BudgetAllocationErrors.JustificationTooLong, line.Update(1m, new string('x', 1001), null).Error);
     }
+
+    // --- CopyInto / NeedsJustification ---
+    //
+    // CopyInto is the one place the aggregate's headline invariant — every line is argued — is
+    // broken on purpose: it carries the amount forward as a starting position and drops the
+    // argument, because last period's reasoning is not this period's reasoning. These tests exist
+    // so that nobody "fixes" it back into Create.
+
+    [Fact]
+    public void CopyInto_carries_tenant_code_and_amount_across_and_clears_the_justification()
+    {
+        var targetPeriod = Guid.Parse("66666666-6666-6666-6666-666666666666");
+        var source = TestBudgeting.CreateAllocation(
+            PeriodId, CodeId, "ZBB-CREW-01", 1250.00m, "Last quarter's reasoning.", TestBudgeting.ActorId);
+
+        var copy = source.CopyInto(targetPeriod, TestBudgeting.ActorId);
+
+        Assert.Equal(TestBudgeting.TenantId, copy.TenantId);
+        Assert.Equal(targetPeriod, copy.PeriodId);
+        Assert.Equal(CodeId, copy.BudgetCodeId);
+        Assert.Equal("ZBB-CREW-01", copy.Code);
+        Assert.Equal(1250.00m, copy.AmountCad);
+        Assert.Equal(string.Empty, copy.Justification);
+        Assert.True(copy.NeedsJustification);
+    }
+
+    [Fact]
+    public void CopyInto_leaves_the_source_line_untouched()
+    {
+        var source = TestBudgeting.CreateAllocation(
+            PeriodId, CodeId, justification: "Original reasoning.", actorId: TestBudgeting.ActorId);
+
+        source.CopyInto(Guid.NewGuid(), null);
+
+        Assert.Equal("Original reasoning.", source.Justification);
+        Assert.Equal(PeriodId, source.PeriodId);
+        Assert.False(source.NeedsJustification);
+        Assert.Null(source.ModifiedBy);
+    }
+
+    [Fact]
+    public void CopyInto_is_a_new_line_with_its_own_id_and_the_copier_as_creator()
+    {
+        var copier = Guid.Parse("55555555-5555-5555-5555-555555555555");
+        var source = TestBudgeting.CreateAllocation(actorId: TestBudgeting.ActorId);
+
+        var copy = source.CopyInto(Guid.NewGuid(), copier);
+
+        Assert.NotEqual(source.Id, copy.Id);
+        // Whoever ran the copy is who put those numbers in the new period.
+        Assert.Equal(copier, copy.CreatedBy);
+        Assert.Null(copy.ModifiedBy);
+        Assert.Equal(copy.CreatedAtUtc, copy.UpdatedAtUtc);
+    }
+
+    [Fact]
+    public void CopyInto_raises_the_created_event_like_Create_does()
+    {
+        // The read model is built from this event — a copy that raised nothing would leave the
+        // console showing a period with no lines in it.
+        var targetPeriod = Guid.Parse("66666666-6666-6666-6666-666666666666");
+        var source = TestBudgeting.CreateAllocation(PeriodId, CodeId, "ZBB-FUEL-01", 480.50m);
+
+        var copy = source.CopyInto(targetPeriod, TestBudgeting.ActorId);
+
+        var created = Assert.Single(copy.DomainEvents.OfType<BudgetAllocationCreatedDomainEvent>());
+        Assert.Equal(copy.Id, created.AllocationId);
+        Assert.Equal(TestBudgeting.TenantId, created.TenantId);
+        Assert.Equal(targetPeriod, created.PeriodId);
+        Assert.Equal(CodeId, created.BudgetCodeId);
+        Assert.Equal("ZBB-FUEL-01", created.Code);
+        Assert.Equal(480.50m, created.AmountCad);
+        Assert.Equal(TestBudgeting.ActorId, created.ActorId);
+        Assert.Empty(copy.DomainEvents.OfType<BudgetAllocationUpdatedDomainEvent>());
+    }
+
+    [Fact]
+    public void CopyInto_without_an_actor_leaves_CreatedBy_null()
+    {
+        var copy = TestBudgeting.CreateAllocation().CopyInto(Guid.NewGuid(), null);
+
+        Assert.Null(copy.CreatedBy);
+        Assert.Null(Assert.Single(copy.DomainEvents.OfType<BudgetAllocationCreatedDomainEvent>()).ActorId);
+    }
+
+    [Fact]
+    public void CopyInto_carries_a_zero_amount_as_is()
+    {
+        // "We plan to spend nothing here" is a plan, and copying it forward is meaningful.
+        var copy = TestBudgeting.CreateAllocation(amount: 0m).CopyInto(Guid.NewGuid(), null);
+
+        Assert.Equal(0m, copy.AmountCad);
+        Assert.True(copy.NeedsJustification);
+    }
+
+    [Fact]
+    public void A_copied_line_cannot_be_saved_again_until_it_is_argued()
+    {
+        // The whole point of the feature, at the aggregate level: Update runs the same Validate
+        // that Create does, so a copied line is refused until somebody writes the argument.
+        var copy = TestBudgeting.CreateAllocation(amount: 1250m).CopyInto(Guid.NewGuid(), null);
+
+        Assert.Equal(BudgetAllocationErrors.JustificationRequired, copy.Update(1250m, "", null).Error);
+        Assert.Equal(BudgetAllocationErrors.JustificationRequired, copy.Update(1250m, "   ", null).Error);
+        Assert.True(copy.NeedsJustification);
+
+        Assert.True(copy.Update(1250m, "Argued fresh for this period.", null).IsSuccess);
+        Assert.False(copy.NeedsJustification);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("\t\n")]
+    public void A_whitespace_justification_never_clears_NeedsJustification(string justification)
+    {
+        // NeedsJustification reads Length, and Validate rejects whitespace before it can ever be
+        // stored — so there is no path to a line that is blank-looking but reads as argued. If
+        // this ever fails, Validate stopped using IsNullOrWhiteSpace.
+        var copy = TestBudgeting.CreateAllocation().CopyInto(Guid.NewGuid(), null);
+
+        Assert.True(copy.Update(100m, justification, null).IsFailure);
+        Assert.True(copy.NeedsJustification);
+        Assert.Equal(string.Empty, copy.Justification);
+    }
+
+    [Fact]
+    public void A_line_created_the_normal_way_never_needs_a_justification()
+    {
+        Assert.False(TestBudgeting.CreateAllocation().NeedsJustification);
+        // Not even one padded out to nothing but whitespace — Create refuses that outright.
+        Assert.False(TestBudgeting.CreateAllocation(justification: "  Argued.  ").NeedsJustification);
+    }
+
+    [Fact]
+    public void Copying_a_copy_keeps_the_justification_empty()
+    {
+        // Chained copies must not accumulate anything: still no argument, still the same amount.
+        var copy = TestBudgeting.CreateAllocation(amount: 900m).CopyInto(Guid.NewGuid(), null);
+
+        var second = copy.CopyInto(Guid.NewGuid(), null);
+
+        Assert.Equal(900m, second.AmountCad);
+        Assert.True(second.NeedsJustification);
+    }
 }

@@ -34,6 +34,15 @@ public static class ClientAccrualsEmailComposer
         return slug.Length == 0 ? "accruals-report.pdf" : $"accruals-report-{slug}.pdf";
     }
 
+    /// <summary>
+    /// The covering note, mirroring the report it attaches: upcoming expenses and the amount
+    /// owing lead, settled work follows. The headline figures are echoed verbatim when the
+    /// report carries them (they are pre-formatted CAD strings — nothing is computed here, and
+    /// no tax appears anywhere, since QuickBooks owns tax); a report with no headline block
+    /// falls back to naming the two leading sections without figures. Every interpolated value
+    /// goes through <see cref="WebUtility.HtmlEncode"/> — the client name, the period and the
+    /// figures are all frontend-supplied strings.
+    /// </summary>
     private static string BuildHtmlBody(ClientAccrualsReport report)
     {
         var builder = new StringBuilder();
@@ -41,8 +50,35 @@ public static class ClientAccrualsEmailComposer
         builder.Append($"Please find attached the accruals report for {WebUtility.HtmlEncode(report.ClientName)}, ");
         builder.Append($"covering {WebUtility.HtmlEncode(report.PeriodLabel)} (prepared {WebUtility.HtmlEncode(report.PreparedDate)}).");
         builder.Append("</p>");
-        builder.Append("<p>The attached PDF lists the period's trips by billing state. ");
-        builder.Append("Estimated amounts are marked and are not invoices; ");
+
+        builder.Append("<p>It leads with the work still to come and what is owing on the period, ");
+        builder.Append("with settled work summarised behind them:</p>");
+
+        if (report.Headline.Count > 0)
+        {
+            builder.Append("<ul>");
+            foreach (var figure in report.Headline)
+            {
+                builder.Append("<li>");
+                builder.Append($"<strong>{WebUtility.HtmlEncode(figure.Label)}:</strong> ");
+                builder.Append(WebUtility.HtmlEncode(figure.AmountCad));
+                if (figure.Detail.Length > 0)
+                {
+                    builder.Append($" — {WebUtility.HtmlEncode(figure.Detail)}");
+                }
+
+                builder.Append("</li>");
+            }
+
+            builder.Append("</ul>");
+        }
+        else
+        {
+            builder.Append("<ul><li>Upcoming expenses — work scheduled but not yet done.</li>");
+            builder.Append("<li>Monies owed — work invoiced or ready for billing.</li></ul>");
+        }
+
+        builder.Append("<p>Estimated amounts are marked and are not invoices; ");
         builder.Append("issued invoices remain the system of record for amounts owing.</p>");
         return builder.ToString();
     }

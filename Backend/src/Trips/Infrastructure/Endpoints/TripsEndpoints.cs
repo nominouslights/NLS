@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Shared.Tenancy;
 using NorthernLink.Trips.Application.Manifests.Create;
@@ -22,12 +23,24 @@ public static class TripsEndpoints
 {
     public static IEndpointRouteBuilder MapTripsEndpoints(this IEndpointRouteBuilder app)
     {
-        var manifests = app.MapGroup("/api/trips/manifests").RequireAuthorization();
+        // Two sibling groups on one prefix, split by who may do what (see
+        // TripPlanningEndpoints for why a nested group cannot widen a narrowed one).
+        // Building and editing a manifest is dispatch work…
+        var manifestAuthoring = app.MapGroup("/api/trips/manifests")
+            .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
 
-        manifests.MapGet("", GetManifests);
-        manifests.MapGet("{id:guid}", GetManifestById);
-        manifests.MapPost("", CreateManifest);
-        manifests.MapPut("{id:guid}", UpdateManifest);
+        manifestAuthoring.MapPost("", CreateManifest);
+        manifestAuthoring.MapPut("{id:guid}", UpdateManifest);
+
+        // …reading one is what the driver does at the door: the manifest IS the passenger list
+        // for the run. Reads only — boarding (marking riders on/off) has no endpoint yet; when
+        // it lands it belongs on this group, with a caller-owns-this-trip check once Trips can
+        // resolve a caller to a driver (see the KNOWN GAP note in TripPlanningEndpoints).
+        var manifestReading = app.MapGroup("/api/trips/manifests")
+            .RequireAuthorization(AuthorizationPolicies.DriverAccess);
+
+        manifestReading.MapGet("", GetManifests);
+        manifestReading.MapGet("{id:guid}", GetManifestById);
 
         app.MapTripPlanningEndpoints();
         app.MapShipmentEndpoints();

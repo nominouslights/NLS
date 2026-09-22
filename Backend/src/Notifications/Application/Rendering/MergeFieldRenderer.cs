@@ -12,7 +12,13 @@ namespace NorthernLink.Notifications.Application.Rendering;
 /// </summary>
 public static partial class MergeFieldRenderer
 {
-    /// <summary>Server sample data used when a preview request supplies no values.</summary>
+    /// <summary>
+    /// Server sample data used when a preview request supplies no values. Must carry an entry
+    /// for every token in <see cref="MergeFields.All"/>: a missing one substitutes to an empty
+    /// string (<see cref="MergeFields.Substitute"/> never leaks the raw token), so the omission
+    /// shows up as a blank hole in the dispatcher's preview rather than as an error.
+    /// <c>MergeFieldRendererTests</c> pins the two lists against each other.
+    /// </summary>
     public static IReadOnlyDictionary<string, string> SampleValues { get; } =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -27,6 +33,7 @@ public static partial class MergeFieldRenderer
             [MergeFields.DropoffStopAddress] = "5 Co-op Lane, Lynn Lake, MB R0B 0W0",
             [MergeFields.TripNumber] = "NL-1042",
             [MergeFields.ClientName] = "Marcel Colomb First Nation",
+            [MergeFields.SeatsNeeded] = "3",
         };
 
     /// <summary>Substitutes values into a subject line (plain text — no encoding).</summary>

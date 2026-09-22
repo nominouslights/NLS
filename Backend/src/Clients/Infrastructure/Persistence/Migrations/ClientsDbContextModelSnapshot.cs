@@ -274,11 +274,19 @@ namespace NorthernLink.Clients.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(1000)")
                         .HasColumnName("note");
 
+                    b.Property<decimal?>("OneWayRateCad")
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("one_way_rate_cad");
+
                     b.Property<string>("PoNumber")
                         .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)")
                         .HasColumnName("po_number");
+
+                    b.Property<decimal?>("RoundTripRateCad")
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("round_trip_rate_cad");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
@@ -566,10 +574,18 @@ namespace NorthernLink.Clients.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("note");
 
+                    b.Property<decimal?>("OneWayRateCad")
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("one_way_rate_cad");
+
                     b.Property<string>("PoNumber")
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("po_number");
+
+                    b.Property<decimal?>("RoundTripRateCad")
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("round_trip_rate_cad");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")

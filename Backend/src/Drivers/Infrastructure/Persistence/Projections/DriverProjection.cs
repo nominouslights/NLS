@@ -109,6 +109,7 @@ internal sealed class DriverProjection : IProjection<DriversDbContext>
     {
         row.Id = source.Id;
         row.TenantId = source.TenantId;
+        row.UserId = source.UserId;
         row.Name = source.Name;
         row.Phone = source.Phone;
         row.LicenceClass = source.LicenceClass;
