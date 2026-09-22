@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { colors } from "@/lib/theme";
 import type { BudgetPeriod } from "@/lib/types";
 import { ActionButton } from "@/components/ui/Button";
@@ -32,6 +31,9 @@ export default function BudgetPeriods({
   onSelectPeriod,
   onCreated,
   onPeriodsRefreshed,
+  showCreate,
+  onShowCreate,
+  onCloseCreate,
 }: {
   /** null while the first load is in flight. */
   periods: BudgetPeriod[] | null;
@@ -42,9 +44,14 @@ export default function BudgetPeriods({
   onCreated: (records: BudgetPeriodRecord[], id: string) => void;
   /** After a transition or a line change: Console's applyLoaded, which preserves the selection. */
   onPeriodsRefreshed: (records: BudgetPeriodRecord[]) => void;
+  /**
+   * The New Period modal lives in Console's state, not here: the TopBar pill is the console's
+   * one global create action and has to be able to open it from any screen.
+   */
+  showCreate: boolean;
+  onShowCreate: () => void;
+  onCloseCreate: () => void;
 }) {
-  const [showCreate, setShowCreate] = useState(false);
-
   const list = periods ?? [];
   // periodId is "" until Console's first load picks one; falling back to the first row keeps the
   // pane populated in that gap.
@@ -55,7 +62,7 @@ export default function BudgetPeriods({
       eyebrow="Planning"
       title="Budget Periods"
       right={
-        <ActionButton variant="primary" onClick={() => setShowCreate(true)}>
+        <ActionButton variant="primary" onClick={onShowCreate}>
           + NEW PERIOD
         </ActionButton>
       }
@@ -90,14 +97,13 @@ export default function BudgetPeriods({
           <PeriodDashboard
             key={selected.id}
             period={selected}
+            periods={list}
             onPeriodsRefreshed={onPeriodsRefreshed}
           />
         </div>
       )}
 
-      {showCreate && (
-        <BudgetPeriodFormModal onClose={() => setShowCreate(false)} onSaved={onCreated} />
-      )}
+      {showCreate && <BudgetPeriodFormModal onClose={onCloseCreate} onSaved={onCreated} />}
     </Screen>
   );
 }

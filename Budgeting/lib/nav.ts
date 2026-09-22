@@ -4,10 +4,14 @@
 // JetBrains Mono code tile and an optional count badge. Settings sits last in the second
 // group and keeps Dispatcher's "ST" code — a deliberate cross-app tell.
 
+// Planning is two items, not three: allocations are planned on the period's own dashboard
+// (screens/periods/), so a separate Allocations screen was a second place to do the same job —
+// and the worse one, since it could not refresh Console's period list after a save. Removed
+// rather than fixed; "one place to plan a period" is the point.
+
 export type ScreenId =
   | "periods"
   | "codes"
-  | "allocations"
   | "actuals"
   | "variance"
   | "reports"
@@ -33,7 +37,6 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: "periods", label: "Budget Periods", code: "BP" },
       { id: "codes", label: "Budget Codes", code: "BC" },
-      { id: "allocations", label: "Allocations", code: "AL" },
     ],
   },
   {
