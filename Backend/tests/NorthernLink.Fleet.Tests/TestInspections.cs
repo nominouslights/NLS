@@ -16,7 +16,9 @@ internal static class TestInspections
         IReadOnlyList<InspectionWeather>? weather = null,
         IReadOnlyList<InspectionRoadCondition>? roadConditions = null,
         InspectionVisibility? visibility = InspectionVisibility.Good,
-        InspectionFuelLevel? fuelLevel = InspectionFuelLevel.Full)
+        InspectionFuelLevel? fuelLevel = InspectionFuelLevel.Full,
+        IReadOnlyList<InspectionChecklistItem>? checklistItems = null,
+        string? certificationStatement = null)
     {
         var result = VehicleInspection.Enter(
             TestVehicles.TenantId,
@@ -29,7 +31,8 @@ internal static class TestInspections
             enteredBy: null,
             performedAt: DateTimeOffset.UtcNow,
             odometerKm,
-            checklistItems: [new InspectionChecklistItem { Group = "Exterior & Mechanical", Item = "Tires", Passed = true }],
+            checklistItems: checklistItems
+                ?? [new InspectionChecklistItem { Group = "Exterior & Mechanical", Item = "Tires", Passed = true }],
             defects: defects ?? [],
             weather: weather ?? [InspectionWeather.Snow, InspectionWeather.ExtremeCold],
             temperatureC: "-31",
@@ -43,7 +46,8 @@ internal static class TestInspections
             certifiedAt: null,
             fuelAdded: false,
             fuelLitres: null,
-            fuelCostCad: null);
+            fuelCostCad: null,
+            certificationStatement);
 
         Assert.True(result.IsSuccess, $"PreTrip inspection entry failed: {result.Error.Code}");
         return result.Value;
@@ -57,7 +61,9 @@ internal static class TestInspections
         IReadOnlyList<InspectionDefect>? defects = null,
         IReadOnlyList<string>? issues = null,
         IReadOnlyList<bool>? attestations = null,
-        bool fuelAdded = true)
+        bool fuelAdded = true,
+        IReadOnlyList<InspectionChecklistItem>? checklistItems = null,
+        string? certificationStatement = null)
     {
         var result = VehicleInspection.Enter(
             TestVehicles.TenantId,
@@ -70,7 +76,8 @@ internal static class TestInspections
             enteredBy: null,
             performedAt: DateTimeOffset.UtcNow,
             odometerKm,
-            checklistItems: [new InspectionChecklistItem { Item = "Keys returned / secured", Passed = true }],
+            checklistItems: checklistItems
+                ?? [new InspectionChecklistItem { Item = "Keys returned / secured", Passed = true }],
             defects: defects ?? [],
             weather: [],
             temperatureC: null,
@@ -84,7 +91,8 @@ internal static class TestInspections
             certifiedAt: DateTimeOffset.UtcNow,
             fuelAdded,
             fuelLitres: fuelAdded ? 92.4m : null,
-            fuelCostCad: fuelAdded ? 178.30m : null);
+            fuelCostCad: fuelAdded ? 178.30m : null,
+            certificationStatement);
 
         Assert.True(result.IsSuccess, $"PostTrip inspection entry failed: {result.Error.Code}");
         return result.Value;
@@ -100,7 +108,9 @@ internal static class TestInspections
         IReadOnlyList<InspectionDefect> defects,
         int? odometerKm = 118_400,
         string unit = "U-04",
-        string driverName = "J. Spence") =>
+        string driverName = "J. Spence",
+        IReadOnlyList<InspectionChecklistItem>? checklistItems = null,
+        string? certificationStatement = null) =>
         inspection.Amend(
             InspectionSource.Dispatcher,
             vehicleId: inspection.VehicleId,
@@ -109,7 +119,7 @@ internal static class TestInspections
             enteredBy: null,
             performedAt: DateTimeOffset.UtcNow,
             odometerKm,
-            checklistItems: [],
+            checklistItems: checklistItems ?? [],
             defects,
             weather: [],
             temperatureC: null,
@@ -123,12 +133,33 @@ internal static class TestInspections
             certifiedAt: null,
             fuelAdded: false,
             fuelLitres: null,
-            fuelCostCad: null);
+            fuelCostCad: null,
+            certificationStatement);
 
     public static InspectionDefect Defect(InspectionDefectSeverity severity) => new()
     {
         Item = "Wipers & washer fluid",
         Severity = severity,
         Note = "test",
+    };
+
+    /// <summary>
+    /// One checklist row, in either shape: leave <paramref name="state"/> null for the legacy
+    /// two-value row (what everything written before NL-PTI-01 looks like), or set it for a
+    /// tri-state row. Deliberately the SAME builder for both — a second fixture for "new" rows
+    /// is how old and new data start being tested under different assumptions.
+    /// </summary>
+    public static InspectionChecklistItem ChecklistItem(
+        string item = "Tires",
+        bool passed = true,
+        ChecklistItemState? state = null,
+        string? note = null,
+        string? group = "Exterior & Mechanical") => new()
+    {
+        Group = group,
+        Item = item,
+        Passed = passed,
+        State = state,
+        Note = note,
     };
 }

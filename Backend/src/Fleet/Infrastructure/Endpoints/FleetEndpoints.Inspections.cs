@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using NorthernLink.Fleet.Application.Inspections.AcknowledgeCarrier;
 using NorthernLink.Fleet.Application.Inspections.Enter;
 using NorthernLink.Fleet.Application.Inspections.GetDefects;
 using NorthernLink.Fleet.Application.Inspections.GetInspections;
@@ -62,7 +63,8 @@ public static partial class FleetEndpoints
             request.CertifiedAt,
             request.FuelAdded ?? false,
             request.FuelLitres,
-            request.FuelCostCad);
+            request.FuelCostCad,
+            request.CertificationStatement);
 
         var result = await sender.Send(command, cancellationToken);
         return result.IsSuccess
@@ -103,7 +105,8 @@ public static partial class FleetEndpoints
             request.CertifiedAt,
             request.FuelAdded ?? false,
             request.FuelLitres,
-            request.FuelCostCad);
+            request.FuelCostCad,
+            request.CertificationStatement);
 
         var result = await sender.Send(command, cancellationToken);
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
@@ -161,6 +164,34 @@ public static partial class FleetEndpoints
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
+    /// <summary>
+    /// Signs the NL-PTI-01 carrier acknowledgement line on this inspection. 404 when the
+    /// inspection is unknown (or belongs to another tenant), 400 when the report is not a Fail
+    /// (only a Major/OutOfService report is acknowledged) or the name is blank, 409 when it was
+    /// already acknowledged — the stamp is final, so this is the double-click guard.
+    /// </summary>
+    private static async Task<IResult> AcknowledgeInspectionCarrier(
+        Guid id,
+        CarrierAcknowledgementRequest request,
+        ITenantContext tenantContext,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var command = new AcknowledgeInspectionCarrierCommand(
+            tenantId,
+            id,
+            request.AcknowledgedBy,
+            request.Note);
+
+        var result = await sender.Send(command, cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
     private static async Task<IResult> RemoveInspection(
         Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
     {
@@ -205,7 +236,8 @@ public sealed record InspectionRequest(
     DateTimeOffset? CertifiedAt,
     bool? FuelAdded,
     decimal? FuelLitres,
-    decimal? FuelCostCad);
+    decimal? FuelCostCad,
+    string? CertificationStatement = null);
 
 /// <summary>
 /// Request body for POST /api/fleet/inspections/{id}/defects/resolve. <see cref="Item"/> names
@@ -219,3 +251,12 @@ public sealed record ResolveDefectRequest(
     DefectResolutionReason Reason,
     string? Note,
     string? ResolvedBy);
+
+/// <summary>
+/// Request body for POST /api/fleet/inspections/{id}/carrier-acknowledgement.
+/// <see cref="AcknowledgedBy"/> is the carrier representative's name and is REQUIRED — unlike
+/// <c>EnteredBy</c>/<c>ResolvedBy</c> it has no "Dispatch" fallback, because the name is the
+/// signature. The acknowledgement timestamp is stamped server-side and is never taken from the
+/// body.
+/// </summary>
+public sealed record CarrierAcknowledgementRequest(string? AcknowledgedBy, string? Note);

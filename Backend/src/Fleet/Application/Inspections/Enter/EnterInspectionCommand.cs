@@ -34,10 +34,23 @@ public sealed record EnterInspectionCommand(
     DateTimeOffset? CertifiedAt,
     bool FuelAdded,
     decimal? FuelLitres,
-    decimal? FuelCostCad) : ICommand<Guid>;
+    decimal? FuelCostCad,
+    string? CertificationStatement = null) : ICommand<Guid>;
 
-/// <summary>One checklist row on an inspection request.</summary>
-public sealed record ChecklistItemInput(string? Group, string Item, bool Passed);
+/// <summary>
+/// One checklist row on an inspection request. <paramref name="State"/> and
+/// <paramref name="Note"/> are the NL-PTI-01 tri-state answer and its free-text note, and both
+/// are OPTIONAL on purpose: the existing Dispatcher inspection modal still posts only
+/// <paramref name="Passed"/>, and must keep working unchanged until its own step lands. A row
+/// that supplies <paramref name="State"/> has its <paramref name="Passed"/> re-derived by the
+/// aggregate (<c>Passed == State != Defect</c>), so a caller cannot send the two out of step.
+/// </summary>
+public sealed record ChecklistItemInput(
+    string? Group,
+    string Item,
+    bool Passed,
+    ChecklistItemState? State = null,
+    string? Note = null);
 
 /// <summary>
 /// One defect on an inspection request. Resolution fields are deliberately absent: the wire can

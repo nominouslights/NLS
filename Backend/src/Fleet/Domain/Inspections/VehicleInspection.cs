@@ -58,12 +58,35 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
 
     // Post-trip log & certification (moved off the manifest §7/§8/§10).
     public List<string> Issues { get; private set; } = [];
+
+    /// <summary>
+    /// LEGACY. The manifest §10 tick-boxes, positional and meaningless without the paper form
+    /// beside them. Kept because existing rows carry it and nothing reads it back except the
+    /// screen that wrote it; new work records the attestation as
+    /// <see cref="CertificationStatement"/> instead, which says what was actually signed.
+    /// </summary>
     public List<bool> Attestations { get; private set; } = [];
+
+    /// <summary>
+    /// The exact sentence the driver certified, stored verbatim rather than by reference, so a
+    /// printed report can say WHICH attestation was made. Re-wording the form later changes what
+    /// new inspections store and rewrites nothing that was already signed.
+    /// </summary>
+    public string? CertificationStatement { get; private set; }
+
     public string? DriverSignatureName { get; private set; }
     public DateTimeOffset? CertifiedAt { get; private set; }
     public bool FuelAdded { get; private set; }
     public decimal? FuelLitres { get; private set; }
     public decimal? FuelCostCad { get; private set; }
+
+    // Carrier acknowledgement (NL-PTI-01). One signature per REPORT, not per defect: the paper
+    // form has a single carrier line, and what it attests is that this report — with whatever
+    // Major/OutOfService defect put it into Fail — was escalated and seen. Set only through
+    // AcknowledgeAsCarrier; deliberately unreachable from Enter and Amend.
+    public string? CarrierAcknowledgedBy { get; private set; }
+    public DateTimeOffset? CarrierAcknowledgedAtUtc { get; private set; }
+    public string? CarrierAcknowledgementNote { get; private set; }
 
     /// <summary>The work order this inspection's defects generated, if any (set on WO creation).</summary>
     public Guid? GeneratedWorkOrderId { get; private set; }
@@ -77,6 +100,10 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
     /// <see cref="InspectionType.PreTrip"/> record, the log/certification/fuel-added fields to a
     /// <see cref="InspectionType.PostTrip"/> record — callers simply pass empty/null for the half
     /// that does not apply. <see cref="Result"/> is derived from <paramref name="defects"/>.
+    ///
+    /// <paramref name="certificationStatement"/> is the sentence that was signed, kept verbatim.
+    /// The carrier acknowledgement fields are NOT parameters here and never will be: see
+    /// <see cref="AcknowledgeAsCarrier"/>.
     /// </summary>
     public static Result<VehicleInspection> Enter(
         Guid tenantId,
@@ -103,7 +130,8 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
         DateTimeOffset? certifiedAt,
         bool fuelAdded,
         decimal? fuelLitres,
-        decimal? fuelCostCad)
+        decimal? fuelCostCad,
+        string? certificationStatement = null)
     {
         if (string.IsNullOrWhiteSpace(unit))
         {
@@ -143,7 +171,7 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
             PerformedAt = performedAt,
             OdometerKm = odometerKm,
             Result = DeriveResult(enteredDefects),
-            ChecklistItems = [.. checklistItems],
+            ChecklistItems = NormalizeChecklist(checklistItems),
             Defects = enteredDefects,
             Weather = [.. weather],
             TemperatureC = Normalize(temperatureC),
@@ -153,6 +181,7 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
             FuelLevel = fuelLevel,
             Issues = [.. issues],
             Attestations = [.. attestations],
+            CertificationStatement = Normalize(certificationStatement),
             DriverSignatureName = Normalize(driverSignatureName),
             CertifiedAt = certifiedAt,
             FuelAdded = fuelAdded,
@@ -182,6 +211,16 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
     /// fails and the resolution is not carried — the honest reading is that a renamed item is a
     /// different defect. Unlike a silent wipe this is visible: the row simply comes back on
     /// screen as open, where a dispatcher can re-resolve it.
+    ///
+    /// An amend likewise never touches the carrier acknowledgement — those fields are not
+    /// parameters here (see <see cref="AcknowledgeAsCarrier"/>). That has a consequence worth
+    /// stating outright, because <see cref="Result"/> IS re-derived here: an inspection that was
+    /// acknowledged as a Fail and is then amended down to Pass or PassWithDefects KEEPS its
+    /// acknowledgement stamp. It is a historical record of what was escalated at the time, not a
+    /// flag describing the report's current state, and erasing it would destroy the only evidence
+    /// that the carrier ever saw the defect that has since been downgraded. The stamp is
+    /// therefore stale-by-design after such an amend, and a reader must interpret it together
+    /// with the amendment rather than against the current <see cref="Result"/>.
     /// </summary>
     public Result Amend(
         InspectionSource source,
@@ -205,7 +244,8 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
         DateTimeOffset? certifiedAt,
         bool fuelAdded,
         decimal? fuelLitres,
-        decimal? fuelCostCad)
+        decimal? fuelCostCad,
+        string? certificationStatement = null)
     {
         if (string.IsNullOrWhiteSpace(unit))
         {
@@ -236,7 +276,7 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
         PerformedAt = performedAt;
         OdometerKm = odometerKm;
         Result = DeriveResult(merged);
-        ChecklistItems = [.. checklistItems];
+        ChecklistItems = NormalizeChecklist(checklistItems);
         Defects = merged;
         Weather = [.. weather];
         TemperatureC = Normalize(temperatureC);
@@ -246,6 +286,7 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
         FuelLevel = fuelLevel;
         Issues = [.. issues];
         Attestations = [.. attestations];
+        CertificationStatement = Normalize(certificationStatement);
         DriverSignatureName = Normalize(driverSignatureName);
         CertifiedAt = certifiedAt;
         FuelAdded = fuelAdded;
@@ -280,6 +321,54 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
         GeneratedWorkOrderId = workOrderId;
 
         Raise(new VehicleInspectionWorkOrderLinkedDomainEvent(Id, workOrderId));
+        return NorthernLink.Shared.Kernel.Result.Success();
+    }
+
+    /// <summary>
+    /// Signs the NL-PTI-01 carrier acknowledgement line: the carrier's representative confirming
+    /// they were shown this report. One signature per report — the paper form has one line, and
+    /// what it attests is that the report as a whole was escalated, not that any particular
+    /// defect was.
+    ///
+    /// Only valid while <see cref="Result"/> is <see cref="InspectionResult.Fail"/>. Acknowledging
+    /// a clean report is meaningless, and permitting it would destroy the field's value as
+    /// evidence that a Major/OutOfService defect was escalated: if everything can be signed,
+    /// a signature proves nothing.
+    ///
+    /// Acknowledgement is FINAL, like <see cref="ResolveDefect"/> and
+    /// <see cref="LinkWorkOrder"/> — a second call fails rather than re-stamping, because
+    /// overwriting who signed and when is exactly what an evidence field must not allow.
+    ///
+    /// Deliberately NOT reachable from <see cref="Enter"/> or <see cref="Amend"/>, for the same
+    /// reason a defect resolution is not: the entry path comes off the wire, and a caller that
+    /// could put the stamp in the body would be self-acknowledging — signing the carrier's line
+    /// on the carrier's behalf, with nothing in the record to show it.
+    ///
+    /// See <see cref="Amend"/> on what happens when an acknowledged report is later amended out
+    /// of Fail: the stamp stays.
+    /// </summary>
+    public Result AcknowledgeAsCarrier(string acknowledgedBy, string? note, DateTimeOffset atUtc)
+    {
+        if (string.IsNullOrWhiteSpace(acknowledgedBy))
+        {
+            return NorthernLink.Shared.Kernel.Result.Failure(InspectionErrors.CarrierAcknowledgerRequired);
+        }
+
+        if (Result != InspectionResult.Fail)
+        {
+            return NorthernLink.Shared.Kernel.Result.Failure(InspectionErrors.CarrierAcknowledgementNotRequired);
+        }
+
+        if (CarrierAcknowledgedAtUtc is not null)
+        {
+            return NorthernLink.Shared.Kernel.Result.Failure(InspectionErrors.CarrierAlreadyAcknowledged);
+        }
+
+        CarrierAcknowledgedBy = acknowledgedBy.Trim();
+        CarrierAcknowledgedAtUtc = atUtc;
+        CarrierAcknowledgementNote = Normalize(note);
+
+        Raise(new VehicleInspectionCarrierAcknowledgedDomainEvent(Id, TenantId));
         return NorthernLink.Shared.Kernel.Result.Success();
     }
 
@@ -398,6 +487,28 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
             }
             : StripResolution(d))];
     }
+
+    /// <summary>
+    /// The one place the checklist tri-state invariant lives, applied on both write paths so no
+    /// call site has to remember it:
+    ///
+    /// <c>Passed == (State != Defect)</c>
+    ///
+    /// NOT <c>State == Ok</c>. <see cref="InspectionChecklistItem.Passed"/> is what every consumer
+    /// written before NL-PTI-01 reads, and to those consumers it means "this row is not a
+    /// defect". An N/A row is not a defect — a bumper-mounted item on a unit that has no bumper
+    /// did not fail the inspection — so it must read back as Passed. Deriving from
+    /// <c>State == Ok</c> instead would silently turn every N/A answer into a failure on the
+    /// older screens and in every report built on that flag.
+    ///
+    /// A row that supplies no <see cref="InspectionChecklistItem.State"/> is left exactly as it
+    /// came: it is the legacy two-value shape, and
+    /// <see cref="InspectionChecklistItem.EffectiveState"/> is what reads it back.
+    /// </summary>
+    private static List<InspectionChecklistItem> NormalizeChecklist(IReadOnlyList<InspectionChecklistItem> items) =>
+        [.. items.Select(item => item.State is { } state
+            ? item with { Passed = state != ChecklistItemState.Defect }
+            : item)];
 
     /// <summary>Nulls the five resolution fields; <c>RecurrenceOfInspectionId</c> is left alone.</summary>
     private static InspectionDefect StripResolution(InspectionDefect defect) => defect with

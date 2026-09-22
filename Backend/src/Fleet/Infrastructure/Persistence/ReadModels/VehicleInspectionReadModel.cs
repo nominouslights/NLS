@@ -37,11 +37,15 @@ public sealed class VehicleInspectionReadModel
     public InspectionFuelLevel? FuelLevel { get; set; }
     public List<string> Issues { get; set; } = [];
     public List<bool> Attestations { get; set; } = [];
+    public string? CertificationStatement { get; set; }
     public string? DriverSignatureName { get; set; }
     public DateTimeOffset? CertifiedAt { get; set; }
     public bool FuelAdded { get; set; }
     public decimal? FuelLitres { get; set; }
     public decimal? FuelCostCad { get; set; }
+    public string? CarrierAcknowledgedBy { get; set; }
+    public DateTimeOffset? CarrierAcknowledgedAtUtc { get; set; }
+    public string? CarrierAcknowledgementNote { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
     public int Version { get; set; }
 }
@@ -71,7 +75,11 @@ public sealed class VehicleInspectionReadModelConfiguration : IEntityTypeConfigu
         builder.Property(i => i.Visibility).HasColumnName("visibility").HasConversion<string>();
         builder.Property(i => i.RoadAdvisories).HasColumnName("road_advisories");
         builder.Property(i => i.FuelLevel).HasColumnName("fuel_level").HasConversion<string>();
+        builder.Property(i => i.CertificationStatement).HasColumnName("certification_statement");
         builder.Property(i => i.DriverSignatureName).HasColumnName("driver_signature_name");
+        builder.Property(i => i.CarrierAcknowledgedBy).HasColumnName("carrier_acknowledged_by");
+        builder.Property(i => i.CarrierAcknowledgedAtUtc).HasColumnName("carrier_acknowledged_at_utc");
+        builder.Property(i => i.CarrierAcknowledgementNote).HasColumnName("carrier_acknowledgement_note");
         builder.Property(i => i.CertifiedAt).HasColumnName("certified_at");
         builder.Property(i => i.FuelAdded).HasColumnName("fuel_added");
         builder.Property(i => i.FuelLitres).HasColumnName("fuel_litres");
@@ -88,7 +96,15 @@ public sealed class VehicleInspectionReadModelConfiguration : IEntityTypeConfigu
         builder.PrimitiveCollection(i => i.Issues).HasColumnName("issues");
         builder.PrimitiveCollection(i => i.Attestations).HasColumnName("attestations");
 
-        builder.OwnsMany(i => i.ChecklistItems, item => item.ToJson("checklist_items"));
+        builder.OwnsMany(i => i.ChecklistItems, item =>
+        {
+            item.ToJson("checklist_items");
+            // Same hazard as ResolutionReason below, same fix: the NL-PTI-01 tri-state is an
+            // enum inside a ToJson block, so the conversion must be configured on BOTH sides or
+            // the projector writes "NotApplicable" into a column this reader deserializes as an
+            // int — a failure that shows up at runtime and nowhere in the build.
+            item.Property(c => c.State).HasConversion<string>();
+        });
         builder.OwnsMany(i => i.Defects, defect =>
         {
             defect.ToJson("defects");

@@ -41,6 +41,30 @@ public static class InspectionErrors
         "Each defect on an inspection must name a different item.");
 
     /// <summary>
+    /// The carrier acknowledgement line of NL-PTI-01 is only meaningful on a failed report: it is
+    /// the evidence that a Major/OutOfService defect was escalated to and seen by the carrier.
+    /// Allowing it on a clean report would let the field be stamped everywhere and so mean
+    /// nothing anywhere.
+    /// </summary>
+    public static readonly Error CarrierAcknowledgementNotRequired = Error.Validation(
+        "Fleet.Inspection.CarrierAcknowledgementNotRequired",
+        "Only a failed inspection carries a carrier acknowledgement.");
+
+    /// <summary>
+    /// The acknowledgement is a signature: stamping it twice would overwrite who signed and
+    /// when. A second call fails rather than re-stamping, exactly as <c>ResolveDefect</c> and
+    /// <c>LinkWorkOrder</c> do.
+    /// </summary>
+    public static readonly Error CarrierAlreadyAcknowledged = Error.Conflict(
+        "Fleet.Inspection.CarrierAlreadyAcknowledged",
+        "This inspection has already been acknowledged by the carrier.");
+
+    /// <summary>A signature with no name on it is not a signature.</summary>
+    public static readonly Error CarrierAcknowledgerRequired = Error.Validation(
+        "Fleet.Inspection.CarrierAcknowledgerRequired",
+        "The name of the carrier representative acknowledging the report is required.");
+
+    /// <summary>
     /// A trip already has an inspection of this half (one pre-trip and one post-trip per trip is
     /// the invariant). The caller should edit the existing record rather than enter a second.
     /// </summary>

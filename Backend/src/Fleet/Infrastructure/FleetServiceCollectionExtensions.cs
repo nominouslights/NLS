@@ -26,6 +26,7 @@ using NorthernLink.Fleet.Application.Maintenance.Status.GetFleetDue;
 using NorthernLink.Fleet.Application.Maintenance.Status.GetHistory;
 using NorthernLink.Fleet.Application.Maintenance.Status.GetOverhauls;
 using NorthernLink.Fleet.Application.Maintenance.Status.GetVehicleStatus;
+using NorthernLink.Fleet.Application.Inspections.AcknowledgeCarrier;
 using NorthernLink.Fleet.Application.Inspections.Enter;
 using NorthernLink.Fleet.Application.Inspections.GetDefects;
 using NorthernLink.Fleet.Application.Inspections.GetInspections;
@@ -130,6 +131,7 @@ public static class FleetServiceCollectionExtensions
         services.AddScoped<ICommandHandler<RemoveInspectionCommand>, RemoveInspectionCommandHandler>();
         services.AddScoped<IQueryHandler<GetVehicleDefectsQuery, IReadOnlyList<VehicleDefectResponse>>, GetVehicleDefectsQueryHandler>();
         services.AddScoped<ICommandHandler<ResolveInspectionDefectCommand>, ResolveInspectionDefectCommandHandler>();
+        services.AddScoped<ICommandHandler<AcknowledgeInspectionCarrierCommand>, AcknowledgeInspectionCarrierCommandHandler>();
         services.AddScoped<ICommandHandler<PropagateInspectionOdometerCommand>, PropagateInspectionOdometerCommandHandler>();
         services.AddScoped<ICommandHandler<RegisterShopCommand, Guid>, RegisterShopCommandHandler>();
         services.AddScoped<ICommandHandler<UpdateShopCommand>, UpdateShopCommandHandler>();

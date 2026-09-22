@@ -180,6 +180,10 @@ public class DriverSurfaceMetadataTests : IAsyncLifetime
     [InlineData("POST", "/api/fleet/pm-plans")]
     [InlineData("POST", "/api/fleet/shops")]
     [InlineData("DELETE", "/api/fleet/inspections/{id:guid}")]
+    // The NL-PTI-01 carrier line records that the CARRIER was shown a report the driver wrote.
+    // A Driver token reaching this would let the reporter sign their own escalation, which is
+    // the one thing the field exists to prove did not happen.
+    [InlineData("POST", "/api/fleet/inspections/{id:guid}/carrier-acknowledgement")]
     [InlineData("POST", "/api/clients")]
     [InlineData("GET", "/api/billing/invoices")]
     [InlineData("GET", "/api/billing/billable-trips")]
@@ -219,6 +223,27 @@ public class DriverSurfaceMetadataTests : IAsyncLifetime
         var policy = endpoint.Metadata.GetMetadata<IAuthorizeData>()?.Policy;
 
         Assert.Equal(AuthorizationPolicies.DriverAccess, policy);
+    }
+
+    /// <summary>
+    /// The Fleet module's driver-facing surface is exactly one route: submitting a DVIR. Pinned
+    /// as a whole list rather than route by route because the failure this guards against is an
+    /// ADDITION — a new inspection endpoint mapped onto the submission group by habit, which the
+    /// per-route theories above would never notice. The NL-PTI-01 carrier acknowledgement is the
+    /// live example: it is an inspection write, on the same prefix, and it must not be here.
+    /// </summary>
+    [Fact]
+    public void The_fleet_driver_facing_surface_is_only_the_DVIR_submission()
+    {
+        var driverFacing = _endpoints
+            .Where(endpoint =>
+                endpoint.RoutePattern.RawText?.StartsWith("/api/fleet", StringComparison.Ordinal) == true
+                && endpoint.Metadata.GetMetadata<IAuthorizeData>()?.Policy == AuthorizationPolicies.DriverAccess)
+            .Select(Describe)
+            .Order()
+            .ToList();
+
+        Assert.Equal(["POST /api/fleet/inspections"], driverFacing);
     }
 
     private RouteEndpoint Endpoint(string method, string pattern)

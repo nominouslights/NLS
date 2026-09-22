@@ -98,6 +98,12 @@ public static partial class FleetEndpoints
         // DVIR, not part of the driver's own circle check.
         inspectionRecords.MapPost("{id:guid}/defects/resolve", ResolveInspectionDefect);
 
+        // Sign the NL-PTI-01 carrier acknowledgement line. DispatchAccess, and never
+        // DriverAccess: the field exists to record that the CARRIER was shown a report the
+        // driver wrote. A driver able to sign it would be acknowledging their own defect report,
+        // which is precisely the escalation this evidences not happening.
+        inspectionRecords.MapPost("{id:guid}/carrier-acknowledgement", AcknowledgeInspectionCarrier);
+
         // …while submitting a pre-/post-trip inspection is the driver's own circle check, and is
         // the reason DriverAccess exists. Entered from the trip workflow today, from the Driver
         // Field App next; the reading advances the vehicle odometer intra-Fleet.
