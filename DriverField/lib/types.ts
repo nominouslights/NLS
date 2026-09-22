@@ -141,21 +141,11 @@ export interface HosEntry {
   note: string;
 }
 
-/**
- * `id` is what answers, drafts and the resume pointer key on; `label` is both what the driver
- * reads and the `Item` string ChecklistItemInput carries. Separate deliberately: the old code
- * keyed answers by the display string, so two groups sharing an item name collided and the
- * group was lost from the payload even though ChecklistItemInput has a Group field.
- */
-export interface ChecklistItem {
-  id: string;
-  label: string;
-}
-
-export interface ChecklistGroup {
-  group: string;
-  items: ChecklistItem[];
-}
+// `ChecklistItem` / `ChecklistGroup` used to live here, describing a locally-invented 22-item
+// DVIR list in lib/data.ts. Both are gone: the checklist is now form NL-PTI-01, whose shapes
+// (`InspectionItem`, `InspectionSubGroup`) come from lib/inspectionForm.ts — a byte-identical
+// copy of Dispatcher's catalogue. Re-declaring them here would be a second definition of the
+// same legal form, which is the drift this app copies the file to prevent.
 
 export interface DvirSubmission {
   id: string;

@@ -21,12 +21,18 @@ import {
   resolveStep,
 } from "@/lib/inspectionSteps";
 import {
+  itemsFor,
+  NL_PTI_01_CERTIFICATION,
+  type InspectionSubGroup,
+} from "@/lib/inspectionForm";
+import {
   certifiedToday,
   discardDraft,
   getDraft,
   recordCertification,
   setAnswer,
   setDefect,
+  setNote,
   setOdometer,
   setStep,
   startDraft,
@@ -36,6 +42,8 @@ import {
 } from "@/lib/inspectionStore";
 import { useInspectionStoreHydrated } from "@/lib/useInspectionStore";
 import {
+  checkStatePassed,
+  checkStateToWire,
   deriveResult,
   inspectionDue,
   INSPECTION_SOURCE_WIRE,
@@ -47,7 +55,6 @@ import {
   assignedVehicle,
   assignedVehicleId,
   currentDriver,
-  dvirChecklist,
   dvirSubmissions,
   today,
 } from "@/lib/data";
@@ -61,18 +68,24 @@ import type { CheckState, DefectSeverity, InspectionMode } from "@/lib/types";
 // draft in lib/inspectionStore.ts and the rules in lib/inspectionGate.ts — so each of those is
 // testable without jsdom and this file stays readable.
 //
-// WHY IT IS SHAPED THIS WAY: the previous version rendered all 22 items as one continuous
-// scroll, three or four screens deep, with the legal attestation at the bottom. On a
-// dash-mounted 10-inch tablet, in northern daylight, with gloves on, a driver loses their place
-// and sees the attestation least.
+// WHY IT IS SHAPED THIS WAY: the previous version rendered every item as one continuous scroll,
+// three or four screens deep, with the legal attestation at the bottom. On a dash-mounted
+// 10-inch tablet, in northern daylight, with gloves on, a driver loses their place and sees the
+// attestation least. That was true of the old 22-item list and is unarguable now the checklist
+// is form NL-PTI-01: 67 to 80 rows depending on the unit and the half of the form.
+//
+// THE CHECKLIST IS NOT MOCK DATA. It comes from lib/inspectionForm.ts, a byte-identical copy of
+// Dispatcher/lib/inspectionForm.ts, narrowed by itemsFor(unit, mode). `unit` is the assigned
+// vehicle's, `mode` the pre/post-trip half. Those two arguments are the whole reason the
+// progress denominator is derived rather than written down — there are four correct answers.
 //
 // THE DRAFT SURVIVES NAVIGATION AND A RELOAD. Answers used to live in local useState, and
-// Console.tsx unmounts screens on nav, so tapping away to Hours destroyed all 22 — which this
+// Console.tsx unmounts screens on nav, so tapping away to Hours destroyed the lot — which this
 // repo frames as a compliance failure, not a lost draft. They now live in
 // lib/inspectionStore.ts, read here through ONE useSyncExternalStore.
 //
 // ORDER ON SUBMIT: enqueue → recordCertification → discardDraft. If enqueue throws, the
-// driver's 22 answers survive. See submit() below.
+// driver's whole walk-around survives. See submit() below.
 //
 // Photo attachment is still rendered DISABLED WITH ITS REASON rather than omitted (on the
 // review step): there is no attachment endpoint for inspections or defects anywhere on the
@@ -90,12 +103,21 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
   // `null` means "whatever inspectionDue() says", so the rail entry and a cold open agree.
   const mode: InspectionMode = requested ?? (hydrated ? inspectionDue(vehicleId).mode : "PreTrip");
 
+  // The unit the form is narrowed for. `assignedVehicle.unit` is "NL-01"/"NL-02"; anything
+  // itemsFor() does not recognise gets the FULL superset, which is the fail-safe direction on a
+  // compliance form (more questions, never fewer). Never "helpfully" default it.
+  const unit = assignedVehicle.unit;
+
   const draft = hydrated ? getDraft(mode, vehicleId) : null;
   const answers: Record<string, CheckState> = draft?.answers ?? {};
+  const notes: Record<string, string> = draft?.notes ?? {};
   const defects: Record<string, DraftDefect> = draft?.defects ?? {};
   const odometerKm = draft?.odometerKm ?? null;
 
-  const steps = buildSteps(answers);
+  const groups = itemsFor(unit, mode);
+  const items = flatten(groups);
+
+  const steps = buildSteps(answers, unit, mode);
   const step = resolveStep(steps, draft?.stepId ?? null);
   const index = steps.findIndex((s) => s.id === step.id);
 
@@ -107,11 +129,7 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
     .map(([, d]) => d.severity)
     .filter((s): s is DefectSeverity => s !== null);
 
-  const naItems = Object.entries(answers)
-    .filter(([, state]) => state === "na")
-    .map(([itemId]) => itemId);
-
-  const unansweredCount = CHECKLIST_ITEMS.filter((i) => answers[i.id] === undefined).length;
+  const unansweredCount = items.filter((i) => answers[i.key] === undefined).length;
   const ungradedCount = Object.entries(answers).filter(
     ([itemId, state]) => state === "defect" && !defects[itemId]?.severity,
   ).length;
@@ -139,7 +157,7 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
    */
   function answer(itemId: string, next: CheckState) {
     const updated = setAnswer(mode, vehicleId, itemId, next);
-    const nextSteps = buildSteps(updated.answers);
+    const nextSteps = buildSteps(updated.answers, unit, mode);
     const at = nextSteps.findIndex((s) => s.id === checkStepId(itemId));
     const target = at === -1 ? nextSteps[nextSteps.length - 1] : nextSteps[at + 1];
     goTo((target ?? nextSteps[nextSteps.length - 1]).id);
@@ -168,19 +186,28 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
     // SEAMS FLAGGED RATHER THAN INVENTED, matching EnterInspectionCommand in
     // Backend/src/Fleet/Application/Inspections/Enter/:
     //
-    //  • `result` IS NOT SENT. VehicleInspection.DeriveResult derives it (VehicleInspection.cs
-    //    :421-432). deriveResult() runs here for the banner, the local certification and the
-    //    boarding gate only.
-    //  • `"na"` HAS NO WIRE REPRESENTATION. ChecklistItemInput.Passed is a `bool`. N/A items are
-    //    OMITTED from `checklist` and named in a client-only `naItems` field. `passed: true`
-    //    for an unapplicable item would be a false attestation in a compliance record — the
-    //    exact failure the "not answered must never look like passed" rule exists to prevent —
-    //    and `passed: false` would read as a defect. Omission loses information, which is
-    //    visible and fixable; falsification is not. OPEN QUESTION FOR THE BACKEND: should
-    //    ChecklistItemInput.Passed become a tri-state?
+    //  • `result` IS NOT SENT. VehicleInspection.DeriveResult derives it. deriveResult() runs
+    //    here for the banner, the local certification and the boarding gate only.
+    //  • `item` IS THE CATALOGUE KEY, NEVER THE LABEL. NL-PTI-01's `key` is the wire value
+    //    stored as InspectionChecklistItem.Item, and half of the `(InspectionId, Item)` address
+    //    a defect is filed against. Sending the label instead would file defects at addresses
+    //    the Dispatch Console cannot resolve — and several labels deliberately differ from
+    //    their key (the "(NL-02)" suffixes, and the four "Interior: " rows).
+    //  • `state` IS THE TRI-STATE, and N/A is no longer dropped. ChecklistItemState is
+    //    `Ok | Defect | NotApplicable`; this app used to OMIT every N/A row and name it in a
+    //    client-only `naItems` field, because Passed was a bare bool and `passed: true` for an
+    //    unapplicable row is a false attestation. That field is GONE — re-adding it would hide
+    //    rows the wire now carries. `passed` still travels because the input record requires
+    //    it, derived exactly as the aggregate re-derives it (checkStatePassed).
+    //  • `note` per row is NL-PTI-01's Notes column, on EVERY row. Distinct from a defect's
+    //    note: one describes the row, the other the fault, and a defect may carry both.
+    //  • `certificationStatement` is NL_PTI_01_CERTIFICATION verbatim from the copied
+    //    catalogue — the sentence the driver actually signed, which is what
+    //    VehicleInspection.CertificationStatement exists to keep.
     //  • `severity` crosses through severityToWire(). InspectionDefectSeverity is
     //    `Minor | Major | OutOfService` — no spaces — and the display string would be rejected
-    //    by the default System.Text.Json enum converter. Pinned in lib/wire.test.ts.
+    //    by the default System.Text.Json enum converter. Pinned in lib/wire.test.ts. The form
+    //    offers only Minor and Major; OutOfService stays reachable for historical rows.
     //  • `source` is never omitted: the backend defaults Source to Dispatcher, which would
     //    attribute a driver's inspection to a dispatcher who never touched the vehicle.
     //  • `tripNumber`, not a trip id — the wire field is TripNumber, a string.
@@ -190,9 +217,9 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
     //    pointer belongs to the dispatcher Re-report path.
     //  • `attestations: [true]` is one flag because IReadOnlyList<bool> has no labels defined
     //    anywhere on the backend. A multi-checkbox UI would be inventing a contract.
-    //  • Weather, temperature, road conditions, visibility and fuel are omitted: nine more
-    //    steps on a screen that posts nowhere. Vehicle.tsx already says on screen that fuel has
-    //    no backend resource.
+    //  • Weather, temperature, road conditions, visibility and fuel are omitted: more steps on
+    //    a screen that posts nowhere. Vehicle.tsx already says on screen that fuel has no
+    //    backend resource.
     let commandId: string;
     try {
       commandId = await enqueue("dvir.submit", {
@@ -205,23 +232,26 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
         performedAt: current.startedAt,
         certifiedAt,
         odometerKm: current.odometerKm,
-        // N/A items are OMITTED here and named in naItems below — never sent as passed.
-        checklist: CHECKLIST_ITEMS.filter(
-          (i) => current.answers[i.id] === "pass" || current.answers[i.id] === "defect",
-        ).map((i) => ({
-          group: i.group,
-          item: i.label,
-          passed: current.answers[i.id] === "pass",
-        })),
+        // EVERY answered row, N/A included. Unanswered rows cannot reach here — the review
+        // step blocks Certify on unansweredCount — but the filter is the belt to that braces.
+        checklist: items
+          .filter((i) => current.answers[i.key] !== undefined)
+          .map((i) => {
+            const state = current.answers[i.key];
+            return {
+              group: i.groupKey,
+              item: i.key,
+              passed: checkStatePassed(state),
+              state: checkStateToWire(state),
+              note: (current.notes[i.key] ?? "").trim() || null,
+            };
+          }),
         defects: graded.map((g) => ({
-          item: labelOf(g.itemId),
+          item: g.itemId,
           severity: severityToWire(g.severity),
           note: g.note.trim() === "" ? null : g.note.trim(),
         })),
-        // CLIENT-ONLY. See the `"na"` note above — there is no wire field for this yet.
-        naItems: Object.entries(current.answers)
-          .filter(([, state]) => state === "na")
-          .map(([itemId]) => labelOf(itemId)),
+        certificationStatement: NL_PTI_01_CERTIFICATION,
         attestations: [true],
         driverSignatureName: currentDriver.name,
       });
@@ -246,12 +276,15 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
       certifiedAt,
       result,
       defectCount: graded.length,
+      // NL-PTI-01 offers Minor and Major only, so this is false for anything certified here.
+      // The field stays because LocalCertification is also read for records graded before the
+      // form change, and the gate's banner branches on it.
       outOfService: graded.some((g) => g.severity === "Out of Service"),
     };
 
     // Order matters: enqueue first (above), then record, then discard. If enqueue throws, the
-    // draft is still on the device and the driver re-taps Certify rather than re-answering 22
-    // questions.
+    // draft is still on the device and the driver re-taps Certify rather than re-walking the
+    // whole vehicle.
     recordCertification(certification);
     discardDraft(mode, vehicleId);
     setDone(certification);
@@ -362,7 +395,7 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
       progressLabel={progressLabel(step)}
       progressFraction={progressFraction(step)}
       // The review chip must not show a teal check while anything is blank: `progressLabel`
-      // reports POSITION ("Review · 22 of 22" = you are past all 22 checks), not completeness,
+      // reports POSITION ("Review · 67 of 67" = you are past every check), not completeness,
       // so the colour and glyph are what have to carry "still something owed". The body names
       // exactly what.
       progressKind={
@@ -437,17 +470,24 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
 
       {step.kind === "check" ? (
         <CheckStep
+          area={step.area}
           group={step.group}
           label={step.label}
+          checkFor={step.checkFor}
           value={answers[step.itemId] ?? null}
+          note={notes[step.itemId] ?? ""}
           onAnswer={(next) => answer(step.itemId, next)}
+          onNote={(next) => setNote(mode, vehicleId, step.itemId, next)}
         />
       ) : null}
 
       {step.kind === "defect" ? (
         <DefectStep
+          area={step.area}
           group={step.group}
           label={step.label}
+          category={step.category}
+          categoryNote={step.categoryNote}
           defect={defects[step.itemId] ?? { severity: null, note: "" }}
           onChange={(next) => setDefect(mode, vehicleId, step.itemId, next)}
         />
@@ -456,13 +496,13 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
       {step.kind === "review" ? (
         <ReviewStep
           mode={mode}
-          unit={assignedVehicle.unit}
-          checklist={dvirChecklist}
+          unit={unit}
+          groups={groups}
           odometerKm={odometerKm}
           answers={answers}
+          notes={notes}
           defects={defects}
           result={deriveResult(severities)}
-          naItems={naItems.map(labelOf)}
           unansweredCount={unansweredCount}
           ungradedCount={ungradedCount}
           recent={dvirSubmissions}
@@ -476,13 +516,24 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
   );
 }
 
-/** Flattened once at module load — the checklist is static data, not state. */
-const CHECKLIST_ITEMS: { id: string; label: string; group: string }[] = dvirChecklist.flatMap((g) =>
-  g.items.map((i) => ({ id: i.id, label: i.label, group: g.group })),
-);
-
-function labelOf(itemId: string): string {
-  return CHECKLIST_ITEMS.find((i) => i.id === itemId)?.label ?? itemId;
+/**
+ * The rows for this unit and mode, flattened, each carrying its sub-group's wire key.
+ *
+ * NOT cached at module load, unlike the array this replaces: the list depends on the unit and
+ * the half of the form, so a module constant could only ever be right for one of the four
+ * combinations. Same reason lib/inspectionSteps.ts has no CHECK_COUNT any more.
+ */
+function flatten(
+  groups: InspectionSubGroup[],
+): { key: string; label: string; checkFor: string; groupKey: string }[] {
+  return groups.flatMap((g) =>
+    g.items.map((i) => ({
+      key: i.key,
+      label: i.label,
+      checkFor: i.checkFor,
+      groupKey: g.key,
+    })),
+  );
 }
 
 function modeTitle(mode: InspectionMode): string {

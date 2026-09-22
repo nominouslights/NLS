@@ -8,19 +8,30 @@ import { StatusBanner } from "@/components/ui-tablet/StatusBanner";
 import { CardRow, FieldLine, Heading, MockTag, TabletChip } from "../shared";
 import { checkStepId, defectStepId } from "@/lib/inspectionSteps";
 import { severityGlyph, severityKind, type InspectionResultName } from "@/lib/inspectionGate";
+import { NL_PTI_01_CERTIFICATION, type InspectionSubGroup } from "@/lib/inspectionForm";
 import type { DraftDefect } from "@/lib/inspectionStore";
-import type { CheckState, DvirSubmission, ChecklistGroup, InspectionMode } from "@/lib/types";
+import type { CheckState, DvirSubmission, InspectionMode } from "@/lib/types";
 
 // APP-LOCAL. The last step: everything the driver is about to attest to, then the attestation.
 //
 // THE ONLY SCROLLING SURFACE IN THE FLOW. WizardFrame deliberately has no scroll container —
-// a driver must never be able to leave part of a single question off screen — but 22 rows of
-// review is reference material being re-read, not a question being answered, so it owns its own
-// overflow here rather than pushing one into the frame.
+// a driver must never be able to leave part of a single question off screen — but 67 to 80 rows
+// of review is reference material being re-read, not a question being answered, so it owns its
+// own overflow here rather than pushing one into the frame.
 //
-// It carries the two seam admissions on screen as well as in the payload comment, because a
-// compliance screen that looks authoritative in a demo is the failure mode this app's MockTag
+// It carries the remaining seam admissions on screen as well as in the payload comment, because
+// a compliance screen that looks authoritative in a demo is the failure mode this app's MockTag
 // convention exists to prevent.
+//
+// ONE BANNER WAS DELETED AND MUST NOT COME BACK: "N/A items will be omitted from the
+// submission". It was true while ChecklistItemInput.Passed was a bare bool; ChecklistItemState
+// landed, every row now travels with `state` and `note`, and nothing is dropped. Re-adding it
+// would make the screen lie in the opposite direction, which is no better.
+//
+// THE ATTESTATION IS NL_PTI_01_CERTIFICATION, VERBATIM, FROM THE COPIED CATALOGUE. It is the
+// sentence the driver signs and the string the backend stores as
+// VehicleInspection.CertificationStatement — "what was actually signed". Retyping or shortening
+// it here would put a different sentence on the tablet than on the console and the paper form.
 
 const RESULT_META: Record<InspectionResultName, { kind: "ontime" | "soon" | "over"; label: string }> =
   {
@@ -38,12 +49,12 @@ const ANSWER_META: Record<CheckState, { kind: "ontime" | "over" | "off"; label: 
 export function ReviewStep({
   mode,
   unit,
-  checklist,
+  groups,
   odometerKm,
   answers,
+  notes,
   defects,
   result,
-  naItems,
   unansweredCount,
   ungradedCount,
   recent,
@@ -54,12 +65,13 @@ export function ReviewStep({
 }: {
   mode: InspectionMode;
   unit: string;
-  checklist: ChecklistGroup[];
+  /** Already narrowed to this unit and mode by itemsFor() — the caller does that once. */
+  groups: InspectionSubGroup[];
   odometerKm: number | null;
   answers: Record<string, CheckState>;
+  notes: Record<string, string>;
   defects: Record<string, DraftDefect>;
   result: InspectionResultName;
-  naItems: string[];
   unansweredCount: number;
   ungradedCount: number;
   recent: DvirSubmission[];
@@ -143,19 +155,6 @@ export function ReviewStep({
         <strong>not sent</strong> — the server derives it, so the two can never disagree.
       </StatusBanner>
 
-      {naItems.length > 0 ? (
-        <StatusBanner
-          kind="soon"
-          title={`${naItems.length} item(s) marked N/A will not appear in the submission.`}
-        >
-          The backend&rsquo;s checklist row carries a plain pass/fail flag with no third state, so
-          an N/A item is <strong>omitted</strong> rather than sent as passed — marking an
-          unapplicable item &ldquo;passed&rdquo; would be a false attestation in a compliance
-          record. Omission loses information, which is visible and fixable. Open question for the
-          backend: should that flag become a tri-state? Items: {naItems.join(", ")}.
-        </StatusBanner>
-      ) : null}
-
       {result === "Fail" ? (
         <StatusBanner kind="over" title="A failing defect does not take the vehicle out of service here.">
           {unit}&rsquo;s out-of-service flag is the server&rsquo;s, and nothing in this build
@@ -165,23 +164,28 @@ export function ReviewStep({
         </StatusBanner>
       ) : null}
 
-      {checklist.map((group) => (
-        <div key={group.group}>
-          <Heading>{group.group}</Heading>
+      {groups.map((group) => (
+        <div key={group.key}>
+          <Heading>
+            Area {group.area} · {group.title}
+          </Heading>
           {group.items.map((item) => {
-            const answer = answers[item.id] ?? null;
+            // Keyed on the catalogue's `key` throughout — the wire value, and the same string
+            // answers, notes and defects are addressed by.
+            const answer = answers[item.key] ?? null;
             const meta = answer ? ANSWER_META[answer] : null;
-            const defect = answer === "defect" ? defects[item.id] : undefined;
+            const defect = answer === "defect" ? defects[item.key] : undefined;
+            const note = (notes[item.key] ?? "").trim();
 
             return (
-              <CardRow key={item.id}>
+              <CardRow key={item.key}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <FieldLine
-                    label={item.id}
+                    label={item.label}
                     value={
                       defect
-                        ? `${item.label} — ${defect.note.trim() || "no note"}`
-                        : item.label
+                        ? `${defect.note.trim() || "no fault note"}${note ? ` · ${note}` : ""}`
+                        : note || item.checkFor
                     }
                   />
                 </div>
@@ -212,7 +216,7 @@ export function ReviewStep({
                   <TouchButton
                     variant="secondary"
                     onClick={() =>
-                      onGoToStep(defect ? defectStepId(item.id) : checkStepId(item.id))
+                      onGoToStep(defect ? defectStepId(item.key) : checkStepId(item.key))
                     }
                   >
                     Change
@@ -234,8 +238,7 @@ export function ReviewStep({
             lineHeight: 1.6,
           }}
         >
-          I certify that I have inspected this vehicle in accordance with NSC Standard 11 and
-          that the entries above are accurate.
+          {NL_PTI_01_CERTIFICATION}
         </div>
         <div style={{ display: "flex", gap: 12, marginTop: 16, flexWrap: "wrap" }}>
           <TouchButton onClick={onSubmit} disabled={!complete} disabledReason={blockedReason}>

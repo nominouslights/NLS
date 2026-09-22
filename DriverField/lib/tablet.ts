@@ -83,17 +83,22 @@ export const radius = {
  *                   target it cannot miss, and three tiles still leave room for the question
  *                   and the footer inside 800.
  *   answerMinW 300  Usable width is 1280 − 200 (expanded rail) − 52 (2× gap.page) = 1028.
- *                   Three at 300 plus two gap.row = 928 — fits expanded AND collapsed.
+ *                   Three at 300 plus two gap.row = 928 — fits expanded AND collapsed. The
+ *                   defect step offers only two (NL-PTI-01 has no third box), which is the
+ *                   same geometry with more air, not a different one.
  *   question    40  The type scale tops out at `metric: 34`, which is a NUMBER size. The
  *                   question is prose and must out-rank every other string on screen; 40 keeps
- *                   "Air system (if equipped)" on one line.
+ *                   most NL-PTI-01 row labels on one line and the longest on two.
  *   footerH     88  touch.primary 56 + 2×16 air. Same family as bar.height 72 without
  *                   equalling it, so the two rows never read as one control strip.
  *   barH         6  Thinner reads as decoration at 1280; thicker competes with the question.
  *
- * Height budget: bar.height 72 + header ~104 + barH 6 + body (answerH 168 + gap.section 20)
- * + footerH 88 + padding 52 ≈ 510 used, ~290 slack — which absorbs the defect step's severity
- * row and note field without scrolling.
+ * Height budget, worst case, with NL-PTI-01's longest rows: 800 − bar.height 72 = 728 for the
+ * frame; header ~90 + barH 6 + body padding 20 + footerH 88 leaves ~524 for a step. A check
+ * step spends at most ~467 of it (area line 19 + a two-line question 88 + a two-line Check For
+ * 64 + tiles 168 + note 72 + four gap.row 56) and the defect step ~479. WizardFrame has NO
+ * scroll container, so a step that does not fit is CLIPPED, not scrolled — anything added here
+ * has to come out of that slack, not out of the question's size.
  */
 export const wizard = {
   answerH: 168,
