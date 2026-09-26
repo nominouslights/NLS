@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using NorthernLink.Api.Auth;
+using NorthernLink.Api.Diagnostics;
 using NorthernLink.Api.Tenancy;
 using NorthernLink.Shared;
 using NorthernLink.Api.HostDefaults;
@@ -87,6 +88,29 @@ builder.Services
 
 builder.Services.AddAuthorization(AuthorizationPolicyRegistration.Add);
 
+// Unhandled exceptions: logged in full server-side, answered with a traceId and nothing else.
+// See UnhandledExceptionHandler for why the response stays vague on a public-reachable API.
+builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<UnhandledExceptionHandler>();
+
+// WHY appsettings.json raises the EF Core log categories to Warning, since the file cannot say so
+// itself: every key under Logging:LogLevel is parsed as a category->level mapping, so a "//"
+// comment key there throws at startup ("Configuration value ... is not supported") and takes the
+// whole API down. Learned the hard way.
+//
+// EF Core logs every SQL statement at Information. On this API that is thousands of lines an hour
+// from the outbox dispatchers alone, and it buried the one stack trace that mattered whenever a
+// request failed — a 500 was undiagnosable without reading past the traffic. The log now carries
+// problems, not traffic.
+//
+// To read SQL again while debugging a query, set Microsoft.EntityFrameworkCore.Database.Command
+// back to Information in appsettings.Development.json ONLY — never in appsettings.json, because
+// EF logs parameter VALUES at that level and those carry personal data (passenger names, phone
+// numbers, addresses) into whatever aggregates the production logs.
+//
+// Migrations stays at Information deliberately: "Applying migration X" is a handful of lines per
+// deploy and is exactly what you want in the log when the schema moves under a running API.
+
 // Domain libraries — one registration call per library, nothing else.
 builder.Services
     .AddIdentity(builder.Configuration)
@@ -118,6 +142,11 @@ builder.Services.AddModuleMigrations(
     typeof(NotificationsDbContext));
 
 var app = builder.Build();
+
+// FIRST in the pipeline, deliberately: anything that throws after this line is caught, logged
+// with its route and its Postgres SqlState, and answered with a traceId. Registered before the
+// endpoints so a failure inside authentication or authorization is caught too.
+app.UseExceptionHandler();
 
 // No CORS policy needed: the Dispatcher dev server proxies /api/* to this API server-side
 // (see Dispatcher/next.config.ts) so the browser only ever talks to its own origin.

@@ -83,6 +83,8 @@ public class NotificationsEndpointMetadataTests : IAsyncLifetime
     [InlineData("POST", "/api/notifications/emails/trip-pickup/report-preview")]
     [InlineData("POST", "/api/notifications/emails/client-accruals")]
     [InlineData("POST", "/api/notifications/emails/client-accruals/preview")]
+    [InlineData("POST", "/api/notifications/emails/booking-passes")]
+    [InlineData("POST", "/api/notifications/emails/booking-passes/preview")]
     [InlineData("GET", "/api/notifications/emails")]
     public void Every_notifications_endpoint_carries_the_DispatchAccess_policy(string method, string pattern)
     {
@@ -117,7 +119,12 @@ public class NotificationsEndpointMetadataTests : IAsyncLifetime
     {
         // Guards the guard: without this, an endpoint added to the group would be silently
         // absent from the Theory above (which asserts only the routes it names).
-        Assert.Equal(12, _endpoints.Count);
+        //
+        // It did exactly that: the two emails/booking-passes routes arrived without being named
+        // above, and this count sat red until someone reconciled it. When it fails, add the new
+        // route to the Theory and then raise this number — raising it alone re-greens the suite
+        // while leaving the new endpoint's policy unasserted, which is the failure this guards.
+        Assert.Equal(14, _endpoints.Count);
     }
 
     private sealed class StubTenantContext : ITenantContext
