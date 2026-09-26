@@ -20,21 +20,22 @@ import { StatusChip } from "@/components/ui/Chip";
 import { MetricTile } from "@/components/ui/MetricTile";
 import { ActionButton } from "@/components/ui/Button";
 import PoFormModal from "@/components/PoFormModal";
-import { poExpiryLabel } from "./shared";
 
 // PO dashboard for a single client — KPI row (valid / expiring / expired /
 // inheriting the contract rate) plus a purchase-order list with real CRUD
-// against the Clients API (/api/clients/{id}/purchase-orders). Expiry chips are
-// derived client-side from `expiry` (docStatusFor thresholds — Fleet
-// document-expiry pattern), never stored.
+// against the Clients API (/api/clients/{id}/purchase-orders). The KPI counts
+// are derived client-side from `expiry` (poExpiryKindFor → docStatusFor
+// thresholds — the Fleet document-expiry pattern), never stored.
 //
-// Each PO carries its OWN pricing terms (roundTripRateCad / oneWayRateCad), and
-// what this screen shows is the EFFECTIVE terms, not the stored fields: a blank
-// round-trip rate reads as the contract's, and a blank one-way rate shows the ½
-// figure it will actually bill at. A blank field that silently means "half of
-// something else" is how a pricing bug reaches an invoice — so the wording comes
-// from poTermsLabel(), the same helper the accruals report prices and prints
-// from (lib/api/clients.ts).
+// The ROWS carry no expiry chip: each row already prints "Issued … · expires …"
+// in words, and the tiles above count valid / expiring soon / expired, so a
+// per-row status chip was the same fact said twice (owner's decision).
+//
+// Each PO carries its OWN round-trip rate, and what this screen shows is the
+// EFFECTIVE rate, not the stored field: a blank rate reads as the contract's. A
+// blank field that silently means "something else" is how a pricing bug reaches
+// an invoice — so the wording comes from poTermsLabel(), the same helper the
+// accruals report prices and prints from (lib/api/clients.ts).
 
 type Editor = { mode: "new" } | { mode: "edit"; po: PurchaseOrderRecord } | null;
 
@@ -182,13 +183,12 @@ export default function ClientPoDashboard({
           </div>
         ) : (
           pos.map((p) => {
-            const kind = poExpiryKindFor(p.expiry);
             return (
               <div
                 key={p.id}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "150px 1fr 150px 150px 110px",
+                  gridTemplateColumns: "150px 1fr 150px 110px",
                   gap: 12,
                   alignItems: "center",
                   padding: "10px 12px",
@@ -206,8 +206,9 @@ export default function ClientPoDashboard({
                     Issued {formatUtcDate(p.issued)}
                     {p.expiry ? ` · expires ${formatUtcDate(p.expiry)}` : " · no expiry"}
                   </div>
-                  {/* EFFECTIVE terms, not the stored fields — an inherited rate
-                      says where it came from, and a ½ one-way rate says so. */}
+                  {/* EFFECTIVE terms, not the stored field — an inherited rate
+                      says where it came from. One rate: every trip bills the
+                      full round trip. */}
                   <div style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textMuted, marginTop: 2 }}>
                     {poTermsLabel(p, contractRate)}
                   </div>
@@ -218,9 +219,9 @@ export default function ClientPoDashboard({
                   </span>
                   {p.amountCad == null && <StatusChip kind="off" label="No value recorded" />}
                 </div>
-                <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                  <StatusChip kind={kind} label={poExpiryLabel(kind)} />
-                </div>
+                {/* No expiry chip on the row, by the owner's decision: the
+                    issued/expires dates above already say it in words, and the
+                    KPI tiles at the top count valid / expiring / expired. */}
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
                   <span
                     onClick={busy ? undefined : () => setEditor({ mode: "edit", po: p })}

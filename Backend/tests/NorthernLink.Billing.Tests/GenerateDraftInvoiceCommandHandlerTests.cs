@@ -174,11 +174,13 @@ public class GenerateDraftInvoiceCommandHandlerTests
     }
 
     /// <summary>
-    /// The no-regression case: a single-PO client still produces exactly one worksheet, with the
-    /// same total and the same PO stamp it got before per-PO pricing existed.
+    /// A single-PO client still produces exactly one worksheet with the same PO stamp, but the
+    /// total now reflects the full-rate rule: three groups at the contract's $120 each. The
+    /// lone leg used to bill $60 and now bills $120, because the empty return was always
+    /// being driven.
     /// </summary>
     [Fact]
-    public async Task A_single_po_client_produces_one_worksheet_identical_to_the_previous_behaviour()
+    public async Task A_single_po_client_produces_one_worksheet_billing_a_full_rate_per_group()
     {
         var contract = TestBilling.Contract(rate: 120m);
         var (o1, r1) = TestBilling.RoundTrip(new DateOnly(2026, 7, 6), "rt-1", "TR-1");
@@ -194,11 +196,11 @@ public class GenerateDraftInvoiceCommandHandlerTests
         Assert.Equal(TestBilling.DefaultPo, generated.PoNumber);
         Assert.Equal("INV-0001", generated.InvoiceNumber);
         Assert.Equal(3, generated.LineCount);
-        Assert.Equal(300m, generated.TotalCad); // 120 + 120 + 60, exactly as before
+        Assert.Equal(360m, generated.TotalCad); // 120 + 120 + 120 — the lone leg is full rate now
         Assert.Empty(generated.Warnings);
 
         var invoice = Assert.Single(invoices.Invoices);
-        Assert.Equal(300m, invoice.TotalCad);
+        Assert.Equal(360m, invoice.TotalCad);
         Assert.Equal("ZBB-CREW-01", invoice.BudgetCode);
         Assert.Equal(30, invoice.NetTermsDays);
         Assert.Equal(5, trips.Trips.Count(t => t.InvoiceId == invoice.Id));

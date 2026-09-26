@@ -129,17 +129,25 @@ export interface PurchaseOrderRecord {
   amountCad: number | null;
   /** Per-PO round-trip rate. Null = inherit the contract's
    *  ratePerRoundTripCad (see poEffectiveTerms — the PO overrides, the
-   *  contract is the fallback). */
+   *  contract is the fallback). Every trip bills this figure. */
   roundTripRateCad: number | null;
-  /** Per-PO one-way rate. Null = half the EFFECTIVE round-trip rate. */
+  /**
+   * Per-PO one-way rate. **Retained for history; no longer priced.** Billing
+   * charges one full round-trip rate for every group, paired or not, because a
+   * lone leg still deadheads the vehicle back — so neither the invoice
+   * generator (Backend InvoiceDraftBuilder) nor this app's estimator reads it.
+   * The backend deliberately kept the column and its data, so the value is
+   * still round-tripped on every PUT rather than cleared.
+   */
   oneWayRateCad: number | null;
   note: string | null;
 }
 
-/** POST /api/clients/{id}/purchase-orders body. Omit (or null) a rate to inherit:
- *  roundTripRateCad falls back to the contract rate, oneWayRateCad to half the
- *  effective round-trip rate. Creating a PO from nothing but a number and a date
- *  is legitimate — the terms often arrive later — so everything else is optional. */
+/** POST /api/clients/{id}/purchase-orders body. Omit (or null) roundTripRateCad
+ *  to inherit the contract rate. Creating a PO from nothing but a number and a
+ *  date is legitimate — the terms often arrive later — so everything else is
+ *  optional. oneWayRateCad is history-only and no longer priced; the PO form no
+ *  longer offers it, and a create simply sends null. */
 export interface PurchaseOrderInput {
   poNumber: string;
   issued: string;
@@ -165,6 +173,11 @@ export interface PurchaseOrderInput {
  * Why it matters more than it looks: a wiped rate does not error. Pricing falls
  * back to the contract rate and produces a plausible figure that gets hand-keyed
  * into QuickBooks — a wrong invoice that looks right.
+ *
+ * `oneWayRateCad` is no longer priced or edited, but it is still REQUIRED here
+ * for exactly this reason: PUT replaces the document, so a form that stopped
+ * sending the key would erase a recorded negotiation the backend chose to keep.
+ * Callers round-trip the existing value unchanged.
  */
 export interface PurchaseOrderUpdateInput {
   poNumber: string;
@@ -404,7 +417,11 @@ export function contractRoundTripRateCad(
 // Backend/src/Billing/Domain/Invoices/InvoiceDraftBuilder.cs:
 //
 //   roundTripRate = po?.roundTripRateCad ?? contractRate
-//   oneWayRate    = po?.oneWayRateCad    ?? roundTripRate * 0.5
+//
+// ONE rate, because there is no one-way price any more: every priced group
+// bills one full round-trip rate, quantity 1, paired or not (a lone leg still
+// deadheads the vehicle back, so charging half was under-billing). The PO's
+// oneWayRateCad is retained as history and is deliberately NOT read here.
 //
 // It lives HERE, beside the PurchaseOrderRecord it resolves, rather than in
 // lib/billing/accruals.ts — accruals.ts already imports this module, so the
@@ -415,14 +432,11 @@ export function contractRoundTripRateCad(
 // ---------------------------------------------------------------------------
 
 export interface PoEffectiveTerms {
-  /** Round-trip rate actually used, or null when neither PO nor contract has one. */
+  /** Round-trip rate actually used, or null when neither PO nor contract has one.
+   *  The ONLY rate there is — every trip bills it in full. */
   roundTripRateCad: number | null;
-  /** One-way rate actually used (explicit, or ½ the effective round trip). */
-  oneWayRateCad: number | null;
   /** True when the round-trip rate was inherited from the contract. */
   roundTripFromContract: boolean;
-  /** True when the one-way rate is the ½ fallback rather than a recorded rate. */
-  oneWayIsHalf: boolean;
 }
 
 export function poEffectiveTerms(
@@ -431,38 +445,30 @@ export function poEffectiveTerms(
 ): PoEffectiveTerms {
   const roundTripRateCad = po?.roundTripRateCad ?? contractRateCad;
   const roundTripFromContract = po?.roundTripRateCad == null && contractRateCad != null;
-  const explicitOneWay = po?.oneWayRateCad ?? null;
-  return {
-    roundTripRateCad,
-    oneWayRateCad: explicitOneWay ?? (roundTripRateCad != null ? roundTripRateCad * 0.5 : null),
-    roundTripFromContract,
-    oneWayIsHalf: explicitOneWay == null && roundTripRateCad != null,
-  };
+  return { roundTripRateCad, roundTripFromContract };
 }
 
 /**
- * The EFFECTIVE terms of a PO as one line — never the stored fields alone. A
- * blank rate that silently means "half of something else" is how a pricing bug
- * reaches an invoice, so an inherited figure prints with the reason it applies:
+ * The EFFECTIVE terms of a PO as one line — never the stored field alone. A
+ * blank rate that silently means "the contract's" is how a pricing bug reaches
+ * an invoice, so an inherited figure prints with the reason it applies:
  *
- *   "$1,600 / round trip · $900 one way"
- *   "$1,450 / round trip (from contract) · $725 one way (½)"
- *   "No round-trip rate on the PO or contract · no one-way rate"
+ *   "$1,600 / round trip"
+ *   "$1,450 / round trip (from contract)"
+ *   "No round-trip rate on the PO or contract"
+ *
+ * One figure only: a trip bills the full round-trip rate whether or not its
+ * return leg exists, so a one-way figure here would describe money nothing
+ * charges.
  */
 export function poTermsLabel(
   po: PurchaseOrderRecord | null,
   contractRateCad: number | null,
 ): string {
   const t = poEffectiveTerms(po, contractRateCad);
-  const roundTrip =
-    t.roundTripRateCad == null
-      ? "No round-trip rate on the PO or contract"
-      : `${rateFmt.format(t.roundTripRateCad)} / round trip${t.roundTripFromContract ? " (from contract)" : ""}`;
-  const oneWay =
-    t.oneWayRateCad == null
-      ? "no one-way rate"
-      : `${rateFmt.format(t.oneWayRateCad)} one way${t.oneWayIsHalf ? " (½)" : ""}`;
-  return `${roundTrip} · ${oneWay}`;
+  return t.roundTripRateCad == null
+    ? "No round-trip rate on the PO or contract"
+    : `${rateFmt.format(t.roundTripRateCad)} / round trip${t.roundTripFromContract ? " (from contract)" : ""}`;
 }
 
 /** Is `serviceDate` inside the PO's [issued, expiry] window? A PO with no

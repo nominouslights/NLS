@@ -27,7 +27,8 @@ import {
   AMOUNT_FLAG_META,
   AMOUNT_NOTE_META,
   PO_FLAG_META,
-  accrualHeadlines,
+  accrualBucketAmountLabel,
+  accrualBucketDetail,
   accrualSectionAmountLabel,
   accrualSectionDetail,
   accrualsClipboardText,
@@ -39,7 +40,6 @@ import {
   poCommitmentDetail,
   type AccrualBucket,
   type AccrualGroup,
-  type AccrualHeadline,
   type AccrualPoCommitment,
   type AccrualSection,
   type AccrualsReport,
@@ -57,14 +57,22 @@ import { PeriodNav } from "@/components/ui/PeriodNav";
 
 // Client Accruals — the monthly per-client accruals report, one of the two
 // reports the Reports screen hosts. It answers two questions in order:
-// what upcoming work is not yet done (a headline figure over the upcoming +
-// scheduled buckets, estimated at each purchase order's own rates with the
-// contract rate as the fallback), and what is still owed (the ready + invoiced
-// buckets, real invoice amounts plus clearly-marked estimates). A purchase-order
-// block sits under the headline: what each PO authorises against what this month
-// draws down on it. Settled work closes the month on ONE line — it still has to
-// reconcile, but it is not what the report is for, so it has no per-trip table.
-// Cancelled and written-off trips keep their reconciliation section.
+// what upcoming work is not yet done (the upcoming + scheduled buckets,
+// estimated at each purchase order's own round-trip rate with the contract rate
+// as the fallback), and what is still owed (the ready + invoiced buckets, real
+// invoice amounts plus clearly-marked estimates). A purchase-order block sits
+// above them: what each PO authorises against what this month draws down on it.
+// Settled work closes the month on ONE line — it still has to reconcile, but it
+// is not what the report is for, so it has no per-trip table. Cancelled and
+// written-off trips keep their reconciliation section.
+//
+// Each question is stated ONCE, as its section heading plus subtotal above its
+// table — the headline tiles that used to repeat the same two figures directly
+// above the same two headings are gone.
+//
+// Money is ONE column: billed and estimated dollars merge into a single Amount,
+// with " est." on the figure when all of it is an estimate and "incl. $X est."
+// in the sub-line where a bucket mixes the two.
 //
 // The derivation lives in lib/billing/accruals.ts — sections, subtotals and both
 // headline strings included — shared with the printed NL-ACC-01 sheet, the
@@ -98,15 +106,19 @@ function LegLine({ leg }: { leg: TripRecord }) {
 }
 
 /** Amount cell: real dollars, "$X est." — with the amount flag chip BESIDE the
- *  figure when the group is unpaired (it has an amount: the PO's one-way rate
- *  per leg, exactly what the invoice will bill) or split across two POs — or the
+ *  figure when the group is unpaired (it has an amount: one FULL round-trip
+ *  rate, exactly what the invoice will bill, because the vehicle deadheads back
+ *  either way) or when a paired run included a deadhead leg — or the
  *  spelled-out unpriced reason as a chip (colour + glyph + text, never colour
- *  alone). A plain "—" means the banner notes explain it (manual billing / no
- *  contract / no rate on the PO or the contract). */
+ *  alone). A split-PO group is the one flag with no figure at all: the chip
+ *  stands alone and says "needs a decision", never "$0.00", which a client
+ *  would read as work performed for free. A plain "—" means the banner notes
+ *  explain it (manual billing / no contract / no rate on the PO or the
+ *  contract). */
 function AmountCell({ group }: { group: AccrualGroup }) {
   const label = groupAmountLabel(group);
+  const flag = group.amountFlag ? AMOUNT_FLAG_META[group.amountFlag] : null;
   if (label !== null) {
-    const flag = group.amountFlag ? AMOUNT_FLAG_META[group.amountFlag] : null;
     return (
       <div
         style={{
@@ -121,6 +133,13 @@ function AmountCell({ group }: { group: AccrualGroup }) {
           {label}
         </div>
         {flag && <StatusChip kind={flag.kind} label={flag.label} />}
+      </div>
+    );
+  }
+  if (flag) {
+    return (
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <StatusChip kind={flag.kind} label={flag.label} />
       </div>
     );
   }
@@ -171,46 +190,14 @@ function GroupRow({ group, last }: { group: AccrualGroup; last: boolean }) {
 }
 
 // ---------------------------------------------------------------------------
-// Headline tile — sibling of Billing's ReceivableTile and of the Terminus
-// report's FigureTile, all kept local to their screen on purpose. Two tiles
-// only: upcoming expenses, then monies owed. Both strings come from the shared
-// derivation (accrualHeadlines), so a tile can never state a figure the printed
-// sheet or the emailed PDF disagrees with. The status kind pairs its colour with
-// the StatusChip's glyph and text label, so the distinction between "coming" and
-// "owed" never rests on colour alone.
+// There are deliberately NO headline tiles on this screen. "Upcoming expenses"
+// and "Monies owed" used to be rendered twice — once as a pair of tiles, then
+// again as the section headings with their tables directly below. Each section
+// now carries its own heading, subtotal and table, and that is the only place
+// the figure appears. accrualHeadlines() itself stays: the emailed PDF payload
+// (accrualsEmailPayload) and the printed sheet still lead with those two
+// figures, where nothing else repeats them.
 // ---------------------------------------------------------------------------
-
-function HeadlineTile({ headline }: { headline: AccrualHeadline }) {
-  return (
-    <div
-      style={{
-        flex: "1 1 240px",
-        padding: "13px 16px",
-        background: colors.cardBg,
-        border: `1px solid ${colors.border}`,
-        borderRadius: 11,
-        boxShadow: colors.shadowCard,
-      }}
-    >
-      <StatusChip kind={headline.kind} label={headline.label} />
-      <div
-        style={{
-          fontFamily: fonts.condensed,
-          fontWeight: 700,
-          fontSize: 27,
-          color: colors.headingBright,
-          fontVariantNumeric: "tabular-nums",
-          marginTop: 8,
-        }}
-      >
-        {headline.amountCad}
-      </div>
-      <div style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textDim, marginTop: 3, minHeight: 14 }}>
-        {headline.detail}
-      </div>
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Purchase-order authorisation — what each PO authorises against what this
@@ -326,9 +313,6 @@ function SettledLine({ section }: { section: AccrualSection }) {
 // ---------------------------------------------------------------------------
 
 function BucketSection({ bucket }: { bucket: AccrualBucket }) {
-  const tallies = [`Actual ${formatInvoiceCad(bucket.actualCad)}`];
-  if (bucket.estimatedCad > 0) tallies.push(`Estimated ${formatInvoiceCad(bucket.estimatedCad)} est.`);
-  if (bucket.unpricedCount > 0) tallies.push(`${bucket.unpricedCount} unpriced`);
   return (
     <div style={{ marginTop: 16 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7, flexWrap: "wrap" }}>
@@ -362,10 +346,11 @@ function BucketSection({ bucket }: { bucket: AccrualBucket }) {
             color: colors.textMuted,
           }}
         >
-          <span>
-            {bucket.groups.length} round trip{bucket.groups.length === 1 ? "" : "s"}
-          </span>
-          <span>{tallies.join(" · ")}</span>
+          {/* ONE amount, like every other output. A bucket mixing billed and
+              estimated money keeps the split in the detail line's
+              "incl. $X est." — the merged figure alone would hide it. */}
+          <span>{accrualBucketDetail(bucket)}</span>
+          <span>{accrualBucketAmountLabel(bucket)}</span>
         </div>
       </div>
     </div>
@@ -612,8 +597,9 @@ export default function ClientAccruals({
               Pick a client to build their accruals report for the month shown. It leads with the work
               not yet done and what it is estimated to cost, then what is still owed — issued invoices
               plus runs complete but not yet billed. Settled work closes the month on one line, and
-              cancelled or written-off trips are reconciled below. Estimates are contract-rate and
-              always marked as such; issued invoice amounts govern.
+              cancelled or written-off trips are reconciled below. Estimates are at each purchase
+              order&rsquo;s rate (the contract rate where a PO records none) and always marked as
+              such; issued invoice amounts govern.
             </div>
           </Panel>
         )}
@@ -677,13 +663,6 @@ export default function ClientAccruals({
                 ))}
               </Panel>
             )}
-
-            {/* the two headline figures — upcoming expenses, then monies owed */}
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
-              {accrualHeadlines(report).map((h) => (
-                <HeadlineTile key={h.id} headline={h} />
-              ))}
-            </div>
 
             {/* purchase orders — authorised value vs this month's work */}
             {report.poCommitments.length > 0 && (

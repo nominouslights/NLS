@@ -5,9 +5,10 @@ using Xunit;
 namespace NorthernLink.Billing.Tests;
 
 /// <summary>
-/// The pricing rule: one worksheet per effective PO, each PO's own terms overriding the
-/// contract rate, with the fallbacks (contract rate; half the round-trip rate for one-way)
-/// producing exactly today's amounts for a client that has no PO terms at all.
+/// The pricing rule: one worksheet per effective PO, each PO's own round-trip rate overriding
+/// the contract rate, and <b>one full round-trip rate per group</b> whether or not its legs
+/// paired — a lone leg still deadheads the vehicle home, so there is no one-way price. A
+/// round trip whose legs were booked on two POs is not priced at all, only flagged.
 /// </summary>
 public class InvoiceDraftBuilderTests
 {
@@ -46,8 +47,13 @@ public class InvoiceDraftBuilderTests
         Assert.Equal(TestBilling.DefaultPo, draft.PoNumber);
     }
 
+    /// <summary>
+    /// The money change: a lone outbound leg still requires the vehicle to come back empty, so
+    /// it costs a full run. It bills the full round-trip rate — double the old half rate — and
+    /// carries a review flag so the full charge is never silent.
+    /// </summary>
     [Fact]
-    public void Orphan_leg_prices_one_way_at_half_the_round_trip_rate_when_the_po_sets_none()
+    public void Orphan_leg_prices_at_the_full_round_trip_rate_and_is_flagged_for_review()
     {
         var contract = TestBilling.Contract(rate: 120m);
         var orphan = TestBilling.Trip(new DateOnly(2026, 7, 8), "rt-lonely", "TR-4830");
@@ -55,11 +61,10 @@ public class InvoiceDraftBuilderTests
         var draft = OnlyDraft(InvoiceDraftBuilder.Build([contract], PeriodStart, PeriodEnd, [orphan]));
 
         var line = Assert.Single(draft.Lines);
-        // Quantity 1 at the derived one-way rate — the same $60 the old 0.5 × $120 produced.
         Assert.Equal(1m, line.Quantity);
-        Assert.Equal(60m, line.UnitPriceCad);
-        Assert.Equal(60m, line.AmountCad);
-        Assert.Contains(InvoiceDraftBuilder.OneWayLegFlag, line.Description);
+        Assert.Equal(120m, line.UnitPriceCad); // full rate, not the old $60
+        Assert.Equal(120m, line.AmountCad);
+        Assert.Contains(InvoiceDraftBuilder.UnpairedGroupFlag, line.Description);
         Assert.Equal("TR-4830", line.TripNumber);
         Assert.Equal([orphan.Id], draft.ClaimedTripIds);
     }
@@ -120,8 +125,12 @@ public class InvoiceDraftBuilderTests
             Assert.Single(draft.Lines).Description);
     }
 
+    /// <summary>
+    /// Two legs sharing a direction are a data anomaly, not two runs. The group is priced
+    /// <b>once</b> at the full rate and flagged — pricing per leg would charge one run twice.
+    /// </summary>
     [Fact]
-    public void Two_legs_sharing_a_direction_are_not_a_pair_and_bill_as_two_one_way_lines()
+    public void Two_legs_sharing_a_direction_bill_one_flagged_full_rate_line_for_the_whole_group()
     {
         var contract = TestBilling.Contract(rate: 120m);
         // Two Outbound legs on the same key — a data anomaly, never a valid round trip.
@@ -132,19 +141,19 @@ public class InvoiceDraftBuilderTests
 
         var draft = OnlyDraft(InvoiceDraftBuilder.Build([contract], PeriodStart, PeriodEnd, [a, b]));
 
-        Assert.Equal(2, draft.Lines.Count);
-        Assert.All(draft.Lines, l => Assert.Equal(1m, l.Quantity));
-        Assert.All(draft.Lines, l => Assert.Equal(60m, l.UnitPriceCad));
-        Assert.All(draft.Lines, l => Assert.Contains(InvoiceDraftBuilder.OneWayLegFlag, l.Description));
-        Assert.All(draft.Lines, l => Assert.Single(l.TripIds));
-        Assert.Equal(120m, draft.Lines.Sum(l => l.AmountCad));
+        var line = Assert.Single(draft.Lines);
+        Assert.Equal(1m, line.Quantity);
+        Assert.Equal(120m, line.UnitPriceCad);
+        Assert.Equal(120m, line.AmountCad); // one run's charge, not two
+        Assert.Contains(InvoiceDraftBuilder.UnpairedGroupFlag, line.Description);
+        Assert.Equal(2, line.TripIds.Count);
         Assert.Equal(2, draft.ClaimedTripIds.Count);
         Assert.Contains(a.Id, draft.ClaimedTripIds);
         Assert.Contains(b.Id, draft.ClaimedTripIds);
     }
 
     [Fact]
-    public void Legs_missing_direction_do_not_pair_even_when_two_share_a_key()
+    public void Legs_missing_direction_bill_one_flagged_full_rate_line_for_the_whole_group()
     {
         var contract = TestBilling.Contract(rate: 120m);
         // Same key, both directions null (pre-migration rows) — no valid pair.
@@ -155,9 +164,11 @@ public class InvoiceDraftBuilderTests
 
         var draft = OnlyDraft(InvoiceDraftBuilder.Build([contract], PeriodStart, PeriodEnd, [a, b]));
 
-        Assert.Equal(2, draft.Lines.Count);
-        Assert.All(draft.Lines, l => Assert.Equal(1m, l.Quantity));
-        Assert.All(draft.Lines, l => Assert.Equal(60m, l.UnitPriceCad));
+        var line = Assert.Single(draft.Lines);
+        Assert.Equal(1m, line.Quantity);
+        Assert.Equal(120m, line.UnitPriceCad);
+        Assert.Equal(120m, line.AmountCad);
+        Assert.Contains(InvoiceDraftBuilder.UnpairedGroupFlag, line.Description);
     }
 
     [Fact]
@@ -216,10 +227,10 @@ public class InvoiceDraftBuilderTests
 
         var draft = OnlyDraft(InvoiceDraftBuilder.Build([contract], PeriodStart, PeriodEnd, [claimed, free]));
 
-        // Only the free leg survives — it prices as a lone one-way leg.
+        // Only the free leg survives — an unpaired group, so one full-rate line.
         var line = Assert.Single(draft.Lines);
         Assert.Equal(1m, line.Quantity);
-        Assert.Equal(60m, line.UnitPriceCad);
+        Assert.Equal(120m, line.UnitPriceCad);
         Assert.Equal([free.Id], draft.ClaimedTripIds);
     }
 
@@ -372,11 +383,16 @@ public class InvoiceDraftBuilderTests
         Assert.Equal(120m, Assert.Single(draft.Lines).UnitPriceCad);
     }
 
+    /// <summary>
+    /// One-way pricing is retired: a PO that still records an explicit one-way rate has that
+    /// figure <b>ignored</b> by pricing. The lone leg bills the PO's full round-trip rate, and
+    /// the stored one-way figure is untouched — retained for history, droppable later.
+    /// </summary>
     [Fact]
-    public void Explicit_po_one_way_rate_prices_a_lone_leg_instead_of_half_the_round_trip()
+    public void An_explicit_po_one_way_rate_is_ignored_and_a_lone_leg_bills_the_full_round_trip()
     {
         var contract = TestBilling.Contract(rate: 120m);
-        // Deliberately NOT half of the round-trip rate — a separately negotiated figure.
+        // A separately negotiated one-way figure that pricing must no longer consult.
         var purchaseOrder = TestBilling.PurchaseOrder(roundTripRateCad: 300m, oneWayRateCad: 200m);
         var orphan = TestBilling.Trip(new DateOnly(2026, 7, 8), "rt-lonely", "TR-4830");
 
@@ -385,29 +401,79 @@ public class InvoiceDraftBuilderTests
 
         var line = Assert.Single(draft.Lines);
         Assert.Equal(1m, line.Quantity);
-        Assert.Equal(200m, line.UnitPriceCad);
-        Assert.Equal(200m, line.AmountCad);
-        Assert.Contains(InvoiceDraftBuilder.OneWayLegFlag, line.Description);
+        Assert.Equal(300m, line.UnitPriceCad); // the round-trip rate, never the $200 one-way
+        Assert.Equal(300m, line.AmountCad);
+        Assert.Contains(InvoiceDraftBuilder.UnpairedGroupFlag, line.Description);
+
+        // The retired figure is still on the snapshot the draft carries — nothing erased it.
+        Assert.Equal(200m, draft.PurchaseOrder!.OneWayRateCad);
     }
 
+    /// <summary>
+    /// The companion case: a PO with no one-way rate at all prices a lone leg identically to
+    /// one that has one — the field simply plays no part, so there is no half-rate fallback
+    /// left to fall back to.
+    /// </summary>
     [Fact]
-    public void One_way_falls_back_to_half_the_effective_round_trip_rate_when_the_po_sets_none()
+    public void A_lone_leg_bills_the_same_full_rate_whether_or_not_the_po_records_a_one_way_rate()
     {
         var contract = TestBilling.Contract(rate: 120m);
-        // PO sets a round-trip rate only — the half rule applies to the PO's rate, not the contract's.
-        var purchaseOrder = TestBilling.PurchaseOrder(roundTripRateCad: 300m);
+        var withOneWay = TestBilling.PurchaseOrder(roundTripRateCad: 300m, oneWayRateCad: 200m);
+        var withoutOneWay = TestBilling.PurchaseOrder(roundTripRateCad: 300m);
         var orphan = TestBilling.Trip(new DateOnly(2026, 7, 8), "rt-lonely", "TR-4830");
 
-        var draft = OnlyDraft(InvoiceDraftBuilder.Build(
-            [contract], PeriodStart, PeriodEnd, [orphan], [purchaseOrder]));
+        var withRate = OnlyDraft(InvoiceDraftBuilder.Build(
+            [contract], PeriodStart, PeriodEnd, [orphan], [withOneWay]));
+        var withoutRate = OnlyDraft(InvoiceDraftBuilder.Build(
+            [contract], PeriodStart, PeriodEnd, [orphan], [withoutOneWay]));
 
-        var line = Assert.Single(draft.Lines);
-        Assert.Equal(150m, line.UnitPriceCad);
-        Assert.Equal(150m, line.AmountCad);
+        Assert.Equal(300m, Assert.Single(withRate.Lines).AmountCad);
+        Assert.Equal(300m, Assert.Single(withoutRate.Lines).AmountCad);
+        Assert.Equal(withRate.TotalCad, withoutRate.TotalCad);
     }
 
+    /// <summary>
+    /// The end-to-end version of the same guarantee: the one-way rate round-trips through the
+    /// replica projection untouched, and moving it across its whole range changes no amount on
+    /// the draft. The column is history, not money.
+    /// </summary>
     [Fact]
-    public void A_pair_split_across_two_pos_prices_as_two_one_way_lines_on_two_worksheets()
+    public void One_way_rate_survives_on_the_snapshot_but_moves_no_invoice_amount()
+    {
+        var contract = TestBilling.Contract(rate: 120m);
+        var (outbound, returnLeg) = TestBilling.RoundTrip(new DateOnly(2026, 7, 6), "rt-1", "TR-1");
+        var orphan = TestBilling.Trip(new DateOnly(2026, 7, 20), "rt-lonely", "TR-3");
+        IReadOnlyList<Domain.BillableTrips.BillableTrip> trips = [outbound, returnLeg, orphan];
+
+        decimal?[] oneWayRates = [null, 1m, 200m, 9_999m];
+        var totals = new List<decimal>();
+
+        foreach (var oneWay in oneWayRates)
+        {
+            var purchaseOrder = TestBilling.PurchaseOrder(roundTripRateCad: 300m, oneWayRateCad: oneWay);
+
+            var draft = OnlyDraft(InvoiceDraftBuilder.Build(
+                [contract], PeriodStart, PeriodEnd, trips, [purchaseOrder]));
+
+            // Persisted and projected through to the draft exactly as recorded.
+            Assert.Equal(oneWay, draft.PurchaseOrder!.OneWayRateCad);
+            totals.Add(draft.TotalCad);
+        }
+
+        // Two full round-trip rates — the pair and the lone leg — whatever the one-way rate says.
+        Assert.All(totals, total => Assert.Equal(600m, total));
+        Assert.Single(totals.Distinct());
+    }
+
+    /// <summary>
+    /// One run cannot be billed on two worksheets, and the full rate on each would bill it
+    /// twice — so a round trip whose legs sit on different POs is <b>not priced at all</b>.
+    /// Each worksheet carries a zero-amount, split-flagged line that still <i>claims</i> its
+    /// leg, so the work stays visible and cannot be invoiced by omission; the figure is a
+    /// deliberate human decision on the worksheet.
+    /// </summary>
+    [Fact]
+    public void A_pair_split_across_two_pos_is_not_priced_and_is_flagged_on_both_worksheets()
     {
         var contract = TestBilling.Contract(rate: 120m);
         var poA = TestBilling.PurchaseOrder("PO-A", roundTripRateCad: 300m, oneWayRateCad: 170m);
@@ -431,19 +497,58 @@ public class InvoiceDraftBuilderTests
 
         var lineA = Assert.Single(draftA.Lines);
         var lineB = Assert.Single(draftB.Lines);
-        Assert.Equal(170m, lineA.UnitPriceCad);
-        Assert.Equal(210m, lineB.UnitPriceCad);
+
+        // No figure at all — neither PO's round-trip rate, nor any one-way rate.
+        Assert.All<InvoiceLine>([lineA, lineB], l => Assert.Equal(0m, l.UnitPriceCad));
+        Assert.All<InvoiceLine>([lineA, lineB], l => Assert.Equal(0m, l.AmountCad));
         Assert.All<InvoiceLine>([lineA, lineB], l => Assert.Equal(1m, l.Quantity));
+        Assert.Equal(0m, draftA.TotalCad);
+        Assert.Equal(0m, draftB.TotalCad);
         Assert.All<InvoiceLine>(
             [lineA, lineB], l => Assert.Contains(InvoiceDraftBuilder.SplitPurchaseOrderFlag, l.Description));
-        Assert.All<InvoiceLine>(
-            [lineA, lineB], l => Assert.Contains(InvoiceDraftBuilder.OneWayLegFlag, l.Description));
 
-        // No trip claimed twice across the worksheets.
+        // Not silently dropped: each leg is still claimed by a visible line, once only.
         var allClaimed = result.Value.SelectMany(d => d.ClaimedTripIds).ToList();
         Assert.Equal(allClaimed.Count, allClaimed.Distinct().Count());
         Assert.Equal([outbound.Id], draftA.ClaimedTripIds);
         Assert.Equal([inbound.Id], draftB.ClaimedTripIds);
+        Assert.Equal([outbound.Id], lineA.TripIds);
+        Assert.Equal([inbound.Id], lineB.TripIds);
+    }
+
+    /// <summary>
+    /// The split rule wins even when one worksheet happens to hold a complete outbound+inbound
+    /// pair (three legs, two POs): any part of a key that reaches a second PO makes the whole
+    /// key undecidable, and pricing the pair here would still bill part of the run twice.
+    /// </summary>
+    [Fact]
+    public void A_split_key_is_unpriced_even_on_the_worksheet_that_holds_a_complete_pair()
+    {
+        var contract = TestBilling.Contract(rate: 120m);
+        var poA = TestBilling.PurchaseOrder("PO-A", roundTripRateCad: 300m);
+        var poB = TestBilling.PurchaseOrder("PO-B", roundTripRateCad: 400m);
+
+        var outbound = TestBilling.Trip(new DateOnly(2026, 7, 6), "rt-split", "TR-01O",
+            direction: "Outbound", poNumber: "PO-A");
+        var inbound = TestBilling.Trip(new DateOnly(2026, 7, 6), "rt-split", "TR-01R",
+            direction: "Inbound", poNumber: "PO-A");
+        var stray = TestBilling.Trip(new DateOnly(2026, 7, 6), "rt-split", "TR-01X",
+            direction: "Inbound", poNumber: "PO-B");
+
+        var result = InvoiceDraftBuilder.Build(
+            [contract], PeriodStart, PeriodEnd, [outbound, inbound, stray], [poA, poB]);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(2, result.Value.Count);
+        Assert.All(result.Value, d => Assert.Equal(0m, d.TotalCad));
+        Assert.All(
+            result.Value.SelectMany(d => d.Lines),
+            l => Assert.Contains(InvoiceDraftBuilder.SplitPurchaseOrderFlag, l.Description));
+
+        // All three legs still claimed exactly once.
+        var allClaimed = result.Value.SelectMany(d => d.ClaimedTripIds).ToList();
+        Assert.Equal(3, allClaimed.Count);
+        Assert.Equal(3, allClaimed.Distinct().Count());
     }
 
     [Fact]
@@ -585,13 +690,13 @@ public class InvoiceDraftBuilderTests
     }
 
     /// <summary>
-    /// The no-regression case: a client with no PO terms at all invoices for exactly what it
-    /// invoiced before per-PO pricing existed — one worksheet, the same amounts, and every leg
-    /// priced off the contract rate. Only the quantity/unit-price split changed on a one-way
-    /// line (1 × 0.5r instead of 0.5 × r), which is the same money.
+    /// A client with no PO terms at all: every group prices off the contract rate on one
+    /// worksheet, and <b>every group costs one full rate</b> — the lone leg included. That is
+    /// the deliberate increase: what used to total $300 ($120 + $120 + $60) is now $360,
+    /// because the lone leg's deadhead return was always being run and never billed.
     /// </summary>
     [Fact]
-    public void A_client_with_no_po_terms_invoices_exactly_the_same_amounts_as_before()
+    public void A_client_with_no_po_terms_bills_one_full_contract_rate_per_group_including_a_lone_leg()
     {
         var contract = TestBilling.Contract(rate: 120m);
         // A PO row exists but carries no terms — as every migrated PO does.
@@ -603,9 +708,10 @@ public class InvoiceDraftBuilderTests
         var draft = OnlyDraft(InvoiceDraftBuilder.Build(
             [contract], PeriodStart, PeriodEnd, [o1, r1, o2, r2, orphan], [termlessPo]));
 
-        // $120 + $120 + $60 — identical to the pre-PO behaviour.
+        // $120 + $120 + $120 — the lone leg doubled from the old $60.
         Assert.Equal(3, draft.Lines.Count);
-        Assert.Equal(300m, draft.TotalCad);
+        Assert.All(draft.Lines, l => Assert.Equal(120m, l.AmountCad));
+        Assert.Equal(360m, draft.TotalCad);
         Assert.Equal(5, draft.ClaimedTripIds.Count);
         Assert.Empty(draft.Warnings);
         Assert.Equal(TestBilling.DefaultPo, draft.PoNumber);
@@ -614,16 +720,18 @@ public class InvoiceDraftBuilderTests
     [Fact]
     public void Line_amount_stays_quantity_times_unit_price_rounded_to_cents()
     {
-        var contract = TestBilling.Contract(rate: 333.33m);
-        var purchaseOrder = TestBilling.PurchaseOrder(roundTripRateCad: 333.33m);
+        var contract = TestBilling.Contract(rate: 120m);
+        // A sub-cent negotiated rate — nothing rejects one, and the line must still round.
+        var purchaseOrder = TestBilling.PurchaseOrder(roundTripRateCad: 166.665m);
         var orphan = TestBilling.Trip(new DateOnly(2026, 7, 8), "rt-lonely", "TR-4830");
 
         var draft = OnlyDraft(InvoiceDraftBuilder.Build(
             [contract], PeriodStart, PeriodEnd, [orphan], [purchaseOrder]));
 
         var line = Assert.Single(draft.Lines);
-        // Half of $333.33 is $166.665; the amount is that rounded to cents, banker's rounding
-        // and all — the same Math.Round(Quantity × UnitPriceCad, 2) InvoiceLine has always used.
+        // The unit price keeps its third decimal; the amount is that rounded to cents,
+        // banker's rounding and all — the same Math.Round(Quantity × UnitPriceCad, 2)
+        // InvoiceLine has always used.
         Assert.Equal(166.665m, line.UnitPriceCad);
         Assert.Equal(Math.Round(line.Quantity * line.UnitPriceCad, 2), line.AmountCad);
         Assert.Equal(166.66m, line.AmountCad);
