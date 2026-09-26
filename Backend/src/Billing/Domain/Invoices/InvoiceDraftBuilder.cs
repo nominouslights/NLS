@@ -45,23 +45,40 @@ public sealed record InvoiceDraft(
 /// per group:
 ///   po            = PO snapshot for that client + PO number, may be null
 ///   roundTripRate = po?.RoundTripRateCad ?? contractRate
-///   oneWayRate    = po?.OneWayRateCad    ?? roundTripRate * 0.5m
-///   if the group has an Outbound leg AND an Inbound leg
+///   if the RoundTripKey's legs sit on more than one PO
+///       → ONE line, Quantity 1, UnitPriceCad = 0, SplitPurchaseOrderFlag  (NOT priced)
+///   else if the group has an Outbound leg AND an Inbound leg
 ///       → ONE line, Quantity 1, UnitPriceCad = roundTripRate
 ///   else
-///       → one line PER LEG, Quantity 1, UnitPriceCad = oneWayRate, review-flagged
+///       → ONE line, Quantity 1, UnitPriceCad = roundTripRate, UnpairedGroupFlag
 /// </code>
 ///
-/// Grouping by PO is what implements "a round trip must be a single PO": two legs sharing a
-/// RoundTripKey but booked on different POs land in different groups, so each prices as a
-/// lone one-way leg and both carry <see cref="SplitPurchaseOrderFlag"/>.
+/// <para>
+/// <b>Every priced group bills one full round-trip rate, quantity 1 — there is no one-way
+/// price any more.</b> A lone outbound leg still requires the vehicle to come back empty, so
+/// it costs a full run; charging half was under-billing. An unpaired group is therefore
+/// priced at the full rate and carries <see cref="UnpairedGroupFlag"/> so the full charge is
+/// never silent. Crucially the group is priced <b>once</b>, never per leg: two legs sharing a
+/// direction under one key are a data anomaly, and pricing each of them would multiply one
+/// run's charge by the leg count.
+/// </para>
 ///
 /// <para>
-/// Note the change from the original rule: an unpaired leg is now
-/// <c>Quantity 1 × oneWayRate</c> rather than <c>Quantity 0.5 × roundTripRate</c>. Where no
-/// explicit one-way rate exists the amount is identical (<c>0.5 × r == 1 × 0.5r</c>); only
-/// the quantity/unit-price columns change, which is the honest shape now that a one-way rate
-/// is a real negotiated figure. <see cref="InvoiceLine.AmountCad"/> stays exactly
+/// <see cref="PurchaseOrderSnapshot.OneWayRateCad"/> (and the PO's own
+/// <c>OneWayRateCad</c>) is <b>no longer read for pricing</b>. The column, property, DTO field
+/// and integration-event field all stay — the figure is retained for history and can be
+/// dropped later — but nothing here consults it.
+/// </para>
+///
+/// <para>
+/// Grouping by PO is what implements "a round trip must be a single PO". A RoundTripKey whose
+/// legs were booked on different POs is <b>not priced at all</b>: full-rate-per-group would
+/// bill one run once on each worksheet, so each worksheet instead emits a zero-amount line
+/// carrying <see cref="SplitPurchaseOrderFlag"/>. The legs are still <i>claimed</i> by that
+/// line, so the work stays visible on a worksheet and cannot be invoiced by omission; someone
+/// edits the line to the figure they decide on. Zero is the only "no amount" a line can carry
+/// — <see cref="InvoiceLine"/> has no nullable amount, and
+/// <see cref="InvoiceLine.AmountCad"/> stays exactly
 /// <c>Math.Round(Quantity × UnitPriceCad, 2)</c>.
 /// </para>
 ///
@@ -90,17 +107,19 @@ public sealed record InvoiceDraft(
 public static class InvoiceDraftBuilder
 {
     /// <summary>
-    /// A leg billed on its own rather than as half of a paired round trip — a lone leg, a
-    /// missing direction, two legs sharing a direction, or legs split across POs. Priced at
-    /// the effective one-way rate, quantity 1.
+    /// The group's legs did not pair into an outbound + inbound round trip — a lone leg, a
+    /// missing direction, or two legs sharing one. It still bills one full round-trip rate
+    /// (the vehicle deadheads back either way), quantity 1, and this flag says so out loud.
     /// </summary>
-    public const string OneWayLegFlag = "one-way leg — review";
+    public const string UnpairedGroupFlag = "full round trip — legs did not pair, review";
 
     /// <summary>
-    /// Two legs shared a RoundTripKey but were booked on different purchase orders, so they
-    /// are not a round trip: each prices one-way on its own PO's worksheet.
+    /// Legs shared a RoundTripKey but were booked on different purchase orders, so they are
+    /// not a round trip this builder can price: full-rate-per-group would bill the same run
+    /// on both worksheets. The line is emitted with no amount and claims its legs, so the
+    /// work stays visible and someone decides the figure by hand.
     /// </summary>
-    public const string SplitPurchaseOrderFlag = "round-trip legs on different POs — priced one-way, review";
+    public const string SplitPurchaseOrderFlag = "round-trip legs on different POs — not priced, needs a decision";
 
     /// <summary>A priced leg's service date falls outside its PO's issue/expiry window. Flagged, never refused.</summary>
     public const string OutsidePurchaseOrderWindowFlag = "outside PO window — review";
@@ -191,8 +210,10 @@ public static class InvoiceDraftBuilder
                 .FirstOrDefault(n => n is not null);
 
             var purchaseOrder = ResolvePurchaseOrder(purchaseOrders, poNumber);
+
+            // OneWayRateCad is deliberately not consulted: every priced group bills one full
+            // round-trip rate. The PO still carries the figure, for history only.
             var roundTripRate = purchaseOrder?.RoundTripRateCad ?? contractRate;
-            var oneWayRate = purchaseOrder?.OneWayRateCad ?? roundTripRate * 0.5m;
 
             var draftResult = BuildForPurchaseOrder(
                 contract,
@@ -201,7 +222,6 @@ public static class InvoiceDraftBuilder
                 [.. poGroup],
                 splitKeys,
                 roundTripRate,
-                oneWayRate,
                 invoicedTotalsByPoNumber);
 
             if (draftResult.IsFailure)
@@ -235,7 +255,6 @@ public static class InvoiceDraftBuilder
         IReadOnlyList<BillableTrip> trips,
         HashSet<string> splitKeys,
         decimal roundTripRate,
-        decimal oneWayRate,
         IReadOnlyDictionary<string, decimal>? invoicedTotalsByPoNumber)
     {
         var lines = new List<InvoiceLine>();
@@ -251,17 +270,36 @@ public static class InvoiceDraftBuilder
             var legs = group.OrderBy(t => t.CompletedAtUtc).ToList();
             var serviceDate = legs.Min(t => t.ServiceDate);
 
-            // A group is a complete round trip only when it pairs an Outbound leg with an
-            // Inbound one — never merely on leg count. Same-direction or direction-less legs
-            // are not a valid pair and each bills as a one-way leg.
-            var hasOutbound = legs.Any(t => IsDirection(t, "Outbound"));
-            var hasInbound = legs.Any(t => IsDirection(t, "Inbound"));
+            // Exactly ONE line per group, whatever shape the group is in: a run is a run, and
+            // pricing per leg would charge one run once per leg.
+            var flags = new List<string>();
+            decimal unitPrice;
 
-            if (hasOutbound && hasInbound)
+            if (splitKeys.Contains(group.Key))
             {
-                var first = legs[0];
-                var flags = new List<string>();
-                if (legs.Any(t => t.IsEmptyLeg))
+                // The key's legs sit on more than one PO, so this worksheet holds only part of
+                // a run. Pricing it at the full rate here and again on the other worksheet
+                // would bill the run twice — the owner would rather see no figure than a wrong
+                // one. Zero-amount, flagged, and still claiming its legs so the work stays on
+                // the worksheet instead of vanishing.
+                flags.Add(SplitPurchaseOrderFlag);
+                unitPrice = 0m;
+            }
+            else
+            {
+                unitPrice = roundTripRate;
+
+                // A group is a complete round trip only when it pairs an Outbound leg with an
+                // Inbound one — never merely on leg count. Same-direction or direction-less
+                // legs are a data anomaly: they still bill one full rate, but flagged.
+                var hasOutbound = legs.Any(t => IsDirection(t, "Outbound"));
+                var hasInbound = legs.Any(t => IsDirection(t, "Inbound"));
+
+                if (!(hasOutbound && hasInbound))
+                {
+                    flags.Add(UnpairedGroupFlag);
+                }
+                else if (legs.Any(t => t.IsEmptyLeg))
                 {
                     flags.Add(DeadheadReturnFlag);
                 }
@@ -270,58 +308,25 @@ public static class InvoiceDraftBuilder
                 {
                     flags.Add(OutsidePurchaseOrderWindowFlag);
                 }
-
-                var lineResult = InvoiceLine.Create(
-                    Describe("Corridor round trip", first.RouteName, serviceDate, flags),
-                    legs.Select(t => t.Id).ToList(),
-                    null,
-                    serviceDate,
-                    quantity: 1m,
-                    unitPriceCad: roundTripRate);
-
-                if (lineResult.IsFailure)
-                {
-                    return Result.Failure<InvoiceDraft>(lineResult.Error);
-                }
-
-                lines.Add(lineResult.Value);
-                claimed.AddRange(legs.Select(t => t.Id));
             }
-            else
+
+            // A single-leg group keeps its trip number on the line; a multi-leg one has no one
+            // number to show, exactly as a paired round trip never did.
+            var lineResult = InvoiceLine.Create(
+                Describe("Corridor round trip", legs[0].RouteName, serviceDate, flags),
+                legs.Select(t => t.Id).ToList(),
+                legs.Count == 1 ? legs[0].TripNumber : null,
+                serviceDate,
+                quantity: 1m,
+                unitPriceCad: unitPrice);
+
+            if (lineResult.IsFailure)
             {
-                // Lone leg, missing direction, duplicated direction, or a pair broken apart by
-                // its legs sitting on different POs: each present leg prices at the effective
-                // one-way rate on its own review-flagged line.
-                foreach (var leg in legs)
-                {
-                    var flags = new List<string>();
-                    if (splitKeys.Contains(group.Key))
-                    {
-                        flags.Add(SplitPurchaseOrderFlag);
-                    }
-
-                    if (IsOutsideWindow(purchaseOrder, leg))
-                    {
-                        flags.Add(OutsidePurchaseOrderWindowFlag);
-                    }
-
-                    var lineResult = InvoiceLine.Create(
-                        Describe(OneWayLegFlag, leg.RouteName, leg.ServiceDate, flags),
-                        [leg.Id],
-                        leg.TripNumber,
-                        leg.ServiceDate,
-                        quantity: 1m,
-                        unitPriceCad: oneWayRate);
-
-                    if (lineResult.IsFailure)
-                    {
-                        return Result.Failure<InvoiceDraft>(lineResult.Error);
-                    }
-
-                    lines.Add(lineResult.Value);
-                    claimed.Add(leg.Id);
-                }
+                return Result.Failure<InvoiceDraft>(lineResult.Error);
             }
+
+            lines.Add(lineResult.Value);
+            claimed.AddRange(legs.Select(t => t.Id));
         }
 
         var total = Math.Round(lines.Sum(line => line.AmountCad), 2);
