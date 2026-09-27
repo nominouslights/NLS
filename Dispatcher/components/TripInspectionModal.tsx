@@ -16,6 +16,7 @@ import {
 } from "@/lib/api";
 import type { TripRecord } from "@/lib/api/trips";
 import { listDrivers } from "@/lib/api/drivers";
+import { listVehicles } from "@/lib/api/fleet";
 import { NL_PTI_01_CERTIFICATION, itemsFor, type InspectionFormMode } from "@/lib/inspectionForm";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { ActionButton } from "@/components/ui/Button";
@@ -110,15 +111,43 @@ export default function TripInspectionModal({
   const mode: InspectionFormMode = isPre ? "PreTrip" : "PostTrip";
   const defaultDriver = existing?.driverName ?? trip.driverName ?? "";
 
-  // The unit narrows the form. A trip with no vehicle assigned genuinely has no
-  // unit, and `itemsFor` answers that with the full superset on purpose — never
-  // the narrower NL-01 form (see its docblock).
+  // The unit narrows the form, and it is REQUIRED — a DVIR names the vehicle it
+  // inspected or it is not a record of anything. It is picked from the fleet
+  // roster rather than typed, because the value is matched against catalogue
+  // scope ("NL-02" vs "nl2" vs "NL-02 ") and a typo silently produces the wrong
+  // form. The trip's assigned vehicle seeds it; a trip with no vehicle starts
+  // blank and the dispatcher must choose before saving.
   //
-  // In edit mode the unit comes from the RECORD, not the trip: reassigning the
+  // In edit mode the unit comes from the RECORD and is LOCKED: reassigning the
   // trip's vehicle afterwards must not change which rows the saved record is
   // rebuilt against, or rows it really answered would render unanswered.
-  const unit = existing ? existing.unit || null : trip.vehicleUnit;
-  const groups = useMemo(() => itemsFor(unit, mode), [unit, mode]);
+  const [unit, setUnit] = useState(existing?.unit || trip.vehicleUnit || "");
+  const [unitOptions, setUnitOptions] = useState<string[]>(unit ? [unit] : []);
+
+  useEffect(() => {
+    let active = true;
+    listVehicles().then(
+      (rows) => {
+        if (!active) return;
+        // Every unit in the fleet, not only the active ones: an inspection can be
+        // entered late for a vehicle that has since been laid up, and a missing
+        // option would leave the dispatcher unable to record it at all.
+        const units = rows.map((v) => v.unitNumber).filter(Boolean);
+        const seeded = existing?.unit || trip.vehicleUnit || "";
+        const merged = seeded && !units.includes(seeded) ? [seeded, ...units] : units;
+        setUnitOptions(merged);
+      },
+      () => undefined,
+    );
+    return () => {
+      active = false;
+    };
+  }, [existing?.unit, trip.vehicleUnit]);
+
+  // `itemsFor` takes null for "unknown" and answers with the full superset on
+  // purpose — never the narrower NL-01 form (see its docblock). An empty select
+  // is exactly that unknown, so it maps to null rather than "".
+  const groups = useMemo(() => itemsFor(unit || null, mode), [unit, mode]);
   const legendKeys = useMemo(() => areaLegendKeys(groups), [groups]);
 
   // A record written against the retired NL-TM-01 checklist cannot be rebuilt
@@ -127,7 +156,7 @@ export default function TripInspectionModal({
   const retired = existing != null && isRetiredFormRecord(existing);
   // Rows rebuilt from the record, and anything it answered that they do not cover.
   const rebuilt = useMemo(
-    () => (existing && !retired ? rowsFromRecord(existing, unit, mode) : []),
+    () => (existing && !retired ? rowsFromRecord(existing, unit || null, mode) : []),
     [existing, retired, unit, mode],
   );
   const outsideForm = existing && !retired ? itemsOutsideForm(existing, rebuilt) : [];
@@ -159,7 +188,7 @@ export default function TripInspectionModal({
 
   const [odometer, setOdometer] = useState(existing?.odometerKm != null ? String(existing.odometerKm) : "");
   const [checklist, setChecklist] = useState<ChecklistRow[]>(() =>
-    existing ? rebuilt : rowsFor(unit, mode),
+    existing ? rebuilt : rowsFor(unit || null, mode),
   );
 
   // Pre-trip sections
@@ -190,6 +219,11 @@ export default function TripInspectionModal({
   const unanswered = unansweredCount(checklist);
 
   function validate(): string | null {
+    // Before the driver check: the unit decides WHICH rows the form asked, so an
+    // unset unit means the answers below were given against the full superset and
+    // cannot be attributed to a vehicle. The backend rejects it too
+    // (InspectionErrors.UnitRequired) — this is the readable half of that rule.
+    if (!unit.trim()) return "Select the unit this inspection was performed on.";
     if (!driverName.trim()) return "Select the driver who performed the inspection.";
     const defectNoNote = checklist.find((r) => r.state === "Defect" && !r.note.trim());
     if (defectNoNote) return `Defect rows need a note — add one for "${defectNoNote.label}".`;
@@ -211,7 +245,9 @@ export default function TripInspectionModal({
       source: "Dispatcher",
       tripNumber: trip.tripNumber,
       vehicleId: trip.vehicleId,
-      unit: trip.vehicleUnit ?? "",
+      // The SELECTED unit, not the trip's — they differ when a trip has no vehicle
+      // assigned, or when the dispatcher corrects which unit actually ran.
+      unit: unit.trim(),
       driverName: driverName.trim(),
       enteredBy,
       odometerKm: Number.isFinite(odo) ? odo : null,
@@ -336,17 +372,40 @@ export default function TripInspectionModal({
 
           {!unit && (
             <Caution kind="soon">
-              No unit assigned — showing the full form; mark bus-only rows N/A.
+              Select a unit — until you do, every row is shown, including the ones that only apply
+              to the bus. Choosing the unit narrows the form to what that vehicle actually has.
             </Caution>
           )}
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 18 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+            <SelectField
+              label="Unit"
+              value={unit}
+              onChange={setUnit}
+              // Locked once saved: the unit decides which rows exist, so changing it on an
+              // existing record would rebuild it against a different form and shed answers.
+              disabled={existing != null}
+              options={[
+                // An explicit empty option, so an unassigned trip opens with nothing chosen
+                // rather than silently defaulting to whichever unit happens to sort first.
+                ...(unit ? [] : [{ value: "", label: "— select a unit —" }]),
+                ...unitOptions.map((u) => ({ value: u, label: u })),
+              ]}
+              hint={
+                existing
+                  ? "Fixed for a saved inspection — remove and re-enter to change it."
+                  : "Required. Narrows the form to the rows this vehicle has."
+              }
+            />
             <SelectField
               label="Driver"
               value={driverName}
               onChange={setDriverName}
               options={driverOptions.map((n) => ({ value: n, label: n }))}
             />
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 18 }}>
             <NumberField
               label={isPre ? "Odometer start (km)" : "Odometer end (km)"}
               value={odometer}

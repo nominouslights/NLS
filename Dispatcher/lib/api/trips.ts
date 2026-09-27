@@ -867,7 +867,28 @@ export function corridorLabel(t: { stops: TripStop[]; origin: string; destinatio
   return stopNames(t).join("  →  ");
 }
 
-/** "06:30:00" → "6:30 AM" (12-hour; tolerates "06:30" input). */
+/**
+ * "06:30:00" → "06:30", the ONLY format `<input type="time">` accepts.
+ *
+ * Seeding a time input with `hhmm()` renders it BLANK: the browser rejects "6:30 AM" as a value
+ * and shows nothing, so editing a schedule template or a trip looked like it had no times set —
+ * and saving then wrote the empty box back over a time that was there. Display and input are two
+ * different formats; `hhmm` is for reading, this is for editing. They live side by side so the
+ * next person sees both.
+ *
+ * Returns "" for null/unparseable, which is what an empty time input expects (not "—").
+ */
+export function timeInputValue(time: string | null | undefined): string {
+  if (!time) return "";
+  const [h, m] = time.split(":");
+  const hour = Number(h);
+  const minute = Number(m ?? "0");
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return "";
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+/** "06:30:00" → "6:30 AM" (12-hour; tolerates "06:30" input). For DISPLAY only — a
+ *  `<input type="time">` cannot render this, see {@link timeInputValue}. */
 export function hhmm(time: string | null): string {
   if (!time) return "—";
   const [h, m] = time.split(":");

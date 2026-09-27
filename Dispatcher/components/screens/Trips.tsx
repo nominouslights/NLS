@@ -23,7 +23,7 @@ import {
   finishTripOperations,
   getTrip,
   hasClearanceFor,
-  hhmm,
+  timeInputValue,
   isCargoService,
   isOpenTrip,
   isOperationallyClosed,
@@ -445,8 +445,9 @@ function EditTripModal({
   onSaved: (input: TripUpdateInput) => Promise<void>;
 }) {
   const [serviceDate, setServiceDate] = useState(trip.serviceDate);
-  const [windowStart, setWindowStart] = useState(hhmm(trip.windowStart));
-  const [windowEnd, setWindowEnd] = useState(trip.windowEnd ? hhmm(trip.windowEnd) : "");
+  // timeInputValue, never hhmm — hhmm is for display and renders a time input blank.
+  const [windowStart, setWindowStart] = useState(timeInputValue(trip.windowStart));
+  const [windowEnd, setWindowEnd] = useState(timeInputValue(trip.windowEnd));
   const [distanceKm, setDistanceKm] = useState(String(trip.distanceKm));
   const [poNumber, setPoNumber] = useState(trip.poNumber ?? "");
   const [seatsCapacity, setSeatsCapacity] = useState(trip.seatsCapacity != null ? String(trip.seatsCapacity) : "");
@@ -615,7 +616,8 @@ function CreateReturnModal({
   onCreated: (input: TripInput) => Promise<void>;
 }) {
   const [serviceDate, setServiceDate] = useState(trip.serviceDate);
-  const [windowStart, setWindowStart] = useState(hhmm(trip.windowEnd ?? trip.windowStart));
+  // The return leg departs when the outbound one ends. timeInputValue, never hhmm.
+  const [windowStart, setWindowStart] = useState(timeInputValue(trip.windowEnd ?? trip.windowStart));
   const [windowEnd, setWindowEnd] = useState("");
   const [isEmptyLeg, setIsEmptyLeg] = useState(false);
 

@@ -8,6 +8,7 @@ import {
   createScheduleTemplate,
   DAY_SHORT,
   hhmm,
+  timeInputValue,
   isCargoService,
   listRoutes,
   listScheduleTemplates,
@@ -692,9 +693,11 @@ function TemplateFormModal({
   );
   const [anchorDate, setAnchorDate] = useState(existing?.anchorDate ?? "");
   const [daysOfMonth, setDaysOfMonth] = useState<number[]>(existing?.daysOfMonth ?? []);
-  const [departure, setDeparture] = useState(existing ? hhmm(existing.departureTime) : "");
+  // timeInputValue, never hhmm: these seed <input type="time">, which renders BLANK for a
+  // 12-hour string, so editing a template showed no times and saving wiped them.
+  const [departure, setDeparture] = useState(timeInputValue(existing?.departureTime));
   const [returnDeparture, setReturnDeparture] = useState(
-    existing?.returnDepartureTime ? hhmm(existing.returnDepartureTime) : "",
+    timeInputValue(existing?.returnDepartureTime),
   );
   const [returnNextDay, setReturnNextDay] = useState(existing?.returnNextDay ?? false);
   const [seatsCapacity, setSeatsCapacity] = useState(existing?.seatsCapacity != null ? String(existing.seatsCapacity) : "");
