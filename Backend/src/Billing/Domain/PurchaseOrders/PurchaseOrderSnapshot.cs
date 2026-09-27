@@ -12,10 +12,9 @@ namespace NorthernLink.Billing.Domain.PurchaseOrders;
 /// <para>
 /// Each PO is negotiated separately, so it carries its own terms.
 /// <see cref="RoundTripRateCad"/> overrides the contract's rate per round trip for work
-/// booked against this PO; <see cref="OneWayRateCad"/> is an absolute one-way figure, not a
-/// fraction. Either being null means "no PO term" and the fallback applies (contract rate,
-/// and half the effective round-trip rate respectively). Both are <b>tax-inclusive</b>: the
-/// platform computes no GST/HST/PST anywhere — QuickBooks Online owns tax.
+/// booked against this PO; null means "no PO term" and the contract rate applies. It is
+/// <b>tax-inclusive</b>: the platform computes no GST/HST/PST anywhere — QuickBooks Online
+/// owns tax.
 /// </para>
 /// <see cref="Expiry"/> and <see cref="AmountCad"/> are advisory only. A leg outside the PO
 /// window, or a draft that pushes the PO past its value, is <em>flagged</em> — pricing and
@@ -41,7 +40,12 @@ public sealed class PurchaseOrderSnapshot : ITenantScoped
     /// <summary>This PO's negotiated round-trip rate; null falls back to the contract rate.</summary>
     public decimal? RoundTripRateCad { get; set; }
 
-    /// <summary>This PO's negotiated one-way rate; null falls back to half the round-trip rate.</summary>
+    /// <summary>
+    /// This PO's negotiated one-way rate. <b>Retained for history; no longer priced</b> —
+    /// every group bills one full round-trip rate, so
+    /// <see cref="Invoices.InvoiceDraftBuilder"/> never reads this. Still replicated so the
+    /// figure survives; droppable later.
+    /// </summary>
     public decimal? OneWayRateCad { get; set; }
 
     public DateTimeOffset UpdatedAtUtc { get; set; }

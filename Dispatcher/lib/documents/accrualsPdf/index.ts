@@ -1,8 +1,10 @@
 // NL-ACC-01 Accruals Report — composes the printable HTML from the section
 // builders. This is a monthly per-client statement that LEADS with upcoming work
 // not yet done and monies owed, closes the month with one settled line, carries
-// real invoice amounts where invoiced/paid and clearly-marked contract-rate
-// estimates elsewhere — NOT an invoice, and it says so in its banner.
+// real invoice amounts where invoiced/paid and clearly-marked PO-rate
+// estimates elsewhere — NOT an invoice, and it says so in its banner. Money
+// prints in ONE Amount column throughout: billed and estimated dollars merge
+// into a single figure that carries its own EST. marking.
 //
 // Page assembly (US-Letter):
 //   header (+ degradation notes) + Report Details

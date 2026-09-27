@@ -45,9 +45,14 @@ public sealed class PurchaseOrder : AggregateRoot, ITenantScoped
     public decimal? RoundTripRateCad { get; private set; }
 
     /// <summary>
-    /// This PO's negotiated one-way rate, tax-inclusive — an absolute figure, not a
-    /// fraction. Null means "no PO term": a one-way leg falls back to half the effective
-    /// round-trip rate, which is what the platform has always charged.
+    /// This PO's negotiated one-way rate, tax-inclusive — an absolute figure, not a fraction.
+    /// <para>
+    /// <b>Retained for history; no longer priced.</b> Billing charges one full round-trip
+    /// rate for every group, paired or not, because a lone leg still deadheads the vehicle
+    /// back — so nothing reads this figure when drafting an invoice. It is still recorded,
+    /// edited and projected so past negotiations stay legible, and the whole change is
+    /// reversible. The column can be dropped once the owner confirms it is not wanted back.
+    /// </para>
     /// </summary>
     public decimal? OneWayRateCad { get; private set; }
 

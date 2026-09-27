@@ -25,21 +25,22 @@ import {
 // this suite matters more than its size suggests:
 //
 //  1. The estimate rule must mirror the invoice generator
-//     (Backend/src/Billing/Domain/Invoices/InvoiceDraftBuilder.cs:88-135) leg for
-//     leg. It once did not: `paired` was tested as `legs.length >= 2`, so a
-//     3-leg group was priced at 1 × rate instead of 1.5 ×, and a lone leg went
-//     unpriced although the invoice will bill it at half. Those are the cases
-//     pinned hardest here, on both sides of the pairing test.
+//     (Backend/src/Billing/Domain/Invoices/InvoiceDraftBuilder.cs) leg for leg.
+//     The rule is now: ONE line per (PO, roundTripKey) group, quantity 1, at the
+//     FULL round-trip rate — paired or not, because a lone leg still deadheads
+//     the vehicle back. There is no one-way price any more. The split-PO test
+//     runs BEFORE the pairing test and leaves the group unpriced entirely. Those
+//     are the cases pinned hardest here, on both sides of each test.
 //  2. `claimedLines` guarantees a given invoice line is counted at most once per
 //     report, and it does that by walking buckets in ACCRUAL_BUCKET_ORDER. That
 //     order is a money rule, not a display choice — the sections added on top
 //     are a separate, purely presentational view — so both are pinned.
-//  3. Rates are now PER PURCHASE ORDER (the contract rate is only the fallback),
+//  3. Rates are PER PURCHASE ORDER (the contract rate is only the fallback),
 //     and grouping is by (effective PO, roundTripKey). That makes the PO a money
-//     input, so both halves of the resolution are pinned on both sides — PO
-//     override vs contract fallback, explicit one-way rate vs the ½ fallback —
-//     plus a no-regression case proving a client whose POs carry no terms at all
-//     still prices exactly as it did before any of this existed.
+//     input, so the resolution is pinned on both sides — PO override vs contract
+//     fallback — plus a no-regression case proving a client whose POs carry no
+//     terms at all still prices at the contract rate. A PO's retained
+//     oneWayRateCad must change no figure anywhere; that too is pinned.
 
 const RATE = 500;
 const TODAY = "2026-09-15";
@@ -236,17 +237,19 @@ describe("estimates mirror InvoiceDraftBuilder", () => {
     expect(groups[0].amountNote).toBeNull();
   });
 
-  it("prices a lone leg at the one-way rate (½ the round trip) and flags it", () => {
-    // The old rule left this unpriced — the common case for upcoming work, and
-    // the reason the new headline figure would have understated by half a trip.
+  it("prices a lone leg at ONE FULL round-trip rate and flags it unpaired", () => {
+    // The owner's rule: "we do not count one way as there is always a deadhead."
+    // A lone outbound leg still brings the vehicle back empty, so it costs a
+    // full run — charging half was under-billing.
     const report = build([readyLeg("Outbound")]);
     const g = bucket(report, "ready").groups[0];
     expect(g.paired).toBe(false);
-    expect(g.amountCad).toBe(RATE * 0.5);
+    expect(g.amountCad).toBe(RATE);
+    expect(g.amountCad).not.toBe(RATE * 0.5);
     expect(g.amountSource).toBe("estimate");
-    expect(g.amountFlag).toBe("oneWay");
-    // A one-way-priced group HAS an amount, so it is not unpriced and must not
-    // be counted as such — that separation is why amountFlag exists.
+    expect(g.amountFlag).toBe("unpaired");
+    // A full-rate unpaired group HAS an amount, so it is not unpriced and must
+    // not be counted as such — that separation is why amountFlag exists.
     expect(g.amountNote).toBeNull();
     expect(bucket(report, "ready").unpricedCount).toBe(0);
   });
@@ -254,9 +257,7 @@ describe("estimates mirror InvoiceDraftBuilder", () => {
   it("prices a 3-leg group that HAS both directions at 1 × the rate", () => {
     // InvoiceDraftBuilder's pairing test is direction PRESENCE, not leg count:
     // Outbound + Inbound + a third leg still bills as one round-trip line at
-    // qty 1. Pinned explicitly because the plan's shorthand ("a 3-leg group is
-    // mis-estimated at 1 × rate") reads as if leg count decided it — the leg
-    // count only matters once the direction test has failed (next case).
+    // qty 1 — unflagged, because it paired.
     const report = build([readyLeg("Outbound"), readyLeg("Inbound"), readyLeg("Outbound")]);
     const g = bucket(report, "ready").groups[0];
     expect(g.legs).toHaveLength(3);
@@ -265,7 +266,9 @@ describe("estimates mirror InvoiceDraftBuilder", () => {
     expect(g.amountFlag).toBeNull();
   });
 
-  it("prices a 3-leg SAME-direction group at 1.5 × the rate", () => {
+  it("prices a 3-leg SAME-direction group ONCE, not per leg", () => {
+    // The group is the money-bearing unit. Pricing each leg would charge one
+    // run's worth of work three times.
     const report = build([
       readyLeg("Outbound"),
       readyLeg("Outbound"),
@@ -274,25 +277,37 @@ describe("estimates mirror InvoiceDraftBuilder", () => {
     const g = bucket(report, "ready").groups[0];
     expect(g.legs).toHaveLength(3);
     expect(g.paired).toBe(false);
-    expect(g.amountCad).toBe(3 * 0.5 * RATE);
-    expect(g.amountFlag).toBe("oneWay");
+    expect(g.amountCad).toBe(RATE);
+    expect(g.amountCad).not.toBe(3 * RATE);
+    expect(g.amountFlag).toBe("unpaired");
   });
 
-  it("prices two SAME-direction legs at 2 × 0.5 = 1 × the rate, still flagged", () => {
+  it("prices two SAME-direction legs at 1 × the rate, still flagged unpaired", () => {
     // The total coincides with a paired round trip, so the flag is the only
-    // thing telling the dispatcher these are two review-flagged half lines.
+    // thing telling the dispatcher these two legs never paired.
     const report = build([readyLeg("Outbound"), readyLeg("Outbound")]);
     const g = bucket(report, "ready").groups[0];
     expect(g.paired).toBe(false);
     expect(g.amountCad).toBe(RATE);
-    expect(g.amountFlag).toBe("oneWay");
+    expect(g.amountFlag).toBe("unpaired");
   });
 
-  it("prices a direction-less leg at half, not at nothing", () => {
+  it("prices a direction-less leg at the full rate, not at half and not at nothing", () => {
     const report = build([readyLeg(null)]);
     const g = bucket(report, "ready").groups[0];
-    expect(g.amountCad).toBe(RATE * 0.5);
-    expect(g.amountFlag).toBe("oneWay");
+    expect(g.amountCad).toBe(RATE);
+    expect(g.amountFlag).toBe("unpaired");
+  });
+
+  it("flags a paired run whose leg ran empty — full rate, discount optional", () => {
+    // InvoiceDraftBuilder's else-branch: a pair including a deadhead leg still
+    // prices at the full round-trip rate, flagged so the dispatcher can discount
+    // the editable worksheet line by hand.
+    const report = build([readyLeg("Outbound"), readyLeg("Inbound", { isEmptyLeg: true })]);
+    const g = bucket(report, "ready").groups[0];
+    expect(g.paired).toBe(true);
+    expect(g.amountCad).toBe(RATE);
+    expect(g.amountFlag).toBe("deadhead");
   });
 
   it("leaves a group with no roundTripKey unpriced, with the manual note", () => {
@@ -325,10 +340,15 @@ describe("estimates mirror InvoiceDraftBuilder", () => {
     expect(owed.amountCad).toBe("Not priced");
   });
 
-  it("raises a banner counting the half-rate groups", () => {
+  it("raises a banner counting the unpaired full-rate groups", () => {
     const report = build([readyLeg("Outbound"), readyLeg("Inbound", { roundTripKey: "rt-2" })]);
     expect(bucket(report, "ready").groups).toHaveLength(2);
-    expect(report.notes.some((n) => n.startsWith("2 groups of trips"))).toBe(true);
+    const banner = report.notes.find((n) => n.startsWith("2 groups of trips"));
+    expect(banner).toBeDefined();
+    // The banner must say FULL rate — the wrong half-rate wording here is
+    // exactly what would make an under-billed month look explained.
+    expect(banner).toContain("ONE FULL round-trip rate");
+    expect(banner).not.toMatch(/half/i);
   });
 });
 
@@ -353,27 +373,28 @@ describe("per-PO pricing terms", () => {
     expect(bucket(report, "ready").groups[0].amountCad).toBe(RATE);
   });
 
-  it("prices a lone leg at the PO's EXPLICIT one-way rate, not at half", () => {
-    // The whole point of an explicit one-way rate: a one-way run is not
-    // necessarily half a round trip, and where the PO says so the estimate must
-    // use the PO's figure rather than the arithmetic.
+  it("IGNORES the PO's retained one-way rate — a lone leg bills the full round trip", () => {
+    // oneWayRateCad survives on the record as history, and must change no
+    // figure anywhere. A PO recording one is the case most likely to regress.
     const report = build([readyLeg("Outbound")], [], client(), [
       po({ roundTripRateCad: 1_600, oneWayRateCad: 900 }),
     ]);
     const g = bucket(report, "ready").groups[0];
-    expect(g.amountCad).toBe(900);
+    expect(g.amountCad).toBe(1_600);
+    expect(g.amountCad).not.toBe(900);
     expect(g.amountCad).not.toBe(800);
-    expect(g.amountFlag).toBe("oneWay");
+    expect(g.amountFlag).toBe("unpaired");
   });
 
-  it("uses ½ the EFFECTIVE round-trip rate when the PO records no one-way rate", () => {
+  it("bills a lone leg the PO's full round-trip rate when no one-way rate exists", () => {
     const report = build([readyLeg("Outbound")], [], client(), [po({ roundTripRateCad: 1_600 })]);
-    expect(bucket(report, "ready").groups[0].amountCad).toBe(800);
+    expect(bucket(report, "ready").groups[0].amountCad).toBe(1_600);
   });
 
-  it("prices a round trip split across two POs as two one-way trips, flagged", () => {
-    // Decision 4: a round trip must be a single PO. Grouping by (PO, key) is
-    // what implements it — the two legs land in two groups with no special case.
+  it("does NOT price a round trip split across two POs — it needs a decision", () => {
+    // Decision 4: a round trip must be a single PO. Full-rate-per-group would
+    // bill the same run once on each worksheet, so neither side is priced; the
+    // rows stay visible, flagged, and counted as unpriced.
     const report = build(
       [
         readyLeg("Outbound", { poNumber: "PO-A" }),
@@ -386,15 +407,46 @@ describe("per-PO pricing terms", () => {
         po({ id: "b", poNumber: "PO-B", roundTripRateCad: 2_000, oneWayRateCad: 1_200 }),
       ],
     );
+    const b = bucket(report, "ready");
+    expect(b.groups).toHaveLength(2);
+    expect(b.groups.map((g) => g.poNumber)).toEqual(["PO-A", "PO-B"]);
+    expect(b.groups.map((g) => g.amountCad)).toEqual([null, null]);
+    expect(b.groups.map((g) => g.amountSource)).toEqual([null, null]);
+    expect(b.groups.map((g) => g.amountFlag)).toEqual(["splitPo", "splitPo"]);
+    // Not priced, but not dropped: still two rows, still counted as unpriced,
+    // and contributing nothing to the PO draw-down.
+    expect(b.estimatedCad).toBe(0);
+    expect(b.unpricedCount).toBe(2);
+    expect(report.poCommitments.map((c) => c.upcomingCad)).toEqual([0, 0]);
+    expect(report.notes.some((n) => n.includes("DIFFERENT purchase order"))).toBe(true);
+    expect(report.notes.some((n) => n.includes("neither side is priced"))).toBe(true);
+  });
+
+  it("tests the SPLIT before the pairing: a complete pair on one PO still stays unpriced", () => {
+    // The ordering is the builder's, and this is the case that proves it: the
+    // PO-A group pairs perfectly, but its roundTripKey has a third leg on PO-B,
+    // so the key is split and NOTHING under it is priced.
+    const report = build(
+      [
+        readyLeg("Outbound", { poNumber: "PO-A", roundTripKey: "rt-x" }),
+        readyLeg("Inbound", { poNumber: "PO-A", roundTripKey: "rt-x" }),
+        readyLeg("Outbound", { poNumber: "PO-B", roundTripKey: "rt-x" }),
+      ],
+      [],
+      client(),
+      [
+        po({ id: "a", poNumber: "PO-A", roundTripRateCad: 1_000 }),
+        po({ id: "b", poNumber: "PO-B", roundTripRateCad: 2_000 }),
+      ],
+    );
     const groups = bucket(report, "ready").groups;
     expect(groups).toHaveLength(2);
-    expect(groups.every((g) => !g.paired)).toBe(true);
-    expect(groups.map((g) => g.poNumber)).toEqual(["PO-A", "PO-B"]);
-    // Each side prices at ITS OWN PO's one-way rate: ½ × 1,000, then the
-    // explicit 1,200.
-    expect(groups.map((g) => g.amountCad)).toEqual([500, 1_200]);
-    expect(groups.map((g) => g.amountFlag)).toEqual(["splitPo", "splitPo"]);
-    expect(report.notes.some((n) => n.includes("DIFFERENT purchase order"))).toBe(true);
+    const paired = groups.find((g) => g.paired)!;
+    expect(paired.poNumber).toBe("PO-A");
+    expect(paired.amountCad).toBeNull();
+    expect(paired.amountFlag).toBe("splitPo");
+    expect(groups.every((g) => g.amountFlag === "splitPo")).toBe(true);
+    expect(bucket(report, "ready").estimatedCad).toBe(0);
   });
 
   it("does not flag a split when the whole round trip sits on one PO", () => {
@@ -418,8 +470,8 @@ describe("per-PO pricing terms", () => {
     ]);
     const g = bucket(report, "ready").groups[0];
     expect(g.poFlags).toEqual(["outsideWindow"]);
-    expect(g.amountCad).toBe(800);
-    expect(bucket(report, "ready").estimatedCad).toBe(800);
+    expect(g.amountCad).toBe(1_600);
+    expect(bucket(report, "ready").estimatedCad).toBe(1_600);
     expect(report.notes.some((n) => n.includes("outside the issued → expiry window"))).toBe(true);
   });
 
@@ -505,24 +557,51 @@ describe("per-PO pricing terms", () => {
     expect(g.poNumber).toBeNull();
     expect(groupPoLabel(g)).toBe("No PO");
     // Still priced at the contract rate — no PO is not no money.
-    expect(g.amountCad).toBe(RATE * 0.5);
+    expect(g.amountCad).toBe(RATE);
   });
 
   it("pins the flag labels — the INVOICE's words, sentence-cased", () => {
-    // These mirror the backend's review-flag constants exactly in substance
-    // ("one-way leg — review", "round-trip legs on different POs — priced
-    // one-way, review", "outside PO window — review"). A client can see this
-    // report and that invoice side by side, so the two must not describe one
-    // condition in two phrasings — that is what this pin is for.
-    expect(AMOUNT_FLAG_META.oneWay.label).toBe("One-way leg — review");
+    // These mirror the backend's review-flag constants (InvoiceDraftBuilder)
+    // exactly in substance. A client can see this report and that invoice side
+    // by side, so the two must not describe one condition in two phrasings —
+    // that is what this pin is for, and it is why the constants and these
+    // labels have to move in the same commit.
+    //
+    // Backend constant            → label pinned here
+    //   UnpairedGroupFlag         "full round trip — legs did not pair, review"
+    //   SplitPurchaseOrderFlag    "round-trip legs on different POs — not priced, needs a decision"
+    //   DeadheadReturnFlag        "round trip incl. deadhead return — discount optional"
+    //   OutsidePurchaseOrderWindowFlag  "outside PO window — review"
+    //
+    // SplitPurchaseOrderFlag kept its NAME while its WORDING changed, so a
+    // name-based check would pass on the old string: only these exact
+    // strings are the contract. The em dashes are U+2014.
+    expect(AMOUNT_FLAG_META.unpaired.label).toBe("Full round trip — legs did not pair, review");
     expect(AMOUNT_FLAG_META.splitPo.label).toBe(
-      "Round-trip legs on different POs — priced one-way, review",
+      "Round-trip legs on different POs — not priced, needs a decision",
+    );
+    expect(AMOUNT_FLAG_META.deadhead.label).toBe(
+      "Round trip incl. deadhead return — discount optional",
     );
     expect(PO_FLAG_META.outsideWindow.label).toBe("Outside PO window — review");
-    for (const meta of [AMOUNT_FLAG_META.oneWay, AMOUNT_FLAG_META.splitPo, PO_FLAG_META.outsideWindow]) {
+    // "one-way" is retired wording everywhere — no flag may reintroduce it.
+    for (const meta of [
+      AMOUNT_FLAG_META.unpaired,
+      AMOUNT_FLAG_META.splitPo,
+      AMOUNT_FLAG_META.deadhead,
+      PO_FLAG_META.outsideWindow,
+    ]) {
       expect(meta.kind).toBeTruthy();
       expect(meta.label.length).toBeGreaterThan(0);
+      expect(meta.label).not.toMatch(/one.way/i);
     }
+  });
+
+  it("pins the PO-value-exceeded wording — the invoice's words again", () => {
+    const report = build([readyLeg("Outbound"), readyLeg("Inbound")], [], client(), [
+      po({ amountCad: 300 }),
+    ]);
+    expect(report.poCommitments[0].label).toContain("PO value exceeded — review");
   });
 
   it("NO REGRESSION: POs with no terms price byte-identically to no POs at all", () => {
@@ -541,9 +620,9 @@ describe("per-PO pricing terms", () => {
     const amounts = (r: AccrualsReport) =>
       r.buckets.flatMap((b) => b.groups.map((g) => [g.amountCad, g.amountSource, g.amountFlag, g.amountNote]));
     expect(amounts(withBarePos)).toEqual(amounts(withoutPos));
-    // …and the figures themselves are the pre-PO ones: pair 1 ×, each unpaired
-    // leg ½ ×, the keyless leg unpriced.
-    expect(bucket(withBarePos, "ready").estimatedCad).toBe(RATE + 0.5 * RATE + 0.5 * RATE);
+    // …and the figures are the contract-rate ones: every group 1 × the full
+    // round-trip rate, paired or not, and the keyless leg unpriced.
+    expect(bucket(withBarePos, "ready").estimatedCad).toBe(3 * RATE);
     expect(bucket(withBarePos, "ready").unpricedCount).toBe(1);
     expect(accrualTotals(withBarePos)).toEqual(accrualTotals(withoutPos));
   });
@@ -570,7 +649,9 @@ describe("previewDraftsByPo", () => {
     expect(rows[0].roundTrips).toBe(1);
     expect(rows[0].pairedCount).toBe(1);
     expect(rows[0].estimatedCad).toBe(1_600);
-    expect(rows[0].termsLabel).toBe("$1,600 / round trip · $800 one way (½)");
+    // One rate on the terms line now — a one-way figure would describe money
+    // nothing charges.
+    expect(rows[0].termsLabel).toBe("$1,600 / round trip");
   });
 
   it("splits one worksheet per PO, each at its own rates, No PO last", () => {
@@ -589,11 +670,36 @@ describe("previewDraftsByPo", () => {
       ],
     });
     expect(rows.map((r) => r.poNumber)).toEqual(["PO-A", "PO-B", null]);
-    expect(rows.map((r) => r.estimatedCad)).toEqual([900, 2_000, 250]);
-    expect(rows[0].oneWayCount).toBe(1);
+    // PO-A's lone leg bills a FULL round trip, and its retained one-way rate of
+    // 900 is ignored — PO-A records no round-trip rate, so the contract's 500
+    // applies. PO-B's pair bills its own 2,000. The no-PO leg bills 500.
+    expect(rows.map((r) => r.estimatedCad)).toEqual([500, 2_000, 500]);
+    expect(rows[0].unpairedCount).toBe(1);
     expect(rows[1].pairedCount).toBe(1);
     // Work with no PO still drafts — it is a worksheet, not a hidden row.
     expect(rows[2].roundTrips).toBe(1);
+  });
+
+  it("prices nothing for a round trip whose legs straddle two POs", () => {
+    // The preview must promise exactly what InvoiceDraftBuilder will create,
+    // and it creates a zero-amount, flagged line on each worksheet.
+    const rows = previewDraftsByPo({
+      legs: [
+        { id: "a", poNumber: "PO-A", roundTripKey: "r1", direction: "Outbound" },
+        { id: "b", poNumber: "PO-B", roundTripKey: "r1", direction: "Inbound" },
+      ],
+      contract,
+      purchaseOrders: [
+        po({ id: "a", poNumber: "PO-A", roundTripRateCad: 1_000 }),
+        po({ id: "b", poNumber: "PO-B", roundTripRateCad: 2_000 }),
+      ],
+    });
+    expect(rows.map((r) => r.splitCount)).toEqual([1, 1]);
+    expect(rows.map((r) => r.estimatedCad)).toEqual([0, 0]);
+    expect(rows.map((r) => r.pairedCount)).toEqual([0, 0]);
+    expect(rows.map((r) => r.unpairedCount)).toEqual([0, 0]);
+    // Still a worksheet each, with its trip counted — not priced is not hidden.
+    expect(rows.map((r) => r.roundTrips)).toEqual([1, 1]);
   });
 
   it("counts a keyless leg as manual and never estimates it", () => {
@@ -681,7 +787,7 @@ describe("bucket membership and the claim rule", () => {
 
 describe("sections", () => {
   const trips = [
-    // upcoming: a lone future leg → half rate
+    // upcoming: a lone future leg → one full round-trip rate
     trip({ status: "Scheduled", serviceDate: "2026-09-25", direction: "Outbound", roundTripKey: "f1" }),
     // scheduled: a pair under way → 1 × rate
     trip({ status: "InProgress", serviceDate: "2026-09-14", direction: "Outbound", roundTripKey: "s1" }),
@@ -730,8 +836,8 @@ describe("sections", () => {
       expect(s.estimatedCad).toBe(s.buckets.reduce((n, b) => n + b.estimatedCad, 0));
       expect(s.unpricedCount).toBe(s.buckets.reduce((n, b) => n + b.unpricedCount, 0));
     }
-    // upcoming = the lone future leg (half) + the in-progress pair (full)
-    expect(section(report, "upcoming").estimatedCad).toBe(0.5 * RATE + RATE);
+    // upcoming = the lone future leg (full) + the in-progress pair (full)
+    expect(section(report, "upcoming").estimatedCad).toBe(2 * RATE);
     expect(section(report, "upcoming").actualCad).toBe(0);
     // owed = the unbilled-but-complete pair (estimate) + the issued invoice line
     expect(section(report, "owed").estimatedCad).toBe(RATE);
@@ -789,8 +895,10 @@ describe("headline figures", () => {
     const [upcoming, owed] = accrualHeadlines(report);
     expect(upcoming.label).toBe("Upcoming expenses");
     // Wholly estimated → the figure itself carries " est.", never bare dollars.
-    expect(upcoming.amountCad).toBe("$250.00 est.");
-    expect(upcoming.detail).toBe("1 round trip");
+    expect(upcoming.amountCad).toBe("$500.00 est.");
+    // "trip", not "round trip": an unpaired group is one trip billed as a
+    // round trip, and the round-trip wording is retired from the counts.
+    expect(upcoming.detail).toBe("1 trip");
     expect(owed.label).toBe("Monies owed");
     expect(owed.amountCad).toBe("$500.00 est.");
     expect(accrualHeadlines(report)).toHaveLength(2);
@@ -839,9 +947,44 @@ describe("clipboard export", () => {
     expect(text).not.toMatch(/GST|HST|PST/);
   });
 
-  it("prints the one-way caveat in words beside the figure", () => {
+  it("prints the unpaired caveat in words beside the full-rate figure", () => {
     const report = build([readyLeg("Outbound")]);
-    expect(accrualsClipboardText(report)).toContain("$250.00 est. (One-way leg — review)");
+    expect(accrualsClipboardText(report)).toContain(
+      "$500.00 est. (Full round trip — legs did not pair, review)",
+    );
+  });
+
+  it("prints a split-PO group as needing a decision, never as $0.00", () => {
+    // The colourless outputs have only words. "$0.00" would read to a client as
+    // a run performed for free, which is the one thing this must never say.
+    const report = build(
+      [
+        readyLeg("Outbound", { poNumber: "PO-A" }),
+        readyLeg("Inbound", { poNumber: "PO-B" }),
+      ],
+      [],
+      client(),
+      [po({ id: "a", poNumber: "PO-A" }), po({ id: "b", poNumber: "PO-B" })],
+    );
+    const text = accrualsClipboardText(report);
+    expect(text).toContain("Round-trip legs on different POs — not priced, needs a decision");
+    expect(text).not.toContain("$0.00 est.");
+  });
+
+  it("tallies each bucket with ONE amount, keeping the estimated share in words", () => {
+    const inv1 = trip({ status: "Invoiced", direction: "Outbound", billing: billed("Invoiced") });
+    const report = build(
+      [inv1, readyLeg("Outbound"), readyLeg("Inbound")],
+      [invoice([line({ tripIds: [inv1.id], amountCad: 480 })])],
+    );
+    const text = accrualsClipboardText(report);
+    // One merged figure per bucket line — no "actual X · estimated Y" pair.
+    expect(text).toContain("Ready for billing — 1 trip · $500.00 est.");
+    expect(text).toContain("Invoiced — 1 trip · $480.00");
+    expect(text).not.toMatch(/actual \$/);
+    expect(text).not.toMatch(/estimated \$/);
+    // …and a section mixing the two keeps the split recoverable in the subline.
+    expect(text).toContain("incl. $500.00 est.");
   });
 
   it("prints the PO authorisation table, with the terms that priced it", () => {
@@ -853,7 +996,8 @@ describe("clipboard export", () => {
     );
     const text = accrualsClipboardText(report);
     expect(text).toContain("PURCHASE ORDERS — AUTHORISED VALUE VS THIS MONTH'S WORK");
-    expect(text).toContain("$1,600 / round trip · $800 one way (½)");
+    expect(text).toContain("$1,600 / round trip");
+    expect(text).not.toMatch(/one way/i);
     expect(text).toContain("$8,400.00 left of $10,000.00");
     expect(text).not.toMatch(/GST|HST|PST/);
   });
@@ -873,9 +1017,22 @@ describe("email payload", () => {
 
   it("emits the two headline figures", () => {
     expect(accrualsEmailPayload(report).headline).toEqual([
-      { label: "Upcoming expenses", amountCad: "$250.00 est.", detail: "1 round trip" },
-      { label: "Monies owed", amountCad: "$500.00 est.", detail: "1 round trip" },
+      { label: "Upcoming expenses", amountCad: "$500.00 est.", detail: "1 trip" },
+      { label: "Monies owed", amountCad: "$500.00 est.", detail: "1 trip" },
     ]);
+  });
+
+  it("sends ONE amount per summary row, with any estimate marking in the string", () => {
+    // The wire row is AccrualsSummaryRow(BucketLabel, RoundTrips, AmountCad,
+    // Emphasis) — no actual/estimated pair for the renderer to get wrong.
+    const rows = accrualsEmailPayload(report).summary;
+    const byLabel = (label: string) => rows.find((r) => r.bucketLabel === label)!;
+    expect(byLabel("Ready for billing").amountCad).toBe("$500.00 est.");
+    expect(byLabel("Paid").amountCad).toBe("$520.00");
+    expect(byLabel("Invoiced").amountCad).toBe("$0.00");
+    for (const row of rows) {
+      expect(Object.keys(row).sort()).toEqual(["amountCad", "bucketLabel", "emphasis", "roundTrips"]);
+    }
   });
 
   it("orders summary by section, subtotal row first then its buckets", () => {

@@ -398,8 +398,7 @@ public static class NotificationsEndpoints
             .Select(row => new AccrualsSummaryRow(
                 row.BucketLabel ?? string.Empty,
                 row.RoundTrips ?? string.Empty,
-                row.ActualCad ?? string.Empty,
-                row.EstimatedCad ?? string.Empty,
+                row.AmountCad ?? string.Empty,
                 row.Emphasis ?? false))
             .ToList(),
         (report?.Buckets ?? [])
@@ -641,14 +640,14 @@ public sealed record AccrualsHeadlineFigureRequest(
     string? Detail);
 
 /// <summary>
-/// One line in the summary table. <c>Emphasis</c> marks a section subtotal row (omitted or
-/// false = a bucket row nested under one).
+/// One line in the summary table: a single pre-formatted <c>amountCad</c> with any "est."
+/// marking already in the string — there is no actual/estimated pair. <c>Emphasis</c> marks a
+/// section subtotal row (omitted or false = a bucket row nested under one).
 /// </summary>
 public sealed record AccrualsSummaryRowRequest(
     string? BucketLabel,
     string? RoundTrips,
-    string? ActualCad,
-    string? EstimatedCad,
+    string? AmountCad,
     bool? Emphasis);
 
 /// <summary>One billing-state bucket's detail section.</summary>

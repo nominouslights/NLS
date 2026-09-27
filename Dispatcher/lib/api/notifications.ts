@@ -197,11 +197,17 @@ export interface AccrualsEmailReport {
   notes: string[];
   /** The two leading figures — upcoming expenses first, then monies owed. */
   headline: { label: string; amountCad: string; detail: string }[];
+  /** Summary table rows (AccrualsSummaryRow). ONE amount column: `amountCad`
+   *  is a single pre-formatted CAD figure with any " est." marking already in
+   *  the string — there is deliberately no actual/estimated pair, because the
+   *  renderer has no notion of an estimate and so cannot get the distinction
+   *  wrong. `roundTrips` keeps its wire name although the emailed PDF's header
+   *  now reads "Trips" — the backend held the field name to avoid an unrelated
+   *  contract break. */
   summary: {
     bucketLabel: string;
     roundTrips: string;
-    actualCad: string;
-    estimatedCad: string;
+    amountCad: string;
     /** True for a section subtotal row; false for a bucket row nested under it. */
     emphasis: boolean;
   }[];

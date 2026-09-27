@@ -151,6 +151,11 @@ public sealed class QuestClientAccrualsReportPdf : IClientAccrualsReportPdf
     /// The summary table. A row with <see cref="AccrualsSummaryRow.Emphasis"/> set is a section
     /// subtotal and reads as a heading; the rows beneath it are indented bucket lines. The
     /// frontend supplies the grouping and the order — this only honours the flag.
+    /// <para>
+    /// Three columns: bucket, trip count, amount. One amount column, not an actual/estimated
+    /// pair — the estimate marking is inside the amount string the frontend sends, so nothing
+    /// here has to know which is which.
+    /// </para>
     /// </summary>
     private static void ComposeSummary(IContainer container, IReadOnlyList<AccrualsSummaryRow> summary)
     {
@@ -165,15 +170,13 @@ public sealed class QuestClientAccrualsReportPdf : IClientAccrualsReportPdf
                     columns.RelativeColumn(3);
                     columns.RelativeColumn(2);
                     columns.RelativeColumn(2);
-                    columns.RelativeColumn(2);
                 });
 
                 table.Header(header =>
                 {
                     header.Cell().Element(HeaderCell).Text("Bucket");
-                    header.Cell().Element(HeaderCell).AlignRight().Text("Round trips");
-                    header.Cell().Element(HeaderCell).AlignRight().Text("Actual");
-                    header.Cell().Element(HeaderCell).AlignRight().Text("Estimated");
+                    header.Cell().Element(HeaderCell).AlignRight().Text("Trips");
+                    header.Cell().Element(HeaderCell).AlignRight().Text("Amount");
                 });
 
                 foreach (var row in summary)
@@ -182,8 +185,7 @@ public sealed class QuestClientAccrualsReportPdf : IClientAccrualsReportPdf
 
                     table.Cell().Element(cell).PaddingLeft(row.Emphasis ? 0 : 10).Text(row.BucketLabel);
                     table.Cell().Element(cell).AlignRight().Text(row.RoundTrips);
-                    table.Cell().Element(cell).AlignRight().Text(row.ActualCad);
-                    table.Cell().Element(cell).AlignRight().Text(row.EstimatedCad);
+                    table.Cell().Element(cell).AlignRight().Text(row.AmountCad);
                 }
             });
         });

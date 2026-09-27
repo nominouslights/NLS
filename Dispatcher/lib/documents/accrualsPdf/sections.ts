@@ -4,12 +4,17 @@
 // printed page can never disagree with the screen about a bucket or a dollar.
 //
 // Money rules restated where they print: estimates carry an explicit "EST."
-// suffix, an unpaired group prints its one-way estimate with the flag spelled
-// out beside it ("ONE-WAY RATE PER LEG — UNPAIRED, REVIEW", or "SPLIT ACROSS
-// POS — PRICED AS ONE-WAY TRIPS") — the sheet is monochrome, so every caveat
-// has to be words — a group with no round-trip key prints "MANUAL LINE — NOT
-// ESTIMATED", and no tax appears anywhere: QuickBooks Online owns all tax
-// calculation, so every amount printed here is a bare line total in CAD.
+// suffix, an unpaired group prints its FULL round-trip estimate with the flag
+// spelled out beside it, and a group whose legs straddle two POs prints the
+// flag INSTEAD of a figure — the sheet is monochrome, so every caveat has to be
+// words, and "$0.00" would read to a client as work performed for free. A group
+// with no round-trip key prints "MANUAL LINE — NOT ESTIMATED", and no tax
+// appears anywhere: QuickBooks Online owns all tax calculation, so every amount
+// printed here is a bare line total in CAD.
+//
+// ONE amount column throughout — actual and estimated money are merged into a
+// single figure, and where a bucket mixes them the sub-line says how much is an
+// estimate ("incl. $X est."). The old actual/estimated pair of columns is gone.
 //
 // Rates are PER PURCHASE ORDER (the contract rate is only the fallback), so the
 // PO column prints the EFFECTIVE PO that priced each row plus any PO warning,
@@ -24,9 +29,12 @@ import {
   ACCRUALS_ESTIMATE_NOTE,
   ACCRUALS_TAX_NOTE,
   AMOUNT_FLAG_META,
+  accrualBucketAmountLabel,
+  accrualBucketDetail,
   accrualHeadlines,
   accrualSectionAmountLabel,
   accrualSectionDetail,
+  accrualTallyAmountLabel,
   accrualTotals,
   groupAmountLabel,
   groupPoText,
@@ -54,9 +62,9 @@ import { esc, field, grid, sectionBar } from "../workOrderPdf/html";
 export function header(company: CompanyInfo, report: AccrualsReport): string {
   const banner =
     "Accruals statement — upcoming work not yet done, then monies owed, then the month's " +
-    "settled work. NOT an invoice. Amounts marked EST. are contract-rate estimates; issued " +
-    "invoice amounts govern. All amounts CAD. Taxes are applied in QuickBooks; this report " +
-    "contains none.";
+    "settled work. NOT an invoice. Amounts marked EST. are estimates at the purchase order's " +
+    "rate (the contract rate where a PO records none); issued invoice amounts govern. All " +
+    "amounts CAD. Taxes are applied in QuickBooks; this report contains none.";
   return `
   <div class="head">
     <div>
@@ -164,20 +172,22 @@ export function purchaseOrdersBlock(report: AccrualsReport): string {
 
 // ---- summary ----------------------------------------------------------------
 
-/** Round trips × actual × estimated, grouped by section with a subtotal row per
- *  section and its buckets nested beneath, plus a whole-report totals row.
- *  Actual and estimated stay separate columns so real dollars are never
- *  visually merged with estimates. Every bucket still appears — the summary is
- *  the complete position of the month, including the settled one whose per-trip
- *  detail table is deliberately gone. */
+/** Trips × ONE amount, grouped by section with a subtotal row per section and
+ *  its buckets nested beneath, plus a whole-report totals row. Billed and
+ *  estimated money are one figure — the estimate marking rides the figure
+ *  itself ("… EST.") and a mixed bucket keeps its split recoverable in the
+ *  detail lines further down, which is the only place it is still needed.
+ *  Every bucket still appears — the summary is the complete position of the
+ *  month, including the settled one whose per-trip detail table is
+ *  deliberately gone. */
 export function summaryBlock(report: AccrualsReport): string {
+  const amount = (label: string): string => esc(label.replace(" est.", " EST."));
   const rows = report.sections
     .map((section) => {
       const subtotal = `<tr class="sub">
       <td>${esc(section.label)}</td>
       <td class="amt">${section.groupCount}</td>
-      <td class="amt">${esc(formatInvoiceCad(section.actualCad))}</td>
-      <td class="amt">${section.estimatedCad > 0 ? `${esc(formatInvoiceCad(section.estimatedCad))} EST.` : "—"}</td>
+      <td class="amt">${amount(accrualSectionAmountLabel(section))}</td>
       <td class="amt">${section.unpricedCount > 0 ? section.unpricedCount : "—"}</td>
     </tr>`;
       const buckets = section.buckets
@@ -185,8 +195,7 @@ export function summaryBlock(report: AccrualsReport): string {
           (b) => `<tr>
       <td class="ind">${esc(b.label)}</td>
       <td class="amt">${b.groups.length}</td>
-      <td class="amt">${esc(formatInvoiceCad(b.actualCad))}</td>
-      <td class="amt">${b.estimatedCad > 0 ? `${esc(formatInvoiceCad(b.estimatedCad))} EST.` : "—"}</td>
+      <td class="amt">${amount(accrualBucketAmountLabel(b))}</td>
       <td class="amt">${b.unpricedCount > 0 ? b.unpricedCount : "—"}</td>
     </tr>`,
         )
@@ -195,6 +204,12 @@ export function summaryBlock(report: AccrualsReport): string {
     })
     .join("");
   const totals = accrualTotals(report);
+  const totalLabel = accrualTallyAmountLabel({
+    count: totals.groupCount,
+    actualCad: totals.actualCad,
+    estimatedCad: totals.estimatedCad,
+    unpricedCount: totals.unpricedCount,
+  });
   return (
     `<div class="blk">` +
     sectionBar("Summary — Upcoming Work, Monies Owed, Settled") +
@@ -202,9 +217,8 @@ export function summaryBlock(report: AccrualsReport): string {
        <thead>
          <tr>
            <th>Section / billing state</th>
-           <th class="amt">Round trips</th>
-           <th class="amt">Actual (CAD)</th>
-           <th class="amt">Estimated (CAD)</th>
+           <th class="amt">Trips</th>
+           <th class="amt">Amount (CAD)</th>
            <th class="amt">Unpriced</th>
          </tr>
        </thead>
@@ -213,8 +227,7 @@ export function summaryBlock(report: AccrualsReport): string {
          <tr class="total">
            <td class="lbl2">Totals</td>
            <td class="amt">${totals.groupCount}</td>
-           <td class="amt">${esc(formatInvoiceCad(totals.actualCad))}</td>
-           <td class="amt">${totals.estimatedCad > 0 ? `${esc(formatInvoiceCad(totals.estimatedCad))} EST.` : "—"}</td>
+           <td class="amt">${amount(totalLabel)}</td>
            <td class="amt">${totals.unpricedCount > 0 ? totals.unpricedCount : "—"}</td>
          </tr>
        </tfoot>
@@ -237,10 +250,12 @@ function tripsCell(g: AccrualGroup): string {
 }
 
 /** Amount cell — the figure with its EST. suffix, any amount flag printed in
- *  words BESIDE a real figure (an unpaired group has an amount: the PO's one-way
- *  rate per leg, exactly as the invoice will bill it), or the spelled-out reason
- *  it is unpriced. The flag text comes from AMOUNT_FLAG_META, so the sheet can
- *  never word a flag differently from the screen. Words, not colour. */
+ *  words BESIDE a real figure (an unpaired group has an amount: one FULL
+ *  round-trip rate, exactly as the invoice will bill it), or the spelled-out
+ *  reason it is unpriced. A split-PO group is the one flag with NO figure: it
+ *  prints the flag's words alone, so the client reads "needs a decision" rather
+ *  than "$0.00 of work". The flag text comes from AMOUNT_FLAG_META, so the
+ *  sheet can never word a flag differently from the screen. Words, not colour. */
 function amountCell(g: AccrualGroup): string {
   const label = groupAmountLabel(g);
   if (label !== null) {
@@ -249,6 +264,9 @@ function amountCell(g: AccrualGroup): string {
       return `<td class="flag">${amount}<br/>${esc(AMOUNT_FLAG_META[g.amountFlag].label.toUpperCase())}</td>`;
     }
     return `<td class="amt">${amount}</td>`;
+  }
+  if (g.amountFlag) {
+    return `<td class="flag">${esc(AMOUNT_FLAG_META[g.amountFlag].label.toUpperCase())}</td>`;
   }
   if (g.amountNote === "manual") return `<td class="flag">MANUAL LINE — NOT ESTIMATED</td>`;
   if (g.amountNote === "unavailable") return `<td class="miss">AMOUNT UNAVAILABLE</td>`;
@@ -268,10 +286,10 @@ function groupRow(g: AccrualGroup): string {
 }
 
 function bucketBlock(b: AccrualBucket): string {
-  const tallies = [
-    `<td class="amt">${esc(formatInvoiceCad(b.actualCad))} actual</td>`,
-    `<td class="amt">${b.estimatedCad > 0 ? `${esc(formatInvoiceCad(b.estimatedCad))} EST.` : "—"}</td>`,
-  ].join("");
+  // One amount cell, spanning what used to be the actual/estimated pair. The
+  // detail line beside it carries the trip count and, for a mixed bucket, how
+  // much of the merged figure is an estimate.
+  const tally = `<td class="amt">${esc(accrualBucketAmountLabel(b).replace(" est.", " EST."))}</td>`;
   return `<div class="blk">
     ${sectionBar(`${b.label} — ${ACCRUAL_BUCKET_META[b.id].hint}`)}
     <table>
@@ -287,7 +305,7 @@ function bucketBlock(b: AccrualBucket): string {
       </thead>
       <tbody>${b.groups.map(groupRow).join("")}</tbody>
       <tfoot>
-        <tr><td class="lbl2" colspan="4">${b.groups.length} round trip${b.groups.length === 1 ? "" : "s"}${b.unpricedCount > 0 ? ` · ${b.unpricedCount} unpriced` : ""}</td>${tallies}</tr>
+        <tr><td class="lbl2" colspan="5">${esc(accrualBucketDetail(b))}</td>${tally}</tr>
       </tfoot>
     </table>
   </div>`;

@@ -28,10 +28,12 @@ internal static class TestNotifications
         // Section subtotals carry Emphasis; the bucket rows nested under them do not.
         Summary:
         [
-            new AccrualsSummaryRow("Monies owed", "1", "—", "$1,450.00 est.", Emphasis: true),
-            new AccrualsSummaryRow("Ready for billing", "1", "—", "$1,450.00 est.", Emphasis: false),
-            new AccrualsSummaryRow("Settled this month", "2", "$2,900.00", "—", Emphasis: true),
-            new AccrualsSummaryRow("Paid", "2", "$2,900.00", "—", Emphasis: false),
+            // One amount column: the "est." marking lives inside the string, not in a
+            // separate estimated column the renderer would have to reason about.
+            new AccrualsSummaryRow("Monies owed", "1", "$1,450.00 est.", Emphasis: true),
+            new AccrualsSummaryRow("Ready for billing", "1", "$1,450.00 est.", Emphasis: false),
+            new AccrualsSummaryRow("Settled this month", "2", "$2,900.00", Emphasis: true),
+            new AccrualsSummaryRow("Paid", "2", "$2,900.00", Emphasis: false),
         ],
         Buckets:
         [

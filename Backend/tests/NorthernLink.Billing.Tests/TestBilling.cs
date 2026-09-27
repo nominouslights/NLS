@@ -39,8 +39,9 @@ public static class TestBilling
     };
 
     /// <summary>
-    /// A PO replica row. <paramref name="roundTripRateCad"/> / <paramref name="oneWayRateCad"/>
-    /// default to null — "no PO term", so the contract fallback applies.
+    /// A PO replica row. <paramref name="roundTripRateCad"/> defaults to null — "no PO term",
+    /// so the contract rate applies. <paramref name="oneWayRateCad"/> is still stored and
+    /// replicated but no longer prices anything; it is here so tests can prove exactly that.
     /// </summary>
     public static PurchaseOrderSnapshot PurchaseOrder(
         string poNumber = DefaultPo,

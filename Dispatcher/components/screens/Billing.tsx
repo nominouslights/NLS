@@ -591,10 +591,13 @@ function MarkEnteredModal({
  *  tallies are words, and the chip beside them carries its own label. */
 function PoDraftRow({ row }: { row: PoDraftPreview }) {
   const tallies = [
-    `${row.roundTrips} round trip${row.roundTrips === 1 ? "" : "s"}`,
+    `${row.roundTrips} trip${row.roundTrips === 1 ? "" : "s"}`,
     `${row.legCount} leg${row.legCount === 1 ? "" : "s"}`,
   ];
-  if (row.oneWayCount > 0) tallies.push(`${row.oneWayCount} unpaired`);
+  if (row.unpairedCount > 0) tallies.push(`${row.unpairedCount} unpaired`);
+  // Legs of one round trip booked on two POs: the draft builder prices them on
+  // neither worksheet, so the preview must not promise money for them either.
+  if (row.splitCount > 0) tallies.push(`${row.splitCount} split across POs — not priced`);
   if (row.manualLegCount > 0) tallies.push(`${row.manualLegCount} manual`);
   return (
     <div

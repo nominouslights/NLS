@@ -19,12 +19,19 @@ import { ActionButton } from "@/components/ui/Button";
 // expiry chips on the PO dashboard are derived client-side from it
 // (docStatusFor thresholds), never stored.
 //
-// A PO carries its own PRICING TERMS, and both rate fields are optional: a blank
-// round-trip rate inherits the contract's, a blank one-way rate bills at ½ the
-// effective round-trip rate. Because a blank field that silently means "half of
-// something else" is how a pricing bug reaches an invoice, this form previews the
-// EFFECTIVE terms live, in the same words the PO dashboard and the accruals
-// report use (poTermsLabel — lib/api/clients.ts).
+// A PO carries its own PRICING TERMS — now exactly ONE rate, the round trip. A
+// blank round-trip rate inherits the contract's. Because a blank field that
+// silently means "something else" is how a pricing bug reaches an invoice, this
+// form previews the EFFECTIVE terms live, in the same words the PO dashboard and
+// the accruals report use (poTermsLabel — lib/api/clients.ts).
+//
+// THE ONE-WAY RATE IS NO LONGER EDITED HERE. Every trip bills the full
+// round-trip rate (a lone leg still deadheads the vehicle back), so a live box
+// that changes no invoice is exactly the confusion the owner asked us to remove.
+// The stored figure is NOT discarded, though: PUT is a full-document replace, so
+// omitting the key would erase a recorded negotiation the backend deliberately
+// kept. The existing value is round-tripped in the payload unchanged, and a new
+// PO simply sends null.
 
 /** A rate box's value as a number, or null when blank. NaN reads as invalid and
  *  is caught on submit. */
@@ -61,16 +68,14 @@ export default function PoFormModal({
   const [roundTripRate, setRoundTripRate] = useState(
     existing?.roundTripRateCad != null ? String(existing.roundTripRateCad) : "",
   );
-  const [oneWayRate, setOneWayRate] = useState(
-    existing?.oneWayRateCad != null ? String(existing.oneWayRateCad) : "",
-  );
   const [note, setNote] = useState(existing?.note ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // What this PO will actually price at, recomputed as the boxes are typed in.
   const roundTripNum = rateValue(roundTripRate);
-  const oneWayNum = rateValue(oneWayRate);
+  // History only — never edited here, never priced, always sent back unchanged.
+  const retainedOneWayRateCad = existing?.oneWayRateCad ?? null;
   const termsPreview = poTermsLabel(
     {
       id: "",
@@ -80,7 +85,7 @@ export default function PoFormModal({
       expiry: null,
       amountCad: null,
       roundTripRateCad: roundTripNum != null && Number.isFinite(roundTripNum) ? roundTripNum : null,
-      oneWayRateCad: oneWayNum != null && Number.isFinite(oneWayNum) ? oneWayNum : null,
+      oneWayRateCad: retainedOneWayRateCad,
       note: null,
     },
     contractRateCad,
@@ -100,22 +105,19 @@ export default function PoFormModal({
         "The round-trip rate must be a non-negative number (CAD), or left blank to inherit the contract rate.",
       );
     }
-    if (oneWayNum != null && (Number.isNaN(oneWayNum) || oneWayNum < 0)) {
-      return setError(
-        "The one-way rate must be a non-negative number (CAD), or left blank to bill at ½ the round-trip rate.",
-      );
-    }
 
     // Every key is set explicitly, null included — PUT is a full replace and the
     // backend rejects a missing key, so an omitted field is never how a rate is
     // cleared here. PurchaseOrderUpdateInput is what makes that a compile error.
+    // oneWayRateCad is the retained figure, resent byte-for-byte: the field is
+    // gone from the UI, not from the record.
     const input: PurchaseOrderUpdateInput = {
       poNumber: poNumber.trim(),
       issued,
       expiry: noExpiry ? null : expiry,
       amountCad: amountNum,
       roundTripRateCad: roundTripNum,
-      oneWayRateCad: oneWayNum,
+      oneWayRateCad: retainedOneWayRateCad,
       note: note.trim() || null,
     };
 
@@ -157,7 +159,7 @@ export default function PoFormModal({
         <DateField label="Issued" value={issued} onChange={setIssued} />
         <DateField label="Expiry" value={expiry} onChange={setExpiry} disabled={noExpiry} />
       </div>
-      {/* pricing terms — both optional, both inheriting when blank */}
+      {/* pricing terms — one rate, optional, inheriting the contract when blank */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
         <NumberField
           label="Round-trip rate (CAD, optional)"
@@ -166,14 +168,6 @@ export default function PoFormModal({
           min={0}
           step={0.01}
           placeholder={contractRateCad != null ? `${contractRateCad} (contract)` : "no contract rate"}
-        />
-        <NumberField
-          label="One-way rate (CAD, optional)"
-          value={oneWayRate}
-          onChange={setOneWayRate}
-          min={0}
-          step={0.01}
-          placeholder="½ of the round trip"
         />
       </div>
       <div
@@ -201,9 +195,9 @@ export default function PoFormModal({
           {termsPreview}
         </div>
         <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim, marginTop: 4, lineHeight: 1.5 }}>
-          Leave a rate blank to inherit: the round trip falls back to the contract rate, one way to
-          ½ the effective round-trip rate. Rates are quoted tax-inclusive — taxes are applied in
-          QuickBooks.
+          Leave the rate blank to inherit the contract rate. Every trip on this PO bills the full
+          round-trip rate, whether or not the return leg is scheduled — the vehicle comes back
+          either way. Rates are quoted tax-inclusive — taxes are applied in QuickBooks.
         </div>
       </div>
 

@@ -39,17 +39,24 @@ public sealed record AccrualsHeadlineFigure(
     string Detail);
 
 /// <summary>
-/// One line in the summary table: label, round-trip count, and totals.
+/// One line in the summary table: label, trip count, and <b>one</b> amount.
+/// <para>
+/// <paramref name="AmountCad"/> is a single pre-formatted CAD figure with any estimate
+/// marking baked into the string itself (e.g. <c>"$1,450.00 est."</c>), exactly like every
+/// other amount in this report. There is deliberately no actual-vs-estimated split here: the
+/// renderer has no notion of an estimate, so it cannot get the distinction wrong, and the
+/// frontend — which is the only thing that knows whether a bucket is settled — says so in
+/// the text.
+/// </para>
 /// <paramref name="Emphasis"/> distinguishes a section subtotal row (true — printed as a
 /// heading) from a bucket row nested under it (false — printed indented). The frontend owns
 /// that grouping; the renderer only honours the flag on the rows it is given, so a client that
-/// sends every row unemphasised still gets today's flat five-row table.
+/// sends every row unemphasised still gets a flat table.
 /// </summary>
 public sealed record AccrualsSummaryRow(
     string BucketLabel,
     string RoundTrips,
-    string ActualCad,
-    string EstimatedCad,
+    string AmountCad,
     bool Emphasis);
 
 /// <summary>One billing-state bucket's detail section: its label and per-group rows.</summary>
