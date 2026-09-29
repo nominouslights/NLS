@@ -28,6 +28,11 @@ TestResults/
 .env.*
 CREDENTIALS.local.md
 
+# `doctl apps spec get … > .do/live.yaml` — the live App Platform spec, which carries the
+# registry-credential blob and every runtime secret in plaintext. Diff it against app.yaml
+# locally, never commit it.
+.do/live.yaml
+
 # AppHost.cs carries local-dev/orchestration secrets (DB connection string, JWT signing key,
 # RabbitMQ credentials) as literal WithEnvironment(...) values — never commit it. A fresh
 # clone needs a local copy recreated by hand; see CLAUDE.md.

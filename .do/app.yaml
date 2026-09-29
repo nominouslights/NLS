@@ -4,12 +4,18 @@
 #   doctl apps spec get c31ce923-34fc-42bd-bdd0-c6711ac37fb5 > current.yaml   # what is live now
 #   doctl apps update  c31ce923-34fc-42bd-bdd0-c6711ac37fb5 --spec .do/app.yaml
 #
-# The Dispatch Console is mounted at "/" and is built with no BASE_PATH. Budgeting (/budget) and
-# the Driver Field App (/driver) ARE prefixed, so their images and this spec are no longer
-# independent: each prefixed component's image must be built with the matching BASE_PATH and
-# NEXT_PUBLIC_API_BASE_URL, and its ingress rule must carry preserve_path_prefix. Publish the
+# Two frontends have a hostname each and are built with no BASE_PATH: the Dispatch Console on
+# app.northernlinkshuttleandcargo.com (the PRIMARY domain, catch-all rule) and Budgeting on
+# budget.northernlinkshuttleandcargo.com (an ALIAS domain, matched by `authority`). The Driver
+# Field App (/driver) IS prefixed, so its image and this spec are not independent: a prefixed
+# component's image must be built with the matching BASE_PATH and NEXT_PUBLIC_API_BASE_URL, and
+# its ingress rule must carry preserve_path_prefix. A hostname-per-app component is the mirror
+# image: NO BASE_PATH in its image, and an authority-matched rule at prefix "/". Publish the
 # image first, then apply the spec. Website is the one app still unmounted; taking the root away
 # from dispatcher is the remaining coupled change, described at the bottom of this file.
+#
+# Both custom domains are DNS-managed in the DigitalOcean zone `northernlinkshuttleandcargo.com`
+# and fronted by Cloudflare; the `domains` block below is what keeps them on the app.
 #
 # ---------------------------------------------------------------------------------------
 # TWO RULES THIS FILE EXISTS TO ENFORCE
@@ -188,16 +194,21 @@ services:
       initial_delay_seconds: 15
 
   # -------------------------------------------------------------------------------------
-  # Zero-Based Budgeting console — mounted at /budget on the same hostname.
+  # Zero-Based Budgeting console — its own hostname, budget.northernlinkshuttleandcargo.com.
   #
-  # Its image MUST be built with BASE_PATH=/budget and NEXT_PUBLIC_API_BASE_URL=/budget
-  # (.github/workflows/build.yml), and the ingress rule below MUST carry
-  # preserve_path_prefix: true. The two are one change. With the prefix stripped and no
-  # basePath in the image, the page renders but asks for root-relative /_next/static/... —
+  # Its image MUST be built with NO BASE_PATH and NO NEXT_PUBLIC_API_BASE_URL
+  # (.github/workflows/build.yml), and the ingress rule below matches on `authority` at
+  # prefix "/". The two are one change. History, so nobody re-couples them the wrong way
+  # round: this console was first mounted at /budget on the dispatcher hostname with a
+  # BASE_PATH=/budget image; the live app was then given the subdomain while CI still baked
+  # the prefix, so the subdomain's root answered a Next.js 404 and only /budget rendered.
+  #
+  # The opposite mistake is worse. If this component ever goes back to a path prefix without
+  # a basePath in the image, the page renders but asks for root-relative /_next/static/... —
   # which the "/" rule hands to dispatcher. Because Budgeting holds identical copies of
   # Dispatcher's design system, turbopack emits identical chunk names for the shared code, so
   # some of those requests SUCCEED and the console silently runs dispatcher's JavaScript while
-  # its own page chunks 404. That is the failure this pairing exists to prevent.
+  # its own page chunks 404. Hostname-per-app is what makes that impossible.
   # -------------------------------------------------------------------------------------
   - name: budgeting
     image:
@@ -209,9 +220,10 @@ services:
     http_port: 3000
     instance_count: 1
     instance_size_slug: apps-s-1vcpu-0.5gb
-    # /budget, not "/" — once basePath is set the bare root 404s, and a 404 fails the check.
+    # "/" — the image has no basePath, so the root is the login page. The probe carries no
+    # Host header the authority rule would need; it hits the container directly.
     health_check:
-      http_path: /budget
+      http_path: /
       initial_delay_seconds: 15
 
   # -------------------------------------------------------------------------------------
@@ -246,17 +258,32 @@ services:
       http_path: /driver
       initial_delay_seconds: 15
 
+# PRIMARY is the hostname the catch-all rule answers on; an ALIAS is any extra hostname the app
+# should hold a certificate for. Both are matched below by `authority`. Adding a hostname here
+# without an authority rule sends it to the catch-all — i.e. the Dispatch Console.
+domains:
+  - domain: app.northernlinkshuttleandcargo.com
+    type: PRIMARY
+    zone: northernlinkshuttleandcargo.com
+  - domain: budget.northernlinkshuttleandcargo.com
+    type: ALIAS
+    zone: northernlinkshuttleandcargo.com
+
 ingress:
-  # ORDER MATTERS: the catch-all "/" rule goes LAST, or it swallows every prefix above it.
+  # ORDER MATTERS: the catch-all "/" rule goes LAST, or it swallows every rule above it.
   rules:
-    # preserve_path_prefix is REQUIRED on every prefixed rule. Without it App Platform strips
-    # the prefix and the app, built with that basePath, 404s on the bare "/" it then receives.
+    # Hostname-per-app: the whole budget subdomain, every path, goes to budgeting. Its image
+    # has no basePath, so "/" is exactly what it expects. No preserve_path_prefix — nothing is
+    # stripped from a "/" match.
     - match:
+        authority:
+          exact: budget.northernlinkshuttleandcargo.com
         path:
-          prefix: /budget
+          prefix: /
       component:
         name: budgeting
-        preserve_path_prefix: true
+    # preserve_path_prefix is REQUIRED on every prefixed rule. Without it App Platform strips
+    # the prefix and the app, built with that basePath, 404s on the bare "/" it then receives.
     - match:
         path:
           prefix: /driver
@@ -281,32 +308,30 @@ databases:
 # -----------------------------------------------------------------------------------------
 # ADDING THE MARKETING SITE
 #
-# Budgeting is now mounted at /budget above. The remaining app is Website, and it is the
-# awkward one: it is written to own the root, but dispatcher currently holds "/".
+# The remaining app is Website, and it is written to own a root. The cheap way, now that the
+# app already does hostname-per-app, is to give it the apex/www hostname and leave the Dispatch
+# Console alone on app.…: add `northernlinkshuttleandcargo.com` (and `www.`) to `domains`, add a
+# `website` service block (same shape as `budgeting`, no build args), and an authority rule for
+# each hostname at prefix "/" above the catch-all. No image changes, no broken bookmarks.
 #
-# Giving Website the root is therefore the same coupled change all over again, this time for
-# the Dispatch Console:
+# Only if the marketing site must instead take "/" on app.… does this become the same coupled
+# change all over again, this time for the Dispatch Console:
 #
 #   1. .github/workflows/build.yml — add build args to the `dispatcher` entry:
 #        BASE_PATH=/dispatch, NEXT_PUBLIC_API_BASE_URL=/dispatch   (always equal)
 #      Website gets neither: it owns the root and makes no API calls.
-#
-#      Dispatcher already carries NEXT_PUBLIC_BUDGETING_URL=/budget — the launcher's Budgeting
-#      tile target, baked at build like the others (no runtime env entry here does anything).
-#      It was set in the same change that mounted Budgeting at /budget, because the two belong
-#      together: set earlier the tile is a dead link, left unset it renders "Not configured"
-#      while the console it points at is live.
+#      NEXT_PUBLIC_BUDGETING_URL (the launcher's Budgeting tile) is already the subdomain's
+#      absolute URL and does not move.
 #
 #   2. Wait for CI to publish the rebuilt dispatcher image. Applying the spec first serves a
 #      still-root-mounted image under a prefix.
 #
-#   3. Here: add a `website` service block (same shape as `budgeting`), and reorder the rules
-#      so the catch-all is LAST:
+#   3. Here: add a `website` service block, and reorder the rules so the catch-all is LAST:
 #
+#        - match: {authority: {exact: budget.…}, path: {prefix: /}}
+#          component: {name: budgeting}
 #        - match: {path: {prefix: /dispatch}}
 #          component: {name: dispatcher,  preserve_path_prefix: true}
-#        - match: {path: {prefix: /budget}}
-#          component: {name: budgeting,   preserve_path_prefix: true}
 #        - match: {path: {prefix: /driver}}
 #          component: {name: driverfield, preserve_path_prefix: true}
 #        - match: {path: {prefix: /}}
@@ -316,6 +341,6 @@ databases:
 #      set, and a 404 fails the check.
 #
 # Note that step 3 changes the Dispatch Console's public URL from / to /dispatch — bookmarks
-# and any saved links break. Budgeting and the Driver Field App are unaffected; both are
-# already prefixed.
+# and any saved links break. Budgeting (own hostname) and the Driver Field App (already
+# prefixed) are unaffected.
 # -----------------------------------------------------------------------------------------

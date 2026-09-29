@@ -38,19 +38,25 @@ jobs:
         # .do/app.yaml), so one value serves every environment.
         #
         # BASE_PATH is the arg that matters, because a Next.js basePath is compiled into every
-        # asset URL at build time. Who gets one is decided by WHICH COMPONENT OWNS "/" on the
-        # shared hostname app.northernlinkshuttleandcargo.com:
+        # asset URL at build time. Who gets one is decided by HOW THE APP IS REACHED, which is
+        # fixed by the ingress rules in .do/app.yaml (the two must agree, see below):
         #
-        #   dispatcher  owns "/"      → no BASE_PATH. Root-relative assets are correct for it.
-        #   budgeting   mounted /budget → BASE_PATH + NEXT_PUBLIC_API_BASE_URL, always equal.
-        #   driverfield mounted /driver → same pair, same rules.
+        #   dispatcher  own hostname app.northernlinkshuttleandcargo.com, owns "/" → no BASE_PATH.
+        #   budgeting   own hostname budget.northernlinkshuttleandcargo.com, owns "/" → no
+        #               BASE_PATH either. It WAS mounted at /budget on the dispatcher hostname;
+        #               the live app moved it to its own subdomain (an ALIAS domain plus an
+        #               authority-matched ingress rule) while the image still carried
+        #               BASE_PATH=/budget, and the subdomain's root 404'd until the two agreed.
+        #   driverfield mounted /driver on the dispatcher hostname → BASE_PATH +
+        #               NEXT_PUBLIC_API_BASE_URL, always equal.
         #   website     not deployed yet → nothing. If it ever takes the root, dispatcher moves
         #               to /dispatch and gains args at the same time, in one sitting.
         #
-        # Both prefixed args are required and must match: BASE_PATH moves the asset URLs,
-        # NEXT_PUBLIC_API_BASE_URL moves the browser's fetches (lib/api/transport.ts prefixes an
-        # absolute /api/... that Next does not rewrite, so without it the calls leave the prefix
-        # and land on whichever component owns "/").
+        # For a prefixed app both args are required and must match: BASE_PATH moves the asset
+        # URLs, NEXT_PUBLIC_API_BASE_URL moves the browser's fetches (lib/api/transport.ts
+        # prefixes an absolute /api/... that Next does not rewrite, so without it the calls leave
+        # the prefix and land on whichever component owns "/"). For an app on its own hostname
+        # both must be ABSENT: a basePath makes the app 404 on the bare "/" its hostname sends it.
         #
         # A MIS-PREFIXED BUILD DOES NOT 404 — IT SERVES THE WRONG APP. Three frontends now carry
         # byte-identical copies of Dispatcher's design system, so turbopack emits identical chunk
@@ -59,38 +65,35 @@ jobs:
         # image and grep the HTML for the expected prefix in /_next/static/ before shipping.
         #
         # THIS IS COUPLED TO .do/app.yaml AND MUST NEVER SHIP HALF. Each prefixed ingress rule
-        # needs preserve_path_prefix: true and a health_check http_path matching the prefix.
-        # Ship the image without the spec and the page itself 404s (the app gets a stripped "/"
-        # it no longer serves); ship the spec without the image and the app 404s on its own
-        # JavaScript. Publish first, then apply the spec.
+        # needs preserve_path_prefix: true and a health_check http_path matching the prefix; each
+        # hostname-per-app rule needs an authority match and an unprefixed image. Ship the image
+        # without the spec and the page itself 404s; ship the spec without the image and the app
+        # 404s on its own JavaScript. Publish first, then apply the spec.
         #
-        # Dispatcher additionally carries NEXT_PUBLIC_BUDGETING_URL=/budget: the launcher's
-        # Budgeting tile target. It belongs to the same coupled change that mounts Budgeting —
-        # set it before the mount and the tile is a dead link; leave it unset after, and the
-        # tile reads "Not configured" while the console it points at is live.
+        # Dispatcher additionally carries NEXT_PUBLIC_BUDGETING_URL: the launcher's Budgeting
+        # tile target, now the subdomain's absolute URL. Leave it unset and the tile reads
+        # "Not configured" while the console it points at is live.
         include:
           # The API's build context is the REPOSITORY ROOT: Directory.Build.props and
           # Directory.Packages.props live above Backend/ and MSBuild walks up to find them.
           - name: api
             context: .
             dockerfile: Backend/Dockerfile
-          # No BASE_PATH: dispatcher owns "/". NEXT_PUBLIC_BUDGETING_URL is not a prefix for
-          # dispatcher itself — it is where its launcher's Budgeting tile points, and it is set
-          # here because this same change mounts Budgeting at /budget below.
+          # No BASE_PATH: dispatcher owns "/" on its hostname. NEXT_PUBLIC_BUDGETING_URL is not a
+          # prefix for dispatcher itself — it is where its launcher's Budgeting tile points.
           - name: dispatcher
             context: Dispatcher
             dockerfile: Dispatcher/Dockerfile
             build_args: |
-              NEXT_PUBLIC_BUDGETING_URL=/budget
+              NEXT_PUBLIC_BUDGETING_URL=https://budget.northernlinkshuttleandcargo.com
           - name: website
             context: Website
             dockerfile: Website/Dockerfile
+          # No BASE_PATH and no NEXT_PUBLIC_API_BASE_URL: budgeting owns "/" on its own
+          # subdomain, so root-relative assets and same-origin /api/* fetches are correct.
           - name: budgeting
             context: Budgeting
             dockerfile: Budgeting/Dockerfile
-            build_args: |
-              BASE_PATH=/budget
-              NEXT_PUBLIC_API_BASE_URL=/budget
           # Unlike the other frontends this one HAS a public/ (service worker + PWA icons), and
           # its Dockerfile deliberately copies it into the runtime image rather than creating an
           # empty one. Do not "align" that Dockerfile with the others — see DriverField/CLAUDE.md.
