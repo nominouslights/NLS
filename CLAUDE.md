@@ -288,8 +288,12 @@ Four things that will bite whoever deploys these images, on any host:
   `http://northernlink-api:8080` as the proxy target, so the host must make the API resolvable
   under the name `northernlink-api` (container-network DNS/alias) — or the frontend images must
   be rebuilt with a different `API_PROXY_TARGET` build arg. The Dispatcher image also bakes
-  `NEXT_PUBLIC_BUDGETING_URL` (the launcher's Budgeting tile); it stays empty — tile reads
-  "Not configured" — until the same path-prefix flip that mounts Budgeting at `/budget`.
+  `NEXT_PUBLIC_BUDGETING_URL` (the launcher's Budgeting tile), set in CI to the Budgeting
+  console's own hostname, `https://budget.northernlinkshuttleandcargo.com`. **Budgeting is
+  hostname-per-app, not path-prefixed**: its image is built with no `BASE_PATH`, and the App
+  Platform ingress matches the subdomain by `authority` at prefix `/`. A `BASE_PATH` on that
+  image makes the subdomain's root a Next.js 404 (the 2026-09 bug). Only the Driver Field App
+  is still path-prefixed (`/driver`, with `preserve_path_prefix`).
 - **The API must never be exposed publicly.** There is no CORS configuration anywhere in the
   stack by design — browsers reach the API only through a frontend's own origin via the
   server-side `/api/*` proxy. Whatever the host, only the frontends get public ingress;
