@@ -17,10 +17,12 @@ import {
 import { ModalShell } from "@/components/ui/ModalShell";
 import { NumberField, SelectField, TextAreaField } from "@/components/ui/Field";
 import { ActionButton } from "@/components/ui/Button";
+import { usePeriodHold } from "@/lib/periodHold";
 
-// Set-or-edit modal for one allocation line, shared by the period dashboard and the Allocations
-// screen. Follows BudgetCodeFormModal: one useState per field, server-side validation is
-// authoritative, and a 400 or 409 surfaces as the backend's own message in the banner.
+// Set-or-edit modal for one allocation line, opened from the Period Dashboard's two allocation
+// sections — the one place a period is planned. Follows BudgetCodeFormModal: one useState per
+// field, server-side validation is authoritative, and a 400 or 409 surfaces as the backend's
+// own message in the banner.
 //
 // Two rules this form carries visibly because the server enforces both:
 //
@@ -36,6 +38,10 @@ import { ActionButton } from "@/components/ui/Button";
 //
 // The whole-dollar check is this app's convention rather than the server's rule — see
 // allocationAmountError.
+//
+// While a save is in flight the modal holds the entered period (lib/periodHold.ts) and ignores
+// ✕ and CANCEL: closing it mid-save used to let the save land after the planner had moved on,
+// on a period they were no longer looking at, with its error shown nowhere.
 
 export default function BudgetAllocationFormModal({
   periodId,
@@ -69,6 +75,11 @@ export default function BudgetAllocationFormModal({
   const [justification, setJustification] = useState(line?.justification ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  usePeriodHold(busy);
+  /** Inert while saving — see the note above. */
+  const close = () => {
+    if (!busy) onClose();
+  };
 
   const codeOptions = candidates.map((c) => ({ value: c.id, label: `${c.code} · ${c.name}` }));
   const noun = revenue ? "revenue" : "budget";
@@ -122,12 +133,14 @@ export default function BudgetAllocationFormModal({
     <ModalShell
       eyebrow={`Planning · ${periodLabel}`}
       title={editing ? `Edit ${line.code}` : revenue ? "Set revenue" : "Set budget"}
-      onClose={onClose}
+      onClose={close}
       error={error}
       maxWidth={620}
       footer={
         <>
-          <ActionButton onClick={onClose}>CANCEL</ActionButton>
+          <ActionButton onClick={close} disabled={busy}>
+            CANCEL
+          </ActionButton>
           <ActionButton
             variant="primary"
             onClick={submit}
@@ -146,7 +159,7 @@ export default function BudgetAllocationFormModal({
           value={codeId}
           onChange={setCodeId}
           options={codeOptions}
-          hint={`Active ${category.toLowerCase()} codes without a line in this period`}
+          hint={`Active ${category.toLowerCase()} codes without a line in ${periodLabel}`}
         />
       ) : (
         <Note>
@@ -186,7 +199,7 @@ export default function BudgetAllocationFormModal({
         Zero-based: the amount may be seeded from an earlier period as a starting position, but
         the argument for it never is — last period&apos;s reasoning is not this period&apos;s.
         A copied line arrives with no justification and cannot be saved until you write one. The
-        justification is stored with the line and shown on the period&apos;s dashboard.
+        justification is stored with the line on {periodLabel} only — other periods keep their own.
       </Note>
     </ModalShell>
   );

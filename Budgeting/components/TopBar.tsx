@@ -37,11 +37,18 @@ function emailInitials(email: string): string {
 export default function TopBar({
   onToggleRail,
   onNewPeriod,
+  newPeriodDisabled = false,
   fullName,
 }: {
   onToggleRail: () => void;
-  /** Opens the New Period modal on the Budget Periods screen — see the note above. */
+  /** Opens Console's New Period modal — see the note above. Creating a period enters it. */
   onNewPeriod: () => void;
+  /**
+   * True while a request against the entered period is in flight (lib/periodHold.ts): creating
+   * a period enters it, which would leave the period that request is for. The banner writes the
+   * reason out beside SWITCH PERIOD; the title here repeats it on hover.
+   */
+  newPeriodDisabled?: boolean;
   /**
    * The signed-in user's own name, from Console's profile fetch — null until it arrives, and for
    * anyone who has not set one. It comes down as a prop rather than from getClaims() because it
@@ -190,7 +197,9 @@ export default function TopBar({
         </span>
       </div>
       <div
-        onClick={onNewPeriod}
+        onClick={newPeriodDisabled ? undefined : onNewPeriod}
+        aria-disabled={newPeriodDisabled || undefined}
+        title={newPeriodDisabled ? "Finishing a change to the current period…" : undefined}
         style={{
           display: "flex",
           alignItems: "center",
@@ -204,7 +213,8 @@ export default function TopBar({
           fontWeight: 700,
           fontSize: 14,
           letterSpacing: ".04em",
-          cursor: "pointer",
+          cursor: newPeriodDisabled ? "not-allowed" : "pointer",
+          opacity: newPeriodDisabled ? 0.6 : 1,
         }}
       >
         <span style={{ fontSize: 15, lineHeight: 1 }}>+</span> NEW PERIOD

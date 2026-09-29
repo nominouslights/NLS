@@ -17,6 +17,22 @@ export type ScreenId =
   | "reports"
   | "settings";
 
+/**
+ * The screens that act on ONE budget period — they render only once a period is entered, inside
+ * Console's banner, and every switch remounts them. Budget Codes and Settings are deliberately
+ * absent: the chart of codes is tenant-wide (one chart, every period), matching the backend.
+ */
+export const PERIOD_SCOPED: ReadonlySet<ScreenId> = new Set<ScreenId>([
+  "periods",
+  "actuals",
+  "variance",
+  "reports",
+]);
+
+export function isPeriodScoped(id: ScreenId): boolean {
+  return PERIOD_SCOPED.has(id);
+}
+
 export interface NavItem {
   id: ScreenId;
   label: string;
@@ -35,7 +51,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "PLANNING",
     collapsedLabel: "PLN",
     items: [
-      { id: "periods", label: "Budget Periods", code: "BP" },
+      { id: "periods", label: "Period Dashboard", code: "BP" },
       { id: "codes", label: "Budget Codes", code: "BC" },
     ],
   },

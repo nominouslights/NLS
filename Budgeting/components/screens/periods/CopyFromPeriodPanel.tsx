@@ -28,7 +28,10 @@ import { EmptyNote } from "@/components/screens/shared";
 // copying a closed period's plan into a fresh Draft is the entire point. See
 // copySourceCandidates — do not filter this list by canEditAllocations.
 //
-// Two-click confirm, matching the dashboard's transition and remove idiom.
+// Two-click confirm, matching the dashboard's transition and remove idiom. The target is always
+// the entered period and is written out three times — a fixed "Into:" line, the select's label,
+// and both buttons — because a copy is the one action here that names TWO periods, and the
+// source picker must never read as a way to change which period is being planned.
 
 export default function CopyFromPeriodPanel({
   period,
@@ -61,6 +64,8 @@ export default function CopyFromPeriodPanel({
   const [outcome, setOutcome] = useState<BudgetAllocationCopyResult | null>(null);
 
   const source = candidates.find((p) => p.id === sourceId) ?? null;
+  /** Button text names the target, so the click that writes says where it writes. */
+  const intoLabel = period.label.toUpperCase();
 
   async function run() {
     if (!source || busy) return;
@@ -82,8 +87,18 @@ export default function CopyFromPeriodPanel({
         </EmptyNote>
       ) : (
         <>
+          <div
+            style={{
+              marginBottom: 10,
+              fontFamily: fonts.body,
+              fontSize: 12,
+              color: colors.textSecondary,
+            }}
+          >
+            Into: <strong>{period.label}</strong> (the period you&apos;re working in)
+          </div>
           <SelectField
-            label="Copy from"
+            label={`Copy into ${period.label} from`}
             value={sourceId}
             onChange={(v) => {
               setSourceId(v);
@@ -100,7 +115,11 @@ export default function CopyFromPeriodPanel({
 
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
             <ActionButton variant="primary" onClick={() => void run()} disabled={busy || !source}>
-              {busy ? "COPYING…" : confirming ? "CONFIRM COPY" : "COPY THE AMOUNTS"}
+              {busy
+                ? "COPYING…"
+                : confirming
+                  ? `CONFIRM COPY INTO ${intoLabel}`
+                  : `COPY INTO ${intoLabel}`}
             </ActionButton>
             {confirming && !busy && (
               <ActionButton onClick={onCancelConfirm}>CANCEL</ActionButton>
@@ -112,7 +131,8 @@ export default function CopyFromPeriodPanel({
               This brings {source.label}&apos;s amounts into {period.label} —{" "}
               <strong>the amounts only. Every justification is cleared</strong>, so each line must
               be argued again before it can be saved. Lines you already have here are left alone,
-              and retired codes are skipped. Click CONFIRM COPY to proceed.
+              and retired codes are skipped. Nothing changes in {source.label}. Click CONFIRM COPY
+              INTO {intoLabel} to proceed.
             </Note>
           )}
 

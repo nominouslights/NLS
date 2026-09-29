@@ -63,8 +63,8 @@ Run it before touching anything on the list, and whenever a Dispatcher UI story 
 | `app/layout.tsx` | `Dispatcher/app/layout.tsx` | **no** — title/description only; the four Google Fonts `<link>` tags are byte-identical and must stay that way |
 | `lib/auth.ts` | `Dispatcher/lib/auth.ts` | **no** — see below |
 | `components/TopBar.tsx`, `AuthGate.tsx`, `LoginScreen.tsx`, `Console.tsx` | same paths | **no** — adapted |
-| `lib/nav.ts`, `lib/data.ts`, `lib/money.ts`, `lib/types.ts`, `lib/claims.ts`, `lib/roles.ts`, `lib/api/budgeting.ts`, `lib/api/identity.ts` | — | new |
-| `components/Brandmark.tsx`, `ErrorNotice.tsx`, `RoleGate.tsx`, `AccessDeniedScreen.tsx`, `SetupPendingScreen.tsx`, `BudgetPeriodFormModal.tsx`, `BudgetCodeFormModal.tsx`, `BudgetAllocationFormModal.tsx`, `ProfileForm.tsx`, `screens/*`, `screens/periods/*` | — | new |
+| `lib/nav.ts`, `lib/data.ts`, `lib/money.ts`, `lib/types.ts`, `lib/claims.ts`, `lib/roles.ts`, `lib/workingPeriod.ts`, `lib/periodHold.ts`, `lib/api/budgeting.ts`, `lib/api/identity.ts` | — | new |
+| `components/Brandmark.tsx`, `ErrorNotice.tsx`, `RoleGate.tsx`, `AccessDeniedScreen.tsx`, `SetupPendingScreen.tsx`, `PeriodBanner.tsx`, `BudgetPeriodFormModal.tsx`, `BudgetCodeFormModal.tsx`, `BudgetAllocationFormModal.tsx`, `ProfileForm.tsx`, `screens/*`, `screens/periods/*` (incl. `PeriodChooser.tsx`) | — | new |
 
 `theme.ts` and the 12 `ui/` files are copied **unpruned**, including parts this app never uses
 (`ServiceType`, `DutyStatus`, `CorridorStepper`, the two upload fields). Pruning them would break
@@ -122,7 +122,8 @@ it. Config is `vitest.config.mts` — the `.mts` extension is load-bearing (Vite
 `.ts` config as CommonJS and warns), and it must therefore use `import.meta.dirname` for the
 `@` alias, never `__dirname`. `@types/node` declares `__dirname` globally, so TypeScript and
 `next build` both stay green while every `@/lib/...` import in the suite fails to resolve at
-run time. Ten files, and only two need a DOM:
+run time. Thirteen files; five need a DOM (the four component tests, plus `workingPeriod`'s
+storage tests, which need `sessionStorage`):
 
 - `lib/roles.test.ts` — US-6.0.1's acceptance criterion: a Dispatcher account is rejected.
 - `lib/claims.test.ts` — JWT decoding, including the non-ASCII round trip (`atob` yields a binary
@@ -183,6 +184,21 @@ run time. Ten files, and only two need a DOM:
   alternative.
 - `lib/money.test.ts` — `formatDeltaCad` / `formatDeltaPct` always write the sign out, so a
   signed figure never rests on colour.
+- `lib/workingPeriod.test.ts` — the "enter a period" contract, which mirrors no server rule (the
+  backend scopes by route id and has no idea which period a tab is in): `suggestedPeriodId`
+  (today strictly inside, on the start and on the end date, the latest-start fallback in any
+  list order, empty → `null`), `resolveEnteredPeriod` (found, nothing entered, **lost** after a
+  good load, **not** lost after a failed load or while loading), the storage key differing by
+  tenant and by user and `null` without claims, the `sessionStorage` round trip, `null` removing
+  the entry, a throwing store degrading quietly, **never touching `localStorage`**, and
+  `isPeriodScoped` being false for exactly `codes` and `settings`.
+- `components/screens/periods/PeriodChooser.test.tsx` — `vi.fn()` props, as `ProfileForm` does:
+  a row click enters that row's id, each row writes its state out, the suggested row carries
+  its tag and focus, the eyebrow names the destination screen, the empty state's create button,
+  a load error shown verbatim with RETRY, the lost notice, and "Returning to your period…".
+- `components/PeriodBanner.test.tsx` — label, dates, state and editability; while held, SWITCH
+  PERIOD is `aria-disabled`, does not call `onSwitch`, and the reason is written beside it; the
+  every-period sentence on a global screen; CHOOSE A PERIOD with nothing entered.
 
 `lib/api/transport.ts` is a **copied** file. Tests against it belong here (a test file is not on
 the copy manifest), but anything they reveal is a change to *Dispatcher's* source first, then a
@@ -200,6 +216,59 @@ The server-side counterpart is
 `Backend/tests/NorthernLink.Api.Tests/AuthorizationPolicyTests.cs`. Both exist on purpose: the
 backend test proves the *policy* rejects Dispatcher, this one proves the *console* does, and in
 Stage 6.0 the console is the gate a user actually meets.
+
+## Working in a period
+
+The planner works **inside one period at a time**. Every period action — a transition, a line,
+a copy, a report — is under the period the banner names, and nothing changes that period
+silently.
+
+- **Enter, then switch.** A period-scoped screen — Period Dashboard, Actuals vs Budget,
+  Variance, Reports (`PERIOD_SCOPED` / `isPeriodScoped` in `lib/nav.ts`) — shows
+  `screens/periods/PeriodChooser.tsx` until a period is entered. Once one is, a strip at the top
+  of the main column (`components/PeriodBanner.tsx`) always shows WORKING IN, the label, dates,
+  the state chip and "Plan editable / read-only"; leaving takes its explicit **SWITCH PERIOD**.
+  Exactly two handlers in `Console.tsx` change the entered period, `enterPeriod` and
+  `switchPeriod`, and no screen carries a period picker of its own (the old `PeriodPicker` was
+  deleted — picking on Variance used to change which dashboard the Periods screen opened).
+  The banner lives in the main column, not the TopBar, whose geometry matches Dispatcher's.
+- **Scoped screens remount on every switch.** Console renders them inside a `Fragment` keyed by
+  the entered period's id, so no confirm, modal or fetch outlives the period it was for.
+- **The entered period is derived, not stored.** Console keeps only `enteredId`;
+  `resolveEnteredPeriod` (`lib/workingPeriod.ts`) finds it in the loaded list, so a list refresh
+  picks up its new totals and state for free. `applyLoaded` never touches the selection.
+- **Remembered per tab, per user: `sessionStorage`, key
+  `nl.budgeting.enteredPeriod.{tenantId}.{sub}`** (from `getClaims()`). It survives a reload;
+  it dies with the tab, so a shared machine never reopens someone else's period; two tabs can
+  work in two periods; and the user in the key covers a sign-out and sign-in in the same tab.
+  **Never `localStorage`** — a test pins that. Every access is try/catch'd, and nothing is
+  stored without claims.
+- **No silent auto-enter.** A first visit shows the chooser with the period containing today —
+  else the latest start — highlighted, tagged `INCLUDES TODAY` / `LATEST`, and focused, so
+  entering it is one click (`suggestedPeriodId`, formerly Console's `defaultPeriodId`).
+- **Lost is not the same as unloaded.** A stored id that matches nothing after a *good* load is
+  `lost`, and the chooser says "The period you were working in is no longer available — choose
+  another." A failed or pending load is never lost; while a stored period loads the chooser
+  reads "Returning to your period…".
+- **The hold guard** (`lib/periodHold.ts`). `PeriodDashboard` (`busy`: transition, remove, copy)
+  and `BudgetAllocationFormModal` (its save) call `usePeriodHold(busy)`. While any hold is taken,
+  SWITCH PERIOD and the TopBar's + NEW PERIOD refuse (`newPeriodDisabled`), and the banner writes
+  "Finishing a change to {label}…" beside the disabled button. The allocation modal also ignores
+  ✕ and CANCEL while saving. **Rail navigation is deliberately not blocked** — changing screen
+  never changes the period, and blocking it would mean editing the copied `NavRail`.
+- **Creating a period enters it.** The New Period modal lives in `Console.tsx` (opened by the
+  TopBar pill and the chooser); `handlePeriodCreated` enters the new id and lands on the Period
+  Dashboard, where the plan can be seeded from an earlier period.
+- **Every action names its period.** The transition confirm ("Click CONFIRM FINALIZE to move
+  Q3 2026 from Draft to Finalized"), the remove confirm ("Removes {code} from {label}'s plan.
+  Other periods are not affected."), the allocation modal's hint, and the copy panel ("Into:
+  {label}", `COPY INTO {LABEL}`). `nextTransition`'s own button labels are unchanged — tests pin
+  them.
+- **Budget Codes is the one tenant-wide planning screen**, matching the backend (codes carry no
+  period). Its eyebrow reads "Planning · All periods" beside an "Applies to every period" chip;
+  RETIRE is now two-click like DELETE, and both confirms say they reach every period. Codes and
+  Settings render with or without an entered period; the banner either says "This screen isn't
+  tied to a period — it applies to every period" or offers CHOOSE A PERIOD.
 
 ## Data: periods, codes and allocations are real; actuals and variance are still mock
 
@@ -259,17 +328,20 @@ state (`stateAfter`); after a line changes it refetches the lines until the new 
 visible (on edit the row was always there), and only then refreshes the period list, whose totals
 read from the same projection.
 
-`screens/BudgetPeriods.tsx` is the master/detail host; `screens/periods/*` is the dashboard
-(list, lifecycle stepper, zero-based checklist, the copy-from-an-earlier-period panel, one
-`AllocationSection` per category), and it is the **one** place a period is planned.
+`screens/BudgetPeriods.tsx` is the **Period Dashboard** screen (rail label; id `periods` and
+code `BP` unchanged): a `Screen` around `screens/periods/PeriodDashboard.tsx` for the entered
+period only — no list, no picker, no load states of its own (those live on the chooser, see
+[Working in a period](#working-in-a-period)). `screens/periods/*` is the chooser and the
+dashboard (lifecycle stepper, zero-based checklist, the copy-from-an-earlier-period panel, one
+`AllocationSection` per category), and the dashboard is the **one** place a period is planned.
 `BudgetAllocationFormModal.tsx` opens from there. The dashboard shows the server's own totals,
 never sums re-derived from the lines on screen.
 
 There is no separate Allocations screen and no `"allocations"` `ScreenId`: a second place to do
 the same job could not refresh Console's period list after a save, so its tiles trailed the
 dashboard's. The TopBar pill is `+ NEW PERIOD` — the console's one global create action, with
-the only create target that is unambiguous from any screen — and its `showCreate` state is
-hoisted into `Console.tsx` so both it and the screen's own pill open the same modal.
+the only create target that is unambiguous from any screen. The New Period modal itself lives
+in `Console.tsx` (the pill and the chooser both open it), and creating a period enters it.
 
 **Budget codes are real too** — the second slice, widened to US-6.1.1's full property set:
 
@@ -360,6 +432,7 @@ Known hazards documented in `theme.ts`: `colors.amber` is a fill/border/icon col
 | Date | Check | Result |
 |---|---|---|
 | 2026-08-04 | Code audit (both greps above) | **Pass** — every call site pairs colour with glyph + label; protected hexes appear only in `theme.ts` and in copied decorative elements that carry adjacent text |
+| 2026-09-29 | Code audit after the period workspace | **Pass** — the one new `statusMeta` call (`PeriodChooser`'s accent stripe) sits beside the row's state `StatusChip`; the banner and chooser carry state only via `StatusChip`; no new protected hex |
 | — | Grayscale (DevTools → Rendering → Achromatopsia) | **Not yet run** |
 | — | Deuteranopia / Protanopia / Tritanopia | **Not yet run** |
 | — | Side-by-side against Dispatcher at equal width | **Not yet run** |

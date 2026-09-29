@@ -42,16 +42,22 @@ import {
 import { ErrorNotice } from "@/components/ErrorNotice";
 import BudgetAllocationFormModal from "@/components/BudgetAllocationFormModal";
 import { EmptyNote } from "@/components/screens/shared";
+import { usePeriodHold } from "@/lib/periodHold";
 import LifecycleStepper from "@/components/screens/periods/LifecycleStepper";
 import PlanningChecklist from "@/components/screens/periods/PlanningChecklist";
 import CopyFromPeriodPanel from "@/components/screens/periods/CopyFromPeriodPanel";
 import AllocationSection from "@/components/screens/periods/AllocationSection";
 
-// The detail pane of the Budget Periods screen: one period, where it stands in its lifecycle,
-// what is planned against it, and the two things a planner does here — set lines, and move the
+// The body of the Period Dashboard: the entered period, where it stands in its lifecycle, what
+// is planned against it, and the two things a planner does here — set lines, and move the
 // period forward. Owns its own fetch of the period's lines and the chart (both needed for
-// coverage and the picker), mounted per period by key from BudgetPeriods so every confirm and
-// modal resets when the selection changes.
+// coverage and the picker). Console remounts it (a Fragment keyed by the entered period's id)
+// on every switch, so no confirm, modal or fetch outlives the period it was for.
+//
+// While a transition, a removal or a copy is in flight (`busy`), the dashboard holds the period
+// (lib/periodHold.ts): SWITCH PERIOD and + NEW PERIOD refuse until the request settles, so its
+// result — or its error — lands on the period the planner is still looking at. Every confirm
+// names the period it acts on.
 //
 // Two eventual-consistency rules, both inherited from the codes screen: after a transition,
 // refetch the period until it reports the expected state; after a line changes, refetch the lines
@@ -62,13 +68,20 @@ import AllocationSection from "@/components/screens/periods/AllocationSection";
 // controls are absent and one note names the state, so "I can't add a line" reads as the rule it
 // is rather than as a bug.
 
-/** What the confirming click will do — shown under the button while it awaits confirmation. */
-const TRANSITION_NOTES: Record<PeriodTransitionAction, string> = {
-  finalize:
-    "Finalizing signs the plan off. Its lines become read-only until the period is opened.",
-  open: "Opening starts the live period. Lines can be adjusted again while it is open.",
-  "begin-review": "Beginning review freezes the plan. Lines become read-only for the review.",
-  close: "Closing is final. The period and its plan stay read-only, and there is no step after it.",
+/**
+ * What the confirming click will do — shown under the button while it awaits confirmation, and
+ * naming the period, so a confirm can never be mistaken for one about another period. The button
+ * labels themselves come from nextTransition and are pinned by budgeting.test.ts.
+ */
+const TRANSITION_NOTES: Record<PeriodTransitionAction, (label: string) => string> = {
+  finalize: (label) =>
+    `Finalizing signs ${label}'s plan off. Its lines become read-only until the period is opened.`,
+  open: (label) =>
+    `Opening starts ${label} as the live period. Lines can be adjusted again while it is open.`,
+  "begin-review": (label) =>
+    `Beginning review freezes ${label}'s plan. Lines become read-only for the review.`,
+  close: (label) =>
+    `Closing ${label} is final. The period and its plan stay read-only, and there is no step after it.`,
 };
 
 const TRANSITION_VARIANTS: Record<PeriodTransitionAction, "primary" | "success" | "amber"> = {
@@ -98,7 +111,7 @@ export default function PeriodDashboard({
   period: BudgetPeriod;
   /** The whole list, for the copy panel's source picker. Threaded from Console via BudgetPeriods. */
   periods: BudgetPeriod[];
-  /** Console's applyLoaded: replaces the list while preserving the selection. */
+  /** Console's applyLoaded: replaces the list (the entered period is derived from it). */
   onPeriodsRefreshed: (records: BudgetPeriodRecord[]) => void;
 }) {
   const periodId = period.id;
@@ -114,6 +127,10 @@ export default function PeriodDashboard({
     category: BudgetCodeCategory;
     line: BudgetAllocationRecord | null;
   } | null>(null);
+
+  // busy covers transition, remove and copy — every request this component makes against the
+  // period. The allocation modal takes its own hold for its save.
+  usePeriodHold(busy);
 
   const applyError = useCallback((e: unknown) => {
     setError(
@@ -302,7 +319,7 @@ export default function PeriodDashboard({
   }
 
   return (
-    <div style={{ overflowY: "auto", padding: "22px 0 22px 26px", background: colors.detailBg }}>
+    <div>
       {/* Header: label, dates, state chip, the one forward action. */}
       <div
         style={{
@@ -381,8 +398,10 @@ export default function PeriodDashboard({
             }}
           >
             <span style={{ flex: "1 1 auto" }}>
-              {TRANSITION_NOTES[transition.action]} Forward only — there is no step back. Click{" "}
-              {transition.confirmLabel} to proceed.
+              {TRANSITION_NOTES[transition.action](period.label)} Click {transition.confirmLabel}{" "}
+              to move {period.label} from {stateLabel} to{" "}
+              {PERIOD_STATE_LABELS[stateAfter(transition.action)]} — forward only, there is no step
+              back.
             </span>
             <ActionButton onClick={() => setConfirm(null)}>CANCEL</ActionButton>
           </div>
@@ -493,6 +512,7 @@ export default function PeriodDashboard({
         <>
           <AllocationSection
             category="Revenue"
+            periodLabel={period.label}
             lines={lines.filter((l) => l.category === "Revenue")}
             editable={editable}
             busy={busy}
@@ -503,6 +523,7 @@ export default function PeriodDashboard({
           />
           <AllocationSection
             category="Expense"
+            periodLabel={period.label}
             lines={lines.filter((l) => l.category === "Expense")}
             editable={editable}
             busy={busy}

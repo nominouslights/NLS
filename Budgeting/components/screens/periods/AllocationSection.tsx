@@ -26,6 +26,7 @@ import { EmptyNote, Num, TableHead } from "@/components/screens/shared";
 
 export default function AllocationSection({
   category,
+  periodLabel,
   lines,
   editable,
   busy,
@@ -35,6 +36,8 @@ export default function AllocationSection({
   onRemove,
 }: {
   category: BudgetCodeCategory;
+  /** The entered period's label, so the remove confirm names the plan it changes. */
+  periodLabel: string;
   /** Already filtered to this category, in the server's order (by code). */
   lines: BudgetAllocationRecord[];
   editable: boolean;
@@ -97,73 +100,88 @@ export default function AllocationSection({
               const confirming = confirmRemoveCodeId === l.budgetCodeId;
               const unargued = needsJustification(l);
               return (
-                <div
-                  key={l.id}
-                  onClick={editable ? () => onEdit(l) : undefined}
-                  style={{
-                    ...rowSurface(false),
-                    cursor: editable ? "pointer" : "default",
-                    padding: "11px 14px",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 12,
-                  }}
-                >
-                  <div style={{ flex: "1 1 auto", minWidth: 0 }}>
-                    <div
-                      style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}
-                    >
-                      <MonoTag>{l.code}</MonoTag>
-                      <span
+                <div key={l.id}>
+                  <div
+                    onClick={editable ? () => onEdit(l) : undefined}
+                    style={{
+                      ...rowSurface(false),
+                      cursor: editable ? "pointer" : "default",
+                      padding: "11px 14px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                    }}
+                  >
+                    <div style={{ flex: "1 1 auto", minWidth: 0 }}>
+                      <div
+                        style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}
+                      >
+                        <MonoTag>{l.code}</MonoTag>
+                        <span
+                          style={{
+                            fontFamily: fonts.body,
+                            fontWeight: 600,
+                            fontSize: 12.5,
+                            color: colors.textPrimary,
+                          }}
+                        >
+                          {l.name}
+                        </span>
+                        {!l.isCodeActive && <StatusChip kind="off" label="Retired" />}
+                        {unargued && <StatusChip kind="soon" label="Needs justification" />}
+                      </div>
+                      <div
                         style={{
                           fontFamily: fonts.body,
-                          fontWeight: 600,
-                          fontSize: 12.5,
-                          color: colors.textPrimary,
+                          fontSize: 11.5,
+                          color: colors.textDim,
+                          marginTop: 3,
+                          lineHeight: 1.5,
                         }}
                       >
-                        {l.name}
-                      </span>
-                      {!l.isCodeActive && <StatusChip kind="off" label="Retired" />}
-                      {unargued && <StatusChip kind="soon" label="Needs justification" />}
+                        {l.serviceLine ? `${SERVICE_LINE_LABELS[l.serviceLine]} · ` : ""}
+                        {/* The justification slot always carries text, so the separator above can
+                            never dangle: an unargued line shows what is missing instead of a blank. */}
+                        <span style={unargued ? { fontStyle: "italic" } : undefined}>
+                          {unargued
+                            ? "Carried over from an earlier period — argue this line before it can be saved."
+                            : l.justification}
+                        </span>
+                      </div>
                     </div>
+                    <div style={{ width: 150, textAlign: "right", flex: "none" }}>
+                      <Num size={13.5}>{formatCad(l.amountCad)}</Num>
+                    </div>
+                    {editable && (
+                      <div
+                        style={{ width: 150, textAlign: "right", flex: "none" }}
+                        // The row itself opens the editor; a click on the remove cell must not.
+                        // ActionButton's onClick carries no event, so the cell stops the bubble.
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <ActionButton
+                          variant="destructive"
+                          disabled={busy}
+                          onClick={() => onRemove(l)}
+                          style={{ padding: "5px 10px", fontSize: 12 }}
+                        >
+                          {confirming ? "CONFIRM REMOVE" : "REMOVE"}
+                        </ActionButton>
+                      </div>
+                    )}
+                  </div>
+                  {confirming && (
                     <div
                       style={{
+                        margin: "6px 14px 0",
                         fontFamily: fonts.body,
                         fontSize: 11.5,
-                        color: colors.textDim,
-                        marginTop: 3,
-                        lineHeight: 1.5,
+                        color: colors.textSecondary,
+                        lineHeight: 1.6,
                       }}
                     >
-                      {l.serviceLine ? `${SERVICE_LINE_LABELS[l.serviceLine]} · ` : ""}
-                      {/* The justification slot always carries text, so the separator above can
-                          never dangle: an unargued line shows what is missing instead of a blank. */}
-                      <span style={unargued ? { fontStyle: "italic" } : undefined}>
-                        {unargued
-                          ? "Carried over from an earlier period — argue this line before it can be saved."
-                          : l.justification}
-                      </span>
-                    </div>
-                  </div>
-                  <div style={{ width: 150, textAlign: "right", flex: "none" }}>
-                    <Num size={13.5}>{formatCad(l.amountCad)}</Num>
-                  </div>
-                  {editable && (
-                    <div
-                      style={{ width: 150, textAlign: "right", flex: "none" }}
-                      // The row itself opens the editor; a click on the remove cell must not.
-                      // ActionButton's onClick carries no event, so the cell stops the bubble.
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <ActionButton
-                        variant="destructive"
-                        disabled={busy}
-                        onClick={() => onRemove(l)}
-                        style={{ padding: "5px 10px", fontSize: 12 }}
-                      >
-                        {confirming ? "CONFIRM REMOVE" : "REMOVE"}
-                      </ActionButton>
+                      Removes {l.code} from {periodLabel}&apos;s plan. Other periods are not
+                      affected. Click CONFIRM REMOVE to proceed.
                     </div>
                   )}
                 </div>

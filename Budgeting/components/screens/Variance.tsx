@@ -11,11 +11,9 @@ import {
   EmptyNote,
   MockTag,
   Num,
-  PeriodPicker,
   Screen,
   SignedStatus,
   TableHead,
-  periodLabel,
 } from "@/components/screens/shared";
 
 // The screen where the status system earns its keep, and the one most at risk of falling into
@@ -26,20 +24,20 @@ import {
 // Bands live in lib/data.ts (varianceKind), not here, so any future report agrees with this
 // screen by construction: within 5% on plan, 5–15% watch, beyond 15% over threshold, and no
 // baseline where planned is zero.
+//
+// Shows the entered period only (Console, lib/workingPeriod.ts). It used to carry its own period
+// picker, and picking there silently changed which dashboard Budget Periods opened; the banner's
+// SWITCH PERIOD is now the one way to another period.
 
 export default function Variance({
-  periods,
-  periodId,
-  onSelectPeriod,
+  period,
   onOpenCode,
 }: {
-  periods: BudgetPeriod[];
-  periodId: string;
-  onSelectPeriod: (id: string) => void;
+  period: BudgetPeriod;
   onOpenCode: (id: string) => void;
 }) {
   const rows = variance
-    .filter((v) => v.periodId === periodId)
+    .filter((v) => v.periodId === period.id)
     .slice()
     .sort((a, b) => Math.abs(b.deltaPct ?? 0) - Math.abs(a.deltaPct ?? 0));
 
@@ -47,9 +45,8 @@ export default function Variance({
 
   return (
     <Screen
-      eyebrow={`Performance · ${periodLabel(periods, periodId)}`}
+      eyebrow={`Performance · ${period.label}`}
       title="Variance"
-      right={<PeriodPicker periods={periods} periodId={periodId} onSelect={onSelectPeriod} />}
     >
       <Panel style={{ marginBottom: 16 }}>
         <SectionLabel>Thresholds</SectionLabel>
@@ -76,7 +73,7 @@ export default function Variance({
       </div>
 
       {rows.length === 0 ? (
-        <EmptyNote>No variance to report for {periodLabel(periods, periodId)}.</EmptyNote>
+        <EmptyNote>No variance to report for {period.label}.</EmptyNote>
       ) : (
         <>
           <TableHead
