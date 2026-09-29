@@ -11,7 +11,7 @@ import type {
 import type { StatusKind } from "@/lib/theme";
 // The checklist's balance row writes its own signed figure, so the sign is text in the tested
 // derivation rather than something a component might forget to add.
-import { formatDeltaCad } from "@/lib/money";
+import { formatCadPrecise, formatDeltaCad } from "@/lib/money";
 
 // ---------------------------------------------------------------------------
 // Budgeting API client — contract owned by Backend/ (Budgeting module,
@@ -202,26 +202,64 @@ export function toBudgetPeriod(r: BudgetPeriodRecord): BudgetPeriod {
 }
 
 // ---------------------------------------------------------------------------
-// Allocations — one line per (period, code), upserted by code. Mirrors the
-// backend's BudgetAllocationResponse and SetBudgetAllocationRequest. Category,
-// name and service line are resolved from the code at read time, never
-// snapshotted, so a re-classified code moves its lines between the totals.
+// Budget items — a code's budget in a period is the SUM of its items, and a
+// period holds any number of items per code. Each item is a small zero-based
+// decision package (what, how much and how it was built up, why, how badly it
+// is needed). Nothing stores a code-level figure any more: the old "one line
+// per (period, code), upserted by code" shape — and the overwrite-one-figure
+// button it implied — is gone.
+//
+// The backend keeps the aggregate name BudgetAllocation and the `allocations`
+// route segment; the console calls them budget items. Mirrors
+// BudgetAllocationResponse and BudgetItemRequest (BudgetingEndpoints.cs).
+// Category, name and service line are resolved from the CODE at read time,
+// never snapshotted, so a re-classified code moves its items between totals.
+// Items follow the period lifecycle only — there is no per-item approval.
 // ---------------------------------------------------------------------------
+
+/** Mirrors C# BudgetSpendType (JsonStringEnumConverter — PascalCase names on the wire). */
+export type BudgetSpendType = "Operating" | "Capital";
+
+/** Mirrors C# BudgetRecurrence. */
+export type BudgetRecurrence = "OneTime" | "Recurring";
+
+/** Mirrors C# BudgetItemPriority — the zero-based ranking a planner cuts from the bottom of. */
+export type BudgetItemPriority = "MustHave" | "ShouldHave" | "NiceToHave";
 
 /** Mirrors BudgetAllocationResponse — rendered directly, no view rename. */
 export interface BudgetAllocationRecord {
   id: string;
   periodId: string;
   budgetCodeId: string;
-  /** Immutable string snapshot of the code, so a line still reads after the code is retired. */
+  /** The code string as it was when the item was assigned to its current code. */
   code: string;
   name: string;
   category: BudgetCodeCategory;
   serviceLine: BudgetServiceLine | null;
-  /** False once the code is retired — the line stays, but cannot be re-set until restored. */
+  /**
+   * False once the code is retired — the item stays and still counts, but every update is refused
+   * (CodeRetired, checked on EVERY update) until it is moved to an active code, or it is removed.
+   */
   isCodeActive: boolean;
+  /** What the money is for. */
+  title: string;
+  /** Rounded to cents. Equal to round(quantity × unitCostCad) when the item is built up. */
   amountCad: number;
+  /** Null on a lump-sum item; set iff unitCostCad is. */
+  quantity: number | null;
+  unitCostCad: number | null;
+  /** Null on a lump-sum item (the server drops a unit sent without a quantity). */
+  unit: string | null;
+  /** "" on an item copied from an earlier period and not yet argued (NeedsJustification). */
   justification: string;
+  spendType: BudgetSpendType;
+  recurrence: BudgetRecurrence;
+  vendor: string | null;
+  /** Never null. */
+  tags: string[];
+  priority: BudgetItemPriority;
+  assumptions: string | null;
+  consequenceIfUnfunded: string | null;
   createdBy: string | null;
   createdByEmail: string | null;
   modifiedBy: string | null;
@@ -230,39 +268,550 @@ export interface BudgetAllocationRecord {
   updatedAtUtc: string;
 }
 
-/** PUT periods/{id}/allocations/{codeId} body (SetBudgetAllocationRequest). */
-export interface BudgetAllocationInput {
-  /** 0 ≤ x ≤ 999,999,999.99; the server rounds to 2 dp. */
-  amountCad: number;
-  /** Required, ≤ 1000 characters — zero-based means every line is justified from nothing. */
+/**
+ * POST periods/{id}/allocations and PUT periods/{id}/allocations/{allocationId} body
+ * (BudgetItemRequest). Everything is nullable on the server's side of the wire; this app always
+ * sends every key, with explicit nulls, so "cleared" never reads as "absent". Enums go as their
+ * PascalCase names.
+ *
+ * Cost is EITHER a lump sum (`amountCad`, quantity and unit cost null) OR built up (`quantity` +
+ * `unitCostCad`, both or neither) — in which case the server computes the amount and ignores any
+ * amount sent, so this app sends `amountCad: null` for a built-up item.
+ */
+export interface BudgetItemInput {
+  budgetCodeId: string;
+  title: string;
+  amountCad: number | null;
+  quantity: number | null;
+  unitCostCad: number | null;
+  unit: string | null;
   justification: string;
+  spendType: BudgetSpendType;
+  recurrence: BudgetRecurrence;
+  vendor: string | null;
+  tags: string[];
+  priority: BudgetItemPriority;
+  assumptions: string | null;
+  consequenceIfUnfunded: string | null;
 }
 
-/** GET → 200, ordered by code server-side; 404 when the period does not exist. */
+/**
+ * GET → 200, ordered server-side by code, then priority (MustHave first), then createdAtUtc, then
+ * id; 404 when the period does not exist.
+ */
 export function listBudgetAllocations(periodId: string): Promise<BudgetAllocationRecord[]> {
   return request<BudgetAllocationRecord[]>(`/api/budgeting/periods/${periodId}/allocations`);
 }
 
 /**
- * PUT → 200 { id, created }. Upsert by code: the first call for a code creates the line, later
- * calls update it in place. 400 on validation, 404 for an unknown period or code, 409
+ * POST → 201 { id } (id only; the row lands on the next projection read). 400 on validation (the
+ * BUDGET_ITEM_MESSAGES below, among others), 404 for an unknown period or code, 409
  * Budgeting.Allocation.PeriodNotEditable / CodeRetired — show the server's message verbatim.
  */
-export function setBudgetAllocation(
+export async function createBudgetItem(periodId: string, input: BudgetItemInput): Promise<string> {
+  const res = await request<{ id: string }>(`/api/budgeting/periods/${periodId}/allocations`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return res.id;
+}
+
+/**
+ * PUT → 204. Rewrites the whole item, and its code may change (moving an item to another code is
+ * allowed; the new code must be active). 404 Budgeting.Allocation.NotFound when the item is not in
+ * this period; 409 CodeRetired is checked on EVERY update, even when the code is unchanged — an
+ * item on a since-retired code can only be moved to an active code or removed.
+ */
+export function updateBudgetItem(
   periodId: string,
-  codeId: string,
-  input: BudgetAllocationInput,
-): Promise<{ id: string; created: boolean }> {
-  return request<{ id: string; created: boolean }>(
-    `/api/budgeting/periods/${periodId}/allocations/${codeId}`,
-    { method: "PUT", body: JSON.stringify(input) },
+  allocationId: string,
+  input: BudgetItemInput,
+): Promise<void> {
+  return request<void>(`/api/budgeting/periods/${periodId}/allocations/${allocationId}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+/** DELETE → 204; 404 when the item is not in this period; 409 PeriodNotEditable outside Draft/Open. */
+export function removeBudgetItem(periodId: string, allocationId: string): Promise<void> {
+  return request<void>(`/api/budgeting/periods/${periodId}/allocations/${allocationId}`, {
+    method: "DELETE",
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Budget item rules — client mirrors of BudgetAllocation.Validate and
+// BudgetAllocation.Round, so the common mistake is caught without a round
+// trip. The server re-checks all of it and its answer is the one that counts;
+// every message below is the server's own text, so the modal says the same
+// thing whichever side caught it.
+// ---------------------------------------------------------------------------
+
+/** Mirrors the BudgetAllocation length and count constants. */
+export const BUDGET_ITEM_LIMITS = {
+  titleMaxLength: 120,
+  justificationMaxLength: 1000,
+  unitMaxLength: 32,
+  vendorMaxLength: 120,
+  assumptionsMaxLength: 1000,
+  consequenceMaxLength: 1000,
+  maxTags: 10,
+  tagMaxLength: 32,
+} as const;
+
+/** Mirrors BudgetAllocation.JustificationMaxLength. */
+export const ALLOCATION_JUSTIFICATION_MAX_LENGTH = BUDGET_ITEM_LIMITS.justificationMaxLength;
+
+/**
+ * Mirrors BudgetAllocation.AmountMax — the inclusive numeric(12,2) ceiling, applied to the amount,
+ * the quantity and the unit cost alike.
+ */
+export const ALLOCATION_AMOUNT_MAX = 999_999_999.99;
+
+/**
+ * The server's messages, verbatim, keyed by the error code's suffix (every code is prefixed
+ * "Budgeting.Allocation."). Mirrors BudgetAllocationErrors.
+ */
+export const BUDGET_ITEM_MESSAGES = {
+  CodeRequired: "Choose the budget code this item is planned against.",
+  TitleRequired: "Give the budget item a title — what is this money for?",
+  TitleTooLong: "The title must be 120 characters or fewer.",
+  QuantityWithoutUnitCost:
+    "Quantity and unit cost go together: enter both, or leave both blank and enter a lump-sum amount.",
+  QuantityNotPositive: "The quantity must be greater than zero.",
+  QuantityTooLarge: "The quantity must be 999,999,999.99 or less.",
+  UnitCostNegative: "The unit cost cannot be negative.",
+  UnitCostTooLarge: "The unit cost must be 999,999,999.99 or less.",
+  AmountRequired: "Enter an amount, or a quantity and a unit cost. Zero is allowed.",
+  AmountNegative: "The amount cannot be negative.",
+  AmountTooLarge: "The amount must be 999,999,999.99 or less.",
+  JustificationRequired:
+    "Every allocation needs a justification — this is zero-based budgeting, so each line is argued from zero.",
+  JustificationTooLong: "The justification must be 1000 characters or fewer.",
+  SpendTypeInvalid: "The spend type must be Operating or Capital.",
+  RecurrenceInvalid: "The recurrence must be OneTime or Recurring.",
+  PriorityInvalid: "The priority must be MustHave, ShouldHave or NiceToHave.",
+  UnitTooLong: "The unit must be 32 characters or fewer.",
+  VendorTooLong: "The vendor must be 120 characters or fewer.",
+  TagInvalid: "Each tag must be 1 to 32 characters.",
+  TooManyTags: "A budget item can carry at most 10 tags.",
+  AssumptionsTooLong: "The assumptions must be 1000 characters or fewer.",
+  ConsequenceTooLong: "The consequence if unfunded must be 1000 characters or fewer.",
+} as const;
+
+/**
+ * A number as an integer count of hundredths, rounded half AWAY FROM ZERO — the integer half of
+ * BudgetAllocation.Round (`Math.Round(value, 2, MidpointRounding.AwayFromZero)`).
+ *
+ * Never `Math.round(value * 100)`: `1.005 * 100` is 100.49999999999999 in binary floating point
+ * and rounds the wrong way. Instead the decimal point is shifted in the number's own shortest
+ * decimal spelling (`String(1.005)` is "1.005", so "1.005e2" parses to exactly 100.5). That
+ * spelling is also exactly what JSON.stringify puts on the wire and what the server parses into a
+ * C# decimal, so this rounds the same digits the server rounds. Math.round is half-UP, which is
+ * half-away-from-zero only for non-negative values — hence the rounding on the absolute value.
+ */
+function toHundredths(value: number): number {
+  const abs = Math.abs(value);
+  const [mantissa, exponent] = String(abs).split("e");
+  const shifted = Number(`${mantissa}e${Number(exponent ?? 0) + 2}`);
+  const rounded = Math.round(shifted);
+  return value < 0 && rounded !== 0 ? -rounded : rounded;
+}
+
+/**
+ * Mirrors BudgetAllocation.Round: two decimal places, half away from zero. 1.005 → 1.01,
+ * 0.005 → 0.01, 0.004 → 0.
+ */
+export function roundCad(value: number): number {
+  return toHundredths(value) / 100;
+}
+
+/**
+ * The amount the server computes for a built-up item, mirroring BudgetAllocation.Parse: quantity
+ * and unit cost are EACH rounded to hundredths first (BudgetAllocation.Round), then
+ * `Round(q × u)`. The product is taken in exact integer arithmetic (BigInt hundredths ×
+ * hundredths = ten-thousandths), so no floating-point error reaches the final rounding. 3 × 1.005
+ * is therefore 3 × 1.01 = 3.03, exactly as the server stores it.
+ */
+export function computeItemAmount(quantity: number, unitCostCad: number): number {
+  const product = BigInt(toHundredths(quantity)) * BigInt(toHundredths(unitCostCad));
+  const negative = product < BigInt(0);
+  const abs = negative ? -product : product;
+  // ten-thousandths → hundredths, half away from zero.
+  const cents = (abs + BigInt(50)) / BigInt(100);
+  const signed = Number(cents) / 100;
+  return negative && signed !== 0 ? -signed : signed;
+}
+
+/**
+ * The amount the server will store for this input, or null when it cannot be computed yet (a
+ * missing figure). Built up → computeItemAmount; lump sum → roundCad(amountCad). Drives the
+ * modal's live total and the post-save refetch predicate.
+ */
+export function itemAmount(input: Pick<BudgetItemInput, "amountCad" | "quantity" | "unitCostCad">): number | null {
+  if (input.quantity !== null && input.unitCostCad !== null) {
+    return computeItemAmount(input.quantity, input.unitCostCad);
+  }
+  if (input.quantity !== null || input.unitCostCad !== null) return null;
+  return input.amountCad === null ? null : roundCad(input.amountCad);
+}
+
+/** Mirrors BudgetAllocation.Normalize: blank optional text is null, anything else is trimmed. */
+function normalizeOptional(value: string | null): string | null {
+  return value === null || value.trim() === "" ? null : value.trim();
+}
+
+/**
+ * The tags the server will store, mirroring the tag loop in BudgetAllocation.Parse: each trimmed,
+ * de-duplicated case-insensitively with the FIRST spelling winning. Returns null when a tag is
+ * invalid (empty after trimming, or longer than 32) — TagInvalid. The count limit is checked
+ * separately, after de-duplication, by budgetItemError.
+ */
+export function normalizeTags(tags: string[]): string[] | null {
+  const kept: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of tags) {
+    const tag = raw.trim();
+    if (tag.length === 0 || tag.length > BUDGET_ITEM_LIMITS.tagMaxLength) return null;
+    // OrdinalIgnoreCase compares by upper-casing; toUpperCase is the closest JS equivalent.
+    const key = tag.toUpperCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      kept.push(tag);
+    }
+  }
+  return kept;
+}
+
+/**
+ * The tag field's text → a tag list. Comma-separated; blank segments (a trailing comma, ", ,")
+ * are artefacts of typing a list, not tags anyone meant, so they are dropped here rather than
+ * sent to be refused as TagInvalid. What is left goes to the server untouched, which trims and
+ * de-duplicates it.
+ */
+export function parseTagText(text: string): string[] {
+  return text
+    .split(",")
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
+}
+
+const SPEND_TYPES: readonly BudgetSpendType[] = ["Operating", "Capital"];
+const RECURRENCES: readonly BudgetRecurrence[] = ["OneTime", "Recurring"];
+
+/**
+ * The first rule this item breaks, as the server's own message, or null when it would be
+ * accepted. Mirrors the create/update handlers' CodeRequired check and then
+ * BudgetAllocation.Validate (Parse) rule for rule, IN THE SAME ORDER — one error at a time, so
+ * the message the modal shows before the round trip is the one the server would have sent:
+ *
+ *   code → title → cost (quantity/unit cost both-or-neither, quantity, unit cost, computed
+ *   amount — or the lump sum) → justification → spend type → recurrence → priority → unit →
+ *   vendor → tags (each, then the count after de-duplication) → assumptions → consequence.
+ *
+ * The quantity is rounded BEFORE it is checked (0.004 is refused as not positive, 0.005 is 0.01
+ * and fine); the lump sum is checked BEFORE it is rounded (999,999,999.994 is too large even
+ * though it would round to the ceiling). Both asymmetries are the server's.
+ */
+export function budgetItemError(input: BudgetItemInput): string | null {
+  const m = BUDGET_ITEM_MESSAGES;
+  const L = BUDGET_ITEM_LIMITS;
+
+  if (!input.budgetCodeId) return m.CodeRequired;
+
+  if (input.title.trim().length === 0) return m.TitleRequired;
+  if (input.title.trim().length > L.titleMaxLength) return m.TitleTooLong;
+
+  if ((input.quantity === null) !== (input.unitCostCad === null)) return m.QuantityWithoutUnitCost;
+
+  if (input.quantity !== null && input.unitCostCad !== null) {
+    const q = roundCad(input.quantity);
+    if (q <= 0) return m.QuantityNotPositive;
+    if (q > ALLOCATION_AMOUNT_MAX) return m.QuantityTooLarge;
+    const u = roundCad(input.unitCostCad);
+    if (u < 0) return m.UnitCostNegative;
+    if (u > ALLOCATION_AMOUNT_MAX) return m.UnitCostTooLarge;
+    if (computeItemAmount(input.quantity, input.unitCostCad) > ALLOCATION_AMOUNT_MAX) {
+      return m.AmountTooLarge;
+    }
+  } else {
+    if (input.amountCad === null) return m.AmountRequired;
+    if (input.amountCad < 0) return m.AmountNegative;
+    if (input.amountCad > ALLOCATION_AMOUNT_MAX) return m.AmountTooLarge;
+  }
+
+  if (input.justification.trim().length === 0) return m.JustificationRequired;
+  if (input.justification.trim().length > L.justificationMaxLength) return m.JustificationTooLong;
+
+  if (!SPEND_TYPES.includes(input.spendType)) return m.SpendTypeInvalid;
+  if (!RECURRENCES.includes(input.recurrence)) return m.RecurrenceInvalid;
+  if (!PRIORITY_ORDER.includes(input.priority)) return m.PriorityInvalid;
+
+  if ((normalizeOptional(input.unit)?.length ?? 0) > L.unitMaxLength) return m.UnitTooLong;
+  if ((normalizeOptional(input.vendor)?.length ?? 0) > L.vendorMaxLength) return m.VendorTooLong;
+
+  const tags = normalizeTags(input.tags);
+  if (tags === null) return m.TagInvalid;
+  if (tags.length > L.maxTags) return m.TooManyTags;
+
+  if ((normalizeOptional(input.assumptions)?.length ?? 0) > L.assumptionsMaxLength) {
+    return m.AssumptionsTooLong;
+  }
+  if ((normalizeOptional(input.consequenceIfUnfunded)?.length ?? 0) > L.consequenceMaxLength) {
+    return m.ConsequenceTooLong;
+  }
+  return null;
+}
+
+/** How the item modal's cost is entered. Client-only — the wire has no mode, only which fields are null. */
+export type CostMode = "lump" | "builtUp";
+
+/** The item modal's raw field text, before parsing. */
+export interface BudgetItemDraft {
+  budgetCodeId: string;
+  title: string;
+  costMode: CostMode;
+  amount: string;
+  quantity: string;
+  unitCost: string;
+  unit: string;
+  justification: string;
+  spendType: BudgetSpendType;
+  recurrence: BudgetRecurrence;
+  vendor: string;
+  /** Comma-separated. */
+  tags: string;
+  priority: BudgetItemPriority;
+  assumptions: string;
+  consequenceIfUnfunded: string;
+}
+
+/**
+ * Number field text → number, null for blank, or NaN for text that is not a number (the number
+ * input can still hand over "1e" or "-" mid-typing). Client-only: the server never sees text.
+ */
+function parseNumberText(text: string): number | null {
+  if (text.trim() === "") return null;
+  const n = Number(text);
+  return Number.isFinite(n) ? n : Number.NaN;
+}
+
+/**
+ * The modal's draft → the exact request body, or the reason it cannot be built. Only the mode's
+ * own fields are sent: a lump sum sends quantity, unit cost and unit as null; a built-up item sends
+ * amountCad as null (the server would ignore it anyway). Text is trimmed and blank optionals are
+ * null, matching what the server stores. The only messages of this app's own are for text that is
+ * not a number at all; everything else is left to budgetItemError, in the server's words.
+ */
+export function draftToBudgetItemInput(
+  draft: BudgetItemDraft,
+): { ok: true; input: BudgetItemInput } | { ok: false; error: string } {
+  const builtUp = draft.costMode === "builtUp";
+  const amount = builtUp ? null : parseNumberText(draft.amount);
+  const quantity = builtUp ? parseNumberText(draft.quantity) : null;
+  const unitCost = builtUp ? parseNumberText(draft.unitCost) : null;
+  if (Number.isNaN(amount)) return { ok: false, error: "Enter the amount as a number." };
+  if (Number.isNaN(quantity)) return { ok: false, error: "Enter the quantity as a number." };
+  if (Number.isNaN(unitCost)) return { ok: false, error: "Enter the unit cost as a number." };
+
+  return {
+    ok: true,
+    input: {
+      budgetCodeId: draft.budgetCodeId,
+      title: draft.title.trim(),
+      amountCad: amount,
+      quantity,
+      unitCostCad: unitCost,
+      unit: builtUp ? normalizeOptional(draft.unit) : null,
+      justification: draft.justification.trim(),
+      spendType: draft.spendType,
+      recurrence: draft.recurrence,
+      vendor: normalizeOptional(draft.vendor),
+      tags: parseTagText(draft.tags),
+      priority: draft.priority,
+      assumptions: normalizeOptional(draft.assumptions),
+      consequenceIfUnfunded: normalizeOptional(draft.consequenceIfUnfunded),
+    },
+  };
+}
+
+/** An existing item → the modal's draft (edit mode). A copied item opens with an empty justification. */
+export function recordToDraft(item: BudgetAllocationRecord): BudgetItemDraft {
+  const builtUp = item.quantity !== null && item.unitCostCad !== null;
+  return {
+    budgetCodeId: item.budgetCodeId,
+    title: item.title,
+    costMode: builtUp ? "builtUp" : "lump",
+    amount: builtUp ? "" : String(item.amountCad),
+    quantity: builtUp ? String(item.quantity) : "",
+    unitCost: builtUp ? String(item.unitCostCad) : "",
+    unit: item.unit ?? "",
+    justification: item.justification,
+    spendType: item.spendType,
+    recurrence: item.recurrence,
+    vendor: item.vendor ?? "",
+    tags: item.tags.join(", "),
+    priority: item.priority,
+    assumptions: item.assumptions ?? "",
+    consequenceIfUnfunded: item.consequenceIfUnfunded ?? "",
+  };
+}
+
+/**
+ * The refetch predicate after a save: the projection row for THIS item id already carries the
+ * values just sent. Values, not existence — on edit the row was always there, so "the id is in the
+ * list" is satisfied by the stale read. The amount is compared within half a cent, because it is
+ * the server's computation and a float that prints the same must not hang the retry loop.
+ */
+export function itemReflects(
+  record: BudgetAllocationRecord,
+  id: string,
+  input: BudgetItemInput,
+): boolean {
+  const expected = itemAmount(input);
+  return (
+    record.id === id &&
+    record.budgetCodeId === input.budgetCodeId &&
+    record.title === input.title &&
+    record.justification === input.justification &&
+    record.priority === input.priority &&
+    (expected === null || Math.abs(record.amountCad - expected) < 0.005)
   );
 }
 
-/** DELETE → 204; 404 when there is no such line; 409 PeriodNotEditable outside Draft/Open. */
-export function removeBudgetAllocation(periodId: string, codeId: string): Promise<void> {
-  return request<void>(`/api/budgeting/periods/${periodId}/allocations/${codeId}`, {
-    method: "DELETE",
+// ---------------------------------------------------------------------------
+// Presentation helpers for items: labels, the priority chip, grouping by code
+// and the by-priority breakdown.
+// ---------------------------------------------------------------------------
+
+/**
+ * The server's order of priorities (the list is sorted MustHave → ShouldHave → NiceToHave within a
+ * code). Also the order the by-priority breakdown reads in: top to bottom is keep to cut.
+ */
+export const PRIORITY_ORDER: readonly BudgetItemPriority[] = ["MustHave", "ShouldHave", "NiceToHave"];
+
+export const PRIORITY_LABELS: Record<BudgetItemPriority, string> = {
+  MustHave: "Must have",
+  ShouldHave: "Should have",
+  NiceToHave: "Nice to have",
+};
+
+/**
+ * Priority → status kind. A priority is a ranking, not a verdict, so none of the three is "over"
+ * (a problem) or "ontime" (a success): Must and Should stay informational, and Nice to have is
+ * "off" — the grey of "first to cut". Two priorities share a colour, so each carries its own glyph
+ * (the StatusChip `glyph` override exists for exactly this) and its written label: the chip is
+ * never colour alone, and never colour plus a shared glyph.
+ */
+export const PRIORITY_KINDS: Record<BudgetItemPriority, StatusKind> = {
+  MustHave: "info",
+  ShouldHave: "info",
+  NiceToHave: "off",
+};
+
+export const PRIORITY_GLYPHS: Record<BudgetItemPriority, string> = {
+  MustHave: "M",
+  ShouldHave: "S",
+  NiceToHave: "N",
+};
+
+export const SPEND_TYPE_LABELS: Record<BudgetSpendType, string> = {
+  Operating: "Operating",
+  Capital: "Capital",
+};
+
+export const RECURRENCE_LABELS: Record<BudgetRecurrence, string> = {
+  OneTime: "One-time",
+  Recurring: "Recurring",
+};
+
+/**
+ * A sum of CAD figures, added in integer cents so eleven items never total $1,234.5600000000002.
+ * Only ever used for client-side sub-totals (a code group, a priority bucket, a section header) —
+ * the dashboard's headline tiles stay the server's own totals.
+ */
+export function sumCad(amounts: number[]): number {
+  return amounts.reduce((cents, a) => cents + toHundredths(a), 0) / 100;
+}
+
+/**
+ * "12 month × $450" / "3 × $1.01" for a built-up item; null for a lump sum. The unit is shown only
+ * when there is one.
+ */
+export function costBuildUpLabel(
+  item: Pick<BudgetAllocationRecord, "quantity" | "unitCostCad" | "unit">,
+): string | null {
+  if (item.quantity === null || item.unitCostCad === null) return null;
+  const qty = item.quantity.toLocaleString("en-CA", { maximumFractionDigits: 2 });
+  const unit = item.unit ? ` ${item.unit}` : "";
+  return `${qty}${unit} × ${formatCadPrecise(item.unitCostCad)}`;
+}
+
+/** One code's items on the dashboard: the code header row, then its items beneath. */
+export interface ItemCodeGroup {
+  budgetCodeId: string;
+  code: string;
+  name: string;
+  serviceLine: BudgetServiceLine | null;
+  isCodeActive: boolean;
+  /** Client-side sum of the group's items — the code's budget, which is exactly that sum. */
+  subtotalCad: number;
+  items: BudgetAllocationRecord[];
+}
+
+/**
+ * Items → one group per code, in first-appearance order (the server lists by code, so the groups
+ * come out by code), each group's items in the server's order (priority, then creation). Nothing
+ * is re-sorted here: the server's order is the contract.
+ */
+export function groupItemsByCode(items: BudgetAllocationRecord[]): ItemCodeGroup[] {
+  const groups = new Map<string, ItemCodeGroup>();
+  for (const item of items) {
+    let group = groups.get(item.budgetCodeId);
+    if (!group) {
+      group = {
+        budgetCodeId: item.budgetCodeId,
+        code: item.code,
+        name: item.name,
+        serviceLine: item.serviceLine,
+        isCodeActive: item.isCodeActive,
+        subtotalCad: 0,
+        items: [],
+      };
+      groups.set(item.budgetCodeId, group);
+    }
+    group.items.push(item);
+  }
+  return [...groups.values()].map((g) => ({
+    ...g,
+    subtotalCad: sumCad(g.items.map((i) => i.amountCad)),
+  }));
+}
+
+/** One row of the by-priority breakdown. */
+export interface PriorityBucket {
+  priority: BudgetItemPriority;
+  label: string;
+  count: number;
+  totalCad: number;
+}
+
+/**
+ * Totals and counts per priority, in PRIORITY_ORDER, every priority present even at zero — so a
+ * planner sees at a glance how much sits in "Nice to have", i.e. what to cut first. Summed
+ * client-side from the loaded items; it is a breakdown, never a replacement for the server's
+ * period totals.
+ */
+export function priorityBreakdown(items: BudgetAllocationRecord[]): PriorityBucket[] {
+  return PRIORITY_ORDER.map((priority) => {
+    const inBucket = items.filter((i) => i.priority === priority);
+    return {
+      priority,
+      label: PRIORITY_LABELS[priority],
+      count: inBucket.length,
+      totalCad: sumCad(inBucket.map((i) => i.amountCad)),
+    };
   });
 }
 
@@ -351,9 +900,9 @@ export function defaultCopySource(
   return pool.reduce((a, b) => (a.startsOn >= b.startsOn ? a : b));
 }
 
-/** "1 line" / "3 lines" — used by every clause of copyOutcomeSummary. */
-function lineCount(n: number): string {
-  return `${n} ${n === 1 ? "line" : "lines"}`;
+/** "1 item" / "3 items" — used by every clause of copyOutcomeSummary and the checklist. */
+export function itemCount(n: number): string {
+  return `${n} ${n === 1 ? "item" : "items"}`;
 }
 
 /**
@@ -362,99 +911,65 @@ function lineCount(n: number): string {
  * `copied + skippedAlreadyPlanned + skippedRetiredCode === sourceLineCount` is only reassuring
  * if the user can see it adds up. Clauses for a zero skip are omitted rather than written as
  * "0 skipped", and an empty source says so rather than reading as a failure.
+ *
+ * The counts are per ITEM. "Already planned" means the item's CODE already has at least one item
+ * here — the whole code is skipped, which is what makes a second copy copy nothing.
  */
 export function copyOutcomeSummary(result: BudgetAllocationCopyResult): string {
   if (result.sourceLineCount === 0) {
-    return "That period has no lines to copy — nothing was added.";
+    return "That period has no items to copy — nothing was added.";
   }
 
   const skips: string[] = [];
   if (result.skippedAlreadyPlanned > 0) {
-    skips.push(`${lineCount(result.skippedAlreadyPlanned)} already planned here and left untouched`);
+    skips.push(
+      `${itemCount(result.skippedAlreadyPlanned)} on codes already planned here, left untouched`,
+    );
   }
   if (result.skippedRetiredCode > 0) {
-    skips.push(`${lineCount(result.skippedRetiredCode)} on retired codes`);
+    skips.push(`${itemCount(result.skippedRetiredCode)} on retired codes`);
   }
 
   const head =
     result.copied === 0
       ? "Nothing was copied"
-      : `Copied ${lineCount(result.copied)}, each with no justification yet`;
+      : `Copied ${itemCount(result.copied)}, each with no justification yet`;
   const tail = skips.length > 0 ? ` — skipped ${skips.join(" and ")}.` : ".";
-  return `${head}${tail} ${lineCount(result.sourceLineCount)} in the source period.`;
+  return `${head}${tail} ${itemCount(result.sourceLineCount)} in the source period.`;
 }
 
 /**
- * Whether a line still has to be argued. Mirrors BudgetAllocation.NeedsJustification
+ * Whether an item still has to be argued. Mirrors BudgetAllocation.NeedsJustification
  * (`Justification.Length == 0`), which is exactly what BudgetAllocation.CopyInto produces — but
- * trimmed here to match Validate's `IsNullOrWhiteSpace`, so a line of spaces counts as unargued
+ * trimmed here to match Validate's `IsNullOrWhiteSpace`, so an item of spaces counts as unargued
  * on both sides rather than only on the save that would refuse it.
  */
 export function needsJustification(line: BudgetAllocationRecord): boolean {
   return line.justification.trim().length === 0;
 }
 
-/** The period's lines that still carry no argument — the checklist's count and the finalize warning. */
+/** The period's items that still carry no argument — the checklist's count and the finalize warning. */
 export function unjustifiedLines(lines: BudgetAllocationRecord[]): BudgetAllocationRecord[] {
   return lines.filter(needsJustification);
 }
 
-/** Mirrors BudgetAllocation.JustificationMaxLength. */
-export const ALLOCATION_JUSTIFICATION_MAX_LENGTH = 1000;
-
-/** Mirrors the upper bound behind BudgetAllocationErrors.AmountTooLarge (decimal(12,2)). */
-export const ALLOCATION_AMOUNT_MAX = 999_999_999.99;
-
 /**
- * Client-side check of the amount text before a round trip, mirroring BudgetAllocation.Validate
- * (AmountRequired / AmountNegative / AmountTooLarge). One rule is deliberately stricter than the
- * server's: the server accepts cents, this app plans in whole dollars (every figure renders
- * through formatCad at 0 dp), so a fractional amount is refused here rather than silently shown
- * rounded. The server re-checks and its answer is the one that counts.
- */
-export function allocationAmountError(text: string): string | null {
-  if (text.trim() === "") return "Enter an amount.";
-  const n = Number(text);
-  if (!Number.isFinite(n)) return "Enter an amount.";
-  if (!Number.isInteger(n)) return "Enter whole dollars — no cents.";
-  if (n < 0) return "The amount cannot be negative.";
-  if (n > ALLOCATION_AMOUNT_MAX) return "The amount is too large.";
-  return null;
-}
-
-/**
- * Mirrors BudgetAllocation.Validate's JustificationRequired / JustificationTooLong. Required
- * because zero-based budgeting means every line earns its place from nothing, each period.
- */
-export function allocationJustificationError(text: string): string | null {
-  const trimmed = text.trim();
-  if (trimmed.length === 0) return "Enter a justification — every line is planned from zero.";
-  if (trimmed.length > ALLOCATION_JUSTIFICATION_MAX_LENGTH) {
-    return `The justification must be ${ALLOCATION_JUSTIFICATION_MAX_LENGTH} characters or fewer.`;
-  }
-  return null;
-}
-
-/**
- * The codes the allocation picker may offer, mirroring two server rules at once: the retired
- * check in SetBudgetAllocationCommandHandler (BudgetAllocationErrors.CodeRetired) and the unique
- * (tenant, period, code) index behind upsert-by-code. Active codes of the requested category
- * that do not already carry a line in this period — except the line being edited, whose own
- * code must stay selectable. Order is the caller's (the chart, by code).
+ * The codes the item modal's picker may offer, mirroring the CodeRetired check in
+ * Create/UpdateBudgetAllocationCommandHandler: active codes of the section's category, in the
+ * caller's order (the chart, by code).
+ *
+ * **A code that already has items is offered.** A period holds any number of items per code (the
+ * unique (period, code) index is gone), so excluding planned codes — as this did while a code had
+ * exactly one line — would now make a second item on a code impossible. On edit, an item on a
+ * since-retired code is deliberately NOT given its own code back: the server refuses every update
+ * to it (CodeRetired, checked on every update), so the only saves that can succeed are a move to
+ * one of these codes, or removing the item.
  */
 export function allocationCandidates(
   codes: BudgetCode[],
-  lines: BudgetAllocationRecord[],
   category: BudgetCodeCategory,
-  editingCodeId: string | null,
 ): BudgetCode[] {
-  const planned = new Set(lines.map((l) => l.budgetCodeId));
-  return codes.filter(
-    (c) =>
-      c.active &&
-      c.category === category &&
-      (c.id === editingCodeId || !planned.has(c.id)),
-  );
+  return codes.filter((c) => c.active && c.category === category);
 }
 
 // ---------------------------------------------------------------------------
@@ -524,9 +1039,10 @@ export function planBalanced(period: BudgetPeriod): boolean {
 }
 
 /**
- * How much of a category's chart is planned: `planned` active codes carry a line, out of
- * `active` codes in the category. Lines on retired codes are not counted — they cannot be
- * re-set, so they are not "coverage" a planner can still act on.
+ * How much of a category's chart is planned: `planned` active codes carry at least one item, out
+ * of `active` codes in the category. A code with five items counts once — coverage is about codes,
+ * not items. Items on retired codes are not counted — they cannot be updated, only moved or
+ * removed, so they are not "coverage" a planner can still act on.
  */
 export function coverage(
   lines: BudgetAllocationRecord[],
@@ -534,7 +1050,11 @@ export function coverage(
   category: BudgetCodeCategory,
 ): { planned: number; active: number } {
   const activeIds = new Set(codes.filter((c) => c.active && c.category === category).map((c) => c.id));
-  const planned = lines.filter((l) => l.category === category && activeIds.has(l.budgetCodeId)).length;
+  const planned = new Set(
+    lines
+      .filter((l) => l.category === category && activeIds.has(l.budgetCodeId))
+      .map((l) => l.budgetCodeId),
+  ).size;
   return { planned, active: activeIds.size };
 }
 
@@ -542,10 +1062,11 @@ export function coverage(
 // The zero-based checklist. Four rows, mapped onto the five steps of zero-based
 // budgeting as they apply to a shuttle and cargo company:
 //
-//   1. List income            → "Revenue planned"
-//   2. List expenses          → "Expense budget set" (every line already
-//                               carries a required justification, which is
-//                               stricter than most ZBB tools)
+//   1. List income            → "Revenue items planned"
+//   2. List expenses          → "Expense items planned" (every item carries
+//                               a required justification, which is stricter
+//                               than most ZBB tools; a code's budget is the
+//                               sum of its items — nothing is "set")
 //   3. Subtract to reach zero → "Every dollar assigned"  ← the row this file
 //                               existed without for too long
 //   4. Track all month        → NO ROW. Actuals are still mock (lib/data.ts);
@@ -553,13 +1074,15 @@ export function coverage(
 //                               than an honest gap.
 //   5. New budget each period → the lifecycle stepper plus the copy panel
 //
-// "Every line argued" is the fifth row and belongs to step 2: a copied line
-// arrives with its amount and no argument, so the count of unargued lines is
+// "Every item argued" is the fifth row and belongs to step 2: a copied item
+// arrives with its amount and no argument, so the count of unargued items is
 // what keeps the copy button from quietly turning ZBB into rollover budgeting.
 //
 // Ramsey's household scaffolding (Giving, the Four Walls, the Baby Steps) does
-// NOT map onto a shuttle company, so there are deliberately no expense
-// priority tiers here.
+// NOT map onto a shuttle company, so there are no household tiers here. The
+// item's own priority (Must / Should / Nice to have) is a different thing — a
+// zero-based decision-package ranking — and is shown as a breakdown on the
+// dashboard (priorityBreakdown), not as a checklist row.
 //
 // Each row carries its own `kind` and `status`, so the colour decision lives in
 // this one tested function and PlanningChecklist renders branch-free.
@@ -622,7 +1145,7 @@ export function planningProgress(
       group: "checklist",
       id,
       label,
-      detail: `${lineCount(count)} · ${cov.planned} of ${cov.active} active ${category.toLowerCase()} codes planned`,
+      detail: `${itemCount(count)} · ${cov.planned} of ${cov.active} active ${category.toLowerCase()} codes planned`,
       kind: count > 0 ? "ontime" : "info",
       status: count > 0 ? "Done" : "Pending",
     };
@@ -642,13 +1165,13 @@ export function planningProgress(
   const arguedStep: ChecklistStep = {
     group: "checklist",
     id: "argued",
-    label: "Every line argued",
+    label: "Every item argued",
     detail:
       lines.length === 0
-        ? "No lines yet — nothing to argue."
+        ? "No items yet — nothing to argue."
         : unargued > 0
-          ? `${unargued} of ${lineCount(lines.length)} still need a justification — a copied line brings its amount, not its argument.`
-          : `All ${lineCount(lines.length)} carry a justification.`,
+          ? `${unargued} of ${itemCount(lines.length)} still need a justification — a copied item brings its amount, not its argument.`
+          : `All ${itemCount(lines.length)} carry a justification.`,
     kind: lines.length === 0 ? "info" : unargued > 0 ? "soon" : "ontime",
     status: lines.length === 0 ? "Pending" : unargued > 0 ? "Needs work" : "Done",
   };
@@ -662,8 +1185,8 @@ export function planningProgress(
   }));
 
   return [
-    lineStep("revenue", "Revenue", "Revenue planned"),
-    lineStep("expense", "Expense", "Expense budget set"),
+    lineStep("revenue", "Revenue", "Revenue items planned"),
+    lineStep("expense", "Expense", "Expense items planned"),
     balanceStep,
     arguedStep,
     ...lifecycle,

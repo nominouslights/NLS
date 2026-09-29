@@ -1,9 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
-  allocationAmountError,
   allocationCandidates,
-  allocationJustificationError,
   assignmentState,
+  budgetItemError,
+  computeItemAmount,
+  costBuildUpLabel,
+  draftToBudgetItemInput,
+  groupItemsByCode,
+  itemAmount,
+  itemReflects,
+  normalizeTags,
+  parseTagText,
+  priorityBreakdown,
+  recordToDraft,
+  roundCad,
   budgetCodeCategoryKind,
   budgetCodeFormatError,
   canEditAllocations,
@@ -30,6 +40,13 @@ import {
   ALLOCATION_JUSTIFICATION_MAX_LENGTH,
   ASSIGNMENT_KINDS,
   ASSIGNMENT_LABELS,
+  BUDGET_ITEM_MESSAGES,
+  PRIORITY_GLYPHS,
+  PRIORITY_KINDS,
+  PRIORITY_LABELS,
+  PRIORITY_ORDER,
+  RECURRENCE_LABELS,
+  SPEND_TYPE_LABELS,
   PERIOD_STATE_LABELS,
   PERIOD_STATE_ORDER,
   REVIEW_FREQUENCY_LABELS,
@@ -37,6 +54,8 @@ import {
   TAX_TREATMENT_LABELS,
   type AssignmentState,
   type BudgetAllocationRecord,
+  type BudgetItemDraft,
+  type BudgetItemInput,
   type BudgetCodeRecord,
   type BudgetPeriodRecord,
   type ChecklistStep,
@@ -91,18 +110,23 @@ const makeCode = (
   glAccountCode: null,
   taxTreatment: null,
   budgetOwnerUserId: null,
+  budgetOwnerName: null,
   budgetOwnerEmail: null,
   reviewFrequency: "Quarterly",
   active,
+  createdByName: null,
   createdByEmail: null,
+  modifiedByName: null,
   modifiedByEmail: null,
 });
 
+/** One budget item. The id defaults to one per code; pass `over.id` for a second item on a code. */
 const makeLine = (
   budgetCodeId: string,
   category: BudgetCodeCategory = "Expense",
   isCodeActive = true,
   amountCad = 1000,
+  over: Partial<BudgetAllocationRecord> = {},
 ): BudgetAllocationRecord => ({
   id: `line-${budgetCodeId}`,
   periodId: periodRecord.id,
@@ -112,14 +136,26 @@ const makeLine = (
   category,
   serviceLine: null,
   isCodeActive,
+  title: `Item on ${budgetCodeId}`,
   amountCad,
+  quantity: null,
+  unitCostCad: null,
+  unit: null,
   justification: "Because.",
+  spendType: "Operating",
+  recurrence: "OneTime",
+  vendor: null,
+  tags: [],
+  priority: "ShouldHave",
+  assumptions: null,
+  consequenceIfUnfunded: null,
   createdBy: null,
   createdByEmail: null,
   modifiedBy: null,
   modifiedByEmail: null,
   createdAtUtc: "2026-09-01T00:00:00+00:00",
   updatedAtUtc: "2026-09-01T00:00:00+00:00",
+  ...over,
 });
 
 // previewPeriod is a display-only mirror of the server's derivation
@@ -413,10 +449,13 @@ describe("parentCandidates", () => {
     glAccountCode: null,
     taxTreatment: null,
     budgetOwnerUserId: null,
+    budgetOwnerName: null,
     budgetOwnerEmail: null,
     reviewFrequency: "Quarterly",
     active: true,
+    createdByName: null,
     createdByEmail: null,
+    modifiedByName: null,
     modifiedByEmail: null,
   });
 
@@ -472,12 +511,15 @@ describe("toBudgetCode", () => {
     glAccountCode: "4000",
     taxTreatment: "GstApplicable",
     budgetOwnerUserId: "5f2b1e1c-0000-4000-8000-000000000009",
+    budgetOwnerName: null,
     budgetOwnerEmail: "planner@northernlink.ca",
     reviewFrequency: "Quarterly",
     isActive: true,
     createdBy: "5f2b1e1c-0000-4000-8000-000000000009",
+    createdByName: null,
     createdByEmail: "planner@northernlink.ca",
     modifiedBy: null,
+    modifiedByName: null,
     modifiedByEmail: null,
     createdAtUtc: "2026-08-12T00:00:00+00:00",
     updatedAtUtc: "2026-08-12T00:00:00+00:00",
@@ -537,10 +579,10 @@ describe("toBudgetCode", () => {
   });
 });
 
-// allocationCandidates mirrors the CodeRetired check in SetBudgetAllocationCommandHandler
-// (BudgetAllocationErrors.CodeRetired) and the unique (tenant, period, code) index behind
-// upsert-by-code: the picker must never offer a code the server will refuse or that would
-// silently update an existing line.
+// allocationCandidates mirrors the CodeRetired check in Create/UpdateBudgetAllocationCommandHandler
+// (BudgetAllocationErrors.CodeRetired). It no longer mirrors a unique (period, code) index —
+// that index is gone, a period holds any number of items per code, so a planned code must stay
+// selectable or a second item on it would be impossible.
 
 describe("allocationCandidates", () => {
   const codes = [
@@ -551,78 +593,466 @@ describe("allocationCandidates", () => {
   ];
 
   it("offers only active codes of the requested category", () => {
-    expect(allocationCandidates(codes, [], "Revenue", null).map((c) => c.id)).toEqual([
-      "rev-a",
-      "rev-b",
-    ]);
-    expect(allocationCandidates(codes, [], "Expense", null).map((c) => c.id)).toEqual(["exp-a"]);
+    expect(allocationCandidates(codes, "Revenue").map((c) => c.id)).toEqual(["rev-a", "rev-b"]);
+    expect(allocationCandidates(codes, "Expense").map((c) => c.id)).toEqual(["exp-a"]);
   });
 
-  it("excludes a code that already carries a line in the period", () => {
-    const lines = [makeLine("rev-a", "Revenue")];
-
-    expect(allocationCandidates(codes, lines, "Revenue", null).map((c) => c.id)).toEqual(["rev-b"]);
-  });
-
-  it("keeps the code of the line being edited selectable", () => {
-    const lines = [makeLine("rev-a", "Revenue")];
-
-    expect(allocationCandidates(codes, lines, "Revenue", "rev-a").map((c) => c.id)).toEqual([
-      "rev-a",
-      "rev-b",
-    ]);
+  it("never offers a retired code — the server answers 409 CodeRetired on create and every update", () => {
+    expect(allocationCandidates(codes, "Revenue").map((c) => c.id)).not.toContain("rev-retired");
   });
 
   it("preserves the chart's order", () => {
     const reversed = [...codes].reverse();
 
-    expect(allocationCandidates(reversed, [], "Revenue", null).map((c) => c.id)).toEqual([
-      "rev-b",
-      "rev-a",
+    expect(allocationCandidates(reversed, "Revenue").map((c) => c.id)).toEqual(["rev-b", "rev-a"]);
+  });
+});
+
+// roundCad / computeItemAmount / itemAmount mirror BudgetAllocation.Round
+// (Math.Round(value, 2, MidpointRounding.AwayFromZero)) and the cost block of
+// BudgetAllocation.Parse: quantity and unit cost each rounded first, then Round(q × u).
+
+describe("roundCad (BudgetAllocation.Round)", () => {
+  it.each<[number, number]>([
+    [1.005, 1.01], // 1.005 * 100 is 100.49999999999999 in floating point — the trap
+    [2.675, 2.68],
+    [0.005, 0.01],
+    [0.004, 0],
+    [0.015, 0.02],
+    [1.004999, 1],
+    [12, 12],
+    [999_999_999.994, 999_999_999.99],
+    [999_999_999.995, 1_000_000_000],
+  ])("rounds %d to %d, half away from zero", (value, expected) => {
+    expect(roundCad(value)).toBe(expected);
+  });
+
+  it("rounds negatives away from zero too", () => {
+    expect(roundCad(-1.005)).toBe(-1.01);
+    expect(roundCad(-0.004)).toBe(0);
+  });
+
+  it("survives numbers JavaScript spells in exponent form", () => {
+    expect(roundCad(1e-7)).toBe(0);
+    expect(roundCad(5e-3)).toBe(0.01);
+  });
+});
+
+describe("computeItemAmount (BudgetAllocation.Parse cost block)", () => {
+  it.each<[number, number, number]>([
+    [12, 450, 5400],
+    [3, 1.005, 3.03], // unit cost rounds to 1.01 FIRST, then 3 × 1.01
+    [0.005, 100, 1], // quantity rounds to 0.01, then 0.01 × 100
+    [1.5, 0.33, 0.5], // 0.495 → 0.50, half away from zero
+    [2.5, 0.01, 0.03], // 0.025 → 0.03
+    [0.1, 0.2, 0.02],
+    [3, 0.1, 0.3], // no 0.30000000000000004
+    [14, 1.85, 25.9],
+    [1, 0, 0],
+  ])("%d × %d = %d", (q, u, expected) => {
+    expect(computeItemAmount(q, u)).toBe(expected);
+  });
+
+  it("stays exact at the numeric(12,2) ceiling", () => {
+    expect(computeItemAmount(1, 999_999_999.99)).toBe(999_999_999.99);
+    expect(computeItemAmount(99_999.99, 9_999.99)).toBe(999_998_900); // 999,998,900.0001 exactly
+  });
+});
+
+describe("itemAmount", () => {
+  it("computes a built-up item and ignores any lump sum sent with it", () => {
+    expect(itemAmount({ amountCad: 1, quantity: 12, unitCostCad: 450 })).toBe(5400);
+  });
+
+  it("rounds a lump sum", () => {
+    expect(itemAmount({ amountCad: 12.345, quantity: null, unitCostCad: null })).toBe(12.35);
+  });
+
+  it("is null until the figures are there", () => {
+    expect(itemAmount({ amountCad: null, quantity: null, unitCostCad: null })).toBeNull();
+    expect(itemAmount({ amountCad: 5, quantity: 3, unitCostCad: null })).toBeNull();
+  });
+});
+
+// budgetItemError mirrors the handlers' CodeRequired check and then BudgetAllocation.Validate
+// (Parse), rule for rule, IN ORDER, returning the server's messages (BudgetAllocationErrors)
+// verbatim. Each boundary is tested on both sides.
+
+describe("budgetItemError (BudgetAllocation.Validate)", () => {
+  const valid: BudgetItemInput = {
+    budgetCodeId: "exp-a",
+    title: "Winter tires, unit NL-04",
+    amountCad: 2400,
+    quantity: null,
+    unitCostCad: null,
+    unit: null,
+    justification: "Four tires at the Kal Tire quote.",
+    spendType: "Operating",
+    recurrence: "OneTime",
+    vendor: null,
+    tags: [],
+    priority: "ShouldHave",
+    assumptions: null,
+    consequenceIfUnfunded: null,
+  };
+  const m = BUDGET_ITEM_MESSAGES;
+  const err = (over: Partial<BudgetItemInput>) => budgetItemError({ ...valid, ...over });
+  const builtUp = { amountCad: null, quantity: 12, unitCostCad: 450 };
+
+  it("accepts a valid lump sum and a valid built-up item", () => {
+    expect(err({})).toBeNull();
+    expect(err(builtUp)).toBeNull();
+  });
+
+  it("pins every message to BudgetAllocationErrors verbatim", () => {
+    expect(m.CodeRequired).toBe("Choose the budget code this item is planned against.");
+    expect(m.TitleRequired).toBe("Give the budget item a title — what is this money for?");
+    expect(m.QuantityWithoutUnitCost).toBe(
+      "Quantity and unit cost go together: enter both, or leave both blank and enter a lump-sum amount.",
+    );
+    expect(m.AmountRequired).toBe("Enter an amount, or a quantity and a unit cost. Zero is allowed.");
+    expect(m.JustificationRequired).toBe(
+      "Every allocation needs a justification — this is zero-based budgeting, so each line is argued from zero.",
+    );
+    expect(m.TagInvalid).toBe("Each tag must be 1 to 32 characters.");
+    expect(m.TooManyTags).toBe("A budget item can carry at most 10 tags.");
+  });
+
+  it("CodeRequired", () => {
+    expect(err({ budgetCodeId: "" })).toBe(m.CodeRequired);
+  });
+
+  it("TitleRequired / TitleTooLong at 120", () => {
+    expect(err({ title: "   " })).toBe(m.TitleRequired);
+    expect(err({ title: "x".repeat(120) })).toBeNull();
+    expect(err({ title: ` ${"x".repeat(120)} ` })).toBeNull(); // trimmed first
+    expect(err({ title: "x".repeat(121) })).toBe(m.TitleTooLong);
+  });
+
+  it("QuantityWithoutUnitCost — both or neither", () => {
+    expect(err({ amountCad: null, quantity: 3, unitCostCad: null })).toBe(m.QuantityWithoutUnitCost);
+    expect(err({ amountCad: null, quantity: null, unitCostCad: 3 })).toBe(m.QuantityWithoutUnitCost);
+  });
+
+  it("QuantityNotPositive — rounded BEFORE the check", () => {
+    expect(err({ ...builtUp, quantity: 0 })).toBe(m.QuantityNotPositive);
+    expect(err({ ...builtUp, quantity: -1 })).toBe(m.QuantityNotPositive);
+    expect(err({ ...builtUp, quantity: 0.004 })).toBe(m.QuantityNotPositive);
+    expect(err({ ...builtUp, quantity: 0.005 })).toBeNull(); // rounds to 0.01
+  });
+
+  it("QuantityTooLarge above 999,999,999.99", () => {
+    expect(err({ ...builtUp, quantity: 999_999_999.99, unitCostCad: 1 })).toBeNull();
+    expect(err({ ...builtUp, quantity: 1_000_000_000, unitCostCad: 1 })).toBe(m.QuantityTooLarge);
+  });
+
+  it("UnitCostNegative / UnitCostTooLarge, zero allowed", () => {
+    expect(err({ ...builtUp, unitCostCad: 0 })).toBeNull();
+    expect(err({ ...builtUp, unitCostCad: -0.004 })).toBeNull(); // rounds to 0
+    expect(err({ ...builtUp, unitCostCad: -0.01 })).toBe(m.UnitCostNegative);
+    expect(err({ ...builtUp, quantity: 1, unitCostCad: 1_000_000_000 })).toBe(m.UnitCostTooLarge);
+  });
+
+  it("AmountTooLarge when the computed product overflows the ceiling", () => {
+    expect(err({ ...builtUp, quantity: 2, unitCostCad: 500_000_000 })).toBe(m.AmountTooLarge);
+    expect(err({ ...builtUp, quantity: 2, unitCostCad: 499_999_999.99 })).toBeNull();
+  });
+
+  it("AmountRequired / AmountNegative / AmountTooLarge on a lump sum — checked BEFORE rounding", () => {
+    expect(err({ amountCad: null })).toBe(m.AmountRequired);
+    expect(err({ amountCad: 0 })).toBeNull();
+    expect(err({ amountCad: -0.01 })).toBe(m.AmountNegative);
+    expect(err({ amountCad: 999_999_999.99 })).toBeNull();
+    expect(err({ amountCad: 999_999_999.994 })).toBe(m.AmountTooLarge);
+  });
+
+  it("JustificationRequired / JustificationTooLong at 1000", () => {
+    expect(err({ justification: "  " })).toBe(m.JustificationRequired);
+    expect(err({ justification: "x".repeat(1000) })).toBeNull();
+    expect(err({ justification: "x".repeat(1001) })).toBe(m.JustificationTooLong);
+    expect(ALLOCATION_JUSTIFICATION_MAX_LENGTH).toBe(1000);
+  });
+
+  it("SpendTypeInvalid / RecurrenceInvalid / PriorityInvalid", () => {
+    expect(err({ spendType: "Opex" as BudgetItemInput["spendType"] })).toBe(m.SpendTypeInvalid);
+    expect(err({ recurrence: "Weekly" as BudgetItemInput["recurrence"] })).toBe(m.RecurrenceInvalid);
+    expect(err({ priority: "Critical" as BudgetItemInput["priority"] })).toBe(m.PriorityInvalid);
+  });
+
+  it("UnitTooLong at 32 — checked even on a lump sum, as the server does", () => {
+    expect(err({ ...builtUp, unit: "x".repeat(32) })).toBeNull();
+    expect(err({ ...builtUp, unit: "x".repeat(33) })).toBe(m.UnitTooLong);
+    expect(err({ unit: "x".repeat(33) })).toBe(m.UnitTooLong);
+  });
+
+  it("VendorTooLong at 120", () => {
+    expect(err({ vendor: "x".repeat(120) })).toBeNull();
+    expect(err({ vendor: "x".repeat(121) })).toBe(m.VendorTooLong);
+  });
+
+  it("TagInvalid — empty after trimming, or longer than 32", () => {
+    expect(err({ tags: ["x".repeat(32)] })).toBeNull();
+    expect(err({ tags: ["x".repeat(33)] })).toBe(m.TagInvalid);
+    expect(err({ tags: ["ok", "  "] })).toBe(m.TagInvalid);
+  });
+
+  it("TooManyTags — counted after case-insensitive de-duplication", () => {
+    const ten = Array.from({ length: 10 }, (_, i) => `t${i}`);
+    expect(err({ tags: ten })).toBeNull();
+    expect(err({ tags: [...ten, "T0", " t1 "] })).toBeNull(); // duplicates don't count
+    expect(err({ tags: [...ten, "t10"] })).toBe(m.TooManyTags);
+  });
+
+  it("AssumptionsTooLong / ConsequenceTooLong at 1000", () => {
+    expect(err({ assumptions: "x".repeat(1000) })).toBeNull();
+    expect(err({ assumptions: "x".repeat(1001) })).toBe(m.AssumptionsTooLong);
+    expect(err({ consequenceIfUnfunded: "x".repeat(1000) })).toBeNull();
+    expect(err({ consequenceIfUnfunded: "x".repeat(1001) })).toBe(m.ConsequenceTooLong);
+  });
+
+  it("reports ONE error at a time, in the server's order", () => {
+    // Everything wrong at once: the code is reported first.
+    const everything: Partial<BudgetItemInput> = {
+      budgetCodeId: "",
+      title: "",
+      amountCad: null,
+      justification: "",
+      vendor: "x".repeat(121),
+      tags: [""],
+    };
+    expect(err(everything)).toBe(m.CodeRequired);
+    expect(err({ ...everything, budgetCodeId: "exp-a" })).toBe(m.TitleRequired);
+    expect(err({ ...everything, budgetCodeId: "exp-a", title: "T" })).toBe(m.AmountRequired);
+    expect(err({ ...everything, budgetCodeId: "exp-a", title: "T", amountCad: 1 })).toBe(
+      m.JustificationRequired,
+    );
+    expect(
+      err({ ...everything, budgetCodeId: "exp-a", title: "T", amountCad: 1, justification: "J" }),
+    ).toBe(m.VendorTooLong);
+    expect(
+      err({
+        ...everything,
+        budgetCodeId: "exp-a",
+        title: "T",
+        amountCad: 1,
+        justification: "J",
+        vendor: null,
+      }),
+    ).toBe(m.TagInvalid);
+  });
+});
+
+describe("normalizeTags and parseTagText", () => {
+  it("trims and de-duplicates case-insensitively, the first spelling winning", () => {
+    expect(normalizeTags([" Fuel", "fuel", "FUEL ", "winter"])).toEqual(["Fuel", "winter"]);
+  });
+
+  it("is null for an invalid tag", () => {
+    expect(normalizeTags([""])).toBeNull();
+    expect(normalizeTags(["x".repeat(33)])).toBeNull();
+  });
+
+  it("splits comma text and drops blank segments rather than sending them to be refused", () => {
+    expect(parseTagText("winter, safety,, ,")).toEqual(["winter", "safety"]);
+    expect(parseTagText("")).toEqual([]);
+  });
+});
+
+describe("draftToBudgetItemInput", () => {
+  const draft: BudgetItemDraft = {
+    budgetCodeId: "exp-a",
+    title: "  Diesel  ",
+    costMode: "lump",
+    amount: "1200.5",
+    quantity: "14",
+    unitCost: "1.85",
+    unit: "litre",
+    justification: " 14 rotations ",
+    spendType: "Operating",
+    recurrence: "Recurring",
+    vendor: "  ",
+    tags: "fuel, ops",
+    priority: "MustHave",
+    assumptions: "",
+    consequenceIfUnfunded: " Trips cancelled ",
+  };
+
+  it("sends only the lump sum for a lump-sum draft — quantity, unit cost and unit go as null", () => {
+    const r = draftToBudgetItemInput(draft);
+    expect(r).toEqual({
+      ok: true,
+      input: {
+        budgetCodeId: "exp-a",
+        title: "Diesel",
+        amountCad: 1200.5,
+        quantity: null,
+        unitCostCad: null,
+        unit: null,
+        justification: "14 rotations",
+        spendType: "Operating",
+        recurrence: "Recurring",
+        vendor: null,
+        tags: ["fuel", "ops"],
+        priority: "MustHave",
+        assumptions: null,
+        consequenceIfUnfunded: "Trips cancelled",
+      },
+    });
+  });
+
+  it("sends quantity, unit cost and unit — and amountCad null — for a built-up draft", () => {
+    const r = draftToBudgetItemInput({ ...draft, costMode: "builtUp" });
+    expect(r.ok && r.input).toMatchObject({
+      amountCad: null,
+      quantity: 14,
+      unitCostCad: 1.85,
+      unit: "litre",
+    });
+  });
+
+  it("leaves blanks as null for budgetItemError to report in the server's words", () => {
+    const r = draftToBudgetItemInput({ ...draft, costMode: "builtUp", unitCost: "" });
+    expect(r.ok && budgetItemError(r.input)).toBe(BUDGET_ITEM_MESSAGES.QuantityWithoutUnitCost);
+  });
+
+  it("refuses text that is not a number", () => {
+    expect(draftToBudgetItemInput({ ...draft, amount: "abc" })).toEqual({
+      ok: false,
+      error: "Enter the amount as a number.",
+    });
+  });
+});
+
+describe("recordToDraft", () => {
+  it("opens a built-up item in built-up mode with its figures", () => {
+    const d = recordToDraft(
+      makeLine("exp-a", "Expense", true, 5400, {
+        quantity: 12,
+        unitCostCad: 450,
+        unit: "month",
+        tags: ["a", "b"],
+      }),
+    );
+    expect(d).toMatchObject({ costMode: "builtUp", quantity: "12", unitCost: "450", unit: "month", amount: "", tags: "a, b" });
+  });
+
+  it("opens a lump-sum item in lump mode, and a copied item with an empty justification", () => {
+    const d = recordToDraft(makeLine("exp-a", "Expense", true, 900, { justification: "" }));
+    expect(d).toMatchObject({ costMode: "lump", amount: "900", justification: "" });
+  });
+});
+
+describe("itemReflects (the post-save refetch predicate)", () => {
+  const input: BudgetItemInput = {
+    budgetCodeId: "exp-a",
+    title: "Diesel",
+    amountCad: null,
+    quantity: 3,
+    unitCostCad: 1.005,
+    unit: null,
+    justification: "J",
+    spendType: "Operating",
+    recurrence: "OneTime",
+    vendor: null,
+    tags: [],
+    priority: "MustHave",
+    assumptions: null,
+    consequenceIfUnfunded: null,
+  };
+  const row = makeLine("exp-a", "Expense", true, 3.03, {
+    id: "item-1",
+    title: "Diesel",
+    justification: "J",
+    priority: "MustHave",
+  });
+
+  it("is true once this id carries the values sent, with the server's computed amount", () => {
+    expect(itemReflects(row, "item-1", input)).toBe(true);
+  });
+
+  it("is false for another id, a stale title, a stale amount or the old code", () => {
+    expect(itemReflects(row, "item-2", input)).toBe(false);
+    expect(itemReflects({ ...row, title: "Old" }, "item-1", input)).toBe(false);
+    expect(itemReflects({ ...row, amountCad: 3 }, "item-1", input)).toBe(false);
+    expect(itemReflects({ ...row, budgetCodeId: "exp-b" }, "item-1", input)).toBe(false);
+  });
+});
+
+describe("groupItemsByCode", () => {
+  it("groups by code in the server's order, keeping item order, with each code's subtotal", () => {
+    const items = [
+      makeLine("exp-a", "Expense", true, 0.1, { id: "a1" }),
+      makeLine("exp-a", "Expense", true, 0.2, { id: "a2" }),
+      makeLine("exp-b", "Expense", false, 50, { id: "b1" }),
+    ];
+    const groups = groupItemsByCode(items);
+
+    expect(groups.map((g) => [g.budgetCodeId, g.items.map((i) => i.id), g.subtotalCad])).toEqual([
+      ["exp-a", ["a1", "a2"], 0.3], // integer cents: not 0.30000000000000004
+      ["exp-b", ["b1"], 50],
+    ]);
+    expect(groups[1].isCodeActive).toBe(false);
+  });
+
+  it("is empty for no items", () => {
+    expect(groupItemsByCode([])).toEqual([]);
+  });
+});
+
+describe("priorityBreakdown", () => {
+  it("totals and counts per priority, Must → Should → Nice, every bucket present", () => {
+    const items = [
+      makeLine("exp-a", "Expense", true, 100, { id: "1", priority: "MustHave" }),
+      makeLine("exp-a", "Expense", true, 0.1, { id: "2", priority: "NiceToHave" }),
+      makeLine("exp-b", "Expense", true, 0.2, { id: "3", priority: "NiceToHave" }),
+    ];
+
+    expect(priorityBreakdown(items)).toEqual([
+      { priority: "MustHave", label: "Must have", count: 1, totalCad: 100 },
+      { priority: "ShouldHave", label: "Should have", count: 0, totalCad: 0 },
+      { priority: "NiceToHave", label: "Nice to have", count: 2, totalCad: 0.3 },
     ]);
   });
 });
 
-// allocationAmountError / allocationJustificationError mirror BudgetAllocation.Validate
-// (AmountRequired / AmountNegative / AmountTooLarge / JustificationRequired /
-// JustificationTooLong). The whole-dollar rule is this app's own, stricter than the server's.
-
-describe("allocationAmountError", () => {
-  it.each(["0", "1", "612000", " 250 "])("accepts %j", (text) => {
-    expect(allocationAmountError(text)).toBeNull();
+describe("costBuildUpLabel", () => {
+  it("writes q unit × $u for a built-up item", () => {
+    expect(costBuildUpLabel({ quantity: 12, unitCostCad: 450, unit: "month" })).toBe("12 month × $450");
+    expect(costBuildUpLabel({ quantity: 3, unitCostCad: 1.01, unit: null })).toBe("3 × $1.01");
+    expect(costBuildUpLabel({ quantity: 1500, unitCostCad: 1.85, unit: "litre" })).toBe(
+      "1,500 litre × $1.85",
+    );
   });
 
-  it.each(["", "   ", "abc"])("requires an amount for %j", (text) => {
-    expect(allocationAmountError(text)).toBe("Enter an amount.");
-  });
-
-  it("refuses cents — the app plans in whole dollars", () => {
-    expect(allocationAmountError("12.50")).toContain("whole dollars");
-  });
-
-  it("refuses a negative amount", () => {
-    expect(allocationAmountError("-1")).toContain("negative");
-  });
-
-  it("refuses an amount beyond decimal(12,2)", () => {
-    expect(allocationAmountError("1000000000")).toContain("too large");
+  it("is null for a lump sum", () => {
+    expect(costBuildUpLabel({ quantity: null, unitCostCad: null, unit: null })).toBeNull();
   });
 });
 
-describe("allocationJustificationError", () => {
-  it("accepts a justification", () => {
-    expect(allocationJustificationError("14 rotations confirmed")).toBeNull();
+// Label maps and the priority → StatusKind mapping. Typed Records make a new wire member a
+// compile error; these pin the wire spellings (C# BudgetSpendType / BudgetRecurrence /
+// BudgetItemPriority) and that the priority chip is never colour alone.
+
+describe("item label maps", () => {
+  it("pins the wire enum spellings", () => {
+    expect(Object.keys(SPEND_TYPE_LABELS)).toEqual(["Operating", "Capital"]);
+    expect(Object.keys(RECURRENCE_LABELS)).toEqual(["OneTime", "Recurring"]);
+    expect([...PRIORITY_ORDER]).toEqual(["MustHave", "ShouldHave", "NiceToHave"]);
+    expect(Object.keys(PRIORITY_LABELS)).toEqual([...PRIORITY_ORDER]);
   });
 
-  it.each(["", "   "])("requires one for %j — zero-based means argued from nothing", (text) => {
-    expect(allocationJustificationError(text)).toContain("Enter a justification");
+  it("gives every priority its own glyph and label, since two share a colour", () => {
+    const glyphs = PRIORITY_ORDER.map((p) => PRIORITY_GLYPHS[p]);
+    const labels = PRIORITY_ORDER.map((p) => PRIORITY_LABELS[p]);
+    expect(new Set(glyphs).size).toBe(3);
+    expect(new Set(labels).size).toBe(3);
+    expect(PRIORITY_KINDS).toEqual({ MustHave: "info", ShouldHave: "info", NiceToHave: "off" });
   });
 
-  it("accepts exactly the maximum and refuses one more", () => {
-    expect(allocationJustificationError("x".repeat(ALLOCATION_JUSTIFICATION_MAX_LENGTH))).toBeNull();
-    expect(
-      allocationJustificationError("x".repeat(ALLOCATION_JUSTIFICATION_MAX_LENGTH + 1)),
-    ).toContain("1000 characters or fewer");
+  it("never maps a priority to a success or problem kind — a ranking is not a verdict", () => {
+    for (const p of PRIORITY_ORDER) {
+      expect(["ontime", "over"]).not.toContain(PRIORITY_KINDS[p]);
+    }
   });
 });
 
@@ -785,7 +1215,7 @@ describe("copyOutcomeSummary", () => {
         skippedRetiredCode: 0,
         sourceLineCount: 11,
       }),
-    ).toBe("Copied 11 lines, each with no justification yet. 11 lines in the source period.");
+    ).toBe("Copied 11 items, each with no justification yet. 11 items in the source period.");
   });
 
   it("omits a skip clause that is zero rather than writing '0 skipped'", () => {
@@ -796,7 +1226,7 @@ describe("copyOutcomeSummary", () => {
       sourceLineCount: 5,
     });
 
-    expect(summary).toContain("2 lines already planned here and left untouched");
+    expect(summary).toContain("2 items on codes already planned here, left untouched");
     expect(summary).not.toContain("retired");
   });
 
@@ -808,9 +1238,9 @@ describe("copyOutcomeSummary", () => {
       sourceLineCount: 3,
     });
 
-    expect(summary).toContain("1 line already planned here and left untouched");
-    expect(summary).toContain("1 line on retired codes");
-    expect(summary).toContain("3 lines in the source period");
+    expect(summary).toContain("1 item on codes already planned here, left untouched");
+    expect(summary).toContain("1 item on retired codes");
+    expect(summary).toContain("3 items in the source period");
   });
 
   it("says nothing was copied rather than claiming a copy, when every line was skipped", () => {
@@ -822,7 +1252,7 @@ describe("copyOutcomeSummary", () => {
         sourceLineCount: 4,
       }),
     ).toBe(
-      "Nothing was copied — skipped 4 lines already planned here and left untouched. 4 lines in the source period.",
+      "Nothing was copied — skipped 4 items on codes already planned here, left untouched. 4 items in the source period.",
     );
   });
 
@@ -836,7 +1266,7 @@ describe("copyOutcomeSummary", () => {
         skippedRetiredCode: 0,
         sourceLineCount: 0,
       }),
-    ).toBe("That period has no lines to copy — nothing was added.");
+    ).toBe("That period has no items to copy — nothing was added.");
   });
 });
 
@@ -863,6 +1293,16 @@ describe("coverage", () => {
 
   it("is 0/0 for a category with no codes", () => {
     expect(coverage([], [], "Expense")).toEqual({ planned: 0, active: 0 });
+  });
+
+  it("counts a code with several items ONCE — coverage is codes with at least one item", () => {
+    const lines = [
+      makeLine("rev-a", "Revenue", true, 100, { id: "i1" }),
+      makeLine("rev-a", "Revenue", true, 200, { id: "i2" }),
+      makeLine("rev-a", "Revenue", true, 300, { id: "i3" }),
+    ];
+
+    expect(coverage(lines, codes, "Revenue")).toEqual({ planned: 1, active: 2 });
   });
 });
 
@@ -911,8 +1351,8 @@ describe("planningProgress", () => {
 
     expect(row(steps, "revenue").status).toBe("Done");
     expect(row(steps, "revenue").kind).toBe("ontime");
-    expect(row(steps, "revenue").detail).toBe("1 line · 1 of 1 active revenue codes planned");
-    expect(row(steps, "expense").detail).toBe("1 line · 1 of 2 active expense codes planned");
+    expect(row(steps, "revenue").detail).toBe("1 item · 1 of 1 active revenue codes planned");
+    expect(row(steps, "expense").detail).toBe("1 item · 1 of 2 active expense codes planned");
   });
 
   it("writes the balance row's signed figure out, and never leaves the sign to colour", () => {
@@ -945,7 +1385,7 @@ describe("planningProgress", () => {
     expect(argued.kind).toBe("soon");
     expect(argued.status).toBe("Needs work");
     expect(argued.detail).toBe(
-      "2 of 3 lines still need a justification — a copied line brings its amount, not its argument.",
+      "2 of 3 items still need a justification — a copied item brings its amount, not its argument.",
     );
   });
 
@@ -955,7 +1395,7 @@ describe("planningProgress", () => {
 
     expect(argued.kind).toBe("ontime");
     expect(argued.status).toBe("Done");
-    expect(argued.detail).toBe("All 2 lines carry a justification.");
+    expect(argued.detail).toBe("All 2 items carry a justification.");
   });
 
   it("marks the states before Open done and the ones after pending", () => {
@@ -988,6 +1428,29 @@ describe("planningProgress", () => {
       "argued",
       ...PERIOD_STATE_ORDER,
     ]);
+  });
+
+  it("names items, never a 'set' budget — a code's budget is the sum of its items", () => {
+    const labels = checklist(planningProgress(period("Draft"), [], codes)).map((s) => s.label);
+
+    expect(labels).toEqual([
+      "Revenue items planned",
+      "Expense items planned",
+      "Every dollar assigned",
+      "Every item argued",
+    ]);
+    expect(labels.join(" ")).not.toMatch(/budget set|set budget/i);
+  });
+
+  it("counts several items on one code as items, and the code once for coverage", () => {
+    const lines = [
+      makeLine("exp-a", "Expense", true, 100, { id: "i1" }),
+      makeLine("exp-a", "Expense", true, 200, { id: "i2" }),
+    ];
+
+    expect(row(planningProgress(period("Draft"), lines, codes), "expense").detail).toBe(
+      "2 items · 1 of 2 active expense codes planned",
+    );
   });
 
   it("has no row for step 4 of zero-based budgeting — actuals are still mock", () => {

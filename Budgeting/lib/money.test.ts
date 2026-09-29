@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDeltaCad, formatDeltaPct } from "./money";
+import { formatCadPrecise, formatDeltaCad, formatDeltaPct } from "./money";
 
 // The platform rule these two enforce: a signed figure writes its sign out as text, so the
 // direction survives grayscale and any colour-vision deficiency. No server rule to mirror — the
@@ -37,5 +37,19 @@ describe("formatDeltaPct", () => {
 
   it("prints a dash when there is no baseline (planned = 0)", () => {
     expect(formatDeltaPct(null)).toBe("—");
+  });
+});
+
+// A built-up budget item (quantity × unit cost) lands on cents, which the copied whole-dollar
+// formatCad would silently round away. No server rule — display only.
+describe("formatCadPrecise", () => {
+  it.each<[number, string]>([
+    [5400, "$5,400"],
+    [0, "$0"],
+    [3.03, "$3.03"],
+    [0.5, "$0.50"],
+    [1_234_567.89, "$1,234,567.89"],
+  ])("formats %d as %s — cents only when there are cents", (value, expected) => {
+    expect(formatCadPrecise(value)).toBe(expected);
   });
 });
