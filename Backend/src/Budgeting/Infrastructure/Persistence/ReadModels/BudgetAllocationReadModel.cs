@@ -25,8 +25,21 @@ public sealed class BudgetAllocationReadModel
     public Guid PeriodId { get; set; }
     public Guid BudgetCodeId { get; set; }
     public string Code { get; set; } = null!;
+    public string Title { get; set; } = null!;
     public decimal AmountCad { get; set; }
+    public decimal? Quantity { get; set; }
+    public decimal? UnitCostCad { get; set; }
+    public string? Unit { get; set; }
     public string Justification { get; set; } = null!;
+
+    /// <summary>Enum names as stored by the write side (<c>BudgetSpendType</c> etc.).</summary>
+    public string SpendType { get; set; } = null!;
+    public string Recurrence { get; set; } = null!;
+    public string? Vendor { get; set; }
+    public List<string> Tags { get; set; } = [];
+    public string Priority { get; set; } = null!;
+    public string? Assumptions { get; set; }
+    public string? ConsequenceIfUnfunded { get; set; }
     public Guid? CreatedBy { get; set; }
     public Guid? ModifiedBy { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
@@ -51,14 +64,29 @@ public sealed class BudgetAllocationReadModelConfiguration : IEntityTypeConfigur
         builder.Property(a => a.Justification)
             .HasColumnName("justification")
             .HasMaxLength(BudgetAllocation.JustificationMaxLength);
+        builder.Property(a => a.Title).HasColumnName("title").HasMaxLength(BudgetAllocation.TitleMaxLength);
+        builder.Property(a => a.Quantity).HasColumnName("quantity").HasPrecision(12, 2);
+        builder.Property(a => a.UnitCostCad).HasColumnName("unit_cost_cad").HasPrecision(12, 2);
+        builder.Property(a => a.Unit).HasColumnName("unit").HasMaxLength(BudgetAllocation.UnitMaxLength);
+        builder.Property(a => a.SpendType).HasColumnName("spend_type").HasMaxLength(16);
+        builder.Property(a => a.Recurrence).HasColumnName("recurrence").HasMaxLength(16);
+        builder.Property(a => a.Vendor).HasColumnName("vendor").HasMaxLength(BudgetAllocation.VendorMaxLength);
+        builder.PrimitiveCollection(a => a.Tags).HasColumnName("tags");
+        builder.Property(a => a.Priority).HasColumnName("priority").HasMaxLength(16);
+        builder.Property(a => a.Assumptions)
+            .HasColumnName("assumptions")
+            .HasMaxLength(BudgetAllocation.AssumptionsMaxLength);
+        builder.Property(a => a.ConsequenceIfUnfunded)
+            .HasColumnName("consequence_if_unfunded")
+            .HasMaxLength(BudgetAllocation.ConsequenceMaxLength);
         builder.Property(a => a.CreatedBy).HasColumnName("created_by");
         builder.Property(a => a.ModifiedBy).HasColumnName("modified_by");
         builder.Property(a => a.CreatedAtUtc).HasColumnName("created_at_utc");
         builder.Property(a => a.UpdatedAtUtc).HasColumnName("updated_at_utc");
         builder.Property(a => a.Version).HasColumnName("version");
 
-        // Mirrors the write table's uniqueness, and with period_id second it is also the
-        // per-period scan both read services make.
-        builder.HasIndex(a => new { a.TenantId, a.PeriodId, a.BudgetCodeId }).IsUnique();
+        // Non-unique, like the write table's: many items per (period, code). With period_id
+        // second it is also the per-period scan both read services make.
+        builder.HasIndex(a => new { a.TenantId, a.PeriodId, a.BudgetCodeId });
     }
 }

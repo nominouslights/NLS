@@ -13,7 +13,7 @@ namespace NorthernLink.Budgeting.Infrastructure.Persistence;
 /// <b>The totals are grouped in memory, not in SQL.</b> The lines are pulled as bare
 /// <c>(PeriodId, BudgetCodeId, AmountCad)</c> triples and bucketed against the chart's
 /// id → category dictionary — the same two-dictionaries shape as <see cref="BudgetCodeReadService"/>,
-/// and for the same reason: the sets are small (a tenant's lines are at most periods × codes),
+/// and for the same reason: the sets are small (a tenant's budget items number in the hundreds),
 /// and the alternative — a <c>GROUP BY</c> over an inner join to <c>rm_budget_codes</c> — would
 /// silently drop any line whose code row is missing, while <see cref="BudgetAllocationReadService"/>
 /// still lists that line as Expense. Doing both resolutions the same way is what keeps a

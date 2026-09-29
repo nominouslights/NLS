@@ -11,7 +11,8 @@ namespace NorthernLink.Budgeting.Application.Allocations;
 /// </para>
 /// <para>
 /// <paramref name="SkippedAlreadyPlanned"/> is the count of source lines whose budget code the
-/// target period already plans. Those are never overwritten: the existing line carries a
+/// target period already plans (at least one item on that code before the copy ran). Those are
+/// never copied, so a second copy is a no-op; the existing items carry a
 /// justification somebody wrote, and destroying it is the opposite of what a "start from last
 /// period" button is for.
 /// </para>
