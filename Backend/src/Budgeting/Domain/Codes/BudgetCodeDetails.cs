@@ -41,7 +41,7 @@ public sealed record BudgetCodeDetails
 
     /// <summary>
     /// Optional parent for one-level rollup reporting. Validated in the application layer
-    /// (<c>BudgetCodeParentRule</c>), not here: the aggregate cannot see the tenant's other codes.
+    /// (<c>BudgetCodeParentRule</c>), not here: the aggregate cannot see the period's other codes, and the parent must be one of them.
     /// </summary>
     public Guid? ParentCodeId { get; init; }
 

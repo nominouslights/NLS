@@ -1,24 +1,21 @@
 using Microsoft.EntityFrameworkCore;
 using NorthernLink.Budgeting.Application.Abstractions;
 using NorthernLink.Budgeting.Application.Periods;
-using NorthernLink.Budgeting.Domain.Codes;
 using NorthernLink.Budgeting.Infrastructure.Persistence.ReadModels;
 
 namespace NorthernLink.Budgeting.Infrastructure.Persistence;
 
 /// <summary>
 /// Read side — queries budgeting.rm_budget_periods and maps to the public contract, with each
-/// period's planned revenue and planned expense summed from its allocation lines.
+/// period's planned revenue and planned expense summed from its budget items.
 /// <para>
-/// <b>The totals are grouped in memory, not in SQL.</b> The lines are pulled as bare
-/// <c>(PeriodId, BudgetCodeId, AmountCad)</c> triples and bucketed against the chart's
-/// id → category dictionary — the same two-dictionaries shape as <see cref="BudgetCodeReadService"/>,
-/// and for the same reason: the sets are small (a tenant's budget items number in the hundreds),
-/// and the alternative — a <c>GROUP BY</c> over an inner join to <c>rm_budget_codes</c> — would
-/// silently drop any line whose code row is missing, while <see cref="BudgetAllocationReadService"/>
-/// still lists that line as Expense. Doing both resolutions the same way is what keeps a
-/// period's totals and its lines agreeing. A line whose code is unknown counts as Expense,
-/// matching the lines read.
+/// <b>The totals are computed in memory, by <see cref="PeriodPlannedTotals"/>.</b> The items are
+/// pulled as bare <c>(PeriodId, BudgetCodeId, AmountCad)</c> triples and classified against the
+/// chart's (period, code id) → category entries — each item by <em>its own period's</em> code. A
+/// <c>GROUP BY</c> over an inner join to <c>rm_budget_codes</c> would silently drop any item
+/// whose code row is missing, while <see cref="BudgetAllocationReadService"/> still lists that
+/// item as Expense; doing both resolutions the same way is what keeps a period's totals and its
+/// items agreeing.
 /// </para>
 /// </summary>
 internal sealed class BudgetPeriodReadService(BudgetingDbContext context) : IBudgetPeriodReadService
@@ -36,7 +33,8 @@ internal sealed class BudgetPeriodReadService(BudgetingDbContext context) : IBud
             return [];
         }
 
-        var totals = await LoadTotalsAsync(context.BudgetAllocationReadModels, cancellationToken);
+        var totals = await LoadTotalsAsync(
+            context.BudgetAllocationReadModels, context.BudgetCodeReadModels, cancellationToken);
 
         return periods.Select(period => ToResponse(period, totals)).ToList();
     }
@@ -55,55 +53,45 @@ internal sealed class BudgetPeriodReadService(BudgetingDbContext context) : IBud
         }
 
         var totals = await LoadTotalsAsync(
-            context.BudgetAllocationReadModels.Where(a => a.PeriodId == periodId), cancellationToken);
+            context.BudgetAllocationReadModels.Where(a => a.PeriodId == periodId),
+            context.BudgetCodeReadModels.Where(c => c.PeriodId == periodId),
+            cancellationToken);
 
         return ToResponse(period, totals);
     }
 
     /// <summary>
-    /// Sums the given lines into (revenue, expense) per period, resolving each line's category
-    /// through the chart. Shared by the list and the single read so the two can never disagree
-    /// on how a total is built.
+    /// Loads the given items and codes and sums them per period. Shared by the list and the single
+    /// read so the two can never disagree on how a total is built.
     /// </summary>
-    private async Task<IReadOnlyDictionary<Guid, PlannedTotals>> LoadTotalsAsync(
-        IQueryable<BudgetAllocationReadModel> lines,
+    private static async Task<IReadOnlyDictionary<Guid, PeriodPlannedTotals.Totals>> LoadTotalsAsync(
+        IQueryable<BudgetAllocationReadModel> items,
+        IQueryable<BudgetCodeReadModel> codes,
         CancellationToken cancellationToken)
     {
-        var amounts = await lines
+        var amounts = await items
             .AsNoTracking()
-            .Select(a => new { a.PeriodId, a.BudgetCodeId, a.AmountCad })
+            .Select(a => new PeriodPlannedTotals.ItemAmount(a.PeriodId, a.BudgetCodeId, a.AmountCad))
             .ToListAsync(cancellationToken);
 
         if (amounts.Count == 0)
         {
-            return new Dictionary<Guid, PlannedTotals>();
+            return new Dictionary<Guid, PeriodPlannedTotals.Totals>();
         }
 
-        var categoryByCodeId = await context.BudgetCodeReadModels
+        var categories = await codes
             .AsNoTracking()
-            .Select(c => new { c.Id, c.Category })
-            .ToDictionaryAsync(c => c.Id, c => c.Category, cancellationToken);
+            .Select(c => new PeriodPlannedTotals.CodeCategory(c.PeriodId, c.Id, c.Category))
+            .ToListAsync(cancellationToken);
 
-        var totals = new Dictionary<Guid, PlannedTotals>();
-        foreach (var amount in amounts)
-        {
-            var isRevenue = categoryByCodeId.TryGetValue(amount.BudgetCodeId, out var category)
-                && category == nameof(BudgetCodeCategory.Revenue);
-
-            var current = totals.GetValueOrDefault(amount.PeriodId, PlannedTotals.Zero);
-            totals[amount.PeriodId] = isRevenue
-                ? current with { RevenueCad = current.RevenueCad + amount.AmountCad }
-                : current with { ExpenseCad = current.ExpenseCad + amount.AmountCad };
-        }
-
-        return totals;
+        return PeriodPlannedTotals.Sum(amounts, categories);
     }
 
     private static BudgetPeriodResponse ToResponse(
         BudgetPeriodReadModel period,
-        IReadOnlyDictionary<Guid, PlannedTotals> totals)
+        IReadOnlyDictionary<Guid, PeriodPlannedTotals.Totals> totals)
     {
-        var planned = totals.GetValueOrDefault(period.Id, PlannedTotals.Zero);
+        var planned = totals.GetValueOrDefault(period.Id, PeriodPlannedTotals.Totals.Zero);
 
         return new BudgetPeriodResponse(
             period.Id,
@@ -118,10 +106,5 @@ internal sealed class BudgetPeriodReadService(BudgetingDbContext context) : IBud
             planned.ExpenseCad,
             period.CreatedAtUtc,
             period.UpdatedAtUtc);
-    }
-
-    private sealed record PlannedTotals(decimal RevenueCad, decimal ExpenseCad)
-    {
-        public static readonly PlannedTotals Zero = new(0m, 0m);
     }
 }

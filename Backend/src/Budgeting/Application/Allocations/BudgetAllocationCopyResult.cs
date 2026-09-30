@@ -10,17 +10,18 @@ namespace NorthernLink.Budgeting.Application.Allocations;
 /// show the user that nothing went missing — a skip nobody counted reads as data loss.
 /// </para>
 /// <para>
-/// <paramref name="SkippedAlreadyPlanned"/> is the count of source lines whose budget code the
-/// target period already plans (at least one item on that code before the copy ran). Those are
+/// <paramref name="SkippedAlreadyPlanned"/> is the count of source lines whose budget code — the
+/// target period's code with the same string — the target already plans (at least one item on
+/// that code before the copy ran). Those are
 /// never copied, so a second copy is a no-op; the existing items carry a
 /// justification somebody wrote, and destroying it is the opposite of what a "start from last
 /// period" button is for.
 /// </para>
 /// <para>
-/// <paramref name="SkippedRetiredCode"/> folds together a source line on a code retired since
-/// and a source line on a code deleted from the chart entirely — from the planner's side both
-/// are "that code isn't on offer any more", and the read model already reports a missing code as
-/// inactive.
+/// <paramref name="SkippedRetiredCode"/> counts source lines for which the target period has
+/// <b>no active code with that string</b> — the string is missing from the target's chart, or
+/// present but retired. From the planner's side both are "that code isn't on offer in this
+/// period". The field keeps its original name to spare the console a rename.
 /// </para>
 /// <para>
 /// All four zero is a success, not a failure: an empty source period copies nothing, and the

@@ -184,7 +184,9 @@ public sealed class BudgetAllocation : AggregateRoot, ITenantScoped
 
     /// <summary>
     /// Copies this item into another period, <b>carrying every field and deliberately dropping
-    /// the argument</b>: same tenant, same budget code (id and string), same title, amount, cost
+    /// the argument</b>: same tenant, same budget code <em>string</em> — re-pointed at
+    /// <paramref name="budgetCodeId"/>, the target period's code with that string, because codes
+    /// belong to a period and the source's code id names a code of the source period — same title, amount, cost
     /// build-up, classification, vendor, tags, priority, assumptions and consequence — and
     /// <see cref="Justification"/> set to <see cref="string.Empty"/>.
     /// <para>
@@ -206,20 +208,21 @@ public sealed class BudgetAllocation : AggregateRoot, ITenantScoped
     /// </para>
     /// <para>
     /// An <em>instance</em> method rather than a static factory, so the copy cannot be handed a
-    /// mismatched tenant, code id or code string — they come from the item being copied, and only
-    /// the period and the actor are supplied. Nothing here can fail: every field was already
+    /// mismatched tenant or code string — they come from the item being copied; only the period,
+    /// the target period's code id and the actor are supplied. The caller (the copy handler) is
+    /// what guarantees that code carries this item's string: it resolves the id by string. Nothing here can fail: every field was already
     /// validated and rounded when the source item was written. Raises
     /// <see cref="BudgetAllocationCreatedDomainEvent"/> exactly as <see cref="Create"/> does.
     /// </para>
     /// </summary>
-    public BudgetAllocation CopyInto(Guid periodId, Guid? actorId)
+    public BudgetAllocation CopyInto(Guid periodId, Guid budgetCodeId, Guid? actorId)
     {
         var now = DateTimeOffset.UtcNow;
         var copy = new BudgetAllocation
         {
             TenantId = TenantId,
             PeriodId = periodId,
-            BudgetCodeId = BudgetCodeId,
+            BudgetCodeId = budgetCodeId,
             Code = Code,
             Title = Title,
             // Already rounded when the source item was written; carried straight across.
@@ -241,7 +244,7 @@ public sealed class BudgetAllocation : AggregateRoot, ITenantScoped
         };
 
         copy.Raise(new BudgetAllocationCreatedDomainEvent(
-            copy.Id, TenantId, periodId, BudgetCodeId, Code, Title, AmountCad, actorId));
+            copy.Id, TenantId, periodId, budgetCodeId, Code, Title, AmountCad, actorId));
         return copy;
     }
 

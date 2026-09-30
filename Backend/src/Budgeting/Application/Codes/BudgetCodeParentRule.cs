@@ -7,8 +7,14 @@ namespace NorthernLink.Budgeting.Application.Codes;
 /// <summary>
 /// The one-level hierarchy rule, in one place so create and edit cannot drift apart — the same
 /// reason <see cref="BudgetCodeDetails"/> exists. It lives in the application layer rather than
-/// on the aggregate because it needs to see the tenant's <em>other</em> codes, which an aggregate
+/// on the aggregate because it needs to see the period's <em>other</em> codes, which an aggregate
 /// by definition cannot.
+/// <para>
+/// <b>The parent must be in the same period.</b> Every lookup is by (period, id), so a parent id
+/// that names another period's code reads back as null and reports
+/// <see cref="BudgetCodeErrors.ParentNotFound"/> — a rollup across two periods' charts is
+/// meaningless, and saying "not found in this period" names the fix.
+/// </para>
 /// <para>
 /// "One level" has to be guarded from both directions. Guarding only from above ("your parent
 /// must be top-level") lets a planner build a two-level chain bottom-up: give A a child B, then
@@ -28,6 +34,7 @@ public static class BudgetCodeParentRule
     /// </param>
     public static async Task<Result> ValidateAsync(
         IBudgetCodeRepository repository,
+        Guid periodId,
         Guid? parentCodeId,
         Guid selfId,
         bool checkChildren,
@@ -43,12 +50,12 @@ public static class BudgetCodeParentRule
             return Result.Failure(BudgetCodeErrors.ParentIsSelf);
         }
 
-        // There is deliberately no explicit tenant comparison here, and a reviewer will look for
-        // one. GetByIdAsync queries through the DbContext's tenant query filter with RLS
-        // underneath, so a parent belonging to another tenant reads back as null and reports
-        // ParentNotFound — which is also the correct answer: confirming the id exists elsewhere
-        // would leak that another tenant owns it.
-        var parent = await repository.GetByIdAsync(parentId, cancellationToken);
+        // There is deliberately no explicit tenant or period comparison here, and a reviewer will
+        // look for one. GetByIdAsync is keyed on (period, id) and queries through the DbContext's
+        // tenant query filter with RLS underneath, so a parent in another period or another
+        // tenant reads back as null and reports ParentNotFound — which is also the correct answer:
+        // confirming the id exists elsewhere would leak that another tenant owns it.
+        var parent = await repository.GetByIdAsync(periodId, parentId, cancellationToken);
         if (parent is null)
         {
             return Result.Failure(BudgetCodeErrors.ParentNotFound);
@@ -59,7 +66,7 @@ public static class BudgetCodeParentRule
             return Result.Failure(BudgetCodeErrors.ParentIsNotTopLevel);
         }
 
-        if (checkChildren && await repository.HasChildrenAsync(selfId, cancellationToken))
+        if (checkChildren && await repository.HasChildrenAsync(periodId, selfId, cancellationToken))
         {
             return Result.Failure(BudgetCodeErrors.CodeWithChildrenCannotHaveParent);
         }

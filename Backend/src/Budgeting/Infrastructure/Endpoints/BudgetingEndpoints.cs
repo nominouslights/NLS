@@ -9,6 +9,7 @@ using NorthernLink.Budgeting.Application.Allocations.GetAllocations;
 using NorthernLink.Budgeting.Application.Allocations.Remove;
 using NorthernLink.Budgeting.Application.Allocations.Create;
 using NorthernLink.Budgeting.Application.Allocations.Update;
+using NorthernLink.Budgeting.Application.Codes.CopyFromPeriod;
 using NorthernLink.Budgeting.Application.Codes.Create;
 using NorthernLink.Budgeting.Application.Codes.Delete;
 using NorthernLink.Budgeting.Application.Codes.GetCodes;
@@ -72,20 +73,33 @@ public static class BudgetingEndpoints
         // WOULD collide with this route — if one is ever added, keep the :guid constraint.
         budgeting.MapPost("periods/{id:guid}/allocations/copy", CopyAllocations);
 
-        // Codes. Retiring (activate/deactivate) is the normal end-of-life path and stays that
-        // way: allocation lines reference codes by id and by string and must keep resolving, so a
-        // code that has ever been used is retired, never deleted. DELETE exists only for the
-        // narrow case retirement does not cover — a code created in error and never referenced —
-        // and IBudgetCodeUsageProbe (now backed by the allocation table) turns it into a 409 the
-        // moment any period has planned against the code.
-        budgeting.MapGet("codes", GetCodes);
+        // Codes belong to a period: each period owns its chart, and the code STRING is the
+        // cross-period identity. Every code route lives under its period, and every write answers
+        // 409 Budgeting.Code.PeriodNotEditable outside Draft and Open (reads work in any state).
+        // Retiring (activate/deactivate) is the normal end-of-life path: items reference codes by
+        // id and by string and must keep resolving, so a code any item of its period has used is
+        // retired, never deleted. DELETE exists only for a code created in error and never
+        // referenced — IBudgetCodeUsageProbe turns it into a 409 otherwise.
+        //
+        // No collision between the literal segments (starter-set, copy) and the id routes: the
+        // literals are POST-only with one segment after "codes", and every {codeId} carries the
+        // :guid constraint, so "copy" can never bind as an id. Keep the constraint if a new
+        // POST .../codes/{codeId} route is ever added.
+        budgeting.MapGet("periods/{id:guid}/codes", GetCodes);
+        budgeting.MapPost("periods/{id:guid}/codes", CreateCode);
+        budgeting.MapPut("periods/{id:guid}/codes/{codeId:guid}", UpdateCode);
+        budgeting.MapPost("periods/{id:guid}/codes/{codeId:guid}/activate", ActivateCode);
+        budgeting.MapPost("periods/{id:guid}/codes/{codeId:guid}/deactivate", DeactivateCode);
+        budgeting.MapDelete("periods/{id:guid}/codes/{codeId:guid}", DeleteCode);
+        budgeting.MapPost("periods/{id:guid}/codes/starter-set", SeedStarterSet);
+
+        // Seed this period's chart from another period's — active codes whose string this period
+        // lacks, hierarchy remapped by string (see CopyBudgetCodesCommandHandler). 200 with
+        // counts, the allocations/copy precedent.
+        budgeting.MapPost("periods/{id:guid}/codes/copy", CopyCodes);
+
+        // Tenant-wide by design: it lists the people who can own a code, not codes.
         budgeting.MapGet("codes/owners", GetOwnerCandidates);
-        budgeting.MapPost("codes", CreateCode);
-        budgeting.MapPut("codes/{id:guid}", UpdateCode);
-        budgeting.MapPost("codes/{id:guid}/activate", ActivateCode);
-        budgeting.MapPost("codes/{id:guid}/deactivate", DeactivateCode);
-        budgeting.MapDelete("codes/{id:guid}", DeleteCode);
-        budgeting.MapPost("codes/starter-set", SeedStarterSet);
 
         return app;
     }
@@ -217,8 +231,9 @@ public static class BudgetingEndpoints
 
     /// <summary>
     /// Copies an earlier period's plan into this one: 200 with a full account of every source
-    /// line (copied / skipped because the code is already planned here / skipped because the code
-    /// is retired or gone), which always sums to <c>sourceLineCount</c>. An empty source period
+    /// line (copied / skipped because this period's code with that string is already planned /
+    /// skipped because this period has no active code with that string), which always sums to
+    /// <c>sourceLineCount</c>. Items land on this period's code with the same string. An empty source period
     /// is a 200 with zeroes, not an error.
     /// </summary>
     private static async Task<IResult> CopyAllocations(
@@ -254,14 +269,14 @@ public static class BudgetingEndpoints
             tenantContext, sender, tenantId => new RemoveBudgetAllocationCommand(tenantId, id, allocationId), cancellationToken);
 
     private static async Task<IResult> GetCodes(
-        ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
     {
         if (tenantContext.TenantId is not { } tenantId)
         {
             return Results.Unauthorized();
         }
 
-        var result = await sender.Query(new GetBudgetCodesQuery(tenantId), cancellationToken);
+        var result = await sender.Query(new GetBudgetCodesQuery(tenantId, id), cancellationToken);
         return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
     }
 
@@ -277,7 +292,12 @@ public static class BudgetingEndpoints
         return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
     }
 
+    /// <summary>
+    /// Adds a code to the period's chart: 201 with <c>{ id }</c>. There is no single-code GET, so
+    /// the Location points at the period's chart the new code now appears in.
+    /// </summary>
     private static async Task<IResult> CreateCode(
+        Guid id,
         CreateBudgetCodeRequest request,
         ITenantContext tenantContext,
         ICurrentActor currentActor,
@@ -290,16 +310,17 @@ public static class BudgetingEndpoints
         }
 
         var command = new CreateBudgetCodeCommand(
-            tenantId, request.Code ?? string.Empty, request.ToDetails(), currentActor.UserId);
+            tenantId, id, request.Code ?? string.Empty, request.ToDetails(), currentActor.UserId);
 
         var result = await sender.Send(command, cancellationToken);
         return result.IsSuccess
-            ? Results.Created($"/api/budgeting/codes/{result.Value}", new EntityCreatedResponse(result.Value))
+            ? Results.Created($"/api/budgeting/periods/{id}/codes", new EntityCreatedResponse(result.Value))
             : EndpointResults.Problem(result.Error);
     }
 
     private static Task<IResult> UpdateCode(
         Guid id,
+        Guid codeId,
         UpdateBudgetCodeRequest request,
         ITenantContext tenantContext,
         ICurrentActor currentActor,
@@ -308,11 +329,12 @@ public static class BudgetingEndpoints
         SendCommand(
             tenantContext,
             sender,
-            tenantId => new UpdateBudgetCodeCommand(tenantId, id, request.ToDetails(), currentActor.UserId),
+            tenantId => new UpdateBudgetCodeCommand(tenantId, id, codeId, request.ToDetails(), currentActor.UserId),
             cancellationToken);
 
     private static Task<IResult> ActivateCode(
         Guid id,
+        Guid codeId,
         ITenantContext tenantContext,
         ICurrentActor currentActor,
         ISender sender,
@@ -320,11 +342,12 @@ public static class BudgetingEndpoints
         SendCommand(
             tenantContext,
             sender,
-            tenantId => new SetBudgetCodeActiveCommand(tenantId, id, true, currentActor.UserId),
+            tenantId => new SetBudgetCodeActiveCommand(tenantId, id, codeId, true, currentActor.UserId),
             cancellationToken);
 
     private static Task<IResult> DeactivateCode(
         Guid id,
+        Guid codeId,
         ITenantContext tenantContext,
         ICurrentActor currentActor,
         ISender sender,
@@ -332,21 +355,22 @@ public static class BudgetingEndpoints
         SendCommand(
             tenantContext,
             sender,
-            tenantId => new SetBudgetCodeActiveCommand(tenantId, id, false, currentActor.UserId),
+            tenantId => new SetBudgetCodeActiveCommand(tenantId, id, codeId, false, currentActor.UserId),
             cancellationToken);
 
     // No actor: a deleted row has nowhere to record who deleted it. See DeleteBudgetCodeCommand.
     private static Task<IResult> DeleteCode(
-        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken) =>
+        Guid id, Guid codeId, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken) =>
         SendCommand(
-            tenantContext, sender, tenantId => new DeleteBudgetCodeCommand(tenantId, id), cancellationToken);
+            tenantContext, sender, tenantId => new DeleteBudgetCodeCommand(tenantId, id, codeId), cancellationToken);
 
     /// <summary>
-    /// Creates any of the starter chart the tenant does not already have. 200 with a count rather
-    /// than 201: it is idempotent, creates many rows or none, and there is no single new resource
-    /// to point a Location header at.
+    /// Creates any of the starter chart the period does not already have. 200 with a count rather
+    /// than 201: it is idempotent per period, creates many rows or none, and there is no single
+    /// new resource to point a Location header at.
     /// </summary>
     private static async Task<IResult> SeedStarterSet(
+        Guid id,
         ITenantContext tenantContext,
         ICurrentActor currentActor,
         ISender sender,
@@ -358,10 +382,41 @@ public static class BudgetingEndpoints
         }
 
         var result = await sender.Send(
-            new SeedStarterBudgetCodesCommand(tenantId, currentActor.UserId), cancellationToken);
+            new SeedStarterBudgetCodesCommand(tenantId, id, currentActor.UserId), cancellationToken);
 
         return result.IsSuccess
             ? Results.Ok(new StarterSetSeededResponse(result.Value))
+            : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>
+    /// Copies another period's active codes into this period's chart: 200 with a full account of
+    /// every source code (copied / skipped because this period already has the string / skipped
+    /// because the source code is retired), which always sums to <c>sourceCodeCount</c>. An empty
+    /// source chart is a 200 with zeroes, not an error.
+    /// </summary>
+    private static async Task<IResult> CopyCodes(
+        Guid id,
+        CopyBudgetCodesRequest request,
+        ITenantContext tenantContext,
+        ICurrentActor currentActor,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var command = new CopyBudgetCodesCommand(tenantId, id, request.SourcePeriodId, currentActor.UserId);
+
+        var result = await sender.Send(command, cancellationToken);
+        return result.IsSuccess
+            ? Results.Ok(new BudgetCodeCopyResponse(
+                result.Value.Copied,
+                result.Value.SkippedExisting,
+                result.Value.SkippedRetired,
+                result.Value.SourceCodeCount))
             : EndpointResults.Problem(result.Error);
     }
 
@@ -390,8 +445,8 @@ public static class BudgetingEndpoints
 public sealed record EntityCreatedResponse(Guid Id);
 
 /// <summary>
-/// Body of POST /api/budgeting/codes/starter-set. <paramref name="Created"/> counts only the
-/// codes actually added — zero on a re-run, which is a success, not a failure.
+/// Body of POST /api/budgeting/periods/{id}/codes/starter-set. <paramref name="Created"/> counts
+/// only the codes actually added to that period — zero on a re-run, which is a success.
 /// </summary>
 public sealed record StarterSetSeededResponse(int Created);
 
@@ -465,10 +520,13 @@ public sealed record BudgetItemRequest(
 public sealed record CopyBudgetAllocationsRequest(Guid? SourcePeriodId);
 
 /// <summary>
-/// Body of a successful copy. <paramref name="Copied"/> plus the two skip counts always equals
-/// <paramref name="SourceLineCount"/> — the console reports all four so a skipped line never
-/// reads as a line that vanished. Every copied line arrives with an <b>empty justification</b>
-/// and must be argued before it can be saved again.
+/// Body of a successful items copy. <paramref name="Copied"/> plus the two skip counts always
+/// equals <paramref name="SourceLineCount"/> — the console reports all four so a skipped line never
+/// reads as a line that vanished. Each source item lands on this period's code with the same
+/// string; <paramref name="SkippedRetiredCode"/> counts items for which this period has <b>no
+/// active code with that string</b> (missing or retired — the name is kept to spare churn).
+/// Every copied line arrives with an <b>empty justification</b> and must be argued before it can
+/// be saved again.
 /// </summary>
 public sealed record BudgetAllocationCopyResponse(
     int Copied,
@@ -477,7 +535,27 @@ public sealed record BudgetAllocationCopyResponse(
     int SourceLineCount);
 
 /// <summary>
-/// Request body for POST /api/budgeting/codes. Every string is nullable on the wire so a missing
+/// Request body for POST /api/budgeting/periods/{id}/codes/copy. The target period comes from the
+/// route; this names the period to copy codes <em>from</em>. Nullable on the wire so an omitted
+/// value fails as a readable <c>Budgeting.Code.CopySourceRequired</c> — the
+/// <see cref="CopyBudgetAllocationsRequest"/> reasoning.
+/// </summary>
+public sealed record CopyBudgetCodesRequest(Guid? SourcePeriodId);
+
+/// <summary>
+/// Body of a successful codes copy. <paramref name="Copied"/> + <paramref name="SkippedExisting"/>
+/// + <paramref name="SkippedRetired"/> always equals <paramref name="SourceCodeCount"/>. Copied
+/// codes are active, carry every descriptive field of the source, and roll up into this period's
+/// code with the source parent's string when there is one (top-level otherwise).
+/// </summary>
+public sealed record BudgetCodeCopyResponse(
+    int Copied,
+    int SkippedExisting,
+    int SkippedRetired,
+    int SourceCodeCount);
+
+/// <summary>
+/// Request body for POST /api/budgeting/periods/{id}/codes. The period comes from the route. Every string is nullable on the wire so a missing
 /// field fails as a readable domain validation error rather than a model-binding 400 with no code
 /// in it. Enums travel as their names ("Revenue", "Nihb", "GstApplicable", "Quarterly"). The code
 /// string is normalized server-side (trim + upper case) and cannot be changed afterwards.
@@ -518,7 +596,7 @@ public sealed record CreateBudgetCodeRequest(
 }
 
 /// <summary>
-/// Request body for PUT /api/budgeting/codes/{id}. Carries no Code: the code string is set once
+/// Request body for PUT /api/budgeting/periods/{id}/codes/{codeId}. Carries no Code: the code string is set once
 /// at creation and is not renameable — allocations and actuals reference it by string. Same
 /// nullable-enum reasoning as <see cref="CreateBudgetCodeRequest"/>.
 /// </summary>

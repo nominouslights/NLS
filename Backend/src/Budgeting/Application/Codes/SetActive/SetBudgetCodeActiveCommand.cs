@@ -10,6 +10,7 @@ namespace NorthernLink.Budgeting.Application.Codes.SetActive;
 /// </summary>
 public sealed record SetBudgetCodeActiveCommand(
     Guid TenantId,
+    Guid PeriodId,
     Guid BudgetCodeId,
     bool IsActive,
     Guid? ActorId) : ICommand;

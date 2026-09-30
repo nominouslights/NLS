@@ -41,12 +41,20 @@ internal static class TestBudgeting
             Description = description,
         };
 
+    /// <summary>
+    /// The period a test code lands in when a test does not name one. Codes belong to a period;
+    /// tests about a code's own rules only need it to be <em>some</em> period, so they share this
+    /// one — and a test about periods passes its own.
+    /// </summary>
+    public static readonly Guid DefaultPeriodId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+
     public static BudgetCode CreateCode(
         string code = "ZBB-CREW-01",
         BudgetCodeDetails? details = null,
-        Guid? actorId = null)
+        Guid? actorId = null,
+        Guid? periodId = null)
     {
-        var result = BudgetCode.Create(TenantId, code, details ?? CodeDetails(), actorId);
+        var result = BudgetCode.Create(TenantId, periodId ?? DefaultPeriodId, code, details ?? CodeDetails(), actorId);
         if (result.IsFailure)
         {
             throw new InvalidOperationException($"Test budget code invalid: {result.Error.Code}");

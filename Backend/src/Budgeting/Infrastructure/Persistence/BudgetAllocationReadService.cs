@@ -13,7 +13,7 @@ namespace NorthernLink.Budgeting.Infrastructure.Persistence;
 /// flag, and each actor id to an email.
 /// <para>
 /// Three queries and two dictionaries, not a join — the <see cref="BudgetCodeReadService"/>
-/// reasoning: the period's lines, the tenant's chart and the tenant's users are all small sets
+/// reasoning: the period's lines, the period's chart and the tenant's users are all small sets
 /// already being materialized in full, and dictionary lookups read better than the SQL a
 /// three-way GroupJoin/DefaultIfEmpty would produce. Resolving here rather than denormalizing
 /// onto the read row is what keeps a re-classified code's lines in the right column.
@@ -41,8 +41,11 @@ internal sealed class BudgetAllocationReadService(BudgetingDbContext context) : 
             return [];
         }
 
+        // Only this period's chart: an item's code is always a code of the item's own period, and
+        // the period totals resolve categories the same way (PeriodPlannedTotals).
         var codesById = await context.BudgetCodeReadModels
             .AsNoTracking()
+            .Where(c => c.PeriodId == periodId)
             .ToDictionaryAsync(c => c.Id, cancellationToken);
 
         var emailByUserId = await context.UserLookups

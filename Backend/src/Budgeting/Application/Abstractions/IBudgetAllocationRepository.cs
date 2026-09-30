@@ -13,11 +13,12 @@ public interface IBudgetAllocationRepository
     Task<BudgetAllocation?> GetByIdAsync(Guid periodId, Guid allocationId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Whether any line, in any period, references the code — by id <b>or</b> by string. Serves
-    /// <see cref="IBudgetCodeUsageProbe"/>: a code deleted and recreated under the same string
-    /// has a new id, and its old lines must still count as references.
+    /// Whether any item <b>in that period</b> references the code — by id <b>or</b> by string.
+    /// Serves <see cref="IBudgetCodeUsageProbe"/>: a code deleted and recreated under the same
+    /// string has a new id, and its old items must still count as references. Period-scoped
+    /// because codes are: another period's items reference another period's code of that string.
     /// </summary>
-    Task<bool> ExistsForCodeAsync(Guid budgetCodeId, string code, CancellationToken cancellationToken = default);
+    Task<bool> ExistsForCodeAsync(Guid periodId, Guid budgetCodeId, string code, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Every one of the tenant's lines in that period, in no guaranteed order. The copy handler's

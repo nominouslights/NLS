@@ -13,13 +13,25 @@ namespace NorthernLink.Budgeting.Application.Codes.SetActive;
 /// one code's availability for new work, and silently retiring a branch would hide codes a
 /// planner never touched.
 /// </para>
+/// <para>
+/// Retirement is per period: retiring FUEL in Q4 leaves Q3's FUEL (another row) untouched, and
+/// is refused outright unless the period is Draft or Open.
+/// </para>
 /// </summary>
-public sealed class SetBudgetCodeActiveCommandHandler(IBudgetCodeRepository repository)
+public sealed class SetBudgetCodeActiveCommandHandler(
+    IBudgetCodeRepository repository,
+    IBudgetPeriodRepository periods)
     : ICommandHandler<SetBudgetCodeActiveCommand>
 {
     public async Task<Result> Handle(SetBudgetCodeActiveCommand command, CancellationToken cancellationToken)
     {
-        var budgetCode = await repository.GetByIdAsync(command.BudgetCodeId, cancellationToken);
+        var periodResult = await BudgetCodePeriodRule.RequireEditableAsync(periods, command.PeriodId, cancellationToken);
+        if (periodResult.IsFailure)
+        {
+            return periodResult;
+        }
+
+        var budgetCode = await repository.GetByIdAsync(command.PeriodId, command.BudgetCodeId, cancellationToken);
         if (budgetCode is null)
         {
             return Result.Failure(BudgetCodeErrors.NotFound);

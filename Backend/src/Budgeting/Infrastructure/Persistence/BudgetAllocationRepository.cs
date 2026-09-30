@@ -14,11 +14,14 @@ internal sealed class BudgetAllocationRepository(BudgetingDbContext context) : I
             a => a.Id == allocationId && a.PeriodId == periodId, cancellationToken);
 
     // Over the write table, not the read model: the delete-code path asks this in the same
-    // request that would remove the code, and the projection may still be a poll behind. Either
-    // arm is a seek — (tenant_id, budget_code_id) and (tenant_id, code) both have an index.
-    public Task<bool> ExistsForCodeAsync(Guid budgetCodeId, string code, CancellationToken cancellationToken = default) =>
+    // request that would remove the code, and the projection may still be a poll behind. Scoped
+    // to the code's period (codes are per period, and the string repeats across periods); the
+    // (tenant_id, period_id, budget_code_id) index narrows to the period first.
+    public Task<bool> ExistsForCodeAsync(
+        Guid periodId, Guid budgetCodeId, string code, CancellationToken cancellationToken = default) =>
         context.BudgetAllocations.AnyAsync(
-            a => a.BudgetCodeId == budgetCodeId || a.Code == code, cancellationToken);
+            a => a.PeriodId == periodId && (a.BudgetCodeId == budgetCodeId || a.Code == code),
+            cancellationToken);
 
     // Served by the leading (tenant_id, period_id) columns of the (tenant, period, code) index. Tracked, not
     // AsNoTracking: the copy handler calls CopyInto on the source lines, and the target lines it

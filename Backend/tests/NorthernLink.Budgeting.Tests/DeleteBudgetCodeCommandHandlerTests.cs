@@ -1,5 +1,6 @@
 using NorthernLink.Budgeting.Application.Codes.Delete;
 using NorthernLink.Budgeting.Domain.Codes;
+using NorthernLink.Budgeting.Domain.Periods;
 using Xunit;
 
 namespace NorthernLink.Budgeting.Tests;
@@ -13,20 +14,28 @@ public class DeleteBudgetCodeCommandHandlerTests
 {
     private readonly InMemoryBudgetCodeRepository _repository = new();
     private readonly StubBudgetCodeUsageProbe _usageProbe = new();
+    private readonly InMemoryBudgetPeriodRepository _periods = new();
+
+    /// <summary>The Draft period every code in this class lives in (codes belong to a period).</summary>
+    private readonly BudgetPeriod _period = TestBudgeting.PeriodIn(PeriodState.Draft);
+
+    private BudgetCode Code(string code = "ZBB-CREW-01", BudgetCodeDetails? details = null) =>
+        TestBudgeting.CreateCode(code, details, periodId: _period.Id);
     private readonly DeleteBudgetCodeCommandHandler _handler;
 
     public DeleteBudgetCodeCommandHandlerTests()
     {
-        _handler = new DeleteBudgetCodeCommandHandler(_repository, _usageProbe);
+        _periods.Add(_period);
+        _handler = new DeleteBudgetCodeCommandHandler(_repository, _periods, _usageProbe);
     }
 
     private Task<NorthernLink.Shared.Kernel.Result> DeleteAsync(Guid id) =>
-        _handler.Handle(new DeleteBudgetCodeCommand(TestBudgeting.TenantId, id), CancellationToken.None);
+        _handler.Handle(new DeleteBudgetCodeCommand(TestBudgeting.TenantId, _period.Id, id), CancellationToken.None);
 
     [Fact]
     public async Task An_unused_code_is_deleted_and_saved_once()
     {
-        var code = TestBudgeting.CreateCode();
+        var code = Code();
         _repository.Add(code);
 
         var result = await DeleteAsync(code.Id);
@@ -49,7 +58,7 @@ public class DeleteBudgetCodeCommandHandlerTests
     [Fact]
     public async Task A_referenced_code_is_refused_and_left_in_place()
     {
-        var code = TestBudgeting.CreateCode();
+        var code = Code();
         _repository.Add(code);
         _usageProbe.Referenced = true;
 
@@ -66,11 +75,12 @@ public class DeleteBudgetCodeCommandHandlerTests
     {
         // Allocations reference a code by its string; a future table may use the id. The probe
         // takes both so Stage 6.2 swaps the implementation without touching this handler.
-        var code = TestBudgeting.CreateCode("ZBB-FUEL-01");
+        var code = Code("ZBB-FUEL-01");
         _repository.Add(code);
 
         await DeleteAsync(code.Id);
 
+        Assert.Equal(_period.Id, _usageProbe.LastProbedPeriodId);
         Assert.Equal(code.Id, _usageProbe.LastProbedId);
         Assert.Equal("ZBB-FUEL-01", _usageProbe.LastProbedCode);
     }
@@ -80,8 +90,8 @@ public class DeleteBudgetCodeCommandHandlerTests
     {
         // There is no database foreign key on parent_code_id, so Postgres will not catch this.
         // A dangling parent id does not throw — it quietly drops a branch from a rollup report.
-        var parent = TestBudgeting.CreateCode("ZBB-REV");
-        var child = TestBudgeting.CreateCode("ZBB-CREW-01", TestBudgeting.CodeDetails(parentCodeId: parent.Id));
+        var parent = Code("ZBB-REV");
+        var child = Code("ZBB-CREW-01", TestBudgeting.CodeDetails(parentCodeId: parent.Id));
         _repository.Add(parent);
         _repository.Add(child);
 
@@ -96,8 +106,8 @@ public class DeleteBudgetCodeCommandHandlerTests
     [Fact]
     public async Task A_child_can_be_deleted_freeing_its_parent()
     {
-        var parent = TestBudgeting.CreateCode("ZBB-REV");
-        var child = TestBudgeting.CreateCode("ZBB-CREW-01", TestBudgeting.CodeDetails(parentCodeId: parent.Id));
+        var parent = Code("ZBB-REV");
+        var child = Code("ZBB-CREW-01", TestBudgeting.CodeDetails(parentCodeId: parent.Id));
         _repository.Add(parent);
         _repository.Add(child);
 
@@ -111,7 +121,7 @@ public class DeleteBudgetCodeCommandHandlerTests
     {
         // Retirement and deletion answer different questions. Retiring is about availability for
         // new work; deleting is about a code that should never have existed.
-        var code = TestBudgeting.CreateCode();
+        var code = Code();
         code.SetActive(false, TestBudgeting.ActorId);
         _repository.Add(code);
 

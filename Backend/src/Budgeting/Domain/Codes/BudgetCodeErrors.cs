@@ -6,7 +6,7 @@ namespace NorthernLink.Budgeting.Domain.Codes;
 public static class BudgetCodeErrors
 {
     public static readonly Error NotFound = Error.NotFound(
-        "Budgeting.Code.NotFound", "The budget code was not found.");
+        "Budgeting.Code.NotFound", "The budget code was not found in this period.");
 
     public static readonly Error CodeRequired = Error.Validation(
         "Budgeting.Code.CodeRequired", "A budget code needs a code.");
@@ -21,7 +21,7 @@ public static class BudgetCodeErrors
 
     public static readonly Error DuplicateCode = Error.Conflict(
         "Budgeting.Code.DuplicateCode",
-        "Another budget code already uses that code. Codes are unique within a tenant.");
+        "Another budget code in this period already uses that code. Codes are unique within a period.");
 
     public static readonly Error NameRequired = Error.Validation(
         "Budgeting.Code.NameRequired", "A budget code needs a name.");
@@ -64,7 +64,8 @@ public static class BudgetCodeErrors
     // --- Hierarchy. The rollup is one level deep, guarded from above and below. ---
 
     public static readonly Error ParentNotFound = Error.NotFound(
-        "Budgeting.Code.ParentNotFound", "The parent budget code was not found.");
+        "Budgeting.Code.ParentNotFound",
+        "The parent budget code was not found in this period. A code can only roll up into a code of the same period.");
 
     public static readonly Error ParentIsSelf = Error.Validation(
         "Budgeting.Code.ParentIsSelf", "A budget code cannot be its own parent.");
@@ -92,4 +93,26 @@ public static class BudgetCodeErrors
     public static readonly Error InUse = Error.Conflict(
         "Budgeting.Code.InUse",
         "This budget code is referenced by budget allocations or actual transactions and cannot be deleted. Retire it instead — a retired code stays listed so existing rows keep resolving.");
+
+    // --- The chart follows the period lifecycle. A Conflict, like the allocation guard it
+    // mirrors: the request was well-formed, the period is not in a state to accept it. ---
+
+    public static readonly Error PeriodNotEditable = Error.Conflict(
+        "Budgeting.Code.PeriodNotEditable",
+        "A period's budget codes can only change while it is Draft or Open.");
+
+    // --- Copy-codes-from-another-period guards. Two period ids are in play, so the source gets
+    // its own NotFound (the BudgetAllocationErrors.CopySourceNotFound reasoning). ---
+
+    public static readonly Error CopySourceRequired = Error.Validation(
+        "Budgeting.Code.CopySourceRequired",
+        "Choose a period to copy budget codes from.");
+
+    public static readonly Error CopySourceIsTarget = Error.Validation(
+        "Budgeting.Code.CopySourceIsTarget",
+        "A period's budget codes cannot be copied onto itself. Choose a different source period.");
+
+    public static readonly Error CopySourceNotFound = Error.NotFound(
+        "Budgeting.Code.CopySourceNotFound",
+        "The period to copy budget codes from was not found.");
 }
