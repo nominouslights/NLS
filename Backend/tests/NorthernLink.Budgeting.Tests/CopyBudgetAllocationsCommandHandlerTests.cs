@@ -1,6 +1,6 @@
 using NorthernLink.Budgeting.Application.Allocations;
 using NorthernLink.Budgeting.Application.Allocations.CopyFromPeriod;
-using NorthernLink.Budgeting.Application.Allocations.Set;
+using NorthernLink.Budgeting.Application.Allocations.Update;
 using NorthernLink.Budgeting.Domain.Allocations;
 using NorthernLink.Budgeting.Domain.Codes;
 using NorthernLink.Budgeting.Domain.Periods;
@@ -324,8 +324,8 @@ public class CopyBudgetAllocationsCommandHandlerTests
     [Fact]
     public async Task A_code_already_planned_in_the_target_is_skipped_and_never_overwritten()
     {
-        // Overwriting would destroy a justification somebody already wrote — and fight the unique
-        // (tenant, period, code) index.
+        // Overwriting would destroy a justification somebody already wrote, and adding to it would
+        // make a second copy duplicate the plan.
         Plan(_source, _crew.Id, amount: 9999m, justification: "Last quarter's number.");
         Plan(_target, _crew.Id, amount: 1250m, justification: "This quarter, argued fresh.");
 
@@ -424,6 +424,110 @@ public class CopyBudgetAllocationsCommandHandlerTests
         Assert.Equal(new BudgetAllocationCopyResult(0, 1, 0, 1), result.Value);
     }
 
+    // --- Many items per code ---
+
+    [Fact]
+    public async Task Every_item_of_a_code_is_copied_not_just_the_first()
+    {
+        // "Already planned" is a snapshot of the target BEFORE the copy: copying the first tires
+        // item must not make the second one look already planned.
+        Plan(_source, _crew.Id, amount: 1800m, justification: "Winter tires.");
+        Plan(_source, _crew.Id, amount: 450m, justification: "Brake pads.");
+        Plan(_source, _crew.Id, amount: 0m, justification: "Nothing on wipers this time.");
+
+        var result = await CopyAsync();
+
+        Assert.Equal(new BudgetAllocationCopyResult(3, 0, 0, 3), result.Value);
+        var lines = TargetLines();
+        Assert.Equal(3, lines.Count);
+        Assert.Equal(2250m, lines.Sum(a => a.AmountCad));
+        Assert.All(lines, a => Assert.True(a.NeedsJustification));
+        Assert.Equal(1, _allocations.SaveChangesCallCount);
+    }
+
+    [Fact]
+    public async Task One_item_already_on_a_code_in_the_target_skips_every_source_item_of_that_code()
+    {
+        var fuel = AddCode("ZBB-FUEL-01");
+        Plan(_source, _crew.Id, amount: 1800m);
+        Plan(_source, _crew.Id, amount: 450m);
+        Plan(_source, fuel.Id, "ZBB-FUEL-01", 900m);
+        Plan(_target, _crew.Id, amount: 99m, justification: "Started by hand.");
+
+        var result = await CopyAsync();
+
+        // Per ITEM: two crew items skipped, one fuel item copied — and the counts add up.
+        Assert.Equal(new BudgetAllocationCopyResult(1, 2, 0, 3), result.Value);
+        var lines = TargetLines();
+        Assert.Equal(2, lines.Count);
+        Assert.Equal(99m, Assert.Single(lines, a => a.BudgetCodeId == _crew.Id).AmountCad);
+        Assert.Equal(900m, Assert.Single(lines, a => a.BudgetCodeId == fuel.Id).AmountCad);
+    }
+
+    [Fact]
+    public async Task Running_the_copy_twice_with_many_items_per_code_never_duplicates()
+    {
+        var fuel = AddCode("ZBB-FUEL-01");
+        var retired = AddCode("ZBB-OLD-01", active: false);
+        Plan(_source, _crew.Id, amount: 1800m);
+        Plan(_source, _crew.Id, amount: 450m);
+        Plan(_source, fuel.Id, "ZBB-FUEL-01", 900m);
+        Plan(_source, retired.Id, "ZBB-OLD-01", 10m);
+
+        var first = await CopyAsync();
+        var second = await CopyAsync();
+
+        Assert.Equal(new BudgetAllocationCopyResult(3, 0, 1, 4), first.Value);
+        // Second run: every live-code item is now already planned; the retired one stays retired.
+        Assert.Equal(new BudgetAllocationCopyResult(0, 3, 1, 4), second.Value);
+        foreach (var counts in new[] { first.Value, second.Value })
+        {
+            Assert.Equal(counts.SourceLineCount, counts.Copied + counts.SkippedAlreadyPlanned + counts.SkippedRetiredCode);
+        }
+
+        Assert.Equal(3, TargetLines().Count);
+        Assert.Equal(1, _allocations.SaveChangesCallCount);
+    }
+
+    [Fact]
+    public async Task A_copied_item_keeps_every_field_except_its_justification()
+    {
+        var source = TestBudgeting.CreateAllocation(
+            _source.Id, _crew.Id, _crew.Code, actorId: TestBudgeting.ActorId,
+            details: TestBudgeting.Item(
+                title: "Crew rotations",
+                amount: null,
+                quantity: 26m,
+                unitCost: 72.5m,
+                unit: "rotation",
+                justification: "Last quarter's argument.",
+                spendType: BudgetSpendType.Capital,
+                recurrence: BudgetRecurrence.Recurring,
+                vendor: "Alamos",
+                tags: ["crew"],
+                priority: BudgetItemPriority.MustHave,
+                assumptions: "Two a week.",
+                consequence: "Crew drives themselves."));
+        _allocations.Add(source);
+
+        await CopyAsync();
+
+        var copy = Assert.Single(TargetLines());
+        Assert.Equal("Crew rotations", copy.Title);
+        Assert.Equal(1885m, copy.AmountCad);
+        Assert.Equal(26m, copy.Quantity);
+        Assert.Equal(72.5m, copy.UnitCostCad);
+        Assert.Equal("rotation", copy.Unit);
+        Assert.Equal(BudgetSpendType.Capital, copy.SpendType);
+        Assert.Equal(BudgetRecurrence.Recurring, copy.Recurrence);
+        Assert.Equal("Alamos", copy.Vendor);
+        Assert.Equal(["crew"], copy.Tags);
+        Assert.Equal(BudgetItemPriority.MustHave, copy.Priority);
+        Assert.Equal("Two a week.", copy.Assumptions);
+        Assert.Equal("Crew drives themselves.", copy.ConsequenceIfUnfunded);
+        Assert.Equal(string.Empty, copy.Justification);
+    }
+
     // --- The point of the whole feature ---
 
     [Fact]
@@ -449,26 +553,29 @@ public class CopyBudgetAllocationsCommandHandlerTests
 
         // …and re-saving one with nothing but whitespace is still refused, by the same Validate
         // the very first line in a period goes through.
-        var setHandler = new SetBudgetAllocationCommandHandler(_allocations, _periods, _codes);
-        var resave = await setHandler.Handle(
-            new SetBudgetAllocationCommand(
-                TestBudgeting.TenantId, _target.Id, _crew.Id, 1250m, "   ", TestBudgeting.ActorId),
+        var crewCopy = Assert.Single(TargetLines(), a => a.BudgetCodeId == _crew.Id);
+        var updateHandler = new UpdateBudgetAllocationCommandHandler(_allocations, _periods, _codes);
+        var resave = await updateHandler.Handle(
+            new UpdateBudgetAllocationCommand(
+                TestBudgeting.TenantId, _target.Id, crewCopy.Id, _crew.Id,
+                TestBudgeting.Item(amount: 1250m, justification: "   "), TestBudgeting.ActorId),
             CancellationToken.None);
 
         Assert.True(resave.IsFailure);
         Assert.Equal(BudgetAllocationErrors.JustificationRequired, resave.Error);
-        Assert.True(Assert.Single(TargetLines(), a => a.BudgetCodeId == _crew.Id).NeedsJustification);
+        Assert.True(crewCopy.NeedsJustification);
 
         // Argue it properly and it saves, and stops needing one.
-        var argued = await setHandler.Handle(
-            new SetBudgetAllocationCommand(
-                TestBudgeting.TenantId, _target.Id, _crew.Id, 1250m,
-                "Still two rotations, re-checked against the new contract.", TestBudgeting.ActorId),
+        var argued = await updateHandler.Handle(
+            new UpdateBudgetAllocationCommand(
+                TestBudgeting.TenantId, _target.Id, crewCopy.Id, _crew.Id,
+                TestBudgeting.Item(amount: 1250m, justification: "Still two rotations, re-checked against the new contract."),
+                TestBudgeting.ActorId),
             CancellationToken.None);
 
         Assert.True(argued.IsSuccess);
-        Assert.False(argued.Value.Created);
         var line = Assert.Single(TargetLines(), a => a.BudgetCodeId == _crew.Id);
+        Assert.Same(crewCopy, line);
         Assert.False(line.NeedsJustification);
         // The other copied line is untouched — one argued, one still owed.
         Assert.True(Assert.Single(TargetLines(), a => a.BudgetCodeId == fuel.Id).NeedsJustification);

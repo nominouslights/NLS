@@ -8,7 +8,7 @@ namespace NorthernLink.Budgeting.Application.Allocations.CopyFromPeriod;
 
 /// <summary>
 /// Handles <see cref="CopyBudgetAllocationsCommand"/>. A copy is N sets in a trench coat, so the
-/// order of the guards mirrors <c>SetBudgetAllocationCommandHandler</c>'s and is equally the
+/// order of the guards mirrors <c>CreateBudgetAllocationCommandHandler</c>'s and is equally the
 /// contract:
 /// <list type="number">
 /// <item><b>Validate the input</b> before any lookup — a source must be named
@@ -19,7 +19,7 @@ namespace NorthernLink.Budgeting.Application.Allocations.CopyFromPeriod;
 /// <item><b>The target period exists</b> (tenant-filtered, so another tenant's id reads as
 /// NotFound) <b>and allows plan changes</b> — Draft or Open; anything else is
 /// <see cref="BudgetAllocationErrors.PeriodNotEditable"/> for the whole request. Byte-for-byte
-/// the set handler's guard, and checked <em>before</em> the source on purpose: the target is the
+/// the create handler's guard, and checked <em>before</em> the source on purpose: the target is the
 /// resource the route addresses and the only place a row will land.</item>
 /// <item><b>The source period exists</b> (tenant-filtered) →
 /// <see cref="BudgetAllocationErrors.CopySourceNotFound"/>, its own error rather than
@@ -35,9 +35,10 @@ namespace NorthernLink.Budgeting.Application.Allocations.CopyFromPeriod;
 /// </list>
 /// <para>
 /// The three skips, in the order they are tested per line:
-/// <b>already planned</b> (the target has a line on that code — skipped and never overwritten,
-/// because rewriting it would destroy a justification somebody wrote and fight the unique
-/// (tenant, period, code) index), then <b>retired or missing code</b> (mirroring the set
+/// <b>already planned</b> (the target already has at least one item on that code — skipped and
+/// never overwritten or added to, because a planner who has started on a code in this period has
+/// made their own decisions there, and because it is what makes running the copy twice a no-op),
+/// then <b>retired or missing code</b> (mirroring the create
 /// handler's <c>CodeRetired</c> guard; a code gone from the chart entirely folds in here, since
 /// from the planner's side both mean "not on offer any more"). Already-planned is tested first
 /// so a line that is both reports the reason that actually protects something.
@@ -93,6 +94,11 @@ public sealed class CopyBudgetAllocationsCommandHandler(
             return Result.Success(new BudgetAllocationCopyResult(0, 0, 0, 0));
         }
 
+        // Snapshotted BEFORE the loop and never updated inside it: "already planned" means planned
+        // in the target before this copy ran. Adding each copied item's code to the set would skip
+        // the second and later source items of a code whose first item was just copied — many
+        // items per code is the model, and every one of them must come across. Counts stay per
+        // ITEM: copied + skippedAlreadyPlanned + skippedRetiredCode == sourceLineCount.
         var targetLines = await allocations.ListForPeriodAsync(command.PeriodId, cancellationToken);
         var alreadyPlanned = targetLines.Select(line => line.BudgetCodeId).ToHashSet();
 

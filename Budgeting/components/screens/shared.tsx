@@ -2,7 +2,6 @@
 
 import type { ReactNode } from "react";
 import { chipStyle, colors, fonts, statusMeta, type StatusKind } from "@/lib/theme";
-import type { BudgetPeriod } from "@/lib/types";
 import { PageHeader } from "@/components/ui/Panel";
 import { StatusChip } from "@/components/ui/Chip";
 
@@ -33,56 +32,6 @@ export function Screen({
       </div>
     </div>
   );
-}
-
-/**
- * Period switcher for the header's right slot. A row of pills rather than ui/PeriodNav's
- * ‹ / › stepper, because budget periods are a short list to pick from, not an unbounded
- * calendar to step through. Reuses PeriodNav's pill treatment so it still reads as the same
- * control family. The list comes from the caller — Console fetches it from the real API and
- * threads it down — so this file no longer imports the mock layer.
- */
-export function PeriodPicker({
-  periods,
-  periodId,
-  onSelect,
-}: {
-  periods: BudgetPeriod[];
-  periodId: string;
-  onSelect: (id: string) => void;
-}) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-      {periods.map((p) => {
-        const active = p.id === periodId;
-        return (
-          <button
-            key={p.id}
-            onClick={() => onSelect(p.id)}
-            style={{
-              padding: "5px 11px",
-              borderRadius: 7,
-              border: `1px solid ${active ? colors.borderActive : colors.borderStrong}`,
-              background: active ? colors.cardBgActive : colors.cardBg,
-              color: active ? colors.headingBright : colors.textMuted,
-              fontFamily: fonts.semiCondensed,
-              fontSize: 11.5,
-              letterSpacing: ".06em",
-              textTransform: "uppercase",
-              cursor: "pointer",
-            }}
-          >
-            {p.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-/** A period's display label, for headers and empty states. "—" when nothing is selected yet. */
-export function periodLabel(periods: BudgetPeriod[], periodId: string): string {
-  return periods.find((p) => p.id === periodId)?.label ?? (periodId || "—");
 }
 
 /**

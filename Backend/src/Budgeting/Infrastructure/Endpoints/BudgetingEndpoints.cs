@@ -7,7 +7,8 @@ using NorthernLink.Shared.Tenancy;
 using NorthernLink.Budgeting.Application.Allocations.CopyFromPeriod;
 using NorthernLink.Budgeting.Application.Allocations.GetAllocations;
 using NorthernLink.Budgeting.Application.Allocations.Remove;
-using NorthernLink.Budgeting.Application.Allocations.Set;
+using NorthernLink.Budgeting.Application.Allocations.Create;
+using NorthernLink.Budgeting.Application.Allocations.Update;
 using NorthernLink.Budgeting.Application.Codes.Create;
 using NorthernLink.Budgeting.Application.Codes.Delete;
 using NorthernLink.Budgeting.Application.Codes.GetCodes;
@@ -19,6 +20,7 @@ using NorthernLink.Budgeting.Application.Periods.Create;
 using NorthernLink.Budgeting.Application.Periods.GetPeriodById;
 using NorthernLink.Budgeting.Application.Periods.GetPeriods;
 using NorthernLink.Budgeting.Application.Periods.Transition;
+using NorthernLink.Budgeting.Domain.Allocations;
 using NorthernLink.Budgeting.Domain.Codes;
 using NorthernLink.Budgeting.Domain.Periods;
 
@@ -50,23 +52,24 @@ public static class BudgetingEndpoints
         budgeting.MapPost("periods/{id:guid}/begin-review", BeginPeriodReview);
         budgeting.MapPost("periods/{id:guid}/close", ClosePeriod);
 
-        // Allocations — one period's plan, one line per code, addressed by (period, code). PUT is
-        // an upsert (200 with { id, created }); there is no POST because the pair is the identity
-        // and a second line for the same code is never a valid request. Both writes answer 409
-        // PeriodNotEditable outside Draft and Open.
+        // Allocations — the UI calls them budget items. A period holds any number of items per
+        // code (a code's budget is the sum of its items), so items are created with POST and
+        // addressed by their own id afterwards. Every write answers 409 PeriodNotEditable outside
+        // Draft and Open.
         budgeting.MapGet("periods/{id:guid}/allocations", GetAllocations);
-        budgeting.MapPut("periods/{id:guid}/allocations/{codeId:guid}", SetAllocation);
-        budgeting.MapDelete("periods/{id:guid}/allocations/{codeId:guid}", RemoveAllocation);
+        budgeting.MapPost("periods/{id:guid}/allocations", CreateAllocation);
+        budgeting.MapPut("periods/{id:guid}/allocations/{allocationId:guid}", UpdateAllocation);
+        budgeting.MapDelete("periods/{id:guid}/allocations/{allocationId:guid}", RemoveAllocation);
 
-        // Seed this period's plan from an earlier one — amounts across, justifications cleared
-        // (see CopyBudgetAllocationsCommandHandler). 200 with counts rather than 201, the
-        // codes/starter-set precedent: it adds many lines or none and has no single new resource
+        // Seed this period's plan from an earlier one — every field across, justifications
+        // cleared (see CopyBudgetAllocationsCommandHandler). 200 with counts rather than 201, the
+        // codes/starter-set precedent: it adds many items or none and has no single new resource
         // to point a Location at.
         //
-        // No collision with PUT .../allocations/{codeId:guid} above: different verb, and the
-        // :guid constraint means the literal "copy" can never bind as a code id. A future
-        // POST .../allocations/{codeId} WOULD collide with this route — if one is ever added,
-        // constrain it (`{codeId:guid}`) or this route stops being reachable.
+        // No collision with the item routes above: POST .../allocations has one segment fewer,
+        // and PUT/DELETE .../{allocationId:guid} are other verbs whose :guid constraint means the
+        // literal "copy" can never bind as an id. A future POST .../allocations/{allocationId}
+        // WOULD collide with this route — if one is ever added, keep the :guid constraint.
         budgeting.MapPost("periods/{id:guid}/allocations/copy", CopyAllocations);
 
         // Codes. Retiring (activate/deactivate) is the normal end-of-life path and stays that
@@ -171,14 +174,12 @@ public static class BudgetingEndpoints
     }
 
     /// <summary>
-    /// Upsert by (period, code): 200 on both the create and the rewrite, with the body saying
-    /// which happened. Not 201 — the resource's URL is the one the caller just PUT to, so there
-    /// is no Location to hand back that the client does not already have.
+    /// Adds a budget item: 201 with <c>{ id }</c>. There is no single-item GET, so the Location
+    /// points at the period's item list the new item now appears in.
     /// </summary>
-    private static async Task<IResult> SetAllocation(
+    private static async Task<IResult> CreateAllocation(
         Guid id,
-        Guid codeId,
-        SetBudgetAllocationRequest request,
+        BudgetItemRequest request,
         ITenantContext tenantContext,
         ICurrentActor currentActor,
         ISender sender,
@@ -189,14 +190,30 @@ public static class BudgetingEndpoints
             return Results.Unauthorized();
         }
 
-        var command = new SetBudgetAllocationCommand(
-            tenantId, id, codeId, request.AmountCad, request.Justification, currentActor.UserId);
+        var command = new CreateBudgetAllocationCommand(
+            tenantId, id, request.BudgetCodeId, request.ToDetails(), currentActor.UserId);
 
         var result = await sender.Send(command, cancellationToken);
         return result.IsSuccess
-            ? Results.Ok(new BudgetAllocationSetResponse(result.Value.AllocationId, result.Value.Created))
+            ? Results.Created($"/api/budgeting/periods/{id}/allocations", new EntityCreatedResponse(result.Value))
             : EndpointResults.Problem(result.Error);
     }
+
+    /// <summary>Rewrites a budget item (its code may change): 204.</summary>
+    private static Task<IResult> UpdateAllocation(
+        Guid id,
+        Guid allocationId,
+        BudgetItemRequest request,
+        ITenantContext tenantContext,
+        ICurrentActor currentActor,
+        ISender sender,
+        CancellationToken cancellationToken) =>
+        SendCommand(
+            tenantContext,
+            sender,
+            tenantId => new UpdateBudgetAllocationCommand(
+                tenantId, id, allocationId, request.BudgetCodeId, request.ToDetails(), currentActor.UserId),
+            cancellationToken);
 
     /// <summary>
     /// Copies an earlier period's plan into this one: 200 with a full account of every source
@@ -232,9 +249,9 @@ public static class BudgetingEndpoints
 
     // No actor: a deleted row has nowhere to record who deleted it. See RemoveBudgetAllocationCommand.
     private static Task<IResult> RemoveAllocation(
-        Guid id, Guid codeId, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken) =>
+        Guid id, Guid allocationId, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken) =>
         SendCommand(
-            tenantContext, sender, tenantId => new RemoveBudgetAllocationCommand(tenantId, id, codeId), cancellationToken);
+            tenantContext, sender, tenantId => new RemoveBudgetAllocationCommand(tenantId, id, allocationId), cancellationToken);
 
     private static async Task<IResult> GetCodes(
         ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
@@ -389,21 +406,55 @@ public sealed record CreateBudgetPeriodRequest(
     int Ordinal);
 
 /// <summary>
-/// Request body for PUT /api/budgeting/periods/{id}/allocations/{codeId}. Both fields are
-/// nullable on the wire so a missing one fails as a readable domain validation error
-/// (<c>AmountRequired</c> / <c>JustificationRequired</c>) rather than a model-binding 400 with
-/// no code in it. Zero is a valid amount; the justification is required — zero-based budgeting
-/// argues every line from zero. The period and code come from the route, never the body.
+/// Request body for POST /api/budgeting/periods/{id}/allocations and
+/// PUT /api/budgeting/periods/{id}/allocations/{allocationId} — one budget item. The period (and,
+/// on PUT, the item) come from the route, never the body.
+/// <para>
+/// Every field is nullable on the wire so a missing one fails as a readable domain validation
+/// error (<c>CodeRequired</c>, <c>TitleRequired</c>, <c>AmountRequired</c>,
+/// <c>JustificationRequired</c>…) rather than a model-binding 400 with no code in it. Send
+/// <see cref="AmountCad"/> for a lump sum, or <see cref="Quantity"/> and
+/// <see cref="UnitCostCad"/> together — the server then computes the amount
+/// (round(q × u, 2, AwayFromZero)) and ignores any amount sent. Enums travel as their names
+/// (<c>Operating|Capital</c>, <c>OneTime|Recurring</c>, <c>MustHave|ShouldHave|NiceToHave</c>);
+/// they are nullable for the <see cref="CreateBudgetCodeRequest"/> reason — a non-nullable enum
+/// binds an omitted property to value 0, which for Priority is MustHave rather than the
+/// documented default ShouldHave.
+/// </para>
 /// </summary>
-public sealed record SetBudgetAllocationRequest(
+public sealed record BudgetItemRequest(
+    Guid? BudgetCodeId,
+    string? Title,
     decimal? AmountCad,
-    string? Justification);
-
-/// <summary>
-/// Body of a successful PUT to an allocation. <paramref name="Created"/> is true when this call
-/// added the line and false when it rewrote one; <paramref name="Id"/> is the same either way.
-/// </summary>
-public sealed record BudgetAllocationSetResponse(Guid Id, bool Created);
+    decimal? Quantity,
+    decimal? UnitCostCad,
+    string? Unit,
+    string? Justification,
+    BudgetSpendType? SpendType,
+    BudgetRecurrence? Recurrence,
+    string? Vendor,
+    IReadOnlyList<string>? Tags,
+    BudgetItemPriority? Priority,
+    string? Assumptions,
+    string? ConsequenceIfUnfunded)
+{
+    public BudgetItemDetails ToDetails() => new()
+    {
+        Title = Title,
+        AmountCad = AmountCad,
+        Quantity = Quantity,
+        UnitCostCad = UnitCostCad,
+        Unit = Unit,
+        Justification = Justification,
+        SpendType = SpendType ?? BudgetSpendType.Operating,
+        Recurrence = Recurrence ?? BudgetRecurrence.OneTime,
+        Vendor = Vendor,
+        Tags = Tags,
+        Priority = Priority ?? BudgetItemPriority.ShouldHave,
+        Assumptions = Assumptions,
+        ConsequenceIfUnfunded = ConsequenceIfUnfunded,
+    };
+}
 
 /// <summary>
 /// Request body for POST /api/budgeting/periods/{id}/allocations/copy. The target period comes

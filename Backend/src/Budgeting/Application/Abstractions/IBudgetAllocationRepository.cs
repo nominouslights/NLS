@@ -6,11 +6,11 @@ namespace NorthernLink.Budgeting.Application.Abstractions;
 public interface IBudgetAllocationRepository
 {
     /// <summary>
-    /// The tenant's line for that (period, code) pair, or null. Lines are keyed by the pair
-    /// rather than by their own id everywhere a caller reaches them — the upsert-by-code rule
-    /// means the pair <em>is</em> the identity a planner thinks in.
+    /// The tenant's budget item with that id <b>in that period</b>, or null. The period is part of
+    /// the lookup so a route naming one period can never reach an item of another; the tenant
+    /// query filter (and RLS beneath it) means another tenant's item id is null here too.
     /// </summary>
-    Task<BudgetAllocation?> GetAsync(Guid periodId, Guid budgetCodeId, CancellationToken cancellationToken = default);
+    Task<BudgetAllocation?> GetByIdAsync(Guid periodId, Guid allocationId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Whether any line, in any period, references the code — by id <b>or</b> by string. Serves

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using NorthernLink.Budgeting.Application.Abstractions;
 using NorthernLink.Budgeting.Application.Allocations;
+using NorthernLink.Budgeting.Domain.Allocations;
 using NorthernLink.Budgeting.Domain.Codes;
 using NorthernLink.Budgeting.Infrastructure.Persistence.ReadModels;
 
@@ -33,7 +34,6 @@ internal sealed class BudgetAllocationReadService(BudgetingDbContext context) : 
         var lines = await context.BudgetAllocationReadModels
             .AsNoTracking()
             .Where(a => a.PeriodId == periodId)
-            .OrderBy(a => a.Code)
             .ToListAsync(cancellationToken);
 
         if (lines.Count == 0)
@@ -49,8 +49,28 @@ internal sealed class BudgetAllocationReadService(BudgetingDbContext context) : 
             .AsNoTracking()
             .ToDictionaryAsync(u => u.UserId, u => u.Email, cancellationToken);
 
-        return lines.Select(line => ToResponse(line, codesById, emailByUserId)).ToList();
+        // Ordered in memory, not in SQL: priority is stored as its name, and "MustHave",
+        // "NiceToHave", "ShouldHave" sort alphabetically out of rank. The rank is the enum's
+        // declaration order. Code is compared ordinally so the order does not depend on the
+        // server's culture or the column's collation; id is the final tie-break so two items
+        // created in the same instant still list stably.
+        return lines
+            .OrderBy(line => line.Code, StringComparer.Ordinal)
+            .ThenBy(line => PriorityRank(line.Priority))
+            .ThenBy(line => line.CreatedAtUtc)
+            .ThenBy(line => line.Id)
+            .Select(line => ToResponse(line, codesById, emailByUserId))
+            .ToList();
     }
+
+    /// <summary>
+    /// A stored priority name's rank; an unrecognized name (a row written by hand) sorts last
+    /// rather than throwing.
+    /// </summary>
+    private static int PriorityRank(string priority) =>
+        Enum.TryParse<BudgetItemPriority>(priority, ignoreCase: false, out var parsed) && Enum.IsDefined(parsed)
+            ? (int)parsed
+            : int.MaxValue;
 
     private static BudgetAllocationResponse ToResponse(
         BudgetAllocationReadModel line,
@@ -68,8 +88,19 @@ internal sealed class BudgetAllocationReadService(BudgetingDbContext context) : 
             code?.Category ?? nameof(BudgetCodeCategory.Expense),
             code?.ServiceLine,
             code?.IsActive ?? false,
+            line.Title,
             line.AmountCad,
+            line.Quantity,
+            line.UnitCostCad,
+            line.Unit,
             line.Justification,
+            line.SpendType,
+            line.Recurrence,
+            line.Vendor,
+            line.Tags,
+            line.Priority,
+            line.Assumptions,
+            line.ConsequenceIfUnfunded,
             line.CreatedBy,
             EmailFor(line.CreatedBy, emailByUserId),
             line.ModifiedBy,

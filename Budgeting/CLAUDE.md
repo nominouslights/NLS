@@ -1,9 +1,9 @@
 # Budgeting — Zero-Based Budgeting Console
 
 Next.js 16 app on port **3003**, consuming the shared API. Scaffolded by US-6.0.1 (Track 6,
-Stage 6.0). Budget **periods**, **codes** and **allocations** are real — including the period
+Stage 6.0). Budget **periods**, **codes** and **budget items** are real — including the period
 lifecycle and the period dashboard; actuals and variance are still mock — see
-[Data](#data-periods-codes-and-allocations-are-real-actuals-and-variance-are-still-mock).
+[Data](#data-periods-codes-and-budget-items-are-real-actuals-and-variance-are-still-mock).
 
 ## Commands
 
@@ -63,8 +63,8 @@ Run it before touching anything on the list, and whenever a Dispatcher UI story 
 | `app/layout.tsx` | `Dispatcher/app/layout.tsx` | **no** — title/description only; the four Google Fonts `<link>` tags are byte-identical and must stay that way |
 | `lib/auth.ts` | `Dispatcher/lib/auth.ts` | **no** — see below |
 | `components/TopBar.tsx`, `AuthGate.tsx`, `LoginScreen.tsx`, `Console.tsx` | same paths | **no** — adapted |
-| `lib/nav.ts`, `lib/data.ts`, `lib/money.ts`, `lib/types.ts`, `lib/claims.ts`, `lib/roles.ts`, `lib/api/budgeting.ts`, `lib/api/identity.ts` | — | new |
-| `components/Brandmark.tsx`, `ErrorNotice.tsx`, `RoleGate.tsx`, `AccessDeniedScreen.tsx`, `SetupPendingScreen.tsx`, `BudgetPeriodFormModal.tsx`, `BudgetCodeFormModal.tsx`, `BudgetAllocationFormModal.tsx`, `ProfileForm.tsx`, `screens/*`, `screens/periods/*` | — | new |
+| `lib/nav.ts`, `lib/data.ts`, `lib/money.ts`, `lib/types.ts`, `lib/claims.ts`, `lib/roles.ts`, `lib/workingPeriod.ts`, `lib/periodHold.ts`, `lib/api/budgeting.ts`, `lib/api/identity.ts` | — | new |
+| `components/Brandmark.tsx`, `ErrorNotice.tsx`, `RoleGate.tsx`, `AccessDeniedScreen.tsx`, `SetupPendingScreen.tsx`, `PeriodBanner.tsx`, `BudgetPeriodFormModal.tsx`, `BudgetCodeFormModal.tsx`, `BudgetItemFormModal.tsx`, `ProfileForm.tsx`, `screens/*`, `screens/periods/*` (incl. `PeriodChooser.tsx`, `PriorityBreakdown.tsx`) | — | new |
 
 `theme.ts` and the 12 `ui/` files are copied **unpruned**, including parts this app never uses
 (`ServiceType`, `DutyStatus`, `CorridorStepper`, the two upload fields). Pruning them would break
@@ -122,7 +122,8 @@ it. Config is `vitest.config.mts` — the `.mts` extension is load-bearing (Vite
 `.ts` config as CommonJS and warns), and it must therefore use `import.meta.dirname` for the
 `@` alias, never `__dirname`. `@types/node` declares `__dirname` globally, so TypeScript and
 `next build` both stay green while every `@/lib/...` import in the suite fails to resolve at
-run time. Ten files, and only two need a DOM:
+run time. Fourteen files; six need a DOM (the five component tests, plus `workingPeriod`'s
+storage tests, which need `sessionStorage`):
 
 - `lib/roles.test.ts` — US-6.0.1's acceptance criterion: a Dispatcher account is rejected.
 - `lib/claims.test.ts` — JWT decoding, including the non-ASCII round trip (`atob` yields a binary
@@ -150,8 +151,18 @@ run time. Ten files, and only two need a DOM:
   `parentCandidates` against `BudgetCodeParentRule`, `PERIOD_STATE_ORDER` /
   `nextTransition` / `stateAfter` against `BudgetPeriod.Transition`, `canEditAllocations`
   against `BudgetPeriod.AllowsPlanChanges`, `allocationCandidates` against the `CodeRetired`
-  check plus the unique (period, code) index, and `allocationAmountError` /
-  `allocationJustificationError` against `BudgetAllocation.Validate`, `needsJustification` /
+  check alone (a code that already has items **is** offered — many items per code),
+  `budgetItemError` against the create/update handlers' `CodeRequired` and then
+  `BudgetAllocation.Validate` **rule for rule, in the server's order, with the server's messages
+  verbatim** (`BUDGET_ITEM_MESSAGES`), each length/count/ceiling boundary tested on both sides,
+  `roundCad` / `computeItemAmount` / `itemAmount` against `BudgetAllocation.Round` and Parse's
+  cost block (half away from zero; `1.005 → 1.01`, `3 × 1.005 → 3.03`, quantity `0.005 → 0.01`
+  and `0.004` refused as not positive — never `Math.round(x * 100)`, which gets `1.005` wrong),
+  `normalizeTags` against the tag loop (trim, case-insensitive de-dup, counted after de-dup),
+  `draftToBudgetItemInput` / `recordToDraft` / `itemReflects` (the post-save refetch
+  predicate), `groupItemsByCode`, `priorityBreakdown`, `costBuildUpLabel`, the item label maps
+  and `PRIORITY_KINDS` / `PRIORITY_GLYPHS` (Must and Should share a colour, so each has its own
+  glyph), `needsJustification` /
   `unjustifiedLines` against `BudgetAllocation.NeedsJustification` + `CopyInto`, and
   `copySourceCandidates` / `defaultCopySource` against
   `CopyBudgetAllocationsCommandHandler`'s `CopySourceIsTarget` guard — including the case that a
@@ -159,8 +170,9 @@ run time. Ten files, and only two need a DOM:
   the →StatusKind mappings (`periodKind` over all five states, `assignmentState` /
   `ASSIGNMENT_KINDS` over all four), `planBalanced` (an empty plan is **not** balanced),
   `copyOutcomeSummary`, the label maps, `toBudgetCode`'s `isActive` → `active` rename,
-  `toBudgetPeriod`'s two totals, `coverage` and `planningProgress` (the dashboard's zero-based
-  checklist and stepper derive from one tested function).
+  `toBudgetPeriod`'s two totals, `coverage` (codes with at least one item — a code with five
+  items counts once) and `planningProgress` (the dashboard's zero-based checklist and stepper
+  derive from one tested function; a test pins that no row says a budget is "set").
 
   `netCad` / `netKind` / `netLabel` and their tests were **deleted**, not adapted, when the Net
   tile became "Left to assign": `netKind(0)` was `info` and `balanced` is now `ontime`, because
@@ -180,9 +192,33 @@ run time. Ten files, and only two need a DOM:
   copy backwards with a 200 on the wire and no error on either side. It also pins the route, the
   four counts and each 400/409/404 message verbatim. Also pins that `deleteBudgetCode`'s 409
   message reaches the caller verbatim, since the server's wording is what names retirement as the
-  alternative.
+  alternative. And the budget-item routes: `createBudgetItem` POSTs the whole
+  `BudgetItemRequest` (every key, explicit nulls, enums as PascalCase strings) and returns the
+  201's id; `updateBudgetItem` / `removeBudgetItem` address the **item's own id**
+  (`.../allocations/{allocationId}`, 204), never a code id; update refusals surface verbatim.
+- `components/BudgetItemFormModal.test.tsx` — the modal takes its three requests as an `api`
+  prop, so it injects `vi.fn()`s: the cost-mode toggle computes the total live (`12 × 450`,
+  `3 × 1.005 → $3.03`), the exact body a built-up item POSTs (`amountCad: null`), an edit PUTs to
+  the item's id and may move it to another code, an item on a retired code opens with no code
+  chosen, and both a client-side and a server-side refusal show the server's words.
 - `lib/money.test.ts` — `formatDeltaCad` / `formatDeltaPct` always write the sign out, so a
-  signed figure never rests on colour.
+  signed figure never rests on colour; `formatCadPrecise` prints cents only when there are cents
+  (the copied `formatCad` is whole-dollar and would print a `$3.03` item as `$3`).
+- `lib/workingPeriod.test.ts` — the "enter a period" contract, which mirrors no server rule (the
+  backend scopes by route id and has no idea which period a tab is in): `suggestedPeriodId`
+  (today strictly inside, on the start and on the end date, the latest-start fallback in any
+  list order, empty → `null`), `resolveEnteredPeriod` (found, nothing entered, **lost** after a
+  good load, **not** lost after a failed load or while loading), the storage key differing by
+  tenant and by user and `null` without claims, the `sessionStorage` round trip, `null` removing
+  the entry, a throwing store degrading quietly, **never touching `localStorage`**, and
+  `isPeriodScoped` being false for exactly `codes` and `settings`.
+- `components/screens/periods/PeriodChooser.test.tsx` — `vi.fn()` props, as `ProfileForm` does:
+  a row click enters that row's id, each row writes its state out, the suggested row carries
+  its tag and focus, the eyebrow names the destination screen, the empty state's create button,
+  a load error shown verbatim with RETRY, the lost notice, and "Returning to your period…".
+- `components/PeriodBanner.test.tsx` — label, dates, state and editability; while held, SWITCH
+  PERIOD is `aria-disabled`, does not call `onSwitch`, and the reason is written beside it; the
+  every-period sentence on a global screen; CHOOSE A PERIOD with nothing entered.
 
 `lib/api/transport.ts` is a **copied** file. Tests against it belong here (a test file is not on
 the copy manifest), but anything they reveal is a change to *Dispatcher's* source first, then a
@@ -201,31 +237,111 @@ The server-side counterpart is
 backend test proves the *policy* rejects Dispatcher, this one proves the *console* does, and in
 Stage 6.0 the console is the gate a user actually meets.
 
-## Data: periods, codes and allocations are real; actuals and variance are still mock
+## Working in a period
+
+The planner works **inside one period at a time**. Every period action — a transition, a budget item,
+a copy, a report — is under the period the banner names, and nothing changes that period
+silently.
+
+- **Enter, then switch.** A period-scoped screen — Period Dashboard, Actuals vs Budget,
+  Variance, Reports (`PERIOD_SCOPED` / `isPeriodScoped` in `lib/nav.ts`) — shows
+  `screens/periods/PeriodChooser.tsx` until a period is entered. Once one is, a strip at the top
+  of the main column (`components/PeriodBanner.tsx`) always shows WORKING IN, the label, dates,
+  the state chip and "Plan editable / read-only"; leaving takes its explicit **SWITCH PERIOD**.
+  Exactly two handlers in `Console.tsx` change the entered period, `enterPeriod` and
+  `switchPeriod`, and no screen carries a period picker of its own (the old `PeriodPicker` was
+  deleted — picking on Variance used to change which dashboard the Periods screen opened).
+  The banner lives in the main column, not the TopBar, whose geometry matches Dispatcher's.
+- **Scoped screens remount on every switch.** Console renders them inside a `Fragment` keyed by
+  the entered period's id, so no confirm, modal or fetch outlives the period it was for.
+- **The entered period is derived, not stored.** Console keeps only `enteredId`;
+  `resolveEnteredPeriod` (`lib/workingPeriod.ts`) finds it in the loaded list, so a list refresh
+  picks up its new totals and state for free. `applyLoaded` never touches the selection.
+- **Remembered per tab, per user: `sessionStorage`, key
+  `nl.budgeting.enteredPeriod.{tenantId}.{sub}`** (from `getClaims()`). It survives a reload;
+  it dies with the tab, so a shared machine never reopens someone else's period; two tabs can
+  work in two periods; and the user in the key covers a sign-out and sign-in in the same tab.
+  **Never `localStorage`** — a test pins that. Every access is try/catch'd, and nothing is
+  stored without claims.
+- **No silent auto-enter.** A first visit shows the chooser with the period containing today —
+  else the latest start — highlighted, tagged `INCLUDES TODAY` / `LATEST`, and focused, so
+  entering it is one click (`suggestedPeriodId`, formerly Console's `defaultPeriodId`).
+- **Lost is not the same as unloaded.** A stored id that matches nothing after a *good* load is
+  `lost`, and the chooser says "The period you were working in is no longer available — choose
+  another." A failed or pending load is never lost; while a stored period loads the chooser
+  reads "Returning to your period…".
+- **The hold guard** (`lib/periodHold.ts`). `PeriodDashboard` (`busy`: transition, remove, copy)
+  and `BudgetItemFormModal` (its save) call `usePeriodHold(busy)`. While any hold is taken,
+  SWITCH PERIOD and the TopBar's + NEW PERIOD refuse (`newPeriodDisabled`), and the banner writes
+  "Finishing a change to {label}…" beside the disabled button. The item modal also ignores
+  ✕ and CANCEL while saving. **Rail navigation is deliberately not blocked** — changing screen
+  never changes the period, and blocking it would mean editing the copied `NavRail`.
+- **Creating a period enters it.** The New Period modal lives in `Console.tsx` (opened by the
+  TopBar pill and the chooser); `handlePeriodCreated` enters the new id and lands on the Period
+  Dashboard, where the plan can be seeded from an earlier period.
+- **Every action names its period.** The transition confirm ("Click CONFIRM FINALIZE to move
+  Q3 2026 from Draft to Finalized"), the remove confirm ("Removes “{title}” ({code}) from {label}'s plan.
+  Other items and other periods are not affected."), the item modal's eyebrow and note, and the copy panel ("Into:
+  {label}", `COPY INTO {LABEL}`). `nextTransition`'s own button labels are unchanged — tests pin
+  them.
+- **Budget Codes is the one tenant-wide planning screen**, matching the backend (codes carry no
+  period). Its eyebrow reads "Planning · All periods" beside an "Applies to every period" chip;
+  RETIRE is now two-click like DELETE, and both confirms say they reach every period. Codes and
+  Settings render with or without an entered period; the banner either says "This screen isn't
+  tied to a period — it applies to every period" or offers CHOOSE A PERIOD.
+
+## Data: periods, codes and budget items are real; actuals and variance are still mock
 
 **Budget periods come from the real API** (`GET/POST /api/budgeting/periods` via
 `lib/api/budgeting.ts`; `Console.tsx` owns the fetch and threads the list down as props) — the
 first Stage 6.1 slice. Each record now carries `plannedRevenueCad` / `plannedExpenseCad`, the
-server's sums of the period's allocation lines by code category; `toBudgetPeriod` maps them to
+server's sums of the period's budget items by code category; `toBudgetPeriod` maps them to
 `plannedRevenue` / `plannedExpense` and derives `pk` from `state` (`periodKind`).
 
 **The period lifecycle is real** — five states, forward only, in this order:
 **Draft → Finalized → Open → In review → Closed** (`PeriodState`; the C# enum spells the fourth
-`InReview`). Allocation lines can change **only while the period is Draft or Open** — finalizing
+`InReview`). Budget items can change **only while the period is Draft or Open** — finalizing
 signs the plan off, opening re-allows in-period adjustments, review and close freeze it
 (`BudgetPeriod.AllowsPlanChanges`; mirrored by `canEditAllocations`). Each state has exactly one
 way forward (`nextTransition`) and the dashboard offers exactly that one button, behind a
 two-click confirm. Transitions are **not** gated on plan completeness — finalizing an empty plan
 is allowed; the dashboard's checklist makes an empty plan visible instead.
 
-**Allocations are real** — one line per (period, code), **upserted by code**, with a
-**required justification** (zero-based: every line is argued from nothing, each period). The
-line's `category`, `name` and `serviceLine` are resolved from the code at read time, never
-snapshotted, so re-classifying a code moves its lines between the two totals retroactively. A
-line on a retired code stays (and still counts) but cannot be re-set until the code is restored
-(`CodeRetired`, 409). Amounts are `decimal(12,2)` server-side; this app enters whole dollars.
+**Budget items are real — and a code's budget is the sum of its items.** There is no fixed,
+"set" figure per code any more: a period holds **any number of items per code** (the old unique
+(period, code) index and the upsert-by-code PUT are gone), each addressed by its own id. The
+backend keeps the aggregate name `BudgetAllocation`, the `allocations` route segment and the
+`BudgetAllocationRecord` wire type; the console calls them **budget items**. Each item is a small
+zero-based decision package:
 
-The period and allocation routes (`BudgetAccess` group, `BudgetingEndpoints.cs`):
+- **What** — the budget code, a `title` (required, ≤ 120), `vendor`, `tags` (≤ 10, each 1–32
+  after trimming, de-duplicated case-insensitively).
+- **Cost** — a lump sum (`amountCad`), **or** `quantity` × `unitCostCad` with an optional
+  `unit`. Built up, the **server computes the amount** — each factor rounded to 2 dp, then the
+  product, all half away from zero (`BudgetAllocation.Round`) — and ignores any amount sent, so
+  the modal sends `amountCad: null`. `computeItemAmount` mirrors it in exact integer arithmetic.
+  Amounts are `decimal(12,2)` and may carry cents (the whole-dollar rule this app used to impose
+  is gone — a built-up item lands on cents); item figures render through `formatCadPrecise`.
+- **Why** — the `justification` (**required**: zero-based, every item is argued from nothing,
+  each period), `priority` (`MustHave` / `ShouldHave` / `NiceToHave` — what gets cut first),
+  `assumptions`, `consequenceIfUnfunded`.
+- **Classification** — `spendType` (`Operating` / `Capital`), `recurrence` (`OneTime` /
+  `Recurring`). No tax field and no tax arithmetic — QuickBooks owns tax.
+
+Items follow the period lifecycle only; there is **no per-item approval**. The item's `category`,
+`name` and `serviceLine` are resolved from the code at read time, never snapshotted, so
+re-classifying a code moves its items between the two totals retroactively. An item on a retired
+code stays (and still counts), but `CodeRetired` (409) is checked on **every** update, even when
+the code is unchanged — it can only be moved to an active code (the code is editable in the
+modal) or removed.
+
+On the dashboard each `AllocationSection` groups its items by code (`groupItemsByCode`): a code
+header (tag, name, retired chip, subtotal, item count, `+ ITEM`) with its items beneath, and a
+section-level `+ ADD BUDGET ITEM`. A "By priority" panel totals the expense items per priority
+(`priorityBreakdown`). Those subtotals and buckets are summed **client-side** from the loaded
+items; the headline tiles stay the server's own period totals.
+
+The period and budget-item routes (`BudgetAccess` group, `BudgetingEndpoints.cs`):
 
 | Route | |
 |---|---|
@@ -235,17 +351,24 @@ The period and allocation routes (`BudgetAccess` group, `BudgetingEndpoints.cs`)
 | `POST /api/budgeting/periods/{id}/open` | Finalized → Open; 409 `NotFinalized` |
 | `POST /api/budgeting/periods/{id}/begin-review` | Open → In review; 409 `NotOpen` |
 | `POST /api/budgeting/periods/{id}/close` | In review → Closed; 409 `NotInReview` |
-| `GET /api/budgeting/periods/{id}/allocations` | the period's lines, ordered by code (404) |
-| `PUT /api/budgeting/periods/{id}/allocations/{codeId}` | upsert `{ amountCad, justification }` → `{ id, created }`; 400 validation, 404 period/code, 409 `PeriodNotEditable` / `CodeRetired` |
-| `DELETE /api/budgeting/periods/{id}/allocations/{codeId}` | 204; 404 no such line; 409 `PeriodNotEditable` |
-| `POST /api/budgeting/periods/{id}/allocations/copy` | seed this period's plan from an earlier one — body `{ sourcePeriodId }` → 200 `{ copied, skippedAlreadyPlanned, skippedRetiredCode, sourceLineCount }` (the first three always sum to the fourth); 400 `CopySourceRequired` / `CopySourceIsTarget`, 404 `CopySourceNotFound` (the **source**) or `Budgeting.Period.NotFound` (the **target**), 409 `PeriodNotEditable` |
+| `GET /api/budgeting/periods/{id}/allocations` | the period's items, ordered by code, then priority (MustHave first), then `createdAtUtc`, then id (404) |
+| `POST /api/budgeting/periods/{id}/allocations` | create an item — body `BudgetItemRequest` → 201 `{ id }`; 400 validation (`CodeRequired`, `TitleRequired`, `QuantityWithoutUnitCost`, … — see `BUDGET_ITEM_MESSAGES`), 404 period/code, 409 `PeriodNotEditable` / `CodeRetired` |
+| `PUT /api/budgeting/periods/{id}/allocations/{allocationId}` | rewrite the item (its code may change) → 204; 400 validation, 404 `Budgeting.Allocation.NotFound`, 409 `PeriodNotEditable` / `CodeRetired` (checked on every update) |
+| `DELETE /api/budgeting/periods/{id}/allocations/{allocationId}` | 204; 404 `NotFound`; 409 `PeriodNotEditable` |
+| `POST /api/budgeting/periods/{id}/allocations/copy` | seed this period's plan from an earlier one — body `{ sourcePeriodId }` → 200 `{ copied, skippedAlreadyPlanned, skippedRetiredCode, sourceLineCount }`, counted **per item** (the first three always sum to the fourth); a source item is skipped as "already planned" when its **code** already has any item here, so a second copy copies nothing; 400 `CopySourceRequired` / `CopySourceIsTarget`, 404 `CopySourceNotFound` (the **source**) or `Budgeting.Period.NotFound` (the **target**), 409 `PeriodNotEditable` |
 
-**The copy brings the amounts and clears every justification.** `BudgetAllocation.CopyInto` sets
-`Justification = string.Empty`, so a copied line arrives `NeedsJustification` and `PUT
-.../allocations/{codeId}` keeps refusing it with 400 `JustificationRequired` until somebody
+`BudgetItemRequest` is `{ budgetCodeId, title, amountCad, quantity, unitCostCad, unit,
+justification, spendType, recurrence, vendor, tags, priority, assumptions,
+consequenceIfUnfunded }`, enums as PascalCase strings. The server accepts nulls for most of it
+(defaults Operating / OneTime / ShouldHave); this app always sends every key, explicitly.
+
+**The copy brings every field but the justification.** `BudgetAllocation.CopyInto` carries the
+title, amount, build-up, classification, vendor, tags, priority, assumptions and consequence, and
+sets `Justification = string.Empty`, so a copied item arrives `NeedsJustification` and `PUT
+.../allocations/{allocationId}` keeps refusing it with 400 `JustificationRequired` until somebody
 argues it. That is the feature, not a gap: zero-based means last period's reasoning is not this
-period's. The dashboard shows those lines with a "Needs justification" chip, counts them in the
-checklist's "Every line argued" row, and names them in the finalize warning.
+period's. The dashboard shows those items with a "Needs justification" chip, counts them in the
+checklist's "Every item argued" row, and names them in the finalize warning.
 
 **Editability is checked on the target only.** A Closed period is a perfectly legal *source* —
 copying a closed plan into a fresh Draft is the whole point — so `copySourceCandidates` offers
@@ -255,21 +378,26 @@ periods in every state and excludes only the target itself. Do not "fix" it with
 
 Every 400/409 message is shown verbatim — the server's text names the rule. Reads are
 projections: after a transition the dashboard refetches the period until it reports the expected
-state (`stateAfter`); after a line changes it refetches the lines until the new **values** are
-visible (on edit the row was always there), and only then refreshes the period list, whose totals
-read from the same projection.
+state (`stateAfter`); after an item is saved it refetches the items until **that item's id**
+carries the new **values** (`itemReflects` — on edit the row was always there), after a remove
+until the id is gone, and only then refreshes the period list, whose totals read from the same
+projection.
 
-`screens/BudgetPeriods.tsx` is the master/detail host; `screens/periods/*` is the dashboard
-(list, lifecycle stepper, zero-based checklist, the copy-from-an-earlier-period panel, one
-`AllocationSection` per category), and it is the **one** place a period is planned.
-`BudgetAllocationFormModal.tsx` opens from there. The dashboard shows the server's own totals,
-never sums re-derived from the lines on screen.
+`screens/BudgetPeriods.tsx` is the **Period Dashboard** screen (rail label; id `periods` and
+code `BP` unchanged): a `Screen` around `screens/periods/PeriodDashboard.tsx` for the entered
+period only — no list, no picker, no load states of its own (those live on the chooser, see
+[Working in a period](#working-in-a-period)). `screens/periods/*` is the chooser and the
+dashboard (lifecycle stepper, zero-based checklist, the by-priority breakdown, the
+copy-from-an-earlier-period panel, one `AllocationSection` per category), and the dashboard is
+the **one** place a period is planned. `BudgetItemFormModal.tsx` opens from there. The
+dashboard's headline tiles show the server's own totals, never sums re-derived from the items on
+screen.
 
 There is no separate Allocations screen and no `"allocations"` `ScreenId`: a second place to do
 the same job could not refresh Console's period list after a save, so its tiles trailed the
 dashboard's. The TopBar pill is `+ NEW PERIOD` — the console's one global create action, with
-the only create target that is unambiguous from any screen — and its `showCreate` state is
-hoisted into `Console.tsx` so both it and the screen's own pill open the same modal.
+the only create target that is unambiguous from any screen. The New Period modal itself lives
+in `Console.tsx` (the pill and the chooser both open it), and creating a period enters it.
 
 **Budget codes are real too** — the second slice, widened to US-6.1.1's full property set:
 
@@ -360,6 +488,8 @@ Known hazards documented in `theme.ts`: `colors.amber` is a fill/border/icon col
 | Date | Check | Result |
 |---|---|---|
 | 2026-08-04 | Code audit (both greps above) | **Pass** — every call site pairs colour with glyph + label; protected hexes appear only in `theme.ts` and in copied decorative elements that carry adjacent text |
+| 2026-09-29 | Code audit after the period workspace | **Pass** — the one new `statusMeta` call (`PeriodChooser`'s accent stripe) sits beside the row's state `StatusChip`; the banner and chooser carry state only via `StatusChip`; no new protected hex |
+| 2026-09-29 | Code audit after budget items | **Pass** — no new `statusMeta` call and no new protected hex; the priority chip is a `StatusChip` with a per-priority glyph (M / S / N) + written label, because Must and Should share the `info` colour; the modal's segmented choices use `aria-pressed` plus a ✓ and bold on the selected option |
 | — | Grayscale (DevTools → Rendering → Achromatopsia) | **Not yet run** |
 | — | Deuteranopia / Protanopia / Tritanopia | **Not yet run** |
 | — | Side-by-side against Dispatcher at equal width | **Not yet run** |
@@ -416,8 +546,8 @@ Not used here on purpose: axe-core / pa11y / Lighthouse. They catch the automata
   replicas of these rows; wiring them together is a cross-module story and needs an integration
   event, not a project reference.
 - Filtering the codes list — it is small enough to render whole. (~~Hiding retired codes from
-  the allocations picker~~ — done: `allocationCandidates` offers only active codes of the
-  section's category that are not already planned.)
+  the item picker~~ — done: `allocationCandidates` offers only active codes of the
+  section's category — planned codes included, since a code may carry many items.)
 - CI/CD and the OVHcloud deployment target — there is no `.github/` anywhere in this repo yet;
   that is a platform-wide story covering every app at once.
 - OIDC/OpenIddict; the `SuperUser` claim from architecture Section 6.1.

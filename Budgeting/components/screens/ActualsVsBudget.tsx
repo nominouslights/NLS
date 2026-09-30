@@ -7,15 +7,7 @@ import { formatCad } from "@/lib/api/format";
 import type { BudgetPeriod } from "@/lib/types";
 import { actuals, budgetCodes, varianceKind } from "@/lib/data";
 import { formatDeltaCad } from "@/lib/money";
-import {
-  EmptyNote,
-  MockTag,
-  Num,
-  PeriodPicker,
-  Screen,
-  TableHead,
-  periodLabel,
-} from "@/components/screens/shared";
+import { EmptyNote, MockTag, Num, Screen, TableHead } from "@/components/screens/shared";
 import { StatusBadge } from "@/components/ui/Chip";
 
 // Plan against reality, line by line. The delta column pairs a status badge with a signed
@@ -23,17 +15,12 @@ import { StatusBadge } from "@/components/ui/Chip";
 // survives a grayscale print and any colour-vision deficiency.
 //
 // Actuals will come from QuickBooks reconciliation once Stage 6.1 lands; today they are mock.
+//
+// Shows the entered period only (Console, lib/workingPeriod.ts) — there is no picker here; the
+// banner's SWITCH PERIOD is the one way to look at another period.
 
-export default function ActualsVsBudget({
-  periods,
-  periodId,
-  onSelectPeriod,
-}: {
-  periods: BudgetPeriod[];
-  periodId: string;
-  onSelectPeriod: (id: string) => void;
-}) {
-  const rows = actuals.filter((a) => a.periodId === periodId);
+export default function ActualsVsBudget({ period }: { period: BudgetPeriod }) {
+  const rows = actuals.filter((a) => a.periodId === period.id);
 
   const planned = rows.reduce((sum, r) => sum + r.planned, 0);
   const actual = rows.reduce((sum, r) => sum + r.actual, 0);
@@ -43,9 +30,8 @@ export default function ActualsVsBudget({
 
   return (
     <Screen
-      eyebrow={`Performance · ${periodLabel(periods, periodId)}`}
+      eyebrow={`Performance · ${period.label}`}
       title="Actuals vs Budget"
-      right={<PeriodPicker periods={periods} periodId={periodId} onSelect={onSelectPeriod} />}
     >
       <div
         style={{
@@ -107,7 +93,7 @@ export default function ActualsVsBudget({
       </div>
 
       {rows.length === 0 ? (
-        <EmptyNote>No actuals recorded for {periodLabel(periods, periodId)}.</EmptyNote>
+        <EmptyNote>No actuals recorded for {period.label}.</EmptyNote>
       ) : (
         <>
           <TableHead

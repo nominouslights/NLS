@@ -32,9 +32,15 @@ import { EmptyNote, Screen } from "@/components/screens/shared";
 // detailBg, split by a CSS grid with a top border.
 //
 // This screen owns its own fetch rather than taking the list as a prop — unlike periods, which
-// Console hoists because five screens read them. The period dashboard and Allocations fetch the
-// chart too (for their pickers and coverage); the three mock screens (Actuals, Variance, Reports)
-// still read the lookup in lib/data.ts until their slice lands.
+// Console hoists because several screens read them. The Period Dashboard fetches the chart too
+// (for its picker and coverage); the three mock screens (Actuals, Variance, Reports) still read
+// the lookup in lib/data.ts until their slice lands.
+//
+// The chart is TENANT-WIDE: one set of codes serves every budget period, matching the backend
+// (budget codes carry no period id). So this is the one planning screen that is not inside the
+// entered period, and it says so — "Planning · All periods" and an "Applies to every period"
+// chip — and both of its destructive actions warn, in their confirm, that they reach every
+// period rather than just the one the planner happens to be working in.
 //
 // Retiring is a flag flip and is the normal end of a code's life — a retired code stays listed,
 // because last period's allocations and actuals reference it by string and must keep resolving.
@@ -55,8 +61,15 @@ export default function BudgetCodes({
   const [editing, setEditing] = useState<BudgetCode | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [busy, setBusy] = useState(false);
-  /** Two-click delete: holds the id awaiting confirmation, so a stray click cannot destroy a code. */
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  /**
+   * Two-click retire and delete: holds the action awaiting confirmation, so a stray click can
+   * neither destroy a code nor retire it out from under every period at once. One at a time, by
+   * construction. Restore stays one click — it takes nothing away.
+   */
+  const [confirmAction, setConfirmAction] = useState<{
+    kind: "retire" | "delete";
+    id: string;
+  } | null>(null);
 
   const applyLoaded = useCallback((records: BudgetCodeRecord[]) => {
     setCodes(records.map(toBudgetCode));
@@ -102,10 +115,14 @@ export default function BudgetCodes({
 
   const list = codes ?? [];
   // selId can point at a code that has since been deleted — or, when Variance jumps here, at a
-  // mock id that never existed (Allocations jumps with real ids now). Falling back to the first
-  // row keeps the pane populated either way.
+  // mock id that never existed (its rows come from lib/data.ts). Falling back to the first row
+  // keeps the pane populated either way.
   const selected = list.find((c) => c.id === selId) ?? list[0] ?? null;
   const selectedHasChildren = selected !== null && list.some((c) => c.parentCodeId === selected.id);
+  const confirmingRetire =
+    selected !== null && confirmAction?.kind === "retire" && confirmAction.id === selected.id;
+  const confirmingDelete =
+    selected !== null && confirmAction?.kind === "delete" && confirmAction.id === selected.id;
 
   function handleSaved(records: BudgetCodeRecord[], id: string) {
     setCodes(records.map(toBudgetCode));
@@ -115,7 +132,7 @@ export default function BudgetCodes({
 
   function selectCode(id: string) {
     onSelect(id);
-    setConfirmDeleteId(null); // a pending confirmation never survives a selection change
+    setConfirmAction(null); // a pending confirmation never survives a selection change
   }
 
   async function runAction(action: () => Promise<unknown>) {
@@ -133,17 +150,25 @@ export default function BudgetCodes({
     }
   }
 
-  const toggleActive = (target: BudgetCode) =>
-    runAction(() => setBudgetCodeActive(target.id, !target.active));
+  async function toggleActive(target: BudgetCode) {
+    if (target.active) {
+      if (confirmAction?.kind !== "retire" || confirmAction.id !== target.id) {
+        setConfirmAction({ kind: "retire", id: target.id });
+        return;
+      }
+      setConfirmAction(null);
+    }
+    await runAction(() => setBudgetCodeActive(target.id, !target.active));
+  }
 
   const seedStarterSet = () => runAction(seedStarterBudgetCodes);
 
   async function confirmDelete(target: BudgetCode) {
-    if (confirmDeleteId !== target.id) {
-      setConfirmDeleteId(target.id);
+    if (confirmAction?.kind !== "delete" || confirmAction.id !== target.id) {
+      setConfirmAction({ kind: "delete", id: target.id });
       return;
     }
-    setConfirmDeleteId(null);
+    setConfirmAction(null);
     // A 409 (children, or the code has been used) surfaces through applyLoadError with the
     // server's own message, which already names retirement as the alternative.
     await runAction(() => deleteBudgetCode(target.id));
@@ -152,18 +177,21 @@ export default function BudgetCodes({
 
   return (
     <Screen
-      eyebrow="Planning"
+      eyebrow="Planning · All periods"
       title="Budget Codes"
       right={
-        <ActionButton
-          variant="primary"
-          onClick={() => {
-            setEditing(null);
-            setShowForm(true);
-          }}
-        >
-          + NEW CODE
-        </ActionButton>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <StatusChip kind="info" label="Applies to every period" />
+          <ActionButton
+            variant="primary"
+            onClick={() => {
+              setEditing(null);
+              setShowForm(true);
+            }}
+          >
+            + NEW CODE
+          </ActionButton>
+        </div>
       }
     >
       {error && (
@@ -294,29 +322,38 @@ export default function BudgetCodes({
                     onClick={() => toggleActive(selected)}
                     disabled={busy}
                   >
-                    {busy ? "WORKING…" : selected.active ? "RETIRE" : "RESTORE"}
+                    {busy
+                      ? "WORKING…"
+                      : !selected.active
+                        ? "RESTORE"
+                        : confirmingRetire
+                          ? "CONFIRM RETIRE"
+                          : "RETIRE"}
                   </ActionButton>
                   <ActionButton
                     variant="destructive"
                     onClick={() => confirmDelete(selected)}
                     disabled={busy}
                   >
-                    {confirmDeleteId === selected.id ? "CONFIRM DELETE" : "DELETE"}
+                    {confirmingDelete ? "CONFIRM DELETE" : "DELETE"}
                   </ActionButton>
                 </div>
 
-                {confirmDeleteId === selected.id && (
-                  <div
-                    style={{
-                      marginBottom: 12,
-                      fontFamily: fonts.body,
-                      fontSize: 11.5,
-                      color: colors.textSecondary,
-                    }}
-                  >
-                    Deleting is permanent and is only for a code created in error. If this code has
-                    ever been used, retire it instead — click anything else to cancel.
-                  </div>
+                {confirmingRetire && (
+                  <ConfirmNote>
+                    Retiring {selected.code} applies to every budget period, not just the one
+                    you&apos;re working in. Lines already planned on it stay and still count, but
+                    no period can set or change a line on it until it is restored. Click CONFIRM
+                    RETIRE to proceed; selecting another code cancels.
+                  </ConfirmNote>
+                )}
+
+                {confirmingDelete && (
+                  <ConfirmNote>
+                    Deleting is permanent, removes {selected.code} from the chart for every budget
+                    period, and is only for a code created in error. If this code has ever been
+                    used, retire it instead — click anything else to cancel.
+                  </ConfirmNote>
                 )}
 
                 {selected.description && (
@@ -438,6 +475,23 @@ export default function BudgetCodes({
         />
       )}
     </Screen>
+  );
+}
+
+/** The text under a pending two-click confirm, naming what the second click will do. */
+function ConfirmNote({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        marginBottom: 12,
+        fontFamily: fonts.body,
+        fontSize: 11.5,
+        color: colors.textSecondary,
+        lineHeight: 1.6,
+      }}
+    >
+      {children}
+    </div>
   );
 }
 

@@ -9,7 +9,8 @@ namespace NorthernLink.Budgeting.Application.Abstractions;
 public interface IBudgetAllocationReadService
 {
     /// <summary>
-    /// Every line of one period, ordered by code, with the code's current name, category,
+    /// Every budget item of one period, ordered by code, then priority (MustHave first), then
+    /// creation time, with the code's current name, category,
     /// service line and active flag resolved from <c>rm_budget_codes</c> at read time.
     /// </summary>
     Task<IReadOnlyList<BudgetAllocationResponse>> GetForPeriodAsync(Guid periodId, CancellationToken cancellationToken = default);

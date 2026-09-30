@@ -15,3 +15,26 @@ export function formatDeltaCad(delta: number): string {
   const sign = delta > 0 ? "+" : delta < 0 ? "−" : "";
   return `${sign}$${Math.abs(delta).toLocaleString("en-CA")}`;
 }
+
+const cadWhole = new Intl.NumberFormat("en-CA", {
+  style: "currency",
+  currency: "CAD",
+  maximumFractionDigits: 0,
+});
+const cadCents = new Intl.NumberFormat("en-CA", {
+  style: "currency",
+  currency: "CAD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+/**
+ * A budget item's amount, to the cent when it has cents: "$5,400" but "$3.03". The copied
+ * `formatCad` (lib/api/format.ts) prints whole dollars only, which was right while this app
+ * planned in whole dollars — but an item built up as quantity × unit cost lands on cents, and
+ * "$3" for a $3.03 item would disagree with what the server stored. Whole-dollar figures keep the
+ * shorter form so the dashboard does not fill with ".00".
+ */
+export function formatCadPrecise(value: number): string {
+  return Number.isInteger(Math.round(value * 100) / 100) ? cadWhole.format(value) : cadCents.format(value);
+}

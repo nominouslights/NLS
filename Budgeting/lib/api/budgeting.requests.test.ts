@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   copyBudgetAllocations,
+  createBudgetItem,
+  listBudgetAllocations,
+  removeBudgetItem,
+  updateBudgetItem,
   createBudgetCode,
   createBudgetPeriod,
   deleteBudgetCode,
@@ -12,6 +16,7 @@ import {
   updateBudgetCode,
   type BudgetCodeInput,
   type BudgetCodeUpdateInput,
+  type BudgetItemInput,
 } from "./budgeting";
 import { ApiError } from "./transport";
 
@@ -170,8 +175,8 @@ describe("period requests", () => {
 describe("copyBudgetAllocations", () => {
   // POST periods/{id}/allocations/copy, mapped inside the BudgetAccess group in
   // BudgetingEndpoints.cs and handled by CopyBudgetAllocationsCommandHandler. The route is the
-  // one place a literal segment sits beside a {codeId:guid} route on the same path — the :guid
-  // constraint is what keeps "copy" from binding as a code id — so the exact string is worth
+  // one place a literal segment sits beside an {allocationId:guid} route on the same path — the :guid
+  // constraint is what keeps "copy" from binding as an item id — so the exact string is worth
   // pinning here.
   const TARGET = "5f2b1e1c-0000-4000-8000-0000000000a1";
   const SOURCE = "5f2b1e1c-0000-4000-8000-0000000000a2";
@@ -367,5 +372,112 @@ describe("code requests", () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { created: 0 }));
 
     await expect(seedStarterBudgetCodes()).resolves.toEqual({ created: 0 });
+  });
+});
+
+describe("budget item requests", () => {
+  // POST / PUT / DELETE periods/{id}/allocations[/{allocationId}] in the BudgetAccess group
+  // (BudgetingEndpoints.cs). The old upsert-by-code PUT periods/{id}/allocations/{codeId} is gone:
+  // an item is addressed by its OWN id, so a code id in that route segment would be a 404.
+  const PERIOD = "5f2b1e1c-0000-4000-8000-0000000000a1";
+  const ITEM = "5f2b1e1c-0000-4000-8000-0000000000b7";
+
+  const input: BudgetItemInput = {
+    budgetCodeId: CODE_ID,
+    title: "Winter tires, unit NL-04",
+    amountCad: null,
+    quantity: 4,
+    unitCostCad: 612.5,
+    unit: "tire",
+    justification: "Kal Tire quote in hand.",
+    spendType: "Capital",
+    recurrence: "OneTime",
+    vendor: "Kal Tire",
+    tags: ["winter", "safety"],
+    priority: "MustHave",
+    assumptions: null,
+    consequenceIfUnfunded: "NL-04 runs summer tires into November.",
+  };
+
+  it("lists a period's items with a GET", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, []));
+
+    await expect(listBudgetAllocations(PERIOD)).resolves.toEqual([]);
+    expect(callPath()).toBe(`/api/budgeting/periods/${PERIOD}/allocations`);
+    expect(callInit().method).toBeUndefined();
+  });
+
+  it("POSTs a new item to the period's allocations route and returns the 201's id", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(201, { id: ITEM }));
+
+    await expect(createBudgetItem(PERIOD, input)).resolves.toBe(ITEM);
+    expect(callPath()).toBe(`/api/budgeting/periods/${PERIOD}/allocations`);
+    expect(callInit().method).toBe("POST");
+  });
+
+  it("sends the whole BudgetItemRequest — every key, enums as their PascalCase strings, explicit nulls", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(201, { id: ITEM }));
+
+    await createBudgetItem(PERIOD, input);
+
+    expect(JSON.parse(String(callInit().body))).toEqual({
+      budgetCodeId: CODE_ID,
+      title: "Winter tires, unit NL-04",
+      amountCad: null,
+      quantity: 4,
+      unitCostCad: 612.5,
+      unit: "tire",
+      justification: "Kal Tire quote in hand.",
+      spendType: "Capital",
+      recurrence: "OneTime",
+      vendor: "Kal Tire",
+      tags: ["winter", "safety"],
+      priority: "MustHave",
+      assumptions: null,
+      consequenceIfUnfunded: "NL-04 runs summer tires into November.",
+    });
+  });
+
+  it("PUTs an update to the ITEM's own route, 204 → undefined", async () => {
+    fetchMock.mockResolvedValueOnce(noContent());
+
+    await expect(updateBudgetItem(PERIOD, ITEM, { ...input, budgetCodeId: "moved" })).resolves.toBeUndefined();
+    expect(callPath()).toBe(`/api/budgeting/periods/${PERIOD}/allocations/${ITEM}`);
+    expect(callInit().method).toBe("PUT");
+    // The code travels in the body, which is how an item moves to another code.
+    expect(JSON.parse(String(callInit().body))).toMatchObject({ budgetCodeId: "moved" });
+  });
+
+  it("DELETEs by item id, 204 → undefined", async () => {
+    fetchMock.mockResolvedValueOnce(noContent());
+
+    await expect(removeBudgetItem(PERIOD, ITEM)).resolves.toBeUndefined();
+    expect(callPath()).toBe(`/api/budgeting/periods/${PERIOD}/allocations/${ITEM}`);
+    expect(callInit().method).toBe("DELETE");
+    expect(callPath()).not.toContain(CODE_ID);
+  });
+
+  it.each<[number, string, string]>([
+    [400, "Budgeting.Allocation.TitleRequired", "Give the budget item a title — what is this money for?"],
+    [
+      400,
+      "Budgeting.Allocation.QuantityWithoutUnitCost",
+      "Quantity and unit cost go together: enter both, or leave both blank and enter a lump-sum amount.",
+    ],
+    [404, "Budgeting.Allocation.NotFound", "That budget item was not found in this period."],
+    [
+      409,
+      "Budgeting.Allocation.CodeRetired",
+      "That budget code is retired and cannot take new allocations. Restore it or pick another code.",
+    ],
+    [
+      409,
+      "Budgeting.Allocation.PeriodNotEditable",
+      "The plan can only change while the period is Draft or Open.",
+    ],
+  ])("surfaces the %d %s message verbatim on update", async (status, code, message) => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(status, { code, message }));
+
+    await expect(updateBudgetItem(PERIOD, ITEM, input)).rejects.toMatchObject({ code, message, status });
   });
 });
