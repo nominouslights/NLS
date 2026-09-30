@@ -24,7 +24,8 @@ import {
   planBalanced,
   planningProgress,
   refetchUntil,
-  removeBudgetAllocation,
+  priorityBreakdown,
+  removeBudgetItem,
   stateAfter,
   toBudgetCode,
   transitionBudgetPeriod,
@@ -40,7 +41,8 @@ import {
   type PeriodTransitionAction,
 } from "@/lib/api/budgeting";
 import { ErrorNotice } from "@/components/ErrorNotice";
-import BudgetAllocationFormModal from "@/components/BudgetAllocationFormModal";
+import BudgetItemFormModal from "@/components/BudgetItemFormModal";
+import PriorityBreakdown from "@/components/screens/periods/PriorityBreakdown";
 import { EmptyNote } from "@/components/screens/shared";
 import { usePeriodHold } from "@/lib/periodHold";
 import LifecycleStepper from "@/components/screens/periods/LifecycleStepper";
@@ -49,8 +51,8 @@ import CopyFromPeriodPanel from "@/components/screens/periods/CopyFromPeriodPane
 import AllocationSection from "@/components/screens/periods/AllocationSection";
 
 // The body of the Period Dashboard: the entered period, where it stands in its lifecycle, what
-// is planned against it, and the two things a planner does here — set lines, and move the
-// period forward. Owns its own fetch of the period's lines and the chart (both needed for
+// is planned against it, and the two things a planner does here — add budget items, and move the
+// period forward. Owns its own fetch of the period's budget items and the chart (both needed for
 // coverage and the picker). Console remounts it (a Fragment keyed by the entered period's id)
 // on every switch, so no confirm, modal or fetch outlives the period it was for.
 //
@@ -60,12 +62,12 @@ import AllocationSection from "@/components/screens/periods/AllocationSection";
 // names the period it acts on.
 //
 // Two eventual-consistency rules, both inherited from the codes screen: after a transition,
-// refetch the period until it reports the expected state; after a line changes, refetch the lines
+// refetch the period until it reports the expected state; after an item changes, refetch the items
 // until the new VALUES are visible (not merely the row — on edit the row was always there). Only
 // then is the period list refreshed, because its totals read from the same projection.
 //
-// Lines are editable in Draft and Open only (BudgetPeriod.AllowsPlanChanges). Everywhere else the
-// controls are absent and one note names the state, so "I can't add a line" reads as the rule it
+// Items are editable in Draft and Open only (BudgetPeriod.AllowsPlanChanges). Everywhere else the
+// controls are absent and one note names the state, so "I can't add an item" reads as the rule it
 // is rather than as a bug.
 
 /**
@@ -75,11 +77,11 @@ import AllocationSection from "@/components/screens/periods/AllocationSection";
  */
 const TRANSITION_NOTES: Record<PeriodTransitionAction, (label: string) => string> = {
   finalize: (label) =>
-    `Finalizing signs ${label}'s plan off. Its lines become read-only until the period is opened.`,
+    `Finalizing signs ${label}'s plan off. Its items become read-only until the period is opened.`,
   open: (label) =>
-    `Opening starts ${label} as the live period. Lines can be adjusted again while it is open.`,
+    `Opening starts ${label} as the live period. Items can be adjusted again while it is open.`,
   "begin-review": (label) =>
-    `Beginning review freezes ${label}'s plan. Lines become read-only for the review.`,
+    `Beginning review freezes ${label}'s plan. Items become read-only for the review.`,
   close: (label) =>
     `Closing ${label} is final. The period and its plan stay read-only, and there is no step after it.`,
 };
@@ -99,7 +101,7 @@ const TRANSITION_VARIANTS: Record<PeriodTransitionAction, "primary" | "success" 
  */
 type PendingConfirm =
   | { kind: "transition" }
-  | { kind: "remove"; codeId: string }
+  | { kind: "remove"; itemId: string }
   | { kind: "copy" }
   | null;
 
@@ -125,11 +127,13 @@ export default function PeriodDashboard({
   const [confirm, setConfirm] = useState<PendingConfirm>(null);
   const [modal, setModal] = useState<{
     category: BudgetCodeCategory;
-    line: BudgetAllocationRecord | null;
+    item: BudgetAllocationRecord | null;
+    /** "+ ITEM" on a code header preselects that code. */
+    presetCodeId: string | null;
   } | null>(null);
 
   // busy covers transition, remove and copy — every request this component makes against the
-  // period. The allocation modal takes its own hold for its save.
+  // period. The item modal takes its own hold for its save.
   usePeriodHold(busy);
 
   const applyError = useCallback((e: unknown) => {
@@ -214,12 +218,17 @@ export default function PeriodDashboard({
   }
   if (unargued > 0) {
     finalizeConcerns.push(
-      `${unargued} ${unargued === 1 ? "line" : "lines"} still ${unargued === 1 ? "carries" : "carry"} no justification — copied from an earlier period and not yet argued.`,
+      `${unargued} ${unargued === 1 ? "item" : "items"} still ${unargued === 1 ? "carries" : "carry"} no justification — copied from an earlier period and not yet argued.`,
     );
   }
   const finalizeWarning = transition?.action === "finalize" && finalizeConcerns.length > 0;
   const warningKind = planBalanced(period) ? "soon" : ASSIGNMENT_KINDS[assignment];
-  const warningLabel = planBalanced(period) ? "Unargued lines" : ASSIGNMENT_LABELS[assignment];
+  const warningLabel = planBalanced(period) ? "Unargued items" : ASSIGNMENT_LABELS[assignment];
+
+  // The by-priority breakdown is summed CLIENT-SIDE from the loaded items — it answers "what would
+  // I cut first?", which the server does not total. The headline tiles above it stay the server's
+  // own totals (period.plannedRevenue / plannedExpense) and are never re-derived from these items.
+  const expenseByPriority = priorityBreakdown((lines ?? []).filter((l) => l.category === "Expense"));
 
   const refreshPeriods = () => listBudgetPeriods().then(onPeriodsRefreshed, applyError);
 
@@ -248,20 +257,20 @@ export default function PeriodDashboard({
     }
   }
 
-  async function removeLine(line: BudgetAllocationRecord) {
+  async function removeItem(item: BudgetAllocationRecord) {
     if (busy) return;
-    if (confirm?.kind !== "remove" || confirm.codeId !== line.budgetCodeId) {
-      setConfirm({ kind: "remove", codeId: line.budgetCodeId });
+    if (confirm?.kind !== "remove" || confirm.itemId !== item.id) {
+      setConfirm({ kind: "remove", itemId: item.id });
       return;
     }
     setConfirm(null);
     setBusy(true);
     setError(null);
     try {
-      await removeBudgetAllocation(periodId, line.budgetCodeId);
+      await removeBudgetItem(periodId, item.id);
       const rows = await refetchUntil(
         () => listBudgetAllocations(periodId),
-        (rows) => !rows.some((r) => r.budgetCodeId === line.budgetCodeId),
+        (rows) => !rows.some((r) => r.id === item.id),
       );
       setLines(rows);
       onPeriodsRefreshed(await listBudgetPeriods());
@@ -307,9 +316,13 @@ export default function PeriodDashboard({
     }
   }
 
-  function openModal(category: BudgetCodeCategory, line: BudgetAllocationRecord | null) {
+  function openModal(
+    category: BudgetCodeCategory,
+    item: BudgetAllocationRecord | null,
+    presetCodeId: string | null = null,
+  ) {
     setConfirm(null);
-    setModal({ category, line });
+    setModal({ category, item, presetCodeId });
   }
 
   function handleSaved(rows: BudgetAllocationRecord[]) {
@@ -482,6 +495,12 @@ export default function PeriodDashboard({
         </div>
       )}
 
+      {loaded && (
+        <div style={{ marginBottom: 14 }}>
+          <PriorityBreakdown title="Expense by priority" buckets={expenseByPriority} />
+        </div>
+      )}
+
       {/* Zero-based step 5: a fresh plan each period, seeded from an earlier one rather than
           rebuilt line by line. Only while the period accepts plan changes — the same rule the
           server enforces on the copy's TARGET. */}
@@ -500,8 +519,8 @@ export default function PeriodDashboard({
       {!editable && (
         <div style={{ marginBottom: 14 }}>
           <EmptyNote>
-            This period is {stateLabel}; its plan is read-only. Lines can change only while the
-            period is Draft or Open.
+            This period is {stateLabel}; its plan is read-only. Budget items can be added, changed
+            or removed only while the period is Draft or Open.
           </EmptyNote>
         </div>
       )}
@@ -513,36 +532,38 @@ export default function PeriodDashboard({
           <AllocationSection
             category="Revenue"
             periodLabel={period.label}
-            lines={lines.filter((l) => l.category === "Revenue")}
+            items={lines.filter((l) => l.category === "Revenue")}
             editable={editable}
             busy={busy}
-            confirmRemoveCodeId={confirm?.kind === "remove" ? confirm.codeId : null}
+            confirmRemoveItemId={confirm?.kind === "remove" ? confirm.itemId : null}
             onAdd={() => openModal("Revenue", null)}
-            onEdit={(line) => openModal("Revenue", line)}
-            onRemove={removeLine}
+            onAddToCode={(codeId) => openModal("Revenue", null, codeId)}
+            onEdit={(item) => openModal("Revenue", item)}
+            onRemove={removeItem}
           />
           <AllocationSection
             category="Expense"
             periodLabel={period.label}
-            lines={lines.filter((l) => l.category === "Expense")}
+            items={lines.filter((l) => l.category === "Expense")}
             editable={editable}
             busy={busy}
-            confirmRemoveCodeId={confirm?.kind === "remove" ? confirm.codeId : null}
+            confirmRemoveItemId={confirm?.kind === "remove" ? confirm.itemId : null}
             onAdd={() => openModal("Expense", null)}
-            onEdit={(line) => openModal("Expense", line)}
-            onRemove={removeLine}
+            onAddToCode={(codeId) => openModal("Expense", null, codeId)}
+            onEdit={(item) => openModal("Expense", item)}
+            onRemove={removeItem}
           />
         </>
       )}
 
       {modal && loaded && (
-        <BudgetAllocationFormModal
+        <BudgetItemFormModal
           periodId={periodId}
           periodLabel={period.label}
           category={modal.category}
           codes={codes}
-          lines={lines}
-          line={modal.line}
+          item={modal.item}
+          presetCodeId={modal.presetCodeId}
           onClose={() => setModal(null)}
           onSaved={handleSaved}
         />

@@ -121,9 +121,46 @@ internal static class TestBudgeting
     }
 
     /// <summary>
-    /// A valid allocation line. The period and code ids default to fresh guids because the
-    /// aggregate holds bare ids — a test that needs the line to point at a real period or code
-    /// passes theirs in.
+    /// A valid lump-sum budget item's details, every field overridable. Defaults are the
+    /// required-only shape (title, amount, justification) plus the documented enum defaults, so
+    /// a test that cares about one field does not have to restate the rest.
+    /// </summary>
+    public static BudgetItemDetails Item(
+        string? title = "Crew rotations, Q4",
+        decimal? amount = 1250.00m,
+        string? justification = "Two crew rotations a week under the Alamos master agreement.",
+        decimal? quantity = null,
+        decimal? unitCost = null,
+        string? unit = null,
+        BudgetSpendType spendType = BudgetSpendType.Operating,
+        BudgetRecurrence recurrence = BudgetRecurrence.OneTime,
+        string? vendor = null,
+        IReadOnlyList<string>? tags = null,
+        BudgetItemPriority priority = BudgetItemPriority.ShouldHave,
+        string? assumptions = null,
+        string? consequence = null) => new()
+        {
+            Title = title,
+            AmountCad = amount,
+            Justification = justification,
+            Quantity = quantity,
+            UnitCostCad = unitCost,
+            Unit = unit,
+            SpendType = spendType,
+            Recurrence = recurrence,
+            Vendor = vendor,
+            Tags = tags,
+            Priority = priority,
+            Assumptions = assumptions,
+            ConsequenceIfUnfunded = consequence,
+        };
+
+    /// <summary>
+    /// A valid budget item. The period and code ids default to fresh guids because the
+    /// aggregate holds bare ids — a test that needs the item to point at a real period or code
+    /// passes theirs in. <paramref name="details"/>, when given, wins over
+    /// <paramref name="amount"/>/<paramref name="justification"/>; <paramref name="tenantId"/>
+    /// exists for the tenant-isolation tests.
     /// </summary>
     public static BudgetAllocation CreateAllocation(
         Guid? periodId = null,
@@ -131,15 +168,16 @@ internal static class TestBudgeting
         string code = "ZBB-CREW-01",
         decimal? amount = 1250.00m,
         string? justification = "Two crew rotations a week under the Alamos master agreement.",
-        Guid? actorId = null)
+        Guid? actorId = null,
+        BudgetItemDetails? details = null,
+        Guid? tenantId = null)
     {
         var result = BudgetAllocation.Create(
-            TenantId,
+            tenantId ?? TenantId,
             periodId ?? Guid.NewGuid(),
             budgetCodeId ?? Guid.NewGuid(),
             code,
-            amount,
-            justification,
+            details ?? Item(amount: amount, justification: justification),
             actorId);
         if (result.IsFailure)
         {

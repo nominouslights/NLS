@@ -17,7 +17,7 @@ import {
 import { EmptyNote } from "@/components/screens/shared";
 
 // "Start from last period" — zero-based budgeting's fifth step (a fresh plan before the period
-// begins) without rebuilding eleven lines by hand, which is the reason people abandon ZBB.
+// begins) without rebuilding eleven items by hand, which is the reason people abandon ZBB.
 //
 // It lives beside the checklist rather than inside AllocationSection because a copy spans both
 // categories at once, and only while the period accepts plan changes (canEditAllocations) —
@@ -128,11 +128,12 @@ export default function CopyFromPeriodPanel({
 
           {confirming && source && (
             <Note>
-              This brings {source.label}&apos;s amounts into {period.label} —{" "}
-              <strong>the amounts only. Every justification is cleared</strong>, so each line must
-              be argued again before it can be saved. Lines you already have here are left alone,
-              and retired codes are skipped. Nothing changes in {source.label}. Click CONFIRM COPY
-              INTO {intoLabel} to proceed.
+              This brings {source.label}&apos;s budget items into {period.label} — titles,
+              amounts and details, <strong>but every justification is cleared</strong>, so each
+              item must be argued again before it can be saved. A code that already has items
+              here is skipped whole (so copying twice adds nothing), and items on retired codes
+              are skipped. Nothing changes in {source.label}. Click CONFIRM COPY INTO{" "}
+              {intoLabel} to proceed.
             </Note>
           )}
 
@@ -161,7 +162,7 @@ export default function CopyFromPeriodPanel({
   );
 }
 
-/** A quiet explanatory line, matching the allocation modal's trailing note. */
+/** A quiet explanatory line, matching the item modal's trailing note. */
 function Note({ children }: { children: React.ReactNode }) {
   return (
     <div

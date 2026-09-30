@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useLayoutEffect } from "react";
 
-// The in-flight guard. A transition, a line removal, a copy or an allocation save names the
+// The in-flight guard. A transition, an item removal, a copy or an item save names the
 // entered period in its request; if the planner could switch period while one is running, the
 // request would finish against the period they had left and its result (or its error) would
 // land nowhere they can see. So anything mid-request takes a hold, and while any hold is taken
