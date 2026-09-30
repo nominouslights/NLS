@@ -61,15 +61,16 @@ describe("PeriodBanner", () => {
     expect(screen.getByText("Finishing a change to Q3 2026…")).toBeTruthy();
   });
 
-  it("marks a screen that is not tied to a period", () => {
-    renderBanner({ scoped: false });
-    expect(
-      screen.getByText("This screen isn't tied to a period — it applies to every period."),
-    ).toBeTruthy();
+  it("marks a screen that is not tied to a period (Settings, the only one left)", () => {
+    const { container } = renderBanner({ scoped: false });
+    expect(screen.getByText("This screen isn't tied to a period.")).toBeTruthy();
     expect(screen.queryByText("Plan read-only")).toBeNull();
+    // Budget codes belong to a period now, so nothing on the banner may still claim a screen
+    // "applies to every period" — that wording described the old tenant-wide chart.
+    expect(container.textContent).not.toContain("every period");
   });
 
-  it("offers the chooser when nothing is entered on a global screen", () => {
+  it("offers the chooser when nothing is entered on a screen not tied to a period", () => {
     const { onChoose } = renderBanner({ period: null, scoped: false });
     expect(screen.getByText("No period entered")).toBeTruthy();
     fireEvent.click(screen.getByText("CHOOSE A PERIOD"));

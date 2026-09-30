@@ -38,6 +38,11 @@ import { EmptyNote, Num } from "@/components/screens/shared";
 // add, edit and remove controls are all absent; the dashboard explains why in one note above both
 // sections.
 //
+// Codes belong to a period, so a fresh period can have no active code of this category at all.
+// Then an item picker would be empty, so the section offers no add button and instead points to
+// Budget Codes, where the period's chart is copied from another period, loaded from the starter
+// set, or built by hand.
+//
 // An item copied from an earlier period arrives with every field but its justification
 // (BudgetAllocation.CopyInto), so it carries a "Needs justification" chip and placeholder text
 // in the justification's place — the gap reads as the work it is, never as a blank.
@@ -46,9 +51,11 @@ export default function AllocationSection({
   category,
   periodLabel,
   items,
+  activeCodeCount,
   editable,
   busy,
   confirmRemoveItemId,
+  onOpenCodes,
   onAdd,
   onAddToCode,
   onEdit,
@@ -59,10 +66,14 @@ export default function AllocationSection({
   periodLabel: string;
   /** Already filtered to this category, in the server's order. */
   items: BudgetAllocationRecord[];
+  /** This period's active codes of this category — 0 means there is nothing to plan against yet. */
+  activeCodeCount: number;
   editable: boolean;
   busy: boolean;
   /** The item id whose REMOVE is awaiting its confirming click, if any. */
   confirmRemoveItemId: string | null;
+  /** To Budget Codes (same period), when there is no active code of this category. */
+  onOpenCodes: () => void;
   /** Section-level add: any active code of the category. */
   onAdd: () => void;
   /** "+ ITEM" on a code header: that code preselected. */
@@ -73,6 +84,7 @@ export default function AllocationSection({
   const revenue = category === "Revenue";
   const total = sumCad(items.map((i) => i.amountCad));
   const groups = groupItemsByCode(items);
+  const noCodes = activeCodeCount === 0;
 
   return (
     <div style={{ marginBottom: 18 }}>
@@ -92,7 +104,7 @@ export default function AllocationSection({
           {itemCount(items.length)} · {groups.length} {groups.length === 1 ? "code" : "codes"} ·{" "}
           {formatCadPrecise(total)}
         </span>
-        {editable && (
+        {editable && !noCodes && (
           <ActionButton
             variant="primary"
             onClick={onAdd}
@@ -104,7 +116,34 @@ export default function AllocationSection({
         )}
       </div>
 
-      {items.length === 0 ? (
+      {editable && noCodes && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            flexWrap: "wrap",
+            marginBottom: items.length > 0 ? 10 : 0,
+          }}
+        >
+          <span
+            style={{
+              flex: "1 1 320px",
+              fontFamily: fonts.body,
+              fontSize: 11.5,
+              color: colors.textSecondary,
+              lineHeight: 1.6,
+            }}
+          >
+            {periodLabel} has no active {category.toLowerCase()} codes yet, and every budget item
+            is tagged to one. Set up this period&apos;s codes first — copy them from an earlier
+            period, load the starter set, or add a code.
+          </span>
+          <ActionButton onClick={onOpenCodes}>OPEN BUDGET CODES</ActionButton>
+        </div>
+      )}
+
+      {editable && noCodes && items.length === 0 ? null : items.length === 0 ? (
         <EmptyNote>
           {revenue
             ? "No revenue items yet — add an item for each source of income you expect, each argued from zero."

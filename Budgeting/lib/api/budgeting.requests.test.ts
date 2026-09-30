@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   copyBudgetAllocations,
+  copyBudgetCodes,
   createBudgetItem,
   listBudgetAllocations,
   removeBudgetItem,
@@ -71,34 +72,39 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+// Every code route lives under the period since codes became per-period
+// (BudgetingEndpoints.cs: periods/{id:guid}/codes...). The old tenant-wide codes* routes were
+// REMOVED server-side, so a request still built the old way is a 404 — pinned per route below.
+const PERIOD_ID = "5f2b1e1c-0000-4000-8000-0000000000b1";
+
 describe("setBudgetCodeActive", () => {
   // The one route in this client built from a boolean. Two routes rather than a body flag is
   // the backend's shape, so an inverted ternary here would silently activate a code the planner
   // asked to retire — a 204 either way, with no error anywhere to notice it by.
 
-  it("posts to /activate when active is true", async () => {
+  it("posts to the period's /activate route when active is true", async () => {
     fetchMock.mockResolvedValueOnce(noContent());
 
-    await setBudgetCodeActive(CODE_ID, true);
+    await setBudgetCodeActive(PERIOD_ID, CODE_ID, true);
 
-    expect(callPath()).toBe(`/api/budgeting/codes/${CODE_ID}/activate`);
+    expect(callPath()).toBe(`/api/budgeting/periods/${PERIOD_ID}/codes/${CODE_ID}/activate`);
     expect(callInit().method).toBe("POST");
   });
 
-  it("posts to /deactivate when active is false", async () => {
+  it("posts to the period's /deactivate route when active is false", async () => {
     fetchMock.mockResolvedValueOnce(noContent());
 
-    await setBudgetCodeActive(CODE_ID, false);
+    await setBudgetCodeActive(PERIOD_ID, CODE_ID, false);
 
-    expect(callPath()).toBe(`/api/budgeting/codes/${CODE_ID}/deactivate`);
+    expect(callPath()).toBe(`/api/budgeting/periods/${PERIOD_ID}/codes/${CODE_ID}/deactivate`);
     expect(callInit().method).toBe("POST");
   });
 
   it("never sends the opposite verb", async () => {
     fetchMock.mockResolvedValue(noContent());
 
-    await setBudgetCodeActive(CODE_ID, false);
-    await setBudgetCodeActive(CODE_ID, true);
+    await setBudgetCodeActive(PERIOD_ID, CODE_ID, false);
+    await setBudgetCodeActive(PERIOD_ID, CODE_ID, true);
 
     expect(callPath(0)).not.toContain("/activate");
     expect(callPath(1)).not.toContain("/deactivate");
@@ -106,12 +112,12 @@ describe("setBudgetCodeActive", () => {
 });
 
 describe("deleteBudgetCode", () => {
-  it("issues a DELETE to the code's own route", async () => {
+  it("issues a DELETE to the code's own route under its period", async () => {
     fetchMock.mockResolvedValueOnce(noContent());
 
-    await deleteBudgetCode(CODE_ID);
+    await deleteBudgetCode(PERIOD_ID, CODE_ID);
 
-    expect(callPath()).toBe(`/api/budgeting/codes/${CODE_ID}`);
+    expect(callPath()).toBe(`/api/budgeting/periods/${PERIOD_ID}/codes/${CODE_ID}`);
     expect(callInit().method).toBe("DELETE");
   });
 
@@ -119,17 +125,18 @@ describe("deleteBudgetCode", () => {
     // CLAUDE.md: the server's 409 names retirement as the alternative, so passing it through
     // unchanged is the correct handling — screens/BudgetCodes.tsx renders e.message directly.
     // A generic "Delete failed." here would strip the only instruction the user gets.
+    // Verbatim from BudgetCodeErrors.InUse.
     const serverMessage =
-      "This code has been used and cannot be deleted. Retire it instead so existing rows keep resolving.";
+      "This budget code is referenced by budget allocations or actual transactions and cannot be deleted. Retire it instead — a retired code stays listed so existing rows keep resolving.";
     fetchMock.mockResolvedValueOnce(
-      jsonResponse(409, { code: "BudgetCode.InUse", message: serverMessage }),
+      jsonResponse(409, { code: "Budgeting.Code.InUse", message: serverMessage }),
     );
 
-    const err = await deleteBudgetCode(CODE_ID).catch((e: unknown) => e);
+    const err = await deleteBudgetCode(PERIOD_ID, CODE_ID).catch((e: unknown) => e);
 
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).message).toBe(serverMessage);
-    expect(err).toMatchObject({ code: "BudgetCode.InUse", status: 409 });
+    expect(err).toMatchObject({ code: "Budgeting.Code.InUse", status: 409 });
   });
 
   it("surfaces the children-block 409 verbatim too", async () => {
@@ -138,7 +145,7 @@ describe("deleteBudgetCode", () => {
       jsonResponse(409, { code: "BudgetCode.HasChildren", message: serverMessage }),
     );
 
-    await expect(deleteBudgetCode(CODE_ID)).rejects.toMatchObject({
+    await expect(deleteBudgetCode(PERIOD_ID, CODE_ID)).rejects.toMatchObject({
       code: "BudgetCode.HasChildren",
       message: serverMessage,
       status: 409,
@@ -295,14 +302,15 @@ describe("code requests", () => {
     reviewFrequency: "Quarterly",
   };
 
-  it("lists codes with a GET", async () => {
+  it("lists the period's codes with a GET on the period route", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, []));
 
-    await expect(listBudgetCodes()).resolves.toEqual([]);
-    expect(callPath()).toBe("/api/budgeting/codes");
+    await expect(listBudgetCodes(PERIOD_ID)).resolves.toEqual([]);
+    expect(callPath()).toBe(`/api/budgeting/periods/${PERIOD_ID}/codes`);
+    expect(callInit().method).toBeUndefined();
   });
 
-  it("lists owner candidates from the codes/owners route", async () => {
+  it("lists owner candidates from the TENANT-WIDE codes/owners route — people, not codes", async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse(200, [{ userId: "u1", email: "owner@northernlink.ca", role: "Owner" }]),
     );
@@ -313,12 +321,16 @@ describe("code requests", () => {
     expect(callPath()).toBe("/api/budgeting/codes/owners");
   });
 
-  it("posts a new code and returns only the new id", async () => {
+  it("posts a new code to the period's route and returns only the new id", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(201, { id: "c9" }));
 
-    await expect(createBudgetCode(input)).resolves.toBe("c9");
-    expect(callPath()).toBe("/api/budgeting/codes");
+    await expect(createBudgetCode(PERIOD_ID, input)).resolves.toBe("c9");
+    expect(callPath()).toBe(`/api/budgeting/periods/${PERIOD_ID}/codes`);
     expect(callInit().method).toBe("POST");
+    // The body shape did not change when codes moved under a period: the period is the route's,
+    // never the body's.
+    expect(JSON.parse(String(callInit().body))).toEqual(input);
+    expect(JSON.parse(String(callInit().body))).not.toHaveProperty("periodId");
   });
 
   it("sends cleared optional fields as explicit nulls, not omissions", async () => {
@@ -326,7 +338,7 @@ describe("code requests", () => {
     // absent key as no change, so omitting a nulled field would make clearing it impossible.
     fetchMock.mockResolvedValueOnce(jsonResponse(201, { id: "c9" }));
 
-    await createBudgetCode(input);
+    await createBudgetCode(PERIOD_ID, input);
 
     const body = JSON.parse(String(callInit().body)) as Record<string, unknown>;
     expect(body).toHaveProperty("costCentre", null);
@@ -334,8 +346,8 @@ describe("code requests", () => {
     expect(body).toHaveProperty("budgetOwnerUserId", null);
   });
 
-  it("PUTs an update without a code field — the code string is set once", async () => {
-    // There is no rename endpoint: allocations and actuals reference a code by string, so a
+  it("PUTs an update to the code's route under its period, without a code field", async () => {
+    // There is no rename endpoint: items and actuals reference a code by string, so a
     // rename would orphan every row already tagged. A `code` key here would be a 400 at best.
     fetchMock.mockResolvedValueOnce(noContent());
 
@@ -353,25 +365,166 @@ describe("code requests", () => {
       budgetOwnerUserId: input.budgetOwnerUserId,
       reviewFrequency: input.reviewFrequency,
     };
-    await expect(updateBudgetCode(CODE_ID, update)).resolves.toBeUndefined();
+    await expect(updateBudgetCode(PERIOD_ID, CODE_ID, update)).resolves.toBeUndefined();
 
-    expect(callPath()).toBe(`/api/budgeting/codes/${CODE_ID}`);
+    expect(callPath()).toBe(`/api/budgeting/periods/${PERIOD_ID}/codes/${CODE_ID}`);
     expect(callInit().method).toBe("PUT");
+    expect(JSON.parse(String(callInit().body))).toEqual(update);
     expect(JSON.parse(String(callInit().body))).not.toHaveProperty("code");
   });
 
-  it("posts the starter set and returns how many it created", async () => {
+  it("posts the starter set to the period's route and returns how many it created", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { created: 12 }));
 
-    await expect(seedStarterBudgetCodes()).resolves.toEqual({ created: 12 });
-    expect(callPath()).toBe("/api/budgeting/codes/starter-set");
+    await expect(seedStarterBudgetCodes(PERIOD_ID)).resolves.toEqual({ created: 12 });
+    expect(callPath()).toBe(`/api/budgeting/periods/${PERIOD_ID}/codes/starter-set`);
     expect(callInit().method).toBe("POST");
   });
 
   it("reports the starter set as idempotent on a second call", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { created: 0 }));
 
-    await expect(seedStarterBudgetCodes()).resolves.toEqual({ created: 0 });
+    await expect(seedStarterBudgetCodes(PERIOD_ID)).resolves.toEqual({ created: 0 });
+  });
+
+  it("never builds a route from the old tenant-wide codes* shape", async () => {
+    // Those routes were removed server-side; only codes/owners stays tenant-wide.
+    fetchMock.mockImplementation(async () => noContent());
+
+    await listBudgetCodes(PERIOD_ID).catch(() => {});
+    await createBudgetCode(PERIOD_ID, input).catch(() => {});
+    await updateBudgetCode(PERIOD_ID, CODE_ID, { ...input }).catch(() => {});
+    await setBudgetCodeActive(PERIOD_ID, CODE_ID, true).catch(() => {});
+    await deleteBudgetCode(PERIOD_ID, CODE_ID).catch(() => {});
+    await seedStarterBudgetCodes(PERIOD_ID).catch(() => {});
+    await copyBudgetCodes(PERIOD_ID, { sourcePeriodId: "src" }).catch(() => {});
+
+    const paths = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(paths).toHaveLength(7);
+    for (const path of paths) {
+      expect(path.startsWith(`/api/budgeting/periods/${PERIOD_ID}/codes`)).toBe(true);
+    }
+  });
+
+  it.each<[string, () => Promise<unknown>]>([
+    ["create", () => createBudgetCode(PERIOD_ID, input)],
+    ["retire", () => setBudgetCodeActive(PERIOD_ID, CODE_ID, false)],
+    ["delete", () => deleteBudgetCode(PERIOD_ID, CODE_ID)],
+    ["starter set", () => seedStarterBudgetCodes(PERIOD_ID)],
+  ])("surfaces %s's 409 PeriodNotEditable verbatim", async (_name, call) => {
+    // BudgetCodeErrors.PeriodNotEditable — every code write checks the period's lifecycle.
+    const message = "A period's budget codes can only change while it is Draft or Open.";
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(409, { code: "Budgeting.Code.PeriodNotEditable", message }),
+    );
+
+    await expect(call()).rejects.toMatchObject({
+      code: "Budgeting.Code.PeriodNotEditable",
+      message,
+      status: 409,
+    });
+  });
+
+  it("surfaces the per-period duplicate and parent messages verbatim", async () => {
+    // BudgetCodeErrors.DuplicateCode / ParentNotFound — the wording now names the period rule.
+    const duplicate =
+      "Another budget code in this period already uses that code. Codes are unique within a period.";
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(409, { code: "Budgeting.Code.DuplicateCode", message: duplicate }),
+    );
+    await expect(createBudgetCode(PERIOD_ID, input)).rejects.toMatchObject({ message: duplicate });
+
+    const parent =
+      "The parent budget code was not found in this period. A code can only roll up into a code of the same period.";
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(404, { code: "Budgeting.Code.ParentNotFound", message: parent }),
+    );
+    await expect(createBudgetCode(PERIOD_ID, input)).rejects.toMatchObject({ message: parent });
+  });
+
+  it("surfaces a 404 for a code from another period verbatim", async () => {
+    // BudgetCodeErrors.NotFound: a code id from another period is "not found in this period".
+    const message = "The budget code was not found in this period.";
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(404, { code: "Budgeting.Code.NotFound", message }),
+    );
+
+    await expect(deleteBudgetCode(PERIOD_ID, CODE_ID)).rejects.toMatchObject({
+      code: "Budgeting.Code.NotFound",
+      message,
+      status: 404,
+    });
+  });
+});
+
+describe("copyBudgetCodes", () => {
+  // POST periods/{id}/codes/copy (BudgetingEndpoints.cs → CopyBudgetCodesCommandHandler). Same
+  // object-body convention as copyBudgetAllocations, for the same reason: two same-typed guids.
+  const TARGET = "5f2b1e1c-0000-4000-8000-0000000000c1";
+  const SOURCE = "5f2b1e1c-0000-4000-8000-0000000000c2";
+
+  it("posts to the target period's codes/copy route with the source in the body", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, { copied: 14, skippedExisting: 0, skippedRetired: 0, sourceCodeCount: 14 }),
+    );
+
+    await copyBudgetCodes(TARGET, { sourcePeriodId: SOURCE });
+
+    expect(callPath()).toBe(`/api/budgeting/periods/${TARGET}/codes/copy`);
+    expect(callInit().method).toBe("POST");
+    expect(JSON.parse(String(callInit().body))).toEqual({ sourcePeriodId: SOURCE });
+  });
+
+  it("puts the TARGET in the route and the SOURCE in the body, never the other way round", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, { copied: 0, skippedExisting: 0, skippedRetired: 0, sourceCodeCount: 0 }),
+    );
+
+    await copyBudgetCodes(TARGET, { sourcePeriodId: SOURCE });
+
+    expect(callPath()).toContain(TARGET);
+    expect(callPath()).not.toContain(SOURCE);
+    expect(String(callInit().body)).toContain(SOURCE);
+    expect(String(callInit().body)).not.toContain(TARGET);
+  });
+
+  it("returns the four counts, which always sum to sourceCodeCount", async () => {
+    const body = { copied: 9, skippedExisting: 3, skippedRetired: 2, sourceCodeCount: 14 };
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, body));
+
+    const result = await copyBudgetCodes(TARGET, { sourcePeriodId: SOURCE });
+
+    expect(result).toEqual(body);
+    expect(result.copied + result.skippedExisting + result.skippedRetired).toBe(
+      result.sourceCodeCount,
+    );
+  });
+
+  it.each<[number, string, string]>([
+    [400, "Budgeting.Code.CopySourceRequired", "Choose a period to copy budget codes from."],
+    [
+      400,
+      "Budgeting.Code.CopySourceIsTarget",
+      "A period's budget codes cannot be copied onto itself. Choose a different source period.",
+    ],
+    [404, "Budgeting.Period.NotFound", "The budget period was not found."],
+    [
+      409,
+      "Budgeting.Code.PeriodNotEditable",
+      "A period's budget codes can only change while it is Draft or Open.",
+    ],
+    [404, "Budgeting.Code.CopySourceNotFound", "The period to copy budget codes from was not found."],
+  ])("surfaces the %d %s message verbatim", async (status, code, message) => {
+    // BudgetCodeErrors / BudgetPeriodErrors, in the handler's guard order. Two 404s exist so the
+    // console can say WHICH period id was wrong: Period.NotFound is the target, CopySourceNotFound
+    // the source.
+    fetchMock.mockResolvedValueOnce(jsonResponse(status, { code, message }));
+
+    await expect(copyBudgetCodes(TARGET, { sourcePeriodId: SOURCE })).rejects.toMatchObject({
+      code,
+      message,
+      status,
+    });
   });
 });
 

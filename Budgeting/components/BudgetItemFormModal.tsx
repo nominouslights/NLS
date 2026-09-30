@@ -105,6 +105,7 @@ export default function BudgetItemFormModal({
   codes,
   item,
   presetCodeId = null,
+  onOpenCodes,
   onClose,
   onSaved,
   api = DEFAULT_API,
@@ -112,12 +113,17 @@ export default function BudgetItemFormModal({
   periodId: string;
   periodLabel: string;
   category: BudgetCodeCategory;
-  /** The whole chart; filtered by allocationCandidates. */
+  /** The entered period's whole chart (codes belong to a period); filtered by allocationCandidates. */
   codes: BudgetCode[];
   /** null → add a new item; an item → edit it. */
   item: BudgetAllocationRecord | null;
   /** "+ ITEM" on a code header preselects that code. */
   presetCodeId?: string | null;
+  /**
+   * To Budget Codes for this period — offered when the period has no active code of this
+   * category, instead of an empty picker. Optional so the modal renders on its own in a test.
+   */
+  onOpenCodes?: () => void;
   onClose: () => void;
   /** Fresh items, already reflecting the change. */
   onSaved: (items: BudgetAllocationRecord[]) => void;
@@ -240,10 +246,25 @@ export default function BudgetItemFormModal({
             hint={`Active ${category.toLowerCase()} codes — a code's budget is the sum of its items`}
           />
         ) : (
-          <Note>
-            There is no active {category.toLowerCase()} code to plan against. Add or restore one
-            under Budget Codes.
-          </Note>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <Note>
+              {periodLabel} has no active {category.toLowerCase()} code to plan against. Set one
+              up under Budget Codes — copy codes from an earlier period, load the starter set, or
+              add or restore a code.
+            </Note>
+            {onOpenCodes && (
+              <ActionButton
+                onClick={() => {
+                  if (busy) return;
+                  onClose();
+                  onOpenCodes();
+                }}
+                disabled={busy}
+              >
+                OPEN BUDGET CODES
+              </ActionButton>
+            )}
+          </div>
         )}
         {retiredOnEdit && (
           <Note>

@@ -41,15 +41,16 @@ import Settings from "@/components/screens/Settings";
 //
 // Period-scoped screens (lib/nav.ts PERIOD_SCOPED) render the chooser until a period is entered,
 // and render inside a Fragment keyed by the period id, so every switch resets their state. Budget
-// Codes and Settings are tenant-wide and render regardless; the banner says which case applies.
+// Codes is one of them — each period has its own chart. Settings is the one screen not tied to a
+// period and renders regardless; the banner says which case applies.
 //
 // A request against the entered period takes a hold (lib/periodHold.ts). While any hold is
 // taken, SWITCH PERIOD and + NEW PERIOD refuse, so a result can never land on a period the
 // planner has left. Rail navigation stays free — it never changes the period.
 //
 // Periods are fetched once on mount and threaded down as props so every screen agrees on the
-// list. Budget codes and allocation lines are real too but are NOT hoisted: the screens that read
-// them own their own fetches. Actuals and variance remain mock until their Stage 6.1 slice lands.
+// list. Budget codes and budget items are real too but are NOT hoisted: the screens that read
+// them (the dashboard and Budget Codes, each for the entered period) own their own fetches. Actuals and variance remain mock until their Stage 6.1 slice lands.
 //
 // The signed-in user's profile is hoisted for a different reason than periods: two places render
 // it — Settings edits it, the TopBar shows it — and getClaims() cannot carry it. That is
@@ -266,9 +267,17 @@ export default function Console() {
                       period={period}
                       periods={periodList}
                       onPeriodsRefreshed={applyLoaded}
+                      onOpenCodes={() => openCode(null)}
                     />
                   )}
-                  {screen === "codes" && <BudgetCodes selId={codeSel} onSelect={setCodeSel} />}
+                  {screen === "codes" && period && (
+                    <BudgetCodes
+                      period={period}
+                      periods={periodList}
+                      selId={codeSel}
+                      onSelect={setCodeSel}
+                    />
+                  )}
                   {screen === "actuals" && period && <ActualsVsBudget period={period} />}
                   {screen === "variance" && period && (
                     <Variance period={period} onOpenCode={openCode} />

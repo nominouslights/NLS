@@ -29,6 +29,7 @@ import {
 import { ModalShell } from "@/components/ui/ModalShell";
 import { SelectField, TextAreaField, TextField } from "@/components/ui/Field";
 import { ActionButton } from "@/components/ui/Button";
+import { usePeriodHold } from "@/lib/periodHold";
 
 // Create-and-edit modal for a budget code, following BudgetPeriodFormModal: one useState per
 // field, server-side validation is authoritative, and a 409 or 400 surfaces as the backend's own
@@ -46,6 +47,12 @@ import { ActionButton } from "@/components/ui/Button";
 //   3. **A revenue code has no cost centre.** A cost centre attributes cost, so the field is
 //      absent rather than disabled when the category is Revenue, and a value stored before the
 //      rule existed is cleared on save. `costCentreApplies` is the mirror of the server's rule.
+//
+// Every code belongs to a period, so the modal writes to that period's chart
+// (periods/{periodId}/codes) and says which one in its eyebrow. The parent picker is fed that
+// same period's chart — a parent from another period is refused server-side (ParentNotFound). The
+// save holds the period (lib/periodHold.ts) and the modal ignores ✕ and CANCEL while it runs,
+// exactly as the budget-item modal does.
 
 const CATEGORY_OPTIONS: { value: BudgetCodeCategory; label: string }[] = [
   { value: "Revenue", label: "Revenue" },
@@ -69,15 +76,20 @@ const REVIEW_FREQUENCY_OPTIONS = (
 ).map((value) => ({ value, label: REVIEW_FREQUENCY_LABELS[value] }));
 
 export default function BudgetCodeFormModal({
+  periodId,
+  periodLabel,
   code,
   allCodes,
   owners,
   onClose,
   onSaved,
 }: {
+  /** The period whose chart this code belongs to — the entered period. */
+  periodId: string;
+  periodLabel: string;
   /** null → create mode; a code → edit mode (its code string is fixed). */
   code: BudgetCode | null;
-  /** Every code, for the parent picker. Filtered by parentCandidates. */
+  /** This period's whole chart, for the parent picker. Filtered by parentCandidates. */
   allCodes: BudgetCode[];
   owners: BudgetOwnerOption[];
   onClose: () => void;
@@ -101,6 +113,11 @@ export default function BudgetCodeFormModal({
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  usePeriodHold(busy);
+  /** Inert while saving, so a result can never land on a modal that is gone. */
+  const close = () => {
+    if (!busy) onClose();
+  };
 
   const normalized = normalizeBudgetCode(codeText);
   const codeError = editing ? null : budgetCodeFormatError(codeText);
@@ -150,15 +167,15 @@ export default function BudgetCodeFormModal({
       let id: string;
       if (editing) {
         id = code.id;
-        await updateBudgetCode(id, details);
+        await updateBudgetCode(periodId, id, details);
       } else {
-        id = await createBudgetCode({ code: normalized, ...details });
+        id = await createBudgetCode(periodId, { code: normalized, ...details });
       }
 
       // The read side is a projection and trails the write by well under a second — refetch until
       // the change is visible rather than assuming it already is. On edit that means waiting for
       // the new name, not merely for the row to exist: the row was always there.
-      const records = await refetchUntil(listBudgetCodes, (rows) =>
+      const records = await refetchUntil(() => listBudgetCodes(periodId), (rows) =>
         editing
           ? rows.some((r) => r.id === id && r.name === details.name)
           : rows.some((r) => r.id === id),
@@ -177,14 +194,16 @@ export default function BudgetCodeFormModal({
 
   return (
     <ModalShell
-      eyebrow="Planning · Budget Codes"
+      eyebrow={`Budget Codes · ${periodLabel}`}
       title={editing ? `Edit ${code.code}` : "New Budget Code"}
-      onClose={onClose}
+      onClose={close}
       error={error}
       maxWidth={680}
       footer={
         <>
-          <ActionButton onClick={onClose}>CANCEL</ActionButton>
+          <ActionButton onClick={close} disabled={busy}>
+            CANCEL
+          </ActionButton>
           <ActionButton variant="primary" onClick={submit} disabled={busy}>
             {busy ? "SAVING…" : editing ? "SAVE CHANGES" : "CREATE CODE"}
           </ActionButton>

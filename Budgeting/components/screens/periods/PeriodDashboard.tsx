@@ -11,6 +11,7 @@ import { formatCad, formatUtcDate } from "@/lib/api/format";
 import { formatDeltaCad } from "@/lib/money";
 import { ApiError } from "@/lib/api/transport";
 import {
+  allocationCandidates,
   assignmentState,
   canEditAllocations,
   copyBudgetAllocations,
@@ -52,8 +53,10 @@ import AllocationSection from "@/components/screens/periods/AllocationSection";
 
 // The body of the Period Dashboard: the entered period, where it stands in its lifecycle, what
 // is planned against it, and the two things a planner does here — add budget items, and move the
-// period forward. Owns its own fetch of the period's budget items and the chart (both needed for
-// coverage and the picker). Console remounts it (a Fragment keyed by the entered period's id)
+// period forward. Owns its own fetch of the period's budget items and of the period's OWN chart of
+// codes (periods/{id}/codes — codes belong to a period; both are needed for coverage and the
+// picker). When the period has no active code of a category, that section points to Budget Codes
+// (copy from another period, the starter set, or a new code) instead of opening an empty picker. Console remounts it (a Fragment keyed by the entered period's id)
 // on every switch, so no confirm, modal or fetch outlives the period it was for.
 //
 // While a transition, a removal or a copy is in flight (`busy`), the dashboard holds the period
@@ -109,12 +112,15 @@ export default function PeriodDashboard({
   period,
   periods,
   onPeriodsRefreshed,
+  onOpenCodes,
 }: {
   period: BudgetPeriod;
   /** The whole list, for the copy panel's source picker. Threaded from Console via BudgetPeriods. */
   periods: BudgetPeriod[];
   /** Console's applyLoaded: replaces the list (the entered period is derived from it). */
   onPeriodsRefreshed: (records: BudgetPeriodRecord[]) => void;
+  /** Go to Budget Codes for this same period — where an empty chart is filled. */
+  onOpenCodes: () => void;
 }) {
   const periodId = period.id;
 
@@ -161,7 +167,7 @@ export default function PeriodDashboard({
           }
         },
       );
-      listBudgetCodes().then(
+      listBudgetCodes(periodId).then(
         (records) => {
           if (isActive()) setCodes(records.map(toBudgetCode));
         },
@@ -533,6 +539,8 @@ export default function PeriodDashboard({
             category="Revenue"
             periodLabel={period.label}
             items={lines.filter((l) => l.category === "Revenue")}
+            activeCodeCount={allocationCandidates(codes, "Revenue").length}
+            onOpenCodes={onOpenCodes}
             editable={editable}
             busy={busy}
             confirmRemoveItemId={confirm?.kind === "remove" ? confirm.itemId : null}
@@ -545,6 +553,8 @@ export default function PeriodDashboard({
             category="Expense"
             periodLabel={period.label}
             items={lines.filter((l) => l.category === "Expense")}
+            activeCodeCount={allocationCandidates(codes, "Expense").length}
+            onOpenCodes={onOpenCodes}
             editable={editable}
             busy={busy}
             confirmRemoveItemId={confirm?.kind === "remove" ? confirm.itemId : null}
@@ -564,6 +574,7 @@ export default function PeriodDashboard({
           codes={codes}
           item={modal.item}
           presetCodeId={modal.presetCodeId}
+          onOpenCodes={onOpenCodes}
           onClose={() => setModal(null)}
           onSaved={handleSaved}
         />

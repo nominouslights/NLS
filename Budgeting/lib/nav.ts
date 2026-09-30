@@ -19,11 +19,13 @@ export type ScreenId =
 
 /**
  * The screens that act on ONE budget period — they render only once a period is entered, inside
- * Console's banner, and every switch remounts them. Budget Codes and Settings are deliberately
- * absent: the chart of codes is tenant-wide (one chart, every period), matching the backend.
+ * Console's banner, and every switch remounts them. Budget Codes joined when codes moved under
+ * the period (each period has its own chart, routes periods/{id}/codes). Settings is the one
+ * screen left out: a profile belongs to a person, not to a period.
  */
 export const PERIOD_SCOPED: ReadonlySet<ScreenId> = new Set<ScreenId>([
   "periods",
+  "codes",
   "actuals",
   "variance",
   "reports",

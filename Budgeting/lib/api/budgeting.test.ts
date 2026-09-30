@@ -17,6 +17,8 @@ import {
   budgetCodeCategoryKind,
   budgetCodeFormatError,
   canEditAllocations,
+  canEditPlan,
+  codeCopyOutcomeSummary,
   copyOutcomeSummary,
   copySourceCandidates,
   costCentreApplies,
@@ -258,6 +260,28 @@ describe("canEditAllocations", () => {
     ["Closed", false],
   ])("%s → editable %s", (state, editable) => {
     expect(canEditAllocations(state)).toBe(editable);
+  });
+});
+
+describe("canEditPlan", () => {
+  // Mirrors BudgetPeriod.AllowsPlanChanges (Draft or Open), which the server now checks for the
+  // chart of codes too: 409 Budgeting.Code.PeriodNotEditable on every code write (create, edit,
+  // retire, restore, delete, starter set, and the TARGET of a codes copy). The Budget Codes screen
+  // goes read-only on exactly this.
+  it.each<[PeriodState, boolean]>([
+    ["Draft", true],
+    ["Finalized", false],
+    ["Open", true],
+    ["InReview", false],
+    ["Closed", false],
+  ])("%s → plan (items and codes) editable %s", (state, editable) => {
+    expect(canEditPlan(state)).toBe(editable);
+  });
+
+  it("is the one rule canEditAllocations reads — the two never diverge", () => {
+    for (const state of PERIOD_STATE_ORDER) {
+      expect(canEditAllocations(state)).toBe(canEditPlan(state));
+    }
   });
 });
 
@@ -1239,7 +1263,7 @@ describe("copyOutcomeSummary", () => {
     });
 
     expect(summary).toContain("1 item on codes already planned here, left untouched");
-    expect(summary).toContain("1 item on retired codes");
+    expect(summary).toContain("1 item with no active code of the same string here");
     expect(summary).toContain("3 items in the source period");
   });
 
@@ -1267,6 +1291,84 @@ describe("copyOutcomeSummary", () => {
         sourceLineCount: 0,
       }),
     ).toBe("That period has no items to copy — nothing was added.");
+  });
+});
+
+// The codes copy (CopyBudgetCodesCommandHandler) has exactly the items copy's guards: only
+// CopySourceIsTarget narrows the source list, and editability is checked on the TARGET only — a
+// Closed period's chart is a legal source. So the Copy codes panel reuses copySourceCandidates /
+// defaultCopySource rather than a second helper that could drift; these pin that reuse.
+
+describe("copy codes source (CopyBudgetCodesCommandHandler)", () => {
+  const march = { ...period("Closed"), id: "p-march", startsOn: "2026-03-01" };
+  const april = { ...period("Closed"), id: "p-april", startsOn: "2026-04-01" };
+  const may = { ...period("Draft"), id: "p-may", startsOn: "2026-05-01" };
+
+  it("offers a Closed period's chart and excludes only the target", () => {
+    expect(canEditPlan(april.state)).toBe(false);
+    expect(copySourceCandidates([march, april, may], "p-may").map((p) => p.id)).toEqual([
+      "p-march",
+      "p-april",
+    ]);
+  });
+
+  it("defaults to the latest period starting before the target — last period's chart", () => {
+    expect(defaultCopySource([may, march, april], "p-may")?.id).toBe("p-april");
+  });
+
+  it("falls back to the latest other period when none starts earlier", () => {
+    expect(defaultCopySource([march, april, may], "p-march")?.id).toBe("p-may");
+  });
+
+  it("has no default when the target is the only period", () => {
+    expect(defaultCopySource([may], "p-may")).toBeNull();
+  });
+});
+
+// codeCopyOutcomeSummary names every bucket of BudgetCodeCopyResponse, whose invariant
+// copied + skippedExisting + skippedRetired === sourceCodeCount is pinned server-side.
+
+describe("codeCopyOutcomeSummary", () => {
+  it("reports a clean copy as active codes with their hierarchy", () => {
+    expect(
+      codeCopyOutcomeSummary({ copied: 14, skippedExisting: 0, skippedRetired: 0, sourceCodeCount: 14 }),
+    ).toBe("Copied 14 codes as active codes, hierarchy included. 14 codes in the source period.");
+  });
+
+  it("names both skip reasons, singular and plural, and omits zero clauses", () => {
+    const both = codeCopyOutcomeSummary({
+      copied: 1,
+      skippedExisting: 1,
+      skippedRetired: 2,
+      sourceCodeCount: 4,
+    });
+    expect(both).toBe(
+      "Copied 1 code as active codes, hierarchy included — skipped 1 code already in this period, left untouched and 2 codes retired there, not copied. 4 codes in the source period.",
+    );
+
+    const onlyRetired = codeCopyOutcomeSummary({
+      copied: 3,
+      skippedExisting: 0,
+      skippedRetired: 1,
+      sourceCodeCount: 4,
+    });
+    expect(onlyRetired).not.toContain("already in this period");
+    expect(onlyRetired).toContain("1 code retired there, not copied");
+  });
+
+  it("says nothing was copied when a second copy finds every code already here", () => {
+    // Idempotent server-side: the target already has every string, so the copy is a no-op.
+    expect(
+      codeCopyOutcomeSummary({ copied: 0, skippedExisting: 5, skippedRetired: 0, sourceCodeCount: 5 }),
+    ).toBe(
+      "Nothing was copied — skipped 5 codes already in this period, left untouched. 5 codes in the source period.",
+    );
+  });
+
+  it("treats an empty source chart as a success, not a failure", () => {
+    expect(
+      codeCopyOutcomeSummary({ copied: 0, skippedExisting: 0, skippedRetired: 0, sourceCodeCount: 0 }),
+    ).toBe("That period has no budget codes to copy — nothing was added.");
   });
 });
 

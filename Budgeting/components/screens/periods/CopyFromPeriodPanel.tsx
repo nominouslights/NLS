@@ -130,10 +130,12 @@ export default function CopyFromPeriodPanel({
             <Note>
               This brings {source.label}&apos;s budget items into {period.label} — titles,
               amounts and details, <strong>but every justification is cleared</strong>, so each
-              item must be argued again before it can be saved. A code that already has items
-              here is skipped whole (so copying twice adds nothing), and items on retired codes
-              are skipped. Nothing changes in {source.label}. Click CONFIRM COPY INTO{" "}
-              {intoLabel} to proceed.
+              item must be argued again before it can be saved. Each item lands on{" "}
+              {period.label}&apos;s own code with the same code string, so copy the codes first
+              (Budget Codes) — an item whose code {period.label} lacks, or has retired, is
+              skipped. A code that already has items here is skipped whole (so copying twice adds
+              nothing). Nothing changes in {source.label}. Click CONFIRM COPY INTO {intoLabel} to
+              proceed.
             </Note>
           )}
 

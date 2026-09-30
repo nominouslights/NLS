@@ -135,13 +135,23 @@ export const PERIOD_STATE_LABELS: Record<PeriodState, string> = {
 export const PERIOD_STATE_ORDER: PeriodState[] = ["Draft", "Finalized", "Open", "InReview", "Closed"];
 
 /**
- * Whether allocation lines may be set or removed in this state. Mirrors
- * BudgetPeriod.AllowsPlanChanges (Draft or Open) — the server answers 409
- * Budgeting.Allocation.PeriodNotEditable otherwise, so the dashboard hides the controls and
- * says why rather than offering an action that will be refused.
+ * Whether a period's plan — its budget items AND its chart of budget codes — may change in this
+ * state. Mirrors BudgetPeriod.AllowsPlanChanges (Draft or Open), which the server checks for
+ * both: 409 Budgeting.Allocation.PeriodNotEditable for an item, 409
+ * Budgeting.Code.PeriodNotEditable for a code (create, edit, retire, restore, delete, the starter
+ * set, and the TARGET of a codes copy). The dashboard and the Budget Codes screen hide their
+ * controls and say why rather than offering an action that will be refused.
+ */
+export function canEditPlan(state: PeriodState): boolean {
+  return state === "Draft" || state === "Open";
+}
+
+/**
+ * The budget-item reading of canEditPlan — kept under its old name because the dashboard and
+ * the banner read it that way. One rule, one function: this never diverges from canEditPlan.
  */
 export function canEditAllocations(state: PeriodState): boolean {
-  return state === "Draft" || state === "Open";
+  return canEditPlan(state);
 }
 
 /** The one forward step available from a state, as the dashboard's context-sensitive button. */
@@ -830,7 +840,11 @@ export interface BudgetAllocationCopyResult {
   copied: number;
   /** Source lines whose code this period already plans — skipped, never overwritten. */
   skippedAlreadyPlanned: number;
-  /** Source lines on a code retired since, or gone from the chart entirely. */
+  /**
+   * Source lines with no ACTIVE code of the same string in the target period — the code was
+   * retired there, or was never copied into it. (Field name kept from when codes were
+   * tenant-wide; the server kept it too.)
+   */
   skippedRetiredCode: number;
   sourceLineCount: number;
 }
@@ -927,7 +941,11 @@ export function copyOutcomeSummary(result: BudgetAllocationCopyResult): string {
     );
   }
   if (result.skippedRetiredCode > 0) {
-    skips.push(`${itemCount(result.skippedRetiredCode)} on retired codes`);
+    // Codes belong to a period, so a source item maps to THIS period's code with the same string;
+    // the bucket counts items with no active such code here (retired, or never copied over).
+    skips.push(
+      `${itemCount(result.skippedRetiredCode)} with no active code of the same string here`,
+    );
   }
 
   const head =
@@ -1241,6 +1259,13 @@ export function previewPeriod(
 // ---------------------------------------------------------------------------
 // Budget codes — the chart of accounts every dollar is tagged to. Mirrors the
 // backend's BudgetCodeResponse and the Create/UpdateBudgetCodeRequest records.
+//
+// Each period has its OWN chart (routes under periods/{id}/codes): the same
+// code string — FUEL, say — exists once per period, as a separate row with its
+// own id. The code STRING is the cross-period identity (items copy by it,
+// reports and future actuals join on it), which is why it stays immutable.
+// The response shape carries no periodId: the caller always knows the period,
+// because it is in the route it asked.
 // ---------------------------------------------------------------------------
 
 /** Mirrors BudgetCodeResponse — list rows come from rm_budget_codes. */
@@ -1275,7 +1300,8 @@ export interface BudgetCodeRecord {
 }
 
 /**
- * POST /api/budgeting/codes body (CreateBudgetCodeRequest). Optional fields go on the wire as
+ * POST /api/budgeting/periods/{id}/codes body (CreateBudgetCodeRequest) — the period comes
+ * from the route, never the body. Optional fields go on the wire as
  * null rather than being omitted, so a cleared field reads as "cleared" and not "unchanged".
  */
 export interface BudgetCodeInput {
@@ -1293,7 +1319,7 @@ export interface BudgetCodeInput {
 }
 
 /**
- * PUT /api/budgeting/codes/{id} body (UpdateBudgetCodeRequest). No `code`: the code string is
+ * PUT /api/budgeting/periods/{id}/codes/{codeId} body (UpdateBudgetCodeRequest). No `code`: the code string is
  * set once at creation and is not renameable server-side, because allocations and actuals
  * reference it by string. A mistyped code is retire-and-recreate, not a rename.
  */
@@ -1332,55 +1358,167 @@ export function userDisplay(
   return name?.trim() || email?.trim() || fallback;
 }
 
-/** Ordered by code ascending server-side. Includes retired codes. */
-export function listBudgetCodes(): Promise<BudgetCodeRecord[]> {
-  return request<BudgetCodeRecord[]>("/api/budgeting/codes");
+/**
+ * GET periods/{periodId}/codes — that period's chart, ordered by code ascending server-side,
+ * retired codes included. Allowed in every period state (reads are never gated). 404
+ * Budgeting.Period.NotFound for an unknown period.
+ */
+export function listBudgetCodes(periodId: string): Promise<BudgetCodeRecord[]> {
+  return request<BudgetCodeRecord[]>(`/api/budgeting/periods/${periodId}/codes`);
 }
 
-/** The tenant's users, from Budgeting's replica of Identity's accounts. */
+/**
+ * The tenant's users, from Budgeting's replica of Identity's accounts. Tenant-wide on purpose —
+ * it lists the PEOPLE who can own a code, not codes, so it is the one codes route that did not
+ * move under a period.
+ */
 export function listBudgetOwnerCandidates(): Promise<BudgetOwnerOption[]> {
   return request<BudgetOwnerOption[]>("/api/budgeting/codes/owners");
 }
 
-/** POST → 201 { id } (id only; the row lands on the next projection read). */
-export async function createBudgetCode(input: BudgetCodeInput): Promise<string> {
-  const res = await request<{ id: string }>("/api/budgeting/codes", {
+// Every code write below answers, in this order: 404 Budgeting.Period.NotFound, then 409
+// Budgeting.Code.PeriodNotEditable ("A period's budget codes can only change while it is Draft
+// or Open.") — the console hides the controls first (canEditPlan), and shows the server's words
+// verbatim if it ever gets there anyway.
+
+/** POST periods/{periodId}/codes → 201 { id } (id only; the row lands on the next projection read). */
+export async function createBudgetCode(periodId: string, input: BudgetCodeInput): Promise<string> {
+  const res = await request<{ id: string }>(`/api/budgeting/periods/${periodId}/codes`, {
     method: "POST",
     body: JSON.stringify(input),
   });
   return res.id;
 }
 
-/** PUT → 204. */
-export function updateBudgetCode(id: string, input: BudgetCodeUpdateInput): Promise<void> {
-  return request<void>(`/api/budgeting/codes/${id}`, {
+/** PUT periods/{periodId}/codes/{codeId} → 204. */
+export function updateBudgetCode(
+  periodId: string,
+  codeId: string,
+  input: BudgetCodeUpdateInput,
+): Promise<void> {
+  return request<void>(`/api/budgeting/periods/${periodId}/codes/${codeId}`, {
     method: "PUT",
     body: JSON.stringify(input),
   });
 }
 
 /**
- * POST → 204. Two routes rather than a body flag, matching the backend: retiring a code is a
- * flag flip, never a delete, so last period's allocations keep resolving.
+ * POST periods/{periodId}/codes/{codeId}/activate|deactivate → 204. Two routes rather than a
+ * body flag, matching the backend: retiring a code is a flag flip, never a delete, so the
+ * period's items on it keep resolving.
  */
-export function setBudgetCodeActive(id: string, active: boolean): Promise<void> {
-  return request<void>(`/api/budgeting/codes/${id}/${active ? "activate" : "deactivate"}`, {
+export function setBudgetCodeActive(
+  periodId: string,
+  codeId: string,
+  active: boolean,
+): Promise<void> {
+  return request<void>(
+    `/api/budgeting/periods/${periodId}/codes/${codeId}/${active ? "activate" : "deactivate"}`,
+    { method: "POST" },
+  );
+}
+
+/**
+ * DELETE periods/{periodId}/codes/{codeId} → 204, or 409 when the code has children or has
+ * budget items in this period (Budgeting.Code.InUse). Retirement is the normal path; this is only
+ * for a code created in error. The server's 409 message names retirement as the alternative, so
+ * surfacing it verbatim is the right handling.
+ */
+export function deleteBudgetCode(periodId: string, codeId: string): Promise<void> {
+  return request<void>(`/api/budgeting/periods/${periodId}/codes/${codeId}`, { method: "DELETE" });
+}
+
+/**
+ * POST periods/{periodId}/codes/starter-set → 200 { created }. Idempotent per period: a second
+ * call creates nothing and returns 0.
+ */
+export function seedStarterBudgetCodes(periodId: string): Promise<{ created: number }> {
+  return request<{ created: number }>(`/api/budgeting/periods/${periodId}/codes/starter-set`, {
     method: "POST",
   });
 }
 
+// ---------------------------------------------------------------------------
+// Copy codes from another period. Codes belong to a period (re-justified from
+// zero each period, architecture §5.3), so a fresh period starts with an empty
+// chart — this seeds it from any other period's chart in one step.
+// Mirrors CopyBudgetCodesCommandHandler and BudgetCodeCopyResponse.
+// ---------------------------------------------------------------------------
+
 /**
- * DELETE → 204, or 409 when the code has children or has ever been used. Retirement is the
- * normal path; this is only for a code created in error. The server's 409 message names
- * retirement as the alternative, so surfacing it verbatim is the right handling.
+ * Mirrors BudgetCodeCopyResponse. The server guarantees
+ * `copied + skippedExisting + skippedRetired === sourceCodeCount` — codeCopyOutcomeSummary
+ * reports every bucket so the planner can see it add up.
  */
-export function deleteBudgetCode(id: string): Promise<void> {
-  return request<void>(`/api/budgeting/codes/${id}`, { method: "DELETE" });
+export interface BudgetCodeCopyResult {
+  /** Copied as ACTIVE codes with new ids, every descriptive field and the hierarchy included. */
+  copied: number;
+  /** Source codes whose string this period already has (active or retired) — never overwritten. */
+  skippedExisting: number;
+  /** Retired source codes — not copied. A code both retired and existing counts here. */
+  skippedRetired: number;
+  sourceCodeCount: number;
 }
 
-/** POST → 200 { created }. Idempotent: a second call creates nothing and returns 0. */
-export function seedStarterBudgetCodes(): Promise<{ created: number }> {
-  return request<{ created: number }>("/api/budgeting/codes/starter-set", { method: "POST" });
+/**
+ * The source period as an object, for the reason BudgetAllocationCopySource gives: two
+ * same-typed guids in a bare `(a, b)` signature swap silently and copy backwards with a 200.
+ */
+export interface BudgetCodeCopySource {
+  sourcePeriodId: string;
+}
+
+/**
+ * POST periods/{targetPeriodId}/codes/copy → 200 with the four counts. Errors, all shown
+ * verbatim, in the server's guard order: 400 Budgeting.Code.CopySourceRequired, 400
+ * Budgeting.Code.CopySourceIsTarget, then the TARGET's 404 Budgeting.Period.NotFound / 409
+ * Budgeting.Code.PeriodNotEditable, then 404 Budgeting.Code.CopySourceNotFound (the SOURCE).
+ * A Closed source is allowed — editability is checked on the target only, as for items.
+ *
+ * An empty source chart is a 200 with all four counts zero, not an error.
+ */
+export function copyBudgetCodes(
+  targetPeriodId: string,
+  source: BudgetCodeCopySource,
+): Promise<BudgetCodeCopyResult> {
+  return request<BudgetCodeCopyResult>(`/api/budgeting/periods/${targetPeriodId}/codes/copy`, {
+    method: "POST",
+    body: JSON.stringify({ sourcePeriodId: source.sourcePeriodId }),
+  });
+}
+
+/** "1 code" / "3 codes" — every clause of codeCopyOutcomeSummary. */
+export function codeCount(n: number): string {
+  return `${n} ${n === 1 ? "code" : "codes"}`;
+}
+
+/**
+ * What a completed codes copy is told back to the planner. Same shape as copyOutcomeSummary:
+ * every non-zero bucket named, zero skips omitted, an empty source reported as a success.
+ *
+ * The source picker and its default are copySourceCandidates / defaultCopySource — the codes copy
+ * has exactly the items copy's guards (only CopySourceIsTarget narrows the list; a Closed source
+ * is legal), so the two share one tested rule rather than two that could drift.
+ */
+export function codeCopyOutcomeSummary(result: BudgetCodeCopyResult): string {
+  if (result.sourceCodeCount === 0) {
+    return "That period has no budget codes to copy — nothing was added.";
+  }
+
+  const skips: string[] = [];
+  if (result.skippedExisting > 0) {
+    skips.push(`${codeCount(result.skippedExisting)} already in this period, left untouched`);
+  }
+  if (result.skippedRetired > 0) {
+    skips.push(`${codeCount(result.skippedRetired)} retired there, not copied`);
+  }
+
+  const head =
+    result.copied === 0
+      ? "Nothing was copied"
+      : `Copied ${codeCount(result.copied)} as active codes, hierarchy included`;
+  const tail = skips.length > 0 ? ` — skipped ${skips.join(" and ")}.` : ".";
+  return `${head}${tail} ${codeCount(result.sourceCodeCount)} in the source period.`;
 }
 
 /**

@@ -20,6 +20,7 @@ export default function BudgetPeriods({
   period,
   periods,
   onPeriodsRefreshed,
+  onOpenCodes,
 }: {
   /** The entered period. */
   period: BudgetPeriod;
@@ -27,10 +28,17 @@ export default function BudgetPeriods({
   periods: BudgetPeriod[];
   /** After a transition or a line change: Console's applyLoaded, which replaces the list. */
   onPeriodsRefreshed: (records: BudgetPeriodRecord[]) => void;
+  /** Go to Budget Codes (same period) — where an empty chart is filled. */
+  onOpenCodes: () => void;
 }) {
   return (
     <Screen eyebrow={`Planning · ${period.label}`} title="Period Dashboard">
-      <PeriodDashboard period={period} periods={periods} onPeriodsRefreshed={onPeriodsRefreshed} />
+      <PeriodDashboard
+        period={period}
+        periods={periods}
+        onPeriodsRefreshed={onPeriodsRefreshed}
+        onOpenCodes={onOpenCodes}
+      />
     </Screen>
   );
 }

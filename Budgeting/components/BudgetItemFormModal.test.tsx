@@ -273,3 +273,21 @@ describe("BudgetItemFormModal — save", () => {
     expect(api.update).not.toHaveBeenCalled();
   });
 });
+
+describe("BudgetItemFormModal — a period with no active codes", () => {
+  // Codes belong to a period, so a fresh period's chart can be empty. The modal must point to
+  // Budget Codes (for THIS period) rather than offer an empty picker.
+  it("names the period, offers no picker, and sends the planner to Budget Codes", () => {
+    const onOpenCodes = vi.fn();
+    const { onClose, api } = renderModal({ codes: [code("rev-a", "Revenue")], onOpenCodes });
+
+    expect(screen.queryByText("Budget code")).toBeNull();
+    expect(screen.getByText(/FY2026 Q4 has no active expense code to plan against/)).toBeTruthy();
+    expect(screen.getByText("ADD ITEM").getAttribute("aria-disabled")).toBe("true");
+
+    fireEvent.click(screen.getByText("OPEN BUDGET CODES"));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onOpenCodes).toHaveBeenCalledTimes(1);
+    expect(api.create).not.toHaveBeenCalled();
+  });
+});
