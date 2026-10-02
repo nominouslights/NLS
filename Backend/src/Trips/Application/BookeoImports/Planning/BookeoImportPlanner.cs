@@ -571,11 +571,20 @@ public static partial class BookeoImportPlanner
         var kept = existing.Where(p => p.ExternalRef is null || !replacedRefs.Contains(p.ExternalRef)).ToList();
         var added = group.EffectiveAdds.SelectMany(r => r.ManifestRows).ToList();
 
+        // An unmapped bucket has no route, so its bookings build no manifest rows (there are no
+        // stops to resolve against). It still reports what the file would bring in — one row per
+        // snapshot passenger, placeholders included, exactly what a mapped booking would build —
+        // so the preview never shows "0 → 0" for a group that carries passengers. Nothing here
+        // reaches the commit: the group is Blocked, and PassengersAfterList stays manifest rows only.
+        var incoming = group.IsUnmapped
+            ? group.EffectiveAdds.Sum(r => r.Snapshot!.Passengers.Count)
+            : added.Count;
+
         group.PassengersBefore = existing.Count;
         group.ImportedRowsRemoved = existing.Count - kept.Count;
-        group.ImportedRowsAdded = added.Count;
+        group.ImportedRowsAdded = incoming;
         group.PassengersAfterList = [.. kept, .. added];
-        group.PassengersAfter = group.PassengersAfterList.Count;
+        group.PassengersAfter = kept.Count + incoming;
         group.SeatsConfirmedAfter = group.Target is { } trip
             ? Math.Max(0, trip.SeatsConfirmed - group.ImportedRowsRemoved + group.ImportedRowsAdded)
             : group.ImportedRowsAdded;
@@ -587,6 +596,12 @@ public static partial class BookeoImportPlanner
                 BookeoIssueCodes.ProductNotMapped,
                 $"Map Bookeo product \"{first.ProductName}\"{DestinationSuffix(first.Destination)} to a route to import these bookings."));
             group.VehicleMatch = BookeoVehicleMatch.Blank;
+
+            // The manifest cap needs no route: the bookings of one bucket all land on one
+            // departure once mapped, so a file that alone brings in more than the cap will still
+            // exceed it after mapping — say so now rather than after the mapping is made. Vehicle
+            // capacity does need a vehicle (and so a trip), so it waits for the mapping.
+            RaiseManifestCap(group);
             return;
         }
 
@@ -604,12 +619,7 @@ public static partial class BookeoImportPlanner
                 $"Trip {closed.TripNumber} is {closed.Status}, so its manifest can no longer be changed by an import."));
         }
 
-        if (group.PassengersAfter > ManifestChecklist.MaxPassengers)
-        {
-            group.Issues.Add(Block(
-                BookeoIssueCodes.ManifestCapExceeded,
-                $"{group.PassengersAfter} passengers would exceed the manifest's {ManifestChecklist.MaxPassengers}-row limit."));
-        }
+        RaiseManifestCap(group);
 
         var needed = Math.Max(group.PassengersAfter, group.SeatsConfirmedAfter);
         if (group.SeatsCapacity is { } capacity && group.ImportedRowsAdded > 0 && needed > capacity)
@@ -617,6 +627,16 @@ public static partial class BookeoImportPlanner
             group.Issues.Add(Block(
                 BookeoIssueCodes.OverVehicleCapacity,
                 $"{needed} passengers would not fit the {capacity} seats on {group.AssignVehicle?.UnitNumber ?? group.Target?.VehicleUnit ?? "the trip"}."));
+        }
+    }
+
+    private static void RaiseManifestCap(PlannedGroup group)
+    {
+        if (group.PassengersAfter > ManifestChecklist.MaxPassengers)
+        {
+            group.Issues.Add(Block(
+                BookeoIssueCodes.ManifestCapExceeded,
+                $"{group.PassengersAfter} passengers would exceed the manifest's {ManifestChecklist.MaxPassengers}-row limit."));
         }
     }
 
