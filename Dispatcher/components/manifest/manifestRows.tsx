@@ -5,6 +5,7 @@ import { colors, fonts } from "@/lib/theme";
 import type { FarePaymentMethod, ManifestCargo, ManifestPassenger } from "@/lib/api/trips";
 import { FieldLabel, NumberField, SelectField, TextField } from "@/components/ui/Field";
 import { ActionButton } from "@/components/ui/Button";
+import { MonoTag } from "@/components/ui/Chip";
 
 // Reusable passenger + cargo row editors for the slim trip manifest. Salvaged
 // from the retired Manual Trip Entry form's §5/§6 editors and shared by the
@@ -44,6 +45,12 @@ export interface PaxRow {
   fareMethod: FarePaymentMethod | "";
   /** Stamped when a method is first picked; cleared when the method is cleared. */
   farePaidAtUtc: string | null;
+  /** Which external record put this row on the manifest ("bookeo:<booking
+   *  number>" for a Bookeo-imported row, null for a row a person entered).
+   *  Opaque to the editor: carried from load to save UNCHANGED — even when
+   *  the name is edited — so a re-import still recognises the row as its own.
+   *  Never shown as an editable field. */
+  externalRef: string | null;
 }
 
 export interface CargoRow {
@@ -67,6 +74,7 @@ export const emptyPax = (): PaxRow => ({
   fareAmount: "",
   fareMethod: "",
   farePaidAtUtc: null,
+  externalRef: null,
 });
 
 export const emptyCargo = (): CargoRow => ({
@@ -104,6 +112,7 @@ export function paxRowsFromManifest(passengers: ManifestPassenger[], stops: Stop
     fareAmount: p.fareAmountCad != null ? String(p.fareAmountCad) : "",
     fareMethod: p.farePaymentMethod ?? "",
     farePaidAtUtc: p.farePaidAtUtc ?? null,
+    externalRef: p.externalRef ?? null,
   }));
 }
 
@@ -151,8 +160,19 @@ export function paxRowsToWire(
         fareAmountCad: amount !== null && !Number.isNaN(amount) ? amount : null,
         farePaymentMethod: p.fareMethod || null,
         farePaidAtUtc: p.fareMethod ? p.farePaidAtUtc : null,
+        externalRef: p.externalRef,
       };
     });
+}
+
+/** The `externalRef` prefix the Bookeo import stamps (ManifestPassenger.BookeoRefPrefix). */
+export const BOOKEO_REF_PREFIX = "bookeo:";
+
+/** The Bookeo booking number behind an imported row, or null for any other row. */
+export function bookeoBookingNumber(externalRef: string | null | undefined): string | null {
+  return externalRef && externalRef.startsWith(BOOKEO_REF_PREFIX)
+    ? externalRef.slice(BOOKEO_REF_PREFIX.length)
+    : null;
 }
 
 /** UI mirror of the backend's per-passenger fare rules — run before submit so
@@ -251,6 +271,7 @@ export function PassengerRowsEditor({
           key={i}
           style={{ border: `1px solid ${colors.borderSubtle}`, borderRadius: 9, padding: "11px 12px", marginBottom: 8 }}
         >
+          <BookeoRowMarker externalRef={p.externalRef} />
           <div style={{ display: "grid", gridTemplateColumns: "24px 1.4fr 1fr 1fr", gap: 10, alignItems: "end" }}>
             <div style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.textDim, paddingBottom: 12 }}>{i + 1}</div>
             <TextField label="Passenger name" value={p.name} onChange={(v) => patch(i, { name: v })} disabled={readOnly} />
@@ -329,6 +350,26 @@ export function PassengerRowsEditor({
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+/** "Bookeo #1234" tag on a row the Bookeo import wrote — a text label, not a
+ *  colour, so dispatchers know a re-import of that booking may update the row.
+ *  Renders nothing for a manually entered row. */
+export function BookeoRowMarker({ externalRef }: { externalRef: string | null | undefined }) {
+  const booking = bookeoBookingNumber(externalRef);
+  if (booking === null) return null;
+  return (
+    <div
+      data-testid="bookeo-row-marker"
+      title={`Imported from Bookeo booking ${booking}. Re-importing a Bookeo report may update this passenger.`}
+      style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}
+    >
+      <MonoTag color={colors.textSecondary}>BOOKEO #{booking}</MonoTag>
+      <span style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim }}>
+        Imported — a re-import may update this row
+      </span>
     </div>
   );
 }

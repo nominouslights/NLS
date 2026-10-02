@@ -79,6 +79,7 @@ function manifest(): TripManifest {
         fareAmountCad: 120,
         farePaymentMethod: "Cash",
         farePaidAtUtc: "2026-09-20T06:35:00Z",
+        externalRef: null,
       },
     ],
     allSeatbeltsVerified: true,

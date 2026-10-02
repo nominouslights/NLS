@@ -22,4 +22,9 @@
     <ProjectReference Include="..\..\src\Fleet\NorthernLink.Fleet.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The synthetic Bookeo fixtures, shared with NorthernLink.Trips.Tests (fake data only). -->
+    <None Include="..\NorthernLink.Trips.Tests\TestData\**" LinkBase="TestData" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

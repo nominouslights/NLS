@@ -14,6 +14,10 @@ using NorthernLink.Shared.Persistence.Auditing;
 using NorthernLink.Shared.Persistence.Projections;
 using NorthernLink.Shared.Tenancy;
 using NorthernLink.Trips.Application.Abstractions;
+using NorthernLink.Trips.Application.BookeoImports;
+using NorthernLink.Trips.Application.BookeoImports.Commit;
+using NorthernLink.Trips.Application.BookeoImports.Mappings;
+using NorthernLink.Trips.Application.BookeoImports.Preview;
 using NorthernLink.Trips.Application.Integration;
 using NorthernLink.Trips.Application.Manifests;
 using NorthernLink.Trips.Application.Manifests.Create;
@@ -61,6 +65,7 @@ using NorthernLink.Trips.Application.Trips.UnpairRoundTrip;
 using NorthernLink.Trips.Application.Trips.Update;
 using NorthernLink.Trips.Domain.Manifests.Events;
 using NorthernLink.Trips.Domain.Trips.Events;
+using NorthernLink.Trips.Infrastructure.BookeoImports;
 using NorthernLink.Trips.Infrastructure.Generation;
 using NorthernLink.Trips.Infrastructure.Persistence;
 using NorthernLink.Trips.Infrastructure.Persistence.Projections;
@@ -142,6 +147,12 @@ public static class TripsServiceCollectionExtensions
         services.TryAddSingleton(TimeProvider.System);
         services.AddScoped<ScheduleTripMaterializer>();
 
+        // The Bookeo booking-report import: the workbook reader (ExcelDataReader — stateless),
+        // its persistence, and the plan loader both preview and commit run.
+        services.AddSingleton<IBookeoWorkbookReader, ExcelBookeoWorkbookReader>();
+        services.AddScoped<IBookeoImportRepository, BookeoImportRepository>();
+        services.AddScoped<BookeoImportPlanLoader>();
+
         // 3. Command/query handlers — registered explicitly, one line per handler.
         services.AddScoped<ICommandHandler<CreateTripManifestCommand, Guid>, CreateTripManifestCommandHandler>();
         services.AddScoped<ICommandHandler<UpdateTripManifestCommand>, UpdateTripManifestCommandHandler>();
@@ -196,6 +207,15 @@ public static class TripsServiceCollectionExtensions
         services.AddScoped<ICommandHandler<SetRiderRotationCommand>, SetRiderRotationCommandHandler>();
         services.AddScoped<ICommandHandler<UpsertRidersFromTripCommand>, UpsertRidersFromTripCommandHandler>();
         services.AddScoped<ICommandHandler<UpsertRidersFromManifestCommand>, UpsertRidersFromManifestCommandHandler>();
+        services.AddScoped<ICommandHandler<PreviewBookeoImportCommand, BookeoImportPreview>, PreviewBookeoImportCommandHandler>();
+        services.AddScoped<ICommandHandler<CommitBookeoImportCommand, BookeoImportCommitResult>, CommitBookeoImportCommandHandler>();
+        services.AddScoped<IQueryHandler<GetBookeoProductMappingsQuery, IReadOnlyList<BookeoProductMappingResponse>>, GetBookeoProductMappingsQueryHandler>();
+        services.AddScoped<ICommandHandler<UpsertBookeoProductMappingsCommand, IReadOnlyList<BookeoProductMappingResponse>>, UpsertBookeoProductMappingsCommandHandler>();
+        services.AddScoped<ICommandHandler<DeleteBookeoProductMappingCommand>, DeleteBookeoProductMappingCommandHandler>();
+        services.AddScoped<IQueryHandler<GetBookeoUnitMappingsQuery, IReadOnlyList<BookeoUnitMappingResponse>>, GetBookeoUnitMappingsQueryHandler>();
+        services.AddScoped<ICommandHandler<UpsertBookeoUnitMappingsCommand, IReadOnlyList<BookeoUnitMappingResponse>>, UpsertBookeoUnitMappingsCommandHandler>();
+        services.AddScoped<ICommandHandler<DeleteBookeoUnitMappingCommand>, DeleteBookeoUnitMappingCommandHandler>();
+        services.AddScoped<IQueryHandler<GetBookeoImportBatchesQuery, IReadOnlyList<BookeoImportBatchResponse>>, GetBookeoImportBatchesQueryHandler>();
 
         // 4. Integration event consumers — the Drivers/Fleet/Clients replicas that keep
         //    driver_lookup/vehicle_lookup/client_lookup current for assignment validation,

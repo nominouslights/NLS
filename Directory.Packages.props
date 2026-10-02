@@ -45,6 +45,12 @@
     <PackageVersion Include="QuestPDF" Version="2026.7.3" />
   </ItemGroup>
 
+  <ItemGroup Label="Spreadsheet import">
+    <!-- ExcelDataReader (MIT) — used by the Trips module to read the Bookeo booking-report
+         export: legacy Excel 97 .xls (BIFF8) and .xlsx. Read-only; nothing writes a workbook. -->
+    <PackageVersion Include="ExcelDataReader" Version="3.9.0" />
+  </ItemGroup>
+
   <ItemGroup Label="Testing">
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />

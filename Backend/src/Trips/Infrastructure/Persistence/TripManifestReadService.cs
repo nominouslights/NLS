@@ -62,7 +62,8 @@ internal sealed class TripManifestReadService(TripsDbContext context) : ITripMan
             p.BoardedOff,
             p.FareAmountCad,
             p.FarePaymentMethod?.ToString(),
-            p.FarePaidAtUtc)).ToList(),
+            p.FarePaidAtUtc,
+            p.ExternalRef)).ToList(),
         m.AllSeatbeltsVerified,
         m.Cargo.Select(c => new CargoItemResponse(
             c.Description,

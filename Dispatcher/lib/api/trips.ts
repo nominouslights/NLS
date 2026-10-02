@@ -987,6 +987,11 @@ export interface ManifestPassenger {
   fareAmountCad: number | null;
   farePaymentMethod: FarePaymentMethod | null;
   farePaidAtUtc: string | null;
+  /** "bookeo:<booking number>" on a row the Bookeo import wrote, null on a row
+   *  a person entered (PassengerResponse.ExternalRef). Send it back UNCHANGED on
+   *  a manifest create/PUT — it is how a re-import recognises its own rows (the
+   *  backend's name-based carry-over is only a fallback). New rows send null. */
+  externalRef: string | null;
 }
 
 export interface ManifestCargo {

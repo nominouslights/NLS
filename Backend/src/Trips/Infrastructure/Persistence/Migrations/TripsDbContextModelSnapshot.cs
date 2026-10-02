@@ -439,6 +439,273 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                     b.ToTable("vehicle_lookup", "trips");
                 });
 
+            modelBuilder.Entity("NorthernLink.Trips.Domain.BookeoImports.BookeoBooking", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("BookeoStatus")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("bookeo_status");
+
+                    b.Property<string>("BookingNumber")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("booking_number");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("content_hash");
+
+                    b.Property<string>("CustomerEmail")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("customer_email");
+
+                    b.Property<string>("CustomerName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("customer_name");
+
+                    b.Property<string>("CustomerPhone")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("customer_phone");
+
+                    b.Property<string>("Destination")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("destination");
+
+                    b.Property<DateTimeOffset>("FirstImportedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("first_imported_at_utc");
+
+                    b.Property<Guid>("LastBatchId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("last_batch_id");
+
+                    b.Property<DateTimeOffset>("LastImportedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_imported_at_utc");
+
+                    b.Property<int>("Participants")
+                        .HasColumnType("integer")
+                        .HasColumnName("participants");
+
+                    b.Property<string>("ProductCode")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("product_code");
+
+                    b.Property<string>("ProductName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("product_name");
+
+                    b.Property<DateOnly>("ServiceDate")
+                        .HasColumnType("date")
+                        .HasColumnName("service_date");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<decimal>("TotalDueCad")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("total_due_cad");
+
+                    b.Property<decimal>("TotalGrossCad")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("total_gross_cad");
+
+                    b.Property<decimal>("TotalPaidCad")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("total_paid_cad");
+
+                    b.Property<Guid?>("TripId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("trip_id");
+
+                    b.Property<string>("UnitText")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("unit_text");
+
+                    b.Property<TimeOnly?>("WindowEnd")
+                        .HasColumnType("time without time zone")
+                        .HasColumnName("window_end");
+
+                    b.Property<TimeOnly>("WindowStart")
+                        .HasColumnType("time without time zone")
+                        .HasColumnName("window_start");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "BookingNumber")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "TripId");
+
+                    b.ToTable("bookeo_bookings", "trips");
+                });
+
+            modelBuilder.Entity("NorthernLink.Trips.Domain.BookeoImports.BookeoImportBatch", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("CommittedAtUtc")
+                        .IsConcurrencyToken()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("committed_at_utc");
+
+                    b.Property<string>("CommittedBy")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("committed_by");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("character varying(260)")
+                        .HasColumnName("file_name");
+
+                    b.Property<string>("ParsedRowsJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("parsed_rows");
+
+                    b.Property<string>("PlanHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("plan_hash");
+
+                    b.Property<string>("SummaryJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("summary");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UploadedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("uploaded_at_utc");
+
+                    b.Property<string>("UploadedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("uploaded_by");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "UploadedAtUtc");
+
+                    b.ToTable("bookeo_import_batches", "trips");
+                });
+
+            modelBuilder.Entity("NorthernLink.Trips.Domain.BookeoImports.BookeoProductMapping", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Destination")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("destination");
+
+                    b.Property<string>("Direction")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("direction");
+
+                    b.Property<string>("ProductCode")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("product_code");
+
+                    b.Property<string>("ProductName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("product_name");
+
+                    b.Property<string>("ResidentStopRole")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("resident_stop_role");
+
+                    b.Property<Guid>("RouteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("route_id");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "ProductCode");
+
+                    b.ToTable("bookeo_product_mappings", "trips");
+                });
+
+            modelBuilder.Entity("NorthernLink.Trips.Domain.BookeoImports.BookeoUnitMapping", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("UnitText")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("unit_text");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<Guid>("VehicleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("vehicle_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "UnitText")
+                        .IsUnique();
+
+                    b.ToTable("bookeo_unit_mappings", "trips");
+                });
+
             modelBuilder.Entity("NorthernLink.Trips.Domain.Manifests.TripManifest", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1236,6 +1503,11 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                     b.Property<bool>("HasPostTripInspection")
                         .HasColumnType("boolean")
                         .HasColumnName("has_post_trip_inspection");
+
+                    b.Property<string>("ImportSource")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("import_source");
 
                     b.Property<bool>("IsEmptyLeg")
                         .HasColumnType("boolean")
@@ -2370,6 +2642,37 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                     b.ToTable("trip_number_counters", "trips");
                 });
 
+            modelBuilder.Entity("NorthernLink.Trips.Domain.BookeoImports.BookeoBooking", b =>
+                {
+                    b.OwnsMany("NorthernLink.Trips.Domain.BookeoImports.BookeoBookingPassenger", "Passengers", b1 =>
+                        {
+                            b1.Property<Guid>("BookeoBookingId");
+
+                            b1.Property<int>("__synthesizedOrdinal")
+                                .ValueGeneratedOnAdd();
+
+                            b1.Property<string>("Category");
+
+                            b1.Property<string>("Email");
+
+                            b1.Property<string>("Name")
+                                .IsRequired();
+
+                            b1.Property<string>("Phone");
+
+                            b1.HasKey("BookeoBookingId", "__synthesizedOrdinal");
+
+                            b1.ToTable("bookeo_bookings", "trips");
+
+                            b1.ToJson("passengers");
+
+                            b1.WithOwner()
+                                .HasForeignKey("BookeoBookingId");
+                        });
+
+                    b.Navigation("Passengers");
+                });
+
             modelBuilder.Entity("NorthernLink.Trips.Domain.Manifests.TripManifest", b =>
                 {
                     b.OwnsMany("NorthernLink.Trips.Domain.Manifests.ManifestCargoItem", "Cargo", b1 =>
@@ -2420,6 +2723,8 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                             b1.Property<string>("DropoffStopName");
 
                             b1.Property<string>("Email");
+
+                            b1.Property<string>("ExternalRef");
 
                             b1.Property<decimal?>("FareAmountCad")
                                 .HasPrecision(12, 2);
@@ -2704,6 +3009,8 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                             b1.Property<string>("DropoffStopName");
 
                             b1.Property<string>("Email");
+
+                            b1.Property<string>("ExternalRef");
 
                             b1.Property<decimal?>("FareAmountCad")
                                 .HasPrecision(12, 2);

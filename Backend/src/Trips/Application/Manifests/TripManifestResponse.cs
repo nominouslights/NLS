@@ -27,7 +27,11 @@ public sealed record TripManifestResponse(
     int FaresPaidCount,
     int FaresWaivedCount);
 
-/// <summary>§5 row. Pickup/dropoff are snapshot references to the trip's route stops.</summary>
+/// <summary>
+/// §5 row. Pickup/dropoff are snapshot references to the trip's route stops.
+/// <c>ExternalRef</c> is "bookeo:&lt;booking number&gt;" on a row the Bookeo import wrote, null on a
+/// row a person entered — send it back unchanged on a manifest edit so the import keeps owning it.
+/// </summary>
 public sealed record PassengerResponse(
     string Name,
     string? Email,
@@ -41,7 +45,8 @@ public sealed record PassengerResponse(
     bool BoardedOff,
     decimal? FareAmountCad,
     string? FarePaymentMethod,
-    DateTimeOffset? FarePaidAtUtc);
+    DateTimeOffset? FarePaidAtUtc,
+    string? ExternalRef = null);
 
 /// <summary>§6 row.</summary>
 public sealed record CargoItemResponse(

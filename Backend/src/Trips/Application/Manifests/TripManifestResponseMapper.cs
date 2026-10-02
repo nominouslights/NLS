@@ -25,7 +25,8 @@ public static class TripManifestResponseMapper
             p.BoardedOff,
             p.FareAmountCad,
             p.FarePaymentMethod?.ToString(),
-            p.FarePaidAtUtc)).ToList(),
+            p.FarePaidAtUtc,
+            p.ExternalRef)).ToList(),
         manifest.AllSeatbeltsVerified,
         manifest.Cargo.Select(c => new CargoItemResponse(
             c.Description,

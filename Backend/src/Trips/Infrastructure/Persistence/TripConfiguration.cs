@@ -37,6 +37,7 @@ public sealed class TripConfiguration : IEntityTypeConfiguration<Trip>
         builder.Property(t => t.DistanceKm).HasColumnName("distance_km");
 
         builder.Property(t => t.BookingDayId).HasColumnName("booking_day_id");
+        builder.Property(t => t.ImportSource).HasColumnName("import_source").HasMaxLength(32);
         builder.Property(t => t.ScheduleTemplateId).HasColumnName("schedule_template_id");
         builder.Property(t => t.RoundTripKey).HasColumnName("round_trip_key").HasMaxLength(64);
         builder.Property(t => t.Direction)
@@ -75,6 +76,7 @@ public sealed class TripConfiguration : IEntityTypeConfiguration<Trip>
 
         builder.Ignore(t => t.IsOperationallyClosed);
         builder.Ignore(t => t.IsFinal);
+        builder.Ignore(t => t.IsCreatedByBookeoImport);
 
         builder.HasIndex(t => new { t.TenantId, t.TripNumber }).IsUnique();
         builder.HasIndex(t => new { t.TenantId, t.ScheduleTemplateId, t.ServiceDate, t.Direction }).IsUnique();
