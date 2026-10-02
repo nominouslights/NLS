@@ -72,7 +72,8 @@ public sealed class UpdateInspectionCommandHandler(IVehicleInspectionRepository 
             command.FuelAdded,
             command.FuelLitres,
             command.FuelCostCad,
-            command.CertificationStatement);
+            command.CertificationStatement,
+            command.Location);
 
         if (amendResult.IsFailure)
         {

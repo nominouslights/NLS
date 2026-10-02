@@ -20,7 +20,8 @@ public class VehicleInspectionReadServiceTests(PostgresFixture fixture)
         string unit,
         IReadOnlyList<InspectionChecklistItem>? checklistItems = null,
         IReadOnlyList<InspectionDefect>? defects = null,
-        string? certificationStatement = null) =>
+        string? certificationStatement = null,
+        string? location = null) =>
         VehicleInspection.Enter(
             tenantId,
             InspectionSource.Dispatcher,
@@ -47,7 +48,8 @@ public class VehicleInspectionReadServiceTests(PostgresFixture fixture)
             fuelAdded: false,
             fuelLitres: null,
             fuelCostCad: null,
-            certificationStatement).Value;
+            certificationStatement,
+            location).Value;
 
     [Fact]
     public async Task Trip_number_filter_returns_only_that_trips_inspections()
@@ -109,7 +111,8 @@ public class VehicleInspectionReadServiceTests(PostgresFixture fixture)
                     new InspectionChecklistItem { Group = "Interior", Item = "Defroster", State = ChecklistItemState.Defect },
                 ],
                 defects: [new InspectionDefect { Item = "Defroster", Severity = InspectionDefectSeverity.Major, Note = "no output" }],
-                certificationStatement: Statement);
+                certificationStatement: Statement,
+                location: "  PTH 6, km 40 south of Grand Rapids ");
 
             Assert.True(inspection
                 .AcknowledgeAsCarrier("R. Beardy", "Unit parked pending repair", DateTimeOffset.UtcNow)
@@ -167,6 +170,7 @@ public class VehicleInspectionReadServiceTests(PostgresFixture fixture)
         Assert.NotNull(only.CarrierAcknowledgedAtUtc);
         Assert.Equal("Unit parked pending repair", only.CarrierAcknowledgementNote);
         Assert.Equal(Statement, only.CertificationStatement);
+        Assert.Equal("PTH 6, km 40 south of Grand Rapids", only.Location);
     }
 
     [Fact]
@@ -203,6 +207,7 @@ public class VehicleInspectionReadServiceTests(PostgresFixture fixture)
         Assert.All(only.Checklist, c => Assert.Null(c.Note));
         Assert.Null(only.CarrierAcknowledgedBy);
         Assert.Null(only.CertificationStatement);
+        Assert.Null(only.Location);
     }
 
     [Fact]

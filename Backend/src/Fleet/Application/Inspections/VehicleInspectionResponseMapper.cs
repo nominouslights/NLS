@@ -48,5 +48,6 @@ public static class VehicleInspectionResponseMapper
         inspection.CarrierAcknowledgedBy,
         inspection.CarrierAcknowledgedAtUtc,
         inspection.CarrierAcknowledgementNote,
-        inspection.CertificationStatement);
+        inspection.CertificationStatement,
+        inspection.Location);
 }

@@ -44,7 +44,8 @@ public sealed record VehicleInspectionResponse(
     string? CarrierAcknowledgedBy,
     DateTimeOffset? CarrierAcknowledgedAtUtc,
     string? CarrierAcknowledgementNote,
-    string? CertificationStatement);
+    string? CertificationStatement,
+    string? Location);
 
 /// <summary>
 /// One checklist row. Group is null for post-trip items.

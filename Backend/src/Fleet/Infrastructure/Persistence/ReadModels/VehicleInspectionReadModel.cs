@@ -38,6 +38,7 @@ public sealed class VehicleInspectionReadModel
     public List<string> Issues { get; set; } = [];
     public List<bool> Attestations { get; set; } = [];
     public string? CertificationStatement { get; set; }
+    public string? Location { get; set; }
     public string? DriverSignatureName { get; set; }
     public DateTimeOffset? CertifiedAt { get; set; }
     public bool FuelAdded { get; set; }
@@ -76,6 +77,7 @@ public sealed class VehicleInspectionReadModelConfiguration : IEntityTypeConfigu
         builder.Property(i => i.RoadAdvisories).HasColumnName("road_advisories");
         builder.Property(i => i.FuelLevel).HasColumnName("fuel_level").HasConversion<string>();
         builder.Property(i => i.CertificationStatement).HasColumnName("certification_statement");
+        builder.Property(i => i.Location).HasColumnName("location");
         builder.Property(i => i.DriverSignatureName).HasColumnName("driver_signature_name");
         builder.Property(i => i.CarrierAcknowledgedBy).HasColumnName("carrier_acknowledged_by");
         builder.Property(i => i.CarrierAcknowledgedAtUtc).HasColumnName("carrier_acknowledged_at_utc");

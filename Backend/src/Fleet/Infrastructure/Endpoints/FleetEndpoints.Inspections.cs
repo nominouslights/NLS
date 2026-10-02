@@ -64,7 +64,8 @@ public static partial class FleetEndpoints
             request.FuelAdded ?? false,
             request.FuelLitres,
             request.FuelCostCad,
-            request.CertificationStatement);
+            request.CertificationStatement,
+            request.Location);
 
         var result = await sender.Send(command, cancellationToken);
         return result.IsSuccess
@@ -106,7 +107,8 @@ public static partial class FleetEndpoints
             request.FuelAdded ?? false,
             request.FuelLitres,
             request.FuelCostCad,
-            request.CertificationStatement);
+            request.CertificationStatement,
+            request.Location);
 
         var result = await sender.Send(command, cancellationToken);
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
@@ -237,7 +239,8 @@ public sealed record InspectionRequest(
     bool? FuelAdded,
     decimal? FuelLitres,
     decimal? FuelCostCad,
-    string? CertificationStatement = null);
+    string? CertificationStatement = null,
+    string? Location = null);
 
 /// <summary>
 /// Request body for POST /api/fleet/inspections/{id}/defects/resolve. <see cref="Item"/> names

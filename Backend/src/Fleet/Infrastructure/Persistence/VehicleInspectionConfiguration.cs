@@ -42,6 +42,12 @@ public sealed class VehicleInspectionConfiguration : IEntityTypeConfiguration<Ve
         builder.Property(i => i.ManifestId).HasColumnName("manifest_id");
         builder.Property(i => i.GeneratedWorkOrderId).HasColumnName("generated_work_order_id");
         builder.Property(i => i.PerformedAt).HasColumnName("performed_at");
+
+        // M.R. 95/2008 s.12(1) inspection location. Nullable, no default: historical rows have
+        // none, and the aggregate does not require it (paper-form back-entries lack it).
+        builder.Property(i => i.Location)
+            .HasColumnName("location")
+            .HasMaxLength(VehicleInspection.LocationMaxLength);
         builder.Property(i => i.OdometerKm).HasColumnName("odometer_km");
 
         builder.Property(i => i.Result)

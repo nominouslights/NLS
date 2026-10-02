@@ -41,6 +41,20 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
 
     public DateTimeOffset PerformedAt { get; private set; }
 
+    /// <summary>Upper bound on <see cref="Location"/>; matches the column's varchar(200).</summary>
+    public const int LocationMaxLength = 200;
+
+    /// <summary>
+    /// Where the inspection was performed — the urban municipality, or a description of the
+    /// highway location — as Manitoba's Commercial Vehicle Trip Inspection Regulation
+    /// (M.R. 95/2008 s.12(1), NSC Standard 13) requires every trip-inspection report to record.
+    /// Trimmed; whitespace-only is stored as null. Deliberately OPTIONAL here: records keyed in
+    /// from old paper forms legitimately lack it, so the requirement for new submissions is
+    /// enforced by the entry UIs, not by the aggregate. Part of the report body, so
+    /// <see cref="Amend"/> may change it; <see cref="AcknowledgeAsCarrier"/> never touches it.
+    /// </summary>
+    public string? Location { get; private set; }
+
     /// <summary>Odometer reading — odometer-in on a pre-trip, odometer-out on a post-trip.</summary>
     public int? OdometerKm { get; private set; }
 
@@ -131,7 +145,8 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
         bool fuelAdded,
         decimal? fuelLitres,
         decimal? fuelCostCad,
-        string? certificationStatement = null)
+        string? certificationStatement = null,
+        string? location = null)
     {
         if (string.IsNullOrWhiteSpace(unit))
         {
@@ -146,6 +161,12 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
         if (HasDuplicateItems(defects))
         {
             return NorthernLink.Shared.Kernel.Result.Failure<VehicleInspection>(InspectionErrors.DuplicateDefectItem);
+        }
+
+        var normalizedLocation = Normalize(location);
+        if (normalizedLocation is { Length: > LocationMaxLength })
+        {
+            return NorthernLink.Shared.Kernel.Result.Failure<VehicleInspection>(InspectionErrors.LocationTooLong);
         }
 
         // A freshly entered defect is never pre-resolved: allowing a resolution stamp in here
@@ -169,6 +190,7 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
             TripNumber = string.IsNullOrWhiteSpace(tripNumber) ? null : tripNumber.Trim(),
             ManifestId = null,
             PerformedAt = performedAt,
+            Location = normalizedLocation,
             OdometerKm = odometerKm,
             Result = DeriveResult(enteredDefects),
             ChecklistItems = NormalizeChecklist(checklistItems),
@@ -245,7 +267,8 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
         bool fuelAdded,
         decimal? fuelLitres,
         decimal? fuelCostCad,
-        string? certificationStatement = null)
+        string? certificationStatement = null,
+        string? location = null)
     {
         if (string.IsNullOrWhiteSpace(unit))
         {
@@ -264,6 +287,12 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
             return NorthernLink.Shared.Kernel.Result.Failure(InspectionErrors.DuplicateDefectItem);
         }
 
+        var normalizedLocation = Normalize(location);
+        if (normalizedLocation is { Length: > LocationMaxLength })
+        {
+            return NorthernLink.Shared.Kernel.Result.Failure(InspectionErrors.LocationTooLong);
+        }
+
         var merged = MergeResolutions(Defects, defects);
 
         Source = source;
@@ -274,6 +303,7 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
         Unit = unit.Trim();
         DriverName = driverName.Trim();
         PerformedAt = performedAt;
+        Location = normalizedLocation;
         OdometerKm = odometerKm;
         Result = DeriveResult(merged);
         ChecklistItems = NormalizeChecklist(checklistItems);
