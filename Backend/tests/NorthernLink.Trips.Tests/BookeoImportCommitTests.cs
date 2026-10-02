@@ -226,6 +226,25 @@ public class BookeoImportCommitTests
     }
 
     [Fact]
+    public async Task With_no_product_mappings_a_commit_writes_nothing_though_the_preview_counts_passengers()
+    {
+        var bed = new BookeoTestBed(mapProducts: false);
+        var preview = await bed.PreviewFixtureAsync();
+        Assert.Equal(3, preview.Groups.Single(g => g.WindowStart == "08:00").PassengersAfter);
+
+        var result = await bed.CommitAsync(preview.BatchId, preview.PlanHash);
+
+        Assert.True(result.IsSuccess, result.IsFailure ? result.Error.Code : string.Empty);
+        Assert.Equal(3, result.Value.GroupsSkippedBlocked);
+        Assert.Equal(0, result.Value.TripsCreated);
+        Assert.Equal(0, result.Value.TripsUpdated);
+        Assert.Equal(0, result.Value.BookingsImported);
+        Assert.Empty(bed.Repo.Trips);
+        Assert.Empty(bed.Repo.Manifests);
+        Assert.Empty(bed.Repo.Bookings);
+    }
+
+    [Fact]
     public async Task Preview_rejects_missing_oversized_and_non_spreadsheet_files()
     {
         var bed = new BookeoTestBed();

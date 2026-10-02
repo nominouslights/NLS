@@ -192,6 +192,66 @@ public class BookeoImportPlannerTests
     }
 
     [Fact]
+    public async Task An_unmapped_group_still_counts_the_passengers_the_file_would_bring_in()
+    {
+        // Regression: with no product mappings every group was Blocked and showed "0 → 0",
+        // because an unmapped booking builds no manifest rows (no route, no stops).
+        var bed = new BookeoTestBed(mapProducts: false);
+
+        var plan = await bed.PlanAsync(BookeoTestBed.FixtureRows());
+
+        Assert.Equal(3, plan.Groups.Count);
+        Assert.All(plan.Groups, g =>
+        {
+            Assert.Equal(BookeoGroupAction.Blocked, g.Action);
+            Assert.True(g.IsUnmapped);
+            Assert.Equal(0, g.PassengersBefore);
+            Assert.Equal(g.AddRows.Sum(r => r.Parsed.Participants), g.PassengersAfter);
+            Assert.Empty(g.PassengersAfterList); // Nothing a commit could write.
+        });
+
+        var fromThompson = GroupOf(plan, "001");
+        Assert.Equal(Oct5, fromThompson.ServiceDate);
+        Assert.Equal(new TimeOnly(8, 0), fromThompson.WindowStart);
+        Assert.Equal(3, fromThompson.PassengersAfter);
+
+        Assert.Equal(0, plan.Summary.TripsToCreate);
+        Assert.Equal(3, plan.Summary.BlockedGroups);
+
+        // The wire shape carries the counts, and the booking rows carry their money.
+        var preview = plan.ToPreview(Guid.NewGuid(), "bookeo_sample.xls", bed.Clock.GetUtcNow());
+        var wire = preview.Groups.Single(g => g.Key == fromThompson.Key);
+        Assert.Equal(0, wire.PassengersBefore);
+        Assert.Equal(3, wire.PassengersAfter);
+        Assert.All(preview.Rows.Where(r => r.GroupKey is not null), r =>
+        {
+            var parsed = RowOf(plan, r.BookingNumber).Parsed;
+            Assert.Equal(parsed.TotalGrossCad, r.TotalGrossCad);
+            Assert.Equal(parsed.TotalPaidCad, r.TotalPaidCad);
+            Assert.Equal(parsed.TotalDueCad, r.TotalDueCad);
+        });
+        Assert.Contains(preview.Rows, r => r.GroupKey is not null && r.TotalGrossCad > 0m);
+    }
+
+    [Fact]
+    public async Task ManifestCapExceeded_is_raised_on_an_unmapped_group_too()
+    {
+        var bed = new BookeoTestBed(mapProducts: false);
+        var big = BookeoTestBed.FixtureRow("001") with
+        {
+            Participants = 9,
+            Categories = [new BookeoCategoryCount("Lynn Lake Residents", 9)],
+        };
+
+        var plan = await bed.PlanAsync([big]);
+
+        var group = GroupOf(plan, "001");
+        Assert.Equal(9, group.PassengersAfter);
+        Assert.Contains(BookeoIssueCodes.ProductNotMapped, Codes(group.Issues));
+        Assert.Contains(BookeoIssueCodes.ManifestCapExceeded, Codes(group.Issues));
+    }
+
+    [Fact]
     public async Task A_destination_specific_mapping_does_not_cover_the_other_direction()
     {
         var bed = new BookeoTestBed();
