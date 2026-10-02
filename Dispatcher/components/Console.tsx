@@ -11,6 +11,7 @@ import NavRail from "@/components/NavRail";
 import TopBar from "@/components/TopBar";
 import Home from "@/components/Home";
 import CreateTripWizard from "@/components/CreateTripWizard";
+import BookeoImportModal from "@/components/BookeoImportModal";
 import TodayApp from "@/components/apps/TodayApp";
 import TripOpsApp from "@/components/apps/TripOpsApp";
 import FleetApp from "@/components/apps/FleetApp";
@@ -30,6 +31,9 @@ export default function Console() {
   const [location, setLocation] = useState<Location>("home");
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [bookeoOpen, setBookeoOpen] = useState(false);
+  // Bumped when the Bookeo import wrote trips, so an open Trips list refetches.
+  const [tripsRefreshKey, setTripsRefreshKey] = useState(0);
   const [tripSelId, setTripSelId] = useState<string | null>(null); // Trips API Guid
   // Reopening an app returns to the screen it was left on.
   const lastScreen = useRef<Partial<Record<AppId, ScreenId>>>({});
@@ -74,6 +78,8 @@ export default function Console() {
   const shell: Shell = {
     openTrip,
     createTrip: () => setWizardOpen(true),
+    importBookeo: canCreateTrip ? () => setBookeoOpen(true) : null,
+    tripsRefreshKey,
     navigate,
     goHome,
   };
@@ -143,6 +149,15 @@ export default function Console() {
             // Selecting the new trip is all the Trips screen needs: it polls for the
             // trip (reads trail writes), brings its period into view, and refreshes.
             openTrip(tripId);
+          }}
+        />
+      )}
+
+      {bookeoOpen && (
+        <BookeoImportModal
+          onClose={(committed) => {
+            setBookeoOpen(false);
+            if (committed) setTripsRefreshKey((k) => k + 1);
           }}
         />
       )}

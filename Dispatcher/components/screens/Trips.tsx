@@ -1340,6 +1340,22 @@ function AcknowledgeCarrierModal({
   );
 }
 
+/** The header's action buttons (+ NEW TRIP, IMPORT FROM BOOKEO) share one look. */
+const headerButtonStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 7,
+  padding: "8px 15px",
+  borderRadius: 8,
+  background: colors.blue,
+  color: "#FFFFFF",
+  fontFamily: fonts.condensed,
+  fontWeight: 700,
+  fontSize: 13.5,
+  letterSpacing: ".04em",
+  cursor: "pointer",
+};
+
 // ---------------------------------------------------------------------------
 // Screen
 // ---------------------------------------------------------------------------
@@ -1348,6 +1364,8 @@ export default function Trips({
   selectedId,
   setSelectedId,
   onNewTrip,
+  onImportBookeo = null,
+  refreshKey = 0,
   period,
   setPeriod,
   page,
@@ -1356,6 +1374,10 @@ export default function Trips({
   selectedId: string | null;
   setSelectedId: (id: string | null) => void;
   onNewTrip: () => void;
+  /** Opens the Bookeo booking-report import; null hides the button. */
+  onImportBookeo?: (() => void) | null;
+  /** Bumped by Console when trips were written elsewhere (a Bookeo import) — refetch. */
+  refreshKey?: number;
   /** Period and page live in Console so they survive navigating away and back. */
   period: Period;
   setPeriod: (next: Period) => void;
@@ -1426,7 +1448,9 @@ export default function Trips({
       page,
       pageSize: PAGE_SIZE,
     });
-  }, [periodStart, periodEnd, filter, svcFilter, showCancelled, page]);
+    // refreshKey carries no value into the query — a change just means "fetch again".
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periodStart, periodEnd, filter, svcFilter, showCancelled, page, refreshKey]);
 
   const applyPage = useCallback(
     (fresh: Awaited<ReturnType<typeof fetchList>>) => {
@@ -1842,24 +1866,15 @@ export default function Trips({
             Trips
           </h1>
         </div>
-        <div
-          onClick={onNewTrip}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 7,
-            padding: "8px 15px",
-            borderRadius: 8,
-            background: colors.blue,
-            color: "#FFFFFF",
-            fontFamily: fonts.condensed,
-            fontWeight: 700,
-            fontSize: 13.5,
-            letterSpacing: ".04em",
-            cursor: "pointer",
-          }}
-        >
-          <span style={{ fontSize: 15, lineHeight: 1 }}>+</span> NEW TRIP
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {onImportBookeo && (
+            <div onClick={onImportBookeo} style={headerButtonStyle}>
+              <span style={{ fontSize: 15, lineHeight: 1 }}>⭱</span> IMPORT FROM BOOKEO
+            </div>
+          )}
+          <div onClick={onNewTrip} style={headerButtonStyle}>
+            <span style={{ fontSize: 15, lineHeight: 1 }}>+</span> NEW TRIP
+          </div>
         </div>
       </div>
       <div style={{ marginBottom: 10 }}>

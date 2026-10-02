@@ -40,6 +40,8 @@ export default function TripOpsApp({
           selectedId={tripSelId}
           setSelectedId={setTripSelId}
           onNewTrip={shell.createTrip}
+          onImportBookeo={shell.importBookeo}
+          refreshKey={shell.tripsRefreshKey}
           period={tripPeriod}
           setPeriod={setTripPeriod}
           page={tripPage}
