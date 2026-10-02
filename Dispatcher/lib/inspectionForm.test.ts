@@ -44,6 +44,95 @@ const CLOSE_OUT_LABELS = [
   "Keys returned / secured",
 ];
 
+/**
+ * Every key on the form as merged in PR #93 (rev 1, 80 rows), taken verbatim from
+ * `origin/main` before rev 2. Stored inspections address their defects by these
+ * strings, so none may be renamed or removed — rev 2 changes only `mode`, `checkFor`
+ * and `categoryNote` on existing rows.
+ */
+const REV1_KEYS = [
+  "Engine oil",
+  "Coolant",
+  "Power steering fluid (if equipped)",
+  "Brake fluid reservoir (hydraulic)",
+  "Washer fluid",
+  "Drive belts",
+  "Hoses (coolant / heater)",
+  "Battery & terminals",
+  "Wiring / harness",
+  "Fuel / water separator",
+  "Radiator / condenser",
+  "Ground beneath the vehicle",
+  "Block heater cord (winter)",
+  "Springs (leaf / coil)",
+  "Shock absorbers",
+  "U-bolts & spring hangers",
+  "Axles & mounting",
+  "Wheel bearings",
+  "Tread depth",
+  "Tire condition",
+  "Tire pressure",
+  "Wheel nuts / studs",
+  "Valve stems & caps",
+  "Frame rails / crossmembers",
+  "Body panels & doors (exterior)",
+  "Windshield & windows",
+  "Exterior mirrors (both sides)",
+  "Exhaust system",
+  "Fuel tank & cap",
+  "Entry steps / passenger door",
+  "Safety beacon & whip flag",
+  "Headlights — low & high beam, both sides",
+  "Tail lights",
+  "Brake lights (incl. centre high-mount if equipped)",
+  "Turn signals — front & rear, both sides",
+  "Hazard (4-way) lights",
+  "Marker / clearance lights (roof & side)",
+  "Reflectors",
+  "Back-up lights & reverse alarm (if equipped)",
+  "Licence plate light",
+  "Driver's seat & seatbelt",
+  "Steering",
+  "Horn",
+  "Gauges (oil pressure, temperature, volt/ammeter, fuel)",
+  "Wipers & washers",
+  "Defrost / heater",
+  "Interior mirrors",
+  "Doors (from inside)",
+  "Emergency exits / windows",
+  "Interior / step lighting",
+  "Interior clean & clear of debris",
+  "Service brake pedal",
+  "Parking brake",
+  "Brake warning light",
+  "Interior: Headlights (dash switch, low & high)",
+  "Interior: Turn signals (left / right)",
+  "Interior: Hazard lights",
+  "Interior: Brake lights",
+  "Fire extinguisher (min. 5 lb, BC-rated)",
+  "First aid kit",
+  "Warning triangles / reflectors (3)",
+  "Passenger seatbelts, all fitted positions",
+  "Spill kit (mine requirement)",
+  "Survival kit",
+  "Traction aids",
+  "Extra fuel",
+  "Jumper cables / booster pack",
+  "Reflective safety vest",
+  "Passenger seats",
+  "Fitted cargo area — partition & tie-downs",
+  "Cell phone charged",
+  "Starlink / satellite comm connected",
+  "GPS / navigation",
+  "Emergency contacts list",
+  "Vehicle exterior — no new damage",
+  "All passengers disembarked safely",
+  "Vehicle secured / plugged in",
+  "Interior cleaned & checked",
+  "All cargo delivered / accounted for",
+  "Keys returned / secured",
+];
+
 describe("wire keys", () => {
   it("is unique across the entire catalogue", () => {
     // A duplicate key collides two rows onto one defect address (InspectionId, Item)
@@ -55,6 +144,12 @@ describe("wire keys", () => {
 
     expect(duplicates).toEqual([]);
     expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it("still contains every rev-1 key, so no stored defect is orphaned", () => {
+    const current = new Set(NL_PTI_01.flatMap((group) => group.items.map((item) => item.key)));
+    expect(REV1_KEYS).toHaveLength(80);
+    expect(REV1_KEYS.filter((key) => !current.has(key))).toEqual([]);
   });
 
   it("keeps the interior light checks distinct from the exterior ones", () => {
@@ -93,22 +188,25 @@ describe("itemsFor — unit scoping", () => {
     expect(items.filter((item) => item.scope === "NL02Only")).toEqual([]);
   });
 
-  it.each(MODES)("includes every NL02Only item for NL-02 (%s)", (mode) => {
+  it.each(MODES)("includes every applicable NL02Only item for NL-02 (%s)", (mode) => {
+    const excluded = mode === "PreTrip" ? "PostTripOnly" : "PreTripOnly";
     const nl02Keys = NL_PTI_01.flatMap((group) =>
       group.items
-        .filter((item) => item.scope === "NL02Only" && (mode === "PostTrip" || item.mode !== "PostTripOnly"))
+        .filter((item) => item.scope === "NL02Only" && item.mode !== excluded)
         .map((item) => item.key),
     );
     const got = new Set(flatten("NL-02", mode).map((item) => item.key));
 
-    expect(nl02Keys.length).toBeGreaterThan(0);
+    // Rev 2 keeps no NL02Only row on the post-trip, so only the pre-trip list is
+    // required to be non-empty.
+    if (mode === "PreTrip") expect(nl02Keys.length).toBeGreaterThan(0);
     for (const key of nl02Keys) expect(got.has(key)).toBe(true);
   });
 
   it("matches the unit trimmed and case-insensitively", () => {
-    const canonical = flatten("NL-01", "PostTrip").map((item) => item.key);
-    expect(flatten("  nl-01 ", "PostTrip").map((i) => i.key)).toEqual(canonical);
-    expect(flatten("Nl-01", "PostTrip").map((i) => i.key)).toEqual(canonical);
+    const canonical = flatten("NL-01", "PreTrip").map((item) => item.key);
+    expect(flatten("  nl-01 ", "PreTrip").map((i) => i.key)).toEqual(canonical);
+    expect(flatten("Nl-01", "PreTrip").map((i) => i.key)).toEqual(canonical);
   });
 
   it.each(MODES)("returns the full superset for null and unknown units (%s)", (mode) => {
@@ -126,8 +224,13 @@ describe("itemsFor — unit scoping", () => {
         expect(gotKeys.has(key), `${String(unit)} is missing ${key}`).toBe(true);
       }
       expect(got.length).toBeGreaterThanOrEqual(nl02.size);
-      // And strictly more than the NL-01 form, which is the narrowed one.
-      expect(got.length).toBeGreaterThan(flatten("NL-01", mode).length);
+      // And strictly more than the NL-01 pre-trip, which is the narrowed one. The
+      // post-trip has no NL02Only row, so there the two are equal.
+      if (mode === "PreTrip") {
+        expect(got.length).toBeGreaterThan(flatten("NL-01", mode).length);
+      } else {
+        expect(got.length).toBe(flatten("NL-01", mode).length);
+      }
     }
   });
 });
@@ -139,6 +242,15 @@ describe("itemsFor — mode scoping", () => {
       const items = flatten(unit, "PreTrip");
       expect(items.length).toBeGreaterThan(0);
       expect(items.filter((item) => item.mode === "PostTripOnly")).toEqual([]);
+    },
+  );
+
+  it.each(["NL-01", "NL-02", null] as const)(
+    "excludes PreTripOnly items from the post-trip form (%s)",
+    (unit) => {
+      const items = flatten(unit, "PostTrip");
+      expect(items.length).toBeGreaterThan(0);
+      expect(items.filter((item) => item.mode === "PreTripOnly")).toEqual([]);
     },
   );
 
@@ -155,6 +267,29 @@ describe("itemsFor — mode scoping", () => {
     expect(preTripGroups).not.toContain("Close-Out");
     expect(itemsFor("NL-02", "PostTrip").map((g) => g.key)).toContain("Close-Out");
   });
+
+  it.each(["NL-01", "NL-02", null] as const)(
+    "puts En-Route Observations on the post-trip only, right before Close-Out (%s)",
+    (unit) => {
+      // The end-of-day duty under Man. Reg. 95/2008 s.17(2): record defects found
+      // while driving. It has nothing to answer before the run.
+      expect(itemsFor(unit, "PreTrip").map((g) => g.key)).not.toContain("En-Route Observations");
+      const post = itemsFor(unit, "PostTrip").map((g) => g.key);
+      expect(post).toContain("En-Route Observations");
+      expect(post.indexOf("En-Route Observations")).toBe(post.indexOf("Close-Out") - 1);
+      expect(flatten(unit, "PostTrip").map((i) => i.key)).toContain(
+        "Defects noticed while driving",
+      );
+    },
+  );
+
+  it("gives every unit the identical post-trip form", () => {
+    // No kept post-trip row is NL02Only, so NL-01, NL-02 and an unknown unit answer
+    // exactly the same rows in the same order.
+    const nl02 = flatten("NL-02", "PostTrip").map((item) => item.key);
+    expect(flatten("NL-01", "PostTrip").map((item) => item.key)).toEqual(nl02);
+    expect(flatten(null, "PostTrip").map((item) => item.key)).toEqual(nl02);
+  });
 });
 
 describe("itemsFor — sub-group shape", () => {
@@ -168,17 +303,26 @@ describe("itemsFor — sub-group shape", () => {
     }
   });
 
-  it("drops the all-NL02 Seating & Cargo group for NL-01", () => {
-    // Both of that group's rows are NL02Only, so on NL-01 the whole heading must go
-    // rather than print with nothing under it.
-    expect(itemsFor("NL-01", "PostTrip").map((g) => g.key)).not.toContain("Seating & Cargo");
-    expect(itemsFor("NL-02", "PostTrip").map((g) => g.key)).toContain("Seating & Cargo");
+  it("keeps Seating & Cargo on the NL-01 pre-trip for the dangerous goods row", () => {
+    // Rev 1's Seating & Cargo was all NL02Only and vanished for NL-01. Rev 2 adds the
+    // dangerous-goods row (scope All), so NL-01 keeps the heading with that one row.
+    const nl01 = itemsFor("NL-01", "PreTrip").find((g) => g.key === "Seating & Cargo");
+    expect(nl01?.items.map((i) => i.key)).toEqual([
+      "Dangerous goods documents & placards (if carried)",
+    ]);
+    // Nothing in Seating & Cargo is on the post-trip, for any unit.
+    expect(itemsFor("NL-02", "PostTrip").map((g) => g.key)).not.toContain("Seating & Cargo");
   });
 
   it("keeps the catalogue's group order", () => {
-    const order = NL_PTI_01.map((group) => group.key);
-    const got = itemsFor(null, "PostTrip").map((group) => group.key);
-    expect(got).toEqual(order);
+    const all = NL_PTI_01.map((group) => group.key);
+    // An unknown unit's pre-trip has every group except the two post-trip-only ones.
+    expect(itemsFor(null, "PreTrip").map((group) => group.key)).toEqual(
+      all.filter((key) => key !== "En-Route Observations" && key !== "Close-Out"),
+    );
+    // The post-trip is a subsequence of the catalogue order.
+    const post = itemsFor(null, "PostTrip").map((group) => group.key);
+    expect(post).toEqual(all.filter((key) => post.includes(key)));
   });
 });
 
@@ -208,31 +352,42 @@ describe("checkCount", () => {
     };
     console.log("NL-PTI-01 check counts:", counts);
 
-    expect(counts["NL-01 pre-trip"]).toBeLessThan(counts["NL-01 post-trip"]);
-    expect(counts["NL-01 post-trip"]).toBeLessThan(counts["NL-02 post-trip"]);
-    expect(counts["NL-02 pre-trip"]).toBeLessThan(counts["NL-02 post-trip"]);
+    // Rev 2: the post-trip is the short "can change while driving" set.
+    expect(counts["NL-01 post-trip"]).toBeLessThan(counts["NL-01 pre-trip"]);
+    expect(counts["NL-02 post-trip"]).toBeLessThan(counts["NL-02 pre-trip"]);
+    expect(counts["NL-01 pre-trip"]).toBeLessThan(counts["NL-02 pre-trip"]);
+    expect(counts["NL-01 post-trip"]).toBe(counts["NL-02 post-trip"]);
   });
 
   it("matches the approved NL-PTI-01 row counts exactly", () => {
     // The backstop for silent row loss. Every other count assertion in this file is
-    // relational, so removing rows keeps them all green. These four literals are the
-    // only thing standing between an accidental deletion and a pre-trip that quietly
-    // stops asking about the brakes.
+    // relational, so removing rows keeps them all green. These literals are the only
+    // thing standing between an accidental deletion and a pre-trip that quietly stops
+    // asking about the brakes.
     //
-    // 74 mechanical rows; 7 of them NL-02-only (fuel/water separator, entry steps,
-    // marker lights, emergency exits, passenger seatbelts, passenger seats, cargo
-    // partition), which is the entire NL-01 difference; Close-Out adds 6 post-trip.
+    // Rev 2 (NSC 13 Schedule 2 / Man. Reg. 95/2008):
+    //   Pre-trip: 82 rows; 11 of them NL-02-only (fuel/water separator, entry steps,
+    //   marker lights, emergency exits, passenger seatbelts, passenger seats, cargo
+    //   partition, passenger floor, overhead racks, accessibility lift, mobility
+    //   restraints), which is the entire NL-01 difference.
+    //   Post-trip: 21 "Both" rows that can change while driving + 1 En-Route
+    //   Observations row + 6 Close-Out = 28, identical for every unit.
     //
     // If the owner changes the form, change these numbers in the same commit and say
     // so in the message. Never "fix" a failure here by relaxing the assertion.
-    expect(checkCount("NL-01", "PreTrip")).toBe(67);
-    expect(checkCount("NL-01", "PostTrip")).toBe(73);
-    expect(checkCount("NL-02", "PreTrip")).toBe(74);
-    expect(checkCount("NL-02", "PostTrip")).toBe(80);
+    expect(checkCount("NL-01", "PreTrip")).toBe(71);
+    expect(checkCount("NL-01", "PostTrip")).toBe(28);
+    expect(checkCount("NL-02", "PreTrip")).toBe(82);
+    expect(checkCount("NL-02", "PostTrip")).toBe(28);
+    expect(checkCount(null, "PreTrip")).toBe(82);
+    expect(checkCount(null, "PostTrip")).toBe(28);
 
-    // The arithmetic those four numbers encode, stated so a future edit that changes
-    // one without the others fails loudly rather than drifting.
-    expect(checkCount("NL-02", "PreTrip") - checkCount("NL-01", "PreTrip")).toBe(7);
-    expect(checkCount("NL-02", "PostTrip") - checkCount("NL-02", "PreTrip")).toBe(6);
+    // The arithmetic those numbers encode, stated so a future edit that changes one
+    // without the others fails loudly rather than drifting.
+    const rows = NL_PTI_01.flatMap((g) => g.items);
+    expect(checkCount("NL-02", "PreTrip") - checkCount("NL-01", "PreTrip")).toBe(11);
+    expect(rows.filter((i) => i.mode === "Both")).toHaveLength(21);
+    expect(rows.filter((i) => i.mode === "PostTripOnly")).toHaveLength(7);
+    expect(checkCount("NL-02", "PostTrip")).toBe(21 + 7);
   });
 });

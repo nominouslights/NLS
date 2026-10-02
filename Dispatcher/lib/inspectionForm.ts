@@ -10,12 +10,40 @@
 //   - National Safety Code Standard 13 (Trip Inspection), as implemented in Manitoba
 //     by the Commercial Vehicle Trip Inspection Regulation, Man. Reg. 95/2008, under
 //     The Highway Traffic Act, C.C.S.M. c. H60.
+//   - NSC Standard 13 Schedule 2 (bus trip inspection defect list), adopted in
+//     Manitoba as Schedule B of Man. Reg. 95/2008. The pre-trip rows cover its parts
+//     that apply to this fleet (accelerator, hubs, air suspension, passenger floor
+//     and racks, accessibility lift, mobility restraints, dangerous goods …).
 //   - NSC Standard 10 (Cargo Securement) for the fitted cargo area.
 //   - MPI Passenger Vehicle for Hire requirements.
 // Rows carrying `basis: "NorthernLink"` are company additions — they are NOT part of
 // NSC 13 and exist because the owner asked to fold the previous checklist's
 // operational items (survival kit, Starlink, spill kit …) into the one form rather
 // than lose them.
+//
+// WHY THE POST-TRIP IS SHORT (rev 2). NSC 13 and Man. Reg. 95/2008 require no full
+// post-trip inspection: the trip inspection is done once per 24 h, before the first
+// trip (s.7), and the end-of-day duty is to RECORD defects found en route and report
+// them (s.12(4), s.17(2)). So the post-trip is the reduced set of critical things that
+// can change while driving, plus what the driver noticed, plus Close-Out. Per-row
+// `mode` choices:
+//   - "Both" (can fail or be damaged in use, and is critical): ground beneath the
+//     vehicle (a fresh leak — stands in for every under-hood level check), springs
+//     (a leaf breaks or shifts on gravel), tire condition and wheel nuts (cuts, flats,
+//     fasteners loosening), windshield, exterior mirrors, exhaust, fuel tank & cap
+//     (rock strike, a clipped mirror, fumes, a cap left off at a fuel stop), the five
+//     exterior lamps (burn out in use), steering, accelerator, gauges, wipers, defrost,
+//     and the three brake checks (all felt or seen while driving).
+//   - "PreTripOnly": everything else — fluid levels, belts, hoses, battery, wiring,
+//     radiator, block-heater cord, shocks, U-bolts, axles, bearings, tread depth,
+//     pressure, valve stems, frame, body panels (Close-Out's "no new damage" covers
+//     them), entry steps, beacon, marker lights, reflectors, back-up and plate lights,
+//     driver's seat, horn, interior mirrors, doors, exits, interior lighting and
+//     cleanliness, the whole Interior Lights group (the exterior walk covers the same
+//     lamps), all Emergency Equipment, Seating & Cargo, and Comms & Nav.
+//   - "PostTripOnly": En-Route Observations and Close-Out.
+// The resulting post-trip is the same 28 checks for every unit: no kept row is
+// NL02Only. Reversing a choice is a one-field `mode` edit on that row.
 //
 // Dependency-free by design: plain data and two pure functions, no imports, no side
 // effects. It is imported by the console, the printable form composer and (via copy)
@@ -54,8 +82,11 @@ export type UnitScope = "All" | "NL02Only";
 /** Whether the row is an NSC 13 requirement or a Northern Link company addition. */
 export type ItemBasis = "NSC13" | "NorthernLink";
 
-/** Whether the row is checked on both runs, or only at the end of the day. */
-export type ItemMode = "Both" | "PostTripOnly";
+/**
+ * Which runs the row is checked on: both, only at the start of the day (the full
+ * NSC 13 inspection), or only at the end of the day (en-route defects, Close-Out).
+ */
+export type ItemMode = "Both" | "PreTripOnly" | "PostTripOnly";
 
 /** Which half of the form is being filled in. */
 export type InspectionFormMode = "PreTrip" | "PostTrip";
@@ -101,7 +132,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Major if critically low",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Coolant",
@@ -111,7 +142,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Major if low or leaking",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Power steering fluid (if equipped)",
@@ -121,7 +152,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Minor / Major if leaking",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Brake fluid reservoir (hydraulic)",
@@ -130,7 +161,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Major",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Washer fluid",
@@ -139,7 +170,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Minor",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Drive belts",
@@ -149,7 +180,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Major if slipping or cracked through",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Hoses (coolant / heater)",
@@ -159,7 +190,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Major if leaking",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Battery & terminals",
@@ -169,7 +200,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Major if loose or heavily corroded",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Wiring / harness",
@@ -179,7 +210,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Major if exposed near a hazard",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Fuel / water separator",
@@ -189,7 +220,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Major if leaking",
         scope: "NL02Only",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Radiator / condenser",
@@ -198,7 +229,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Minor",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Ground beneath the vehicle",
@@ -219,7 +250,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Major if conductor exposed",
         scope: "All",
         basis: "NorthernLink",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
     ],
   },
@@ -240,6 +271,16 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         mode: "Both",
       },
       {
+        key: "Air suspension (if equipped)",
+        label: "Air suspension (if equipped)",
+        checkFor: "No audible air leak; air bags intact, inflated and securely mounted",
+        category: "Minor",
+        categoryNote: "Major if an air bag is damaged or deflated",
+        scope: "All",
+        basis: "NSC13",
+        mode: "PreTripOnly",
+      },
+      {
         key: "Shock absorbers",
         label: "Shock absorbers",
         checkFor: "No visible fluid leak; mounts tight",
@@ -247,7 +288,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Minor / Major if leaking badly",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "U-bolts & spring hangers",
@@ -256,7 +297,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Major",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Axles & mounting",
@@ -265,7 +306,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Major",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Wheel bearings",
@@ -275,7 +316,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Major if loose",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
     ],
   },
@@ -292,12 +333,13 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Major if below minimum",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Tire condition",
         label: "Tire condition",
-        checkFor: "No cuts, bulges, exposed cord, or uneven/cupped wear",
+        checkFor:
+          "No cuts, bulges, exposed cord, flat or audible leak; not touching another tire or the body",
         category: "Major",
         categoryNote: "Major if cord exposed",
         scope: "All",
@@ -311,7 +353,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Minor",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Wheel nuts / studs",
@@ -324,13 +366,23 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         mode: "Both",
       },
       {
+        key: "Hubs & wheel seals",
+        label: "Hubs & wheel seals",
+        checkFor:
+          "No oil or grease leaking at the wheel seal; hub oil visible in the sight glass if fitted",
+        category: "Minor",
+        scope: "All",
+        basis: "NSC13",
+        mode: "PreTripOnly",
+      },
+      {
         key: "Valve stems & caps",
         label: "Valve stems & caps",
         checkFor: "Present and undamaged",
         category: "Minor",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
     ],
   },
@@ -346,7 +398,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Major",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Body panels & doors (exterior)",
@@ -356,7 +408,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Minor, unless a door won't secure (Major)",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Windshield & windows",
@@ -393,7 +445,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         label: "Fuel tank & cap",
         checkFor: "Secure and sealed; no leaks",
         category: "Major",
-        categoryNote: "Major if leaking",
+        categoryNote: "Major if leaking, insecure, or cap missing",
         scope: "All",
         basis: "NSC13",
         mode: "Both",
@@ -406,7 +458,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Major if unsafe to board",
         scope: "NL02Only",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Safety beacon & whip flag",
@@ -416,7 +468,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Major if the day's site requires it and it is inoperative",
         scope: "All",
         basis: "NorthernLink",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
     ],
   },
@@ -478,7 +530,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Minor / Major depending on which",
         scope: "NL02Only",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Reflectors",
@@ -487,7 +539,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Minor",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Back-up lights & reverse alarm (if equipped)",
@@ -496,7 +548,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Major",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Licence plate light",
@@ -505,7 +557,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Minor",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
     ],
   },
@@ -523,7 +575,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Major",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Steering",
@@ -535,13 +587,23 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         mode: "Both",
       },
       {
+        key: "Accelerator pedal",
+        label: "Accelerator pedal",
+        checkFor: "Moves freely; engine returns to idle when released",
+        category: "Major",
+        categoryNote: "Major when carrying passengers",
+        scope: "All",
+        basis: "NSC13",
+        mode: "Both",
+      },
+      {
         key: "Horn",
         label: "Horn",
         checkFor: "Audible and functioning",
         category: "Minor",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Gauges (oil pressure, temperature, volt/ammeter, fuel)",
@@ -566,9 +628,10 @@ export const NL_PTI_01: InspectionSubGroup[] = [
       {
         key: "Defrost / heater",
         label: "Defrost / heater",
-        checkFor: "Functions — critical for northern Manitoba winter operation",
+        checkFor:
+          "Clears the windshield; passenger compartment holds at least 10 °C — critical for northern Manitoba winter operation",
         category: "Major",
-        categoryNote: "Major in winter conditions",
+        categoryNote: "Major if the windshield cannot be cleared",
         scope: "All",
         basis: "NSC13",
         mode: "Both",
@@ -580,7 +643,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Major",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Doors (from inside)",
@@ -589,16 +652,17 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Major",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Emergency exits / windows",
         label: "Emergency exits / windows (NL-02)",
-        checkFor: "Clearly marked, release mechanism works freely, path unobstructed",
+        checkFor:
+          "Clearly marked, release mechanism works freely, path unobstructed; exit alarm sounds",
         category: "Major",
         scope: "NL02Only",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Interior / step lighting",
@@ -607,7 +671,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Minor",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Interior clean & clear of debris",
@@ -617,7 +681,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "MAJOR if anything can foul the pedals",
         scope: "All",
         basis: "NorthernLink",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
     ],
   },
@@ -629,7 +693,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
       {
         key: "Service brake pedal",
         label: "Service brake pedal",
-        checkFor: "Firm; no excessive travel; no fade when held under load",
+        checkFor: "Firm; no excessive travel; no fade when held under load; power assist working",
         category: "Major",
         scope: "All",
         basis: "NSC13",
@@ -671,7 +735,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Major",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Interior: Turn signals (left / right)",
@@ -680,7 +744,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Major",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Interior: Hazard lights",
@@ -689,7 +753,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Major",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Interior: Brake lights",
@@ -698,7 +762,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Major",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
     ],
   },
@@ -714,7 +778,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Major",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "First aid kit",
@@ -723,7 +787,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Minor",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Warning triangles / reflectors (3)",
@@ -732,7 +796,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Minor",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Passenger seatbelts, all fitted positions",
@@ -741,7 +805,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Major",
         scope: "NL02Only",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Spill kit (mine requirement)",
@@ -751,7 +815,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Site entry is refused without it",
         scope: "All",
         basis: "NorthernLink",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Survival kit",
@@ -761,7 +825,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Major Nov–Apr",
         scope: "All",
         basis: "NorthernLink",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Traction aids",
@@ -771,7 +835,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Major Nov–Apr",
         scope: "All",
         basis: "NorthernLink",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Extra fuel",
@@ -781,7 +845,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Major if the run has no fuel stop",
         scope: "All",
         basis: "NorthernLink",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Jumper cables / booster pack",
@@ -790,7 +854,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Minor",
         scope: "All",
         basis: "NorthernLink",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Reflective safety vest",
@@ -799,7 +863,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Minor",
         scope: "All",
         basis: "NorthernLink",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
     ],
   },
@@ -813,9 +877,10 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         label: "Passenger seats (NL-02)",
         checkFor: "Securely mounted; no damage",
         category: "Major",
+        categoryNote: "Major when the seat is occupied",
         scope: "NL02Only",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Fitted cargo area — partition & tie-downs",
@@ -825,7 +890,56 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Major if a load can shift",
         scope: "NL02Only",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
+      },
+      {
+        key: "Passenger floor, steps & stanchion padding",
+        label: "Passenger floor, steps & stanchion padding (NL-02)",
+        checkFor: "Floor and steps undamaged; stanchion padding intact",
+        category: "Minor",
+        scope: "NL02Only",
+        basis: "NSC13",
+        mode: "PreTripOnly",
+      },
+      {
+        key: "Overhead racks / luggage compartments (if equipped)",
+        label: "Overhead racks / luggage compartments (if equipped, NL-02)",
+        checkFor: "Secure and undamaged; doors latch",
+        category: "Minor",
+        scope: "NL02Only",
+        basis: "NSC13",
+        mode: "PreTripOnly",
+      },
+      {
+        key: "Accessibility lift / ramp & kneeling (if equipped)",
+        label: "Accessibility lift / ramp & kneeling (if equipped, NL-02)",
+        checkFor:
+          "Alarm sounds, interlock works, lift/ramp retracts fully, vehicle returns to ride height after kneeling",
+        category: "Major",
+        categoryNote: "Device may not be used",
+        scope: "NL02Only",
+        basis: "NSC13",
+        mode: "PreTripOnly",
+      },
+      {
+        key: "Wheelchair / mobility-device restraints (if equipped)",
+        label: "Wheelchair / mobility-device restraints (if equipped, NL-02)",
+        checkFor: "Present and functional at every fitted position",
+        category: "Minor",
+        categoryNote: "Major when that position is occupied",
+        scope: "NL02Only",
+        basis: "NSC13",
+        mode: "PreTripOnly",
+      },
+      {
+        key: "Dangerous goods documents & placards (if carried)",
+        label: "Dangerous goods documents & placards (if carried)",
+        checkFor:
+          "Shipping documents in the cab, placards/labels correct and the load meets TDG requirements",
+        category: "Major",
+        scope: "All",
+        basis: "NSC13",
+        mode: "PreTripOnly",
       },
     ],
   },
@@ -841,7 +955,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Minor",
         scope: "All",
         basis: "NorthernLink",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Starlink / satellite comm connected",
@@ -851,7 +965,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Major if the run leaves cell coverage",
         scope: "All",
         basis: "NorthernLink",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "GPS / navigation",
@@ -860,7 +974,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Minor",
         scope: "All",
         basis: "NorthernLink",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Emergency contacts list",
@@ -869,7 +983,29 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Minor",
         scope: "All",
         basis: "NorthernLink",
-        mode: "Both",
+        mode: "PreTripOnly",
+      },
+    ],
+  },
+  {
+    // POST-TRIP ONLY. This is the end-of-day duty NSC 13 actually imposes: under
+    // Man. Reg. 95/2008 s.17(2) a defect the driver finds after the inspection (while
+    // driving) is recorded and reported — majors without delay, minors before the next
+    // inspection. One row, so the driver files each such defect against it with a note.
+    key: "En-Route Observations",
+    title: "En-Route Observations",
+    area: "C",
+    items: [
+      {
+        key: "Defects noticed while driving",
+        label: "Defects noticed while driving",
+        checkFor:
+          "Anything felt, heard or seen en route — pulling, vibration, unusual noise, a warning light that came on, a change in brake feel — is logged here as a defect with a note",
+        category: "Major",
+        categoryNote: "Major if it affects safe operation",
+        scope: "All",
+        basis: "NSC13",
+        mode: "PostTripOnly",
       },
     ],
   },
@@ -962,11 +1098,16 @@ const NL_01 = "nl-01";
  *    default an unknown unit to NL-01.
  *
  * 3. `mode: "PostTripOnly"` rows are dropped when `mode` is `"PreTrip"` — the
- *    Close-Out group cannot be answered before the run.
+ *    En-Route Observations and Close-Out groups cannot be answered before the run.
+ *    `mode: "PreTripOnly"` rows are dropped when `mode` is `"PostTrip"` — the
+ *    post-trip is the reduced "can change while driving" set (see the header
+ *    comment for why NSC 13 needs no full post-trip inspection).
  *
  * 4. A sub-group whose items were all filtered out is dropped entirely, so no
- *    empty heading is ever printed or rendered (NL-01 pre-trip loses both
- *    "Seating & Cargo" and "Close-Out" this way).
+ *    empty heading is ever printed or rendered (pre-trip loses "En-Route
+ *    Observations" and "Close-Out" this way; post-trip loses every group with no
+ *    "Both" row, e.g. "Lights & Signals — Interior", "Emergency Equipment",
+ *    "Seating & Cargo" and "Communications & Navigation").
  *
  * Pure: no imports, no mutation of `NL_PTI_01`, no side effects.
  */
@@ -981,6 +1122,7 @@ export function itemsFor(
     const items = group.items.filter((item) => {
       if (isNl01 && item.scope === "NL02Only") return false;
       if (mode === "PreTrip" && item.mode === "PostTripOnly") return false;
+      if (mode === "PostTrip" && item.mode === "PreTripOnly") return false;
       return true;
     });
     if (items.length === 0) continue;

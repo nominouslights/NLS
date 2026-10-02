@@ -52,6 +52,9 @@ export interface VehicleInspection {
   enteredBy: string | null;
   performedAt: string;
   odometerKm: number | null;
+  /** Where the inspection was done — a municipality or highway description
+   *  (Man. Reg. 95/2008 s.12(1)). Null on records entered before the field existed. */
+  location: string | null;
   result: InspectionResultWire;
   checklist: InspectionChecklistItemWire[];
   defects: InspectionDefectWire[];
@@ -90,6 +93,20 @@ export function listInspections(params?: { unit?: string; tripNumber?: string })
   return request<VehicleInspection[]>(`/api/fleet/inspections${qs ? `?${qs}` : ""}`);
 }
 
+/** Longest inspection location the API accepts (`InspectionInput.location`). */
+export const INSPECTION_LOCATION_MAX = 200;
+
+/**
+ * Whether the Location field must be filled before saving. Required on every new
+ * inspection (Man. Reg. 95/2008 s.12(1) — the report names where it was done) and on
+ * an amend of a record that already has one, so a saved location is never erased.
+ * An amend of an older record stored before the field existed may stay blank —
+ * nobody can know now where that inspection happened.
+ */
+export function inspectionLocationRequired(existing: Pick<VehicleInspection, "location"> | null | undefined): boolean {
+  return existing == null || (existing.location ?? "").trim() !== "";
+}
+
 /** POST /api/fleet/inspections body. `source` defaults to Dispatcher server-side;
  *  pre-trip sends the weather/road/fuel fields, post-trip the issues/attestations/
  *  signature/fuel-added fields. Returns the new inspection id. */
@@ -103,6 +120,10 @@ export interface InspectionInput {
   enteredBy?: string | null;
   performedAt?: string;
   odometerKm?: number | null;
+  /** Inspection location (town or highway), max 200 chars. Required by the UI on a
+   *  new inspection; nullable on the wire so an amend of an older record without
+   *  one still goes through. */
+  location?: string | null;
   /** `state` and `note` are the NL-PTI-01 tri-state answer and its free-text note,
    *  and both are optional: a row that supplies `state` has its `passed` re-derived
    *  server-side (`passed == state != "Defect"`), so the two can never be sent out

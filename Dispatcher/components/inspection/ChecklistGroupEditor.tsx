@@ -7,7 +7,7 @@ import { MonoTag, StatusChip } from "@/components/ui/Chip";
 import { SelectField, TextField } from "@/components/ui/Field";
 
 // One NL-PTI-01 sub-group. Each row is the paper form's three boxes — OK /
-// Defect / N-A — and starts UNANSWERED: with 67–80 rows, defaulting them to OK
+// Defect / N-A — and starts UNANSWERED: with 28–82 rows, defaulting them to OK
 // would let a dispatcher save a form nobody actually filled in. Defect expands a
 // severity select; the note applies on any state (an N-A wants a reason as much
 // as a defect does). Rows carry the backend wire keys (group + item); everything
@@ -139,7 +139,7 @@ function ItemRow({
 }) {
   const isDefect = row.state === "Defect";
   const isNa = row.state === "NotApplicable";
-  // Only the two noteworthy answers get the accent bar. With 67–80 rows, marking
+  // Only the two noteworthy answers get the accent bar. With 28–82 rows, marking
   // every answered row would leave the highlight carrying no signal; "unanswered"
   // is called out by its own chip instead.
   const accent = isDefect ? statusMeta("over").c : isNa ? statusMeta("off").c : colors.blue;
@@ -158,7 +158,7 @@ function ItemRow({
             {item.basis === "NorthernLink" && <MonoTag>NL</MonoTag>}
             {row.state == null && <StatusChip kind="soon" label="Unanswered" />}
           </div>
-          {/* The form's "Check For" column: with 80 rows a dispatcher needs to know
+          {/* The form's "Check For" column: with up to 82 rows a dispatcher needs to know
               what "Ground beneath the vehicle" actually means. */}
           <div
             style={{
