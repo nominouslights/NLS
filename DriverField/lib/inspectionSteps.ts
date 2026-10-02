@@ -5,32 +5,32 @@
 // WHY A STEP MODEL AT ALL: the inspection screen used to render every checklist item as one
 // continuous scroll, with the legal attestation at the very bottom — the part a driver sees
 // least. On a dash-mounted 10-inch tablet, in northern daylight, with gloves on, that is the
-// wrong shape, and it got worse the moment the list became form NL-PTI-01: between 67 and 80
-// rows depending on the unit and the half of the form. One question per screen is the whole
+// wrong shape, and it got worse the moment the list became form NL-PTI-01: up to 82 rows on a
+// pre-trip, depending on the unit. One question per screen is the whole
 // point, and that needs a flat, ordered, addressable list of steps.
 //
 // THE CRUX — KEEPING PROGRESS HONEST, AND THE DENOMINATOR IS NO LONGER ONE NUMBER.
-// The denominator a driver reads is the checklist for THIS unit and THIS mode, and there are
-// four real ones: NL-01 pre-trip 67, NL-01 post-trip 73, NL-02 pre-trip 74, NL-02 post-trip 80.
+// The denominator a driver reads is the checklist for THIS unit and THIS mode: NL-01 pre-trip
+// 71, NL-02 pre-trip 82, and the post-trip 28 for both (rev 2 made it the en-route set).
 // It is DERIVED, every time, from checkCount(unit, mode) in the copied catalogue — never
 // written here as a literal and never cached in a module-level constant.
 //
 //   That invariant is the whole point of this file, and it survived a rewrite.
 //   The old code had `export const CHECK_COUNT = …` computed once at module load, which was
 //   correct only while the list was one fixed 22-item array. A module constant cannot be right
-//   for four different answers; a stale one would have the chip telling a driver they had
-//   answered 67 of 67 questions on an 80-question form, on a legal attestation. If you ever
+//   for three different answers; a stale one would have the chip telling a driver they had
+//   answered 71 of 71 questions on an 82-question form, on a legal attestation. If you ever
 //   find yourself writing a number here, that is the bug.
 //
 // `CheckStep.n`/`.of` are computed during the checklist walk and never see the defect steps
-// injected around them, so the progress chip can never read "68 of 67". A defect step is a
+// injected around them, so the progress chip can never read "72 of 71". A defect step is a
 // CHILD of its check, reporting its parent's numbers under a "Follow-up ·" label — the driver
-// is told they are on a branch off item 7, not on a 68th item. The review step carries the same
+// is told they are on a branch off item 7, not on a 72nd item. The review step carries the same
 // derived `of` rather than reaching for a constant, for exactly the reason above.
 //
 // REJECTED, recorded so nobody re-adds it: a dot step strip. It would be the only status
 // carrier in the app relying on colour plus shape with no word, and DriverField/CLAUDE.md's
-// "colour + glyph + text label, always all three" admits no exception. At 67–80 dots it would
+// "colour + glyph + text label, always all three" admits no exception. At 82 dots it would
 // also be unreadable, which the 22-item version at least was not.
 // ---------------------------------------------------------------------------
 
@@ -43,7 +43,11 @@ import {
 } from "./inspectionForm";
 import type { CheckState } from "./types";
 
-/** The odometer reading, asked first: it is the one value the rest of the report hangs off. */
+/**
+ * The report header, asked first: the odometer reading (the one value the rest of the report
+ * hangs off) and the inspection location (Man. Reg. 95/2008 s.12(1)). The id stays "odometer"
+ * so a resume pointer and every caller keep working.
+ */
 export interface OdometerStep {
   kind: "odometer";
   id: "odometer";
@@ -100,7 +104,7 @@ export interface ReviewStep {
   /**
    * The same derived denominator every CheckStep carries. It lives on the step rather than
    * being read from a module constant in progressLabel() — that constant is what could go
-   * stale, and "Review · 67 of 67" on an 80-question form is a lie about a legal document.
+   * stale, and "Review · 71 of 71" on an 82-question form is a lie about a legal document.
    */
   of: number;
 }
@@ -204,13 +208,13 @@ export function resolveStep(steps: InspectionStep[], stepId: string | null): Ins
 
 /**
  * The progress line. A defect step reports its PARENT's numbers under a "Follow-up ·" label —
- * so the chip can never read "68 of 67" however many defects the driver reports — and the
+ * so the chip can never read "72 of 71" however many defects the driver reports — and the
  * review step reports the denominator it was BUILT with, not one read from anywhere else.
  */
 export function progressLabel(step: InspectionStep): string {
   switch (step.kind) {
     case "odometer":
-      return "Odometer";
+      return "Odometer & location";
     case "check":
       return `Check ${step.n} of ${step.of}`;
     case "defect":

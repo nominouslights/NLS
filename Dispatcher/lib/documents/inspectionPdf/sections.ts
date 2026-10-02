@@ -64,13 +64,6 @@ const NL02_LEGEND = "NL-02 = applies to the bus (NL-02) only.";
 // Local, and deliberately blank-on-missing: a blank form prints an empty ruled
 // cell, never an em dash placeholder that looks like a recorded "nothing".
 
-function fmtDate(iso: string | null | undefined): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("en-CA", { year: "numeric", month: "short", day: "numeric" });
-}
-
 function fmtDateTime(iso: string | null | undefined): string {
   if (!iso) return "";
   const d = new Date(iso);
@@ -152,15 +145,20 @@ export function header(
   <div class="warn">A Major defect takes the vehicle OUT OF SERVICE until it is repaired and re-inspected. Do not operate.</div>
   ${provenanceStrip(insp)}
   ${grid([
-    field("Date", fmtDate(insp?.performedAt), { mono: true }),
+    field("Date & time", fmtDateTime(insp?.performedAt), { mono: true }),
     field("Driver", insp?.driverName),
     checkField("Unit", unitChecks),
     field("Odometer", km(insp?.odometerKm), { mono: true }),
   ])}
-  ${grid(
-    [field("Route / Trip #", tripNumber, { mono: true }), checkField("Inspection", modeChecks)],
-    2,
-  )}`;
+  ${grid([
+    field("Location (town or highway)", insp?.location),
+    field("Route / Trip #", tripNumber, { mono: true }),
+    checkField("Inspection", modeChecks),
+    // The carrier's NSC number must appear on the report. It prints when configured
+    // in COMPANY; until then the cell stays a ruled blank for hand completion —
+    // never a placeholder or an invented number.
+    field("NSC No.", company.nscNo, { mono: true }),
+  ])}`;
 }
 
 function provenanceStrip(insp: VehicleInspection | null): string {
@@ -308,8 +306,17 @@ export function defectLogBlock(insp: VehicleInspection | null): string {
     </tr>`;
   }).join("");
 
+  // Man. Reg. 95/2008 s.12(1): a report with nothing wrong states that no defect was
+  // found, rather than leaving an empty log a reader could take for an unfilled one.
+  // Only a filled record can say so — a blank form has not been inspected yet.
+  const noneFound =
+    insp && defects.length === 0
+      ? `<div class="none">${box(true)} No defects found</div>`
+      : "";
+
   return (
     sectionBar("Defect Log") +
+    noneFound +
     `<div class="note">Record every Defect row above. Repair follow-up is completed by hand — the platform does not hold a per-defect repair date on this report.</div>
      <table>
        <thead><tr>

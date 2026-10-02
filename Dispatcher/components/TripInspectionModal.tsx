@@ -4,7 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import { colors, fonts, statusMeta } from "@/lib/theme";
 import {
   ApiError,
+  INSPECTION_LOCATION_MAX,
   createInspection,
+  inspectionLocationRequired,
   updateInspection,
   type InspectionFuelLevel,
   type InspectionInput,
@@ -42,8 +44,9 @@ import RetiredFormChecklist from "@/components/inspection/RetiredFormChecklist";
 // Trip-context Fleet inspection entry. Posts a real Fleet VehicleInspection
 // (POST /api/fleet/inspections) tagged with the trip's tripNumber + vehicleId,
 // source "Dispatcher". Both halves of the form are now the SAME thing — the
-// NL-PTI-01 catalogue narrowed by `itemsFor(unit, mode)`, where the post-trip
-// mode simply adds the Close-Out group. Pre-trip additionally carries
+// NL-PTI-01 catalogue narrowed by `itemsFor(unit, mode)`: the pre-trip is the
+// full NSC 13 list, the post-trip the reduced "can change while driving" set plus
+// En-Route Observations and Close-Out. Pre-trip additionally carries
 // weather/road/fuel; post-trip carries issues, fuel-added and the §10
 // certification.
 
@@ -187,6 +190,10 @@ export default function TripInspectionModal({
   }, [defaultDriver]);
 
   const [odometer, setOdometer] = useState(existing?.odometerKm != null ? String(existing.odometerKm) : "");
+  // Man. Reg. 95/2008 s.12(1): the report names where the inspection was done. Required
+  // on a new record; an older record saved before the field existed may stay blank.
+  const [location, setLocation] = useState(existing?.location ?? "");
+  const locationRequired = inspectionLocationRequired(existing);
   const [checklist, setChecklist] = useState<ChecklistRow[]>(() =>
     existing ? rebuilt : rowsFor(unit || null, mode),
   );
@@ -225,9 +232,12 @@ export default function TripInspectionModal({
     // (InspectionErrors.UnitRequired) — this is the readable half of that rule.
     if (!unit.trim()) return "Select the unit this inspection was performed on.";
     if (!driverName.trim()) return "Select the driver who performed the inspection.";
+    if (locationRequired && !location.trim()) {
+      return "Enter where the inspection was done — a town or a highway description.";
+    }
     const defectNoNote = checklist.find((r) => r.state === "Defect" && !r.note.trim());
     if (defectNoNote) return `Defect rows need a note — add one for "${defectNoNote.label}".`;
-    // With 67–80 rows, "something is unanswered" is not actionable. Say how many.
+    // With 28–82 rows, "something is unanswered" is not actionable. Say how many.
     if (unanswered > 0) {
       return `${unanswered} of ${checklist.length} checks ${unanswered === 1 ? "is" : "are"} unanswered — every row needs OK, Defect or N-A.`;
     }
@@ -251,6 +261,7 @@ export default function TripInspectionModal({
       driverName: driverName.trim(),
       enteredBy,
       odometerKm: Number.isFinite(odo) ? odo : null,
+      location: location.trim() || null,
       // Every row, in both modes — close-out rows are ordinary checklist rows now.
       checklist: checklistWire(checklist),
       defects: defectsWire(checklist),
@@ -412,6 +423,18 @@ export default function TripInspectionModal({
               onChange={setOdometer}
               min={0}
               step={1}
+            />
+            <TextField
+              label="Location (town or highway)"
+              value={location}
+              onChange={setLocation}
+              maxLength={INSPECTION_LOCATION_MAX}
+              placeholder="e.g. Leaf Rapids, or PR 391 km 40"
+              hint={
+                locationRequired
+                  ? "Required — where the inspection was done."
+                  : "Optional for this older record, which was saved without one."
+              }
             />
           </div>
 

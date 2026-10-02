@@ -73,7 +73,8 @@ public sealed class EnterInspectionCommandHandler(IVehicleInspectionRepository r
             command.FuelAdded,
             command.FuelLitres,
             command.FuelCostCad,
-            command.CertificationStatement);
+            command.CertificationStatement,
+            command.Location);
 
         if (inspectionResult.IsFailure)
         {

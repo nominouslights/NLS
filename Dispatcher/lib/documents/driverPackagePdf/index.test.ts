@@ -107,6 +107,7 @@ function inspection(type: "PreTrip" | "PostTrip", unit = "NL-02"): VehicleInspec
     enteredBy: null,
     performedAt: "2026-09-20T12:30:00Z",
     odometerKm: 184_220,
+    location: null,
     result: "Pass",
     checklist: [{ group: "Engine Bay", item: "Engine oil", passed: true, state: "Ok", note: null }],
     defects: [],
@@ -295,6 +296,30 @@ describe("driverPackageHtml — the two inspection halves", () => {
     expect(postTripPart).toContain("Close-Out");
   });
 
+  it("puts En-Route Observations on the post-trip sheet only", () => {
+    expect(preTripPart).not.toContain("En-Route Observations");
+    expect(postTripPart).toContain("En-Route Observations");
+  });
+
+  it("keeps the full mechanical list on the pre-trip sheet only", () => {
+    // Rev 2: the post-trip is the reduced "can change while driving" set.
+    expect(preTripPart).toContain("Emergency Equipment");
+    expect(postTripPart).not.toContain("Emergency Equipment");
+  });
+
+  it("prints time, location and an NSC No. cell in each sheet's header", () => {
+    for (const part of [preTripPart, postTripPart]) {
+      expect(part).toContain('<div class="lbl">Date &amp; time</div>');
+      expect(part).toContain('<div class="lbl">Location (town or highway)</div>');
+      expect(part).toContain('<div class="lbl">NSC No.</div>');
+    }
+  });
+
+  it('says "No defects found" on each filled sheet with none recorded', () => {
+    expect(preTripPart).toContain("No defects found");
+    expect(postTripPart).toContain("No defects found");
+  });
+
   it("ticks the right half of each inspection sheet", () => {
     expect(preTripPart).toContain("☒ Pre-Trip");
     expect(preTripPart).toContain("☐ Post-Trip");
@@ -314,6 +339,8 @@ describe("driverPackageHtml — unit narrowing", () => {
     COMPANY,
   );
 
+  // The bus-only rows are all pre-trip rows since rev 2, so these assertions are
+  // effectively about the pre-trip sheet; the post-trip is the same for both units.
   it("includes the bus-only rows for NL-02", () => {
     expect(nl02).toContain("Emergency exits / windows (NL-02)");
     expect(nl02).toContain("Fitted cargo area — partition &amp; tie-downs (NL-02)");

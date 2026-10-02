@@ -18,7 +18,8 @@ internal static class TestInspections
         InspectionVisibility? visibility = InspectionVisibility.Good,
         InspectionFuelLevel? fuelLevel = InspectionFuelLevel.Full,
         IReadOnlyList<InspectionChecklistItem>? checklistItems = null,
-        string? certificationStatement = null)
+        string? certificationStatement = null,
+        string? location = null)
     {
         var result = VehicleInspection.Enter(
             TestVehicles.TenantId,
@@ -47,7 +48,8 @@ internal static class TestInspections
             fuelAdded: false,
             fuelLitres: null,
             fuelCostCad: null,
-            certificationStatement);
+            certificationStatement,
+            location);
 
         Assert.True(result.IsSuccess, $"PreTrip inspection entry failed: {result.Error.Code}");
         return result.Value;
@@ -63,7 +65,8 @@ internal static class TestInspections
         IReadOnlyList<bool>? attestations = null,
         bool fuelAdded = true,
         IReadOnlyList<InspectionChecklistItem>? checklistItems = null,
-        string? certificationStatement = null)
+        string? certificationStatement = null,
+        string? location = null)
     {
         var result = VehicleInspection.Enter(
             TestVehicles.TenantId,
@@ -92,7 +95,8 @@ internal static class TestInspections
             fuelAdded,
             fuelLitres: fuelAdded ? 92.4m : null,
             fuelCostCad: fuelAdded ? 178.30m : null,
-            certificationStatement);
+            certificationStatement,
+            location);
 
         Assert.True(result.IsSuccess, $"PostTrip inspection entry failed: {result.Error.Code}");
         return result.Value;
@@ -110,7 +114,8 @@ internal static class TestInspections
         string unit = "U-04",
         string driverName = "J. Spence",
         IReadOnlyList<InspectionChecklistItem>? checklistItems = null,
-        string? certificationStatement = null) =>
+        string? certificationStatement = null,
+        string? location = null) =>
         inspection.Amend(
             InspectionSource.Dispatcher,
             vehicleId: inspection.VehicleId,
@@ -134,7 +139,8 @@ internal static class TestInspections
             fuelAdded: false,
             fuelLitres: null,
             fuelCostCad: null,
-            certificationStatement);
+            certificationStatement,
+            location);
 
     public static InspectionDefect Defect(InspectionDefectSeverity severity) => new()
     {

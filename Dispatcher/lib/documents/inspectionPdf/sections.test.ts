@@ -27,6 +27,7 @@ function inspection(over: Partial<VehicleInspection> = {}): VehicleInspection {
     enteredBy: null,
     performedAt: "2026-09-20T12:30:00Z",
     odometerKm: 184_220,
+    location: null,
     result: "PassWithDefects",
     checklist: [],
     defects: [],
@@ -136,22 +137,83 @@ describe("inspectionReportHtml — the blank form", () => {
 });
 
 describe("inspectionReportHtml — unit and mode filtering", () => {
-  it("omits the seven bus rows on a blank NL-01 sheet", () => {
-    const nl01 = inspectionReportHtml(null, { unit: "NL-01", mode: "PostTrip" }, COMPANY);
+  it("omits the bus rows on a blank NL-01 pre-trip sheet", () => {
+    const nl01 = inspectionReportHtml(null, { unit: "NL-01", mode: "PreTrip" }, COMPANY);
     expect(nl01).not.toContain("Emergency exits / windows (NL-02)");
     expect(nl01).not.toContain("Fuel / water separator (NL-02, diesel)");
     expect(nl01).not.toContain("Fitted cargo area");
+    expect(nl01).not.toContain("Accessibility lift / ramp &amp; kneeling (if equipped, NL-02)");
   });
 
-  it("keeps them on an NL-02 sheet", () => {
-    const nl02 = inspectionReportHtml(null, { unit: "NL-02", mode: "PostTrip" }, COMPANY);
+  it("keeps them on an NL-02 pre-trip sheet", () => {
+    const nl02 = inspectionReportHtml(null, NL02_CTX, COMPANY);
     expect(nl02).toContain("Emergency exits / windows (NL-02)");
     expect(nl02).toContain("Fuel / water separator (NL-02, diesel)");
+    expect(nl02).toContain("Accessibility lift / ramp &amp; kneeling (if equipped, NL-02)");
   });
 
-  it("has no Close-Out section on a pre-trip sheet, and one on a post-trip sheet", () => {
-    expect(inspectionReportHtml(null, NL02_CTX, COMPANY)).not.toContain("Close-Out");
+  it("prints the short post-trip: no pre-trip-only rows, plus En-Route Observations", () => {
+    const post = inspectionReportHtml(null, { unit: "NL-02", mode: "PostTrip" }, COMPANY);
+    expect(post).not.toContain("Engine oil");
+    expect(post).not.toContain("Emergency exits / windows (NL-02)");
+    expect(post).not.toContain("Emergency Equipment");
+    expect(post).toContain("Wheel nuts / studs");
+    expect(post).toContain("En-Route Observations");
+    expect(post).toContain("Defects noticed while driving");
+  });
+
+  it("has no Close-Out or En-Route section on a pre-trip sheet, and both on a post-trip sheet", () => {
+    const pre = inspectionReportHtml(null, NL02_CTX, COMPANY);
+    expect(pre).not.toContain("Close-Out");
+    expect(pre).not.toContain("En-Route Observations");
     expect(inspectionReportHtml(null, { unit: "NL-02", mode: "PostTrip" }, COMPANY)).toContain("Close-Out");
+  });
+});
+
+describe("inspectionReportHtml — Reg. 95/2008 s.12(1) header fields", () => {
+  /** The value cell of the header field labelled `label`. */
+  function fieldValue(html: string, label: string): string {
+    const escaped = esc(label).replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+    const m = new RegExp(`<div class="lbl">${escaped}</div><div class="val">(.*?)</div>`).exec(html);
+    expect(m, `no header field "${label}"`).not.toBeNull();
+    return m![1];
+  }
+
+  it("prints the date AND the time the inspection was performed", () => {
+    const html = inspectionReportHtml(inspection(), NL02_CTX, COMPANY);
+    const value = fieldValue(html, "Date & time");
+    expect(value).toContain("2026");
+    // A time-of-day component, whatever the runner's timezone.
+    expect(value).toMatch(/\d{1,2}:\d{2}/);
+  });
+
+  it("prints the recorded location", () => {
+    const html = inspectionReportHtml(inspection({ location: "Leaf Rapids — PR 391 yard" }), NL02_CTX, COMPANY);
+    expect(fieldValue(html, "Location (town or highway)")).toBe("Leaf Rapids — PR 391 yard");
+  });
+
+  it("leaves Location a ruled blank on an older record and on the blank form", () => {
+    expect(fieldValue(inspectionReportHtml(inspection({ location: null }), NL02_CTX, COMPANY), "Location (town or highway)")).toBe("&nbsp;");
+    expect(fieldValue(inspectionReportHtml(null, NL02_CTX, COMPANY), "Location (town or highway)")).toBe("&nbsp;");
+  });
+
+  it("leaves NSC No. a ruled blank for hand completion while none is configured", () => {
+    expect(fieldValue(inspectionReportHtml(null, NL02_CTX, { ...COMPANY, nscNo: "" }), "NSC No.")).toBe("&nbsp;");
+  });
+
+  it("prints the carrier's NSC number once it is configured", () => {
+    const html = inspectionReportHtml(null, NL02_CTX, { ...COMPANY, nscNo: "MB-TEST-0001" });
+    expect(fieldValue(html, "NSC No.")).toBe("MB-TEST-0001");
+  });
+
+  it('states "No defects found" on a filled record with none', () => {
+    expect(inspectionReportHtml(inspection({ defects: [] }), NL02_CTX, COMPANY)).toContain("No defects found");
+  });
+
+  it("does not claim no defects on a record that has one, nor on a blank form", () => {
+    const withDefect = inspection({ defects: [defect({ item: "Coolant" })] });
+    expect(inspectionReportHtml(withDefect, NL02_CTX, COMPANY)).not.toContain("No defects found");
+    expect(inspectionReportHtml(null, NL02_CTX, COMPANY)).not.toContain("No defects found");
   });
 });
 

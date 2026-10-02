@@ -10,7 +10,7 @@ import type { CheckState } from "@/lib/types";
 // the form says to check for, three answer tiles and the row's Notes column.
 //
 // WHY THERE IS MORE ON THIS SCREEN THAN THERE USED TO BE. The old 22-item list was all
-// self-explanatory labels ("Engine oil level"). NL-PTI-01 is 67-80 rows of the real form, and
+// self-explanatory labels ("Engine oil level"). NL-PTI-01 is up to 82 rows of the real form, and
 // "Ground beneath the vehicle" means nothing without its Check For column ("No fresh oil,
 // coolant, fuel, brake fluid or transmission fluid on the ground"). The area and sub-group line
 // is the other half of that: a walk-around that long needs the driver to be able to see where
@@ -20,7 +20,7 @@ import type { CheckState } from "@/lib/types";
 // NO DEFAULT SELECTION. "Not answered" must never be able to look like "passed"; that rule is
 // the reason this feature exists, and it is also why there is no bulk "all pass" affordance
 // anywhere in the flow (explicitly rejected — a one-question-per-screen flow whose first
-// affordance skips 67 questions is self-defeating, and more so at 80).
+// affordance skips 71 questions is self-defeating, and more so at 82).
 
 const AREA_LABEL: Record<InspectionArea, string> = {
   A: "Area A",
@@ -86,7 +86,7 @@ export function CheckStep({
       </div>
 
       {/* The form's own words, not a paraphrase. It is the answer to "what does this row
-          actually mean?", which at 67-80 rows a driver will have for several of them. */}
+          actually mean?", which at up to 82 rows a driver will have for several of them. */}
       <div
         style={{
           fontFamily: fonts.body,

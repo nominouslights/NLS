@@ -76,6 +76,7 @@ internal sealed class VehicleInspectionReadService(FleetDbContext context) : IVe
             i.CarrierAcknowledgedBy,
             i.CarrierAcknowledgedAtUtc,
             i.CarrierAcknowledgementNote,
-            i.CertificationStatement)).ToList();
+            i.CertificationStatement,
+            i.Location)).ToList();
     }
 }

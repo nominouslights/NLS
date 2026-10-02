@@ -8,7 +8,7 @@
 //   State          | Uncertified, private to the      | Certified — it IS the compliance
 //                  | device                           | record
 //   Cost of loss   | Re-answer the whole NL-PTI-01    | A COMPLIANCE FAILURE
-//                  | walk-around (67-80 questions)    |
+//                  | walk-around (28-82 questions)    |
 //   Home           | localStorage — synchronous,      | IndexedDB + navigator.storage
 //                  | survives reload, ~2KB            | .persist(), the offline batch's job
 //
@@ -38,7 +38,7 @@
 
 import { today } from "./data";
 // The NL-PTI-01 catalogue, a byte-identical copy of Dispatcher's. Item keys are WIRE VALUES.
-import { NL_PTI_01 } from "./inspectionForm";
+import { itemsFor, type InspectionFormMode } from "./inspectionForm";
 import type { CheckState, DefectSeverity, InspectionMode } from "./types";
 // Type-only, so there is no runtime import cycle with inspectionGate.ts (which imports
 // certifiedToday from here). `import type` is erased at compile time.
@@ -51,8 +51,22 @@ import type { InspectionResultName } from "./inspectionGate";
  * v2: the checklist became form NL-PTI-01. Every item key changed (22 invented ids → 80
  * catalogue keys) and `notes` was added, so a v1 draft's answers address rows that no longer
  * exist. Discarding is not merely the convention here, it is the only honest option.
+ *
+ * v3: NL-PTI-01 rev 2, and `location` was added. No key was renamed, but rows MOVED between the
+ * halves of the form — the post-trip became the 28-row en-route set, and the pre-trip gained the
+ * NSC 13 Schedule 2 rows — so a v2 draft is an answer sheet for a different revision of a legal
+ * form, and it has no location. Discarded, not migrated, for the same reason as v2. (The
+ * per-mode key filter in validateDraft is the second line: it keeps a stale draft from
+ * submitting off-form rows even without a bump.)
+ *
+ * DRAFTS ONLY. Local certifications carry their own CERTIFIED_STORE_VERSION, because their
+ * shape did not change — sharing one number would make a form revision silently drop today's
+ * certifications and re-block boarding for a driver who had already certified.
  */
-export const INSPECTION_STORE_VERSION = 2;
+export const INSPECTION_STORE_VERSION = 3;
+
+/** The local-certification list's version. Independent of the draft's — see above. */
+export const CERTIFIED_STORE_VERSION = 2;
 
 /** Follows lib/auth.ts's `nl.driverfield.refreshToken` convention. */
 const DRAFT_KEY_PREFIX = "nl.driverfield.inspectionDraft";
@@ -101,6 +115,12 @@ export interface InspectionDraft {
   notes: Record<string, string>;
   defects: Record<string, DraftDefect>;
   odometerKm: number | null;
+  /**
+   * Where the inspection is being done — a town, or a highway description (Man. Reg. 95/2008
+   * s.12(1)). Held RAW, as typed, like `notes`: trimming on every keystroke would eat the space
+   * a driver just typed after "Lynn". Trimmed once, at submit, by normalizeLocation().
+   */
+  location: string;
   /** A step ID, never an index — an injected defect step shifts every later index. */
   stepId: string;
 }
@@ -222,15 +242,19 @@ function removeRaw(key: string): void {
 // --- draft validation ------------------------------------------------------
 
 /**
- * Every item key the catalogue knows, across BOTH units and BOTH halves of the form — the
- * unnarrowed superset, deliberately. Narrowing this by unit and mode would make a draft started
- * against NL-02 lose rows the moment the assigned vehicle changed, which is the silent
- * re-attribution draftKey() already exists to prevent; the key check here is only about rows
- * that no longer exist ANYWHERE.
+ * Every item key on one HALF of the form, across BOTH units — `itemsFor(null, mode)`, the
+ * fail-safe superset an unknown unit gets.
+ *
+ * Narrowed by MODE, because the mode is part of the draft's identity (it is in draftKey()) and
+ * rev 2 of NL-PTI-01 moved rows between the halves: a post-trip draft holding an answer for a
+ * row that is now pre-trip-only would otherwise carry it toward a post-trip payload.
+ * Deliberately NOT narrowed by unit: the unit follows from the vehicle, which is also in the key,
+ * and the screen narrows to the exact unit itself when it builds the payload.
  */
-const KNOWN_ITEM_IDS: ReadonlySet<string> = new Set(
-  NL_PTI_01.flatMap((g) => g.items.map((i) => i.key)),
-);
+const KNOWN_ITEM_IDS: Readonly<Record<InspectionFormMode, ReadonlySet<string>>> = {
+  PreTrip: new Set(itemsFor(null, "PreTrip").flatMap((g) => g.items.map((i) => i.key))),
+  PostTrip: new Set(itemsFor(null, "PostTrip").flatMap((g) => g.items.map((i) => i.key))),
+};
 
 const CHECK_STATES: ReadonlySet<string> = new Set<CheckState>(["pass", "defect", "na"]);
 const SEVERITIES: ReadonlySet<string> = new Set<DefectSeverity>([
@@ -246,8 +270,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 /**
  * VALIDATION, NOT A CAST. Anything in localStorage was written by a program that may no longer
  * exist. Beyond the version and identity checks, this DROPS any answer, note or defect whose
- * item key is not in NL_PTI_01, so a row retired from the form cannot resurrect from storage
- * and reach a compliance payload.
+ * item key is not on this mode's half of NL_PTI_01, so a row retired from the form — or moved to
+ * the other half — cannot resurrect from storage and reach a compliance payload. Nothing is ever
+ * ADDED: a row new to the form has no answer, so it reads "Not answered" and blocks Certify.
  */
 function validateDraft(
   parsed: unknown,
@@ -263,9 +288,10 @@ function validateDraft(
   if (typeof parsed.stepId !== "string") return null;
   if (!isPlainObject(parsed.answers)) return null;
 
+  const known = KNOWN_ITEM_IDS[mode];
   const answers: Record<string, CheckState> = {};
   for (const [itemId, state] of Object.entries(parsed.answers)) {
-    if (!KNOWN_ITEM_IDS.has(itemId)) continue;
+    if (!known.has(itemId)) continue;
     if (typeof state === "string" && CHECK_STATES.has(state)) {
       answers[itemId] = state as CheckState;
     }
@@ -274,7 +300,7 @@ function validateDraft(
   const notes: Record<string, string> = {};
   if (isPlainObject(parsed.notes)) {
     for (const [itemId, note] of Object.entries(parsed.notes)) {
-      if (!KNOWN_ITEM_IDS.has(itemId)) continue;
+      if (!known.has(itemId)) continue;
       if (typeof note === "string") notes[itemId] = note;
     }
   }
@@ -282,7 +308,7 @@ function validateDraft(
   const defects: Record<string, DraftDefect> = {};
   if (isPlainObject(parsed.defects)) {
     for (const [itemId, raw] of Object.entries(parsed.defects)) {
-      if (!KNOWN_ITEM_IDS.has(itemId)) continue;
+      if (!known.has(itemId)) continue;
       if (!isPlainObject(raw)) continue;
       const severity =
         typeof raw.severity === "string" && SEVERITIES.has(raw.severity)
@@ -297,6 +323,8 @@ function validateDraft(
       ? parsed.odometerKm
       : null;
 
+  const location = typeof parsed.location === "string" ? parsed.location : "";
+
   return {
     v: INSPECTION_STORE_VERSION,
     mode,
@@ -307,6 +335,7 @@ function validateDraft(
     notes,
     defects,
     odometerKm,
+    location,
     stepId: parsed.stepId,
   };
 }
@@ -396,6 +425,7 @@ export function startDraft(
     notes: {},
     defects: {},
     odometerKm: null,
+    location: "",
     stepId: "odometer",
   };
   return persist(draft);
@@ -428,6 +458,7 @@ function update(
       notes: {},
       defects: {},
       odometerKm: null,
+      location: "",
       stepId: "odometer",
     };
   return persist(change(current));
@@ -499,6 +530,16 @@ export function setOdometer(
   return update(mode, vehicleId, asOf, (draft) => ({ ...draft, odometerKm }));
 }
 
+/** Stores the location as typed. Trimming and the 200-character rule apply at submit. */
+export function setLocation(
+  mode: InspectionMode,
+  vehicleId: string,
+  location: string,
+  asOf: string = today,
+): InspectionDraft {
+  return update(mode, vehicleId, asOf, (draft) => ({ ...draft, location }));
+}
+
 export function setStep(
   mode: InspectionMode,
   vehicleId: string,
@@ -531,7 +572,7 @@ function readCertifications(): LocalCertification[] {
   }
 
   if (!isPlainObject(parsed)) return dropCertifications();
-  if (parsed.v !== INSPECTION_STORE_VERSION) return dropCertifications();
+  if (parsed.v !== CERTIFIED_STORE_VERSION) return dropCertifications();
   if (!Array.isArray(parsed.items)) return dropCertifications();
 
   const items: LocalCertification[] = [];
@@ -575,7 +616,7 @@ function dropCertifications(): LocalCertification[] {
  */
 export function recordCertification(certification: LocalCertification): void {
   const items = [...readCertifications(), certification].slice(-CERTIFIED_LIMIT);
-  writeRaw(CERTIFIED_KEY, JSON.stringify({ v: INSPECTION_STORE_VERSION, items }));
+  writeRaw(CERTIFIED_KEY, JSON.stringify({ v: CERTIFIED_STORE_VERSION, items }));
   bump();
 }
 

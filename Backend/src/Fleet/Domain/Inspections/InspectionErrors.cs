@@ -14,6 +14,14 @@ public static class InspectionErrors
     public static readonly Error DriverRequired = Error.Validation(
         "Fleet.Inspection.DriverRequired", "The driver who performed the inspection is required.");
 
+    /// <summary>
+    /// The inspection location (municipality or highway description, M.R. 95/2008 s.12(1)) is
+    /// over the column's limit. Measured after trimming, so surrounding whitespace never counts.
+    /// </summary>
+    public static readonly Error LocationTooLong = Error.Validation(
+        "Fleet.Inspection.LocationTooLong",
+        $"The inspection location cannot exceed {VehicleInspection.LocationMaxLength} characters.");
+
     public static readonly Error WorkOrderAlreadyGenerated = Error.Conflict(
         "Fleet.Inspection.WorkOrderAlreadyGenerated",
         "A work order was already generated from this inspection.");

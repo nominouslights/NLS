@@ -35,7 +35,8 @@ public sealed record EnterInspectionCommand(
     bool FuelAdded,
     decimal? FuelLitres,
     decimal? FuelCostCad,
-    string? CertificationStatement = null) : ICommand<Guid>;
+    string? CertificationStatement = null,
+    string? Location = null) : ICommand<Guid>;
 
 /// <summary>
 /// One checklist row on an inspection request. <paramref name="State"/> and

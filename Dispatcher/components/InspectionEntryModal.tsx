@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { colors, fonts, statusMeta } from "@/lib/theme";
 import { ApiError } from "@/lib/api";
 import {
+  INSPECTION_LOCATION_MAX,
   createInspection,
   type DefectSeverityWire,
   type InspectionInput,
@@ -106,6 +107,9 @@ export default function InspectionEntryModal({
   }, []);
 
   const [odo, setOdo] = useState(String(odometerKm));
+  // Man. Reg. 95/2008 s.12(1): the report names where the inspection was done. This
+  // modal only ever creates a record, so the field is always required here.
+  const [location, setLocation] = useState("");
 
   const [rows, setRows] = useState<ChecklistRow[]>(() => {
     const base = rowsFor(unit, type);
@@ -170,6 +174,7 @@ export default function InspectionEntryModal({
 
   function validate(): string | null {
     if (!driver) return "Select the driver who performed the inspection.";
+    if (!location.trim()) return "Enter where the inspection was done — a town or a highway description.";
     const defectNoNote = rows.find((r) => r.state === "Defect" && !r.note.trim());
     if (defectNoNote) return `Defect rows need a note — add one for "${defectNoNote.label}".`;
     if (extra && !extra.note.trim()) return `Defect rows need a note — add one for "${extra.item}".`;
@@ -197,6 +202,7 @@ export default function InspectionEntryModal({
         driverName: driver,
         enteredBy: "Dispatch",
         odometerKm: parseInt(odo, 10) || odometerKm,
+        location: location.trim(),
         checklist: [
           ...checklistWire(rows),
           ...(extra
@@ -294,6 +300,16 @@ export default function InspectionEntryModal({
           options={driverNames.map((n) => ({ value: n, label: n }))}
         />
         <NumberField label="Odometer (km)" value={odo} onChange={setOdo} min={0} step={1} />
+        <div style={{ gridColumn: "1 / -1" }}>
+          <TextField
+            label="Location (town or highway)"
+            value={location}
+            onChange={setLocation}
+            maxLength={INSPECTION_LOCATION_MAX}
+            placeholder="As written on the paper form — e.g. Leaf Rapids, or PR 391 km 40"
+            hint="Required — where the inspection was done."
+          />
+        </div>
       </div>
 
       {extra && (
