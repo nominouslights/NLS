@@ -46,4 +46,18 @@ public sealed record ManifestPassenger
     /// audit timestamp once the driver app captures fares at the door.
     /// </summary>
     public DateTimeOffset? FarePaidAtUtc { get; init; }
+
+    /// <summary>
+    /// Which external record put this row on the manifest — "bookeo:&lt;booking number&gt;" for a
+    /// row the Bookeo import wrote, null for a row a person entered. The import only ever adds,
+    /// replaces or removes rows carrying its own ref, so manually entered passengers are never
+    /// touched by a re-upload.
+    /// </summary>
+    public string? ExternalRef { get; init; }
+
+    /// <summary>The <see cref="ExternalRef"/> prefix the Bookeo import stamps.</summary>
+    public const string BookeoRefPrefix = "bookeo:";
+
+    /// <summary>The <see cref="ExternalRef"/> for one Bookeo booking's rows.</summary>
+    public static string BookeoRef(string bookingNumber) => BookeoRefPrefix + bookingNumber;
 }

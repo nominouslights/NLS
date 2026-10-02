@@ -64,6 +64,20 @@ public sealed class Trip : AggregateRoot, ITenantScoped
     /// </summary>
     public Guid? BookingDayId { get; private set; }
 
+    /// <summary>
+    /// The external system that created this trip — <see cref="BookeoImportSource"/> for a trip
+    /// <see cref="ScheduleFromImport"/> materialized from a Bookeo booking report, null for every
+    /// other creation path. It is what lets a later import cancel a trip it emptied while never
+    /// touching a trip a dispatcher or the generation worker made.
+    /// </summary>
+    public string? ImportSource { get; private set; }
+
+    /// <summary>The <see cref="ImportSource"/> value stamped by the Bookeo booking-report import.</summary>
+    public const string BookeoImportSource = "bookeo";
+
+    /// <summary>Whether the Bookeo import created this trip (and so may cancel it once empty).</summary>
+    public bool IsCreatedByBookeoImport => ImportSource == BookeoImportSource;
+
     // Template provenance.
     public Guid? ScheduleTemplateId { get; private set; }
     public string? RoundTripKey { get; private set; }
@@ -347,6 +361,109 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         };
 
         trip.Raise(new TripScheduledFromBookingDomainEvent(trip.Id));
+        return Result.Success(trip);
+    }
+
+    /// <summary>
+    /// The Bookeo-import creation path, modelled on <see cref="ScheduleFromBooking"/>: a community
+    /// trip materialized from a group of Bookeo bookings sharing (route, direction, date,
+    /// departure). Community service type ONLY, and — the same scoped relaxation as the booking
+    /// path — driver and vehicle are optional: Bookeo knows who is riding, not who is driving.
+    /// The window comes from Bookeo, the route snapshot from the product mapping's route (the
+    /// caller orients <paramref name="stops"/>/<paramref name="origin"/>/<paramref name="destination"/>
+    /// for <paramref name="direction"/>), and <see cref="SeatsConfirmed"/> starts at the imported
+    /// passenger count. A vehicle is passed only when the import matched it to one Active fleet
+    /// unit that seats everyone; its seating capacity becomes <see cref="SeatsCapacity"/>, as on
+    /// every other assignment. Stamps <see cref="ImportSource"/> so a later import may cancel it
+    /// once every booking on it is cancelled. Raises the ordinary
+    /// <see cref="TripScheduledDomainEvent"/> — nothing here is a Booking-module fact, so no
+    /// backlink goes anywhere.
+    /// </summary>
+    public static Result<Trip> ScheduleFromImport(
+        Guid tenantId,
+        string tripNumber,
+        DateOnly serviceDate,
+        TimeOnly windowStart,
+        TimeOnly? windowEnd,
+        Guid routeId,
+        string routeName,
+        string origin,
+        string destination,
+        IReadOnlyList<RouteStop> stops,
+        int distanceKm,
+        TripDirection? direction,
+        int seatsConfirmed,
+        Guid? vehicleId,
+        string? vehicleUnit,
+        int? vehicleSeatingCapacity)
+    {
+        if (string.IsNullOrWhiteSpace(tripNumber))
+        {
+            return Result.Failure<Trip>(TripErrors.TripNumberRequired);
+        }
+
+        if (routeId == Guid.Empty)
+        {
+            return Result.Failure<Trip>(TripErrors.RouteNameRequired);
+        }
+
+        var validation = ValidateDetails(routeName, origin, destination, distanceKm, vehicleSeatingCapacity, seatsMinimum: null);
+        if (validation.IsFailure)
+        {
+            return Result.Failure<Trip>(validation.Error);
+        }
+
+        if (seatsConfirmed < 0)
+        {
+            return Result.Failure<Trip>(TripErrors.InvalidSeats);
+        }
+
+        if (vehicleId is not null)
+        {
+            if (vehicleId == Guid.Empty)
+            {
+                return Result.Failure<Trip>(TripErrors.VehicleRequired);
+            }
+
+            if (string.IsNullOrWhiteSpace(vehicleUnit))
+            {
+                return Result.Failure<Trip>(TripErrors.VehicleUnitRequired);
+            }
+
+            if (vehicleSeatingCapacity is { } capacity && seatsConfirmed > capacity)
+            {
+                return Result.Failure<Trip>(TripErrors.VehicleCapacityBelowConfirmed);
+            }
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var trip = new Trip
+        {
+            TenantId = tenantId,
+            TripNumber = tripNumber.Trim(),
+            ServiceDate = serviceDate,
+            WindowStart = windowStart,
+            WindowEnd = windowEnd,
+            ServiceType = TripServiceType.Community,
+            RouteId = routeId,
+            RouteName = routeName.Trim(),
+            Origin = origin.Trim(),
+            Destination = destination.Trim(),
+            Stops = [.. stops],
+            DistanceKm = distanceKm,
+            ImportSource = BookeoImportSource,
+            Direction = direction,
+            VehicleId = vehicleId,
+            VehicleUnit = vehicleId is null ? null : Normalize(vehicleUnit),
+            SeatsCapacity = vehicleId is null ? null : vehicleSeatingCapacity,
+            SeatsConfirmed = seatsConfirmed,
+            DemandGuaranteed = false,
+            Status = TripStatus.Scheduled,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+        };
+
+        trip.Raise(new TripScheduledDomainEvent(trip.Id));
         return Result.Success(trip);
     }
 
