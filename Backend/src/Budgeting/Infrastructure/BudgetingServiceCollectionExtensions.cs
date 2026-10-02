@@ -19,6 +19,7 @@ using NorthernLink.Budgeting.Application.Allocations.Create;
 using NorthernLink.Budgeting.Application.Allocations.Update;
 using NorthernLink.Budgeting.Application.Integration;
 using NorthernLink.Budgeting.Application.Codes;
+using NorthernLink.Budgeting.Application.Codes.CopyFromPeriod;
 using NorthernLink.Budgeting.Application.Codes.Create;
 using NorthernLink.Budgeting.Application.Codes.Delete;
 using NorthernLink.Budgeting.Application.Codes.GetCodes;
@@ -78,7 +79,7 @@ public static class BudgetingServiceCollectionExtensions
 
         // Allocation lines reference codes by id and by string, so "is this code in use" is now
         // a real question with a real answer — the delete-code path refuses with 409 InUse the
-        // moment any period has planned against the code. Actual transactions plug into the same
+        // moment any item of the code's own period has planned against it. Actual transactions plug into the same
         // probe when they arrive (see the class comment).
         services.AddScoped<IBudgetCodeUsageProbe, AllocationBudgetCodeUsageProbe>();
 
@@ -92,6 +93,7 @@ public static class BudgetingServiceCollectionExtensions
         services.AddScoped<ICommandHandler<SetBudgetCodeActiveCommand>, SetBudgetCodeActiveCommandHandler>();
         services.AddScoped<ICommandHandler<DeleteBudgetCodeCommand>, DeleteBudgetCodeCommandHandler>();
         services.AddScoped<ICommandHandler<SeedStarterBudgetCodesCommand, int>, SeedStarterBudgetCodesCommandHandler>();
+        services.AddScoped<ICommandHandler<CopyBudgetCodesCommand, BudgetCodeCopyResult>, CopyBudgetCodesCommandHandler>();
         services.AddScoped<IQueryHandler<GetBudgetCodesQuery, IReadOnlyList<BudgetCodeResponse>>, GetBudgetCodesQueryHandler>();
         services.AddScoped<IQueryHandler<GetBudgetOwnerCandidatesQuery, IReadOnlyList<BudgetOwnerOptionResponse>>, GetBudgetOwnerCandidatesQueryHandler>();
         services.AddScoped<ICommandHandler<CreateBudgetAllocationCommand, Guid>, CreateBudgetAllocationCommandHandler>();

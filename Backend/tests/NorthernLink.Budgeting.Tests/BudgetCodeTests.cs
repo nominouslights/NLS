@@ -22,7 +22,7 @@ public class BudgetCodeTests
             taxTreatment: BudgetTaxTreatment.GstApplicable,
             description: "Contracted crew rotation runs.");
 
-        var result = BudgetCode.Create(TestBudgeting.TenantId, "ZBB-CREW-01", details, TestBudgeting.ActorId);
+        var result = BudgetCode.Create(TestBudgeting.TenantId,TestBudgeting.DefaultPeriodId, "ZBB-CREW-01", details, TestBudgeting.ActorId);
 
         Assert.True(result.IsSuccess);
         var code = result.Value;
@@ -45,7 +45,7 @@ public class BudgetCodeTests
         // genuinely optional, not merely nullable in the type.
         var bare = new BudgetCodeDetails { Name = "Fuel" };
 
-        var result = BudgetCode.Create(TestBudgeting.TenantId, "FUEL", bare, actorId: null);
+        var result = BudgetCode.Create(TestBudgeting.TenantId,TestBudgeting.DefaultPeriodId, "FUEL", bare, actorId: null);
 
         Assert.True(result.IsSuccess);
         var code = result.Value;
@@ -65,7 +65,7 @@ public class BudgetCodeTests
     [InlineData("Zbb-Crew-01")]
     public void Create_normalizes_the_code_to_trimmed_upper_case(string input)
     {
-        var result = BudgetCode.Create(TestBudgeting.TenantId, input, TestBudgeting.CodeDetails(), actorId: null);
+        var result = BudgetCode.Create(TestBudgeting.TenantId,TestBudgeting.DefaultPeriodId, input, TestBudgeting.CodeDetails(), actorId: null);
 
         Assert.True(result.IsSuccess);
         Assert.Equal("ZBB-CREW-01", result.Value.Code);
@@ -87,7 +87,7 @@ public class BudgetCodeTests
     [InlineData("   ")]
     public void A_blank_code_is_rejected(string input)
     {
-        var result = BudgetCode.Create(TestBudgeting.TenantId, input, TestBudgeting.CodeDetails(), actorId: null);
+        var result = BudgetCode.Create(TestBudgeting.TenantId,TestBudgeting.DefaultPeriodId, input, TestBudgeting.CodeDetails(), actorId: null);
 
         Assert.True(result.IsFailure);
         Assert.Equal(BudgetCodeErrors.CodeRequired, result.Error);
@@ -97,7 +97,8 @@ public class BudgetCodeTests
     public void A_code_longer_than_the_maximum_is_rejected()
     {
         var result = BudgetCode.Create(
-            TestBudgeting.TenantId, new string('A', BudgetCode.CodeMaxLength + 1),
+            TestBudgeting.TenantId,
+            TestBudgeting.DefaultPeriodId, new string('A', BudgetCode.CodeMaxLength + 1),
             TestBudgeting.CodeDetails(), actorId: null);
 
         Assert.True(result.IsFailure);
@@ -112,7 +113,7 @@ public class BudgetCodeTests
     [InlineData("HAS/SLASH")]
     public void A_malformed_code_is_rejected(string input)
     {
-        var result = BudgetCode.Create(TestBudgeting.TenantId, input, TestBudgeting.CodeDetails(), actorId: null);
+        var result = BudgetCode.Create(TestBudgeting.TenantId,TestBudgeting.DefaultPeriodId, input, TestBudgeting.CodeDetails(), actorId: null);
 
         Assert.True(result.IsFailure);
         Assert.Equal(BudgetCodeErrors.CodeInvalidFormat, result.Error);
@@ -122,7 +123,8 @@ public class BudgetCodeTests
     public void A_plain_alphanumeric_code_with_no_hyphen_is_allowed()
     {
         var result = BudgetCode.Create(
-            TestBudgeting.TenantId, "FUEL01", TestBudgeting.CodeDetails(), actorId: null);
+            TestBudgeting.TenantId,
+            TestBudgeting.DefaultPeriodId, "FUEL01", TestBudgeting.CodeDetails(), actorId: null);
 
         Assert.True(result.IsSuccess);
     }
@@ -131,7 +133,8 @@ public class BudgetCodeTests
     public void A_blank_name_is_rejected()
     {
         var result = BudgetCode.Create(
-            TestBudgeting.TenantId, "ZBB-CREW-01", TestBudgeting.CodeDetails(name: "  "), actorId: null);
+            TestBudgeting.TenantId,
+            TestBudgeting.DefaultPeriodId, "ZBB-CREW-01", TestBudgeting.CodeDetails(name: "  "), actorId: null);
 
         Assert.True(result.IsFailure);
         Assert.Equal(BudgetCodeErrors.NameRequired, result.Error);
@@ -167,6 +170,7 @@ public class BudgetCodeTests
     {
         var result = BudgetCode.Create(
             TestBudgeting.TenantId,
+            TestBudgeting.DefaultPeriodId,
             "ZBB-CREW-01",
             TestBudgeting.CodeDetails(description: new string('x', BudgetCode.DescriptionMaxLength + 1)),
             actorId: null);
@@ -180,6 +184,7 @@ public class BudgetCodeTests
     {
         var result = BudgetCode.Create(
             TestBudgeting.TenantId,
+            TestBudgeting.DefaultPeriodId,
             "ZBB-CREW-01",
             TestBudgeting.CodeDetails(costCentre: new string('x', BudgetCode.CostCentreMaxLength + 1)),
             actorId: null);
@@ -195,6 +200,7 @@ public class BudgetCodeTests
     {
         var result = BudgetCode.Create(
             TestBudgeting.TenantId,
+            TestBudgeting.DefaultPeriodId,
             "ZBB-CREW-01",
             TestBudgeting.CodeDetails(category: BudgetCodeCategory.Revenue, costCentre: "OPS-01"),
             actorId: null);
@@ -209,6 +215,7 @@ public class BudgetCodeTests
         // The normal revenue path, pinned so the rule above cannot over-reach into it.
         var result = BudgetCode.Create(
             TestBudgeting.TenantId,
+            TestBudgeting.DefaultPeriodId,
             "ZBB-CREW-01",
             TestBudgeting.CodeDetails(category: BudgetCodeCategory.Revenue, costCentre: null),
             actorId: null);
@@ -224,6 +231,7 @@ public class BudgetCodeTests
         // to reject. Rejecting it would make an empty form field an error message.
         var result = BudgetCode.Create(
             TestBudgeting.TenantId,
+            TestBudgeting.DefaultPeriodId,
             "ZBB-CREW-01",
             TestBudgeting.CodeDetails(category: BudgetCodeCategory.Revenue, costCentre: "   "),
             actorId: null);
@@ -238,6 +246,7 @@ public class BudgetCodeTests
         // Guards the regression the other way: the rule is about Revenue only.
         var result = BudgetCode.Create(
             TestBudgeting.TenantId,
+            TestBudgeting.DefaultPeriodId,
             "ZBB-CREW-01",
             TestBudgeting.CodeDetails(category: BudgetCodeCategory.Expense, costCentre: "OPS-01"),
             actorId: null);
@@ -273,6 +282,7 @@ public class BudgetCodeTests
         // to record that the omission is intentional.
         var result = BudgetCode.Create(
             TestBudgeting.TenantId,
+            TestBudgeting.DefaultPeriodId,
             "ZBB-CREW-01",
             TestBudgeting.CodeDetails(glAccountCode: new string('9', BudgetCode.GlAccountCodeMaxLength + 1)),
             actorId: null);
@@ -288,6 +298,7 @@ public class BudgetCodeTests
         // enum *name* before a command is built, but binds a numeric 99 cleanly.
         var result = BudgetCode.Create(
             TestBudgeting.TenantId,
+            TestBudgeting.DefaultPeriodId,
             "ZBB-CREW-01",
             TestBudgeting.CodeDetails(reviewFrequency: (BudgetReviewFrequency)99),
             actorId: null);
@@ -301,6 +312,7 @@ public class BudgetCodeTests
     {
         var result = BudgetCode.Create(
             TestBudgeting.TenantId,
+            TestBudgeting.DefaultPeriodId,
             "ZBB-CREW-01",
             TestBudgeting.CodeDetails(serviceLine: (BudgetServiceLine)99),
             actorId: null);
@@ -314,6 +326,7 @@ public class BudgetCodeTests
     {
         var result = BudgetCode.Create(
             TestBudgeting.TenantId,
+            TestBudgeting.DefaultPeriodId,
             "ZBB-CREW-01",
             TestBudgeting.CodeDetails(taxTreatment: (BudgetTaxTreatment)99),
             actorId: null);
@@ -452,5 +465,80 @@ public class BudgetCodeTests
         Assert.True(result.IsSuccess);
         Assert.True(code.IsActive);
         Assert.Equal(2, code.DomainEvents.OfType<BudgetCodeActivationChangedDomainEvent>().Count());
+    }
+
+    // --- Period ownership and CopyInto ---
+
+    [Fact]
+    public void Create_records_the_period_the_code_belongs_to()
+    {
+        var periodId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+
+        var code = TestBudgeting.CreateCode("FUEL", periodId: periodId);
+
+        Assert.Equal(periodId, code.PeriodId);
+        Assert.Equal(periodId, Assert.Single(code.DomainEvents.OfType<BudgetCodeCreatedDomainEvent>()).PeriodId);
+    }
+
+    [Fact]
+    public void CopyInto_is_a_new_active_code_in_the_target_period_with_every_detail()
+    {
+        var owner = Guid.Parse("88888888-8888-8888-8888-888888888888");
+        var source = TestBudgeting.CreateCode("ZBB-FUEL-01", TestBudgeting.CodeDetails(
+            name: "Fuel",
+            category: BudgetCodeCategory.Expense,
+            reviewFrequency: BudgetReviewFrequency.Annual,
+            serviceLine: BudgetServiceLine.Fleet,
+            costCentre: "CC-1",
+            parentCodeId: Guid.NewGuid(),
+            glAccountCode: "5100",
+            taxTreatment: BudgetTaxTreatment.ZeroRated,
+            budgetOwnerUserId: owner,
+            description: "Diesel."), actorId: TestBudgeting.ActorId);
+        source.SetActive(false, TestBudgeting.ActorId);
+        var targetPeriod = Guid.Parse("66666666-6666-6666-6666-666666666666");
+        var targetParent = Guid.Parse("77777777-7777-7777-7777-777777777777");
+        var copier = Guid.Parse("55555555-5555-5555-5555-555555555555");
+
+        var copy = source.CopyInto(targetPeriod, targetParent, copier);
+
+        Assert.NotEqual(source.Id, copy.Id);
+        Assert.Equal(source.TenantId, copy.TenantId);
+        Assert.Equal(targetPeriod, copy.PeriodId);
+        Assert.Equal("ZBB-FUEL-01", copy.Code);
+        Assert.Equal("Fuel", copy.Name);
+        Assert.Equal("Diesel.", copy.Description);
+        Assert.Equal(BudgetCodeCategory.Expense, copy.Category);
+        Assert.Equal(BudgetServiceLine.Fleet, copy.ServiceLine);
+        Assert.Equal("CC-1", copy.CostCentre);
+        Assert.Equal(targetParent, copy.ParentCodeId);
+        Assert.Equal("5100", copy.GlAccountCode);
+        Assert.Equal(BudgetTaxTreatment.ZeroRated, copy.TaxTreatment);
+        Assert.Equal(owner, copy.BudgetOwnerUserId);
+        Assert.Equal(BudgetReviewFrequency.Annual, copy.ReviewFrequency);
+        // Always active: the handler never copies a retired code, and the aggregate does not
+        // carry a retirement across even if asked.
+        Assert.True(copy.IsActive);
+        Assert.Equal(copier, copy.CreatedBy);
+        Assert.Null(copy.ModifiedBy);
+        var created = Assert.Single(copy.DomainEvents.OfType<BudgetCodeCreatedDomainEvent>());
+        Assert.Equal(copy.Id, created.BudgetCodeId);
+        Assert.Equal(targetPeriod, created.PeriodId);
+        Assert.Equal("ZBB-FUEL-01", created.Code);
+        Assert.Equal(copier, created.ActorId);
+    }
+
+    [Fact]
+    public void CopyInto_leaves_the_source_untouched()
+    {
+        var source = TestBudgeting.CreateCode("FUEL");
+        source.ClearDomainEvents();
+        var periodBefore = source.PeriodId;
+
+        source.CopyInto(Guid.NewGuid(), null, TestBudgeting.ActorId);
+
+        Assert.Equal(periodBefore, source.PeriodId);
+        Assert.Null(source.ModifiedBy);
+        Assert.Empty(source.DomainEvents);
     }
 }

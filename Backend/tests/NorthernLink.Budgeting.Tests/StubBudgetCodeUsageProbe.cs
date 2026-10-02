@@ -14,13 +14,16 @@ internal sealed class StubBudgetCodeUsageProbe : IBudgetCodeUsageProbe
 {
     public bool Referenced { get; set; }
 
+    public Guid? LastProbedPeriodId { get; private set; }
+
     public Guid? LastProbedId { get; private set; }
 
     public string? LastProbedCode { get; private set; }
 
     public Task<bool> IsReferencedAsync(
-        Guid budgetCodeId, string code, CancellationToken cancellationToken = default)
+        Guid periodId, Guid budgetCodeId, string code, CancellationToken cancellationToken = default)
     {
+        LastProbedPeriodId = periodId;
         LastProbedId = budgetCodeId;
         LastProbedCode = code;
         return Task.FromResult(Referenced);

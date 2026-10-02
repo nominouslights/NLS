@@ -64,7 +64,7 @@ Run it before touching anything on the list, and whenever a Dispatcher UI story 
 | `lib/auth.ts` | `Dispatcher/lib/auth.ts` | **no** — see below |
 | `components/TopBar.tsx`, `AuthGate.tsx`, `LoginScreen.tsx`, `Console.tsx` | same paths | **no** — adapted |
 | `lib/nav.ts`, `lib/data.ts`, `lib/money.ts`, `lib/types.ts`, `lib/claims.ts`, `lib/roles.ts`, `lib/workingPeriod.ts`, `lib/periodHold.ts`, `lib/api/budgeting.ts`, `lib/api/identity.ts` | — | new |
-| `components/Brandmark.tsx`, `ErrorNotice.tsx`, `RoleGate.tsx`, `AccessDeniedScreen.tsx`, `SetupPendingScreen.tsx`, `PeriodBanner.tsx`, `BudgetPeriodFormModal.tsx`, `BudgetCodeFormModal.tsx`, `BudgetItemFormModal.tsx`, `ProfileForm.tsx`, `screens/*`, `screens/periods/*` (incl. `PeriodChooser.tsx`, `PriorityBreakdown.tsx`) | — | new |
+| `components/Brandmark.tsx`, `ErrorNotice.tsx`, `RoleGate.tsx`, `AccessDeniedScreen.tsx`, `SetupPendingScreen.tsx`, `PeriodBanner.tsx`, `BudgetPeriodFormModal.tsx`, `BudgetCodeFormModal.tsx`, `BudgetItemFormModal.tsx`, `ProfileForm.tsx`, `screens/*`, `screens/periods/*` (incl. `PeriodChooser.tsx`, `PriorityBreakdown.tsx`), `screens/codes/*` (`CopyCodesPanel.tsx`) | — | new |
 
 `theme.ts` and the 12 `ui/` files are copied **unpruned**, including parts this app never uses
 (`ServiceType`, `DutyStatus`, `CorridorStepper`, the two upload fields). Pruning them would break
@@ -122,7 +122,7 @@ it. Config is `vitest.config.mts` — the `.mts` extension is load-bearing (Vite
 `.ts` config as CommonJS and warns), and it must therefore use `import.meta.dirname` for the
 `@` alias, never `__dirname`. `@types/node` declares `__dirname` globally, so TypeScript and
 `next build` both stay green while every `@/lib/...` import in the suite fails to resolve at
-run time. Fourteen files; six need a DOM (the five component tests, plus `workingPeriod`'s
+run time. Fifteen files; seven need a DOM (the six component tests, plus `workingPeriod`'s
 storage tests, which need `sessionStorage`):
 
 - `lib/roles.test.ts` — US-6.0.1's acceptance criterion: a Dispatcher account is rejected.
@@ -149,8 +149,9 @@ storage tests, which need `sessionStorage`):
   `budgetCodeFormatError` against `BudgetCode.NormalizeCode` / `ValidateCode` (both sides of the
   32-character boundary, and the ASCII-only rule `char.IsAsciiLetterOrDigit` enforces),
   `parentCandidates` against `BudgetCodeParentRule`, `PERIOD_STATE_ORDER` /
-  `nextTransition` / `stateAfter` against `BudgetPeriod.Transition`, `canEditAllocations`
-  against `BudgetPeriod.AllowsPlanChanges`, `allocationCandidates` against the `CodeRetired`
+  `nextTransition` / `stateAfter` against `BudgetPeriod.Transition`, `canEditPlan` against
+  `BudgetPeriod.AllowsPlanChanges` (the one rule for items **and** codes; `canEditAllocations`
+  is pinned to agree with it in every state), `allocationCandidates` against the `CodeRetired`
   check alone (a code that already has items **is** offered — many items per code),
   `budgetItemError` against the create/update handlers' `CodeRequired` and then
   `BudgetAllocation.Validate` **rule for rule, in the server's order, with the server's messages
@@ -166,7 +167,11 @@ storage tests, which need `sessionStorage`):
   `unjustifiedLines` against `BudgetAllocation.NeedsJustification` + `CopyInto`, and
   `copySourceCandidates` / `defaultCopySource` against
   `CopyBudgetAllocationsCommandHandler`'s `CopySourceIsTarget` guard — including the case that a
-  **Closed period is offered**, because the server checks editability on the target only. Plus
+  **Closed period is offered**, because the server checks editability on the target only — and
+  the same two helpers against `CopyBudgetCodesCommandHandler`, whose guards are identical, so
+  the Copy codes panel reuses them rather than growing a second rule; `codeCopyOutcomeSummary`
+  names every bucket of `BudgetCodeCopyResponse` (singular/plural, zero clauses omitted, an
+  empty source as a success, a second copy as "Nothing was copied"). Plus
   the →StatusKind mappings (`periodKind` over all five states, `assignmentState` /
   `ASSIGNMENT_KINDS` over all four), `planBalanced` (an empty plan is **not** balanced),
   `copyOutcomeSummary`, the label maps, `toBudgetCode`'s `isActive` → `active` rename,
@@ -184,7 +189,14 @@ storage tests, which need `sessionStorage`):
   construction — the parsed `{ code, message }` body, the `Http.<status>` fallback, and the
   `Network.Unreachable`/status-0 branch that `Console.tsx` and `screens/BudgetCodes.tsx` both
   branch on via `e instanceof ApiError`.
-- `lib/api/budgeting.requests.test.ts` — what each request function puts on the wire. Chiefly
+- `lib/api/budgeting.requests.test.ts` — what each request function puts on the wire. Every
+  code route is pinned **under its period** (`/api/budgeting/periods/{id}/codes...`, body shapes
+  unchanged and never carrying a `periodId`), plus a sweep asserting no code request is built the
+  removed tenant-wide way — `codes/owners` is the one tenant-wide codes route left. Each code
+  write's 409 `Budgeting.Code.PeriodNotEditable`, the per-period `DuplicateCode` /
+  `ParentNotFound` / `NotFound` messages, and `copyBudgetCodes` (route, `{ sourcePeriodId }`
+  object body, target-in-route / source-in-body, the four counts, and its five refusals verbatim
+  in guard order) are pinned too. Chiefly
   `setBudgetCodeActive`, whose route is built from a boolean (`activate` / `deactivate`): an
   inverted ternary there returns 204 either way and silently activates a code the planner asked
   to retire. Likewise `copyBudgetAllocations`, which takes the source as an **object**
@@ -200,7 +212,13 @@ storage tests, which need `sessionStorage`):
   prop, so it injects `vi.fn()`s: the cost-mode toggle computes the total live (`12 × 450`,
   `3 × 1.005 → $3.03`), the exact body a built-up item POSTs (`amountCad: null`), an edit PUTs to
   the item's id and may move it to another code, an item on a retired code opens with no code
-  chosen, and both a client-side and a server-side refusal show the server's words.
+  chosen, both a client-side and a server-side refusal show the server's words, and a period with
+  no active code of the category gets a note naming the period and OPEN BUDGET CODES instead of
+  an empty picker.
+- `components/screens/codes/CopyCodesPanel.test.tsx` — `vi.fn()` props: last period (a Closed
+  one) is pre-selected, the first click only asks to confirm, the confirm note names both
+  periods, the second click copies from the chosen source and shows the outcome summary, a
+  refused copy shows no outcome, and a lone period gets "nothing to copy from".
 - `lib/money.test.ts` — `formatDeltaCad` / `formatDeltaPct` always write the sign out, so a
   signed figure never rests on colour; `formatCadPrecise` prints cents only when there are cents
   (the copied `formatCad` is whole-dollar and would print a `$3.03` item as `$3`).
@@ -211,14 +229,16 @@ storage tests, which need `sessionStorage`):
   good load, **not** lost after a failed load or while loading), the storage key differing by
   tenant and by user and `null` without claims, the `sessionStorage` round trip, `null` removing
   the entry, a throwing store degrading quietly, **never touching `localStorage`**, and
-  `isPeriodScoped` being false for exactly `codes` and `settings`.
+  `isPeriodScoped` being false for `settings` alone (Budget Codes became scoped when codes moved
+  under the period).
 - `components/screens/periods/PeriodChooser.test.tsx` — `vi.fn()` props, as `ProfileForm` does:
   a row click enters that row's id, each row writes its state out, the suggested row carries
   its tag and focus, the eyebrow names the destination screen, the empty state's create button,
   a load error shown verbatim with RETRY, the lost notice, and "Returning to your period…".
 - `components/PeriodBanner.test.tsx` — label, dates, state and editability; while held, SWITCH
   PERIOD is `aria-disabled`, does not call `onSwitch`, and the reason is written beside it; the
-  every-period sentence on a global screen; CHOOSE A PERIOD with nothing entered.
+  "isn't tied to a period" sentence on Settings, with no "every period" wording left anywhere;
+  CHOOSE A PERIOD with nothing entered.
 
 `lib/api/transport.ts` is a **copied** file. Tests against it belong here (a test file is not on
 the copy manifest), but anything they reveal is a change to *Dispatcher's* source first, then a
@@ -243,8 +263,9 @@ The planner works **inside one period at a time**. Every period action — a tra
 a copy, a report — is under the period the banner names, and nothing changes that period
 silently.
 
-- **Enter, then switch.** A period-scoped screen — Period Dashboard, Actuals vs Budget,
-  Variance, Reports (`PERIOD_SCOPED` / `isPeriodScoped` in `lib/nav.ts`) — shows
+- **Enter, then switch.** A period-scoped screen — Period Dashboard, Budget Codes, Actuals vs
+  Budget, Variance, Reports (`PERIOD_SCOPED` / `isPeriodScoped` in `lib/nav.ts`; Settings is
+  the only screen outside it) — shows
   `screens/periods/PeriodChooser.tsx` until a period is entered. Once one is, a strip at the top
   of the main column (`components/PeriodBanner.tsx`) always shows WORKING IN, the label, dates,
   the state chip and "Plan editable / read-only"; leaving takes its explicit **SWITCH PERIOD**.
@@ -270,10 +291,11 @@ silently.
   `lost`, and the chooser says "The period you were working in is no longer available — choose
   another." A failed or pending load is never lost; while a stored period loads the chooser
   reads "Returning to your period…".
-- **The hold guard** (`lib/periodHold.ts`). `PeriodDashboard` (`busy`: transition, remove, copy)
-  and `BudgetItemFormModal` (its save) call `usePeriodHold(busy)`. While any hold is taken,
+- **The hold guard** (`lib/periodHold.ts`). `PeriodDashboard` (`busy`: transition, remove, copy),
+  `BudgetItemFormModal` (its save), `screens/BudgetCodes.tsx` (`busy`: retire, restore, delete,
+  starter set, copy codes) and `BudgetCodeFormModal` (its save) call `usePeriodHold(busy)`. While any hold is taken,
   SWITCH PERIOD and the TopBar's + NEW PERIOD refuse (`newPeriodDisabled`), and the banner writes
-  "Finishing a change to {label}…" beside the disabled button. The item modal also ignores
+  "Finishing a change to {label}…" beside the disabled button. Both modals also ignore
   ✕ and CANCEL while saving. **Rail navigation is deliberately not blocked** — changing screen
   never changes the period, and blocking it would mean editing the copied `NavRail`.
 - **Creating a period enters it.** The New Period modal lives in `Console.tsx` (opened by the
@@ -282,13 +304,16 @@ silently.
 - **Every action names its period.** The transition confirm ("Click CONFIRM FINALIZE to move
   Q3 2026 from Draft to Finalized"), the remove confirm ("Removes “{title}” ({code}) from {label}'s plan.
   Other items and other periods are not affected."), the item modal's eyebrow and note, and the copy panel ("Into:
-  {label}", `COPY INTO {LABEL}`). `nextTransition`'s own button labels are unchanged — tests pin
-  them.
-- **Budget Codes is the one tenant-wide planning screen**, matching the backend (codes carry no
-  period). Its eyebrow reads "Planning · All periods" beside an "Applies to every period" chip;
-  RETIRE is now two-click like DELETE, and both confirms say they reach every period. Codes and
-  Settings render with or without an entered period; the banner either says "This screen isn't
-  tied to a period — it applies to every period" or offers CHOOSE A PERIOD.
+  {label}", `COPY INTO {LABEL}`). On Budget Codes: the eyebrow ("Planning · {label}"), the code
+  modal's eyebrow, the retire confirm ("Retiring FUEL in Q3 2026 changes Q3 2026's chart only —
+  other periods keep their own FUEL…"), the delete confirm, and the Copy codes panel ("Into:
+  {label}", `COPY CODES INTO {LABEL}`, a confirm naming both periods). `nextTransition`'s own
+  button labels are unchanged — tests pin them.
+- **Budget codes belong to the period** (they used to be tenant-wide; the owner reversed that).
+  Budget Codes is scoped like the dashboard, shows the entered period's chart, and is read-only
+  outside Draft/Open. RETIRE and DELETE are both two-click. Only Settings renders with or without
+  an entered period; there the banner says "This screen isn't tied to a period." or offers
+  CHOOSE A PERIOD.
 
 ## Data: periods, codes and budget items are real; actuals and variance are still mock
 
@@ -302,7 +327,8 @@ server's sums of the period's budget items by code category; `toBudgetPeriod` ma
 **Draft → Finalized → Open → In review → Closed** (`PeriodState`; the C# enum spells the fourth
 `InReview`). Budget items can change **only while the period is Draft or Open** — finalizing
 signs the plan off, opening re-allows in-period adjustments, review and close freeze it
-(`BudgetPeriod.AllowsPlanChanges`; mirrored by `canEditAllocations`). Each state has exactly one
+(`BudgetPeriod.AllowsPlanChanges`; mirrored by `canEditPlan`, which `canEditAllocations`
+reads). The same rule freezes the period's **chart of budget codes**. Each state has exactly one
 way forward (`nextTransition`) and the dashboard offers exactly that one button, behind a
 two-click confirm. Transitions are **not** gated on plan completeness — finalizing an empty plan
 is allowed; the dashboard's checklist makes an empty plan visible instead.
@@ -355,7 +381,7 @@ The period and budget-item routes (`BudgetAccess` group, `BudgetingEndpoints.cs`
 | `POST /api/budgeting/periods/{id}/allocations` | create an item — body `BudgetItemRequest` → 201 `{ id }`; 400 validation (`CodeRequired`, `TitleRequired`, `QuantityWithoutUnitCost`, … — see `BUDGET_ITEM_MESSAGES`), 404 period/code, 409 `PeriodNotEditable` / `CodeRetired` |
 | `PUT /api/budgeting/periods/{id}/allocations/{allocationId}` | rewrite the item (its code may change) → 204; 400 validation, 404 `Budgeting.Allocation.NotFound`, 409 `PeriodNotEditable` / `CodeRetired` (checked on every update) |
 | `DELETE /api/budgeting/periods/{id}/allocations/{allocationId}` | 204; 404 `NotFound`; 409 `PeriodNotEditable` |
-| `POST /api/budgeting/periods/{id}/allocations/copy` | seed this period's plan from an earlier one — body `{ sourcePeriodId }` → 200 `{ copied, skippedAlreadyPlanned, skippedRetiredCode, sourceLineCount }`, counted **per item** (the first three always sum to the fourth); a source item is skipped as "already planned" when its **code** already has any item here, so a second copy copies nothing; 400 `CopySourceRequired` / `CopySourceIsTarget`, 404 `CopySourceNotFound` (the **source**) or `Budgeting.Period.NotFound` (the **target**), 409 `PeriodNotEditable` |
+| `POST /api/budgeting/periods/{id}/allocations/copy` | seed this period's plan from an earlier one — body `{ sourcePeriodId }` → 200 `{ copied, skippedAlreadyPlanned, skippedRetiredCode, sourceLineCount }`, counted **per item** (the first three always sum to the fourth); each source item lands on **this period's code with the same code string** — `skippedRetiredCode` counts items with no *active* code of that string here (retired, or never copied over; the field name predates per-period codes); a source item is skipped as "already planned" when that code already has any item here, so a second copy copies nothing; 400 `CopySourceRequired` / `CopySourceIsTarget`, 404 `CopySourceNotFound` (the **source**) or `Budgeting.Period.NotFound` (the **target**), 409 `PeriodNotEditable` |
 
 `BudgetItemRequest` is `{ budgetCodeId, title, amountCad, quantity, unitCostCad, unit,
 justification, spendType, recurrence, vendor, tags, priority, assumptions,
@@ -399,20 +425,58 @@ dashboard's. The TopBar pill is `+ NEW PERIOD` — the console's one global crea
 the only create target that is unambiguous from any screen. The New Period modal itself lives
 in `Console.tsx` (the pill and the chooser both open it), and creating a period enters it.
 
-**Budget codes are real too** — the second slice, widened to US-6.1.1's full property set:
+**Budget codes are real too — and each period has its own chart.** The second slice, widened
+to US-6.1.1's full property set, then moved under the period at the owner's request ("budget
+codes should be a part of periods, with a way to copy codes to another period"). This reverses
+the earlier "one tenant-wide chart" decision and matches architecture §5.3 (codes are
+re-justified from zero each period rather than carried forward by default). The same code string
+— `FUEL` — exists once **per period**, as its own row with its own id; uniqueness is (tenant,
+period, code). The **code string is the cross-period identity**: the items copy maps by it, and
+reports and future QuickBooks actuals will join on it.
 
 | Route | |
 |---|---|
-| `GET /api/budgeting/codes` | the whole chart, retired codes included |
-| `GET /api/budgeting/codes/owners` | the owner picker's options, from the user replica |
-| `POST /api/budgeting/codes` | |
-| `PUT /api/budgeting/codes/{id}` | no `code` in the body — see below |
-| `POST /api/budgeting/codes/{id}/activate\|deactivate` | |
-| `DELETE /api/budgeting/codes/{id}` | narrow; 409 when the code has children or has been used |
-| `POST /api/budgeting/codes/starter-set` | idempotent; returns how many it created |
+| `GET /api/budgeting/periods/{id}/codes` | that period's chart, retired codes included, ordered by code; 404 `Budgeting.Period.NotFound`; allowed in every state |
+| `POST /api/budgeting/periods/{id}/codes` | 201 `{ id }` |
+| `PUT /api/budgeting/periods/{id}/codes/{codeId}` | 204; no `code` in the body — see below |
+| `POST /api/budgeting/periods/{id}/codes/{codeId}/activate\|deactivate` | 204 |
+| `DELETE /api/budgeting/periods/{id}/codes/{codeId}` | narrow; 409 when the code has children, or `Budgeting.Code.InUse` when this period has items on it |
+| `POST /api/budgeting/periods/{id}/codes/starter-set` | idempotent per period; 200 `{ created }` |
+| `POST /api/budgeting/periods/{id}/codes/copy` | body `{ sourcePeriodId }` → 200 `{ copied, skippedExisting, skippedRetired, sourceCodeCount }` (the first three sum to the fourth); 400 `CopySourceRequired` / `CopySourceIsTarget`, then the target's 404 `Budgeting.Period.NotFound` / 409 `PeriodNotEditable`, then 404 `CopySourceNotFound` (the **source**) |
+| `GET /api/budgeting/codes/owners` | the owner picker's options, from the user replica — **tenant-wide**, since it lists people, not codes |
 
-Unlike periods, codes are **not** hoisted into `Console.tsx`: only `screens/BudgetCodes.tsx`
-reads them, so that screen owns its own fetch.
+The old tenant-wide `codes*` routes are **gone** server-side (only `codes/owners` stays), and a
+test sweeps every code request to prove none is built that way. Body and response shapes did
+not change: the period is always the route's, `BudgetCodeResponse` carries no `periodId`.
+
+**The chart follows the period lifecycle.** Every code write answers 404
+`Budgeting.Period.NotFound`, then 409 `Budgeting.Code.PeriodNotEditable` ("A period's budget
+codes can only change while it is Draft or Open.") — the same `AllowsPlanChanges` rule as items,
+mirrored by `canEditPlan`. Outside Draft/Open the Budget Codes screen hides create, edit, retire,
+restore, delete, the starter set and the copy, and one note names the period and its state.
+
+**Copying codes** (`screens/codes/CopyCodesPanel.tsx`, on the Budget Codes screen, mirroring the
+dashboard's `CopyFromPeriodPanel`): every **active** source code whose string the target does
+not already have (active or retired) is copied as an active code with a new id and every
+descriptive field; the hierarchy comes too — a copied child rolls up into the target's code with
+its parent's string, or sits top-level when there is none. Retired codes are not copied, so a
+code both retired and existing counts as retired. A second copy adds nothing. The source picker
+offers every other period in **any** state (a Closed chart is a fine starting point — the server
+checks editability on the target only), defaulting to the latest period starting before this
+one; it reuses `copySourceCandidates` / `defaultCopySource`, whose tests pin that the codes copy
+has the same guards. Two-click confirm naming both periods; `codeCopyOutcomeSummary` reports the
+four counts; the chart is refetched until `copied` more rows are visible (skipped when 0).
+
+**An empty chart is the normal start of a new period.** The screen says "No budget codes in
+{label} yet" and offers three ways out: copy from an earlier period, load the starter set, or
+`+ NEW CODE`. On the dashboard, a category with no active code in the period shows a note and
+OPEN BUDGET CODES instead of `+ ADD BUDGET ITEM` (Console's `openCode(null)` path), and the item
+modal says the same instead of rendering an empty picker. The item copy notes that items land on
+the target's code **by string**, so codes should be copied first.
+
+Unlike periods, codes are **not** hoisted into `Console.tsx`: `screens/BudgetCodes.tsx` and the
+dashboard each fetch the **entered period's** chart themselves (the dashboard passes it to
+`BudgetItemFormModal` as a prop).
 
 Five rules the UI has to keep visible, because all five are enforced server-side and none is
 guessable from the form:
@@ -421,15 +485,18 @@ guessable from the form:
   reference a code by string, so renaming would orphan every row already tagged. The edit modal
   renders it as read-only text rather than a disabled input, because disabled reads as "not right
   now" when the truth is "not ever". A mistyped code is retire-and-recreate.
-- **Retiring is the normal end of a code's life.** A retired code stays listed so last period's
-  rows keep resolving. `DELETE` exists only for a code created in error that nothing has ever
-  referenced; `IBudgetCodeUsageProbe` turns it into a 409 the moment that stops being true, and
-  the server's message names retirement as the alternative. The UI puts it behind a two-click
-  confirm.
+- **Retiring is the normal end of a code's life in a period.** It changes that period's chart
+  only — other periods keep their own row for the same string — and a retired code stays listed
+  so the period's items on it keep resolving. `DELETE` exists only for a code created in error
+  that has no items in this period; `IBudgetCodeUsageProbe` turns it into a 409 the moment that
+  stops being true, and the server's message names retirement as the alternative. Both are
+  two-click, and both confirms name the period.
 - **The hierarchy is one level deep**, guarded from both directions: a parent must be top-level,
   *and* a code that already has children cannot be given a parent (otherwise the chain is built
-  bottom-up). `parentCandidates` in `lib/api/budgeting.ts` mirrors this so the picker never offers
-  an option the server will reject. Retiring a parent does **not** cascade to its children.
+  bottom-up), and a parent must be in the **same period** (`ParentNotFound` otherwise — the
+  modal's picker is fed only the entered period's chart). `parentCandidates` in
+  `lib/api/budgeting.ts` mirrors this so the picker never offers an option the server will
+  reject. Retiring a parent does **not** cascade to its children.
 - **`glAccountCode` is free text and always will be, for now.** QuickBooks work on this platform
   is manual by decision — `Invoice.EnteredInQbo` is a flag a bookkeeper ticks, and the platform
   never calls the QBO API. There is no synced chart of accounts to validate against and no
@@ -490,6 +557,7 @@ Known hazards documented in `theme.ts`: `colors.amber` is a fill/border/icon col
 | 2026-08-04 | Code audit (both greps above) | **Pass** — every call site pairs colour with glyph + label; protected hexes appear only in `theme.ts` and in copied decorative elements that carry adjacent text |
 | 2026-09-29 | Code audit after the period workspace | **Pass** — the one new `statusMeta` call (`PeriodChooser`'s accent stripe) sits beside the row's state `StatusChip`; the banner and chooser carry state only via `StatusChip`; no new protected hex |
 | 2026-09-29 | Code audit after budget items | **Pass** — no new `statusMeta` call and no new protected hex; the priority chip is a `StatusChip` with a per-priority glyph (M / S / N) + written label, because Must and Should share the `info` colour; the modal's segmented choices use `aria-pressed` plus a ✓ and bold on the selected option |
+| 2026-09-29 | Code audit after per-period codes | **Pass** — no new `statusMeta` call and no new protected hex; the "Applies to every period" chip is gone; the Copy codes outcome is a `StatusChip` (Copied / Nothing copied) beside the written summary, as on the items copy |
 | — | Grayscale (DevTools → Rendering → Achromatopsia) | **Not yet run** |
 | — | Deuteranopia / Protanopia / Tritanopia | **Not yet run** |
 | — | Side-by-side against Dispatcher at equal width | **Not yet run** |
@@ -531,8 +599,9 @@ Not used here on purpose: axe-core / pa11y / Lighthouse. They catch the automata
   `IdentityIntegrationEventMapper`, or every replica goes stale with no error anywhere.
 - ~~`BudgetAllocation`~~ — **shipped** (`budgeting.budget_allocations` + `rm_budget_allocations`,
   migration `AddBudgetAllocations`), and with it `AllocationBudgetCodeUsageProbe` replaced
-  `NeverReferencedBudgetCodeUsageProbe`, so `DELETE /codes/{id}` now answers 409
-  `Budgeting.Code.InUse` for a code any period has ever planned. Still open: the
+  `NeverReferencedBudgetCodeUsageProbe`, so `DELETE periods/{id}/codes/{codeId}` answers 409
+  `Budgeting.Code.InUse` for a code with items in its period (codes are per period now, so the
+  probe is too). Still open: the
   `ActualTransaction` table and its RLS policies; QuickBooks actuals reconciliation.
 - **Any QuickBooks automation.** All QBO work is manual for now, by decision. Automating GL
   validation means an Intuit OAuth flow, per-tenant token storage (there is no tenants table),

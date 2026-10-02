@@ -34,14 +34,21 @@ namespace NorthernLink.Budgeting.Application.Allocations.CopyFromPeriod;
 /// actually copied — a copy that skips everything writes nothing at all.</item>
 /// </list>
 /// <para>
-/// The three skips, in the order they are tested per line:
-/// <b>already planned</b> (the target already has at least one item on that code — skipped and
-/// never overwritten or added to, because a planner who has started on a code in this period has
-/// made their own decisions there, and because it is what makes running the copy twice a no-op),
-/// then <b>retired or missing code</b> (mirroring the create
-/// handler's <c>CodeRetired</c> guard; a code gone from the chart entirely folds in here, since
-/// from the planner's side both mean "not on offer any more"). Already-planned is tested first
-/// so a line that is both reports the reason that actually protects something.
+/// <b>Codes are matched by string.</b> Each period owns its own chart, so a source item's code id
+/// names a code of the <em>source</em> period; the copy lands on the <em>target</em> period's code
+/// with the same string (the string is the cross-period identity). The source item's own
+/// <c>Code</c> copy is the string used — it is immutable and always equals its code's string.
+/// </para>
+/// <para>
+/// The skips, in the order they are tested per line:
+/// <b>already planned</b> (the target's code with that string already has at least one item —
+/// skipped and never overwritten or added to, because a planner who has started on a code in this
+/// period has made their own decisions there, and because it is what makes running the copy twice
+/// a no-op), then <b>no active code with that string in this period</b> (the target chart lacks
+/// the string entirely, or has it retired — mirroring the create handler's <c>CodeRetired</c>
+/// guard; from the planner's side both mean "not on offer here"). Already-planned is tested first
+/// so a line that is both reports the reason that actually protects something. The second bucket
+/// keeps its wire name <c>skippedRetiredCode</c> to spare the console churn.
 /// </para>
 /// <para>
 /// A zero-amount source line is copied as-is — zero is a valid plan — and an empty source period
@@ -102,10 +109,11 @@ public sealed class CopyBudgetAllocationsCommandHandler(
         var targetLines = await allocations.ListForPeriodAsync(command.PeriodId, cancellationToken);
         var alreadyPlanned = targetLines.Select(line => line.BudgetCodeId).ToHashSet();
 
-        // One load of the chart rather than a GetByIdAsync per source line. A code missing from
-        // the set is one deleted outright, and lands in the same bucket as a retired one.
-        var chart = await codes.GetAllAsync(cancellationToken);
-        var liveCodeIds = chart.Where(code => code.IsActive).Select(code => code.Id).ToHashSet();
+        // One load of the TARGET period's chart rather than a lookup per source line, keyed by
+        // string — the cross-period identity. The source chart is never consulted: whether a
+        // code is on offer is a question about the period the item is landing in.
+        var targetChart = await codes.ListForPeriodAsync(command.PeriodId, cancellationToken);
+        var targetByCode = targetChart.ToDictionary(code => code.Code, StringComparer.Ordinal);
 
         var copied = 0;
         var skippedAlreadyPlanned = 0;
@@ -113,19 +121,21 @@ public sealed class CopyBudgetAllocationsCommandHandler(
 
         foreach (var line in sourceLines)
         {
-            if (alreadyPlanned.Contains(line.BudgetCodeId))
+            var targetCode = targetByCode.GetValueOrDefault(line.Code);
+
+            if (targetCode is not null && alreadyPlanned.Contains(targetCode.Id))
             {
                 skippedAlreadyPlanned++;
                 continue;
             }
 
-            if (!liveCodeIds.Contains(line.BudgetCodeId))
+            if (targetCode is not { IsActive: true })
             {
                 skippedRetiredCode++;
                 continue;
             }
 
-            allocations.Add(line.CopyInto(command.PeriodId, command.ActorId));
+            allocations.Add(line.CopyInto(command.PeriodId, targetCode.Id, command.ActorId));
             copied++;
         }
 

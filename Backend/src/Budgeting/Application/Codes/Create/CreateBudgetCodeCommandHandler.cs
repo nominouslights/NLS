@@ -6,26 +6,29 @@ using NorthernLink.Budgeting.Domain.Codes;
 namespace NorthernLink.Budgeting.Application.Codes.Create;
 
 /// <summary>
-/// Creates a budget code after enforcing that the tenant's code strings are unique. The lookup
+/// Creates a budget code after enforcing that the period's code strings are unique. The lookup
 /// runs against the <em>normalized</em> code, so "fleet-maint" collides with "FLEET-MAINT" — two
 /// codes that differ only in case would be indistinguishable to the person reading a report.
-/// The unique (tenant, code) index is the DB backstop for the double-click race; this check is
-/// what turns the race into a readable 409 in every other case.
+/// The same string in <em>another</em> period is not a collision: each period owns its chart.
+/// The unique (tenant, period, code) index is the DB backstop for the double-click race; this
+/// check is what turns the race into a readable 409 in every other case.
 /// <para>
-/// Order matters and is deliberate: domain validation runs first, then the cross-row lookups. A
-/// malformed payload reports the validation error rather than a conflict or a not-found for a
-/// parent it was never going to reach — the rule
+/// Order matters and is deliberate: domain validation runs first, then the period (exists, and
+/// Draft or Open), then the cross-row lookups. A malformed payload reports the validation error
+/// rather than a conflict or a not-found for a parent it was never going to reach — the rule
 /// <c>Invalid_details_report_validation_not_conflict</c> pins.
 /// </para>
 /// </summary>
 public sealed class CreateBudgetCodeCommandHandler(
     IBudgetCodeRepository repository,
+    IBudgetPeriodRepository periods,
     IUserLookupRepository users)
     : ICommandHandler<CreateBudgetCodeCommand, Guid>
 {
     public async Task<Result<Guid>> Handle(CreateBudgetCodeCommand command, CancellationToken cancellationToken)
     {
-        var codeResult = BudgetCode.Create(command.TenantId, command.Code, command.Details, command.ActorId);
+        var codeResult = BudgetCode.Create(
+            command.TenantId, command.PeriodId, command.Code, command.Details, command.ActorId);
         if (codeResult.IsFailure)
         {
             return Result.Failure<Guid>(codeResult.Error);
@@ -33,7 +36,13 @@ public sealed class CreateBudgetCodeCommandHandler(
 
         var budgetCode = codeResult.Value;
 
-        var existing = await repository.GetByCodeAsync(budgetCode.Code, cancellationToken);
+        var periodResult = await BudgetCodePeriodRule.RequireEditableAsync(periods, command.PeriodId, cancellationToken);
+        if (periodResult.IsFailure)
+        {
+            return Result.Failure<Guid>(periodResult.Error);
+        }
+
+        var existing = await repository.GetByCodeAsync(command.PeriodId, budgetCode.Code, cancellationToken);
         if (existing is not null)
         {
             return Result.Failure<Guid>(BudgetCodeErrors.DuplicateCode);
@@ -41,7 +50,12 @@ public sealed class CreateBudgetCodeCommandHandler(
 
         // checkChildren: false — a code that does not exist yet cannot have any.
         var parentResult = await BudgetCodeParentRule.ValidateAsync(
-            repository, command.Details.ParentCodeId, budgetCode.Id, checkChildren: false, cancellationToken);
+            repository,
+            command.PeriodId,
+            command.Details.ParentCodeId,
+            budgetCode.Id,
+            checkChildren: false,
+            cancellationToken);
         if (parentResult.IsFailure)
         {
             return Result.Failure<Guid>(parentResult.Error);

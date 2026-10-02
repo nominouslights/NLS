@@ -16,7 +16,8 @@ namespace NorthernLink.Budgeting.Application.Allocations.Update;
 /// <item><b>The item exists in that period</b> — looked up by (period, id) through the
 /// tenant-filtered repository, so an item of another period or another tenant is
 /// <see cref="BudgetAllocationErrors.NotFound"/>, never a cross-period or cross-tenant write.</item>
-/// <item><b>The target code exists and is active</b> — whether or not it changed. Moving an item
+/// <item><b>The target code exists in this period and is active</b> — whether or not it changed.
+/// Looked up by (period, id), so another period's code is <see cref="BudgetCodeErrors.NotFound"/>. Moving an item
 /// to a retired code is a new decision against a code no longer offered; and so is rewriting an
 /// item whose code has been retired since (the rule the one-line-per-code upsert already had).
 /// The way out <see cref="BudgetAllocationErrors.CodeRetired"/> names is real: restore the code,
@@ -61,7 +62,7 @@ public sealed class UpdateBudgetAllocationCommandHandler(
             return Result.Failure(BudgetAllocationErrors.NotFound);
         }
 
-        var code = await codes.GetByIdAsync(budgetCodeId, cancellationToken);
+        var code = await codes.GetByIdAsync(command.PeriodId, budgetCodeId, cancellationToken);
         if (code is null)
         {
             return Result.Failure(BudgetCodeErrors.NotFound);

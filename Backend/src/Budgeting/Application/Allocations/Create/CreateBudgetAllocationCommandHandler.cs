@@ -17,7 +17,9 @@ namespace NorthernLink.Budgeting.Application.Allocations.Create;
 /// <item><b>The period exists</b> (tenant-filtered, so another tenant's id reads as NotFound)
 /// <b>and allows plan changes</b> — Draft or Open; anything else is
 /// <see cref="BudgetAllocationErrors.PeriodNotEditable"/>.</item>
-/// <item><b>The code exists and is active.</b> A retired code stays listed so old items keep
+/// <item><b>The code exists in this period and is active.</b> Codes belong to a period, so the
+/// lookup is by (period, id): another period's code — even one with the same string — is
+/// <see cref="BudgetCodeErrors.NotFound"/>. A retired code stays listed so old items keep
 /// resolving, but it takes no new item — <see cref="BudgetAllocationErrors.CodeRetired"/> names
 /// the way out (restore it or pick another).</item>
 /// <item><b>Create + Add, one save.</b> No "already planned" check: many items per code is the
@@ -56,7 +58,7 @@ public sealed class CreateBudgetAllocationCommandHandler(
             return Result.Failure<Guid>(BudgetAllocationErrors.PeriodNotEditable);
         }
 
-        var code = await codes.GetByIdAsync(budgetCodeId, cancellationToken);
+        var code = await codes.GetByIdAsync(command.PeriodId, budgetCodeId, cancellationToken);
         if (code is null)
         {
             return Result.Failure<Guid>(BudgetCodeErrors.NotFound);

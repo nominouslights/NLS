@@ -84,14 +84,15 @@ public class BudgetingEndpointMetadataTests : IAsyncLifetime
     [InlineData("PUT", "/api/budgeting/periods/{id:guid}/allocations/{allocationId:guid}")]
     [InlineData("DELETE", "/api/budgeting/periods/{id:guid}/allocations/{allocationId:guid}")]
     [InlineData("POST", "/api/budgeting/periods/{id:guid}/allocations/copy")]
-    [InlineData("GET", "/api/budgeting/codes")]
+    [InlineData("GET", "/api/budgeting/periods/{id:guid}/codes")]
+    [InlineData("POST", "/api/budgeting/periods/{id:guid}/codes")]
+    [InlineData("PUT", "/api/budgeting/periods/{id:guid}/codes/{codeId:guid}")]
+    [InlineData("POST", "/api/budgeting/periods/{id:guid}/codes/{codeId:guid}/activate")]
+    [InlineData("POST", "/api/budgeting/periods/{id:guid}/codes/{codeId:guid}/deactivate")]
+    [InlineData("DELETE", "/api/budgeting/periods/{id:guid}/codes/{codeId:guid}")]
+    [InlineData("POST", "/api/budgeting/periods/{id:guid}/codes/starter-set")]
+    [InlineData("POST", "/api/budgeting/periods/{id:guid}/codes/copy")]
     [InlineData("GET", "/api/budgeting/codes/owners")]
-    [InlineData("POST", "/api/budgeting/codes")]
-    [InlineData("PUT", "/api/budgeting/codes/{id:guid}")]
-    [InlineData("POST", "/api/budgeting/codes/{id:guid}/activate")]
-    [InlineData("POST", "/api/budgeting/codes/{id:guid}/deactivate")]
-    [InlineData("DELETE", "/api/budgeting/codes/{id:guid}")]
-    [InlineData("POST", "/api/budgeting/codes/starter-set")]
     public void Every_budgeting_endpoint_carries_the_BudgetAccess_policy(string method, string pattern)
     {
         var endpoint = Endpoint(method, pattern);
@@ -125,7 +126,20 @@ public class BudgetingEndpointMetadataTests : IAsyncLifetime
     {
         // Guards the guard: without this, an endpoint added to the group would be silently
         // absent from the Theory above (which asserts only the routes it names).
-        Assert.Equal(20, _endpoints.Count);
+        Assert.Equal(21, _endpoints.Count);
+    }
+
+    [Theory]
+    [InlineData("/api/budgeting/codes")]
+    [InlineData("/api/budgeting/codes/{id:guid}")]
+    [InlineData("/api/budgeting/codes/{id:guid}/activate")]
+    [InlineData("/api/budgeting/codes/{id:guid}/deactivate")]
+    [InlineData("/api/budgeting/codes/starter-set")]
+    public void The_old_tenant_wide_code_routes_are_gone(string pattern)
+    {
+        // Codes belong to a period now. A surviving tenant-wide route would read or write a chart
+        // with no period, and a console still calling it must fail loudly (404), not half-work.
+        Assert.DoesNotContain(_endpoints, e => e.RoutePattern.RawText == pattern);
     }
 
     private sealed class StubTenantContext : ITenantContext

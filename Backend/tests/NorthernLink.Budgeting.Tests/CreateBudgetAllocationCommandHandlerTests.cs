@@ -21,13 +21,21 @@ public class CreateBudgetAllocationCommandHandlerTests
     private readonly CreateBudgetAllocationCommandHandler _handler;
 
     private readonly BudgetPeriod _draft = TestBudgeting.CreatePeriod();
-    private readonly BudgetCode _code = TestBudgeting.CreateCode("ZBB-CREW-01");
+    private readonly BudgetCode _code;
 
     public CreateBudgetAllocationCommandHandlerTests()
     {
         _handler = new CreateBudgetAllocationCommandHandler(_allocations, _periods, _codes);
         _periods.Add(_draft);
-        _codes.Add(_code);
+        _code = AddCode(_draft, "ZBB-CREW-01");
+    }
+
+    /// <summary>Adds a code to one period's chart — codes belong to a period.</summary>
+    private BudgetCode AddCode(BudgetPeriod period, string code)
+    {
+        var budgetCode = TestBudgeting.CreateCode(code, periodId: period.Id);
+        _codes.Add(budgetCode);
+        return budgetCode;
     }
 
     private Task<Result<Guid>> CreateAsync(
@@ -99,14 +107,34 @@ public class CreateBudgetAllocationCommandHandlerTests
     [Fact]
     public async Task The_same_code_in_two_periods_gets_an_item_in_each()
     {
+        // Each period has its own ZBB-CREW-01 (same string, its own id), and each item points at
+        // its own period's.
         var q1 = TestBudgeting.CreatePeriod(PeriodGranularity.Quarter, 2027, 1);
         _periods.Add(q1);
+        var crewInQ1 = AddCode(q1, "ZBB-CREW-01");
 
         var inQ4 = await CreateAsync(periodId: _draft.Id);
-        var inQ1 = await CreateAsync(periodId: q1.Id);
+        var inQ1 = await CreateAsync(periodId: q1.Id, codeId: crewInQ1.Id);
 
         Assert.NotEqual(inQ4.Value, inQ1.Value);
-        Assert.Single(_allocations.Allocations, a => a.PeriodId == q1.Id);
+        Assert.Equal(crewInQ1.Id, Assert.Single(_allocations.Allocations, a => a.PeriodId == q1.Id).BudgetCodeId);
+        Assert.Equal(_code.Id, Assert.Single(_allocations.Allocations, a => a.PeriodId == _draft.Id).BudgetCodeId);
+    }
+
+    [Fact]
+    public async Task A_code_of_another_period_is_not_found_in_this_one()
+    {
+        // Same string, real id — but it belongs to Q1's chart. An item's code must belong to the
+        // item's period, and "not found in this period" is the honest answer.
+        var q1 = TestBudgeting.CreatePeriod(PeriodGranularity.Quarter, 2027, 1);
+        _periods.Add(q1);
+        var crewInQ1 = AddCode(q1, "ZBB-CREW-01");
+
+        var result = await CreateAsync(periodId: _draft.Id, codeId: crewInQ1.Id);
+
+        Assert.Equal(BudgetCodeErrors.NotFound, result.Error);
+        Assert.Empty(_allocations.Allocations);
+        Assert.Equal(0, _allocations.SaveChangesCallCount);
     }
 
     // --- Guard order: input first ---
@@ -185,8 +213,9 @@ public class CreateBudgetAllocationCommandHandlerTests
     {
         var period = TestBudgeting.PeriodIn(state);
         _periods.Add(period);
+        var code = AddCode(period, "ZBB-CREW-01");
 
-        var result = await CreateAsync(periodId: period.Id);
+        var result = await CreateAsync(periodId: period.Id, codeId: code.Id);
 
         Assert.True(result.IsSuccess);
         Assert.Equal(1, _allocations.SaveChangesCallCount);
@@ -218,9 +247,8 @@ public class CreateBudgetAllocationCommandHandlerTests
     [Fact]
     public async Task A_retired_code_takes_no_item()
     {
-        var retired = TestBudgeting.CreateCode("ZBB-OLD-01");
+        var retired = AddCode(_draft, "ZBB-OLD-01");
         Assert.True(retired.SetActive(false, TestBudgeting.ActorId).IsSuccess);
-        _codes.Add(retired);
 
         var result = await CreateAsync(codeId: retired.Id);
 

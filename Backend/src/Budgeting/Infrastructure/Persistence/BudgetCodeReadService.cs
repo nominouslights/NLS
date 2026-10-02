@@ -24,10 +24,14 @@ namespace NorthernLink.Budgeting.Infrastructure.Persistence;
 internal sealed class BudgetCodeReadService(BudgetingDbContext context) : IBudgetCodeReadService
 {
     public async Task<IReadOnlyList<BudgetCodeResponse>> GetCodesAsync(
+        Guid periodId,
         CancellationToken cancellationToken = default)
     {
+        // One period's chart. A parent is always in the same period (BudgetCodeParentRule), so
+        // the parent lookup below needs nothing outside this set.
         var codes = await context.BudgetCodeReadModels
             .AsNoTracking()
+            .Where(c => c.PeriodId == periodId)
             .OrderBy(c => c.Code)
             .ToListAsync(cancellationToken);
 

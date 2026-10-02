@@ -13,6 +13,7 @@ internal sealed class BudgetCodeProjection : BudgetingProjection<BudgetCode, Bud
     {
         row.Id = source.Id;
         row.TenantId = source.TenantId;
+        row.PeriodId = source.PeriodId;
         row.Code = source.Code;
         row.Name = source.Name;
         row.Description = source.Description;

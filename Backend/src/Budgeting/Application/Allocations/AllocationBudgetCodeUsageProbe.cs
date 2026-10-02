@@ -3,8 +3,9 @@ using NorthernLink.Budgeting.Application.Abstractions;
 namespace NorthernLink.Budgeting.Application.Allocations;
 
 /// <summary>
-/// The real answer to "has anything ever been tagged with this code": yes, if any allocation
-/// line in any period carries its id or its string. Replaces the never-referenced probe that
+/// The real answer to "has anything ever been tagged with this code": yes, if any budget item
+/// in the code's own period carries its id or its string. Period-scoped because codes are — see
+/// <see cref="IBudgetCodeUsageProbe"/>. Replaces the never-referenced probe that
 /// held the slot while nothing could reference a code.
 /// <para>
 /// Lives in Application rather than Infrastructure because it is pure orchestration over a
@@ -19,6 +20,6 @@ namespace NorthernLink.Budgeting.Application.Allocations;
 public sealed class AllocationBudgetCodeUsageProbe(IBudgetAllocationRepository allocations) : IBudgetCodeUsageProbe
 {
     public Task<bool> IsReferencedAsync(
-        Guid budgetCodeId, string code, CancellationToken cancellationToken = default) =>
-        allocations.ExistsForCodeAsync(budgetCodeId, code, cancellationToken);
+        Guid periodId, Guid budgetCodeId, string code, CancellationToken cancellationToken = default) =>
+        allocations.ExistsForCodeAsync(periodId, budgetCodeId, code, cancellationToken);
 }

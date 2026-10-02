@@ -16,6 +16,7 @@ namespace NorthernLink.Budgeting.Domain.Codes.Events;
 public sealed record BudgetCodeCreatedDomainEvent(
     Guid BudgetCodeId,
     Guid TenantId,
+    Guid PeriodId,
     string Code,
     Guid? ActorId) : IDomainEvent
 {

@@ -12,10 +12,15 @@ namespace NorthernLink.Budgeting.Tests;
 /// <summary>
 /// CopyBudgetAllocationsCommandHandler: the guard order the handler documents as its contract
 /// (source named, source ≠ target, then the <em>target</em> exists and is editable, then the
-/// source exists — with no editability check on the source), the three skip rules, and the
-/// accounting invariant <c>copied + skippedAlreadyPlanned + skippedRetiredCode ==
-/// sourceLineCount</c>. Every refusal asserts <c>SaveChangesCallCount == 0</c> and that no line
-/// appeared in the target.
+/// source exists — with no editability check on the source), the skip rules, and the accounting
+/// invariant <c>copied + skippedAlreadyPlanned + skippedRetiredCode == sourceLineCount</c>. Every
+/// refusal asserts <c>SaveChangesCallCount == 0</c> and that no line appeared in the target.
+/// <para>
+/// <b>Codes belong to a period</b>, so every code here exists twice — once in each period's chart,
+/// with different ids and the same string — and a copied item must land on the <em>target's</em>
+/// code. The mapping is by string; the "no active code with that string in this period" cases pin
+/// what happens when the target's chart lacks or has retired the string.
+/// </para>
 /// <para>
 /// The case that matters most is <see cref="Every_copied_line_arrives_with_no_justification_and_must_be_re_argued"/>:
 /// it is what separates this from a plain duplicate.
@@ -30,14 +35,20 @@ public class CopyBudgetAllocationsCommandHandlerTests
 
     private readonly BudgetPeriod _target = TestBudgeting.CreatePeriod(PeriodGranularity.Quarter, 2026, 4);
     private readonly BudgetPeriod _source = TestBudgeting.CreatePeriod(PeriodGranularity.Quarter, 2026, 3);
-    private readonly BudgetCode _crew = TestBudgeting.CreateCode("ZBB-CREW-01");
+
+    /// <summary>ZBB-CREW-01 in the source period's chart.</summary>
+    private readonly BudgetCode _crewSource;
+
+    /// <summary>ZBB-CREW-01 in the target period's chart — same string, different id.</summary>
+    private readonly BudgetCode _crew;
 
     public CopyBudgetAllocationsCommandHandlerTests()
     {
         _handler = new CopyBudgetAllocationsCommandHandler(_allocations, _periods, _codes);
         _periods.Add(_target);
         _periods.Add(_source);
-        _codes.Add(_crew);
+        _crewSource = AddCode(_source, "ZBB-CREW-01");
+        _crew = AddCode(_target, "ZBB-CREW-01");
     }
 
     private Task<Result<BudgetAllocationCopyResult>> CopyAsync(
@@ -67,9 +78,10 @@ public class CopyBudgetAllocationsCommandHandlerTests
         return line;
     }
 
-    private BudgetCode AddCode(string code, bool active = true)
+    /// <summary>Adds a code to one period's chart.</summary>
+    private BudgetCode AddCode(BudgetPeriod period, string code, bool active = true)
     {
-        var budgetCode = TestBudgeting.CreateCode(code);
+        var budgetCode = TestBudgeting.CreateCode(code, periodId: period.Id);
         if (!active)
         {
             Assert.True(budgetCode.SetActive(false, TestBudgeting.ActorId).IsSuccess);
@@ -78,6 +90,11 @@ public class CopyBudgetAllocationsCommandHandlerTests
         _codes.Add(budgetCode);
         return budgetCode;
     }
+
+    /// <summary>Adds a code with that string to BOTH charts; returns (source copy, target copy).</summary>
+    private (BudgetCode Source, BudgetCode Target) AddCodeToBoth(
+        string code, bool activeInSource = true, bool activeInTarget = true) =>
+        (AddCode(_source, code, activeInSource), AddCode(_target, code, activeInTarget));
 
     private List<BudgetAllocation> TargetLines() =>
         _allocations.Allocations.Where(a => a.PeriodId == _target.Id).ToList();
@@ -153,11 +170,12 @@ public class CopyBudgetAllocationsCommandHandlerTests
     [InlineData(PeriodState.Closed, false)]
     public async Task Only_a_target_that_allows_plan_changes_accepts_a_copy(PeriodState state, bool editable)
     {
-        // The same rule as the set handler's, over all five states: Draft and Open take lines,
+        // The same rule as the create handler's, over all five states: Draft and Open take lines,
         // the three read-only states refuse the whole request.
         var target = TestBudgeting.PeriodIn(state, PeriodGranularity.Month, 2026, 5);
         _periods.Add(target);
-        Plan(_source, _crew.Id);
+        AddCode(target, "ZBB-CREW-01");
+        Plan(_source, _crewSource.Id);
 
         var result = await CopyAsync(periodId: target.Id);
 
@@ -220,7 +238,8 @@ public class CopyBudgetAllocationsCommandHandlerTests
         // to the source, so its state has no bearing.
         var source = TestBudgeting.PeriodIn(state, PeriodGranularity.Month, 2026, 7);
         _periods.Add(source);
-        Plan(source, _crew.Id, amount: 4000m);
+        var crewThere = AddCode(source, "ZBB-CREW-01");
+        Plan(source, crewThere.Id, amount: 4000m);
 
         var result = await CopyAsync(sourcePeriodId: source.Id);
 
@@ -229,14 +248,14 @@ public class CopyBudgetAllocationsCommandHandlerTests
         Assert.Equal(4000m, Assert.Single(TargetLines()).AmountCad);
     }
 
-    // --- Copying ---
+    // --- Copying: codes are matched by string ---
 
     [Fact]
-    public async Task Every_source_line_lands_in_the_target_with_the_same_code_and_amount()
+    public async Task Every_source_line_lands_on_the_target_periods_code_with_the_same_string()
     {
-        var fuel = AddCode("ZBB-FUEL-01");
-        Plan(_source, _crew.Id, "ZBB-CREW-01", 1250m);
-        Plan(_source, fuel.Id, "ZBB-FUEL-01", 480.50m);
+        var fuel = AddCodeToBoth("ZBB-FUEL-01");
+        Plan(_source, _crewSource.Id, "ZBB-CREW-01", 1250m);
+        Plan(_source, fuel.Source.Id, "ZBB-FUEL-01", 480.50m);
 
         var result = await CopyAsync();
 
@@ -244,8 +263,10 @@ public class CopyBudgetAllocationsCommandHandlerTests
         Assert.Equal(new BudgetAllocationCopyResult(2, 0, 0, 2), result.Value);
         var lines = TargetLines();
         Assert.Equal(2, lines.Count);
+        // The TARGET's code ids, never the source's: an item always points at a code of its own period.
         Assert.Contains(lines, a => a.Code == "ZBB-CREW-01" && a.BudgetCodeId == _crew.Id && a.AmountCad == 1250m);
-        Assert.Contains(lines, a => a.Code == "ZBB-FUEL-01" && a.BudgetCodeId == fuel.Id && a.AmountCad == 480.50m);
+        Assert.Contains(lines, a => a.Code == "ZBB-FUEL-01" && a.BudgetCodeId == fuel.Target.Id && a.AmountCad == 480.50m);
+        Assert.DoesNotContain(lines, a => a.BudgetCodeId == _crewSource.Id || a.BudgetCodeId == fuel.Source.Id);
         Assert.All(lines, a => Assert.Equal(TestBudgeting.TenantId, a.TenantId));
         // One save for the whole copy, not one per line.
         Assert.Equal(1, _allocations.SaveChangesCallCount);
@@ -255,7 +276,7 @@ public class CopyBudgetAllocationsCommandHandlerTests
     public async Task The_copier_is_stamped_as_the_creator_of_every_copied_line()
     {
         var copier = Guid.Parse("55555555-5555-5555-5555-555555555555");
-        Plan(_source, _crew.Id);
+        Plan(_source, _crewSource.Id);
 
         await CopyAsync(actorId: copier);
 
@@ -267,13 +288,14 @@ public class CopyBudgetAllocationsCommandHandlerTests
     [Fact]
     public async Task The_source_period_is_left_exactly_as_it_was()
     {
-        Plan(_source, _crew.Id, amount: 1250m, justification: "The original argument.");
+        Plan(_source, _crewSource.Id, amount: 1250m, justification: "The original argument.");
 
         await CopyAsync();
 
         var sourceLine = Assert.Single(_allocations.Allocations, a => a.PeriodId == _source.Id);
         Assert.Equal(1250m, sourceLine.AmountCad);
         Assert.Equal("The original argument.", sourceLine.Justification);
+        Assert.Equal(_crewSource.Id, sourceLine.BudgetCodeId);
         Assert.False(sourceLine.NeedsJustification);
     }
 
@@ -281,7 +303,7 @@ public class CopyBudgetAllocationsCommandHandlerTests
     public async Task A_zero_amount_line_is_copied_as_is()
     {
         // Zero is a valid plan — "we intend to spend nothing here" is a decision worth carrying.
-        Plan(_source, _crew.Id, amount: 0m);
+        Plan(_source, _crewSource.Id, amount: 0m);
 
         var result = await CopyAsync();
 
@@ -289,16 +311,16 @@ public class CopyBudgetAllocationsCommandHandlerTests
         Assert.Equal(0m, Assert.Single(TargetLines()).AmountCad);
     }
 
-    // --- Skip rules ---
+    // --- Skip rules: no active code with that string in the target ---
 
     [Fact]
-    public async Task A_source_line_on_a_code_retired_since_is_skipped_not_failed()
+    public async Task A_source_line_whose_string_is_retired_in_the_target_is_skipped_not_failed()
     {
-        // Mirrors the set handler's CodeRetired guard, but as a skip: one dead code must not cost
-        // the planner the other eleven lines.
-        var retired = AddCode("ZBB-OLD-01", active: false);
-        Plan(_source, _crew.Id, "ZBB-CREW-01");
-        Plan(_source, retired.Id, "ZBB-OLD-01");
+        // Mirrors the create handler's CodeRetired guard, but as a skip: one dead code must not
+        // cost the planner the other eleven lines.
+        var old = AddCodeToBoth("ZBB-OLD-01", activeInTarget: false);
+        Plan(_source, _crewSource.Id, "ZBB-CREW-01");
+        Plan(_source, old.Source.Id, "ZBB-OLD-01");
 
         var result = await CopyAsync();
 
@@ -308,10 +330,38 @@ public class CopyBudgetAllocationsCommandHandlerTests
     }
 
     [Fact]
-    public async Task A_source_line_on_a_code_gone_from_the_chart_is_folded_into_the_retired_count()
+    public async Task A_source_line_whose_string_the_target_chart_lacks_is_counted_as_no_active_code()
     {
-        // From the planner's side a deleted code and a retired one are the same thing: not on
-        // offer any more. The read model already reports a missing code as inactive.
+        // The source's code is alive and well; the TARGET period simply has no code with that
+        // string (nobody copied or created it there). Nothing to land on — skipped and counted.
+        var onlyInSource = AddCode(_source, "ZBB-FUEL-01");
+        Plan(_source, onlyInSource.Id, "ZBB-FUEL-01");
+
+        var result = await CopyAsync();
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(new BudgetAllocationCopyResult(0, 0, 1, 1), result.Value);
+        Assert.Empty(TargetLines());
+        Assert.Equal(0, _allocations.SaveChangesCallCount);
+    }
+
+    [Fact]
+    public async Task A_source_line_on_a_code_retired_in_the_source_is_still_copied_when_the_target_offers_it()
+    {
+        // Whether a code is on offer is a question about the period the item lands in. Retiring
+        // OLD in Q3 says nothing about Q4, whose own OLD is active.
+        var old = AddCodeToBoth("ZBB-OLD-01", activeInSource: false, activeInTarget: true);
+        Plan(_source, old.Source.Id, "ZBB-OLD-01", 75m);
+
+        var result = await CopyAsync();
+
+        Assert.Equal(new BudgetAllocationCopyResult(1, 0, 0, 1), result.Value);
+        Assert.Equal(old.Target.Id, Assert.Single(TargetLines()).BudgetCodeId);
+    }
+
+    [Fact]
+    public async Task A_source_line_on_a_code_gone_from_both_charts_is_folded_into_the_same_count()
+    {
         Plan(_source, Guid.NewGuid(), "ZBB-GONE-01");
 
         var result = await CopyAsync();
@@ -321,12 +371,15 @@ public class CopyBudgetAllocationsCommandHandlerTests
         Assert.Empty(TargetLines());
     }
 
+    // --- Skip rules: already planned ---
+
     [Fact]
     public async Task A_code_already_planned_in_the_target_is_skipped_and_never_overwritten()
     {
         // Overwriting would destroy a justification somebody already wrote, and adding to it would
-        // make a second copy duplicate the plan.
-        Plan(_source, _crew.Id, amount: 9999m, justification: "Last quarter's number.");
+        // make a second copy duplicate the plan. "Already planned" is judged on the TARGET's code
+        // with the source item's string — a different id from the source's code.
+        Plan(_source, _crewSource.Id, amount: 9999m, justification: "Last quarter's number.");
         Plan(_target, _crew.Id, amount: 1250m, justification: "This quarter, argued fresh.");
 
         var result = await CopyAsync();
@@ -354,9 +407,9 @@ public class CopyBudgetAllocationsCommandHandlerTests
     [Fact]
     public async Task A_copy_that_skips_every_line_saves_nothing()
     {
-        var retired = AddCode("ZBB-OLD-01", active: false);
-        Plan(_source, retired.Id, "ZBB-OLD-01");
-        Plan(_source, _crew.Id, "ZBB-CREW-01");
+        var old = AddCodeToBoth("ZBB-OLD-01", activeInTarget: false);
+        Plan(_source, old.Source.Id, "ZBB-OLD-01");
+        Plan(_source, _crewSource.Id, "ZBB-CREW-01");
         Plan(_target, _crew.Id, "ZBB-CREW-01");
 
         var result = await CopyAsync();
@@ -368,7 +421,7 @@ public class CopyBudgetAllocationsCommandHandlerTests
     [Fact]
     public async Task Running_the_copy_twice_copies_nothing_the_second_time()
     {
-        Plan(_source, _crew.Id);
+        Plan(_source, _crewSource.Id);
 
         var first = await CopyAsync();
         var second = await CopyAsync();
@@ -386,24 +439,26 @@ public class CopyBudgetAllocationsCommandHandlerTests
     {
         // copied + skippedAlreadyPlanned + skippedRetiredCode == sourceLineCount. A skip nobody
         // counted reads as data loss.
-        var fuel = AddCode("ZBB-FUEL-01");
-        var admin = AddCode("ZBB-ADMIN-01");
-        var retired = AddCode("ZBB-OLD-01", active: false);
+        var fuel = AddCodeToBoth("ZBB-FUEL-01");
+        var admin = AddCodeToBoth("ZBB-ADMIN-01");
+        var old = AddCodeToBoth("ZBB-OLD-01", activeInTarget: false);
+        var sourceOnly = AddCode(_source, "ZBB-NEW-01");
 
-        Plan(_source, _crew.Id, "ZBB-CREW-01");          // copied
-        Plan(_source, fuel.Id, "ZBB-FUEL-01");           // copied
-        Plan(_source, admin.Id, "ZBB-ADMIN-01");         // already planned in the target
-        Plan(_source, retired.Id, "ZBB-OLD-01");         // retired code
-        Plan(_source, Guid.NewGuid(), "ZBB-GONE-01");    // code gone from the chart
-        Plan(_target, admin.Id, "ZBB-ADMIN-01");
+        Plan(_source, _crewSource.Id, "ZBB-CREW-01");     // copied
+        Plan(_source, fuel.Source.Id, "ZBB-FUEL-01");     // copied
+        Plan(_source, admin.Source.Id, "ZBB-ADMIN-01");   // already planned in the target
+        Plan(_source, old.Source.Id, "ZBB-OLD-01");       // retired in the target
+        Plan(_source, sourceOnly.Id, "ZBB-NEW-01");       // no such string in the target
+        Plan(_source, Guid.NewGuid(), "ZBB-GONE-01");     // code gone everywhere
+        Plan(_target, admin.Target.Id, "ZBB-ADMIN-01");
 
         var result = await CopyAsync();
 
         var counts = result.Value;
-        Assert.Equal(5, counts.SourceLineCount);
+        Assert.Equal(6, counts.SourceLineCount);
         Assert.Equal(2, counts.Copied);
         Assert.Equal(1, counts.SkippedAlreadyPlanned);
-        Assert.Equal(2, counts.SkippedRetiredCode);
+        Assert.Equal(3, counts.SkippedRetiredCode);
         Assert.Equal(
             counts.SourceLineCount,
             counts.Copied + counts.SkippedAlreadyPlanned + counts.SkippedRetiredCode);
@@ -415,9 +470,9 @@ public class CopyBudgetAllocationsCommandHandlerTests
     {
         // Precedence is documented on the handler: already-planned is tested first, because it is
         // the reason that actually protects something (an argued line in the target).
-        var retired = AddCode("ZBB-OLD-01", active: false);
-        Plan(_source, retired.Id, "ZBB-OLD-01");
-        Plan(_target, retired.Id, "ZBB-OLD-01");
+        var old = AddCodeToBoth("ZBB-OLD-01", activeInTarget: false);
+        Plan(_source, old.Source.Id, "ZBB-OLD-01");
+        Plan(_target, old.Target.Id, "ZBB-OLD-01");
 
         var result = await CopyAsync();
 
@@ -431,9 +486,9 @@ public class CopyBudgetAllocationsCommandHandlerTests
     {
         // "Already planned" is a snapshot of the target BEFORE the copy: copying the first tires
         // item must not make the second one look already planned.
-        Plan(_source, _crew.Id, amount: 1800m, justification: "Winter tires.");
-        Plan(_source, _crew.Id, amount: 450m, justification: "Brake pads.");
-        Plan(_source, _crew.Id, amount: 0m, justification: "Nothing on wipers this time.");
+        Plan(_source, _crewSource.Id, amount: 1800m, justification: "Winter tires.");
+        Plan(_source, _crewSource.Id, amount: 450m, justification: "Brake pads.");
+        Plan(_source, _crewSource.Id, amount: 0m, justification: "Nothing on wipers this time.");
 
         var result = await CopyAsync();
 
@@ -442,16 +497,17 @@ public class CopyBudgetAllocationsCommandHandlerTests
         Assert.Equal(3, lines.Count);
         Assert.Equal(2250m, lines.Sum(a => a.AmountCad));
         Assert.All(lines, a => Assert.True(a.NeedsJustification));
+        Assert.All(lines, a => Assert.Equal(_crew.Id, a.BudgetCodeId));
         Assert.Equal(1, _allocations.SaveChangesCallCount);
     }
 
     [Fact]
     public async Task One_item_already_on_a_code_in_the_target_skips_every_source_item_of_that_code()
     {
-        var fuel = AddCode("ZBB-FUEL-01");
-        Plan(_source, _crew.Id, amount: 1800m);
-        Plan(_source, _crew.Id, amount: 450m);
-        Plan(_source, fuel.Id, "ZBB-FUEL-01", 900m);
+        var fuel = AddCodeToBoth("ZBB-FUEL-01");
+        Plan(_source, _crewSource.Id, amount: 1800m);
+        Plan(_source, _crewSource.Id, amount: 450m);
+        Plan(_source, fuel.Source.Id, "ZBB-FUEL-01", 900m);
         Plan(_target, _crew.Id, amount: 99m, justification: "Started by hand.");
 
         var result = await CopyAsync();
@@ -461,18 +517,18 @@ public class CopyBudgetAllocationsCommandHandlerTests
         var lines = TargetLines();
         Assert.Equal(2, lines.Count);
         Assert.Equal(99m, Assert.Single(lines, a => a.BudgetCodeId == _crew.Id).AmountCad);
-        Assert.Equal(900m, Assert.Single(lines, a => a.BudgetCodeId == fuel.Id).AmountCad);
+        Assert.Equal(900m, Assert.Single(lines, a => a.BudgetCodeId == fuel.Target.Id).AmountCad);
     }
 
     [Fact]
     public async Task Running_the_copy_twice_with_many_items_per_code_never_duplicates()
     {
-        var fuel = AddCode("ZBB-FUEL-01");
-        var retired = AddCode("ZBB-OLD-01", active: false);
-        Plan(_source, _crew.Id, amount: 1800m);
-        Plan(_source, _crew.Id, amount: 450m);
-        Plan(_source, fuel.Id, "ZBB-FUEL-01", 900m);
-        Plan(_source, retired.Id, "ZBB-OLD-01", 10m);
+        var fuel = AddCodeToBoth("ZBB-FUEL-01");
+        var old = AddCodeToBoth("ZBB-OLD-01", activeInTarget: false);
+        Plan(_source, _crewSource.Id, amount: 1800m);
+        Plan(_source, _crewSource.Id, amount: 450m);
+        Plan(_source, fuel.Source.Id, "ZBB-FUEL-01", 900m);
+        Plan(_source, old.Source.Id, "ZBB-OLD-01", 10m);
 
         var first = await CopyAsync();
         var second = await CopyAsync();
@@ -493,7 +549,7 @@ public class CopyBudgetAllocationsCommandHandlerTests
     public async Task A_copied_item_keeps_every_field_except_its_justification()
     {
         var source = TestBudgeting.CreateAllocation(
-            _source.Id, _crew.Id, _crew.Code, actorId: TestBudgeting.ActorId,
+            _source.Id, _crewSource.Id, _crewSource.Code, actorId: TestBudgeting.ActorId,
             details: TestBudgeting.Item(
                 title: "Crew rotations",
                 amount: null,
@@ -513,6 +569,8 @@ public class CopyBudgetAllocationsCommandHandlerTests
         await CopyAsync();
 
         var copy = Assert.Single(TargetLines());
+        Assert.Equal(_crew.Id, copy.BudgetCodeId);
+        Assert.Equal("ZBB-CREW-01", copy.Code);
         Assert.Equal("Crew rotations", copy.Title);
         Assert.Equal(1885m, copy.AmountCad);
         Assert.Equal(26m, copy.Quantity);
@@ -534,11 +592,11 @@ public class CopyBudgetAllocationsCommandHandlerTests
     public async Task Every_copied_line_arrives_with_no_justification_and_must_be_re_argued()
     {
         // This is what makes the copy zero-based rather than a plain duplicate: the amount comes
-        // across as a starting position, the argument does not come across at all, and the set
+        // across as a starting position, the argument does not come across at all, and the update
         // handler refuses to save the line again until somebody writes one.
-        var fuel = AddCode("ZBB-FUEL-01");
-        Plan(_source, _crew.Id, "ZBB-CREW-01", 1250m, "Two crew rotations a week.");
-        Plan(_source, fuel.Id, "ZBB-FUEL-01", 480.50m, "Diesel at last quarter's price.");
+        var fuel = AddCodeToBoth("ZBB-FUEL-01");
+        Plan(_source, _crewSource.Id, "ZBB-CREW-01", 1250m, "Two crew rotations a week.");
+        Plan(_source, fuel.Source.Id, "ZBB-FUEL-01", 480.50m, "Diesel at last quarter's price.");
 
         var result = await CopyAsync();
 
@@ -578,6 +636,6 @@ public class CopyBudgetAllocationsCommandHandlerTests
         Assert.Same(crewCopy, line);
         Assert.False(line.NeedsJustification);
         // The other copied line is untouched — one argued, one still owed.
-        Assert.True(Assert.Single(TargetLines(), a => a.BudgetCodeId == fuel.Id).NeedsJustification);
+        Assert.True(Assert.Single(TargetLines(), a => a.BudgetCodeId == fuel.Target.Id).NeedsJustification);
     }
 }

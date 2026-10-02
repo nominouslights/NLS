@@ -21,17 +21,25 @@ public class UpdateBudgetAllocationCommandHandlerTests
     private readonly UpdateBudgetAllocationCommandHandler _handler;
 
     private readonly BudgetPeriod _draft = TestBudgeting.CreatePeriod();
-    private readonly BudgetCode _code = TestBudgeting.CreateCode("ZBB-CREW-01");
+    private readonly BudgetCode _code;
     private readonly BudgetAllocation _item;
 
     public UpdateBudgetAllocationCommandHandlerTests()
     {
         _handler = new UpdateBudgetAllocationCommandHandler(_allocations, _periods, _codes);
         _periods.Add(_draft);
-        _codes.Add(_code);
+        _code = AddCode(_draft, "ZBB-CREW-01");
         _item = TestBudgeting.CreateAllocation(
             _draft.Id, _code.Id, _code.Code, 1250m, "Original reasoning.", TestBudgeting.ActorId);
         _allocations.Add(_item);
+    }
+
+    /// <summary>Adds a code to one period's chart — codes belong to a period.</summary>
+    private BudgetCode AddCode(BudgetPeriod period, string code)
+    {
+        var budgetCode = TestBudgeting.CreateCode(code, periodId: period.Id);
+        _codes.Add(budgetCode);
+        return budgetCode;
     }
 
     private Task<Result> UpdateAsync(
@@ -98,8 +106,7 @@ public class UpdateBudgetAllocationCommandHandlerTests
     [Fact]
     public async Task An_item_can_move_to_another_active_code()
     {
-        var fuel = TestBudgeting.CreateCode("ZBB-FUEL-01");
-        _codes.Add(fuel);
+        var fuel = AddCode(_draft, "ZBB-FUEL-01");
 
         var result = await UpdateAsync(codeId: fuel.Id);
 
@@ -112,13 +119,27 @@ public class UpdateBudgetAllocationCommandHandlerTests
     [Fact]
     public async Task Moving_an_item_to_a_retired_code_is_refused_as_CodeRetired()
     {
-        var retired = TestBudgeting.CreateCode("ZBB-OLD-01");
+        var retired = AddCode(_draft, "ZBB-OLD-01");
         Assert.True(retired.SetActive(false, TestBudgeting.ActorId).IsSuccess);
-        _codes.Add(retired);
 
         var result = await UpdateAsync(codeId: retired.Id);
 
         Assert.Equal(BudgetAllocationErrors.CodeRetired, result.Error);
+        AssertUntouched();
+    }
+
+    [Fact]
+    public async Task Moving_an_item_to_a_code_of_another_period_reports_the_code_as_not_found()
+    {
+        // Q1's ZBB-FUEL-01 is a real, active code — of another period's chart. An item's code
+        // must belong to the item's period.
+        var q1 = TestBudgeting.CreatePeriod(PeriodGranularity.Quarter, 2027, 1);
+        _periods.Add(q1);
+        var fuelInQ1 = AddCode(q1, "ZBB-FUEL-01");
+
+        var result = await UpdateAsync(codeId: fuelInQ1.Id);
+
+        Assert.Equal(BudgetCodeErrors.NotFound, result.Error);
         AssertUntouched();
     }
 
@@ -141,8 +162,7 @@ public class UpdateBudgetAllocationCommandHandlerTests
         Assert.Equal(BudgetAllocationErrors.CodeRetired, (await UpdateAsync()).Error);
         AssertUntouched();
 
-        var fuel = TestBudgeting.CreateCode("ZBB-FUEL-01");
-        _codes.Add(fuel);
+        var fuel = AddCode(_draft, "ZBB-FUEL-01");
         Assert.True((await UpdateAsync(codeId: fuel.Id)).IsSuccess);
         Assert.Equal(fuel.Id, _item.BudgetCodeId);
     }
@@ -267,7 +287,7 @@ public class UpdateBudgetAllocationCommandHandlerTests
     [Fact]
     public async Task A_copied_item_saves_only_once_it_is_argued()
     {
-        var copy = _item.CopyInto(_draft.Id, null);
+        var copy = _item.CopyInto(_draft.Id, _code.Id, null);
         _allocations.Add(copy);
 
         var unargued = await UpdateAsync(allocationId: copy.Id, details: TestBudgeting.Item(justification: "  "));

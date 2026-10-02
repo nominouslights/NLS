@@ -163,9 +163,15 @@ describe("entered period storage", () => {
 });
 
 describe("isPeriodScoped", () => {
-  it("is false for exactly Budget Codes and Settings", () => {
+  it("is false for Settings alone — Budget Codes is scoped since codes moved under the period", () => {
     const all: ScreenId[] = NAV_GROUPS.flatMap((g) => g.items.map((i) => i.id));
-    expect(all.filter((id) => !isPeriodScoped(id)).sort()).toEqual(["codes", "settings"]);
-    expect(all.filter(isPeriodScoped).sort()).toEqual(["actuals", "periods", "reports", "variance"]);
+    expect(all.filter((id) => !isPeriodScoped(id)).sort()).toEqual(["settings"]);
+    expect(all.filter(isPeriodScoped).sort()).toEqual([
+      "actuals",
+      "codes",
+      "periods",
+      "reports",
+      "variance",
+    ]);
   });
 });

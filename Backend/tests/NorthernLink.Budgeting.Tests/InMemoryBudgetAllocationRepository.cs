@@ -28,13 +28,15 @@ internal sealed class InMemoryBudgetAllocationRepository : IBudgetAllocationRepo
         Guid periodId, Guid allocationId, CancellationToken cancellationToken = default) =>
         Task.FromResult(Visible.FirstOrDefault(a => a.Id == allocationId && a.PeriodId == periodId));
 
-    // Id OR string, like the real repository's `a.BudgetCodeId == budgetCodeId || a.Code == code`.
+    // In the period, by id OR string, like the real repository's
+    // `a.PeriodId == periodId && (a.BudgetCodeId == budgetCodeId || a.Code == code)`.
     // The string half is ordinal because a Postgres varchar equality is: a case-insensitive
     // match here would make the probe look more forgiving than the database it stands in for.
     public Task<bool> ExistsForCodeAsync(
-        Guid budgetCodeId, string code, CancellationToken cancellationToken = default) =>
+        Guid periodId, Guid budgetCodeId, string code, CancellationToken cancellationToken = default) =>
         Task.FromResult(Visible.Any(a =>
-            a.BudgetCodeId == budgetCodeId || string.Equals(a.Code, code, StringComparison.Ordinal)));
+            a.PeriodId == periodId
+            && (a.BudgetCodeId == budgetCodeId || string.Equals(a.Code, code, StringComparison.Ordinal))));
 
     // A copy of the list, like the real repository's ToListAsync: the copy handler iterates the
     // source items while adding to the repository, and a live view would be a mutation-during-
