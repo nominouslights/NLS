@@ -83,24 +83,24 @@ function scopeForRow(html: string, label: string): string {
 describe("inspectionReportHtml — answers", () => {
   const filled = inspection({
     checklist: [
-      item({ item: "Engine oil", state: "Ok", passed: true }),
-      item({ item: "Coolant", state: "Defect", passed: false, note: "Weeping at the upper hose" }),
-      item({ item: "Washer fluid", state: "NotApplicable", passed: true }),
+      item({ item: "Engine fluid levels", state: "Ok", passed: true }),
+      item({ item: "Belts, hoses & radiator", state: "Defect", passed: false, note: "Weeping at the upper hose" }),
+      item({ item: "Battery, wiring & block-heater cord", state: "NotApplicable", passed: true }),
     ],
-    defects: [defect({ item: "Coolant", severity: "Major", note: "Weeping at the upper hose" })],
+    defects: [defect({ item: "Belts, hoses & radiator", severity: "Major", note: "Weeping at the upper hose" })],
   });
   const html = inspectionReportHtml(filled, NL02_CTX, COMPANY);
 
   it("ticks OK on an Ok row", () => {
-    expect(boxesForRow(html, "Engine oil")).toEqual(["☒", "☐", "☐"]);
+    expect(boxesForRow(html, "Engine fluid levels")).toEqual(["☒", "☐", "☐"]);
   });
 
   it("ticks Defect on a Defect row", () => {
-    expect(boxesForRow(html, "Coolant")).toEqual(["☐", "☒", "☐"]);
+    expect(boxesForRow(html, "Belts, hoses &amp; radiator")).toEqual(["☐", "☒", "☐"]);
   });
 
   it("ticks N/A on a NotApplicable row — never as a failure", () => {
-    expect(boxesForRow(html, "Washer fluid")).toEqual(["☐", "☐", "☒"]);
+    expect(boxesForRow(html, "Battery, wiring &amp; block-heater cord")).toEqual(["☐", "☐", "☒"]);
   });
 
   it("leaves a row the record does not carry unanswered", () => {
@@ -109,7 +109,7 @@ describe("inspectionReportHtml — answers", () => {
 
   it("carries the defect onto the defect log with its category", () => {
     expect(html).toContain("Defect Log");
-    expect(html).toContain("Coolant — Weeping at the upper hose");
+    expect(html).toContain("Belts, hoses &amp; radiator — Weeping at the upper hose");
     expect(html).toContain("Major");
   });
 });
@@ -154,7 +154,7 @@ describe("inspectionReportHtml — unit and mode filtering", () => {
 
   it("prints the short post-trip: no pre-trip-only rows, plus En-Route Observations", () => {
     const post = inspectionReportHtml(null, { unit: "NL-02", mode: "PostTrip" }, COMPANY);
-    expect(post).not.toContain("Engine oil");
+    expect(post).not.toContain("Engine fluid levels");
     expect(post).not.toContain("Emergency exits / windows (NL-02)");
     expect(post).not.toContain("Emergency Equipment");
     expect(post).toContain("Wheel nuts / studs");
@@ -225,11 +225,13 @@ describe("inspectionReportHtml — the scope column", () => {
   });
 
   it("marks a Northern Link addition NL", () => {
-    expect(scopeForRow(html, "Survival kit")).toContain("<span>NL</span>");
+    expect(scopeForRow(html, "Remote / winter kit")).toContain("<span>NL</span>");
+    // Rev 3 retagged the engine-bay rows: Schedule 2 has no engine-fluid part.
+    expect(scopeForRow(html, "Engine fluid levels")).toContain("<span>NL</span>");
   });
 
   it("leaves a plain NSC 13 row unmarked", () => {
-    expect(scopeForRow(html, "Engine oil")).not.toContain("<span>");
+    expect(scopeForRow(html, "Brake fluid reservoir (hydraulic)")).not.toContain("<span>");
   });
 
   it("prints the legend so an inspector can tell the two apart", () => {
@@ -242,7 +244,7 @@ describe("inspectionReportHtml — retired-form records", () => {
   const html = inspectionReportHtml(
     inspection({
       checklist: [
-        item({ item: "Engine oil" }),
+        item({ item: "Engine fluid levels" }),
         item({ group: "Fluids (NL-TM-01)", item: "Oil, coolant and washer levels", state: "Defect", passed: false }),
       ],
     }),
@@ -251,7 +253,36 @@ describe("inspectionReportHtml — retired-form records", () => {
   );
 
   it("renders the catalogue row it recognises", () => {
-    expect(boxesForRow(html, "Engine oil")).toEqual(["☒", "☐", "☐"]);
+    expect(boxesForRow(html, "Engine fluid levels")).toEqual(["☒", "☐", "☐"]);
+  });
+
+  it("prints a rev-2 record's retired keys verbatim, never onto their replacement rows", () => {
+    // Every key here is in RETIRED_KEYS — known, but no longer a catalogue row. The
+    // replacement ("Engine fluid levels", "Remote / winter kit") must stay
+    // unanswered: ticking it would claim a check the driver never answered as such.
+    const rev2 = inspectionReportHtml(
+      inspection({
+        checklist: [
+          item({ group: "Engine Bay", item: "Engine oil", state: "Ok", passed: true }),
+          item({ group: "Engine Bay", item: "Coolant", state: "Defect", passed: false, note: "Low" }),
+          item({ group: "Emergency Equipment", item: "Survival kit", state: "NotApplicable", passed: true }),
+          item({ group: "Lights & Signals — Interior", item: "Interior: Hazard lights" }),
+        ],
+        defects: [defect({ item: "Coolant", severity: "Major", note: "Low" })],
+      }),
+      NL02_CTX,
+      COMPANY,
+    );
+    expect(rev2).toContain("Recorded under a previous form revision");
+    for (const old of ["Engine oil", "Coolant", "Survival kit", "Interior: Hazard lights"]) {
+      expect(rev2).toContain(`<td>${old}</td>`);
+    }
+    expect(rev2).toContain("Lights &amp; Signals — Interior");
+    expect(boxesForRow(rev2, "Engine fluid levels")).toEqual(["☐", "☐", "☐"]);
+    expect(boxesForRow(rev2, "Remote / winter kit")).toEqual(["☐", "☐", "☐"]);
+    expect(boxesForRow(rev2, "Hazard (4-way) lights")).toEqual(["☐", "☐", "☐"]);
+    // The defect log keeps the stored item string.
+    expect(rev2).toContain("Coolant — Low");
   });
 
   it("does not silently drop the item it does not recognise", () => {
@@ -262,7 +293,7 @@ describe("inspectionReportHtml — retired-form records", () => {
 
   it("says nothing about a previous revision when every item is current", () => {
     const clean = inspectionReportHtml(
-      inspection({ checklist: [item({ item: "Engine oil" })] }),
+      inspection({ checklist: [item({ item: "Engine fluid levels" })] }),
       NL02_CTX,
       COMPANY,
     );

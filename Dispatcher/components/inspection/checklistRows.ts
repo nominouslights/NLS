@@ -35,10 +35,17 @@ export function rowsFor(unit: string | null, mode: InspectionFormMode): Checklis
  * Is this saved record written against a form revision NL-PTI-01 replaced?
  *
  * Every item string changed when NL-TM-01 became NL-PTI-01 (28 old rows → 80 new),
- * and the rows are addressed by that string. A record holding even one unknown item
- * cannot be rebuilt into editable rows: the lookup finds nothing, every row renders
- * unanswered, and saving would overwrite what the old inspection actually said. The
+ * and rev 3 retired 23 more NL-PTI-01 keys into combined rows (`RETIRED_KEYS`). The
+ * rows are addressed by that string. A record holding even one item outside today's
+ * catalogue cannot be rebuilt into editable rows: the lookup finds nothing, that row
+ * is lost, and saving would overwrite what the old inspection actually said. The
  * caller's job is to render it read-only instead — never to guess a correspondence.
+ *
+ * Deliberately tested against the CURRENT catalogue only, not `RETIRED_KEYS`: a
+ * retired-but-known key ("Engine oil") is treated exactly like a completely unknown
+ * one. `RETIRED_KEYS` names the row that now covers the check for display, but
+ * folding "Engine oil: OK" into "Engine fluid levels: OK" would assert three checks
+ * the driver never answered.
  */
 export function isRetiredFormRecord(existing: VehicleInspection): boolean {
   return existing.checklist.some((c) => !CATALOGUE_KEYS.has(c.item));

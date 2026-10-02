@@ -229,12 +229,14 @@ const CATALOGUE_KEYS: ReadonlySet<string> = new Set(
 
 /**
  * Stored answers this sheet's catalogue rows did NOT print — either recorded
- * against a form revision NL-PTI-01 replaced, or against rows this unit/mode
+ * against an earlier form revision (NL-TM-01, or an NL-PTI-01 key rev 3 retired —
+ * see `RETIRED_KEYS`), or against rows this unit/mode
  * filters out (a report entered for NL-02 and reprinted for NL-01).
  *
  * They print verbatim, as the record carries them. Nothing here guesses a
- * correspondence to a current row: the item string is half a defect's address,
- * and a wrong mapping would misreport what the driver actually answered.
+ * correspondence to a current row — not even a retired key's `RETIRED_KEYS`
+ * replacement: the item string is half a defect's address, and a mapping would
+ * misreport what the driver actually answered.
  */
 export function retiredFormBlock(
   insp: VehicleInspection | null,
@@ -263,7 +265,7 @@ export function retiredFormBlock(
     .join("");
 
   const cause = leftover.some((c) => !CATALOGUE_KEYS.has(c.item))
-    ? "These rows were answered on a form revision NL-PTI-01 replaced."
+    ? "These rows were answered on an earlier revision of the form (NL-TM-01, or NL-PTI-01 before rev 3)."
     : "These rows were answered on a wider form than this unit and inspection type print.";
 
   return (

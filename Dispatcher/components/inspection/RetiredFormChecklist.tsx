@@ -4,12 +4,14 @@ import { colors, fonts } from "@/lib/theme";
 import type { ChecklistItemStateWire, VehicleInspection } from "@/lib/api/maintenance";
 import { DEFECT_SEVERITY_LABEL, DEFECT_SEVERITY_META } from "@/lib/workOrderDisplay";
 import { StatusChip } from "@/components/ui/Chip";
+import RetiredKeyNote from "./RetiredKeyNote";
 
-// Read-only view of an inspection recorded against a form revision NL-PTI-01
-// replaced. It renders THAT RECORD'S OWN items — never the current catalogue —
-// because the two share no item strings and any mapping between them would be a
-// guess. Nothing here is editable and nothing is dropped: what the driver
-// answered on the day is what shows.
+// Read-only view of an inspection recorded against an earlier form revision
+// (NL-TM-01, or NL-PTI-01 before rev 3 combined some rows). It renders THAT
+// RECORD'S OWN items — never the current catalogue — because any mapping between
+// them would be a guess. Nothing here is editable and nothing is dropped: what the
+// driver answered on the day is what shows. A key rev 3 retired also says which
+// current row now covers that check — display text only, from RETIRED_KEYS.
 
 const STATE_CHIP: Record<ChecklistItemStateWire, { kind: "ontime" | "over" | "off"; label: string }> = {
   Ok: { kind: "ontime", label: "OK" },
@@ -84,6 +86,7 @@ export default function RetiredFormChecklist({ inspection }: { inspection: Vehic
                       )}
                     </span>
                   </div>
+                  <RetiredKeyNote item={row.item} />
                   {note && (
                     <div
                       style={{

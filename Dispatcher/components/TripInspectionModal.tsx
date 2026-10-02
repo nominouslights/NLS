@@ -153,9 +153,9 @@ export default function TripInspectionModal({
   const groups = useMemo(() => itemsFor(unit || null, mode), [unit, mode]);
   const legendKeys = useMemo(() => areaLegendKeys(groups), [groups]);
 
-  // A record written against the retired NL-TM-01 checklist cannot be rebuilt
-  // into current-catalogue rows without inventing a correspondence, so it opens
-  // read-only. See `isRetiredFormRecord`.
+  // A record written against a retired checklist (NL-TM-01, or NL-PTI-01 keys that
+  // rev 3 combined — see RETIRED_KEYS) cannot be rebuilt into current-catalogue rows
+  // without inventing a correspondence, so it opens read-only. See `isRetiredFormRecord`.
   const retired = existing != null && isRetiredFormRecord(existing);
   // Rows rebuilt from the record, and anything it answered that they do not cover.
   const rebuilt = useMemo(
@@ -237,7 +237,7 @@ export default function TripInspectionModal({
     }
     const defectNoNote = checklist.find((r) => r.state === "Defect" && !r.note.trim());
     if (defectNoNote) return `Defect rows need a note — add one for "${defectNoNote.label}".`;
-    // With 28–82 rows, "something is unanswered" is not actionable. Say how many.
+    // With 28–64 rows, "something is unanswered" is not actionable. Say how many.
     if (unanswered > 0) {
       return `${unanswered} of ${checklist.length} checks ${unanswered === 1 ? "is" : "are"} unanswered — every row needs OK, Defect or N-A.`;
     }
@@ -367,7 +367,7 @@ export default function TripInspectionModal({
         <>
           <Caution kind="over">
             {retired
-              ? "Recorded against a retired form revision — editing is disabled. Remove and re-enter to move this record to NL-PTI-01."
+              ? "Recorded against an earlier form revision — editing is disabled so its answers stay exactly as recorded. Remove and re-enter to move this record to the current NL-PTI-01."
               : `This record answers ${outsideForm.length} ${outsideForm.length === 1 ? "row" : "rows"} the current form does not show for ${unit ?? "this unit"} — editing is disabled so those answers cannot be dropped. Remove and re-enter to move this record to the form as it now reads.`}
           </Caution>
           <RetiredFormChecklist inspection={existing} />
