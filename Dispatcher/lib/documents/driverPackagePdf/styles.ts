@@ -8,7 +8,7 @@
 //    wins for the whole print job. Every Northern Link document therefore
 //    declares exactly `size: Letter; margin: 12mm 12mm` — including this one.
 //    Never change page size or margin in a sub-document: a landscape itinerary
-//    would silently re-page the manifest and both inspections too.
+//    would silently re-page the manifest, the inspection and the defect report too.
 //
 // 2. THE BREAK CLASS MUST BE UNSCOPED. `.tm .brk` is scoped under `.tm`, so it
 //    can only break INSIDE the trip manifest — it cannot break BETWEEN two
@@ -17,7 +17,7 @@
 //    `.tm`-scoped one.
 //
 // The cover carries its own `page-break-after`, which is what starts the trip
-// manifest on a fresh sheet without needing a fourth `.nlpkg-brk` marker.
+// manifest on a fresh sheet without an extra `.nlpkg-brk` marker.
 
 export const DRIVER_PACKAGE_STYLES = `
 @page { size: Letter; margin: 12mm 12mm; }

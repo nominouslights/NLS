@@ -1,13 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { driverPackageHtml, type DriverPackageInput } from "./index";
+import { driverPackageHtml, partsFollowText, type DriverPackageInput } from "./index";
+import { enRouteDefectReportHtml } from "../defectReportPdf";
+import { itemsFor } from "@/lib/inspectionForm";
 import { COMPANY } from "@/lib/company";
 import type { VehicleInspection } from "@/lib/api/maintenance";
 import type { ShipmentRecord } from "@/lib/api/shipments";
 import type { TripManifest, TripRecord, TripStop } from "@/lib/api/trips";
 
-// The package is pure composition, so these tests are about ASSEMBLY, not
-// content: all four parts present, in order, separated by real page breaks, and
-// a cover that never lets a blank inspection pass for a completed one.
+// The package is pure composition, so most of these tests are about ASSEMBLY:
+// all four parts present, in order, separated by real page breaks, and a cover
+// that never lets a blank inspection pass for a completed one. The rest pin that
+// the printed parts reflect the CURRENT sub-documents — NL-PTI-01 rev 3's
+// catalogue and header, Bookeo-imported passengers, and the en-route defect
+// report that replaced the post-trip sheet.
 
 function stop(name: string, order: number, outbound: number): TripStop {
   return { name, order, stopId: `stop-${order}`, outboundOffsetMinutes: outbound, returnOffsetMinutes: null };
@@ -185,23 +190,43 @@ function full(over: Partial<DriverPackageInput> = {}): DriverPackageInput {
     trip: trip(),
     manifest: manifest(),
     preTrip: inspection("PreTrip"),
-    postTrip: inspection("PostTrip"),
     shipments: [shipment()],
     ...over,
   };
 }
 
-/** Where each sub-document's wrapper starts. The two inspections share the
- *  `.pti` prefix, so they are told apart by position — pre-trip first. */
+/** Where each sub-document's wrapper starts. Each part has its own class prefix. */
 function partOffsets(html: string) {
-  const ptiFirst = html.indexOf('<div class="pti">');
   return {
     cover: html.indexOf('<div class="nlpkg cover">'),
     manifest: html.indexOf('<div class="tm">'),
     itinerary: html.indexOf('<div class="itin">'),
-    preTrip: ptiFirst,
-    postTrip: html.indexOf('<div class="pti">', ptiFirst + 1),
+    preTrip: html.indexOf('<div class="pti">'),
+    defectReport: html.indexOf('<div class="edr">'),
   };
+}
+
+/** The four parts' HTML, sliced at their wrappers. */
+function parts(html: string) {
+  const at = partOffsets(html);
+  return {
+    cover: html.slice(at.cover, at.manifest),
+    manifest: html.slice(at.manifest, at.itinerary),
+    itinerary: html.slice(at.itinerary, at.preTrip),
+    preTrip: html.slice(at.preTrip, at.defectReport),
+    defectReport: html.slice(at.defectReport),
+  };
+}
+
+/** Rows of the checklist tables — every catalogue row prints as `td.item`. */
+function checklistRowCount(part: string): number {
+  return [...part.matchAll(/<td class="item">/g)].length;
+}
+
+/** The value cell printed under a field label, as raw HTML. */
+function fieldValue(part: string, label: string): string | null {
+  const m = part.match(new RegExp(`<div class="lbl">${label}</div><div class="val">(.*?)</div>`));
+  return m ? m[1] : null;
 }
 
 describe("driverPackageHtml — assembly", () => {
@@ -214,18 +239,23 @@ describe("driverPackageHtml — assembly", () => {
     }
   });
 
-  it("orders them cover → manifest → itinerary → pre-trip → post-trip", () => {
+  it("orders them cover → manifest → itinerary → pre-trip → en-route defect report", () => {
     expect(at.cover).toBeLessThan(at.manifest);
     expect(at.manifest).toBeLessThan(at.itinerary);
     expect(at.itinerary).toBeLessThan(at.preTrip);
-    expect(at.preTrip).toBeLessThan(at.postTrip);
+    expect(at.preTrip).toBeLessThan(at.defectReport);
   });
 
-  it("uses each sub-document's own class prefix", () => {
-    expect(html).toContain('<div class="tm">');
-    expect(html).toContain('<div class="itin">');
-    expect(html).toContain('<div class="pti">');
-    expect(html).toContain('<div class="nlpkg cover">');
+  it("carries no post-trip inspection sheet", () => {
+    // Exactly one NL-PTI-01 sheet, and it is the pre-trip half.
+    expect([...html.matchAll(/<div class="pti">/g)].length).toBe(1);
+    expect(html).toContain("☒ Pre-Trip");
+    expect(html).not.toContain("☒ Post-Trip");
+    // The post-trip-only groups never print.
+    expect(html).not.toContain("Close-Out");
+    expect(html).not.toContain("En-Route Observations");
+    expect(html).not.toContain("Post-Trip Inspection (NL-PTI-01)");
+    expect(html).not.toContain("No post-trip on file");
   });
 
   it("puts exactly three package-level breaks between the four documents", () => {
@@ -237,11 +267,20 @@ describe("driverPackageHtml — assembly", () => {
     expect(html).toContain(".nlpkg.cover { page-break-after: always;");
   });
 
+  it("starts each part after the cover on its own sheet", () => {
+    // A break marker sits between every consecutive pair of parts.
+    const order = [at.manifest, at.itinerary, at.preTrip, at.defectReport];
+    for (let i = 1; i < order.length; i++) {
+      const between = html.slice(order[i - 1], order[i]);
+      expect(between, `no break before part ${i + 1}`).toContain('<div class="nlpkg-brk"></div>');
+    }
+  });
+
   it("keeps every sheet on the same US-Letter page geometry", () => {
     // @page cannot be class-scoped: concatenation emits it several times and the
     // last one wins for the whole job, so they must all be identical.
     const pages = [...html.matchAll(/@page \{[^}]*\}/g)].map((m) => m[0]);
-    expect(pages.length).toBeGreaterThan(1);
+    expect(pages.length).toBe(5); // package + four sub-documents
     expect(new Set(pages).size).toBe(1);
     expect(pages[0]).toBe("@page { size: Letter; margin: 12mm 12mm; }");
   });
@@ -252,105 +291,210 @@ describe("driverPackageHtml — assembly", () => {
   });
 });
 
-describe("driverPackageHtml — nothing on file", () => {
-  const html = driverPackageHtml(
-    full({ manifest: null, preTrip: null, postTrip: null, shipments: [] }),
-    COMPANY,
+describe("driverPackageHtml — the cover", () => {
+  const cover = parts(driverPackageHtml(full(), COMPANY)).cover;
+  const rows = [...cover.matchAll(/<tr>\s*<td class="num">(\d+)<\/td>\s*<td>(.*?)<\/td>/g)].map(
+    (m) => [Number(m[1]), m[2]],
   );
+
+  it("lists the four parts, numbered in print order", () => {
+    expect(rows).toEqual([
+      [1, "Trip Manifest (NL-TM-01)"],
+      [2, "Trip Itinerary"],
+      [3, "Pre-Trip Inspection (NL-PTI-01)"],
+      [4, "En-Route Defect Report"],
+    ]);
+  });
+
+  it("marks the en-route defect report as always completed by hand", () => {
+    const row = cover.slice(cover.indexOf("<td>En-Route Defect Report</td>"));
+    expect(row.slice(0, row.indexOf("</tr>"))).toContain("BLANK — to be completed by hand");
+    // Every other part was on file, so that is the only blank marker.
+    expect([...cover.matchAll(/BLANK — to be completed by hand/g)].length).toBe(1);
+  });
+
+  it("does not warn of missing records when only the hand-completed part is blank", () => {
+    expect(cover).not.toContain("A blank inspection is not a passed inspection");
+    expect(cover).toContain("complete the en-route defect report by hand");
+  });
+
+  it("derives its parts count from the parts it lists", () => {
+    expect(cover).toContain("Four parts follow, one per sheet.");
+    expect(partsFollowText(rows.length)).toBe("Four parts follow, one per sheet.");
+    expect(partsFollowText(1)).toBe("One part follows, one per sheet.");
+  });
+});
+
+describe("driverPackageHtml — nothing on file", () => {
+  const html = driverPackageHtml(full({ manifest: null, preTrip: null, shipments: [] }), COMPANY);
   const at = partOffsets(html);
+  const p = parts(html);
 
   it("still prints all four parts, as blank forms", () => {
     expect(at.manifest).toBeGreaterThanOrEqual(0);
     expect(at.itinerary).toBeGreaterThanOrEqual(0);
     expect(at.preTrip).toBeGreaterThanOrEqual(0);
-    expect(at.postTrip).toBeGreaterThan(at.preTrip);
+    expect(at.defectReport).toBeGreaterThan(at.preTrip);
   });
 
   it("marks each missing part BLANK on the cover, never silently filled", () => {
-    const cover = html.slice(at.cover, at.manifest);
-    const blanks = [...cover.matchAll(/BLANK — to be completed by hand/g)];
-    expect(blanks.length).toBe(3); // manifest, pre-trip, post-trip
-    expect(cover).toContain("No pre-trip on file");
-    expect(cover).toContain("No post-trip on file");
-    expect(cover).toContain("A blank inspection is not a passed inspection");
+    const blanks = [...p.cover.matchAll(/BLANK — to be completed by hand/g)];
+    expect(blanks.length).toBe(3); // manifest, pre-trip, en-route defect report
+    expect(p.cover).toContain("No pre-trip on file");
+    expect(p.cover).toContain("A blank inspection is not a passed inspection");
   });
 
   it("marks the itinerary filled — it is derived from the trip itself", () => {
-    const cover = html.slice(at.cover, at.manifest);
-    expect(cover).toContain("Trip Itinerary");
-    expect(cover).toContain("✓ Filled");
+    expect(p.cover).toContain("Trip Itinerary");
+    expect(p.cover).toContain("✓ Filled");
   });
 
   it("omits the freight block when no shipments ride the trip", () => {
-    expect(html.slice(at.itinerary, at.preTrip)).not.toContain("Received By");
+    expect(p.itinerary).not.toContain("Received By");
+  });
+
+  it("prints the blank pre-trip header as empty form fields", () => {
+    for (const label of ["Date &amp; time", "Location \\(town or highway\\)", "NSC No\\.", "Odometer", "Driver"]) {
+      expect(fieldValue(p.preTrip, label), label).toBe("&nbsp;");
+    }
+    // A blank form has not been inspected — it must not claim a clean result.
+    expect(p.preTrip).not.toContain("No defects found");
   });
 });
 
-describe("driverPackageHtml — the two inspection halves", () => {
-  const html = driverPackageHtml(full(), COMPANY);
-  const at = partOffsets(html);
-  const preTripPart = html.slice(at.preTrip, at.postTrip);
-  const postTripPart = html.slice(at.postTrip);
+describe("driverPackageHtml — the pre-trip part prints NL-PTI-01 rev 3", () => {
+  const nl01 = parts(
+    driverPackageHtml(
+      full({
+        trip: trip({ vehicleUnit: "NL-01", vehicleId: "veh-1" }),
+        preTrip: inspection("PreTrip", "NL-01"),
+      }),
+      COMPANY,
+    ),
+  ).preTrip;
+  const nl02 = parts(driverPackageHtml(full(), COMPANY)).preTrip;
+  const unknown = parts(
+    driverPackageHtml(full({ trip: trip({ vehicleUnit: null, vehicleId: null }), preTrip: null }), COMPANY),
+  ).preTrip;
 
-  it("puts Close-Out on the post-trip sheet only", () => {
-    expect(preTripPart).not.toContain("Close-Out");
-    expect(postTripPart).toContain("Close-Out");
+  it("prints itemsFor(unit, 'PreTrip') — 53 rows for NL-01", () => {
+    expect(checklistRowCount(nl01)).toBe(53);
   });
 
-  it("puts En-Route Observations on the post-trip sheet only", () => {
-    expect(preTripPart).not.toContain("En-Route Observations");
-    expect(postTripPart).toContain("En-Route Observations");
+  it("prints 64 rows for NL-02, and for an unknown unit (every row, fail-safe)", () => {
+    expect(checklistRowCount(nl02)).toBe(64);
+    expect(checklistRowCount(unknown)).toBe(64);
   });
 
-  it("keeps the full mechanical list on the pre-trip sheet only", () => {
-    // Rev 2: the post-trip is the reduced "can change while driving" set.
-    expect(preTripPart).toContain("Emergency Equipment");
-    expect(postTripPart).not.toContain("Emergency Equipment");
+  it("matches the catalogue the console uses, row for row", () => {
+    const count = (unit: string | null) =>
+      itemsFor(unit, "PreTrip").reduce((n, g) => n + g.items.length, 0);
+    expect(checklistRowCount(nl01)).toBe(count("NL-01"));
+    expect(checklistRowCount(nl02)).toBe(count("NL-02"));
+    expect(checklistRowCount(unknown)).toBe(count(null));
   });
 
-  it("prints time, location and an NSC No. cell in each sheet's header", () => {
-    for (const part of [preTripPart, postTripPart]) {
-      expect(part).toContain('<div class="lbl">Date &amp; time</div>');
-      expect(part).toContain('<div class="lbl">Location (town or highway)</div>');
-      expect(part).toContain('<div class="lbl">NSC No.</div>');
+  it("has no Interior Lights group — rev 3 removed it", () => {
+    for (const part of [nl01, nl02, unknown]) {
+      expect(part).not.toContain("Lights &amp; Signals — Interior");
+      expect(part).not.toContain("Interior: Hazard lights");
     }
   });
 
-  it('says "No defects found" on each filled sheet with none recorded', () => {
-    expect(preTripPart).toContain("No defects found");
-    expect(postTripPart).toContain("No defects found");
+  it("prints rev 3's consolidated rows", () => {
+    for (const part of [nl01, nl02]) {
+      expect(part).toContain('<td class="item">Engine fluid levels</td>');
+      expect(part).toContain('<td class="item">Remote / winter kit</td>');
+      expect(part).toContain('<td class="item">Comms &amp; navigation</td>');
+      // ...and not the rows they replaced.
+      expect(part).not.toContain('<td class="item">Engine oil</td>');
+      expect(part).not.toContain('<td class="item">Survival kit</td>');
+    }
   });
 
-  it("ticks the right half of each inspection sheet", () => {
-    expect(preTripPart).toContain("☒ Pre-Trip");
-    expect(preTripPart).toContain("☐ Post-Trip");
-    expect(postTripPart).toContain("☐ Pre-Trip");
-    expect(postTripPart).toContain("☒ Post-Trip");
-  });
-});
-
-describe("driverPackageHtml — unit narrowing", () => {
-  const nl02 = driverPackageHtml(full(), COMPANY);
-  const nl01 = driverPackageHtml(
-    full({
-      trip: trip({ vehicleUnit: "NL-01", vehicleId: "veh-1" }),
-      preTrip: inspection("PreTrip", "NL-01"),
-      postTrip: inspection("PostTrip", "NL-01"),
-    }),
-    COMPANY,
-  );
-
-  // The bus-only rows are all pre-trip rows since rev 2, so these assertions are
-  // effectively about the pre-trip sheet; the post-trip is the same for both units.
-  it("includes the bus-only rows for NL-02", () => {
+  it("includes the bus-only rows for NL-02 and omits them for NL-01", () => {
     expect(nl02).toContain("Emergency exits / windows (NL-02)");
     expect(nl02).toContain("Fitted cargo area — partition &amp; tie-downs (NL-02)");
-  });
-
-  it("omits them for NL-01 — that unit does not have them", () => {
     expect(nl01).not.toContain("Emergency exits / windows (NL-02)");
     expect(nl01).not.toContain("Fitted cargo area");
     expect(nl01).not.toContain("Fuel / water separator (NL-02, diesel)");
+  });
+});
+
+describe("driverPackageHtml — the pre-trip header", () => {
+  const filled = parts(
+    driverPackageHtml(
+      full({ preTrip: { ...inspection("PreTrip"), location: "Leaf Rapids depot" } }),
+      COMPANY,
+    ),
+  ).preTrip;
+
+  it("prints date & time, location and an NSC No. cell", () => {
+    expect(fieldValue(filled, "Date &amp; time")).not.toBe("&nbsp;");
+    expect(fieldValue(filled, "Location \\(town or highway\\)")).toBe("Leaf Rapids depot");
+    expect(fieldValue(filled, "Route / Trip #")).toBe("NL-2026-0042");
+  });
+
+  it("leaves NSC No. a ruled blank while the carrier has none configured", () => {
+    expect(COMPANY.nscNo).toBe("");
+    expect(fieldValue(filled, "NSC No\\.")).toBe("&nbsp;");
+  });
+
+  it("prints the NSC No. once one is configured", () => {
+    const withNsc = parts(driverPackageHtml(full(), { ...COMPANY, nscNo: "MB-123456" })).preTrip;
+    expect(fieldValue(withNsc, "NSC No\\.")).toBe("MB-123456");
+  });
+
+  it('says "No defects found" on a clean filed pre-trip', () => {
+    expect(filled).toContain("☒ No defects found");
+  });
+
+  it("ticks the Pre-Trip half", () => {
+    expect(filled).toContain("☒ Pre-Trip");
+    expect(filled).toContain("☐ Post-Trip");
+  });
+});
+
+describe("driverPackageHtml — the manifest part", () => {
+  it("prints a Bookeo-imported passenger like any other passenger", () => {
+    const base = manifest();
+    const bookeo = {
+      ...base.passengers[0],
+      name: "M. Linklater",
+      email: null,
+      phone: "(204) 555-0177",
+      externalRef: "bookeo:88123",
+    };
+    const m = { ...base, passengers: [...base.passengers, bookeo] };
+    const sheet = parts(driverPackageHtml(full({ manifest: m }), COMPANY)).manifest;
+
+    expect(sheet).toContain("<td>J. Bighetty</td>");
+    expect(sheet).toContain("<td>M. Linklater</td>");
+    expect(sheet).toContain("<td>(204) 555-0177</td>");
+    // NL-TM-01 has no notes / source column, so the import reference is not
+    // printed — the row is indistinguishable from a hand-entered one.
+    expect(sheet).not.toContain("88123");
+    expect(sheet).not.toMatch(/bookeo/i);
+  });
+});
+
+describe("driverPackageHtml — the en-route defect report part", () => {
+  const part = parts(driverPackageHtml(full(), COMPANY)).defectReport;
+
+  it("is the sub-document's own sheet, verbatim", () => {
+    expect(part.trim()).toBe(enRouteDefectReportHtml(trip(), COMPANY).trim().replace(/^<style>[\s\S]*?<\/style>\s*/, ""));
+  });
+
+  it("carries the no-defects tick box and the severity columns", () => {
+    expect(part).toContain("☐ No defects found during this trip");
+    expect(part).toContain("<th class=\"sev\">Severity</th>");
+    expect([...part.matchAll(/☐ Minor<br\/>☐ Major/g)].length).toBe(6);
+  });
+
+  it("is prefilled with the trip it rides with", () => {
+    expect(fieldValue(part, "Trip #")).toBe("NL-2026-0042");
+    expect(fieldValue(part, "Unit")).toBe("NL-02");
+    expect(fieldValue(part, "Driver")).toBe("R. Okimaw");
   });
 });
 
@@ -376,7 +520,6 @@ describe("driverPackageHtml — no placeholder leaks", () => {
         }),
         manifest: null,
         preTrip: null,
-        postTrip: null,
         shipments: [],
       }),
       COMPANY,
