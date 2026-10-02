@@ -8,7 +8,7 @@
 //   State          | Uncertified, private to the      | Certified — it IS the compliance
 //                  | device                           | record
 //   Cost of loss   | Re-answer the whole NL-PTI-01    | A COMPLIANCE FAILURE
-//                  | walk-around (28-82 questions)    |
+//                  | walk-around (28-64 questions)    |
 //   Home           | localStorage — synchronous,      | IndexedDB + navigator.storage
 //                  | survives reload, ~2KB            | .persist(), the offline batch's job
 //
@@ -487,6 +487,48 @@ export function setAnswer(
       delete defects[itemId];
     }
     return { ...draft, answers: { ...draft.answers, [itemId]: state }, defects };
+  });
+}
+
+/**
+ * The per-section "All OK" shortcut's ONE write: every row of sub-group `groupKey` on this unit's
+ * `mode` half of the form that has NO answer yet becomes "pass". See lib/inspectionSteps.ts for
+ * when the wizard offers it.
+ *
+ * The compliance rules live HERE, at the write, so no caller can get them wrong:
+ *   • it takes a GROUP KEY, not a list of item keys — there is no way to ask it for more than
+ *     one sub-group, and no whole-form variant exists;
+ *   • it fills BLANKS ONLY. An existing answer — Defect, N/A, or Pass — is never touched, and
+ *     neither is any defect record or note;
+ *   • it narrows by `unit` exactly as the wizard does (itemsFor), so an NL02Only row is never
+ *     marked on an NL-01 form;
+ *   • the rows it fills are ordinary "pass" answers, indistinguishable from tapped ones and each
+ *     individually changeable afterwards through setAnswer. Nothing records that a section was
+ *     bulk-passed, and nothing of the kind goes on the wire.
+ *
+ * An unknown group key fills nothing. Returns the resulting draft (starting one if needed).
+ */
+export function markSectionOk(
+  mode: InspectionMode,
+  vehicleId: string,
+  unit: string | null,
+  groupKey: string,
+  asOf: string = today,
+): InspectionDraft {
+  const group = itemsFor(unit, mode).find((g) => g.key === groupKey);
+  return update(mode, vehicleId, asOf, (draft) => {
+    if (!group) return draft;
+    const answers = { ...draft.answers };
+    const defects = { ...draft.defects };
+    for (const item of group.items) {
+      if (answers[item.key] !== undefined) continue;
+      answers[item.key] = "pass";
+      // A blank row cannot legitimately hold a defect record (setAnswer seeds one only on
+      // "defect"), but if one were ever there it would be an orphan on a Pass row — the same
+      // false entry setAnswer prunes.
+      delete defects[item.key];
+    }
+    return { ...draft, answers, defects };
   });
 }
 

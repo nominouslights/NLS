@@ -9,6 +9,7 @@ import {
   CERTIFIED_STORE_VERSION,
   hasDraft,
   INSPECTION_STORE_VERSION,
+  markSectionOk,
   recordCertification,
   setAnswer,
   setDefect,
@@ -22,11 +23,11 @@ import {
   type LocalCertification,
 } from "./inspectionStore";
 import { today } from "./data";
-import { itemsFor } from "./inspectionForm";
+import { itemsFor, NL_PTI_01, RETIRED_KEYS } from "./inspectionForm";
 
 // The DVIR draft store.
 //
-// What is being protected here is a driver's whole NL-PTI-01 walk-around — 28 to 82 answers
+// What is being protected here is a driver's whole NL-PTI-01 walk-around — 28 to 64 answers
 // depending on the unit and the half of the form — and the honesty of a compliance record.
 // Every test below is a failure mode somebody would otherwise hit in a vehicle: yesterday's
 // pre-trip resuming into today's certification, a vehicle reassignment silently re-attributing
@@ -339,6 +340,54 @@ describe("draft rejection", () => {
     expect(unanswered).toHaveLength(PRE_KEYS.length - 1);
   });
 
+  it("drops a rev 2 pre-trip draft's RETIRED keys on load, and leaves their replacements blank", () => {
+    // NL-PTI-01 rev 3 consolidated the non-NSC pre-trip rows (engine bay 10 → 3, remote/winter
+    // kit 5 → 1, comms 4 → 1) and removed the duplicate interior-lights group. The draft SHAPE
+    // did not change, so INSPECTION_STORE_VERSION was deliberately not bumped and a rev 2
+    // draft still loads — which makes this filter the whole defence. What it must guarantee:
+    //   • no retired key survives load, so none can reach a payload;
+    //   • the replacement row reads unanswered — an answer to "Engine oil" is NOT an answer to
+    //     "Engine fluid levels", which also covers coolant, power steering and washer fluid.
+    //     RETIRED_KEYS is display metadata, never a mapping to carry answers across;
+    //   • every surviving key's answer, note and defect is kept.
+    expect(INSPECTION_STORE_VERSION).toBe(3);
+    const retired = [...RETIRED_KEYS.keys()];
+    const replacements = new Set(RETIRED_KEYS.values());
+    expect(retired.length).toBeGreaterThan(0);
+    for (const key of retired) expect(PRE_KEYS).not.toContain(key);
+    for (const key of replacements) expect(PRE_KEYS).toContain(key);
+
+    const kept = PRE_KEYS.filter((k) => !replacements.has(k));
+    const rev2Answers: Record<string, string> = Object.fromEntries([
+      ...retired.map((k) => [k, "pass"]),
+      ...kept.map((k) => [k, "pass"]),
+    ]);
+    rev2Answers["Survival kit"] = "defect";
+    seed(
+      draftKey("PreTrip", "VEH-11"),
+      validDraft({
+        answers: rev2Answers as Record<string, "pass" | "defect">,
+        notes: { "Engine oil": "topped up", [ITEM_B]: "fine" },
+        defects: {
+          "Survival kit": { severity: "Major", note: "no blankets" },
+          "Interior: Brake lights": { severity: "Minor", note: "dim" },
+        },
+      }),
+    );
+
+    const draft = getDraft("PreTrip", "VEH-11");
+    if (!draft) throw new Error("a rev 2 v3 draft should still load");
+    for (const key of retired) {
+      expect(draft.answers[key]).toBeUndefined();
+      expect(draft.notes[key]).toBeUndefined();
+      expect(draft.defects[key]).toBeUndefined();
+    }
+    for (const key of replacements) expect(draft.answers[key]).toBeUndefined();
+    expect(Object.keys(draft.answers).sort()).toEqual([...kept].sort());
+    expect(draft.notes).toEqual({ [ITEM_B]: "fine" });
+    expect(draft.defects).toEqual({});
+  });
+
   it("drops an answer or severity that is not one of the known literals", () => {
     seed(
       draftKey("PreTrip", "VEH-11"),
@@ -353,6 +402,91 @@ describe("draft rejection", () => {
     // The defect row survives but ungraded, so the review step can still demand a severity
     // rather than silently submitting a made-up one.
     expect(draft?.defects[ITEM_B]).toEqual({ severity: null, note: "x" });
+  });
+});
+
+describe("markSectionOk — the per-section All OK write", () => {
+  // The shortcut's compliance rules are enforced HERE, at the one write, so they hold for any
+  // caller. lib/inspectionSteps.test.ts pins when it is offered; Inspection.test.tsx the screen.
+  const NL02_PRE = itemsFor("NL-02", "PreTrip");
+  const CONTROLS = NL02_PRE.find((g) => g.key === "Controls & Instruments");
+  if (!CONTROLS) throw new Error("no Controls & Instruments sub-group");
+  const [C0, C1, C2, ...C_REST] = CONTROLS.items.map((i) => i.key);
+
+  it("fills every blank row of the sub-group with Pass", () => {
+    const draft = markSectionOk("PreTrip", "VEH-11", "NL-02", CONTROLS.key);
+    for (const item of CONTROLS.items) expect(draft.answers[item.key]).toBe("pass");
+    expect(Object.keys(draft.answers)).toHaveLength(CONTROLS.items.length);
+  });
+
+  it("never overwrites a Defect, an N/A or a Pass, and leaves the defect record and notes alone", () => {
+    setAnswer("PreTrip", "VEH-11", C0, "defect");
+    setDefect("PreTrip", "VEH-11", C0, { severity: "Major", note: "steering play" });
+    setAnswer("PreTrip", "VEH-11", C1, "na");
+    setNote("PreTrip", "VEH-11", C1, "not fitted");
+    setAnswer("PreTrip", "VEH-11", C2, "pass");
+
+    const draft = markSectionOk("PreTrip", "VEH-11", "NL-02", CONTROLS.key);
+    expect(draft.answers[C0]).toBe("defect");
+    expect(draft.defects[C0]).toEqual({ severity: "Major", note: "steering play" });
+    expect(draft.answers[C1]).toBe("na");
+    expect(draft.notes[C1]).toBe("not fitted");
+    expect(draft.answers[C2]).toBe("pass");
+    for (const key of C_REST) expect(draft.answers[key]).toBe("pass");
+  });
+
+  it("touches ONE sub-group only — every other row stays blank", () => {
+    const draft = markSectionOk("PreTrip", "VEH-11", "NL-02", CONTROLS.key);
+    const inGroup = new Set(CONTROLS.items.map((i) => i.key));
+    for (const key of PRE_KEYS) {
+      if (!inGroup.has(key)) expect(draft.answers[key]).toBeUndefined();
+    }
+  });
+
+  it("narrows to the unit: on NL-01 it never marks an NL-02-only row", () => {
+    const nl01Keys = new Set(itemsFor("NL-01", "PreTrip").flatMap((g) => g.items.map((i) => i.key)));
+    const draft = markSectionOk("PreTrip", "VEH-11", "NL-01", CONTROLS.key);
+    const marked = Object.keys(draft.answers);
+    expect(marked.length).toBeGreaterThan(0);
+    expect(marked.length).toBeLessThan(CONTROLS.items.length);
+    for (const key of marked) expect(nl01Keys.has(key)).toBe(true);
+  });
+
+  it("fills nothing for an unknown group, or for a group not on this half of the form", () => {
+    expect(markSectionOk("PreTrip", "VEH-11", "NL-02", "Everything").answers).toEqual({});
+    // Close-Out is post-trip only.
+    expect(NL_PTI_01.some((g) => g.key === "Close-Out")).toBe(true);
+    expect(markSectionOk("PreTrip", "VEH-11", "NL-02", "Close-Out").answers).toEqual({});
+  });
+
+  it("leaves every filled row individually changeable afterwards", () => {
+    markSectionOk("PreTrip", "VEH-11", "NL-02", CONTROLS.key);
+    const draft = setAnswer("PreTrip", "VEH-11", C1, "defect");
+    expect(draft.answers[C1]).toBe("defect");
+    expect(draft.defects[C1]).toEqual({ severity: null, note: "" });
+    expect(draft.answers[C0]).toBe("pass");
+  });
+
+  it("writes nothing but ordinary answers — no section marker anywhere in the draft", () => {
+    // Nothing on the wire says "section passed", and nothing in storage does either: the filled
+    // rows are indistinguishable from tapped ones.
+    const draft = markSectionOk("PreTrip", "VEH-11", "NL-02", CONTROLS.key);
+    expect(Object.keys(draft).sort()).toEqual(
+      [
+        "answers",
+        "defects",
+        "location",
+        "mode",
+        "notes",
+        "odometerKm",
+        "startedAt",
+        "startedOn",
+        "stepId",
+        "v",
+        "vehicleId",
+      ].sort(),
+    );
+    expect(new Set(Object.values(draft.answers))).toEqual(new Set(["pass"]));
   });
 });
 

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { colors, fonts } from "@/lib/theme";
-import { gap, type } from "@/lib/tablet";
+import { gap, type, wizard } from "@/lib/tablet";
 import { Panel } from "@/components/ui/Panel";
 import { TouchButton } from "@/components/ui-tablet/TouchButton";
 import { StatusBanner } from "@/components/ui-tablet/StatusBanner";
@@ -16,9 +16,11 @@ import { enqueue } from "@/lib/sync/queue";
 import {
   buildSteps,
   checkStepId,
+  nextAfterSection,
   progressFraction,
   progressLabel,
   resolveStep,
+  sectionShortcut,
 } from "@/lib/inspectionSteps";
 import {
   itemsFor,
@@ -29,6 +31,7 @@ import {
   certifiedToday,
   discardDraft,
   getDraft,
+  markSectionOk,
   recordCertification,
   setAnswer,
   setDefect,
@@ -75,7 +78,7 @@ import type { CheckState, DefectSeverity, InspectionMode } from "@/lib/types";
 // three or four screens deep, with the legal attestation at the bottom. On a dash-mounted
 // 10-inch tablet, in northern daylight, with gloves on, a driver loses their place and sees the
 // attestation least. That was true of the old 22-item list and is unarguable now the checklist
-// is form NL-PTI-01: 82 pre-trip rows (71 on NL-01), and the 28-row en-route post-trip.
+// is form NL-PTI-01: 64 pre-trip rows (53 on NL-01, rev 3), and the 28-row en-route post-trip.
 //
 // THE CHECKLIST IS NOT MOCK DATA. It comes from lib/inspectionForm.ts, a byte-identical copy of
 // Dispatcher/lib/inspectionForm.ts, narrowed by itemsFor(unit, mode). `unit` is the assigned
@@ -174,6 +177,21 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
     goTo((target ?? nextSteps[nextSteps.length - 1]).id);
   }
 
+  /**
+   * The per-section "All OK", after the driver has seen the sub-group's rows and tapped
+   * "Confirm all OK". ONE write, and the store enforces the rules (one sub-group, blanks only,
+   * this unit's rows only). Then on to the next blank check after the sub-group, or Review —
+   * computed from the UPDATED answers, as answer() does.
+   */
+  function confirmSection(groupKey: string) {
+    const updated = markSectionOk(mode, vehicleId, unit, groupKey);
+    const nextSteps = buildSteps(updated.answers, unit, mode);
+    goTo(nextAfterSection(nextSteps, updated.answers, groupKey).id);
+  }
+
+  const section =
+    step.kind === "check" ? sectionShortcut(steps, answers, step.id, wizard.sectionMaxRows) : null;
+
   // --- submit -------------------------------------------------------------
 
   async function submit() {
@@ -208,7 +226,7 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
     //    stored as InspectionChecklistItem.Item, and half of the `(InspectionId, Item)` address
     //    a defect is filed against. Sending the label instead would file defects at addresses
     //    the Dispatch Console cannot resolve — and several labels deliberately differ from
-    //    their key (the "(NL-02)" suffixes, and the four "Interior: " rows).
+    //    their key (the "(NL-02)" suffixes; revs 1-2 also had four "Interior: " rows).
     //  • `state` IS THE TRI-STATE, and N/A is no longer dropped. ChecklistItemState is
     //    `Ok | Defect | NotApplicable`; this app used to OMIT every N/A row and name it in a
     //    client-only `naItems` field, because Passed was a bare bool and `passed: true` for an
@@ -414,7 +432,7 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
       progressLabel={progressLabel(step)}
       progressFraction={progressFraction(step)}
       // The review chip must not show a teal check while anything is blank: `progressLabel`
-      // reports POSITION ("Review · 71 of 71" = you are past every check), not completeness,
+      // reports POSITION ("Review · 53 of 53" = you are past every check), not completeness,
       // so the colour and glyph are what have to carry "still something owed". The body names
       // exactly what.
       progressKind={
@@ -503,6 +521,8 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
           note={notes[step.itemId] ?? ""}
           onAnswer={(next) => answer(step.itemId, next)}
           onNote={(next) => setNote(mode, vehicleId, step.itemId, next)}
+          section={section}
+          onSectionOk={section ? () => confirmSection(section.groupKey) : undefined}
         />
       ) : null}
 

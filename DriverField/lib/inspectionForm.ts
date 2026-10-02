@@ -36,18 +36,36 @@
 //     (rock strike, a clipped mirror, fumes, a cap left off at a fuel stop), the five
 //     exterior lamps (burn out in use), steering, accelerator, gauges, wipers, defrost,
 //     and the three brake checks (all felt or seen while driving).
-//   - "PreTripOnly": everything else — fluid levels, belts, hoses, battery, wiring,
-//     radiator, block-heater cord, shocks, U-bolts, axles, bearings, tread depth,
-//     pressure, valve stems, frame, body panels (Close-Out's "no new damage" covers
-//     them), entry steps, beacon, marker lights, reflectors, back-up and plate lights,
-//     driver's seat, horn, interior mirrors, doors, exits, interior lighting and
-//     cleanliness, the whole Interior Lights group (the exterior walk covers the same
-//     lamps), all Emergency Equipment, Seating & Cargo, and Comms & Nav.
+//   - "PreTripOnly": everything else — engine fluid levels, belts/hoses/radiator,
+//     battery/wiring/block-heater cord, brake fluid, shocks, U-bolts, axles, bearings,
+//     tread depth, pressure, valve stems, frame, body panels (Close-Out's "no new
+//     damage" covers them), entry steps, beacon, marker lights, reflectors, back-up
+//     and plate lights, driver's seat, horn, interior mirrors, doors, exits, interior
+//     lighting and cleanliness, all Emergency Equipment, Seating & Cargo, and Comms &
+//     Nav.
 //   - "PostTripOnly": En-Route Observations and Close-Out.
 // The resulting post-trip is the same 28 checks for every unit: no kept row is
 // NL02Only. Reversing a choice is a one-field `mode` edit on that row.
 //
-// Dependency-free by design: plain data and two pure functions, no imports, no side
+// WHY THE PRE-TRIP IS SHORTER (rev 3). The owner asked for a faster pre-trip with NO
+// change to NSC 13 Schedule 2 / Schedule B or SFC coverage. The rule applied: every
+// row that maps to a Schedule 2 part stays its own row with its key unchanged; only
+// rows that are NOT NSC requirements, plus exact duplicates, were combined.
+//   - Engine Bay: Schedule 2 has NO engine-fluid, belt, hose, radiator, battery or
+//     wiring part (its only fluid check is hydraulic brake fluid, 18.1 / 18.6M, which
+//     stays its own row). Rev 2 had mis-tagged ten such rows `basis: "NSC13"`; they
+//     are now three company rows (`basis: "NorthernLink"`). The fresh-leak check
+//     ("Ground beneath the vehicle") and the fuel/water separator stay as they were.
+//   - Lights & Signals — Interior: removed. Its four rows were the same lamps the
+//     Area B exterior walk already verifies — an exact duplicate.
+//   - Emergency Equipment: the five company winter/remote items are one "Remote /
+//     winter kit" row. Fire extinguisher, first aid kit, warning triangles (NSC
+//     Part 10), passenger seatbelts and the spill kit (its own Major site-entry rule)
+//     stay separate.
+//   - Communications & Navigation: four company rows are one.
+// Every removed key is listed in `RETIRED_KEYS` below with the row that replaced it.
+//
+// Dependency-free by design: plain data and a few pure functions, no imports, no side
 // effects. It is imported by the console, the printable form composer and (via copy)
 // the Driver Field App, so it must stay safe to pull into any of them.
 //
@@ -61,10 +79,15 @@
 //   - "(NL-02)" / "(NL-02, diesel)" suffixes are stripped from the key so wire values
 //     stay clean — e.g. label "Fuel / water separator (NL-02, diesel)" has the key
 //     "Fuel / water separator".
-//   - The four Area C interior light checks repeat the names of Area B's exterior
-//     light checks (they are the same lamps verified from the driver's seat), so every
-//     row in "Lights & Signals — Interior" is prefixed "Interior: ". That prefix is
-//     applied to all four consistently, never case-by-case.
+//   - Revs 1 and 2 had four Area C interior light checks that repeated the names of
+//     Area B's exterior light checks (the same lamps verified from the driver's seat),
+//     so every row in "Lights & Signals — Interior" was prefixed "Interior: ". That
+//     group was RETIRED in rev 3 as a duplicate of the exterior walk. The four
+//     "Interior: …" keys remain reserved — stored inspections and defects still carry
+//     them, so they must never be reused by a new row (see `RETIRED_KEYS`).
+//   - A key that leaves the catalogue is never deleted from memory: it moves to
+//     `RETIRED_KEYS`, and no current row may ever take it again. Reusing one would
+//     silently re-attach old answers and open defects to a different check.
 //
 // SEVERITY IS DISPLAY TEXT, NEVER COMPUTED. `category` is the form's default and
 // `categoryNote` is the form's own qualifier reproduced verbatim ("Major if leaking",
@@ -127,33 +150,36 @@ export const NL_PTI_01: InspectionSubGroup[] = [
     area: "A",
     items: [
       {
-        key: "Engine oil",
-        label: "Engine oil",
-        checkFor: "Level at/near full mark on dipstick; not milky or burnt-smelling",
+        key: "Engine fluid levels",
+        label: "Engine fluid levels",
+        checkFor:
+          "Oil, coolant, power-steering (if equipped) and washer fluid at their marks; no milky oil, rust-coloured coolant or wet spots",
         category: "Major",
-        categoryNote: "Major if critically low",
+        categoryNote: "Major if oil or coolant is critically low or leaking",
         scope: "All",
-        basis: "NSC13",
+        basis: "NorthernLink",
         mode: "PreTripOnly",
       },
       {
-        key: "Coolant",
-        label: "Coolant",
-        checkFor: 'At "full cold" mark in reservoir; no rust colour or oily sheen',
+        key: "Belts, hoses & radiator",
+        label: "Belts, hoses & radiator",
+        checkFor:
+          "Belts not cracked, frayed or glazed and properly tensioned; hoses free of cracks, bulges and leaks; radiator fins clear",
         category: "Major",
-        categoryNote: "Major if low or leaking",
+        categoryNote: "Major if a belt is slipping or cracked through, or a hose is leaking",
         scope: "All",
-        basis: "NSC13",
+        basis: "NorthernLink",
         mode: "PreTripOnly",
       },
       {
-        key: "Power steering fluid (if equipped)",
-        label: "Power steering fluid (if equipped)",
-        checkFor: "At marked level; no visible leak",
-        category: "Minor",
-        categoryNote: "Minor / Major if leaking",
+        key: "Battery, wiring & block-heater cord",
+        label: "Battery, wiring & block-heater cord",
+        checkFor:
+          "Battery secure, terminals clean and tight, case intact; wiring secured and insulated; block-heater cord and plug intact (winter)",
+        category: "Major",
+        categoryNote: "Major if loose, heavily corroded, or a conductor is exposed",
         scope: "All",
-        basis: "NSC13",
+        basis: "NorthernLink",
         mode: "PreTripOnly",
       },
       {
@@ -161,55 +187,6 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         label: "Brake fluid reservoir (hydraulic)",
         checkFor: 'At or above "MIN" line, cap seated, no fluid around master cylinder',
         category: "Major",
-        scope: "All",
-        basis: "NSC13",
-        mode: "PreTripOnly",
-      },
-      {
-        key: "Washer fluid",
-        label: "Washer fluid",
-        checkFor: "Reservoir topped up",
-        category: "Minor",
-        scope: "All",
-        basis: "NSC13",
-        mode: "PreTripOnly",
-      },
-      {
-        key: "Drive belts",
-        label: "Drive belts",
-        checkFor: "No cracking, fraying or glazing; proper tension, no squeal on start-up",
-        category: "Major",
-        categoryNote: "Major if slipping or cracked through",
-        scope: "All",
-        basis: "NSC13",
-        mode: "PreTripOnly",
-      },
-      {
-        key: "Hoses (coolant / heater)",
-        label: "Hoses (coolant / heater)",
-        checkFor: "No cracks, bulges, wet spots or chafing against other parts",
-        category: "Major",
-        categoryNote: "Major if leaking",
-        scope: "All",
-        basis: "NSC13",
-        mode: "PreTripOnly",
-      },
-      {
-        key: "Battery & terminals",
-        label: "Battery & terminals",
-        checkFor: "Securely mounted; terminals clean and tight; case not swollen or cracked",
-        category: "Major",
-        categoryNote: "Major if loose or heavily corroded",
-        scope: "All",
-        basis: "NSC13",
-        mode: "PreTripOnly",
-      },
-      {
-        key: "Wiring / harness",
-        label: "Wiring / harness",
-        checkFor: "Secured and insulated; no bare copper visible near heat or moving parts",
-        category: "Major",
-        categoryNote: "Major if exposed near a hazard",
         scope: "All",
         basis: "NSC13",
         mode: "PreTripOnly",
@@ -225,15 +202,6 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         mode: "PreTripOnly",
       },
       {
-        key: "Radiator / condenser",
-        label: "Radiator / condenser",
-        checkFor: "Clear of debris; fins not crushed or blocked",
-        category: "Minor",
-        scope: "All",
-        basis: "NSC13",
-        mode: "PreTripOnly",
-      },
-      {
         key: "Ground beneath the vehicle",
         label: "Ground beneath the vehicle",
         checkFor:
@@ -243,16 +211,6 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         scope: "All",
         basis: "NSC13",
         mode: "Both",
-      },
-      {
-        key: "Block heater cord (winter)",
-        label: "Block heater cord (winter)",
-        checkFor: "Cord and plug intact; insulation unbroken, no exposed conductor",
-        category: "Minor",
-        categoryNote: "Major if conductor exposed",
-        scope: "All",
-        basis: "NorthernLink",
-        mode: "PreTripOnly",
       },
     ],
   },
@@ -610,7 +568,8 @@ export const NL_PTI_01: InspectionSubGroup[] = [
       {
         key: "Gauges (oil pressure, temperature, volt/ammeter, fuel)",
         label: "Gauges (oil pressure, temperature, volt/ammeter, fuel)",
-        checkFor: "Normal readings; warning lights extinguish after the start-up self-test",
+        checkFor:
+          "Normal readings; warning lights extinguish after the start-up self-test; turn-signal and high-beam indicators work",
         category: "Major",
         categoryNote: "Major if a warning light stays on",
         scope: "All",
@@ -723,52 +682,6 @@ export const NL_PTI_01: InspectionSubGroup[] = [
     ],
   },
   {
-    // Every row here is prefixed "Interior: " in its key — see the header comment.
-    // These are the same lamps as the Area B exterior rows, verified from the driver's
-    // seat, so the labels repeat and only the prefix keeps the wire keys distinct.
-    key: "Lights & Signals — Interior",
-    title: "Lights & Signals — Interior",
-    area: "C",
-    items: [
-      {
-        key: "Interior: Headlights (dash switch, low & high)",
-        label: "Headlights (dash switch, low & high)",
-        checkFor: "Dash indicator confirms activation",
-        category: "Major",
-        scope: "All",
-        basis: "NSC13",
-        mode: "PreTripOnly",
-      },
-      {
-        key: "Interior: Turn signals (left / right)",
-        label: "Turn signals (left / right)",
-        checkFor: "Dash indicator flashes with audible clicker",
-        category: "Major",
-        scope: "All",
-        basis: "NSC13",
-        mode: "PreTripOnly",
-      },
-      {
-        key: "Interior: Hazard lights",
-        label: "Hazard lights",
-        checkFor: "Activates all four corners",
-        category: "Major",
-        scope: "All",
-        basis: "NSC13",
-        mode: "PreTripOnly",
-      },
-      {
-        key: "Interior: Brake lights",
-        label: "Brake lights",
-        checkFor: "Press the pedal; confirm with a helper or by reflection in a wall/window",
-        category: "Major",
-        scope: "All",
-        basis: "NSC13",
-        mode: "PreTripOnly",
-      },
-    ],
-  },
-  {
     key: "Emergency Equipment",
     title: "Emergency Equipment",
     area: "C",
@@ -820,49 +733,12 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         mode: "PreTripOnly",
       },
       {
-        key: "Survival kit",
-        label: "Survival kit",
-        checkFor: "Present and stocked for the season — blankets, heat source, rations",
-        category: "Major",
-        categoryNote: "Major Nov–Apr",
-        scope: "All",
-        basis: "NorthernLink",
-        mode: "PreTripOnly",
-      },
-      {
-        key: "Traction aids",
-        label: "Traction aids",
-        checkFor: "Chains, sand or traction mats carried and reachable",
+        key: "Remote / winter kit",
+        label: "Remote / winter kit",
+        checkFor:
+          "Survival kit stocked for the season (blankets, heat source, rations); traction aids; approved spare fuel can filled and secured; jumper cables or a charged booster pack; reflective vest",
         category: "Minor",
-        categoryNote: "Major Nov–Apr",
-        scope: "All",
-        basis: "NorthernLink",
-        mode: "PreTripOnly",
-      },
-      {
-        key: "Extra fuel",
-        label: "Extra fuel",
-        checkFor: "Approved can carried, filled and secured",
-        category: "Minor",
-        categoryNote: "Major if the run has no fuel stop",
-        scope: "All",
-        basis: "NorthernLink",
-        mode: "PreTripOnly",
-      },
-      {
-        key: "Jumper cables / booster pack",
-        label: "Jumper cables / booster pack",
-        checkFor: "Present; booster pack holding a charge",
-        category: "Minor",
-        scope: "All",
-        basis: "NorthernLink",
-        mode: "PreTripOnly",
-      },
-      {
-        key: "Reflective safety vest",
-        label: "Reflective safety vest",
-        checkFor: "Present in the cab and wearable",
-        category: "Minor",
+        categoryNote: "Major Nov–Apr, or if the run has no fuel stop",
         scope: "All",
         basis: "NorthernLink",
         mode: "PreTripOnly",
@@ -951,38 +827,12 @@ export const NL_PTI_01: InspectionSubGroup[] = [
     area: "C",
     items: [
       {
-        key: "Cell phone charged",
-        label: "Cell phone charged",
-        checkFor: "Charged, and a charger is in the vehicle",
+        key: "Comms & navigation",
+        label: "Comms & navigation",
+        checkFor:
+          "Cell phone charged with a charger aboard; Starlink/satellite terminal connected; GPS on with the day's route loaded; emergency contacts list in the cab and current",
         category: "Minor",
-        scope: "All",
-        basis: "NorthernLink",
-        mode: "PreTripOnly",
-      },
-      {
-        key: "Starlink / satellite comm connected",
-        label: "Starlink / satellite comm connected",
-        checkFor: "Terminal powers up and reports a connection",
-        category: "Minor",
-        categoryNote: "Major if the run leaves cell coverage",
-        scope: "All",
-        basis: "NorthernLink",
-        mode: "PreTripOnly",
-      },
-      {
-        key: "GPS / navigation",
-        label: "GPS / navigation",
-        checkFor: "Powers up; the day's route is loaded",
-        category: "Minor",
-        scope: "All",
-        basis: "NorthernLink",
-        mode: "PreTripOnly",
-      },
-      {
-        key: "Emergency contacts list",
-        label: "Emergency contacts list",
-        checkFor: "Present in the cab and current",
-        category: "Minor",
+        categoryNote: "Major if the run leaves cell coverage and satellite comms are down",
         scope: "All",
         basis: "NorthernLink",
         mode: "PreTripOnly",
@@ -1077,6 +927,64 @@ export const NL_PTI_01: InspectionSubGroup[] = [
   },
 ];
 
+/**
+ * Every key that has left the catalogue, mapped to the CURRENT key of the row that
+ * now covers the same check. Rev 3 retired these (see the header comment).
+ *
+ * THIS IS DISPLAY METADATA, NEVER A WIRE MAPPING. Stored inspections and open
+ * defects keep the old string forever — the backend addresses a defect by
+ * `(InspectionId, Item)` with `Item` exactly as stored. So:
+ *   - a saved record holding any key not in today's catalogue opens read-only and
+ *     prints its rows verbatim; it is never rebuilt onto the replacement rows;
+ *   - an open defect filed against a retired key is resolved, and re-reported, under
+ *     that same old key;
+ *   - the replacement may be shown as "now covered by …" text and nothing more.
+ * A retired key may never be reused by a current row (pinned by a test).
+ */
+export const RETIRED_KEYS: ReadonlyMap<string, string> = new Map([
+  // Engine Bay — not Schedule 2 parts; folded into three company rows.
+  ["Engine oil", "Engine fluid levels"],
+  ["Coolant", "Engine fluid levels"],
+  ["Power steering fluid (if equipped)", "Engine fluid levels"],
+  ["Washer fluid", "Engine fluid levels"],
+  ["Drive belts", "Belts, hoses & radiator"],
+  ["Hoses (coolant / heater)", "Belts, hoses & radiator"],
+  ["Radiator / condenser", "Belts, hoses & radiator"],
+  ["Battery & terminals", "Battery, wiring & block-heater cord"],
+  ["Wiring / harness", "Battery, wiring & block-heater cord"],
+  ["Block heater cord (winter)", "Battery, wiring & block-heater cord"],
+  // Lights & Signals — Interior — the same lamps as the exterior walk.
+  ["Interior: Headlights (dash switch, low & high)", "Headlights — low & high beam, both sides"],
+  ["Interior: Turn signals (left / right)", "Turn signals — front & rear, both sides"],
+  ["Interior: Hazard lights", "Hazard (4-way) lights"],
+  ["Interior: Brake lights", "Brake lights (incl. centre high-mount if equipped)"],
+  // Emergency Equipment — company winter/remote items.
+  ["Survival kit", "Remote / winter kit"],
+  ["Traction aids", "Remote / winter kit"],
+  ["Extra fuel", "Remote / winter kit"],
+  ["Jumper cables / booster pack", "Remote / winter kit"],
+  ["Reflective safety vest", "Remote / winter kit"],
+  // Communications & Navigation — company items.
+  ["Cell phone charged", "Comms & navigation"],
+  ["Starlink / satellite comm connected", "Comms & navigation"],
+  ["GPS / navigation", "Comms & navigation"],
+  ["Emergency contacts list", "Comms & navigation"],
+]);
+
+/**
+ * The current row that covers a retired key's check, for "now covered by …" display
+ * text. `null` for a current key or a key this file has never known. Display only —
+ * never send the result as a defect's or checklist row's `item`.
+ */
+export function retiredKeyReplacement(key: string): InspectionItem | null {
+  const target = RETIRED_KEYS.get(key);
+  if (target == null) return null;
+  for (const group of NL_PTI_01) {
+    for (const item of group.items) if (item.key === target) return item;
+  }
+  return null;
+}
+
 /** Units this form knows how to narrow for. Anything else gets the full superset. */
 const NL_01 = "nl-01";
 
@@ -1108,8 +1016,8 @@ const NL_01 = "nl-01";
  * 4. A sub-group whose items were all filtered out is dropped entirely, so no
  *    empty heading is ever printed or rendered (pre-trip loses "En-Route
  *    Observations" and "Close-Out" this way; post-trip loses every group with no
- *    "Both" row, e.g. "Lights & Signals — Interior", "Emergency Equipment",
- *    "Seating & Cargo" and "Communications & Navigation").
+ *    "Both" row, e.g. "Emergency Equipment", "Seating & Cargo" and
+ *    "Communications & Navigation").
  *
  * Pure: no imports, no mutation of `NL_PTI_01`, no side effects.
  */

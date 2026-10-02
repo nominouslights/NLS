@@ -3,9 +3,12 @@ import {
   buildSteps,
   checkStepId,
   defectStepId,
+  nextAfterSection,
   progressFraction,
   progressLabel,
   resolveStep,
+  sectionShortcut,
+  SECTION_SHORTCUT_MIN,
   type CheckStep,
   type DefectStep,
   type InspectionStep,
@@ -16,19 +19,20 @@ import {
   NL_PTI_01,
   type InspectionFormMode,
 } from "./inspectionForm";
+import { wizard } from "./tablet";
 import type { CheckState } from "./types";
 
 // The DVIR wizard's step model, over form NL-PTI-01.
 //
 // The assertions that matter are about the PROGRESS DENOMINATOR and the ITEM KEYS. A driver
-// answering a legal attestation must be told exactly where they are; a chip reading "72 of 71"
+// answering a legal attestation must be told exactly where they are; a chip reading "54 of 53"
 // or a follow-up presented as a 72nd question is a trust failure, not a cosmetic one.
 //
 // THE DENOMINATOR IS NO LONGER ONE NUMBER, AND THAT IS WHAT THIS FILE EXISTS TO PIN.
 // It depends on the unit and on the half of the form. Rev 2 of NL-PTI-01 made the post-trip the
-// reduced en-route set — 28 checks for every unit, because no row kept on it is NL02Only — so
-// there are now THREE distinct right answers across the four forms: NL-01 pre 71, NL-02 pre 82,
-// and post 28 for both. The counts below are written out because they are the ACCEPTANCE
+// reduced en-route set — 28 checks for every unit, because no row kept on it is NL02Only — and
+// rev 3 consolidated the non-NSC pre-trip rows, so there are THREE distinct right answers across
+// the four forms: NL-01 pre 53, NL-02 pre 64, and post 28 for both. The counts below are written out because they are the ACCEPTANCE
 // CRITERION — what the paper form says — but every one of them is also asserted to equal what
 // the code DERIVES from the catalogue. The code must never carry a literal; the test must. If
 // the catalogue legitimately changes, exactly these numbers move, and somebody has to look at
@@ -45,9 +49,9 @@ const NL01 = "NL-01";
 const NL02 = "NL-02";
 
 const DENOMINATORS: { unit: string; mode: InspectionFormMode; expected: number }[] = [
-  { unit: NL01, mode: "PreTrip", expected: 71 },
+  { unit: NL01, mode: "PreTrip", expected: 53 },
   { unit: NL01, mode: "PostTrip", expected: 28 },
-  { unit: NL02, mode: "PreTrip", expected: 82 },
+  { unit: NL02, mode: "PreTrip", expected: 64 },
   { unit: NL02, mode: "PostTrip", expected: 28 },
 ];
 
@@ -125,9 +129,9 @@ describe("the denominator", () => {
     // itemsFor's fail-safe direction: more questions when we do not know what is being
     // inspected. Defaulting an unknown unit to NL-01 would silently drop eleven rows from a
     // compliance pre-trip. (The post-trip has no NL02Only row, so it is 28 either way.)
-    expect(checkCount(null, "PreTrip")).toBe(82);
-    expect(checkCount("", "PreTrip")).toBe(82);
-    expect(checkCount("NL-99", "PreTrip")).toBe(82);
+    expect(checkCount(null, "PreTrip")).toBe(64);
+    expect(checkCount("", "PreTrip")).toBe(64);
+    expect(checkCount("NL-99", "PreTrip")).toBe(64);
     expect(checkCount(null, "PostTrip")).toBe(28);
     expect(checkCount("", "PostTrip")).toBe(28);
     expect(checkCount("NL-99", "PostTrip")).toBe(28);
@@ -175,14 +179,14 @@ describe("buildSteps", () => {
     const target = NL01_PRE_KEYS[7];
     const all = steps({ [target]: "defect" });
 
-    expect(all).toHaveLength(1 + 71 + 1 + 1);
+    expect(all).toHaveLength(1 + 53 + 1 + 1);
     const at = all.findIndex((s) => s.id === checkStepId(target));
     expect(all[at + 1].id).toBe(defectStepId(target));
   });
 
   it("keeps `of` at the derived count on every check even when EVERY item is a defect", () => {
     // The denominator cannot be inflated by a branch. This is the assertion that makes
-    // "72 of 71" unreachable rather than merely unlikely.
+    // "54 of 53" unreachable rather than merely unlikely.
     for (const { unit, mode, expected } of DENOMINATORS) {
       const answers = Object.fromEntries(
         keysFor(unit, mode).map((k) => [k, "defect" as CheckState]),
@@ -205,15 +209,15 @@ describe("buildSteps", () => {
     if (!defect) throw new Error("no defect step built");
 
     expect(defect.parentN).toBe(7);
-    expect(defect.parentOf).toBe(71);
-    expect(progressLabel(defect)).toBe("Follow-up · check 7 of 71");
+    expect(defect.parentOf).toBe(53);
+    expect(progressLabel(defect)).toBe("Follow-up · check 7 of 53");
     // Same position on the bar as its parent — the bar never moves backwards.
-    expect(progressFraction(defect)).toBe(7 / 71);
+    expect(progressFraction(defect)).toBe(7 / 53);
   });
 
   it("carries the sub-group, the area and the Check For text onto every step that needs them", () => {
     // ChecklistItemInput has a Group field, and CheckStep.tsx renders the area + sub-group line
-    // that makes a walk-around of up to 82 rows locatable. Losing either is a silent regression.
+    // that makes a walk-around of up to 64 rows locatable. Losing either is a silent regression.
     const answers = Object.fromEntries(
       NL01_PRE_KEYS.map((k) => [k, "defect" as CheckState]),
     );
@@ -252,7 +256,7 @@ describe("buildSteps", () => {
 
     const answers = Object.fromEntries(nl02Only.map((k) => [k, "defect" as CheckState]));
     const all = steps(answers, NL01, "PreTrip");
-    expect(all).toHaveLength(1 + 71 + 1);
+    expect(all).toHaveLength(1 + 53 + 1);
     expect(all.some((s) => s.kind === "defect")).toBe(false);
   });
 
@@ -315,8 +319,8 @@ describe("progress", () => {
   it("labels the odometer, a check and the review without a fraction lie", () => {
     const all = steps();
     expect(progressLabel(all[0])).toBe("Odometer & location");
-    expect(progressLabel(all[1])).toBe("Check 1 of 71");
-    expect(progressLabel(all[all.length - 1])).toBe("Review · 71 of 71");
+    expect(progressLabel(all[1])).toBe("Check 1 of 53");
+    expect(progressLabel(all[all.length - 1])).toBe("Review · 53 of 53");
   });
 
   it("never exceeds 1 or drops below 0, for any answer combination on any form", () => {
@@ -330,5 +334,187 @@ describe("progress", () => {
         expect(f).toBeLessThanOrEqual(1);
       }
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The per-section "All OK" shortcut (rev 3). The WRITE and its blanks-only rule are pinned in
+// lib/inspectionStore.test.ts (markSectionOk); the DOM flow, the confirm list and the payload in
+// components/screens/Inspection.test.tsx. This block pins WHEN it is offered and WHERE it lands.
+// ---------------------------------------------------------------------------
+
+/** The check steps of one sub-group on a form, in form order. */
+function groupChecks(
+  groupKey: string,
+  answers: Record<string, CheckState> = {},
+  unit: string | null = NL01,
+  mode: InspectionFormMode = "PreTrip",
+): CheckStep[] {
+  return checks(answers, unit, mode).filter((c) => c.groupKey === groupKey);
+}
+
+const MAX = wizard.sectionMaxRows;
+
+describe("sectionShortcut", () => {
+  it("carries the sub-group's catalogue key on every check and defect step", () => {
+    const groupKeys = new Set(NL_PTI_01.map((g) => g.key));
+    const answers = Object.fromEntries(NL01_PRE_KEYS.map((k) => [k, "defect" as CheckState]));
+    for (const step of steps(answers)) {
+      if (step.kind === "check" || step.kind === "defect") {
+        expect(groupKeys.has(step.groupKey)).toBe(true);
+      }
+    }
+  });
+
+  it("is offered on the first row of every multi-row sub-group of a fresh form, and only there", () => {
+    for (const { unit, mode } of DENOMINATORS) {
+      const all = steps({}, unit, mode);
+      for (const group of itemsFor(unit, mode)) {
+        const rows = groupChecks(group.key, {}, unit, mode);
+        const first = sectionShortcut(all, {}, rows[0].id, MAX);
+        if (rows.length >= SECTION_SHORTCUT_MIN) {
+          expect(first?.groupKey).toBe(group.key);
+          expect(first?.unanswered).toBe(rows.length);
+        } else {
+          // One row: the Pass tile IS the shortcut.
+          expect(first).toBeNull();
+        }
+        for (const later of rows.slice(1)) {
+          expect(sectionShortcut(all, {}, later.id, MAX)).toBeNull();
+        }
+      }
+    }
+  });
+
+  it("lists EVERY row of the sub-group by label, in form order, with its current answer", () => {
+    // The driver must see what they are certifying — including the rows they already answered,
+    // which the shortcut will not touch.
+    const rows = groupChecks("Controls & Instruments", {}, NL02);
+    const answers: Record<string, CheckState> = { [rows[0].itemId]: "defect" };
+    const s = sectionShortcut(steps(answers, NL02), answers, rows[1].id, MAX);
+    if (!s) throw new Error("shortcut not offered on the first blank row");
+
+    expect(s.rows.map((r) => r.label)).toEqual(rows.map((r) => r.label));
+    expect(s.rows.map((r) => r.checkFor)).toEqual(rows.map((r) => r.checkFor));
+    expect(s.rows[0].state).toBe("defect");
+    expect(s.rows.slice(1).every((r) => r.state === null)).toBe(true);
+    expect(s.unanswered).toBe(rows.length - 1);
+    expect(s.title).toBe("Controls & Instruments");
+  });
+
+  it("moves to the next blank row once earlier rows are answered, counting only the blanks", () => {
+    const rows = groupChecks("Tires & Wheels");
+    const answers: Record<string, CheckState> = {
+      [rows[0].itemId]: "pass",
+      [rows[1].itemId]: "na",
+    };
+    const all = steps(answers);
+    expect(sectionShortcut(all, answers, rows[0].id, MAX)).toBeNull();
+    expect(sectionShortcut(all, answers, rows[1].id, MAX)).toBeNull();
+    expect(sectionShortcut(all, answers, rows[2].id, MAX)?.unanswered).toBe(rows.length - 2);
+  });
+
+  it("is not offered on an answered row, even the first one", () => {
+    const rows = groupChecks("Tires & Wheels");
+    const answers: Record<string, CheckState> = { [rows[0].itemId]: "pass" };
+    expect(sectionShortcut(steps(answers), answers, rows[0].id, MAX)).toBeNull();
+  });
+
+  it("is not offered when a single blank would be left — that is just the Pass tile", () => {
+    const rows = groupChecks("Brakes — Functional Test");
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+    const answers: Record<string, CheckState> = Object.fromEntries(
+      rows.slice(0, -1).map((r) => [r.itemId, "pass" as CheckState]),
+    );
+    expect(sectionShortcut(steps(answers), answers, rows[rows.length - 1].id, MAX)).toBeNull();
+  });
+
+  it("is never offered on the odometer, a defect follow-up or the review step", () => {
+    const target = NL01_PRE_KEYS[0];
+    const answers: Record<string, CheckState> = { [target]: "defect" };
+    const all = steps(answers);
+    expect(sectionShortcut(all, answers, "odometer", MAX)).toBeNull();
+    expect(sectionShortcut(all, answers, defectStepId(target), MAX)).toBeNull();
+    expect(sectionShortcut(all, answers, "review", MAX)).toBeNull();
+  });
+
+  it("is withheld for a sub-group too large for the confirm panel, rather than clipped", () => {
+    const rows = groupChecks("Controls & Instruments", {}, NL02);
+    const all = steps({}, NL02);
+    expect(sectionShortcut(all, {}, rows[0].id, rows.length)).not.toBeNull();
+    expect(sectionShortcut(all, {}, rows[0].id, rows.length - 1)).toBeNull();
+  });
+
+  it("fits every sub-group of every form inside the confirm panel's height budget", () => {
+    // THE BUDGET PIN. lib/tablet.ts budgets the label-only, two-column confirm list for
+    // `wizard.sectionMaxRows` rows — the largest rev 3 sub-group, Controls & Instruments at 12
+    // on NL-02. A catalogue change that grows a sub-group past it would silently lose that
+    // section's shortcut; this makes it a visible failure instead, so somebody re-does the
+    // height budget rather than nobody noticing.
+    const largest = Math.max(
+      ...DENOMINATORS.flatMap(({ unit, mode }) => itemsFor(unit, mode).map((g) => g.items.length)),
+      ...itemsFor(null, "PreTrip").map((g) => g.items.length),
+    );
+    expect(largest).toBe(12);
+    expect(largest).toBeLessThanOrEqual(MAX);
+  });
+
+  it("narrows to the unit: an NL-01 confirm list never shows an NL-02-only row", () => {
+    const nl02Only = new Set(
+      keysFor(NL02, "PreTrip").filter((k) => !keysFor(NL01, "PreTrip").includes(k)),
+    );
+    const all = steps({}, NL01);
+    for (const group of itemsFor(NL01, "PreTrip")) {
+      const s = sectionShortcut(all, {}, groupChecks(group.key)[0].id, MAX);
+      for (const row of s?.rows ?? []) expect(nl02Only.has(row.itemId)).toBe(false);
+    }
+  });
+});
+
+describe("nextAfterSection", () => {
+  it("lands on the next sub-group's first check after a fresh section is filled", () => {
+    const groups = itemsFor(NL01, "PreTrip");
+    const first = groups[0];
+    const answers = Object.fromEntries(first.items.map((i) => [i.key, "pass" as CheckState]));
+    const next = nextAfterSection(steps(answers), answers, first.key);
+    expect(next.id).toBe(checkStepId(groups[1].items[0].key));
+  });
+
+  it("skips a later sub-group that is already fully answered", () => {
+    const groups = itemsFor(NL01, "PreTrip");
+    const answers = Object.fromEntries(
+      [...groups[0].items, ...groups[1].items].map((i) => [i.key, "pass" as CheckState]),
+    );
+    const next = nextAfterSection(steps(answers), answers, groups[0].key);
+    expect(next.id).toBe(checkStepId(groups[2].items[0].key));
+  });
+
+  it("goes to Review when nothing after the sub-group is blank", () => {
+    const groups = itemsFor(NL01, "PreTrip");
+    const last = groups[groups.length - 1];
+    // Earlier rows left blank on purpose: they are NOT jumped back to — Review lists them.
+    const answers = Object.fromEntries(last.items.map((i) => [i.key, "pass" as CheckState]));
+    expect(nextAfterSection(steps(answers), answers, last.key).kind).toBe("review");
+  });
+
+  it("is not stopped by a defect follow-up inside the sub-group", () => {
+    // A row answered Defect before the shortcut keeps its follow-up step; the shortcut moves on
+    // past it, and the review step's ungraded count is what demands the severity.
+    const groups = itemsFor(NL01, "PreTrip");
+    const first = groups[0];
+    const answers: Record<string, CheckState> = Object.fromEntries(
+      first.items.map((i) => [i.key, "pass" as CheckState]),
+    );
+    answers[first.items[0].key] = "defect";
+    const next = nextAfterSection(steps(answers), answers, first.key);
+    expect(next.id).toBe(checkStepId(groups[1].items[0].key));
+  });
+
+  it("keeps the progress numbers honest: the landing step reports its own position", () => {
+    const groups = itemsFor(NL01, "PreTrip");
+    const first = groups[0];
+    const answers = Object.fromEntries(first.items.map((i) => [i.key, "pass" as CheckState]));
+    const next = nextAfterSection(steps(answers), answers, first.key);
+    expect(progressLabel(next)).toBe(`Check ${first.items.length + 1} of 53`);
   });
 });
