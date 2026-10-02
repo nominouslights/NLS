@@ -38,6 +38,24 @@ const { enqueue } = vi.hoisted(() => ({
   enqueue: vi.fn<(kind: string, payload: unknown) => Promise<string>>(),
 }));
 
+// The assigned vehicle is NL-01 in lib/data.ts. Since rev 3 every NL-01 row has key === label,
+// so the "key, never label" pin needs an NL-02 form to bite on — this lets one describe block
+// re-point the unit without touching the mock data. Read at render time, so null = the real one.
+const { unitOverride } = vi.hoisted(() => ({ unitOverride: { value: null as string | null } }));
+
+vi.mock("@/lib/data", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/data")>();
+  return {
+    ...real,
+    assignedVehicle: {
+      ...real.assignedVehicle,
+      get unit() {
+        return unitOverride.value ?? real.assignedVehicle.unit;
+      },
+    },
+  };
+});
+
 vi.mock("@/lib/sync/queue", () => ({
   enqueue,
   pending: () => [],
@@ -70,13 +88,17 @@ const FIRST = ITEMS[0];
 const CATALOGUE_KEYS = new Set(NL_PTI_01.flatMap((g) => g.items.map((i) => i.key)));
 
 /**
- * A row whose KEY and LABEL differ: the four Area C interior light checks repeat Area B's
- * exterior labels and are kept distinct by an "Interior: " key prefix. If the screen ever sent
- * labels, this is the row that would collide onto another item's defect address.
+ * NL-02's rows, for the one block that renders an NL-02 form. Since rev 3 retired the four
+ * "Interior: " rows, the rows whose KEY and LABEL differ are the NL-02 ones with a "(NL-02)"
+ * suffix on the label only — e.g. "Passenger seats (NL-02)" whose key is "Passenger seats". If the
+ * screen ever sent labels, these are the rows that would be filed at an address the Dispatch
+ * Console cannot resolve.
  */
-const PREFIXED = ITEMS.find((i) => i.key !== i.label && i.key.startsWith("Interior: "));
+const NL02_ITEMS = itemsFor("NL-02", "PreTrip").flatMap((g) => g.items);
+const SUFFIXED = NL02_ITEMS.filter((i) => i.key !== i.label);
 
 beforeEach(() => {
+  unitOverride.value = null;
   window.localStorage.clear();
   enqueue.mockReset();
   enqueue.mockResolvedValue("cmd-1");
@@ -117,7 +139,7 @@ function payload(): Payload {
  * A complete draft, written straight to storage — what a reload of a finished walk-around
  * actually leaves behind.
  *
- * WHY NOT TAP 71 TILES IN EVERY PAYLOAD TEST. One full walk through the DOM is worth having and
+ * WHY NOT TAP 53 TILES IN EVERY PAYLOAD TEST. One full walk through the DOM is worth having and
  * there is one below; eight of them cost a minute of suite time to re-prove the same navigation
  * and prove nothing about the payload. Seeding the key directly is the same technique
  * lib/inspectionStore.test.ts uses for a reload, and it leaves the submit path — enqueue →
@@ -128,9 +150,10 @@ function seedComplete(over: {
   notes?: Record<string, string>;
   defects?: Record<string, { severity: string; note: string }>;
   location?: string;
+  items?: { key: string }[];
 } = {}) {
   const answers: Record<string, CheckState> = Object.fromEntries(
-    ITEMS.map((i) => [i.key, "pass" as CheckState]),
+    (over.items ?? ITEMS).map((i) => [i.key, "pass" as CheckState]),
   );
   window.localStorage.setItem(
     draftKey("PreTrip", "VEH-11"),
@@ -210,7 +233,7 @@ describe("the wizard", () => {
   });
 
   it("shows one question at a time and counts out of the derived denominator", () => {
-    // 71 for NL-01 pre-trip. Written through checkCount() rather than as a literal, because a
+    // 53 for NL-01 pre-trip (rev 3). Written through checkCount() rather than as a literal, because a
     // literal here is the same bug the step model was rewritten to remove.
     renderWizard();
     setOdometer("184920");
@@ -224,7 +247,7 @@ describe("the wizard", () => {
   });
 
   it("shows the form's Check For text and the area + sub-group line", () => {
-    // The mitigation for a walk-around of up to 82 rows. "Ground beneath the vehicle" is not a
+    // The mitigation for a walk-around of up to 64 rows. "Ground beneath the vehicle" is not a
     // question a driver can answer without its Check For column.
     renderWizard();
     setOdometer("184920");
@@ -290,7 +313,7 @@ describe("the wizard", () => {
   it(
     "walks the whole form, one question at a time, and reaches the attestation",
     () => {
-      // THE full-walk test, and deliberately the only one: 71 taps through jsdom is slow, so
+      // THE full-walk test, and deliberately the only one: 53 taps through jsdom is slow, so
       // the payload tests below seed a finished draft instead. This is what proves the wizard
       // actually gets from question 1 to the attestation without a dead end.
       renderWizard();
@@ -340,19 +363,24 @@ describe("the submit payload", () => {
   });
 
   it("addresses every row by its catalogue KEY, never its label", () => {
-    // Sending labels would collide the four "Interior: " rows onto Area B's exterior lamps and
-    // file their defects at an address the Dispatch Console cannot resolve.
-    seedComplete();
+    // Rendered as NL-02, the form that still has rows whose label differs from their key (the
+    // "(NL-02)" suffixes). Sending labels would file those rows, and any defect on them, at an
+    // address the Dispatch Console cannot resolve.
+    unitOverride.value = "NL-02";
+    seedComplete({ items: NL02_ITEMS });
     renderWizard();
     certify();
     const p = payload();
 
     expect(p.checklist.every((c) => CATALOGUE_KEYS.has(c.item))).toBe(true);
-    expect(new Set(p.checklist.map((c) => c.item)).size).toBe(ITEM_COUNT);
+    expect(p.checklist).toHaveLength(checkCount("NL-02", "PreTrip"));
+    expect(new Set(p.checklist.map((c) => c.item)).size).toBe(checkCount("NL-02", "PreTrip"));
 
-    if (!PREFIXED) throw new Error("the catalogue has no key-differs-from-label row");
-    expect(p.checklist.some((c) => c.item === PREFIXED.key)).toBe(true);
-    expect(p.checklist.some((c) => c.item === PREFIXED.label)).toBe(false);
+    expect(SUFFIXED.length).toBeGreaterThan(0);
+    for (const row of SUFFIXED) {
+      expect(p.checklist.some((c) => c.item === row.key)).toBe(true);
+      expect(p.checklist.some((c) => c.item === row.label)).toBe(false);
+    }
   });
 
   it("sends the certification statement verbatim, and no derived result", () => {
@@ -529,6 +557,151 @@ describe("a draft holding rows this form does not ask", () => {
       (screen.getByRole("button", { name: /Certify & submit/i }) as HTMLButtonElement).disabled,
     ).toBe(true);
   });
+});
+
+describe("the per-section All OK shortcut", () => {
+  // NL-PTI-01 rev 3's time saver, through the DOM. The rules it must keep: one sub-group only,
+  // blanks only, the driver SEES the rows before the one confirming tap, and the wire carries
+  // every row individually with nothing that says "section passed".
+  const GROUPS = itemsFor("NL-01", "PreTrip");
+  const ENGINE = GROUPS[0];
+  const NEXT = GROUPS[1];
+
+  function allOkButton(): HTMLElement {
+    return screen.getByRole("button", { name: /^All OK — / });
+  }
+
+  function confirmAllOk() {
+    fireEvent.click(screen.getByRole("button", { name: /Confirm all OK/ }));
+  }
+
+  it("is offered on a sub-group's first row as a separate, named, counted button", () => {
+    renderWizard();
+    setOdometer("184920");
+
+    expect(screen.getAllByRole("button", { name: /^All OK — / })).toHaveLength(1);
+    expect(allOkButton().textContent).toContain(
+      `All OK — ${ENGINE.title} (${ENGINE.items.length} checks)`,
+    );
+    // The three answer tiles are still there, unselected — the shortcut is an alternative.
+    expect(screen.getByRole("button", { name: /^Pass/ }).getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("shows every row of the sub-group by label before anything is written", () => {
+    renderWizard();
+    setOdometer("184920");
+    fireEvent.click(allOkButton());
+
+    const list = screen.getByRole("list", { name: `Checks in ${ENGINE.title}` });
+    const rows = list.querySelectorAll("li");
+    expect(rows).toHaveLength(ENGINE.items.length);
+    ENGINE.items.forEach((item, i) => expect(rows[i].textContent).toContain(item.label));
+    expect(screen.getAllByText("Will be OK")).toHaveLength(ENGINE.items.length);
+
+    // Opening the panel answers nothing.
+    expect(getDraft("PreTrip", "VEH-11")?.answers).toEqual({});
+  });
+
+  it("writes nothing on Cancel and returns to the row-by-row question", () => {
+    renderWizard();
+    setOdometer("184920");
+    fireEvent.click(allOkButton());
+    fireEvent.click(screen.getByRole("button", { name: /^Cancel/ }));
+
+    expect(screen.getByText(FIRST.label)).toBeTruthy();
+    expect(screen.getByText(`Check 1 of ${ITEM_COUNT}`)).toBeTruthy();
+    expect(getDraft("PreTrip", "VEH-11")?.answers).toEqual({});
+  });
+
+  it("marks only that sub-group OK and lands on the next sub-group's first check", () => {
+    renderWizard();
+    setOdometer("184920");
+    fireEvent.click(allOkButton());
+    confirmAllOk();
+
+    const answers = getDraft("PreTrip", "VEH-11")?.answers ?? {};
+    expect(Object.keys(answers).sort()).toEqual(ENGINE.items.map((i) => i.key).sort());
+    expect(Object.values(answers).every((a) => a === "pass")).toBe(true);
+
+    // The progress count is position on the form, unchanged by how the rows were answered.
+    expect(screen.getByText(NEXT.items[0].label)).toBeTruthy();
+    expect(screen.getByText(`Check ${ENGINE.items.length + 1} of ${ITEM_COUNT}`)).toBeTruthy();
+    // And the next sub-group offers its OWN shortcut — never one for the rest of the form.
+    expect(allOkButton().textContent).toContain(`${NEXT.title} (${NEXT.items.length} checks)`);
+  });
+
+  it("never overwrites a Defect or an N/A, and says so in the list", () => {
+    renderWizard();
+    setOdometer("184920");
+    tap("Defect"); // row 1 → follow-up
+    fireEvent.click(screen.getByRole("button", { name: /^Major/ }));
+    fireEvent.click(continueButton());
+    tap("N/A"); // row 2
+
+    // Row 3 is now the sub-group's first blank row.
+    const remaining = ENGINE.items.length - 2;
+    expect(allOkButton().textContent).toContain(`(${remaining} checks)`);
+    fireEvent.click(allOkButton());
+    expect(screen.getByText("Defect — kept")).toBeTruthy();
+    expect(screen.getByText("N/A — kept")).toBeTruthy();
+    expect(screen.getAllByText("Will be OK")).toHaveLength(remaining);
+    confirmAllOk();
+
+    const draft = getDraft("PreTrip", "VEH-11");
+    expect(draft?.answers[ENGINE.items[0].key]).toBe("defect");
+    expect(draft?.defects[ENGINE.items[0].key]?.severity).toBe("Major");
+    expect(draft?.answers[ENGINE.items[1].key]).toBe("na");
+    for (const item of ENGINE.items.slice(2)) expect(draft?.answers[item.key]).toBe("pass");
+  });
+
+  it("leaves every filled row individually changeable — Back, then a different answer", () => {
+    renderWizard();
+    setOdometer("184920");
+    fireEvent.click(allOkButton());
+    confirmAllOk();
+
+    fireEvent.click(screen.getByRole("button", { name: /Back/ }));
+    const last = ENGINE.items[ENGINE.items.length - 1];
+    expect(screen.getByText(last.label)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Pass/ }).getAttribute("aria-pressed")).toBe("true");
+
+    tap("Defect");
+    expect(getDraft("PreTrip", "VEH-11")?.answers[last.key]).toBe("defect");
+    expect(screen.getByText(/^Follow-up · /)).toBeTruthy();
+  });
+
+  it(
+    "sends every row individually, with its own state, and nothing that says a section passed",
+    () => {
+      renderWizard();
+      setOdometer("184920");
+      tap("N/A"); // row 1 answered by hand, so the shortcut must leave it
+      // Walk the whole form the fast way: the shortcut wherever it is offered, Pass elsewhere.
+      for (let guard = 0; guard < ITEM_COUNT + 1; guard += 1) {
+        if (screen.queryByText(NL_PTI_01_CERTIFICATION)) break;
+        const shortcut = screen.queryByRole("button", { name: /^All OK — / });
+        if (shortcut) {
+          fireEvent.click(shortcut);
+          confirmAllOk();
+        } else {
+          tap("Pass");
+        }
+      }
+      expect(screen.getByText(`Review · ${ITEM_COUNT} of ${ITEM_COUNT}`)).toBeTruthy();
+      certify();
+      const p = payload();
+
+      expect(p.checklist).toHaveLength(ITEM_COUNT);
+      expect(new Set(p.checklist.map((c) => c.item))).toEqual(new Set(ITEMS.map((i) => i.key)));
+      for (const row of p.checklist) {
+        expect(Object.keys(row).sort()).toEqual(["group", "item", "note", "passed", "state"]);
+      }
+      expect(p.checklist.find((c) => c.item === FIRST.key)?.state).toBe("NotApplicable");
+      expect(p.checklist.filter((c) => c.state === "Ok")).toHaveLength(ITEM_COUNT - 1);
+      expect(JSON.stringify(p)).not.toMatch(/section/i);
+    },
+    30_000,
+  );
 });
 
 describe("when the queue rejects the capture", () => {

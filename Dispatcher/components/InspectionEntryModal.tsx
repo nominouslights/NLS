@@ -27,6 +27,7 @@ import {
   defectsWire,
   rowsFor,
 } from "@/components/inspection/checklistRows";
+import RetiredKeyNote from "@/components/inspection/RetiredKeyNote";
 
 /** NL-PTI-01 classifies a defect Minor or Major; OutOfService stays in the wire
  *  enum for legacy rows but this form never offers it. */
@@ -43,9 +44,11 @@ export interface InspectionPrefill {
 }
 
 /** A re-reported item that is NOT on the current form. Defect items are free text
- *  and some predate NL-PTI-01, so it is carried alongside the catalogue rows
- *  rather than forced into one — and it is a defect by definition, so it has no
- *  OK / N-A choice. */
+ *  and some predate NL-PTI-01 or its rev 3 (e.g. "Engine oil", now inside "Engine
+ *  fluid levels"). It is filed against the STORED item string — never remapped onto
+ *  the replacement row, which would detach it from the defect it recurs — so it is
+ *  carried alongside the catalogue rows rather than forced into one, and it is a
+ *  defect by definition, so it has no OK / N-A choice. */
 interface ExtraDefect {
   item: string;
   severity: DefectSeverityWire;
@@ -337,6 +340,8 @@ export default function InspectionEntryModal({
             <div style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: 600, color: colors.textPrimary }}>
               {statusMeta("over").g} {extra.item} — Defect
             </div>
+            {/* Filed under the stored item string, never the replacement row's key. */}
+            <RetiredKeyNote item={extra.item} />
             <div style={{ display: "grid", gridTemplateColumns: "180px 1fr", gap: 10, marginTop: 9 }}>
               <SelectField
                 label="Severity"

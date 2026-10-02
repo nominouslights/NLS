@@ -99,6 +99,24 @@ export const radius = {
  * 64 + tiles 168 + note 72 + four gap.row 56) and the defect step ~479. WizardFrame has NO
  * scroll container, so a step that does not fit is CLIPPED, not scrolled — anything added here
  * has to come out of that slack, not out of the question's size.
+ *
+ * The per-section "All OK" shortcut (rev 3) spends some of it. On a check step it puts a 56px
+ * StatusButton on the area line, which grows that row from 19 to touch.primary 56: +37, so a
+ * check step with the shortcut is at most ~504 of the ~524. (Every NL-PTI-01 rev 3 label fits on
+ * one line at 40px across ~1028px, so the two-line question above is itself the slack-bearing
+ * worst case; the longest Check For, 185 characters, is two lines at 22px.)
+ *
+ *   sectionMaxRows 12  The confirm panel lists the sub-group's rows label-only, in TWO
+ *                   columns, read down then across. The largest sub-group on any rev 3 form
+ *                   is Controls & Instruments, 12 rows on NL-02 / an unknown unit's pre-trip
+ *                   — 6 rows per column. Worst case per row: a two-line label at type.label 16
+ *                   × 1.25 = 40 + 4 padding = 44, so 6 × 44 + 5 × gap.tight 8 = 304. Panel
+ *                   total: area line 19 + heading 34×1.1 ≈ 38 + two-line instruction 2×22 = 44 +
+ *                   list 304 + button row 56 + four gap.row 56 = 517 of ~524. Check For is
+ *                   deliberately NOT in this list: at 12 rows it cannot fit, and the driver has
+ *                   read it on the row-by-row walk or can Cancel to do so. A sub-group larger
+ *                   than this does not get the shortcut at all (lib/inspectionSteps.ts), and
+ *                   lib/inspectionSteps.test.ts fails if the catalogue grows one past it.
  */
 export const wizard = {
   answerH: 168,
@@ -106,6 +124,7 @@ export const wizard = {
   question: 40,
   footerH: 88,
   barH: 6,
+  sectionMaxRows: 12,
 } as const;
 
 /**

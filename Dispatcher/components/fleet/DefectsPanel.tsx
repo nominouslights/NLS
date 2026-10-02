@@ -23,6 +23,7 @@ import { MonoTag, StatusChip } from "@/components/ui/Chip";
 import { ActionButton } from "@/components/ui/Button";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { SelectField, TextAreaField } from "@/components/ui/Field";
+import RetiredKeyNote from "@/components/inspection/RetiredKeyNote";
 
 // One component, four surfaces: the trip detail, the create-trip wizard, the
 // vehicle's Open Defects tab, and (via ResolveDefectModal alone) the inspection
@@ -283,6 +284,10 @@ function DefectRow({
           </span>
         ) : null}
       </div>
+
+      {/* Display only — the defect stays addressed (and is resolved / re-reported)
+          by d.item exactly as stored, even when rev 3 retired that row. */}
+      <RetiredKeyNote item={d.item} />
 
       {d.note && (
         <div style={{ ...dim, color: colors.textMuted, marginTop: 5 }}>{d.note}</div>

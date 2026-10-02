@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   NL_PTI_01,
+  RETIRED_KEYS,
   checkCount,
+  retiredKeyReplacement,
   itemsFor,
   type InspectionFormMode,
   type InspectionItem,
@@ -47,8 +49,8 @@ const CLOSE_OUT_LABELS = [
 /**
  * Every key on the form as merged in PR #93 (rev 1, 80 rows), taken verbatim from
  * `origin/main` before rev 2. Stored inspections address their defects by these
- * strings, so none may be renamed or removed — rev 2 changes only `mode`, `checkFor`
- * and `categoryNote` on existing rows.
+ * strings, so none may be renamed. Rev 3 retired some of them; each retired key
+ * must be in `RETIRED_KEYS` and may never be reused.
  */
 const REV1_KEYS = [
   "Engine oil",
@@ -133,6 +135,81 @@ const REV1_KEYS = [
   "Keys returned / secured",
 ];
 
+/** The nine keys rev 2 (PR #100) added, verbatim. With REV1_KEYS: every pre-rev-3 key. */
+const REV2_ADDED_KEYS = [
+  "Air suspension (if equipped)",
+  "Hubs & wheel seals",
+  "Accelerator pedal",
+  "Passenger floor, steps & stanchion padding",
+  "Overhead racks / luggage compartments (if equipped)",
+  "Accessibility lift / ramp & kneeling (if equipped)",
+  "Wheelchair / mobility-device restraints (if equipped)",
+  "Dangerous goods documents & placards (if carried)",
+  "Defects noticed while driving",
+];
+
+const PRE_REV3_KEYS = [...REV1_KEYS, ...REV2_ADDED_KEYS];
+
+/** Rev 2's company (`basis: "NorthernLink"`) rows, verbatim. Every OTHER pre-rev-3
+ *  key was tagged `basis: "NSC13"` in rev 2. */
+const REV2_COMPANY_KEYS = new Set([
+  "Block heater cord (winter)",
+  "Safety beacon & whip flag",
+  "Interior clean & clear of debris",
+  "Spill kit (mine requirement)",
+  "Survival kit",
+  "Traction aids",
+  "Extra fuel",
+  "Jumper cables / booster pack",
+  "Reflective safety vest",
+  "Cell phone charged",
+  "Starlink / satellite comm connected",
+  "GPS / navigation",
+  "Emergency contacts list",
+  "Vehicle exterior — no new damage",
+  "All passengers disembarked safely",
+  "Vehicle secured / plugged in",
+  "Interior cleaned & checked",
+  "All cargo delivered / accounted for",
+  "Keys returned / secured",
+]);
+
+/**
+ * Rev-2 `NSC13` rows that rev 3 removed from the catalogue — the ONLY exceptions to
+ * "an NSC 13 row keeps its own row and its key". Two reasons, and no others:
+ *
+ *   1. Mis-tagged in rev 2. NSC 13 Schedule 2 (Manitoba Schedule B) has NO engine-
+ *      fluid, belt, hose, radiator, battery or wiring part — its only fluid check is
+ *      hydraulic brake fluid (18.1 / 18.6M), which stays its own row. These nine were
+ *      company checks wearing an NSC13 tag; they are now NorthernLink rows.
+ *   2. Exact duplicates. The four "Interior: " light rows checked the same lamps the
+ *      Area B exterior walk already checks; each maps onto that NSC13 exterior row,
+ *      which keeps its key.
+ */
+const REV3_NSC13_EXCEPTIONS: Record<string, "not-a-schedule-2-part" | "duplicate-of-exterior-lamp"> = {
+  "Engine oil": "not-a-schedule-2-part",
+  Coolant: "not-a-schedule-2-part",
+  "Power steering fluid (if equipped)": "not-a-schedule-2-part",
+  "Washer fluid": "not-a-schedule-2-part",
+  "Drive belts": "not-a-schedule-2-part",
+  "Hoses (coolant / heater)": "not-a-schedule-2-part",
+  "Battery & terminals": "not-a-schedule-2-part",
+  "Wiring / harness": "not-a-schedule-2-part",
+  "Radiator / condenser": "not-a-schedule-2-part",
+  "Interior: Headlights (dash switch, low & high)": "duplicate-of-exterior-lamp",
+  "Interior: Turn signals (left / right)": "duplicate-of-exterior-lamp",
+  "Interior: Hazard lights": "duplicate-of-exterior-lamp",
+  "Interior: Brake lights": "duplicate-of-exterior-lamp",
+};
+
+function currentKeys(): Set<string> {
+  return new Set(NL_PTI_01.flatMap((group) => group.items.map((item) => item.key)));
+}
+
+function currentItem(key: string): InspectionItem | undefined {
+  return NL_PTI_01.flatMap((group) => group.items).find((item) => item.key === key);
+}
+
 describe("wire keys", () => {
   it("is unique across the entire catalogue", () => {
     // A duplicate key collides two rows onto one defect address (InspectionId, Item)
@@ -146,26 +223,70 @@ describe("wire keys", () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
-  it("still contains every rev-1 key, so no stored defect is orphaned", () => {
-    const current = new Set(NL_PTI_01.flatMap((group) => group.items.map((item) => item.key)));
+  it("accounts for every pre-rev-3 key: still current, or retired with a replacement", () => {
+    // A stored inspection or open defect may carry any of these strings forever.
+    // Each must still be a current row, or be discoverable in RETIRED_KEYS.
     expect(REV1_KEYS).toHaveLength(80);
-    expect(REV1_KEYS.filter((key) => !current.has(key))).toEqual([]);
+    expect(PRE_REV3_KEYS).toHaveLength(89);
+    expect(new Set(PRE_REV3_KEYS).size).toBe(89);
+    const current = currentKeys();
+    expect(PRE_REV3_KEYS.filter((key) => !current.has(key) && !RETIRED_KEYS.has(key))).toEqual([]);
   });
 
-  it("keeps the interior light checks distinct from the exterior ones", () => {
-    // Same lamps, checked twice (from outside, then from the driver's seat). The
-    // labels repeat on purpose; only the "Interior: " key prefix separates them.
-    const interior = NL_PTI_01.find((g) => g.key === "Lights & Signals — Interior");
-    const exterior = NL_PTI_01.find((g) => g.key === "Lights & Signals — Exterior");
-
-    expect(interior).toBeDefined();
-    expect(exterior).toBeDefined();
-
-    const exteriorKeys = new Set(exterior!.items.map((item) => item.key));
-    for (const item of interior!.items) {
-      expect(item.key.startsWith("Interior: ")).toBe(true);
-      expect(exteriorKeys.has(item.key)).toBe(false);
+  it("maps every retired key onto a CURRENT key", () => {
+    const current = currentKeys();
+    for (const [retired, target] of RETIRED_KEYS) {
+      expect(current.has(target), `${retired} → ${target}`).toBe(true);
+      expect(retiredKeyReplacement(retired)?.key).toBe(target);
     }
+  });
+
+  it("never lets a current row reuse a retired key", () => {
+    // Reusing one would re-attach old answers and open defects to a different check.
+    const current = currentKeys();
+    expect([...RETIRED_KEYS.keys()].filter((key) => current.has(key))).toEqual([]);
+  });
+
+  it("retires only keys that were really on the form (no typos in the map)", () => {
+    const known = new Set(PRE_REV3_KEYS);
+    expect([...RETIRED_KEYS.keys()].filter((key) => !known.has(key))).toEqual([]);
+    expect(RETIRED_KEYS.size).toBe(23);
+  });
+
+  it("keeps every rev-2 NSC13 row with an unchanged key, except the listed exceptions", () => {
+    // The owner's hard rule for rev 3: a row that maps to an NSC 13 Schedule 2 part
+    // stays its own row. Only REV3_NSC13_EXCEPTIONS may leave, for the reasons given.
+    const current = currentKeys();
+    const rev2Nsc13 = PRE_REV3_KEYS.filter((key) => !REV2_COMPANY_KEYS.has(key));
+    expect(rev2Nsc13).toHaveLength(89 - 19);
+
+    const missing = rev2Nsc13.filter((key) => !current.has(key));
+    expect(missing.sort()).toEqual(Object.keys(REV3_NSC13_EXCEPTIONS).sort());
+
+    for (const key of rev2Nsc13.filter((k) => current.has(k))) {
+      expect(currentItem(key)?.basis, key).toBe("NSC13");
+    }
+    // A duplicate's replacement must itself be an NSC13 row — the lamp is still
+    // checked under NSC 13, just once.
+    for (const [key, why] of Object.entries(REV3_NSC13_EXCEPTIONS)) {
+      const target = retiredKeyReplacement(key);
+      expect(target, key).not.toBeNull();
+      if (why === "duplicate-of-exterior-lamp") expect(target!.basis, key).toBe("NSC13");
+    }
+  });
+
+  it("keeps hydraulic brake fluid (Schedule 2 18.1 / 18.6M) as its own NSC13 row", () => {
+    expect(currentItem("Brake fluid reservoir (hydraulic)")?.basis).toBe("NSC13");
+  });
+
+  it("drops the interior lights group entirely", () => {
+    expect(NL_PTI_01.map((g) => g.key)).not.toContain("Lights & Signals — Interior");
+    expect([...currentKeys()].filter((key) => key.startsWith("Interior: "))).toEqual([]);
+  });
+
+  it("answers null for a key that is current or unknown", () => {
+    expect(retiredKeyReplacement("Steering")).toBeNull();
+    expect(retiredKeyReplacement("Brakes (NL-TM-01)")).toBeNull();
   });
 
   it("gives every item a non-empty label, key and checkFor", () => {
@@ -365,21 +486,25 @@ describe("checkCount", () => {
     // thing standing between an accidental deletion and a pre-trip that quietly stops
     // asking about the brakes.
     //
-    // Rev 2 (NSC 13 Schedule 2 / Man. Reg. 95/2008):
-    //   Pre-trip: 82 rows; 11 of them NL-02-only (fuel/water separator, entry steps,
+    // Rev 3 (NSC 13 Schedule 2 / Man. Reg. 95/2008):
+    //   Pre-trip: 64 rows; 11 of them NL-02-only (fuel/water separator, entry steps,
     //   marker lights, emergency exits, passenger seatbelts, passenger seats, cargo
     //   partition, passenger floor, overhead racks, accessibility lift, mobility
-    //   restraints), which is the entire NL-01 difference.
+    //   restraints), which is the entire NL-01 difference (NL-01: 53).
+    //   Rev 2 was 82 / 71; rev 3 removed 18 rows from every unit's pre-trip, none of
+    //   them a Schedule 2 part (Engine Bay 10 → 3, the 4 duplicate interior lights,
+    //   Emergency Equipment's 5 winter items → 1, Comms & Nav 4 → 1).
     //   Post-trip: 21 "Both" rows that can change while driving + 1 En-Route
-    //   Observations row + 6 Close-Out = 28, identical for every unit.
+    //   Observations row + 6 Close-Out = 28, identical for every unit — unchanged
+    //   from rev 2 (no retired row was "Both").
     //
     // If the owner changes the form, change these numbers in the same commit and say
     // so in the message. Never "fix" a failure here by relaxing the assertion.
-    expect(checkCount("NL-01", "PreTrip")).toBe(71);
+    expect(checkCount("NL-01", "PreTrip")).toBe(53);
     expect(checkCount("NL-01", "PostTrip")).toBe(28);
-    expect(checkCount("NL-02", "PreTrip")).toBe(82);
+    expect(checkCount("NL-02", "PreTrip")).toBe(64);
     expect(checkCount("NL-02", "PostTrip")).toBe(28);
-    expect(checkCount(null, "PreTrip")).toBe(82);
+    expect(checkCount(null, "PreTrip")).toBe(64);
     expect(checkCount(null, "PostTrip")).toBe(28);
 
     // The arithmetic those numbers encode, stated so a future edit that changes one
@@ -389,5 +514,34 @@ describe("checkCount", () => {
     expect(rows.filter((i) => i.mode === "Both")).toHaveLength(21);
     expect(rows.filter((i) => i.mode === "PostTripOnly")).toHaveLength(7);
     expect(checkCount("NL-02", "PostTrip")).toBe(21 + 7);
+  });
+
+  it("keeps the post-trip's 28 keys exactly as rev 2 had them", () => {
+    // The pre-trip consolidation must not touch the post-trip at all.
+    expect(flatten("NL-02", "PostTrip").map((i) => i.key)).toEqual([
+      "Ground beneath the vehicle",
+      "Springs (leaf / coil)",
+      "Tire condition",
+      "Wheel nuts / studs",
+      "Windshield & windows",
+      "Exterior mirrors (both sides)",
+      "Exhaust system",
+      "Fuel tank & cap",
+      "Headlights — low & high beam, both sides",
+      "Tail lights",
+      "Brake lights (incl. centre high-mount if equipped)",
+      "Turn signals — front & rear, both sides",
+      "Hazard (4-way) lights",
+      "Steering",
+      "Accelerator pedal",
+      "Gauges (oil pressure, temperature, volt/ammeter, fuel)",
+      "Wipers & washers",
+      "Defrost / heater",
+      "Service brake pedal",
+      "Parking brake",
+      "Brake warning light",
+      "Defects noticed while driving",
+      ...CLOSE_OUT_LABELS,
+    ]);
   });
 });

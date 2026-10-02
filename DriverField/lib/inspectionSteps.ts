@@ -5,13 +5,13 @@
 // WHY A STEP MODEL AT ALL: the inspection screen used to render every checklist item as one
 // continuous scroll, with the legal attestation at the very bottom — the part a driver sees
 // least. On a dash-mounted 10-inch tablet, in northern daylight, with gloves on, that is the
-// wrong shape, and it got worse the moment the list became form NL-PTI-01: up to 82 rows on a
-// pre-trip, depending on the unit. One question per screen is the whole
+// wrong shape, and it got worse the moment the list became form NL-PTI-01: up to 64 rows on a
+// pre-trip (rev 3), depending on the unit. One question per screen is the whole
 // point, and that needs a flat, ordered, addressable list of steps.
 //
 // THE CRUX — KEEPING PROGRESS HONEST, AND THE DENOMINATOR IS NO LONGER ONE NUMBER.
 // The denominator a driver reads is the checklist for THIS unit and THIS mode: NL-01 pre-trip
-// 71, NL-02 pre-trip 82, and the post-trip 28 for both (rev 2 made it the en-route set).
+// 53, NL-02 pre-trip 64 (rev 3), and the post-trip 28 for both (rev 2 made it the en-route set).
 // It is DERIVED, every time, from checkCount(unit, mode) in the copied catalogue — never
 // written here as a literal and never cached in a module-level constant.
 //
@@ -19,18 +19,18 @@
 //   The old code had `export const CHECK_COUNT = …` computed once at module load, which was
 //   correct only while the list was one fixed 22-item array. A module constant cannot be right
 //   for three different answers; a stale one would have the chip telling a driver they had
-//   answered 71 of 71 questions on an 82-question form, on a legal attestation. If you ever
+//   answered 53 of 53 questions on a 64-question form, on a legal attestation. If you ever
 //   find yourself writing a number here, that is the bug.
 //
 // `CheckStep.n`/`.of` are computed during the checklist walk and never see the defect steps
-// injected around them, so the progress chip can never read "72 of 71". A defect step is a
+// injected around them, so the progress chip can never read "54 of 53". A defect step is a
 // CHILD of its check, reporting its parent's numbers under a "Follow-up ·" label — the driver
 // is told they are on a branch off item 7, not on a 72nd item. The review step carries the same
 // derived `of` rather than reaching for a constant, for exactly the reason above.
 //
 // REJECTED, recorded so nobody re-adds it: a dot step strip. It would be the only status
 // carrier in the app relying on colour plus shape with no word, and DriverField/CLAUDE.md's
-// "colour + glyph + text label, always all three" admits no exception. At 82 dots it would
+// "colour + glyph + text label, always all three" admits no exception. At 64 dots it would
 // also be unreadable, which the 22-item version at least was not.
 // ---------------------------------------------------------------------------
 
@@ -66,6 +66,11 @@ export interface CheckStep {
   itemId: string;
   /** The sub-group's title — "Tires & Wheels". */
   group: string;
+  /**
+   * The sub-group's catalogue key — the wire value sent as ChecklistItemInput.Group, and what
+   * the per-section "All OK" shortcut is scoped by. Distinct from `group`, the display title.
+   */
+  groupKey: string;
   /** A, B or C: engine bay, exterior circuit, in-cab. Shown so a long walk stays locatable. */
   area: InspectionArea;
   label: string;
@@ -87,6 +92,7 @@ export interface DefectStep {
   id: string;
   itemId: string;
   group: string;
+  groupKey: string;
   area: InspectionArea;
   label: string;
   /** The form's default classification for this row. DISPLAY TEXT — nothing computes it. */
@@ -104,7 +110,7 @@ export interface ReviewStep {
   /**
    * The same derived denominator every CheckStep carries. It lives on the step rather than
    * being read from a module constant in progressLabel() — that constant is what could go
-   * stale, and "Review · 71 of 71" on an 82-question form is a lie about a legal document.
+   * stale, and "Review · 53 of 53" on a 64-question form is a lie about a legal document.
    */
   of: number;
 }
@@ -155,6 +161,7 @@ export function buildSteps(
         id: checkStepId(item.key),
         itemId: item.key,
         group: group.title,
+        groupKey: group.key,
         area: group.area,
         label: item.label,
         checkFor: item.checkFor,
@@ -168,6 +175,7 @@ export function buildSteps(
           id: defectStepId(item.key),
           itemId: item.key,
           group: group.title,
+          groupKey: group.key,
           area: group.area,
           label: item.label,
           category: item.category,
@@ -208,7 +216,7 @@ export function resolveStep(steps: InspectionStep[], stepId: string | null): Ins
 
 /**
  * The progress line. A defect step reports its PARENT's numbers under a "Follow-up ·" label —
- * so the chip can never read "72 of 71" however many defects the driver reports — and the
+ * so the chip can never read "54 of 53" however many defects the driver reports — and the
  * review step reports the denominator it was BUILT with, not one read from anywhere else.
  */
 export function progressLabel(step: InspectionStep): string {
@@ -239,6 +247,118 @@ export function progressFraction(step: InspectionStep): number {
     case "review":
       return 1;
   }
+}
+
+// ---------------------------------------------------------------------------
+// The per-section "All OK" shortcut (NL-PTI-01 rev 3, at the owner's request).
+//
+// WHAT IT IS: on the FIRST unanswered check of a sub-group, the driver may instead review that
+// sub-group's rows on one screen and confirm them all as Pass in one tap. It is the main time
+// saver of rev 3, and it is bounded by rules that keep it from becoming a rubber stamp:
+//
+//   • ONE SUB-GROUP AT A TIME. There is no whole-form "all OK" and there must never be one —
+//     a one-question-per-screen flow whose first affordance skips every question is
+//     self-defeating. markSectionOk() in lib/inspectionStore.ts takes a group key, not a list
+//     of item keys, so nothing can call it for more than one sub-group.
+//   • IT ONLY FILLS BLANKS. A Defect or an N/A (or a Pass) the driver already gave is never
+//     overwritten — enforced in the store, not here, so no caller can get it wrong.
+//   • THE DRIVER SEES WHAT THEY ARE CERTIFYING. The confirm panel lists every row of the
+//     sub-group by its label, with what will happen to it, before the one confirming tap.
+//   • NOTHING NEW ON THE WIRE. Each filled row is an ordinary "pass" answer, sent as its own
+//     ChecklistItemInput with state Ok — no "section passed" value exists anywhere — and each
+//     can still be changed individually afterwards (Back, or the review step's Change).
+//
+// Offered only when at least SECTION_SHORTCUT_MIN rows are still blank (for one row, the Pass
+// tile IS the shortcut) and the sub-group fits the confirm panel's height budget
+// (`wizard.sectionMaxRows` in lib/tablet.ts). A sub-group that outgrew the budget loses the
+// shortcut rather than rendering a list that WizardFrame would silently clip.
+// ---------------------------------------------------------------------------
+
+/** Below this many blank rows the shortcut is not offered — the Pass tile already is one. */
+export const SECTION_SHORTCUT_MIN = 2;
+
+export interface SectionShortcutRow {
+  itemId: string;
+  label: string;
+  checkFor: string;
+  /** The driver's current answer, or null when the shortcut would fill it with Pass. */
+  state: CheckState | null;
+}
+
+export interface SectionShortcut {
+  groupKey: string;
+  title: string;
+  area: InspectionArea;
+  /** Every row of the sub-group on THIS form, in form order, answered or not. */
+  rows: SectionShortcutRow[];
+  /** How many rows the shortcut would fill — the number on the button. */
+  unanswered: number;
+}
+
+/**
+ * The shortcut for the check step `stepId`, or null when it is not offered there.
+ *
+ * Offered only on a CHECK step that is unanswered AND is the first unanswered row of its
+ * sub-group in form order, with at least SECTION_SHORTCUT_MIN blanks and no more rows than
+ * `maxRows`. Read from `steps`, so it sees exactly the unit- and mode-narrowed form the wizard
+ * walks — an NL02Only row can never appear in an NL-01 confirm list.
+ */
+export function sectionShortcut(
+  steps: InspectionStep[],
+  answers: Record<string, CheckState>,
+  stepId: string,
+  maxRows: number,
+): SectionShortcut | null {
+  const step = steps.find((s) => s.id === stepId);
+  if (!step || step.kind !== "check") return null;
+  if (answers[step.itemId] !== undefined) return null;
+
+  const groupChecks = steps.filter(
+    (s): s is CheckStep => s.kind === "check" && s.groupKey === step.groupKey,
+  );
+  const firstBlank = groupChecks.find((c) => answers[c.itemId] === undefined);
+  if (!firstBlank || firstBlank.id !== step.id) return null;
+
+  const rows: SectionShortcutRow[] = groupChecks.map((c) => ({
+    itemId: c.itemId,
+    label: c.label,
+    checkFor: c.checkFor,
+    state: answers[c.itemId] ?? null,
+  }));
+  const unanswered = rows.filter((r) => r.state === null).length;
+  if (unanswered < SECTION_SHORTCUT_MIN) return null;
+  if (rows.length > maxRows) return null;
+
+  return { groupKey: step.groupKey, title: step.group, area: step.area, rows, unanswered };
+}
+
+/**
+ * Where the wizard goes after the shortcut fills `groupKey`: the first still-unanswered check
+ * AFTER that sub-group, or the review step when none is left. Rows left blank BEFORE the
+ * sub-group are not jumped back to — the review step lists them as "Not answered" and blocks
+ * Certify on them, exactly as for a driver who skipped ahead with the Review button.
+ *
+ * Built from the steps AFTER the fill, so a defect follow-up still owed inside the sub-group is
+ * not a target either: it was answered "defect" before the shortcut and the review step's
+ * ungraded count is what catches a missing severity.
+ */
+export function nextAfterSection(
+  steps: InspectionStep[],
+  answers: Record<string, CheckState>,
+  groupKey: string,
+): InspectionStep {
+  let lastInGroup = -1;
+  steps.forEach((s, i) => {
+    if ((s.kind === "check" || s.kind === "defect") && s.groupKey === groupKey) lastInGroup = i;
+  });
+  const review = steps[steps.length - 1];
+  if (lastInGroup === -1) return review;
+
+  for (let i = lastInGroup + 1; i < steps.length; i += 1) {
+    const s = steps[i];
+    if (s.kind === "check" && answers[s.itemId] === undefined) return s;
+  }
+  return review;
 }
 
 /**

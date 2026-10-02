@@ -5,10 +5,13 @@ import type { ChecklistItemStateWire, DefectSeverityWire } from "@/lib/api/maint
 import type { InspectionItem, InspectionSubGroup } from "@/lib/inspectionForm";
 import { MonoTag, StatusChip } from "@/components/ui/Chip";
 import { SelectField, TextField } from "@/components/ui/Field";
+import { ActionButton } from "@/components/ui/Button";
 
 // One NL-PTI-01 sub-group. Each row is the paper form's three boxes — OK /
-// Defect / N-A — and starts UNANSWERED: with 28–82 rows, defaulting them to OK
-// would let a dispatcher save a form nobody actually filled in. Defect expands a
+// Defect / N-A — and starts UNANSWERED: with 28–64 rows, defaulting them to OK
+// would let a dispatcher save a form nobody actually filled in. The one shortcut is
+// per sub-group: "Mark unanswered OK" answers only that section's still-blank rows,
+// for transcribing a paper section the driver ticked through. Defect expands a
 // severity select; the note applies on any state (an N-A wants a reason as much
 // as a defect does). Rows carry the backend wire keys (group + item); everything
 // else on screen comes from the catalogue entry, so the form text and the wire
@@ -52,6 +55,15 @@ export function unansweredCount(rows: ChecklistRow[]): number {
   return rows.filter((r) => !isAnswered(r)).length;
 }
 
+/**
+ * The rows "Mark unanswered OK" may touch: ONLY those still unanswered. A Defect or
+ * an N-A is somebody's deliberate answer and is never overwritten. Returned as item
+ * keys so the caller patches each one through its ordinary `onPatch`.
+ */
+export function unansweredItemKeys(rows: ChecklistRow[]): string[] {
+  return rows.filter((r) => !isAnswered(r)).map((r) => r.itemKey);
+}
+
 /** Result for a set of rows. A NotApplicable row is NOT a failure — it is an
  *  answer, matching the backend's own rule that `passed == state != Defect`. */
 export function groupResult(rows: ChecklistRow[]): "Pass" | "Pass with defects" | "Fail" {
@@ -66,6 +78,7 @@ export default function ChecklistGroupEditor({
   rows,
   onPatch,
   legend = false,
+  readOnly = false,
 }: {
   group: InspectionSubGroup;
   rows: ChecklistRow[];
@@ -73,11 +86,27 @@ export default function ChecklistGroupEditor({
   /** Print the marker legend under this sub-group — set on the last sub-group of
    *  each area so the legend appears once per area rather than thirteen times. */
   legend?: boolean;
+  /** Disables every answer control, including "Mark unanswered OK". */
+  readOnly?: boolean;
 }) {
   const result = groupResult(rows);
   const rm = statusMeta(result === "Pass" ? "ontime" : result === "Fail" ? "over" : "soon");
   const open = unansweredCount(rows);
   const byKey = new Map(rows.map((r) => [r.itemKey, r]));
+  // Only rows this sub-group actually renders — a row with no catalogue item here
+  // is not on screen, so a bulk action must not answer it unseen.
+  const shown = group.items.flatMap((item) => byKey.get(item.key) ?? []);
+  const toMark = unansweredItemKeys(shown);
+  const canMark = !readOnly && toMark.length > 0;
+
+  // Per sub-group ON PURPOSE — there is no whole-form "all OK". Transcribing a paper
+  // form section by section, each section the driver ticked through is one
+  // deliberate act; a single form-wide button would let a blank form be saved as a
+  // clean pass. Defect and N-A answers are never touched.
+  function markUnansweredOk() {
+    if (!canMark) return;
+    for (const key of toMark) onPatch(key, { state: "Ok" });
+  }
 
   return (
     <div style={{ marginBottom: 14 }}>
@@ -93,6 +122,13 @@ export default function ChecklistGroupEditor({
         >
           {group.title}
         </span>
+        <ActionButton
+          onClick={markUnansweredOk}
+          disabled={!canMark}
+          style={{ fontSize: 11, padding: "3px 9px", alignSelf: "center" }}
+        >
+          {canMark ? `MARK ${toMark.length} UNANSWERED OK` : "MARK UNANSWERED OK"}
+        </ActionButton>
         <span style={{ marginLeft: "auto", fontFamily: fonts.body, fontSize: 12, color: colors.textDim }}>
           {open > 0 ? `${open} unanswered · ` : ""}Result:{" "}
           <span style={{ color: rm.t, fontWeight: 700 }}>
@@ -105,7 +141,7 @@ export default function ChecklistGroupEditor({
         {group.items.map((item) => {
           const r = byKey.get(item.key);
           if (!r) return null;
-          return <ItemRow key={item.key} item={item} row={r} onPatch={onPatch} />;
+          return <ItemRow key={item.key} item={item} row={r} onPatch={onPatch} readOnly={readOnly} />;
         })}
       </div>
 
@@ -132,14 +168,16 @@ function ItemRow({
   item,
   row,
   onPatch,
+  readOnly,
 }: {
   item: InspectionItem;
   row: ChecklistRow;
   onPatch: (itemKey: string, patch: Partial<ChecklistRow>) => void;
+  readOnly: boolean;
 }) {
   const isDefect = row.state === "Defect";
   const isNa = row.state === "NotApplicable";
-  // Only the two noteworthy answers get the accent bar. With 28–82 rows, marking
+  // Only the two noteworthy answers get the accent bar. With 28–64 rows, marking
   // every answered row would leave the highlight carrying no signal; "unanswered"
   // is called out by its own chip instead.
   const accent = isDefect ? statusMeta("over").c : isNa ? statusMeta("off").c : colors.blue;
@@ -158,7 +196,7 @@ function ItemRow({
             {item.basis === "NorthernLink" && <MonoTag>NL</MonoTag>}
             {row.state == null && <StatusChip kind="soon" label="Unanswered" />}
           </div>
-          {/* The form's "Check For" column: with up to 82 rows a dispatcher needs to know
+          {/* The form's "Check For" column: with up to 64 rows a dispatcher needs to know
               what "Ground beneath the vehicle" actually means. */}
           <div
             style={{
@@ -191,18 +229,21 @@ function ItemRow({
             active={row.state === "Ok"}
             label="OK"
             kind="ontime"
+            disabled={readOnly}
             onClick={() => onPatch(row.itemKey, { state: "Ok" })}
           />
           <StateToggle
             active={isDefect}
             label="DEFECT"
             kind="over"
+            disabled={readOnly}
             onClick={() => onPatch(row.itemKey, { state: "Defect" })}
           />
           <StateToggle
             active={isNa}
             label="N-A"
             kind="off"
+            disabled={readOnly}
             onClick={() => onPatch(row.itemKey, { state: "NotApplicable" })}
           />
         </div>
@@ -217,12 +258,14 @@ function ItemRow({
             value={row.severity}
             onChange={(v) => onPatch(row.itemKey, { severity: v as DefectSeverityWire })}
             options={SEVERITY_OPTIONS}
+            disabled={readOnly}
           />
         )}
         <TextField
           label={isDefect ? "Note (required for a defect)" : "Note (optional)"}
           value={row.note}
           onChange={(v) => onPatch(row.itemKey, { note: v })}
+          disabled={readOnly}
           placeholder={
             isDefect
               ? "Describe the defect"
@@ -240,24 +283,28 @@ function StateToggle({
   active,
   label,
   kind,
+  disabled,
   onClick,
 }: {
   active: boolean;
   label: string;
   kind: "ontime" | "over" | "off";
+  disabled: boolean;
   onClick: () => void;
 }) {
   const m = statusMeta(kind);
   return (
     <span
-      onClick={onClick}
+      onClick={disabled ? undefined : onClick}
+      aria-disabled={disabled || undefined}
       style={{
         fontFamily: fonts.body,
         fontWeight: 600,
         fontSize: 11.5,
         padding: "4px 9px",
         borderRadius: 7,
-        cursor: "pointer",
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled && !active ? 0.6 : 1,
         border: `1px solid ${active ? m.bd : colors.borderSubtle}`,
         background: active ? m.bg : "transparent",
         color: active ? m.t : colors.textDim,

@@ -21,7 +21,7 @@ import type { CheckState, DvirSubmission, InspectionMode } from "@/lib/types";
 // APP-LOCAL. The last step: everything the driver is about to attest to, then the attestation.
 //
 // THE ONLY SCROLLING SURFACE IN THE FLOW. WizardFrame deliberately has no scroll container —
-// a driver must never be able to leave part of a single question off screen — but up to 82 rows
+// a driver must never be able to leave part of a single question off screen — but up to 64 rows
 // of review is reference material being re-read, not a question being answered, so it owns its
 // own overflow here rather than pushing one into the frame.
 //

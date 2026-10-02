@@ -109,7 +109,7 @@ function inspection(type: "PreTrip" | "PostTrip", unit = "NL-02"): VehicleInspec
     odometerKm: 184_220,
     location: null,
     result: "Pass",
-    checklist: [{ group: "Engine Bay", item: "Engine oil", passed: true, state: "Ok", note: null }],
+    checklist: [{ group: "Engine Bay", item: "Engine fluid levels", passed: true, state: "Ok", note: null }],
     defects: [],
     weather: [],
     temperatureC: null,
