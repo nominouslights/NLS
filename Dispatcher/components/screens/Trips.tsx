@@ -1997,13 +1997,14 @@ export default function Trips({
   // it's safe to gate the ENTER buttons on the one-each-per-trip guard.
   const hasPreTrip = inspections.some((i) => i.type === "PreTrip");
   const hasPostTrip = inspections.some((i) => i.type === "PostTrip");
-  // The two inspections the driver package prints. A plain `find` on purpose:
-  // there is at most ONE pre-trip and ONE post-trip per trip (that is exactly
-  // what the ENTER buttons above are gated on), so sorting and taking the
-  // latest would invent a multiplicity the system does not have. `null` here is
-  // a real answer — the package prints a blank NL-PTI-01 for it.
+  // The inspection the driver package prints. A plain `find` on purpose:
+  // there is at most ONE pre-trip per trip (that is exactly what the ENTER
+  // button above is gated on), so sorting and taking the latest would invent a
+  // multiplicity the system does not have. `null` here is a real answer — the
+  // package prints a blank NL-PTI-01 for it. The post-trip is deliberately not
+  // in the package: the driver files it on the tablet, and the paper package
+  // carries an en-route defect report in its place.
   const preTripInspection = inspections.find((i) => i.type === "PreTrip") ?? null;
-  const postTripInspection = inspections.find((i) => i.type === "PostTrip") ?? null;
   const activity = t && activityState?.tripId === t.id ? activityState.rows : [];
 
   // Manifest may be present on the trip (manifestId) but not yet fetched into
@@ -2741,8 +2742,8 @@ export default function Trips({
                   {manifest ? "PRINT TRIP MANIFEST" : "PRINT BLANK MANIFEST"}
                 </ActionButton>
                 {/* The whole driver package: cover + manifest + itinerary +
-                    pre-trip + post-trip, each part blank-form-printed when it
-                    has no record. Deliberately NOT gated on tripEditable — a
+                    pre-trip + en-route defect report, each part
+                    blank-form-printed when it has no record. Deliberately NOT gated on tripEditable — a
                     closed trip's records can still be viewed and printed, and
                     downloading the package after the fact is the audit case.
                     The label is fixed (unlike the manifest button's
@@ -2760,7 +2761,6 @@ export default function Trips({
                       trip: t,
                       manifest,
                       preTrip: preTripInspection,
-                      postTrip: postTripInspection,
                       // Shipments only ride cargo/grocery trips, and the fetch
                       // above is guarded to match — a passenger trip's
                       // incidental cargo is already on the manifest's §3, so []
