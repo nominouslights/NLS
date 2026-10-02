@@ -7,7 +7,13 @@ import { TouchButton } from "@/components/ui-tablet/TouchButton";
 import { StatusBanner } from "@/components/ui-tablet/StatusBanner";
 import { CardRow, FieldLine, Heading, MockTag, TabletChip } from "../shared";
 import { checkStepId, defectStepId } from "@/lib/inspectionSteps";
-import { severityGlyph, severityKind, type InspectionResultName } from "@/lib/inspectionGate";
+import {
+  locationError,
+  normalizeLocation,
+  severityGlyph,
+  severityKind,
+  type InspectionResultName,
+} from "@/lib/inspectionGate";
 import { NL_PTI_01_CERTIFICATION, type InspectionSubGroup } from "@/lib/inspectionForm";
 import type { DraftDefect } from "@/lib/inspectionStore";
 import type { CheckState, DvirSubmission, InspectionMode } from "@/lib/types";
@@ -15,7 +21,7 @@ import type { CheckState, DvirSubmission, InspectionMode } from "@/lib/types";
 // APP-LOCAL. The last step: everything the driver is about to attest to, then the attestation.
 //
 // THE ONLY SCROLLING SURFACE IN THE FLOW. WizardFrame deliberately has no scroll container —
-// a driver must never be able to leave part of a single question off screen — but 67 to 80 rows
+// a driver must never be able to leave part of a single question off screen — but up to 82 rows
 // of review is reference material being re-read, not a question being answered, so it owns its
 // own overflow here rather than pushing one into the frame.
 //
@@ -51,6 +57,7 @@ export function ReviewStep({
   unit,
   groups,
   odometerKm,
+  location,
   answers,
   notes,
   defects,
@@ -68,6 +75,8 @@ export function ReviewStep({
   /** Already narrowed to this unit and mode by itemsFor() — the caller does that once. */
   groups: InspectionSubGroup[];
   odometerKm: number | null;
+  /** Raw, as typed. Shown trimmed — the value that will be sent. */
+  location: string;
   answers: Record<string, CheckState>;
   notes: Record<string, string>;
   defects: Record<string, DraftDefect>;
@@ -82,16 +91,21 @@ export function ReviewStep({
   onSubmit: () => void;
 }) {
   const rm = RESULT_META[result];
-  const complete = unansweredCount === 0 && ungradedCount === 0 && odometerKm !== null;
+  const locError = locationError(location);
+  const shownLocation = normalizeLocation(location);
+  const complete =
+    unansweredCount === 0 && ungradedCount === 0 && odometerKm !== null && locError === null;
 
   const blockedReason =
     odometerKm === null
       ? "Enter the odometer reading first — an inspection cannot be certified without it."
-      : unansweredCount > 0
-        ? `${unansweredCount} item(s) still unanswered — an inspection cannot be certified with blanks.`
-        : ungradedCount > 0
-          ? `${ungradedCount} defect(s) have no severity — a defect without one cannot be graded.`
-          : "";
+      : locError !== null
+        ? locError
+        : unansweredCount > 0
+          ? `${unansweredCount} item(s) still unanswered — an inspection cannot be certified with blanks.`
+          : ungradedCount > 0
+            ? `${ungradedCount} defect(s) have no severity — a defect without one cannot be graded.`
+            : "";
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingBottom: gap.page }}>
@@ -145,6 +159,23 @@ export function ReviewStep({
           Change
         </TouchButton>
       </div>
+
+      {/* The location, on its own row: it is free text up to 200 characters and would wrap the
+          title row above. Same Change target — it is collected on the header step. */}
+      <CardRow>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <FieldLine
+            label="Location (town or highway)"
+            value={shownLocation ?? "Not entered — required"}
+          />
+        </div>
+        <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 10 }}>
+          {locError !== null ? <TabletChip kind="soon" label="Required" /> : null}
+          <TouchButton variant="secondary" onClick={() => onGoToStep("odometer")}>
+            Change
+          </TouchButton>
+        </div>
+      </CardRow>
 
       {/* A plain Unicode apostrophe, not &rsquo;: `title` is a string prop, so relying on JSX
           entity decoding in an attribute is a trap worth not setting. */}

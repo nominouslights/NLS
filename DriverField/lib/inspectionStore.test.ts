@@ -6,11 +6,13 @@ import {
   getDraft,
   getServerSnapshot,
   getSnapshot,
+  CERTIFIED_STORE_VERSION,
   hasDraft,
   INSPECTION_STORE_VERSION,
   recordCertification,
   setAnswer,
   setDefect,
+  setLocation,
   setNote,
   setOdometer,
   setStep,
@@ -24,7 +26,7 @@ import { itemsFor } from "./inspectionForm";
 
 // The DVIR draft store.
 //
-// What is being protected here is a driver's whole NL-PTI-01 walk-around — 67 to 80 answers
+// What is being protected here is a driver's whole NL-PTI-01 walk-around — 28 to 82 answers
 // depending on the unit and the half of the form — and the honesty of a compliance record.
 // Every test below is a failure mode somebody would otherwise hit in a vehicle: yesterday's
 // pre-trip resuming into today's certification, a vehicle reassignment silently re-attributing
@@ -42,6 +44,16 @@ const NL01_PRE = itemsFor("NL-01", "PreTrip");
 const ITEM_A = NL01_PRE[0].items[0].key;
 const ITEM_B = NL01_PRE[1].items[0].key;
 
+/** Keys on each half of the form, for any unit — what the store's per-mode filter keeps. */
+const PRE_KEYS = itemsFor(null, "PreTrip").flatMap((g) => g.items.map((i) => i.key));
+const POST_KEYS = itemsFor(null, "PostTrip").flatMap((g) => g.items.map((i) => i.key));
+/** A real post-trip row ("Defects noticed while driving" is the rev 2 one). */
+const POST_ITEM = "Defects noticed while driving";
+/** A row rev 2 moved OFF the post-trip: on the pre-trip, no longer on the post-trip. */
+const PRE_ONLY = PRE_KEYS.find((k) => !POST_KEYS.includes(k)) as string;
+/** A row that is on BOTH halves. */
+const BOTH = PRE_KEYS.find((k) => POST_KEYS.includes(k)) as string;
+
 function seed(key: string, value: unknown): void {
   window.localStorage.setItem(key, JSON.stringify(value));
 }
@@ -57,6 +69,7 @@ function validDraft(over: Partial<InspectionDraft> = {}): InspectionDraft {
     notes: {},
     defects: {},
     odometerKm: 184_930,
+    location: "Lynn Lake",
     stepId: `check:${ITEM_A}`,
     ...over,
   };
@@ -91,10 +104,10 @@ describe("draftKey", () => {
 describe("draft isolation", () => {
   it("keeps a PreTrip and a PostTrip draft for one vehicle apart", () => {
     setAnswer("PreTrip", "VEH-11", ITEM_A, "pass");
-    setAnswer("PostTrip", "VEH-11", ITEM_B, "defect");
+    setAnswer("PostTrip", "VEH-11", POST_ITEM, "defect");
 
     expect(getDraft("PreTrip", "VEH-11")?.answers).toEqual({ [ITEM_A]: "pass" });
-    expect(getDraft("PostTrip", "VEH-11")?.answers).toEqual({ [ITEM_B]: "defect" });
+    expect(getDraft("PostTrip", "VEH-11")?.answers).toEqual({ [POST_ITEM]: "defect" });
   });
 
   it("never returns another vehicle's draft", () => {
@@ -180,6 +193,17 @@ describe("mutations", () => {
     expect(draft?.notes[ITEM_A]).toBe("Weeping at the seam.");
   });
 
+  it("records the location as typed — untrimmed, because trimming happens at submit", () => {
+    // Trimming per keystroke would eat the space a driver just typed after "Lynn".
+    setLocation("PreTrip", "VEH-11", "Lynn ");
+    expect(getDraft("PreTrip", "VEH-11")?.location).toBe("Lynn ");
+  });
+
+  it("starts a draft with an empty location, never a default one", () => {
+    // A defaulted town would be a false statement on the report (Man. Reg. 95/2008 s.12(1)).
+    expect(startDraft("PreTrip", "VEH-11").location).toBe("");
+  });
+
   it("starts a draft on the first mutation, so no caller has to remember to", () => {
     expect(hasDraft("PreTrip", "VEH-11")).toBe(false);
     setAnswer("PreTrip", "VEH-11", ITEM_A, "pass");
@@ -196,8 +220,16 @@ describe("reload", () => {
     const draft = getDraft("PreTrip", "VEH-11");
     expect(draft?.answers[ITEM_A]).toBe("pass");
     expect(draft?.odometerKm).toBe(184_930);
+    expect(draft?.location).toBe("Lynn Lake");
     expect(draft?.stepId).toBe(`check:${ITEM_A}`);
     expect(storageFailed()).toBe(false);
+  });
+
+  it("reads a stored draft with no location as an empty one, not a missing field", () => {
+    const { location: _omit, ...withoutLocation } = validDraft();
+    void _omit;
+    seed(draftKey("PreTrip", "VEH-11"), withoutLocation);
+    expect(getDraft("PreTrip", "VEH-11")?.location).toBe("");
   });
 
   it("survives a mutation, a reseed and a re-read without serving a stale cache", () => {
@@ -216,6 +248,17 @@ describe("draft rejection", () => {
 
     expect(getDraft("PreTrip", "VEH-11")).toBeNull();
     expect(window.localStorage.getItem(draftKey("PreTrip", "VEH-11"))).toBeNull();
+  });
+
+  it("discards a v2 draft — an answer sheet for NL-PTI-01 rev 1, with no location", () => {
+    // Rev 2 moved rows between the halves and added the location. No key was renamed, so a v2
+    // draft would LOAD — and that is the reason for discarding it rather than trusting the key
+    // filter alone: it is answers to a different revision of a legal form.
+    expect(INSPECTION_STORE_VERSION).toBe(3);
+    seed(draftKey("PostTrip", "VEH-11"), validDraft({ v: 2, mode: "PostTrip" }));
+
+    expect(getDraft("PostTrip", "VEH-11")).toBeNull();
+    expect(window.localStorage.getItem(draftKey("PostTrip", "VEH-11"))).toBeNull();
   });
 
   it("discards yesterday's draft, and removes the key", () => {
@@ -259,6 +302,41 @@ describe("draft rejection", () => {
     expect(draft?.answers).toEqual({ [ITEM_A]: "pass" });
     expect(draft?.notes).toEqual({ [ITEM_A]: "topped up" });
     expect(draft?.defects).toEqual({});
+  });
+
+  it("drops every answer, note and defect for a row not on THIS half of the form", () => {
+    // THE stale-draft case: a post-trip draft holding rows that rev 2 moved to the pre-trip
+    // only. They are in the catalogue, so the catalogue-wide check alone would keep them, and a
+    // graded defect among them would be filed on a post-trip that never asked the question.
+    expect(PRE_ONLY).toBeTruthy();
+    expect(BOTH).toBeTruthy();
+    seed(
+      draftKey("PostTrip", "VEH-11"),
+      validDraft({
+        mode: "PostTrip",
+        answers: { [PRE_ONLY]: "defect", [BOTH]: "pass", [POST_ITEM]: "na" },
+        notes: { [PRE_ONLY]: "from the old post-trip", [BOTH]: "ok" },
+        defects: { [PRE_ONLY]: { severity: "Major", note: "from the old post-trip" } },
+      }),
+    );
+
+    const draft = getDraft("PostTrip", "VEH-11");
+    expect(draft?.answers).toEqual({ [BOTH]: "pass", [POST_ITEM]: "na" });
+    expect(draft?.notes).toEqual({ [BOTH]: "ok" });
+    expect(draft?.defects).toEqual({});
+    // Every key that survives is on the current post-trip.
+    for (const key of Object.keys(draft?.answers ?? {})) expect(POST_KEYS).toContain(key);
+  });
+
+  it("never invents an answer for a row the draft does not hold — a new row reads unanswered", () => {
+    // The other half of a form revision: rows ADDED to the form must show as "Not answered"
+    // and block Certify, never default to Ok. The store only ever filters; it never fills in.
+    seed(draftKey("PreTrip", "VEH-11"), validDraft({ answers: { [ITEM_A]: "pass" } }));
+
+    const draft = getDraft("PreTrip", "VEH-11");
+    expect(Object.keys(draft?.answers ?? {})).toEqual([ITEM_A]);
+    const unanswered = PRE_KEYS.filter((k) => draft?.answers[k] === undefined);
+    expect(unanswered).toHaveLength(PRE_KEYS.length - 1);
   });
 
   it("drops an answer or severity that is not one of the known literals", () => {
@@ -315,6 +393,14 @@ describe("certifications", () => {
     });
 
     expect(certifiedToday("PreTrip", "VEH-11")?.result).toBe("Fail");
+  });
+
+  it("keeps today's certifications across the DRAFT version bump", () => {
+    // The two versions are independent on purpose: bumping the draft for a form revision must
+    // not drop a certification made this morning and re-block boarding.
+    expect(CERTIFIED_STORE_VERSION).toBe(2);
+    seed("nl.driverfield.inspectionCertified", { v: 2, items: [certification] });
+    expect(certifiedToday("PreTrip", "VEH-11")?.commandId).toBe(certification.commandId);
   });
 
   it("ignores a stored certification list from an older store version", () => {

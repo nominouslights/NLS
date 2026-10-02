@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   boardingGate,
   deriveResult,
+  INSPECTION_LOCATION_MAX,
   inspectionDue,
+  locationError,
+  normalizeLocation,
   odometerError,
   severityGlyph,
   severityKind,
@@ -93,6 +96,38 @@ describe("odometerError", () => {
 
   it("rejects a fractional reading", () => {
     expect(odometerError(184_920.5, 0)).toContain("whole kilometres");
+  });
+});
+
+describe("locationError / normalizeLocation", () => {
+  // Mirrors VehicleInspection.Create — Backend/src/Fleet/Domain/Inspections/VehicleInspection.cs —
+  // which Normalize()s the location (trim, blank → null) and then fails with
+  // InspectionErrors.LocationTooLong when `normalizedLocation.Length > LocationMaxLength` (200).
+  // Both sides of that boundary, and on the TRIMMED length, because that is what the server
+  // measures: padding a 200-character town must not be rejected here when the API accepts it.
+  it("pins the limit to VehicleInspection.LocationMaxLength", () => {
+    expect(INSPECTION_LOCATION_MAX).toBe(200);
+  });
+
+  it("accepts exactly 200 characters and rejects 201", () => {
+    expect(locationError("a".repeat(200))).toBeNull();
+    expect(locationError("a".repeat(201))).toContain("201 characters");
+  });
+
+  it("measures the trimmed value, as the server does", () => {
+    expect(locationError(`   ${"a".repeat(200)}   `)).toBeNull();
+    expect(normalizeLocation("  Lynn Lake  ")).toBe("Lynn Lake");
+  });
+
+  it("requires a location — blank and whitespace-only are both refused", () => {
+    // Man. Reg. 95/2008 s.12(1). Nullable on the wire for old-record amends; never blank here.
+    expect(locationError("")).toContain("Enter where");
+    expect(locationError("   \t ")).toContain("Enter where");
+    expect(normalizeLocation("   ")).toBeNull();
+  });
+
+  it("accepts a highway description", () => {
+    expect(locationError("PTH 391, km 42 north of Thompson")).toBeNull();
   });
 });
 

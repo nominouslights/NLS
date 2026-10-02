@@ -21,15 +21,18 @@ import type { CheckState } from "./types";
 // The DVIR wizard's step model, over form NL-PTI-01.
 //
 // The assertions that matter are about the PROGRESS DENOMINATOR and the ITEM KEYS. A driver
-// answering a legal attestation must be told exactly where they are; a chip reading "68 of 67"
-// or a follow-up presented as a 68th question is a trust failure, not a cosmetic one.
+// answering a legal attestation must be told exactly where they are; a chip reading "72 of 71"
+// or a follow-up presented as a 72nd question is a trust failure, not a cosmetic one.
 //
 // THE DENOMINATOR IS NO LONGER ONE NUMBER, AND THAT IS WHAT THIS FILE EXISTS TO PIN.
-// It depends on the unit and on the half of the form, so there are four right answers. The
-// counts below are written out because they are the ACCEPTANCE CRITERION — what the paper form
-// says — but every one of them is also asserted to equal what the code DERIVES from the
-// catalogue. The code must never carry a literal; the test must. If the catalogue legitimately
-// changes, exactly these four numbers move, and somebody has to look at the form to move them.
+// It depends on the unit and on the half of the form. Rev 2 of NL-PTI-01 made the post-trip the
+// reduced en-route set — 28 checks for every unit, because no row kept on it is NL02Only — so
+// there are now THREE distinct right answers across the four forms: NL-01 pre 71, NL-02 pre 82,
+// and post 28 for both. The counts below are written out because they are the ACCEPTANCE
+// CRITERION — what the paper form says — but every one of them is also asserted to equal what
+// the code DERIVES from the catalogue. The code must never carry a literal; the test must. If
+// the catalogue legitimately changes, exactly these numbers move, and somebody has to look at
+// the form to move them.
 //
 // Item keys mirror InspectionChecklistItem.Item on the backend: the key is the wire value, and
 // half of the `(InspectionId, Item)` address a defect is filed against. The uniqueness test
@@ -42,10 +45,10 @@ const NL01 = "NL-01";
 const NL02 = "NL-02";
 
 const DENOMINATORS: { unit: string; mode: InspectionFormMode; expected: number }[] = [
-  { unit: NL01, mode: "PreTrip", expected: 67 },
-  { unit: NL01, mode: "PostTrip", expected: 73 },
-  { unit: NL02, mode: "PreTrip", expected: 74 },
-  { unit: NL02, mode: "PostTrip", expected: 80 },
+  { unit: NL01, mode: "PreTrip", expected: 71 },
+  { unit: NL01, mode: "PostTrip", expected: 28 },
+  { unit: NL02, mode: "PreTrip", expected: 82 },
+  { unit: NL02, mode: "PostTrip", expected: 28 },
 ];
 
 function keysFor(unit: string | null, mode: InspectionFormMode): string[] {
@@ -108,21 +111,42 @@ describe("the denominator", () => {
     },
   );
 
-  it("differs between the two units and between the two halves of the form", () => {
-    // The pin against a module-level constant coming back. A cached denominator would make at
-    // least three of these four equal, and nothing else in the suite would notice.
+  it("differs between the two units on the pre-trip, and between the two halves of the form", () => {
+    // The pin against a module-level constant coming back. The post-trip is the same 28 for
+    // both units BY DESIGN (rev 2), so three distinct values is the right answer — a cached
+    // denominator would collapse them to one and nothing else in the suite would notice.
     const observed = DENOMINATORS.map(({ unit, mode }) => checkCount(unit, mode));
-    expect(new Set(observed).size).toBe(4);
+    expect(new Set(observed).size).toBe(3);
+    expect(checkCount(NL01, "PreTrip")).not.toBe(checkCount(NL02, "PreTrip"));
+    expect(checkCount(NL01, "PostTrip")).not.toBe(checkCount(NL01, "PreTrip"));
   });
 
   it("gives an unknown or unassigned unit the FULL superset, never NL-01's narrower form", () => {
     // itemsFor's fail-safe direction: more questions when we do not know what is being
-    // inspected. Defaulting an unknown unit to NL-01 would silently drop seven rows from a
-    // compliance form.
-    expect(checkCount(null, "PostTrip")).toBe(80);
-    expect(checkCount("", "PostTrip")).toBe(80);
-    expect(checkCount("NL-99", "PostTrip")).toBe(80);
-    expect(checkCount(null, "PreTrip")).toBe(74);
+    // inspected. Defaulting an unknown unit to NL-01 would silently drop eleven rows from a
+    // compliance pre-trip. (The post-trip has no NL02Only row, so it is 28 either way.)
+    expect(checkCount(null, "PreTrip")).toBe(82);
+    expect(checkCount("", "PreTrip")).toBe(82);
+    expect(checkCount("NL-99", "PreTrip")).toBe(82);
+    expect(checkCount(null, "PostTrip")).toBe(28);
+    expect(checkCount("", "PostTrip")).toBe(28);
+    expect(checkCount("NL-99", "PostTrip")).toBe(28);
+  });
+
+  it("makes the post-trip the en-route set: the same rows for every unit, none pre-trip-only", () => {
+    // Rev 2: NSC 13 requires no full post-trip inspection — the duty at the end of a run is to
+    // record what changed or was noticed en route. So the post-trip is the short "critical,
+    // can change while driving" list, and it carries "Defects noticed while driving".
+    expect(keysFor(NL01, "PostTrip")).toEqual(keysFor(NL02, "PostTrip"));
+    expect(keysFor(null, "PostTrip")).toEqual(keysFor(NL02, "PostTrip"));
+    expect(keysFor(NL01, "PostTrip")).toContain("Defects noticed while driving");
+    expect(keysFor(NL01, "PreTrip")).not.toContain("Defects noticed while driving");
+
+    const preTripOnly = NL_PTI_01.flatMap((g) => g.items)
+      .filter((i) => i.mode === "PreTripOnly")
+      .map((i) => i.key);
+    expect(preTripOnly.length).toBeGreaterThan(0);
+    for (const key of preTripOnly) expect(keysFor(null, "PostTrip")).not.toContain(key);
   });
 
   it("is what the review step reports, for each unit and mode", () => {
@@ -151,14 +175,14 @@ describe("buildSteps", () => {
     const target = NL01_PRE_KEYS[7];
     const all = steps({ [target]: "defect" });
 
-    expect(all).toHaveLength(1 + 67 + 1 + 1);
+    expect(all).toHaveLength(1 + 71 + 1 + 1);
     const at = all.findIndex((s) => s.id === checkStepId(target));
     expect(all[at + 1].id).toBe(defectStepId(target));
   });
 
   it("keeps `of` at the derived count on every check even when EVERY item is a defect", () => {
     // The denominator cannot be inflated by a branch. This is the assertion that makes
-    // "68 of 67" unreachable rather than merely unlikely.
+    // "72 of 71" unreachable rather than merely unlikely.
     for (const { unit, mode, expected } of DENOMINATORS) {
       const answers = Object.fromEntries(
         keysFor(unit, mode).map((k) => [k, "defect" as CheckState]),
@@ -181,15 +205,15 @@ describe("buildSteps", () => {
     if (!defect) throw new Error("no defect step built");
 
     expect(defect.parentN).toBe(7);
-    expect(defect.parentOf).toBe(67);
-    expect(progressLabel(defect)).toBe("Follow-up · check 7 of 67");
+    expect(defect.parentOf).toBe(71);
+    expect(progressLabel(defect)).toBe("Follow-up · check 7 of 71");
     // Same position on the bar as its parent — the bar never moves backwards.
-    expect(progressFraction(defect)).toBe(7 / 67);
+    expect(progressFraction(defect)).toBe(7 / 71);
   });
 
   it("carries the sub-group, the area and the Check For text onto every step that needs them", () => {
     // ChecklistItemInput has a Group field, and CheckStep.tsx renders the area + sub-group line
-    // that makes a 67-to-80-row walk-around locatable. Losing either is a silent regression.
+    // that makes a walk-around of up to 82 rows locatable. Losing either is a silent regression.
     const answers = Object.fromEntries(
       NL01_PRE_KEYS.map((k) => [k, "defect" as CheckState]),
     );
@@ -207,9 +231,9 @@ describe("buildSteps", () => {
   it("gives every step a unique id", () => {
     // The resume pointer is an id, so a collision resumes on the wrong step.
     const answers = Object.fromEntries(
-      keysFor(NL02, "PostTrip").map((k) => [k, "defect" as CheckState]),
+      keysFor(NL02, "PreTrip").map((k) => [k, "defect" as CheckState]),
     );
-    const ids = steps(answers, NL02, "PostTrip").map((s) => s.id);
+    const ids = steps(answers, NL02, "PreTrip").map((s) => s.id);
     expect(new Set(ids).size).toBe(ids.length);
   });
 
@@ -223,12 +247,24 @@ describe("buildSteps", () => {
   it("ignores an answer for a row this unit and mode do not ask", () => {
     // A draft started on NL-02 and reopened after a reassignment to NL-01 still holds answers
     // for the NL02Only rows. They must not resurrect a step the narrowed form does not have.
-    const nl02Only = keysFor(NL02, "PostTrip").filter((k) => !keysFor(NL01, "PreTrip").includes(k));
+    const nl02Only = keysFor(NL02, "PreTrip").filter((k) => !keysFor(NL01, "PreTrip").includes(k));
     expect(nl02Only.length).toBeGreaterThan(0);
 
     const answers = Object.fromEntries(nl02Only.map((k) => [k, "defect" as CheckState]));
     const all = steps(answers, NL01, "PreTrip");
-    expect(all).toHaveLength(1 + 67 + 1);
+    expect(all).toHaveLength(1 + 71 + 1);
+    expect(all.some((s) => s.kind === "defect")).toBe(false);
+  });
+
+  it("ignores an answer for a row on the OTHER half of the form", () => {
+    // A post-trip draft from before rev 2 holds answers for rows that are now pre-trip-only.
+    // They must not resurrect a step on the 28-row post-trip.
+    const preOnly = keysFor(NL01, "PreTrip").filter((k) => !keysFor(NL01, "PostTrip").includes(k));
+    expect(preOnly.length).toBeGreaterThan(0);
+
+    const answers = Object.fromEntries(preOnly.map((k) => [k, "defect" as CheckState]));
+    const all = steps(answers, NL01, "PostTrip");
+    expect(all).toHaveLength(1 + 28 + 1);
     expect(all.some((s) => s.kind === "defect")).toBe(false);
   });
 
@@ -269,7 +305,7 @@ describe("resolveStep", () => {
 
   it("falls back to the first step for a row the narrowed form does not ask", () => {
     // Same reassignment story as above, seen through the resume pointer rather than the steps.
-    const nl02Only = keysFor(NL02, "PostTrip").find((k) => !NL01_PRE_KEYS.includes(k));
+    const nl02Only = keysFor(NL02, "PreTrip").find((k) => !NL01_PRE_KEYS.includes(k));
     if (!nl02Only) throw new Error("the catalogue has no NL-02-only row");
     expect(resolveStep(steps(), checkStepId(nl02Only)).kind).toBe("odometer");
   });
@@ -278,9 +314,9 @@ describe("resolveStep", () => {
 describe("progress", () => {
   it("labels the odometer, a check and the review without a fraction lie", () => {
     const all = steps();
-    expect(progressLabel(all[0])).toBe("Odometer");
-    expect(progressLabel(all[1])).toBe("Check 1 of 67");
-    expect(progressLabel(all[all.length - 1])).toBe("Review · 67 of 67");
+    expect(progressLabel(all[0])).toBe("Odometer & location");
+    expect(progressLabel(all[1])).toBe("Check 1 of 71");
+    expect(progressLabel(all[all.length - 1])).toBe("Review · 71 of 71");
   });
 
   it("never exceeds 1 or drops below 0, for any answer combination on any form", () => {

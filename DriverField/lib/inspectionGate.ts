@@ -156,6 +156,48 @@ export function odometerError(entered: number | null, lastReadingKm: number): st
 }
 
 /**
+ * Longest inspection location the API accepts. Mirrors `VehicleInspection.LocationMaxLength`
+ * (Backend/src/Fleet/Domain/Inspections/VehicleInspection.cs) — the column's varchar(200) — and
+ * Dispatcher/lib/api/maintenance.ts's INSPECTION_LOCATION_MAX. Over it the server returns 400
+ * `Fleet.Inspection.LocationTooLong`.
+ */
+export const INSPECTION_LOCATION_MAX = 200;
+
+/**
+ * The wire value for the location field. Mirrors `VehicleInspection.Normalize`: trimmed, and a
+ * blank or whitespace-only value is null. The length check is on the TRIMMED value, exactly as
+ * `VehicleInspection.Create` applies it after Normalize.
+ */
+export function normalizeLocation(raw: string): string | null {
+  const trimmed = raw.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+/**
+ * Why the location cannot be certified, or null when it can.
+ *
+ * REQUIRED HERE, nullable on the wire. Man. Reg. 95/2008 s.12(1) requires a trip inspection
+ * report to name "the municipality or description of the highway location where the
+ * inspection was performed", so a driver-app submission never omits it. The backend accepts
+ * null only so a dispatcher amend of a record made before the field existed still goes
+ * through — that is not this app's case. The max mirrors `VehicleInspection.Create`'s
+ * `normalizedLocation.Length > LocationMaxLength` → InspectionErrors.LocationTooLong.
+ */
+export function locationError(raw: string): string | null {
+  const normalized = normalizeLocation(raw);
+  if (normalized === null) {
+    return "Enter where this inspection is being done — a town, or a highway and landmark.";
+  }
+  if (normalized.length > INSPECTION_LOCATION_MAX) {
+    return (
+      `The location is ${normalized.length} characters; the limit is ` +
+      `${INSPECTION_LOCATION_MAX}. Shorten it to the town or highway.`
+    );
+  }
+  return null;
+}
+
+/**
  * The status colour for a severity. Major and Out of Service BOTH map to `over` (vermillion) —
  * deliberately, because lib/theme.ts is a protected copy and inventing a fifth StatusKind or a
  * new hex is not an option. They are told apart by their glyph instead; see severityGlyph.

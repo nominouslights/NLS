@@ -27,6 +27,9 @@ import type { CheckState } from "@/lib/types";
 //   • `passed` is derived the way the aggregate re-derives it (`state !== Defect`).
 //   • `certificationStatement` is the catalogue's sentence, verbatim — what was actually signed.
 //   • `source` is "DriverApp", explicitly, because the backend defaults it to Dispatcher.
+//   • `location` is sent, trimmed, and required — Man. Reg. 95/2008 s.12(1) — even though the
+//     wire field is nullable (InspectionRequest.Location).
+//   • a row the draft holds but THIS form does not ask is never sent and never blocks Certify.
 //
 // And the one behavioural guarantee that costs a driver the whole walk-around if it breaks: if
 // enqueue throws, the draft survives.
@@ -54,6 +57,7 @@ type Payload = {
   type: string;
   source: string;
   odometerKm: number | null;
+  location: string | null;
   checklist: ChecklistRow[];
   defects: { item: string; severity: string; note: string | null }[];
   certificationStatement: string;
@@ -86,9 +90,17 @@ function renderWizard() {
   return render(<Inspection mode="PreTrip" />);
 }
 
-function setOdometer(km: string) {
+/** Fills the header step — odometer and location — and continues past it. */
+function setOdometer(km: string, location = "Lynn Lake") {
   fireEvent.change(screen.getByLabelText(/Odometer reading/), { target: { value: km } });
+  fireEvent.change(screen.getByLabelText("Location (town or highway)"), {
+    target: { value: location },
+  });
   fireEvent.click(screen.getByRole("button", { name: /^Continue/ }));
+}
+
+function continueButton(): HTMLButtonElement {
+  return screen.getByRole("button", { name: /^Continue/ }) as HTMLButtonElement;
 }
 
 /** Taps one answer tile on the current check step. */
@@ -105,7 +117,7 @@ function payload(): Payload {
  * A complete draft, written straight to storage — what a reload of a finished walk-around
  * actually leaves behind.
  *
- * WHY NOT TAP 67 TILES IN EVERY PAYLOAD TEST. One full walk through the DOM is worth having and
+ * WHY NOT TAP 71 TILES IN EVERY PAYLOAD TEST. One full walk through the DOM is worth having and
  * there is one below; eight of them cost a minute of suite time to re-prove the same navigation
  * and prove nothing about the payload. Seeding the key directly is the same technique
  * lib/inspectionStore.test.ts uses for a reload, and it leaves the submit path — enqueue →
@@ -115,6 +127,7 @@ function seedComplete(over: {
   answers?: Record<string, CheckState>;
   notes?: Record<string, string>;
   defects?: Record<string, { severity: string; note: string }>;
+  location?: string;
 } = {}) {
   const answers: Record<string, CheckState> = Object.fromEntries(
     ITEMS.map((i) => [i.key, "pass" as CheckState]),
@@ -131,6 +144,7 @@ function seedComplete(over: {
       notes: over.notes ?? {},
       defects: over.defects ?? {},
       odometerKm: 184_920,
+      location: over.location ?? "Lynn Lake",
       stepId: "review",
     }),
   );
@@ -145,7 +159,44 @@ describe("the wizard", () => {
     renderWizard();
     expect(screen.getByText("What does the odometer read?")).toBeTruthy();
     expect(screen.getByText("MOCK")).toBeTruthy();
-    expect(screen.getByText("Odometer")).toBeTruthy();
+    expect(screen.getByText("Odometer & location")).toBeTruthy();
+  });
+
+  it("asks for the location on the header step, and blocks Continue until it is filled", () => {
+    renderWizard();
+    fireEvent.change(screen.getByLabelText(/Odometer reading/), { target: { value: "184920" } });
+
+    // A good odometer alone is not enough.
+    expect(continueButton().disabled).toBe(true);
+    expect(screen.getByText(/the report must say where the inspection was done/)).toBeTruthy();
+
+    // Whitespace is blank.
+    fireEvent.change(screen.getByLabelText("Location (town or highway)"), {
+      target: { value: "   " },
+    });
+    expect(continueButton().disabled).toBe(true);
+
+    fireEvent.change(screen.getByLabelText("Location (town or highway)"), {
+      target: { value: "Lynn Lake" },
+    });
+    expect(continueButton().disabled).toBe(false);
+    expect(getDraft("PreTrip", "VEH-11")?.location).toBe("Lynn Lake");
+  });
+
+  it("blocks Continue over 200 characters, with the reason on screen", () => {
+    renderWizard();
+    fireEvent.change(screen.getByLabelText(/Odometer reading/), { target: { value: "184920" } });
+    fireEvent.change(screen.getByLabelText("Location (town or highway)"), {
+      target: { value: "a".repeat(201) },
+    });
+
+    expect(continueButton().disabled).toBe(true);
+    expect(screen.getByText("That location is too long.")).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText("Location (town or highway)"), {
+      target: { value: "a".repeat(200) },
+    });
+    expect(continueButton().disabled).toBe(false);
   });
 
   it("blocks Continue on a rolled-back odometer, with the reason on screen", () => {
@@ -159,7 +210,7 @@ describe("the wizard", () => {
   });
 
   it("shows one question at a time and counts out of the derived denominator", () => {
-    // 67 for NL-01 pre-trip. Written through checkCount() rather than as a literal, because a
+    // 71 for NL-01 pre-trip. Written through checkCount() rather than as a literal, because a
     // literal here is the same bug the step model was rewritten to remove.
     renderWizard();
     setOdometer("184920");
@@ -173,7 +224,7 @@ describe("the wizard", () => {
   });
 
   it("shows the form's Check For text and the area + sub-group line", () => {
-    // The mitigation for a 67-to-80-row walk-around. "Ground beneath the vehicle" is not a
+    // The mitigation for a walk-around of up to 82 rows. "Ground beneath the vehicle" is not a
     // question a driver can answer without its Check For column.
     renderWizard();
     setOdometer("184920");
@@ -239,7 +290,7 @@ describe("the wizard", () => {
   it(
     "walks the whole form, one question at a time, and reaches the attestation",
     () => {
-      // THE full-walk test, and deliberately the only one: 67 taps through jsdom is slow, so
+      // THE full-walk test, and deliberately the only one: 71 taps through jsdom is slow, so
       // the payload tests below seed a finished draft instead. This is what proves the wizard
       // actually gets from question 1 to the attestation without a dead end.
       renderWizard();
@@ -268,6 +319,7 @@ describe("the wizard", () => {
     expect(screen.getByText(`Check 2 of ${ITEM_COUNT}`)).toBeTruthy();
     expect(screen.queryByLabelText(/Odometer reading/)).toBeNull();
     expect(getDraft("PreTrip", "VEH-11")?.odometerKm).toBe(184_920);
+    expect(getDraft("PreTrip", "VEH-11")?.location).toBe("Lynn Lake");
   });
 });
 
@@ -281,6 +333,7 @@ describe("the submit payload", () => {
     expect(p.type).toBe("PreTrip");
     expect(p.source).toBe("DriverApp");
     expect(p.odometerKm).toBe(184_920);
+    expect(p.location).toBe("Lynn Lake");
     expect(p.checklist).toHaveLength(ITEM_COUNT);
     expect(p.checklist.every((c) => c.state === "Ok" && c.passed)).toBe(true);
     expect(p.checklist.every((c) => c.group.trim().length > 0)).toBe(true);
@@ -364,6 +417,117 @@ describe("the submit payload", () => {
     const row = p.checklist.find((c) => c.item === FIRST.key);
     expect(row?.state).toBe("Defect");
     expect(row?.passed).toBe(false);
+  });
+});
+
+describe("the location", () => {
+  it("is sent trimmed", () => {
+    // VehicleInspection.Normalize trims server-side too; sending it trimmed means the 200-char
+    // check here and there measure the same string.
+    seedComplete({ location: "   PTH 391, km 42 north of Thompson  " });
+    renderWizard();
+    certify();
+
+    expect(payload().location).toBe("PTH 391, km 42 north of Thompson");
+  });
+
+  it("is shown on the review step", () => {
+    seedComplete({ location: "  Leaf Rapids " });
+    renderWizard();
+
+    expect(screen.getByText("Location (town or highway)")).toBeTruthy();
+    expect(screen.getByText("Leaf Rapids")).toBeTruthy();
+  });
+
+  it("is required: a blank one disables Certify and nothing is enqueued", () => {
+    seedComplete({ location: "  " });
+    renderWizard();
+
+    expect(screen.getByText("Not entered — required")).toBeTruthy();
+    const button = screen.getByRole("button", { name: /Certify & submit/i }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    certify();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("is required: over 200 characters disables Certify", () => {
+    seedComplete({ location: "a".repeat(201) });
+    renderWizard();
+
+    expect(
+      (screen.getByRole("button", { name: /Certify & submit/i }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+});
+
+describe("a draft holding rows this form does not ask", () => {
+  it("never sends them and never lets them block Certify", () => {
+    // The store filters by HALF of the form on load; the screen filters by the exact UNIT.
+    // An NL02Only row on an NL-01 pre-trip draft (a reassignment, or a form revision) is in
+    // the catalogue and on the pre-trip, so it survives the store — and must stop here. Graded
+    // Major, it would otherwise turn a clean NL-01 pre-trip into a Fail; left ungraded, it
+    // would block Certify with a defect the driver cannot see.
+    const offForm = itemsFor("NL-02", "PreTrip")
+      .flatMap((g) => g.items)
+      .find((i) => !ITEMS.some((x) => x.key === i.key));
+    if (!offForm) throw new Error("the catalogue has no NL-02-only pre-trip row");
+
+    seedComplete({
+      answers: { [offForm.key]: "defect" },
+      defects: { [offForm.key]: { severity: "Major", note: "not this unit" } },
+    });
+    renderWizard();
+
+    expect(
+      (screen.getByRole("button", { name: /Certify & submit/i }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+    certify();
+    const p = payload();
+    expect(p.defects).toEqual([]);
+    expect(p.checklist.some((c) => c.item === offForm.key)).toBe(false);
+    expect(p.checklist).toHaveLength(ITEM_COUNT);
+  });
+
+  it("does not block on an ungraded defect for an off-form row", () => {
+    const offForm = itemsFor("NL-02", "PreTrip")
+      .flatMap((g) => g.items)
+      .find((i) => !ITEMS.some((x) => x.key === i.key));
+    if (!offForm) throw new Error("the catalogue has no NL-02-only pre-trip row");
+
+    seedComplete({ answers: { [offForm.key]: "defect" } });
+    renderWizard();
+
+    expect(
+      (screen.getByRole("button", { name: /Certify & submit/i }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+  });
+
+  it("shows a row new to the form as Not answered and blocks Certify, never defaulting it to Ok", () => {
+    // What a form revision that ADDS rows looks like to a draft: the answers simply lack them.
+    const answers = Object.fromEntries(ITEMS.slice(1).map((i) => [i.key, "pass" as CheckState]));
+    window.localStorage.setItem(
+      draftKey("PreTrip", "VEH-11"),
+      JSON.stringify({
+        v: INSPECTION_STORE_VERSION,
+        mode: "PreTrip",
+        vehicleId: "VEH-11",
+        startedOn: today,
+        startedAt: `${today}T06:02:00.000Z`,
+        answers,
+        notes: {},
+        defects: {},
+        odometerKm: 184_920,
+        location: "Lynn Lake",
+        stepId: "review",
+      }),
+    );
+    renderWizard();
+
+    expect(screen.getAllByText("Not answered")).toHaveLength(1);
+    expect(screen.getByText(/1 item\(s\) still unanswered/)).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: /Certify & submit/i }) as HTMLButtonElement).disabled,
+    ).toBe(true);
   });
 });
 

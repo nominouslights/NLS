@@ -33,6 +33,7 @@ import {
   setAnswer,
   setDefect,
   setNote,
+  setLocation,
   setOdometer,
   setStep,
   startDraft,
@@ -47,6 +48,8 @@ import {
   deriveResult,
   inspectionDue,
   INSPECTION_SOURCE_WIRE,
+  locationError,
+  normalizeLocation,
   odometerError,
   severityToWire,
 } from "@/lib/inspectionGate";
@@ -72,7 +75,7 @@ import type { CheckState, DefectSeverity, InspectionMode } from "@/lib/types";
 // three or four screens deep, with the legal attestation at the bottom. On a dash-mounted
 // 10-inch tablet, in northern daylight, with gloves on, a driver loses their place and sees the
 // attestation least. That was true of the old 22-item list and is unarguable now the checklist
-// is form NL-PTI-01: 67 to 80 rows depending on the unit and the half of the form.
+// is form NL-PTI-01: 82 pre-trip rows (71 on NL-01), and the 28-row en-route post-trip.
 //
 // THE CHECKLIST IS NOT MOCK DATA. It comes from lib/inspectionForm.ts, a byte-identical copy of
 // Dispatcher/lib/inspectionForm.ts, narrowed by itemsFor(unit, mode). `unit` is the assigned
@@ -113,9 +116,16 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
   const notes: Record<string, string> = draft?.notes ?? {};
   const defects: Record<string, DraftDefect> = draft?.defects ?? {};
   const odometerKm = draft?.odometerKm ?? null;
+  const location = draft?.location ?? "";
 
   const groups = itemsFor(unit, mode);
   const items = flatten(groups);
+  // The rows on THIS form — this unit, this half. Every count and every payload row below is
+  // filtered through it, so an answer or defect the draft holds for a row that is not on the
+  // current form (a stale draft, a row moved between halves by a form revision) can neither
+  // block Certify invisibly nor reach the submission. The store filters by mode on load; this
+  // is the exact-unit filter on top.
+  const onForm = new Set(items.map((i) => i.key));
 
   const steps = buildSteps(answers, unit, mode);
   const step = resolveStep(steps, draft?.stepId ?? null);
@@ -125,14 +135,15 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
   const finished = done ?? (draft === null ? alreadyCertified : null);
 
   const severities: DefectSeverity[] = Object.entries(defects)
-    .filter(([itemId]) => answers[itemId] === "defect")
+    .filter(([itemId]) => onForm.has(itemId) && answers[itemId] === "defect")
     .map(([, d]) => d.severity)
     .filter((s): s is DefectSeverity => s !== null);
 
   const unansweredCount = items.filter((i) => answers[i.key] === undefined).length;
   const ungradedCount = Object.entries(answers).filter(
-    ([itemId, state]) => state === "defect" && !defects[itemId]?.severity,
+    ([itemId, state]) => onForm.has(itemId) && state === "defect" && !defects[itemId]?.severity,
   ).length;
+  const locError = locationError(location);
 
   // --- navigation ---------------------------------------------------------
 
@@ -168,10 +179,15 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
   async function submit() {
     const current = getDraft(mode, vehicleId);
     if (!current) return;
+    // The review step disables Certify on this already; the belt to that braces, because a
+    // report without a location is not a report under Man. Reg. 95/2008 s.12(1).
+    if (locationError(current.location) !== null) return;
 
     const graded: { itemId: string; severity: DefectSeverity; note: string }[] = [];
     for (const [itemId, state] of Object.entries(current.answers)) {
       if (state !== "defect") continue;
+      // A defect on a row that is not on this form must never be filed — see `onForm`.
+      if (!onForm.has(itemId)) continue;
       const d = current.defects[itemId];
       if (d?.severity) graded.push({ itemId, severity: d.severity, note: d.note });
     }
@@ -232,6 +248,9 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
         performedAt: current.startedAt,
         certifiedAt,
         odometerKm: current.odometerKm,
+        // Trimmed, blank → null, exactly as VehicleInspection.Normalize stores it. Never null
+        // in practice here: the guard above refuses a blank one.
+        location: normalizeLocation(current.location),
         // EVERY answered row, N/A included. Unanswered rows cannot reach here — the review
         // step blocks Certify on unansweredCount — but the filter is the belt to that braces.
         checklist: items
@@ -257,7 +276,7 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
       });
     } catch (error) {
       // The draft is untouched — recordCertification and discardDraft are both below this
-      // point. The driver re-taps Certify rather than re-answering 22 questions, and they are
+      // point. The driver re-taps Certify rather than re-answering the whole walk-around, and they are
       // TOLD rather than left looking at a button that did nothing.
       setSubmitError(
         error instanceof Error
@@ -395,7 +414,7 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
       progressLabel={progressLabel(step)}
       progressFraction={progressFraction(step)}
       // The review chip must not show a teal check while anything is blank: `progressLabel`
-      // reports POSITION ("Review · 67 of 67" = you are past every check), not completeness,
+      // reports POSITION ("Review · 71 of 71" = you are past every check), not completeness,
       // so the colour and glyph are what have to carry "still something owed". The body names
       // exactly what.
       progressKind={
@@ -403,7 +422,7 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
           ? "over"
           : step.kind !== "review"
             ? "info"
-            : unansweredCount > 0 || ungradedCount > 0 || odometerKm === null
+            : unansweredCount > 0 || ungradedCount > 0 || odometerKm === null || locError !== null
               ? "soon"
               : deriveResult(severities) === "Fail"
                 ? "over"
@@ -421,7 +440,11 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
           </TouchButton>
 
           {step.kind === "odometer" ? (
-            <TouchButton onClick={goNext} disabled={odoError !== null} disabledReason={odoError ?? ""}>
+            <TouchButton
+              onClick={goNext}
+              disabled={odoError !== null || locError !== null}
+              disabledReason={odoError ?? locError ?? ""}
+            >
               Continue
             </TouchButton>
           ) : null}
@@ -465,6 +488,8 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
           lastReadingKm={assignedVehicle.odometerKm}
           value={odometerKm}
           onChange={(next) => setOdometer(mode, vehicleId, next)}
+          location={location}
+          onLocationChange={(next) => setLocation(mode, vehicleId, next)}
         />
       ) : null}
 
@@ -499,6 +524,7 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
           unit={unit}
           groups={groups}
           odometerKm={odometerKm}
+          location={location}
           answers={answers}
           notes={notes}
           defects={defects}
