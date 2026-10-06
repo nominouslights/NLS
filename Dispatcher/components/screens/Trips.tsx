@@ -2826,6 +2826,7 @@ export default function Trips({
                   trip={t}
                   type={editingInspection ? editingInspection.type : inspectionType!}
                   existing={editingInspection ?? undefined}
+                  preTrip={preTripInspection}
                   enteredBy={DISPATCHER_LABEL}
                   onClose={() => {
                     setInspectionType(null);

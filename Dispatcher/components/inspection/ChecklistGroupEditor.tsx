@@ -9,7 +9,10 @@ import { ActionButton } from "@/components/ui/Button";
 
 // One NL-PTI-01 sub-group. Each row is the paper form's three boxes — OK /
 // Defect / N-A — and starts UNANSWERED: with 28–64 rows, defaulting them to OK
-// would let a dispatcher save a form nobody actually filled in. The one shortcut is
+// would let a dispatcher save a form nobody actually filled in. The one exception is
+// a new TRIP inspection, whose rows start at OK by the owner's decision (see
+// `TRIP_ROW_START` in checklistRows.ts) — this editor just renders whatever state it
+// is given. The one shortcut is
 // per sub-group: "Mark unanswered OK" answers only that section's still-blank rows,
 // for transcribing a paper section the driver ticked through. Defect expands a
 // severity select; the note applies on any state (an N-A wants a reason as much

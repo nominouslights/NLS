@@ -21,29 +21,15 @@
 // operational items (survival kit, Starlink, spill kit …) into the one form rather
 // than lose them.
 //
-// WHY THE POST-TRIP IS SHORT (rev 2). NSC 13 and Man. Reg. 95/2008 require no full
-// post-trip inspection: the trip inspection is done once per 24 h, before the first
-// trip (s.7), and the end-of-day duty is to RECORD defects found en route and report
-// them (s.12(4), s.17(2)). So the post-trip is the reduced set of critical things that
-// can change while driving, plus what the driver noticed, plus Close-Out. Per-row
-// `mode` choices:
-//   - "Both" (can fail or be damaged in use, and is critical): ground beneath the
-//     vehicle (a fresh leak — stands in for every under-hood level check), springs
-//     (a leaf breaks or shifts on gravel), tire condition and wheel nuts (cuts, flats,
-//     fasteners loosening), windshield, exterior mirrors, exhaust, fuel tank & cap
-//     (rock strike, a clipped mirror, fumes, a cap left off at a fuel stop), the five
-//     exterior lamps (burn out in use), steering, accelerator, gauges, wipers, defrost,
-//     and the three brake checks (all felt or seen while driving).
-//   - "PreTripOnly": everything else — engine fluid levels, belts/hoses/radiator,
-//     battery/wiring/block-heater cord, brake fluid, shocks, U-bolts, axles, bearings,
-//     tread depth, pressure, valve stems, frame, body panels (Close-Out's "no new
-//     damage" covers them), entry steps, beacon, marker lights, reflectors, back-up
-//     and plate lights, driver's seat, horn, interior mirrors, doors, exits, interior
-//     lighting and cleanliness, all Emergency Equipment, Seating & Cargo, and Comms &
-//     Nav.
-//   - "PostTripOnly": En-Route Observations and Close-Out.
-// The resulting post-trip is the same 28 checks for every unit: no kept row is
-// NL02Only. Reversing a choice is a one-field `mode` edit on that row.
+// WHY THE POST-TRIP IS NOT A CHECKLIST (rev 4). NSC 13 and Man. Reg. 95/2008 require
+// no full post-trip inspection: the trip inspection is done once per 24 h, before the
+// first trip (s.7), and the end-of-day duty is to RECORD defects found en route and
+// report them (s.12(4), s.17(2)). Rev 2 re-asked 21 "can change while driving" rows
+// plus one "Defects noticed while driving" row; by the owner's decision (2026-10) the
+// post-trip now asks only for NEW defects — each filed against the pre-trip row it
+// concerns, so work orders and recurrence tracking still match on the item — plus the
+// six Close-Out checks. Every vehicle row is therefore "PreTripOnly"; Close-Out is
+// "PostTripOnly". The withdrawn en-route row is reserved in `WITHDRAWN_KEYS`.
 //
 // WHY THE PRE-TRIP IS SHORTER (rev 3). The owner asked for a faster pre-trip with NO
 // change to NSC 13 Schedule 2 / Schedule B or SFC coverage. The rule applied: every
@@ -84,7 +70,8 @@
 //     "Interior: …" keys remain reserved — stored inspections and defects still carry
 //     them, so they must never be reused by a new row (see `RETIRED_KEYS`).
 //   - A key that leaves the catalogue is never deleted from memory: it moves to
-//     `RETIRED_KEYS`, and no current row may ever take it again. Reusing one would
+//     `RETIRED_KEYS` (or `WITHDRAWN_KEYS` when no row replaces it), and no current
+//     row may ever take it again. Reusing one would
 //     silently re-attach old answers and open defects to a different check.
 //
 // SEVERITY IS DISPLAY TEXT, NEVER COMPUTED. `category` is the form's default and
@@ -106,10 +93,11 @@ export type UnitScope = "All" | "NL02Only";
 export type ItemBasis = "NSC13" | "NorthernLink";
 
 /**
- * Which runs the row is checked on: both, only at the start of the day (the full
- * NSC 13 inspection), or only at the end of the day (en-route defects, Close-Out).
+ * Which run the row is checked on: the start of the day (the full NSC 13
+ * inspection) or the end of the day (Close-Out). Rev 4 retired "Both" — see the
+ * header comment.
  */
-export type ItemMode = "Both" | "PreTripOnly" | "PostTripOnly";
+export type ItemMode = "PreTripOnly" | "PostTripOnly";
 
 /** Which half of the form is being filled in. */
 export type InspectionFormMode = "PreTrip" | "PostTrip";
@@ -208,7 +196,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "MAJOR if any fluid is actively dripping",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
     ],
   },
@@ -226,7 +214,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Major",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Air suspension (if equipped)",
@@ -302,7 +290,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Major if cord exposed",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Tire pressure",
@@ -321,7 +309,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "MAJOR if any missing or loose",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Hubs & wheel seals",
@@ -376,7 +364,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Major if sightline obstructed",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Exterior mirrors (both sides)",
@@ -386,7 +374,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Major if missing or loose",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Exhaust system",
@@ -396,7 +384,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Major if leaking toward the cab/interior",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Fuel tank & cap",
@@ -406,7 +394,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Major if leaking, insecure, or cap missing",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Entry steps / passenger door",
@@ -442,7 +430,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Major",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Tail lights",
@@ -451,7 +439,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Major",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Brake lights (incl. centre high-mount if equipped)",
@@ -460,7 +448,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Major",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Turn signals — front & rear, both sides",
@@ -469,7 +457,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Major",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Hazard (4-way) lights",
@@ -478,7 +466,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Major",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Marker / clearance lights (roof & side)",
@@ -542,7 +530,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Major",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Accelerator pedal",
@@ -552,7 +540,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Major when carrying passengers",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Horn",
@@ -572,7 +560,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Major if a warning light stays on",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Wipers & washers",
@@ -582,7 +570,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Major if inoperative",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Defrost / heater",
@@ -593,7 +581,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "Major if the windshield cannot be cleared",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Interior mirrors",
@@ -656,7 +644,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Major",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Parking brake",
@@ -665,7 +653,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         category: "Major",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
       {
         key: "Brake warning light",
@@ -675,7 +663,7 @@ export const NL_PTI_01: InspectionSubGroup[] = [
         categoryNote: "MAJOR if it stays on",
         scope: "All",
         basis: "NSC13",
-        mode: "Both",
+        mode: "PreTripOnly",
       },
     ],
   },
@@ -838,28 +826,6 @@ export const NL_PTI_01: InspectionSubGroup[] = [
     ],
   },
   {
-    // POST-TRIP ONLY. This is the end-of-day duty NSC 13 actually imposes: under
-    // Man. Reg. 95/2008 s.17(2) a defect the driver finds after the inspection (while
-    // driving) is recorded and reported — majors without delay, minors before the next
-    // inspection. One row, so the driver files each such defect against it with a note.
-    key: "En-Route Observations",
-    title: "En-Route Observations",
-    area: "C",
-    items: [
-      {
-        key: "Defects noticed while driving",
-        label: "Defects noticed while driving",
-        checkFor:
-          "Anything felt, heard or seen en route — pulling, vibration, unusual noise, a warning light that came on, a change in brake feel — is logged here as a defect with a note",
-        category: "Major",
-        categoryNote: "Major if it affects safe operation",
-        scope: "All",
-        basis: "NSC13",
-        mode: "PostTripOnly",
-      },
-    ],
-  },
-  {
     // POST-TRIP ONLY. These six labels are carried over from the previous checklist
     // VERBATIM: they are already on the wire as stored `Item` values, so rewording one
     // would orphan every historical defect filed against it.
@@ -970,6 +936,16 @@ export const RETIRED_KEYS: ReadonlyMap<string, string> = new Map([
 ]);
 
 /**
+ * Keys that left the catalogue with NO current row covering them (rev 4). Reserved
+ * exactly like `RETIRED_KEYS` — stored inspections still carry them, so no current
+ * row may ever take one — but there is no replacement to name.
+ *   - "Defects noticed while driving": the one En-Route Observations row. Rev 4 files
+ *     each en-route defect against the item it actually concerns ("Tire condition",
+ *     "Parking brake" …) in the post-trip's "New defects" section instead.
+ */
+export const WITHDRAWN_KEYS: ReadonlySet<string> = new Set(["Defects noticed while driving"]);
+
+/**
  * The current row that covers a retired key's check, for "now covered by …" display
  * text. `null` for a current key or a key this file has never known. Display only —
  * never send the result as a defect's or checklist row's `item`.
@@ -1006,16 +982,13 @@ const NL_01 = "nl-01";
  *    default an unknown unit to NL-01.
  *
  * 3. `mode: "PostTripOnly"` rows are dropped when `mode` is `"PreTrip"` — the
- *    En-Route Observations and Close-Out groups cannot be answered before the run.
- *    `mode: "PreTripOnly"` rows are dropped when `mode` is `"PostTrip"` — the
- *    post-trip is the reduced "can change while driving" set (see the header
- *    comment for why NSC 13 needs no full post-trip inspection).
+ *    Close-Out group cannot be answered before the run. `mode: "PreTripOnly"` rows
+ *    are dropped when `mode` is `"PostTrip"` — the post-trip asks for new defects
+ *    instead (see the header comment), so its checklist is Close-Out alone.
  *
  * 4. A sub-group whose items were all filtered out is dropped entirely, so no
- *    empty heading is ever printed or rendered (pre-trip loses "En-Route
- *    Observations" and "Close-Out" this way; post-trip loses every group with no
- *    "Both" row, e.g. "Emergency Equipment", "Seating & Cargo" and
- *    "Communications & Navigation").
+ *    empty heading is ever printed or rendered (pre-trip loses "Close-Out" this
+ *    way; post-trip loses every vehicle group).
  *
  * Pure: no imports, no mutation of `NL_PTI_01`, no side effects.
  */
