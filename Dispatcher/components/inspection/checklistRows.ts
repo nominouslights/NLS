@@ -195,6 +195,13 @@ export function newDefectOptions(unit: string | null, preTrip: VehicleInspection
   );
 }
 
+/** Un-pick (keep the note and severity) any new defect whose item is no longer
+ *  offered — e.g. a bus-only row after the unit changed to NL-01. */
+export function withoutUnofferedItems(defects: NewDefect[], options: NewDefectOption[]): NewDefect[] {
+  const offered = new Set(options.map((o) => o.key));
+  return defects.map((d) => (d.itemKey && !offered.has(d.itemKey) ? { ...d, itemKey: "" } : d));
+}
+
 /** A saved post-trip's new defects: every defect not filed against one of its
  *  checklist (Close-Out) rows. */
 export function newDefectsFromRecord(existing: VehicleInspection, rows: ChecklistRow[]): NewDefect[] {

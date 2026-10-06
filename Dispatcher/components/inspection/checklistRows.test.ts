@@ -14,6 +14,7 @@ import {
   newDefectsFromRecord,
   newDefectsProblem,
   newDefectsWire,
+  withoutUnofferedItems,
   isRetiredFormRecord,
   rowsFor,
   rowsForUnitChange,
@@ -172,6 +173,16 @@ describe("post-trip new defects (rev 4)", () => {
     const nl01 = newDefectOptions("NL-01", null).map((o) => o.key);
     expect(nl01).toEqual(rowsFor("NL-01", "PreTrip").map((r) => r.itemKey));
     expect(nl01).not.toContain("Emergency exits / windows");
+  });
+
+  it("un-picks a new defect whose item the new unit does not have, so the save blocks", () => {
+    const picked = [
+      { itemKey: "Emergency exits / windows", severity: "Major" as const, note: "Jammed" },
+      { itemKey: "Steering", severity: "Minor" as const, note: "Loose" },
+    ];
+    const after = withoutUnofferedItems(picked, newDefectOptions("NL-01", null));
+    expect(after).toEqual([{ ...picked[0], itemKey: "" }, picked[1]]);
+    expect(newDefectsProblem(after)).toMatch(/Pick the item/);
   });
 
   it("sends each new defect against its real item key, never a checklist row", () => {

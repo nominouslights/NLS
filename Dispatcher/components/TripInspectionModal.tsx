@@ -43,6 +43,7 @@ import {
   newDefectsProblem,
   newDefectsWire,
   rowsForUnitChange,
+  withoutUnofferedItems,
   rowsFromRecord,
   type NewDefect,
 } from "@/components/inspection/checklistRows";
@@ -216,6 +217,9 @@ export default function TripInspectionModal({
   function changeUnit(next: string) {
     setUnit(next);
     setChecklist((prev) => rowsForUnitChange(prev, next || null, mode));
+    // A new defect picked against a row the new unit does not have is un-picked
+    // (its note kept), so the save blocks until the dispatcher re-picks.
+    setNewDefects((prev) => withoutUnofferedItems(prev, newDefectOptions(next || null, preTrip)));
   }
 
   // Pre-trip sections
@@ -232,13 +236,15 @@ export default function TripInspectionModal({
   );
   const [newDefectsFound, setNewDefectsFound] = useState(newDefects.length > 0);
   const defectOptions = useMemo(() => newDefectOptions(unit || null, preTrip), [unit, preTrip]);
-  // Items the saved record already filed must stay pickable even if the pre-trip
+  // Items the SAVED record already filed must stay pickable even if the pre-trip
   // (or a later edit to it) also reports them — never silently drop an answer.
+  // Only those: on a new record a pick outside the options is stale, not saved.
+  const [savedDefectKeys] = useState(() => new Set(newDefects.map((d) => d.itemKey)));
   const pickable = useMemo(() => {
     const keys = new Set(defectOptions.map((o) => o.key));
-    const kept = newDefects.filter((d) => d.itemKey && !keys.has(d.itemKey)).map((d) => ({ key: d.itemKey, label: d.itemKey }));
+    const kept = [...savedDefectKeys].filter((k) => !keys.has(k)).map((k) => ({ key: k, label: k }));
     return [...defectOptions, ...kept];
-  }, [defectOptions, newDefects]);
+  }, [defectOptions, savedDefectKeys]);
   const preTripReported = preTrip?.defects.length ?? 0;
   const [issues, setIssues] = useState<string[]>(existing?.issues ?? []);
   const [signature, setSignature] = useState(existing?.driverSignatureName ?? trip.driverName ?? "");
