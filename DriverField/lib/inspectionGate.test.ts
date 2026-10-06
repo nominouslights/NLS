@@ -7,11 +7,12 @@ import {
   locationError,
   normalizeLocation,
   odometerError,
+  preTripDefectItems,
   severityGlyph,
   severityKind,
 } from "./inspectionGate";
 import { recordCertification, setAnswer } from "./inspectionStore";
-import { eligibility, today } from "./data";
+import { dvirSubmissions, eligibility, today } from "./data";
 import { statusMeta } from "./theme";
 import type { DefectSeverity, Trip } from "./types";
 
@@ -32,6 +33,7 @@ const cert = {
   certifiedAt: `${today}T06:12:00.000Z`,
   result: "Pass" as const,
   defectCount: 0,
+  defectItems: [] as string[],
   outOfService: false,
 };
 
@@ -196,7 +198,12 @@ describe("boardingGate", () => {
   });
 
   it("opens on PassWithDefects — minor defects do not block boarding", () => {
-    recordCertification({ ...cert, result: "PassWithDefects", defectCount: 2 });
+    recordCertification({
+      ...cert,
+      result: "PassWithDefects",
+      defectCount: 2,
+      defectItems: ["Tire pressure", "Horn"],
+    });
     expect(boardingGate("VEH-11", today).open).toBe(true);
   });
 
@@ -205,6 +212,7 @@ describe("boardingGate", () => {
       ...cert,
       result: "Fail",
       defectCount: 1,
+      defectItems: ["Service brake pedal"],
       outOfService: true,
     });
 
@@ -247,6 +255,74 @@ describe("boardingGate", () => {
     expect(gate.open).toBe(false);
     expect(gate.requires).toBeNull();
     expect(gate.title).toContain("NL-06");
+  });
+});
+
+describe("preTripDefectItems — what the post-trip treats as already reported (rev 4)", () => {
+  // Mirrors newDefectOptions' `alreadyReported` in Dispatcher/components/inspection/
+  // checklistRows.ts, which reads the trip's saved pre-trip. Here "the trip's pre-trip" is the
+  // SAME record boardingGate reads, so the gate and the post-trip cannot disagree about it.
+
+  it("is empty when no pre-trip is on record for the vehicle and day", () => {
+    // The mock history has no row dated today on purpose (see DVR-8101's comment), so on first
+    // paint nothing is excluded — more choices, never fewer.
+    expect([...preTripDefectItems("VEH-11", today)]).toEqual([]);
+  });
+
+  it("reads this device's pre-trip certification for the vehicle and day", () => {
+    recordCertification({
+      ...cert,
+      result: "PassWithDefects",
+      defectCount: 2,
+      defectItems: ["Tire pressure", "Horn"],
+    });
+    expect(preTripDefectItems("VEH-11", today)).toEqual(new Set(["Tire pressure", "Horn"]));
+  });
+
+  it("ignores a POST-trip certification, another vehicle and another day", () => {
+    recordCertification({ ...cert, mode: "PostTrip", defectItems: ["Tire pressure"] });
+    recordCertification({ ...cert, vehicleId: "VEH-14", defectItems: ["Horn"] });
+    recordCertification({ ...cert, onDate: "2026-09-11", defectItems: ["Steering"] });
+    expect([...preTripDefectItems("VEH-11", today)]).toEqual([]);
+  });
+
+  it("reads the mock history's pre-trip by mode, vehicle and day", () => {
+    // DVR-8101: VEH-11's pre-trip on 2026-09-11, one Minor defect against "Wipers & washers".
+    expect(preTripDefectItems("VEH-11", "2026-09-11")).toEqual(new Set(["Wipers & washers"]));
+    // DVR-8102 is that day's POST-trip and must not contribute.
+    const post = dvirSubmissions.find((s) => s.id === "DVR-8102");
+    expect(post?.mode).toBe("PostTrip");
+  });
+
+  it("prefers this device's certification over the mock history, as the gate does", () => {
+    recordCertification({ ...cert, onDate: "2026-09-11", defectItems: [] });
+    expect([...preTripDefectItems("VEH-11", "2026-09-11")]).toEqual([]);
+  });
+
+  it("treats a certification stored before rev 4 (no defectItems) as reporting nothing", () => {
+    // CERTIFIED_STORE_VERSION was deliberately not bumped — that would drop this morning's
+    // certifications and re-block boarding. A pre-rev-4 entry reads as `defectItems: []`.
+    const { defectItems: _omit, ...legacy } = cert;
+    void _omit;
+    window.localStorage.setItem(
+      "nl.driverfield.inspectionCertified",
+      JSON.stringify({ v: 2, items: [{ ...legacy, defectCount: 1, result: "PassWithDefects" }] }),
+    );
+    expect(boardingGate("VEH-11", today).open).toBe(true);
+    expect([...preTripDefectItems("VEH-11", today)]).toEqual([]);
+  });
+});
+
+describe("the mock inspection history", () => {
+  it("agrees with deriveResult — each row's prose result matches the defects it lists", () => {
+    // The rows now carry their defects (the post-trip reads them), so a row whose `result`
+    // contradicts them would demonstrate a rule VehicleInspection.DeriveResult does not have.
+    for (const s of dvirSubmissions) {
+      const derived = deriveResult(s.defects.map((d) => d.severity));
+      const expected =
+        derived === "Pass" ? "Pass" : derived === "PassWithDefects" ? "Pass with defects" : "Fail";
+      expect(s.result).toBe(expected);
+    }
   });
 });
 

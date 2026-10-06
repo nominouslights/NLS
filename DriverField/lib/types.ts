@@ -147,6 +147,16 @@ export interface HosEntry {
 // copy of Dispatcher's catalogue. Re-declaring them here would be a second definition of the
 // same legal form, which is the drift this app copies the file to prevent.
 
+/**
+ * One defect recorded on a historical submission. `item` is an NL-PTI-01 catalogue KEY — the
+ * wire value stored as InspectionDefect.Item — never a label or free text, because the post-trip
+ * reads these to decide which items are "already reported" and must compare like with like.
+ */
+export interface DvirDefect {
+  item: string;
+  severity: DefectSeverity;
+}
+
 export interface DvirSubmission {
   id: string;
   performedAt: string;
@@ -163,7 +173,31 @@ export interface DvirSubmission {
   odometerKm: number;
   result: string;
   rk: StatusKind;
-  defectCount: number;
+  /**
+   * The defects this submission recorded. Replaces a bare `defectCount`: the count is
+   * `defects.length` (derived, never duplicated), and the items are what the post-trip's
+   * "New defects since the pre-trip" step excludes (NL-PTI-01 rev 4).
+   */
+  defects: DvirDefect[];
+}
+
+/** The two grades NL-PTI-01 offers. `"Out of Service"` is wire vocabulary, never offered. */
+export type FormSeverity = Extract<DefectSeverity, "Minor" | "Major">;
+
+/**
+ * One defect found AFTER the pre-trip, on the post-trip's "New defects since the pre-trip" step
+ * (NL-PTI-01 rev 4). Filed against the PRE-TRIP row it concerns, so work orders and recurrence
+ * tracking still match on the item — but it is NOT a checklist row: it goes on the wire as a
+ * `defects` entry only.
+ *
+ * Nothing defaults: `itemKey` is "" until the driver picks the item and `severity` null until
+ * they grade it, and either blocks Certify. (The Dispatch Console's editor starts a row at
+ * Minor; on the tablet a severity nobody chose would be one the driver never attested to.)
+ */
+export interface NewDefectDraft {
+  itemKey: string;
+  severity: FormSeverity | null;
+  note: string;
 }
 
 export interface Incident {

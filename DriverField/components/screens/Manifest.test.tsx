@@ -37,6 +37,7 @@ const passCertification: LocalCertification = {
   certifiedAt: `${today}T06:12:00.000Z`,
   result: "Pass",
   defectCount: 0,
+  defectItems: [],
   outOfService: false,
 };
 
