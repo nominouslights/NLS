@@ -3,9 +3,14 @@
 import { useState } from "react";
 import { colors, fonts, statusMeta } from "@/lib/theme";
 import { formatKm, formatUtcDate } from "@/lib/api";
-import type { DefectSeverityWire, VehicleInspection } from "@/lib/api/maintenance";
-import { prefillFromInspection, type WorkOrderPrefillWire } from "@/lib/inspectionWorkOrder";
-import { DEFECT_SEVERITY_LABEL, INSPECTION_RESULT_META } from "@/lib/workOrderDisplay";
+import type { DefectSeverityWire, InspectionDefectWire, VehicleInspection } from "@/lib/api/maintenance";
+import { isAttachable, prefillFromInspection, type WorkOrderPrefillWire } from "@/lib/inspectionWorkOrder";
+import {
+  DEFECT_RESOLUTION_LABEL,
+  DEFECT_RESOLUTION_META,
+  DEFECT_SEVERITY_LABEL,
+  INSPECTION_RESULT_META,
+} from "@/lib/workOrderDisplay";
 import type { VehicleOption } from "@/components/screens/fleet/vehicle-detail/shared";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { MonoTag, StatusChip } from "@/components/ui/Chip";
@@ -14,42 +19,51 @@ import WorkOrderModal from "@/components/WorkOrderModal";
 import { ResolveDefectModal } from "@/components/fleet/DefectsPanel";
 
 // Detail view of a live DVIR inspection — the full checklist (what passed and
-// what failed), with a "create work order" action on every failed item and one
-// for all defects at once. Both disappear once a work order has been generated.
+// what failed). Each failed item reads its own state from the defect: Resolved,
+// on an open work order, or open — and only an open, unattached defect offers
+// RESOLVE and CREATE WORK ORDER. "All defects" attaches every open, unattached
+// defect; a defect already on an open work order is never offered twice.
 
 interface ChecklistRow {
   item: string;
   passed: boolean;
   severity?: DefectSeverityWire;
   note?: string | null;
+  defect?: InspectionDefectWire;
 }
 
 export default function InspectionDetailModal({
   inspection,
   vehicleId,
   woNumber,
+  workOrderNumberOf,
   vehicles,
   onWorkOrderCreated,
+  onChanged,
   onClose,
 }: {
   inspection: VehicleInspection;
   vehicleId: string;
+  /** Number of the legacy whole-inspection work order (`generatedWorkOrderId`). */
   woNumber?: string;
+  /** Resolves a defect's `workOrderId` to its WO-n number. */
+  workOrderNumberOf?: (id: string) => string | undefined;
   vehicles: VehicleOption[];
   onWorkOrderCreated: () => void;
+  /** A defect was resolved here — the parent refetches. */
+  onChanged?: () => void;
   onClose: () => void;
 }) {
   const [woPrefill, setWoPrefill] = useState<WorkOrderPrefillWire | null>(null);
-  // Per-defect resolve. The inspection DTO carries no resolution fields, so a
-  // defect already cleared elsewhere still offers the action and the endpoint
-  // answers 409 — items cleared from HERE are remembered for this modal's life
-  // so the row reads back as resolved immediately.
   const [resolving, setResolving] = useState<ChecklistRow | null>(null);
-  const [resolvedItems, setResolvedItems] = useState<string[]>([]);
+  // The inspection list is a projected read model (≈5s behind a write), so a
+  // defect resolved from HERE is shown resolved immediately rather than
+  // offering RESOLVE again until the projection catches up.
+  const [resolvedHere, setResolvedHere] = useState<ReadonlySet<string>>(new Set());
 
   const typeLabel = inspection.type === "PreTrip" ? "Pre-Trip" : "Post-Trip";
   const rm = INSPECTION_RESULT_META[inspection.result] ?? INSPECTION_RESULT_META.Pass;
-  const canGenerate = inspection.defects.length > 0 && !inspection.generatedWorkOrderId;
+  const openDefects = inspection.defects.filter((d) => isAttachable(d) && !resolvedHere.has(d.item));
 
   // Checklist joined with defects by item name; manifest-derived records can
   // carry defects without a checklist, so synthesize rows from the defects then.
@@ -57,9 +71,9 @@ export default function InspectionDetailModal({
   const checklist: ChecklistRow[] = inspection.checklist.length
     ? inspection.checklist.map((c) => {
         const d = defectByItem.get(c.item);
-        return { item: c.item, passed: c.passed && !d, severity: d?.severity, note: d?.note };
+        return { item: c.item, passed: c.passed && !d, severity: d?.severity, note: d?.note, defect: d };
       })
-    : inspection.defects.map((d) => ({ item: d.item, passed: false, severity: d.severity, note: d.note }));
+    : inspection.defects.map((d) => ({ item: d.item, passed: false, severity: d.severity, note: d.note, defect: d }));
   const passed = checklist.filter((c) => c.passed).length;
   const failed = checklist.filter((c) => !c.passed).length;
 
@@ -74,12 +88,12 @@ export default function InspectionDetailModal({
             {passed} passed · {failed} failed
           </span>
           <ActionButton onClick={onClose}>CLOSE</ActionButton>
-          {canGenerate && (
+          {openDefects.length > 1 && (
             <ActionButton
               variant="primary"
-              onClick={() => setWoPrefill(prefillFromInspection(inspection, inspection.unit))}
+              onClick={() => setWoPrefill(prefillFromInspection(inspection, inspection.unit, openDefects))}
             >
-              GENERATE WORK ORDER FROM ALL DEFECTS
+              CREATE WORK ORDER FOR ALL {openDefects.length} OPEN DEFECTS
             </ActionButton>
           )}
         </>
@@ -131,26 +145,16 @@ export default function InspectionDetailModal({
                   </div>
                 )}
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", justifyContent: "flex-end" }}>
                 <StatusChip kind={isDefect ? "over" : "ontime"} label={isDefect ? "Defect" : "Pass"} />
-                {isDefect &&
-                  (resolvedItems.includes(c.item) ? (
-                    <StatusChip kind="ontime" label="Resolved" />
-                  ) : (
-                    <ActionButton onClick={() => setResolving(c)}>RESOLVE</ActionButton>
-                  ))}
-                {isDefect && canGenerate && (
-                  <ActionButton
-                    onClick={() =>
-                      setWoPrefill(
-                        prefillFromInspection(inspection, inspection.unit, [
-                          { item: c.item, severity: c.severity ?? "Major", note: c.note ?? null },
-                        ]),
-                      )
-                    }
-                  >
-                    CREATE WORK ORDER
-                  </ActionButton>
+                {isDefect && (
+                  <DefectState
+                    row={c}
+                    resolvedHere={resolvedHere.has(c.item)}
+                    workOrderNumberOf={workOrderNumberOf}
+                    onResolve={() => setResolving(c)}
+                    onCreateWorkOrder={(d) => setWoPrefill(prefillFromInspection(inspection, inspection.unit, [d]))}
+                  />
                 )}
               </div>
             </div>
@@ -166,8 +170,9 @@ export default function InspectionDetailModal({
           severity={resolving.severity}
           onClose={() => setResolving(null)}
           onResolved={() => {
-            setResolvedItems((prev) => [...prev, resolving.item]);
+            setResolvedHere((prev) => new Set([...prev, resolving.item]));
             setResolving(null);
+            onChanged?.();
           }}
         />
       )}
@@ -185,5 +190,45 @@ export default function InspectionDetailModal({
         />
       )}
     </ModalShell>
+  );
+}
+
+/** Resolved / On WO-x / open (RESOLVE + CREATE WORK ORDER) — from the defect's own fields. */
+function DefectState({
+  row,
+  resolvedHere,
+  workOrderNumberOf,
+  onResolve,
+  onCreateWorkOrder,
+}: {
+  row: ChecklistRow;
+  resolvedHere: boolean;
+  workOrderNumberOf?: (id: string) => string | undefined;
+  onResolve: () => void;
+  onCreateWorkOrder: (d: InspectionDefectWire) => void;
+}) {
+  const d = row.defect;
+  if (resolvedHere) return <StatusChip kind="ontime" label="Resolved" />;
+  // A checklist failure with no defect entry cannot be addressed by the API.
+  if (!d) return null;
+  if (d.resolvedAtUtc != null) {
+    const reason = d.resolutionReason;
+    const m = reason ? DEFECT_RESOLUTION_META[reason] : undefined;
+    return (
+      <StatusChip
+        kind={m?.kind ?? "ontime"}
+        glyph={m?.glyph}
+        label={reason ? `Resolved · ${DEFECT_RESOLUTION_LABEL[reason] ?? reason}` : "Resolved"}
+      />
+    );
+  }
+  if (d.workOrderId != null) {
+    return <StatusChip kind="soon" label={`On ${workOrderNumberOf?.(d.workOrderId) ?? "open work order"}`} />;
+  }
+  return (
+    <>
+      <ActionButton onClick={onResolve}>RESOLVE</ActionButton>
+      <ActionButton onClick={() => onCreateWorkOrder(d)}>CREATE WORK ORDER</ActionButton>
+    </>
   );
 }

@@ -28,17 +28,21 @@ import { MonoTag, StatusChip } from "@/components/ui/Chip";
 import { ActionButton } from "@/components/ui/Button";
 import WorkOrderModal from "@/components/WorkOrderModal";
 import ServiceRecordModal from "@/components/ServiceRecordModal";
+import WorkOrderDefectLines from "@/components/fleet/WorkOrderDefectLines";
 
 // Per-vehicle work orders (live Fleet API). Create manually, advance status,
-// close by logging the service that resolved it, and print the NL-WO-01 form
-// to take to the shop.
+// close by logging the service that resolved it (with one outcome per attached
+// defect), and print the NL-WO-01 form to take to the shop.
 
 export default function VehicleWorkOrders({
   vehicle,
   vehicles,
+  onVehicleChanged,
 }: {
   vehicle: Vehicle;
   vehicles: VehicleOption[];
+  /** Refetch the vehicle after the close form's return-to-service offer changed its status. */
+  onVehicleChanged?: () => void;
 }) {
   const [newOpen, setNewOpen] = useState(false);
   const [closing, setClosing] = useState<WorkOrderWire | null>(null);
@@ -157,6 +161,15 @@ export default function VehicleWorkOrders({
                 </div>
               )}
 
+              {(w.defects ?? []).length > 0 && (
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ fontFamily: fonts.body, fontSize: 11, fontWeight: 600, color: colors.textLabel, marginBottom: 5 }}>
+                    Defects · {w.defects.length}
+                  </div>
+                  <WorkOrderDefectLines lines={w.defects} />
+                </div>
+              )}
+
               {w.lineItems.length > 0 && (
                 <ul style={{ margin: "0 0 8px", paddingLeft: 18 }}>
                   {w.lineItems.map((li, i) => (
@@ -212,7 +225,9 @@ export default function VehicleWorkOrders({
         <ServiceRecordModal
           unit={unit}
           odometerKm={vehicle.odometerKm}
-          closeWorkOrder={{ id: closing.id, number: closing.number, title: closing.title }}
+          closeWorkOrder={{ id: closing.id, number: closing.number, title: closing.title, defects: closing.defects ?? [] }}
+          vehicle={{ id: vehicle.id, status: vehicle.status }}
+          onVehicleChanged={onVehicleChanged}
           onClose={() => setClosing(null)}
           onSaved={() => setReload((n) => n + 1)}
         />

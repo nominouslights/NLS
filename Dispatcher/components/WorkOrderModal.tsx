@@ -9,19 +9,22 @@ import {
   type ShopWire,
   type WorkOrderPriorityWire,
 } from "@/lib/api/maintenance";
-import type { WorkOrderPrefillWire } from "@/lib/inspectionWorkOrder";
+import { defectRefs, type WorkOrderPrefillWire } from "@/lib/inspectionWorkOrder";
 import { toUtcIso, WO_SOURCE_LABEL } from "@/lib/workOrderDisplay";
 import type { VehicleOption } from "@/components/screens/fleet/vehicle-detail/shared";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { NumberField, SelectField, TextAreaField, TextField } from "@/components/ui/Field";
 import { ActionButton } from "@/components/ui/Button";
+import WorkOrderDefectLines from "@/components/fleet/WorkOrderDefectLines";
 
 const PRIORITIES: WorkOrderPriorityWire[] = ["Low", "Medium", "High", "Critical"];
 
-// Create a work order — manually from the interface, or prefilled from a
-// pre/post-trip inspection's defects (WorkOrderPrefillWire, which links the WO
-// back to the inspection server-side). A registered shop can be attached so its
-// details auto-fill the printable NL-WO-01 work order.
+// Create a work order — manually from the interface, or prefilled from
+// inspection defects (WorkOrderPrefillWire). Each prefilled defect is attached
+// to the new work order server-side by (inspectionId, item), and is shown here
+// read-only — the attached set is chosen where the defects are listed, not
+// edited in this form. A registered shop can be attached so its details
+// auto-fill the printable NL-WO-01 work order.
 
 export default function WorkOrderModal({
   vehicles,
@@ -66,7 +69,10 @@ export default function WorkOrderModal({
     };
   }, []);
 
-  const fromInspection = !!prefill?.inspectionId;
+  const attached = prefill?.defects ?? [];
+  // Defects belong to one vehicle — the server rejects a mismatch, so the
+  // select is locked rather than left to fail.
+  const fromInspection = attached.length > 0;
   const sourceLabel = prefill ? WO_SOURCE_LABEL[prefill.source] : "Manual";
   const shopOptions = [{ value: "", label: "— none —" }, ...shops.map((s) => ({ value: s.id, label: s.name }))];
   const vehicleOptions = vehicles.map((v) => ({ value: v.id, label: v.label }));
@@ -94,7 +100,7 @@ export default function WorkOrderModal({
         authorizedLimitCad: limit ? parseFloat(limit) : null,
         budgetCode: budgetCode.trim() || null,
         dateRequiredOrOos: dueDate.trim() ? toUtcIso(dueDate.trim()) : null,
-        inspectionId: prefill?.inspectionId ?? null,
+        ...(attached.length ? { defects: defectRefs(attached) } : {}),
       });
       onSaved();
       onClose();
@@ -131,6 +137,17 @@ export default function WorkOrderModal({
             </>
           ) : null}
           . Defects were carried over as line items below.
+        </div>
+      )}
+      {attached.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textLabel, marginBottom: 6 }}>
+            Defects on this work order · {attached.length}
+          </div>
+          <WorkOrderDefectLines lines={attached} />
+          <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim, marginTop: 6, lineHeight: 1.45 }}>
+            Each defect stays open until this work order is completed with an outcome for it.
+          </div>
         </div>
       )}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>

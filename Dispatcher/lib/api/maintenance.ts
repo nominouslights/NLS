@@ -38,6 +38,12 @@ export interface InspectionDefectWire {
   item: string;
   severity: DefectSeverityWire;
   note: string | null;
+  /** The ACTIVE work order this defect is attached to; null when none (a
+   *  completed or cancelled work order no longer holds it). */
+  workOrderId: string | null;
+  /** A `DefectResolutionReasonWire` name; with `resolvedAtUtc`, null while open. */
+  resolutionReason: DefectResolutionReasonWire | null;
+  resolvedAtUtc: string | null;
 }
 
 export interface VehicleInspection {
@@ -198,8 +204,11 @@ export function deleteInspection(id: string): Promise<void> {
 // reportedAt first within each). Do not re-sort them.
 // ---------------------------------------------------------------------------
 
+/** `RepairedUnderWorkOrder` and `NoFaultFound` are stamped ONLY by work-order
+ *  completion — a dispatcher never picks them on the resolve endpoint. */
 export type DefectResolutionReasonWire =
-  | "RepairedUnderWorkOrder" | "PreviouslyRepaired" | "ReportedInError" | "AcceptedMonitoring";
+  | "RepairedUnderWorkOrder" | "PreviouslyRepaired" | "ReportedInError" | "AcceptedMonitoring"
+  | "NoFaultFound";
 
 /** The earlier, already-cleared report of the same fault this defect supersedes.
  *  Derived per read on the backend by matching `item` on the same vehicle with a
@@ -227,8 +236,10 @@ export interface VehicleDefectWire {
   item: string;
   severity: DefectSeverityWire;
   note: string | null;
-  // Repair underway — the inspection's work order, whatever its status. Present
-  // on open and resolved rows alike; a cancelled work order still shows here.
+  // Per DEFECT: the open work order it is attached to, else the work order that
+  // resolved it, else (work orders from before per-defect links) the work order
+  // its inspection generated — whatever that work order's status. A per-defect
+  // work order releases its defects on cancel, so it no longer shows here.
   workOrderId: string | null;
   workOrderNumber: string | null;
   workOrderStatus: string | null;
@@ -428,6 +439,39 @@ export async function addServiceRecord(vehicleId: string, input: {
   return res.id;
 }
 
+/** What the mechanic found for one defect line, recorded at completion.
+ *  Repaired and NoFaultFound resolve the defect permanently; Deferred leaves it
+ *  OPEN and releases it for a later work order (needs a note; never allowed on
+ *  an OutOfService defect). */
+export type DefectRepairOutcomeWire = "Repaired" | "NoFaultFound" | "Deferred";
+
+/** One defect a work order was raised against (`WorkOrderDefectLineResponse`),
+ *  keyed by `(inspectionId, item)`. Severity and note are the snapshot taken
+ *  when the work order was created; `outcome` is null until it completes. */
+export interface WorkOrderDefectLineWire {
+  inspectionId: string;
+  item: string;
+  severity: DefectSeverityWire;
+  note: string | null;
+  outcome: DefectRepairOutcomeWire | null;
+  outcomeNote: string | null;
+}
+
+/** A defect reference. There is no defect id: a defect is addressed by its
+ *  inspection and item. */
+export interface DefectRefWire {
+  inspectionId: string;
+  item: string;
+}
+
+/** One `defectOutcomes` entry on the complete body. */
+export interface DefectOutcomeInputWire {
+  inspectionId: string;
+  item: string;
+  outcome: DefectRepairOutcomeWire;
+  note?: string | null;
+}
+
 export interface WorkOrderWire {
   id: string;
   vehicleId: string;
@@ -449,6 +493,8 @@ export interface WorkOrderWire {
   authorizedLimitCad: number | null;
   budgetCode: string | null;
   dateRequiredOrOos: string | null;
+  /** The per-defect link — empty on manual and pre-link work orders. */
+  defects: WorkOrderDefectLineWire[];
 }
 
 export function listVehicleWorkOrders(vehicleId: string): Promise<WorkOrderWire[]> {
@@ -473,7 +519,12 @@ export async function createWorkOrder(input: {
   authorizedLimitCad?: number | null;
   budgetCode?: string | null;
   dateRequiredOrOos?: string | null;
+  /** Older whole-inspection form: attaches EVERY open, unattached defect of that
+   *  inspection. New callers send `defects`; the server attaches the union. */
   inspectionId?: string | null;
+  /** Each must be open, unattached and on this vehicle — else 409
+   *  `Fleet.Inspection.DefectAlreadyOnWorkOrder` / 400 `Fleet.Inspection.VehicleMismatch`. */
+  defects?: DefectRefWire[];
 }): Promise<string> {
   const res = await request<{ id: string }>("/api/fleet/work-orders", { method: "POST", body: JSON.stringify(input) });
   return res.id;
@@ -495,6 +546,8 @@ export async function completeWorkOrder(id: string, input: {
   laborHours?: number | null;
   costCad?: number | null;
   notes?: string | null;
+  /** Exactly one per defect line when the work order has lines; omit when it has none. */
+  defectOutcomes?: DefectOutcomeInputWire[];
 }): Promise<string> {
   const res = await request<{ id: string }>(`/api/fleet/work-orders/${id}/complete`, {
     method: "POST",

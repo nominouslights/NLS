@@ -10,7 +10,7 @@ import {
   type VehicleInspection,
   type WorkOrderWire,
 } from "@/lib/api/maintenance";
-import { prefillFromInspection, type WorkOrderPrefillWire } from "@/lib/inspectionWorkOrder";
+import { isAttachable, prefillFromInspection, type WorkOrderPrefillWire } from "@/lib/inspectionWorkOrder";
 import { DEFECT_SEVERITY_LABEL, INSPECTION_RESULT_META } from "@/lib/workOrderDisplay";
 import type { VehicleOption } from "@/components/screens/fleet/vehicle-detail/shared";
 import { Panel, SectionLabel } from "@/components/ui/Panel";
@@ -37,7 +37,9 @@ export default function VehicleInspections({
   const vehicleId = vehicle.id;
 
   const [entryType, setEntryType] = useState<InspectionType | null>(null);
-  const [detail, setDetail] = useState<VehicleInspection | null>(null);
+  // Held by id and read from the current rows, so a refetch (after a resolve)
+  // reaches an open detail modal instead of leaving it on a stale snapshot.
+  const [detailId, setDetailId] = useState<string | null>(null);
   const [woPrefill, setWoPrefill] = useState<WorkOrderPrefillWire | null>(null);
   const [reload, setReload] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -82,6 +84,14 @@ export default function VehicleInspections({
     (woFetch?.vehicleId === vehicleId ? woFetch.rows : []).map((w) => [w.id, w.number]),
   );
   const woLink = (id: string) => woNumberById.get(id) ?? "work order";
+  const detail = detailId ? (rows?.find((r) => r.id === detailId) ?? null) : null;
+
+  function refreshSoon() {
+    // The inspection list is a projected read model: refetch now, and again
+    // once the projector (5s poll) has certainly run.
+    setReload((n) => n + 1);
+    setTimeout(() => setReload((n) => n + 1), 6000);
+  }
 
   async function onInspectionSaved(id: string) {
     // Refetch and use the returned rows directly — no state-timing race between
@@ -95,9 +105,13 @@ export default function VehicleInspections({
     }
     setInspFetch({ unit, rows: fresh });
     const insp = fresh.find((i) => i.id === id);
-    // Auto-offer a work order when a major / out-of-service defect was recorded.
-    if (insp && insp.defects.some((d) => d.severity === "Major" || d.severity === "OutOfService")) {
-      setWoPrefill(prefillFromInspection(insp, unit));
+    // Auto-offer a work order for the Major / Out-of-Service defects just
+    // recorded — Minor ones are left for the dispatcher to add deliberately.
+    const serious = insp?.defects.filter(
+      (d) => (d.severity === "Major" || d.severity === "OutOfService") && isAttachable(d),
+    );
+    if (insp && serious && serious.length > 0) {
+      setWoPrefill(prefillFromInspection(insp, unit, serious));
     }
   }
 
@@ -131,7 +145,7 @@ export default function VehicleInspections({
           const hasDefects = insp.defects.length > 0;
           return (
             <Panel key={insp.id} style={{ marginBottom: 10, cursor: "pointer" }}>
-              <div onClick={() => setDetail(insp)}>
+              <div onClick={() => setDetailId(insp.id)}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
                   {insp.tripNumber && <MonoTag color={colors.skyBlue}>{insp.tripNumber}</MonoTag>}
                   <span style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: 700, color: colors.headingBright }}>
@@ -159,6 +173,11 @@ export default function VehicleInspections({
                         <span style={{ fontWeight: 600, color: colors.textSecondary }}>{d.item}</span> —{" "}
                         {DEFECT_SEVERITY_LABEL[d.severity]}
                         {d.note ? `: ${d.note}` : ""}
+                        {d.resolvedAtUtc == null && d.workOrderId && (
+                          <span style={{ marginLeft: 6 }}>
+                            <MonoTag color={colors.skyBlue}>→ {woLink(d.workOrderId)}</MonoTag>
+                          </span>
+                        )}
                       </li>
                     ))}
                   </ul>
@@ -188,9 +207,11 @@ export default function VehicleInspections({
           inspection={detail}
           vehicleId={vehicleId}
           woNumber={detail.generatedWorkOrderId ? woLink(detail.generatedWorkOrderId) : undefined}
+          workOrderNumberOf={(id) => woNumberById.get(id)}
           vehicles={vehicles}
-          onWorkOrderCreated={() => setReload((n) => n + 1)}
-          onClose={() => setDetail(null)}
+          onWorkOrderCreated={refreshSoon}
+          onChanged={refreshSoon}
+          onClose={() => setDetailId(null)}
         />
       )}
       {woPrefill && (
@@ -199,7 +220,7 @@ export default function VehicleInspections({
           defaultVehicleId={vehicleId}
           prefill={woPrefill}
           onClose={() => setWoPrefill(null)}
-          onSaved={() => setReload((n) => n + 1)}
+          onSaved={refreshSoon}
         />
       )}
     </div>
