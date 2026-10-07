@@ -395,7 +395,7 @@ public class TripRoundTripTests
         Assert.True(source.Update(
             source.ServiceDate, source.WindowStart, null, source.ServiceType,
             source.RouteId, source.RouteName, source.Origin, source.Destination, source.Stops,
-            source.DistanceKm, source.IsEmptyLeg, source.ClientId, source.ClientName,
+            source.DistanceKm, source.ClientId, source.ClientName,
             source.PoNumber, source.SeatsCapacity, source.SeatsMinimum).IsSuccess);
         Assert.Null(source.WindowEnd);
 

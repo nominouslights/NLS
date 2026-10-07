@@ -133,6 +133,24 @@ public class BookeoImportCommitTests
     }
 
     [Fact]
+    public async Task A_target_converted_to_a_deadhead_after_the_preview_is_PreviewStale_and_nothing_is_written()
+    {
+        var bed = new BookeoTestBed();
+        var trip = bed.AddExistingTrip(Oct5, new TimeOnly(8, 0), TripDirection.Outbound);
+        var preview = await bed.PreviewFixtureAsync();
+        Assert.Contains(preview.Groups, g => g.ExistingTripId == trip.Id);
+
+        Assert.True(trip.ConvertToDeadhead([], 0, []).IsSuccess);
+        var result = await bed.CommitAsync(preview.BatchId, preview.PlanHash);
+
+        Assert.Equal("Trips.BookeoImport.PreviewStale", result.Error.Code);
+        Assert.Null(trip.ManifestId);
+        Assert.Empty(bed.Repo.Manifests);
+        Assert.Empty(bed.Repo.Bookings);
+        Assert.Equal(0, trip.SeatsConfirmed);
+    }
+
+    [Fact]
     public async Task A_save_conflict_is_PreviewStale_and_unknown_batches_are_not_found()
     {
         var bed = new BookeoTestBed();

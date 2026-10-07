@@ -479,6 +479,11 @@ public sealed class Trip : AggregateRoot, ITenantScoped
     /// application layer applies to both legs of a round trip at once; a re-route here would
     /// silently split a pair across two corridors.
     /// </para>
+    /// <para>
+    /// <see cref="IsEmptyLeg"/> is NOT editable here either: a trip becomes a deadhead only
+    /// through <see cref="ConvertToDeadhead"/> (which proves nobody is booked on it) and back
+    /// through <see cref="ConvertToPassengerTrip"/>.
+    /// </para>
     /// </summary>
     public Result Update(
         DateOnly serviceDate,
@@ -491,7 +496,6 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         string destination,
         IReadOnlyList<RouteStop> stops,
         int distanceKm,
-        bool isEmptyLeg,
         Guid? clientId,
         string? clientName,
         string? poNumber,
@@ -524,7 +528,6 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         Destination = destination.Trim();
         Stops = [.. stops];
         DistanceKm = distanceKm;
-        IsEmptyLeg = isEmptyLeg;
         ClientId = clientId;
         ClientName = Normalize(clientName);
         PoNumber = Normalize(poNumber);
@@ -1088,6 +1091,105 @@ public sealed class Trip : AggregateRoot, ITenantScoped
 
         var paired = AssignRoundTrip(key, TripDirection.Outbound);
         return paired.IsFailure ? Result.Failure<Trip>(paired.Error) : returnTrip;
+    }
+
+    /// <summary>
+    /// Turns a Scheduled trip nobody is booked on into a deadhead — an empty repositioning run —
+    /// so it no longer needs a passenger manifest to start or a post-trip inspection to finish.
+    /// The caller loads what lives outside this aggregate and passes it in (the
+    /// <see cref="MergeRoundTrip"/> shape): <paramref name="manifests"/> is EVERY manifest for the
+    /// trip — the one on <see cref="ManifestId"/> and any recorded under its trip number, because
+    /// linking is lazy; <paramref name="externalBookingCount"/> is the number of live Bookeo ledger
+    /// rows placed on it; <paramref name="roundTripPartners"/> the other legs sharing its
+    /// <see cref="RoundTripKey"/>.
+    /// <para>
+    /// Refused, in this order, unless: Scheduled; not already a deadhead; not confirmed from a
+    /// community booking day (those passengers live in Community Booking); no confirmed seats
+    /// and no gift-a-seat pledge (demand blocks — it is never reset here); every manifest has no
+    /// passengers and no cargo items; no imported Bookeo booking points at it; and no paired leg
+    /// is already a deadhead. Shipment legs are NOT checked — freight on a deadhead is the point
+    /// of having one. Cargo/grocery runs and unpaired client trips may convert.
+    /// </para>
+    /// <para>
+    /// On success the trip drops its manifest link; the caller deletes the (empty) manifests in
+    /// the same save, so a passenger added concurrently moves a manifest's version token and the
+    /// save loses cleanly instead of stranding someone on a deadhead.
+    /// </para>
+    /// </summary>
+    public Result ConvertToDeadhead(
+        IReadOnlyCollection<TripManifest> manifests,
+        int externalBookingCount,
+        IReadOnlyCollection<Trip> roundTripPartners)
+    {
+        if (Status != TripStatus.Scheduled)
+        {
+            return Result.Failure(TripErrors.DeadheadConversionNotScheduled);
+        }
+
+        if (IsEmptyLeg)
+        {
+            return Result.Failure(TripErrors.AlreadyEmptyLeg);
+        }
+
+        if (BookingDayId is not null)
+        {
+            return Result.Failure(TripErrors.DeadheadConversionBookingSourced);
+        }
+
+        if (SeatsConfirmed > 0 || DemandGuaranteed)
+        {
+            return Result.Failure(TripErrors.DeadheadConversionHasDemand(SeatsConfirmed, DemandGuaranteed));
+        }
+
+        var passengers = manifests.Sum(m => m.Passengers.Count);
+        var cargoItems = manifests.Sum(m => m.Cargo.Count);
+        if (passengers > 0 || cargoItems > 0)
+        {
+            return Result.Failure(TripErrors.DeadheadConversionManifestNotEmpty(passengers, cargoItems));
+        }
+
+        if (externalBookingCount > 0)
+        {
+            return Result.Failure(TripErrors.DeadheadConversionHasExternalBookings(externalBookingCount));
+        }
+
+        var emptyPartner = roundTripPartners.FirstOrDefault(p => p.Id != Id && p.IsEmptyLeg);
+        if (emptyPartner is not null)
+        {
+            return Result.Failure(TripErrors.RoundTripBothLegsEmpty(emptyPartner.TripNumber));
+        }
+
+        IsEmptyLeg = true;
+        ManifestId = null;
+        UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        Raise(new TripConvertedToDeadheadDomainEvent(Id, [.. manifests.Select(m => m.Id).Distinct()]));
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Turns a Scheduled deadhead back into an ordinary trip. Only the flag changes: the en-route
+    /// gates (a passenger manifest, or a shipment for a cargo run) and the post-trip inspection
+    /// gate on <see cref="FinishOperations"/> apply again by themselves, and a manifest can be
+    /// recorded for it again.
+    /// </summary>
+    public Result ConvertToPassengerTrip()
+    {
+        if (Status != TripStatus.Scheduled)
+        {
+            return Result.Failure(TripErrors.PassengerTripConversionNotScheduled);
+        }
+
+        if (!IsEmptyLeg)
+        {
+            return Result.Failure(TripErrors.NotEmptyLeg);
+        }
+
+        IsEmptyLeg = false;
+        UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        Raise(new TripConvertedToPassengerTripDomainEvent(Id));
+        return Result.Success();
     }
 
     /// <summary>

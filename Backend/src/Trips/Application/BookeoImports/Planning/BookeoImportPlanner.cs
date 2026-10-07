@@ -297,14 +297,18 @@ public static partial class BookeoImportPlanner
                 .Where(r => r.KeepsLedgerDeparture && r.Ledger!.TripId is not null)
                 .Select(r => tripsById.GetValueOrDefault(r.Ledger!.TripId!.Value))
                 .OfType<Trip>()
-                .Where(t => t.Status != TripStatus.Cancelled && !claimed.Contains(t.Id))
+                .Where(t => t.Status != TripStatus.Cancelled && !t.IsEmptyLeg && !claimed.Contains(t.Id))
                 .OrderBy(t => t.Status == TripStatus.Scheduled ? 0 : 1)
                 .ThenBy(t => t.TripNumber, StringComparer.Ordinal)
                 .FirstOrDefault();
 
             // 2. Otherwise an existing Scheduled Community trip at exactly this departure.
+            //    Never a deadhead (in either step): an empty repositioning run carries nobody, so
+            //    bookings are never placed on one — a booking that already sits on one is caught
+            //    by its removal group (TripIsDeadhead) instead.
             var target = ledgerTrip ?? input.Trips
                 .Where(t => t.Status == TripStatus.Scheduled
+                    && !t.IsEmptyLeg
                     && t.ServiceType == TripServiceType.Community
                     && t.RouteId == group.RouteId
                     && t.Direction == group.Direction
@@ -604,6 +608,16 @@ public static partial class BookeoImportPlanner
             group.Issues.Add(Block(
                 BookeoIssueCodes.TripNotEditable,
                 $"Trip {closed.TripNumber} is {closed.Status}, so its manifest can no longer be changed by an import."));
+        }
+
+        // ResolveTargets never picks a deadhead, but a removal group is built around the trip a
+        // booking's ledger row points at — and that trip can have become a deadhead since (or be
+        // one left by a race with the conversion). Nothing is written to an empty leg.
+        if (group.Target is { IsEmptyLeg: true } deadhead)
+        {
+            group.Issues.Add(Block(
+                BookeoIssueCodes.TripIsDeadhead,
+                $"Trip {deadhead.TripNumber} is now a deadhead, so an import cannot change its passengers — convert it back to a passenger trip first."));
         }
 
         RaiseManifestCap(group);

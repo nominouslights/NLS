@@ -367,6 +367,20 @@ internal sealed class FakeTripManifestRepository : ITripManifestRepository
             ? Manifests.FirstOrDefault(m => m.Id == id)
             : Manifests.Where(m => m.TripNumber == tripNumber).OrderBy(m => m.CreatedAtUtc).FirstOrDefault());
 
+    public Task<IReadOnlyList<TripManifest>> GetByTripNumberAsync(
+        string tripNumber, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<TripManifest>>(
+            Manifests.Where(m => m.TripNumber == tripNumber).OrderBy(m => m.CreatedAtUtc).ToList());
+
+    /// <summary>Manifests handed to <see cref="Remove"/> — dropped from <see cref="Manifests"/> at once (the fake has no unit of work).</summary>
+    public List<TripManifest> Removed { get; } = [];
+
+    public void Remove(TripManifest manifest)
+    {
+        Removed.Add(manifest);
+        Manifests.Remove(manifest);
+    }
+
     public Task SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         SaveCount++;
