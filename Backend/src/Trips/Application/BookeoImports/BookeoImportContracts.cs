@@ -120,6 +120,7 @@ public static class BookeoIssueCodes
     public const string ManifestCapExceeded = "ManifestCapExceeded";
     public const string OverVehicleCapacity = "OverVehicleCapacity";
     public const string TripNotEditable = "TripNotEditable";
+    public const string TripIsDeadhead = "TripIsDeadhead";
 
     // Warning.
     public const string VehicleUnmatched = "VehicleUnmatched";

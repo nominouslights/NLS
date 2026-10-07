@@ -38,6 +38,13 @@ public interface IBookeoImportRepository
 
     void AddBooking(BookeoBooking booking);
 
+    /// <summary>
+    /// How many ledger rows currently place their passengers on <paramref name="tripId"/> — a
+    /// cancelled booking has its trip cleared, so this counts live bookings only. The narrow read
+    /// the deadhead conversion uses to refuse a trip an import has put people on.
+    /// </summary>
+    Task<int> CountBookingsOnTripAsync(Guid tripId, CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<BookeoProductMapping>> GetProductMappingsAsync(CancellationToken cancellationToken = default);
 
     void AddProductMapping(BookeoProductMapping mapping);

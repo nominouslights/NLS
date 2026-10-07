@@ -57,6 +57,15 @@ public sealed class CommitBookeoImportCommandHandler(
         var created = new List<string>();
         int updated = 0, cancelled = 0;
 
+        // Belt and braces behind the planner (which never targets a deadhead and blocks a group
+        // whose trip has become one): if a plan would still write passengers onto an empty leg,
+        // the database has moved past anything a dispatcher previewed.
+        if (plan.Groups.Any(g => g.Action is BookeoGroupAction.Update or BookeoGroupAction.Cancel
+            && g.Target is { IsEmptyLeg: true }))
+        {
+            return Result.Failure<BookeoImportCommitResult>(BookeoImportErrors.PreviewStale);
+        }
+
         foreach (var group in plan.Groups)
         {
             Result applied;
