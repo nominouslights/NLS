@@ -18,8 +18,11 @@ import {
   canPairRoundTrip,
   changeTripStatus,
   closeTripWithoutBilling,
+  convertTripToDeadhead,
+  convertTripToPassengerTrip,
   corridorLabel,
   createTrip,
+  deadheadConversionBlockReason,
   finishTripOperations,
   getTrip,
   hasClearanceFor,
@@ -76,6 +79,7 @@ import ManifestEditorModal from "@/components/ManifestEditorModal";
 import TripInspectionModal from "@/components/TripInspectionModal";
 import SendPickupEmailModal from "@/components/SendPickupEmailModal";
 import ChangeRouteModal from "@/components/ChangeRouteModal";
+import ConvertToDeadheadModal from "@/components/ConvertToDeadheadModal";
 import DefectsPanel from "@/components/fleet/DefectsPanel";
 
 /** Label attributed to dispatcher-entered manifests/inspections (no user id yet). */
@@ -137,6 +141,8 @@ const EVENT_LABELS: Record<string, string> = {
   "trip-manifest-updated": "Manifest updated",
   "trip-route-changed": "Route changed",
   "trip-manifest-route-renamed": "Manifest route renamed",
+  "trip-converted-to-deadhead": "Converted to deadhead",
+  "trip-converted-to-passenger-trip": "Converted to passenger trip",
 };
 
 /** "Who did what" line for one audit entry (source + event). */
@@ -491,7 +497,6 @@ function EditTripModal({
       destination: trip.destination,
       stops: trip.stops,
       distanceKm: km,
-      isEmptyLeg: trip.isEmptyLeg,
       clientId: trip.clientId,
       clientName: trip.clientName,
       poNumber: poNumber.trim() || null,
@@ -1076,6 +1081,61 @@ function UnpairRoundTripModal({
 }
 
 // ---------------------------------------------------------------------------
+// Convert back — POST /convert-to-passenger-trip only flips the flag, but the
+// en-route and post-trip gates come back with it, so it gets a short confirm.
+// ---------------------------------------------------------------------------
+
+function ConvertToPassengerTripModal({
+  trip,
+  onClose,
+  onConfirmed,
+}: {
+  trip: TripRecord;
+  onClose: () => void;
+  onConfirmed: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onConfirmed();
+      onClose();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Failed to convert the trip — please try again.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ModalShell
+      eyebrow={`Operations · ${trip.tripNumber} · ${corridorLabel(trip)}`}
+      title="Convert to Passenger Trip"
+      onClose={onClose}
+      error={error}
+      maxWidth={480}
+      footer={
+        <>
+          <ActionButton onClick={onClose}>KEEP AS DEADHEAD</ActionButton>
+          <ActionButton variant="primary" onClick={submit} disabled={busy}>
+            {busy ? "CONVERTING…" : "CONVERT TO PASSENGER TRIP"}
+          </ActionButton>
+        </>
+      }
+    >
+      <div style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textSecondary, lineHeight: 1.6 }}>
+        {trip.tripNumber} becomes an ordinary trip again. A manifest can be recorded for it, and it will need{" "}
+        {isCargoService(trip.serviceType) ? "an assigned shipment" : "a passenger manifest"} to start and a post-trip
+        inspection to finish.
+      </div>
+    </ModalShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Cancel modal — POST /status with an optional reason.
 // ---------------------------------------------------------------------------
 
@@ -1417,6 +1477,8 @@ export default function Trips({
     | "createReturn"
     | "pairRoundTrip"
     | "unpairRoundTrip"
+    | "convertToDeadhead"
+    | "convertToPassengerTrip"
     | "changeRoute"
     | "cancel"
     | "closeWithoutBilling"
@@ -1724,6 +1786,35 @@ export default function Trips({
   async function onRoundTripUnpaired(id: string) {
     await unpairRoundTrip(id);
     await reloadUntil(id, (trip) => trip !== undefined && trip.roundTripKey === null);
+  }
+
+  /** CONVERT TO DEADHEAD — the server deletes the trip's empty manifest
+   *  record(s) and clears its manifestId, so the panel's manifest goes too, and
+   *  the timeline picks up the conversion. Mirrors onRoundTripUnpaired. */
+  async function onConvertedToDeadhead(id: string) {
+    await convertTripToDeadhead(id);
+    await reloadUntil(id, (trip) => trip?.isEmptyLeg === true);
+    setManifestState({ tripId: id, manifest: null });
+    await refreshActivity(id);
+  }
+
+  /** CONVERT TO PASSENGER TRIP — only the flag flips; there is no manifest to
+   *  restore (conversion deleted it), so the panel offers ADD MANIFEST again. */
+  async function onConvertedToPassengerTrip(id: string) {
+    await convertTripToPassengerTrip(id);
+    await reloadUntil(id, (trip) => trip?.isEmptyLeg === false);
+    setManifestState({ tripId: id, manifest: null });
+    await refreshActivity(id);
+  }
+
+  /** Re-read the audit timeline after a mutation. Best-effort. */
+  async function refreshActivity(id: string) {
+    try {
+      const fresh = await listTripActivity(id);
+      setActivityState({ tripId: id, rows: fresh });
+    } catch {
+      // Audit timeline is best-effort.
+    }
   }
 
   /** CHANGE ROUTE — the POST already succeeded (the modal owns it); poll this leg
@@ -2124,6 +2215,15 @@ export default function Trips({
       ? ((rows ?? []).find((r) => r.id !== t.id && r.roundTripKey === t.roundTripKey) ?? null)
       : null;
 
+  // CONVERT TO DEADHEAD gate — the client-visible half of the server's "nobody is
+  // booked on it" rule. The linked manifest is "loading" until the keyed fetch
+  // lands; a failed fetch reads as no manifest and the server re-checks.
+  const manifestLoading = !!t && t.manifestId !== null && manifestState?.tripId !== t.id;
+  const deadheadBlockReason = t ? deadheadConversionBlockReason(t, manifest, pairedSibling, manifestLoading) : null;
+  // A deadhead without a manifest has none by design (the server refuses one),
+  // so the manifest panel says so instead of offering ADD MANIFEST.
+  const deadheadWithoutManifest = !!t && t.isEmptyLeg && t.manifestId === null;
+
   // Timeline — operational steps first (run finished = operationsFinishedAtUtc),
   // then the billing-driven ones. "Completed" is the paid/final step only:
   // completedAtUtc now means "the money arrived" (or run end for clientless trips).
@@ -2429,6 +2529,8 @@ export default function Trips({
                       value={
                         t.manifestId ? (
                           <StatusChip kind="ontime" label={`${manifestPaxCount} passenger${manifestPaxCount === 1 ? "" : "s"}`} />
+                        ) : deadheadWithoutManifest ? (
+                          <StatusChip kind="off" label="Deadhead — no manifest" />
                         ) : (
                           <StatusChip kind="off" label={tripIsCargo ? "No manifest — not required" : "No manifest yet"} />
                         )
@@ -2437,7 +2539,7 @@ export default function Trips({
                     {/* Editable while Scheduled/InProgress/ReadyForBilling (fares
                         get recorded just after the run); view-only from Invoiced
                         onward (cancelled trips show nothing). */}
-                    {manifestEditable ? (
+                    {manifestEditable && !deadheadWithoutManifest ? (
                       <div style={{ marginTop: 2 }}>
                         {t.manifestId && !manifest ? (
                           <span style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textDim }}>Loading manifest…</span>
@@ -2758,6 +2860,17 @@ export default function Trips({
                 {t.status === "Scheduled" && (
                   <ActionButton onClick={() => setModal("changeRoute")}>CHANGE ROUTE</ActionButton>
                 )}
+                {t.status === "Scheduled" &&
+                  (t.isEmptyLeg ? (
+                    <ActionButton onClick={() => setModal("convertToPassengerTrip")}>CONVERT TO PASSENGER TRIP</ActionButton>
+                  ) : manifestLoading ? (
+                    <ActionButton disabled>CONVERT TO DEADHEAD</ActionButton>
+                  ) : deadheadBlockReason ? (
+                    // Pre-gated like START below; the server stays the final authority.
+                    <StatusChip kind="soon" label={`Can't convert to deadhead — ${deadheadBlockReason}`} />
+                  ) : (
+                    <ActionButton onClick={() => setModal("convertToDeadhead")}>CONVERT TO DEADHEAD</ActionButton>
+                  ))}
                 {(t.status === "Scheduled" || t.status === "InProgress") && (
                   <ActionButton onClick={() => setModal("assign")}>REASSIGN</ActionButton>
                 )}
@@ -2805,18 +2918,24 @@ export default function Trips({
                     CLOSE WITHOUT BILLING
                   </ActionButton>
                 )}
-                {/* Always printable: the loaded manifest when one exists, else the
-                    blank NL-TM-01 form (printTripManifest handles null). */}
-                <ActionButton onClick={() => printTripManifest(manifest)}>
-                  {manifest ? "PRINT TRIP MANIFEST" : "PRINT BLANK MANIFEST"}
-                </ActionButton>
+                {/* Printable whenever a manifest can exist: the loaded manifest
+                    when one exists, else the blank NL-TM-01 form
+                    (printTripManifest handles null). A deadhead without a
+                    manifest gets no blank one — it carries no passengers. */}
+                {!deadheadWithoutManifest && (
+                  <ActionButton onClick={() => printTripManifest(manifest)}>
+                    {manifest ? "PRINT TRIP MANIFEST" : "PRINT BLANK MANIFEST"}
+                  </ActionButton>
+                )}
                 {/* The whole driver package: cover + manifest + itinerary +
                     pre-trip + en-route defect report, each part
-                    blank-form-printed when it has no record. Deliberately NOT gated on tripEditable — a
+                    blank-form-printed when it has no record — except a
+                    deadhead's, which leaves the manifest out and says
+                    "Deadhead — no passengers carried" on the cover. Deliberately NOT gated on tripEditable — a
                     closed trip's records can still be viewed and printed, and
                     downloading the package after the fact is the audit case.
                     The label is fixed (unlike the manifest button's
-                    filled/blank pair) because all four parts always print.
+                    filled/blank pair) because every part prints, filled or blank.
 
                     onClick is SYNCHRONOUS and must stay that way:
                     openPrintDocument calls window.open, and after an await
@@ -2861,6 +2980,21 @@ export default function Trips({
                   sibling={pairedSibling}
                   onClose={() => setModal(null)}
                   onConfirmed={() => onRoundTripUnpaired(t.id)}
+                />
+              )}
+              {modal === "convertToDeadhead" && (
+                <ConvertToDeadheadModal
+                  trip={t}
+                  partner={pairedSibling}
+                  onClose={() => setModal(null)}
+                  onConfirmed={() => onConvertedToDeadhead(t.id)}
+                />
+              )}
+              {modal === "convertToPassengerTrip" && (
+                <ConvertToPassengerTripModal
+                  trip={t}
+                  onClose={() => setModal(null)}
+                  onConfirmed={() => onConvertedToPassengerTrip(t.id)}
                 />
               )}
               {modal === "manifest" && (
