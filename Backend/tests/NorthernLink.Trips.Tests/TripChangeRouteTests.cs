@@ -159,7 +159,7 @@ public class TripChangeRouteTests
         var result = trip.Update(
             trip.ServiceDate, trip.WindowStart, trip.WindowEnd, trip.ServiceType,
             other.Id, other.Name, other.Origin, other.Destination, other.Stops, other.DistanceKm,
-            trip.IsEmptyLeg, trip.ClientId, trip.ClientName, trip.PoNumber, trip.SeatsCapacity, trip.SeatsMinimum);
+            trip.ClientId, trip.ClientName, trip.PoNumber, trip.SeatsCapacity, trip.SeatsMinimum);
 
         Assert.Equal(TripErrors.UseChangeRoute, result.Error);
         Assert.Equal(Original.Id, trip.RouteId);

@@ -39,9 +39,22 @@ public sealed class AttachManifestToTripCommandHandler(
         {
             // Defense in depth behind the create-time guard: a deadhead never carries a
             // manifest, so a number-matching manifest is left unlinked rather than attached.
-            logger.LogWarning(
-                "Trips skipped attaching manifest {ManifestId} to deadhead trip {TripNumber} ({TripId}); empty legs carry no manifest",
-                manifest.Id, trip.TripNumber, trip.Id);
+            // One that lists people or cargo is the dangerous case — e.g. recorded in the
+            // instant before a convert-to-deadhead committed — because those riders are now on
+            // no trip at all, so it is a Warning someone must act on; an empty one is noise.
+            if (manifest.Passengers.Count > 0 || manifest.Cargo.Count > 0)
+            {
+                logger.LogWarning(
+                    "Trips skipped attaching manifest {ManifestId} to deadhead trip {TripNumber} ({TripId}) although it lists {PassengerCount} passenger(s) and {CargoCount} cargo item(s); they are on no trip until the manifest is moved or the trip is converted back",
+                    manifest.Id, trip.TripNumber, trip.Id, manifest.Passengers.Count, manifest.Cargo.Count);
+            }
+            else
+            {
+                logger.LogInformation(
+                    "Trips skipped attaching empty manifest {ManifestId} to deadhead trip {TripNumber} ({TripId}); empty legs carry no manifest",
+                    manifest.Id, trip.TripNumber, trip.Id);
+            }
+
             return Result.Success();
         }
 

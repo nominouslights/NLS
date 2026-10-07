@@ -81,7 +81,6 @@ public class UpdateTripCommandHandlerTests
         trip.Destination,
         trip.Stops,
         trip.DistanceKm,
-        trip.IsEmptyLeg,
         trip.ClientId,
         trip.ClientName,
         poNumber,
@@ -223,5 +222,23 @@ public class UpdateTripCommandHandlerTests
         var result = await Handler.Handle(EditCommand(trip, Guid.NewGuid(), "PO-1"), CancellationToken.None);
 
         Assert.Equal(TripErrors.UseChangeRoute, result.Error);
+    }
+
+    [Fact]
+    public async Task An_edit_never_changes_the_deadhead_flag_either_way()
+    {
+        var route = CreateRoute("Thompson", "Leaf Rapids", "Lynn Lake");
+        var passengerTrip = AddTrip(route, TripDirection.Outbound);
+        var deadhead = AddTrip(route, TripDirection.Inbound);
+        Assert.True(deadhead.ConvertToDeadhead([], 0, []).IsSuccess);
+
+        // The command has no flag to carry any more — an edit leaves whatever the trip is.
+        Assert.True((await Handler.Handle(EditCommand(passengerTrip, route.Id, "PO-NEW"), CancellationToken.None)).IsSuccess);
+        Assert.True((await Handler.Handle(EditCommand(deadhead, route.Id, "PO-NEW"), CancellationToken.None)).IsSuccess);
+
+        Assert.False(passengerTrip.IsEmptyLeg);
+        Assert.True(deadhead.IsEmptyLeg);
+        Assert.Equal("PO-NEW", deadhead.PoNumber);
+        Assert.Null(typeof(UpdateTripCommand).GetProperty("IsEmptyLeg"));
     }
 }
