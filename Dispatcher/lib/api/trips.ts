@@ -328,6 +328,97 @@ export function unpairRoundTrip(id: string): Promise<void> {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Change route — moves a Scheduled trip (and its paired leg, reversed for that
+// leg's direction) onto another catalogue route. PUT /api/trips/{id} refuses a
+// different routeId (409 Trips.Trip.UseChangeRoute); this pair is the only way.
+// ---------------------------------------------------------------------------
+
+/** Mirrors TripRouteChangePartnerResponse — the paired leg that always moves too. */
+export interface TripRouteChangePartner {
+  tripId: string;
+  tripNumber: string;
+  status: TripStatus;
+  direction: TripDirection | null;
+}
+
+/** Mirrors TripRouteChangeLegResponse — one leg now vs. after the change. The
+ *  new* corridor fields are null when the target route does not exist;
+ *  willChange is false for a paired leg already on the target route. Times are
+ *  TimeOnly ("06:30:00"); newWindowEnd stays null for an open-ended window. */
+export interface TripRouteChangeLeg {
+  tripId: string;
+  tripNumber: string;
+  isRequestedTrip: boolean;
+  status: TripStatus;
+  direction: TripDirection | null;
+  willChange: boolean;
+  currentRouteName: string;
+  currentOrigin: string;
+  currentDestination: string;
+  currentDistanceKm: number;
+  newOrigin: string | null;
+  newDestination: string | null;
+  newDistanceKm: number | null;
+  newStops: TripStop[] | null;
+  windowStart: string;
+  currentWindowEnd: string | null;
+  newWindowEnd: string | null;
+}
+
+/** Mirrors TripRouteChangeFindingResponse — a blocker, warning or notice.
+ *  tripId/tripNumber name the leg it concerns (null = the request as a whole);
+ *  count is set for countable warnings (passengers, shipment legs). */
+export interface TripRouteChangeFinding {
+  code: string;
+  message: string;
+  tripId: string | null;
+  tripNumber: string | null;
+  count: number | null;
+}
+
+/** Mirrors TripRouteChangePreviewResponse. Always 200 for an existing trip:
+ *  problems arrive as blockers (same codes/messages the POST would return).
+ *  requiresAcknowledgement is true exactly when warnings is non-empty. */
+export interface TripRouteChangePreview {
+  tripId: string;
+  tripNumber: string;
+  currentRouteId: string | null;
+  currentRouteName: string;
+  newRouteId: string;
+  newRouteName: string | null;
+  canChange: boolean;
+  requiresAcknowledgement: boolean;
+  partner: TripRouteChangePartner | null;
+  legs: TripRouteChangeLeg[];
+  blockers: TripRouteChangeFinding[];
+  warnings: TripRouteChangeFinding[];
+  notices: TripRouteChangeFinding[];
+}
+
+/** POST /api/trips/{id}/change-route body (ChangeTripRouteRequest). */
+export interface ChangeTripRouteInput {
+  routeId: string;
+  acknowledgeWarnings: boolean;
+}
+
+/** GET /api/trips/{id}/change-route/preview?routeId= → what the change would do,
+ *  nothing persisted. 404 Trips.Trip.NotFound for an unknown trip. */
+export function previewTripRouteChange(tripId: string, routeId: string): Promise<TripRouteChangePreview> {
+  const q = new URLSearchParams({ routeId });
+  return request<TripRouteChangePreview>(`/api/trips/${tripId}/change-route/preview?${q.toString()}`);
+}
+
+/** POST /api/trips/{id}/change-route → 204. Errors use the standard {code,message}
+ *  body: the first blocker as its error, or 409
+ *  Trips.Trip.RouteChangeNeedsAcknowledgement when warnings were not acknowledged. */
+export function changeTripRoute(tripId: string, input: ChangeTripRouteInput): Promise<void> {
+  return request<void>(`/api/trips/${tripId}/change-route`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
 /** POST /api/trips/{id}/deadhead-return → { id } (same created-id shape as
  *  createTrip) — creates the reversed empty repositioning leg, already paired
  *  to this trip as its return. */

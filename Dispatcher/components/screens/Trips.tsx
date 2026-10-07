@@ -75,6 +75,7 @@ import { periodContaining, periodContains, periodLabel, type Period } from "@/li
 import ManifestEditorModal from "@/components/ManifestEditorModal";
 import TripInspectionModal from "@/components/TripInspectionModal";
 import SendPickupEmailModal from "@/components/SendPickupEmailModal";
+import ChangeRouteModal from "@/components/ChangeRouteModal";
 import DefectsPanel from "@/components/fleet/DefectsPanel";
 
 /** Label attributed to dispatcher-entered manifests/inspections (no user id yet). */
@@ -134,6 +135,8 @@ const EVENT_LABELS: Record<string, string> = {
   "trip-manifest-linked": "Manifest linked",
   "trip-manifest-created": "Manifest created",
   "trip-manifest-updated": "Manifest updated",
+  "trip-route-changed": "Route changed",
+  "trip-manifest-route-renamed": "Manifest route renamed",
 };
 
 /** "Who did what" line for one audit entry (source + event). */
@@ -580,8 +583,9 @@ function EditTripModal({
         )}
       </div>
       <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim, marginTop: 14, lineHeight: 1.5 }}>
-        Corridor, service type, and client come from the trip&rsquo;s route/client snapshot and are not editable here.
-        Trips are editable only while Scheduled — the backend rejects edits after departure.
+        Service type and client come from the trip&rsquo;s client snapshot and are not editable here. The corridor comes
+        from the route — to move this trip onto another route, use CHANGE ROUTE. Trips are editable only while
+        Scheduled — the backend rejects edits after departure.
       </div>
     </ModalShell>
   );
@@ -1413,6 +1417,7 @@ export default function Trips({
     | "createReturn"
     | "pairRoundTrip"
     | "unpairRoundTrip"
+    | "changeRoute"
     | "cancel"
     | "closeWithoutBilling"
     | "manifest"
@@ -1430,6 +1435,9 @@ export default function Trips({
   const [defectsRefresh, setDefectsRefresh] = useState(0);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  /** After CHANGE ROUTE: the follow-up strip offering a fresh pickup email and
+   *  a driver-package reprint (both now carry stale times/stops). Keyed by trip. */
+  const [routeChangedFor, setRouteChangedFor] = useState<{ tripId: string; routeName: string | null } | null>(null);
 
   const periodStart = period.start;
   const periodEnd = period.end;
@@ -1716,6 +1724,29 @@ export default function Trips({
   async function onRoundTripUnpaired(id: string) {
     await unpairRoundTrip(id);
     await reloadUntil(id, (trip) => trip !== undefined && trip.roundTripKey === null);
+  }
+
+  /** CHANGE ROUTE — the POST already succeeded (the modal owns it); poll this leg
+   *  until it reads back on the new route, then refresh what the change rewrote:
+   *  the page (which carries the paired leg when it is on it), the manifest's
+   *  route name and the activity timeline. Mirrors onRoundTripUnpaired. */
+  async function onRouteChanged(id: string, manifestId: string | null, newRouteId: string, routeName: string | null) {
+    await reloadUntil(id, (trip) => trip !== undefined && trip.routeId === newRouteId);
+    if (manifestId) {
+      try {
+        const m = await getTripManifest(manifestId);
+        setManifestState({ tripId: id, manifest: m });
+      } catch {
+        // Non-fatal — the keyed effect will refetch on the next render.
+      }
+    }
+    try {
+      const fresh = await listTripActivity(id);
+      setActivityState({ tripId: id, rows: fresh });
+    } catch {
+      // Audit timeline is best-effort.
+    }
+    setRouteChangedFor({ tripId: id, routeName });
   }
 
   /** After a manifest create/edit: wait for the trip to carry a manifestId, then
@@ -2029,6 +2060,20 @@ export default function Trips({
   // synchronous (an await there would lose the pop-up gesture). A passenger
   // trip never fetches shipments, so it is never pending.
   const cargoShipmentsPending = tripIsCargo && tripShipments === null;
+  /** PRINT / REPRINT DRIVER PACKAGE. Must stay SYNCHRONOUS — see the button's
+   *  comment below: an await before window.open loses the pop-up gesture. */
+  const printPackage = () => {
+    if (!t) return;
+    printDriverPackage({
+      trip: t,
+      manifest,
+      preTrip: preTripInspection,
+      // Shipments only ride cargo/grocery trips, and the fetch above is guarded
+      // to match — a passenger trip's incidental cargo is already on the
+      // manifest's §3, so [] here is correct and the freight block omits itself.
+      shipments: tripIsCargo ? (tripShipments ?? []) : [],
+    });
+  };
   // START gate: a driver, then the service-specific half of the backend
   // en-route guard — passenger runs need a linked manifest with ≥1 passenger,
   // Cargo/Grocery runs need ≥1 LIVE assigned shipment instead (cancelled or
@@ -2679,6 +2724,27 @@ export default function Trips({
                 )}
               </Panel>
 
+              {routeChangedFor?.tripId === t.id && (
+                <Panel borderColor="rgba(0,158,115,.4)">
+                  <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 9 }}>
+                    <StatusChip
+                      kind="ontime"
+                      label={`Route changed${routeChangedFor.routeName ? ` to ${routeChangedFor.routeName}` : ""}`}
+                    />
+                    <span style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textMuted, flex: 1, minWidth: 220 }}>
+                      Times and stops moved. Anything already sent or printed for this trip is out of date.
+                    </span>
+                    {canSendPickupEmail && (
+                      <ActionButton onClick={() => setModal("sendEmail")}>SEND PICKUP EMAIL</ActionButton>
+                    )}
+                    <ActionButton disabled={cargoShipmentsPending} onClick={printPackage}>
+                      {cargoShipmentsPending ? "LOADING…" : "REPRINT DRIVER PACKAGE"}
+                    </ActionButton>
+                    <ActionButton onClick={() => setRouteChangedFor(null)}>DISMISS</ActionButton>
+                  </div>
+                </Panel>
+              )}
+
               {/* actions */}
               <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 9 }}>
                 {(t.status === "Invoiced" || t.status === "Completed" || t.status === "WrittenOff") && (
@@ -2688,6 +2754,9 @@ export default function Trips({
                   <ActionButton variant="primary" onClick={() => setModal("edit")}>
                     EDIT TRIP
                   </ActionButton>
+                )}
+                {t.status === "Scheduled" && (
+                  <ActionButton onClick={() => setModal("changeRoute")}>CHANGE ROUTE</ActionButton>
                 )}
                 {(t.status === "Scheduled" || t.status === "InProgress") && (
                   <ActionButton onClick={() => setModal("assign")}>REASSIGN</ActionButton>
@@ -2754,21 +2823,7 @@ export default function Trips({
                     Safari and Firefox no longer treat it as a user gesture and
                     block the tab silently. Everything it reads is already in
                     state. */}
-                <ActionButton
-                  disabled={cargoShipmentsPending}
-                  onClick={() =>
-                    printDriverPackage({
-                      trip: t,
-                      manifest,
-                      preTrip: preTripInspection,
-                      // Shipments only ride cargo/grocery trips, and the fetch
-                      // above is guarded to match — a passenger trip's
-                      // incidental cargo is already on the manifest's §3, so []
-                      // here is correct and the freight block omits itself.
-                      shipments: tripIsCargo ? (tripShipments ?? []) : [],
-                    })
-                  }
-                >
+                <ActionButton disabled={cargoShipmentsPending} onClick={printPackage}>
                   {cargoShipmentsPending ? "LOADING…" : "PRINT DRIVER PACKAGE"}
                 </ActionButton>
                 {(t.status === "Scheduled" || t.status === "InProgress") && (
@@ -2855,6 +2910,13 @@ export default function Trips({
                   inspection={acknowledgingInspection}
                   onClose={() => setAcknowledgingInspection(null)}
                   onConfirmed={() => onInspectionSaved(t.id, t.tripNumber, false)}
+                />
+              )}
+              {modal === "changeRoute" && (
+                <ChangeRouteModal
+                  trip={t}
+                  onClose={() => setModal(null)}
+                  onChanged={(newRouteId, routeName) => onRouteChanged(t.id, t.manifestId, newRouteId, routeName)}
                 />
               )}
               {modal === "edit" && (
