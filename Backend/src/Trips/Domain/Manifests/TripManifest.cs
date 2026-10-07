@@ -162,6 +162,30 @@ public sealed class TripManifest : AggregateRoot, ITenantScoped
         return Result.Success();
     }
 
+    /// <summary>
+    /// Re-copies the §1 route name after the trip moved to another route
+    /// (<c>Trip.ChangeRoute</c>). Deliberately narrow: it touches only <see cref="Route"/> and
+    /// leaves <see cref="Source"/>/<see cref="EnteredBy"/>/<see cref="EnteredAt"/> alone — a
+    /// system-driven rename is not somebody editing the manifest, and <see cref="Update"/>
+    /// would re-stamp the provenance as if it were. Passenger stop picks are NOT touched: an
+    /// off-route pick stays as recorded until the dispatcher re-picks it. A no-op (no event)
+    /// when the name is already current.
+    /// </summary>
+    public Result RenameRoute(string route)
+    {
+        var renamed = route?.Trim() ?? string.Empty;
+        if (string.Equals(Route, renamed, StringComparison.Ordinal))
+        {
+            return Result.Success();
+        }
+
+        var previous = Route;
+        Route = renamed;
+
+        Raise(new TripManifestRouteRenamedDomainEvent(Id, previous, renamed));
+        return Result.Success();
+    }
+
     private static Result Validate(
         string tripNumber,
         IReadOnlyList<ManifestPassenger> passengers,

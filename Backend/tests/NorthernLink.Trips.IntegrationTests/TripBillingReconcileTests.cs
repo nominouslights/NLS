@@ -110,6 +110,12 @@ public class TripBillingReconcileTests(PostgresFixture fixture)
             return true;
         }
 
+        public async Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            await context.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+
         public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
             context.SaveChangesAsync(cancellationToken);
     }

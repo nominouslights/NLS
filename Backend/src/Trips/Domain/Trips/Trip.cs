@@ -472,6 +472,13 @@ public sealed class Trip : AggregateRoot, ITenantScoped
     /// move through their own methods; the trip number and <see cref="ScheduleTemplateId"/>
     /// never change, and round-trip pairing moves only through
     /// <see cref="MergeRoundTrip"/>/<see cref="AssignRoundTrip"/>/<see cref="ClearRoundTrip"/>.
+    /// <para>
+    /// The route is NOT editable here: <paramref name="routeId"/> must equal the trip's current
+    /// <see cref="RouteId"/> (null stays null — a free-form trip may still edit its corridor
+    /// text). Moving to another route goes through <see cref="ChangeRoute"/>, which the
+    /// application layer applies to both legs of a round trip at once; a re-route here would
+    /// silently split a pair across two corridors.
+    /// </para>
     /// </summary>
     public Result Update(
         DateOnly serviceDate,
@@ -494,6 +501,11 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         if (Status != TripStatus.Scheduled)
         {
             return Result.Failure(TripErrors.NotEditable);
+        }
+
+        if (routeId != RouteId)
+        {
+            return Result.Failure(TripErrors.UseChangeRoute);
         }
 
         var validation = ValidateDetails(routeName, origin, destination, distanceKm, seatsCapacity, seatsMinimum);
@@ -523,6 +535,94 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         UpdatedAtUtc = DateTimeOffset.UtcNow;
 
         Raise(new TripUpdatedDomainEvent(Id));
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Whether this trip could move onto <paramref name="route"/> right now — the same checks
+    /// <see cref="ChangeRoute"/> applies, without mutating, so the change preview can list them.
+    /// Order matters only for which single error a caller sees first: not Scheduled, owned by a
+    /// booking day, already on that route, then the route being inactive.
+    /// </summary>
+    public Result CanChangeRouteTo(Route route)
+    {
+        if (Status != TripStatus.Scheduled)
+        {
+            return Result.Failure(TripErrors.RouteChangeNotScheduled);
+        }
+
+        // A booking-confirmed trip's corridor IS the booking day's corridor (Booking's replica
+        // of this route). Moving the trip would strand every booking on the day.
+        if (BookingDayId is not null)
+        {
+            return Result.Failure(TripErrors.RouteOwnedByBooking);
+        }
+
+        if (RouteId == route.Id)
+        {
+            return Result.Failure(TripErrors.RouteUnchanged);
+        }
+
+        if (!route.Active)
+        {
+            return Result.Failure(TripErrors.RouteInactive);
+        }
+
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// The snapshot this trip would carry on <paramref name="route"/>, oriented for its own
+    /// <see cref="Direction"/>: an Inbound leg runs the stops backwards with origin and
+    /// destination swapped (<see cref="RouteStop.OrientedFor"/> — the reversal generation, the
+    /// deadhead return and the Bookeo import all share). The window end is recomputed the way
+    /// the generation materializer stamps it — departure + the route's estimated duration —
+    /// but only when the trip had one; an open-ended window stays open-ended.
+    /// </summary>
+    public TripRouteSnapshot RouteSnapshotFor(Route route)
+    {
+        var inbound = Direction == TripDirection.Inbound;
+        return new TripRouteSnapshot(
+            route.Id,
+            route.Name,
+            inbound ? route.Destination : route.Origin,
+            inbound ? route.Origin : route.Destination,
+            RouteStop.OrientedFor(route.Stops, Direction),
+            route.DistanceKm,
+            WindowEnd is null ? null : WindowStart.Add(route.EstimatedDuration));
+    }
+
+    /// <summary>
+    /// Moves a Scheduled trip onto a different catalogue route: the route snapshot (id, name,
+    /// endpoints, stops, distance) is replaced by <see cref="RouteSnapshotFor"/> and the window
+    /// end recomputed from the route's duration. Everything else stays — trip number, template
+    /// provenance, round-trip key and direction, assignment, seats, client, and the manifest's
+    /// passengers (whose stop picks may now be off-route; the dispatcher re-picks them).
+    /// Pairing is the caller's concern: the application layer changes both legs of a round trip
+    /// in one save, each oriented for its own direction.
+    /// </summary>
+    public Result ChangeRoute(Route route)
+    {
+        var check = CanChangeRouteTo(route);
+        if (check.IsFailure)
+        {
+            return check;
+        }
+
+        var snapshot = RouteSnapshotFor(route);
+        var previousRouteId = RouteId;
+        var previousRouteName = RouteName;
+
+        RouteId = snapshot.RouteId;
+        RouteName = snapshot.RouteName.Trim();
+        Origin = snapshot.Origin.Trim();
+        Destination = snapshot.Destination.Trim();
+        Stops = [.. snapshot.Stops];
+        DistanceKm = snapshot.DistanceKm;
+        WindowEnd = snapshot.WindowEnd;
+        UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        Raise(new TripRouteChangedDomainEvent(Id, previousRouteId, previousRouteName, RouteId.Value, RouteName));
         return Result.Success();
     }
 

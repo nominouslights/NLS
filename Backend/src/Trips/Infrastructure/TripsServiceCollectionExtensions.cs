@@ -51,6 +51,7 @@ using NorthernLink.Trips.Application.Schedules.UpdateException;
 using NorthernLink.Trips.Application.Trips;
 using NorthernLink.Trips.Application.Trips.Assign;
 using NorthernLink.Trips.Application.Trips.AttachManifest;
+using NorthernLink.Trips.Application.Trips.ChangeRoute;
 using NorthernLink.Trips.Application.Trips.ChangeStatus;
 using NorthernLink.Trips.Application.Trips.CloseWithoutBilling;
 using NorthernLink.Trips.Application.Trips.FinishOperations;
@@ -153,6 +154,10 @@ public static class TripsServiceCollectionExtensions
         services.AddScoped<IBookeoImportRepository, BookeoImportRepository>();
         services.AddScoped<BookeoImportPlanLoader>();
 
+        // Route change: one impact calculator shared by the preview and the command, so the
+        // dialog can never promise something the command then refuses.
+        services.AddScoped<TripRouteChangeImpactCalculator>();
+
         // 3. Command/query handlers — registered explicitly, one line per handler.
         services.AddScoped<ICommandHandler<CreateTripManifestCommand, Guid>, CreateTripManifestCommandHandler>();
         services.AddScoped<ICommandHandler<UpdateTripManifestCommand>, UpdateTripManifestCommandHandler>();
@@ -160,6 +165,8 @@ public static class TripsServiceCollectionExtensions
         services.AddScoped<IQueryHandler<GetTripManifestByIdQuery, TripManifestResponse>, GetTripManifestByIdQueryHandler>();
         services.AddScoped<ICommandHandler<CreateTripCommand, Guid>, CreateTripCommandHandler>();
         services.AddScoped<ICommandHandler<UpdateTripCommand>, UpdateTripCommandHandler>();
+        services.AddScoped<ICommandHandler<ChangeTripRouteCommand>, ChangeTripRouteCommandHandler>();
+        services.AddScoped<IQueryHandler<PreviewTripRouteChangeQuery, TripRouteChangePreviewResponse>, PreviewTripRouteChangeQueryHandler>();
         services.AddScoped<ICommandHandler<AssignTripCommand>, AssignTripCommandHandler>();
         services.AddScoped<ICommandHandler<ChangeTripStatusCommand>, ChangeTripStatusCommandHandler>();
         services.AddScoped<ICommandHandler<FinishTripOperationsCommand>, FinishTripOperationsCommandHandler>();

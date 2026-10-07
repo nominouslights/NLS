@@ -77,4 +77,13 @@ public interface ITripRepository
     Task<bool> TryAddGeneratedAsync(IReadOnlyList<Trip> trips, CancellationToken cancellationToken = default);
 
     Task SaveChangesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Saves like <see cref="SaveChangesAsync"/>, but reports an optimistic-concurrency loss
+    /// (an aggregate's <c>version</c> token moved underneath this request) as false instead of
+    /// throwing — the tracker is cleared so nothing half-applied can be saved later, and the
+    /// caller maps it to a clean 409. Every repository in the module shares the one
+    /// DbContext, so this commits manifest/shipment changes staged in the same request too.
+    /// </summary>
+    Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken = default);
 }

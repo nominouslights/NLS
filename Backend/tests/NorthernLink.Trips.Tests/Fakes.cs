@@ -109,6 +109,20 @@ internal sealed class FakeTripRepository : ITripRepository
         SaveCount++;
         return Task.CompletedTask;
     }
+
+    /// <summary>Set true to make the next <see cref="TrySaveChangesAsync"/> lose an optimistic-concurrency race.</summary>
+    public bool SimulateConcurrencyConflict { get; set; }
+
+    public Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        if (SimulateConcurrencyConflict)
+        {
+            return Task.FromResult(false);
+        }
+
+        SaveCount++;
+        return Task.FromResult(true);
+    }
 }
 
 /// <summary>Sequential trip numbers, shared by every handler test that mints one.</summary>
@@ -346,6 +360,12 @@ internal sealed class FakeTripManifestRepository : ITripManifestRepository
 
     public Task<TripManifest?> GetByIdAsync(Guid manifestId, CancellationToken cancellationToken = default) =>
         Task.FromResult(Manifests.FirstOrDefault(m => m.Id == manifestId));
+
+    public Task<TripManifest?> GetForTripAsync(
+        Guid? manifestId, string tripNumber, CancellationToken cancellationToken = default) =>
+        Task.FromResult(manifestId is { } id
+            ? Manifests.FirstOrDefault(m => m.Id == id)
+            : Manifests.Where(m => m.TripNumber == tripNumber).OrderBy(m => m.CreatedAtUtc).FirstOrDefault());
 
     public Task SaveChangesAsync(CancellationToken cancellationToken = default)
     {
