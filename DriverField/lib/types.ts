@@ -87,8 +87,23 @@ export interface VehicleDefect {
   severity: DefectSeverity;
   note: string;
   dk: StatusKind;
+  /**
+   * The work order the defect is linked to, if any. Having one does NOT make a defect closed —
+   * a defect stays open until completing its work order records a resolving outcome.
+   */
   workOrder: string | null;
+  /** ISO date the defect was resolved; null while it is still open. */
+  resolvedOn: string | null;
+  /**
+   * The resolving outcome, recorded per defect when its work order is completed. Only the two
+   * resolving outcomes appear here: Deferred leaves the defect open, so it never sets this.
+   * Null exactly when `resolvedOn` is null.
+   */
+  resolution: DefectResolution | null;
 }
+
+/** Work-order outcomes that resolve a defect. ("Deferred" is an outcome too, but not a resolution.) */
+export type DefectResolution = "Repaired" | "NoFaultFound";
 
 export interface Trip {
   id: string;

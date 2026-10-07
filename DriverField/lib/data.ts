@@ -174,6 +174,9 @@ export const assignedVehicleId = "VEH-11";
 export const assignedVehicle: Vehicle =
   vehicles.find((v) => v.id === assignedVehicleId) ?? vehicles[0];
 
+// A defect is OPEN until a work-order completion records a resolving outcome for it (Repaired
+// or No fault found). A linked work order does not close it — "On WO-2231" is still a fault the
+// driver must see before the pre-trip — and a Deferred outcome leaves it open too.
 export const vehicleDefects: VehicleDefect[] = [
   {
     id: "DF-5301",
@@ -184,6 +187,8 @@ export const vehicleDefects: VehicleDefect[] = [
     note: "Works after a few tries. Not a road hazard in current conditions.",
     dk: "soon",
     workOrder: null,
+    resolvedOn: null,
+    resolution: null,
   },
   {
     id: "DF-5302",
@@ -193,11 +198,110 @@ export const vehicleDefects: VehicleDefect[] = [
     severity: "Out of Service",
     note: "Unit parked at Thompson yard pending inspection.",
     dk: "over",
+    // Open WITH a work order — the unit is in the shop, and the defect is still open.
     workOrder: "WO-2219",
+    resolvedOn: null,
+    resolution: null,
+  },
+  {
+    id: "DF-5303",
+    vehicleId: "VEH-11",
+    reportedOn: "2026-09-09",
+    item: "Driver-side mirror loose in bracket",
+    severity: "Minor",
+    note: "Holds position but drifts on washboard gravel.",
+    dk: "soon",
+    // Open WITH a work order — parts on order, defect still open.
+    workOrder: "WO-2231",
+    resolvedOn: null,
+    resolution: null,
+  },
+  {
+    id: "DF-5304",
+    vehicleId: "VEH-11",
+    reportedOn: "2026-09-04",
+    item: "Rear marker lamp out",
+    severity: "Minor",
+    note: "Right rear amber marker dark.",
+    dk: "soon",
+    workOrder: "WO-2224",
+    resolvedOn: "2026-09-11",
+    resolution: "Repaired",
+  },
+  {
+    id: "DF-5305",
+    vehicleId: "VEH-11",
+    reportedOn: "2026-09-06",
+    item: "Heater fan noise",
+    severity: "Minor",
+    note: "Rattle at high fan speed.",
+    dk: "soon",
+    workOrder: "WO-2226",
+    resolvedOn: "2026-09-08",
+    resolution: "NoFaultFound",
   },
 ];
 
-export const openDefects: VehicleDefect[] = vehicleDefects.filter((d) => d.workOrder === null);
+/** A defect is open until it is resolved. A linked work order alone does NOT close it. */
+export function isDefectOpen(d: VehicleDefect): boolean {
+  return d.resolvedOn === null;
+}
+
+/** How far back a resolved defect still shows on the tablet, in days. */
+export const RECENTLY_RESOLVED_DAYS = 14;
+
+/** Resolved defects whose resolution falls within the last RECENTLY_RESOLVED_DAYS, newest first. */
+export function recentlyResolved(
+  defects: VehicleDefect[],
+  asOf: string = today,
+): VehicleDefect[] {
+  return defects
+    .filter((d) => d.resolvedOn !== null)
+    .filter((d) => {
+      const days = daysBetween(d.resolvedOn as string, asOf);
+      return days >= 0 && days <= RECENTLY_RESOLVED_DAYS;
+    })
+    .sort((a, b) => (b.resolvedOn as string).localeCompare(a.resolvedOn as string));
+}
+
+/** The work-order tag on an OPEN defect row. */
+export function openDefectWorkOrderText(d: VehicleDefect): string {
+  return d.workOrder ? `On ${d.workOrder}` : "No WO";
+}
+
+/**
+ * The outcome line on a RESOLVED defect row, in the console's wording:
+ * "Repaired under WO-2224 on 2026-09-11" / "No fault found — WO-2226".
+ */
+export function defectResolutionText(d: VehicleDefect): string {
+  if (d.resolution === "Repaired") {
+    const under = d.workOrder ? ` under ${d.workOrder}` : "";
+    return `Repaired${under} on ${d.resolvedOn}`;
+  }
+  if (d.resolution === "NoFaultFound") {
+    return d.workOrder ? `No fault found — ${d.workOrder}` : "No fault found";
+  }
+  return "Open";
+}
+
+/** Short chip label for a resolved defect. */
+export function defectResolutionLabel(d: VehicleDefect): string {
+  return d.resolution === "NoFaultFound" ? "No fault found" : "Repaired";
+}
+
+/** Worst status among a set of defects — "ontime" when there are none. */
+export function worstDefectKind(defects: VehicleDefect[]): StatusKind {
+  if (defects.some((d) => d.dk === "over")) return "over";
+  if (defects.length > 0) return "soon";
+  return "ontime";
+}
+
+export const openDefects: VehicleDefect[] = vehicleDefects.filter(isDefectOpen);
+
+/** Open defects on the driver's assigned vehicle — what Today's tile counts. */
+export const assignedVehicleOpenDefects: VehicleDefect[] = openDefects.filter(
+  (d) => d.vehicleId === assignedVehicleId,
+);
 
 // --- trips -----------------------------------------------------------------
 
