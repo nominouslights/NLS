@@ -234,6 +234,18 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
     /// different defect. Unlike a silent wipe this is visible: the row simply comes back on
     /// screen as open, where a dispatcher can re-resolve it.
     ///
+    /// Two amends are REFUSED while a defect is on an open work order — its own
+    /// <see cref="InspectionDefect.WorkOrderId"/>, or, for an unresolved defect with no own link,
+    /// this inspection's legacy <see cref="GeneratedWorkOrderId"/> while
+    /// <paramref name="generatedWorkOrderIsOpen"/> (the same hold <see cref="CanAttachDefect"/>
+    /// applies; a Completed, Cancelled or missing legacy work order holds nothing, and a resolved
+    /// defect is never held by it) — for the same reason removing the inspection is: one that drops that defect's item
+    /// (<see cref="InspectionErrors.AttachedDefectCannotBeDropped"/>, naming the item — renaming
+    /// it counts as dropping it), and one that moves the report to another vehicle
+    /// (<see cref="InspectionErrors.VehicleChangeWithDefectOnActiveWorkOrder"/>). Complete,
+    /// cancel, or defer the defect off the work order first. Correcting an attached defect's
+    /// severity or note is fine — it stays on its work order.
+    ///
     /// An amend likewise never touches the carrier acknowledgement — those fields are not
     /// parameters here (see <see cref="AcknowledgeAsCarrier"/>). That has a consequence worth
     /// stating outright, because <see cref="Result"/> IS re-derived here: an inspection that was
@@ -267,6 +279,7 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
         bool fuelAdded,
         decimal? fuelLitres,
         decimal? fuelCostCad,
+        bool generatedWorkOrderIsOpen,
         string? certificationStatement = null,
         string? location = null)
     {
@@ -291,6 +304,29 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
         if (normalizedLocation is { Length: > LocationMaxLength })
         {
             return NorthernLink.Shared.Kernel.Result.Failure(InspectionErrors.LocationTooLong);
+        }
+
+        // A defect on an open work order is that work order's subject — the same reason
+        // removing the inspection is refused. Dropping it would leave the work order's line
+        // pointing at nothing (its completion would silently skip it); moving the report to
+        // another vehicle would leave the work order on one truck repairing another's defect.
+        // Re-stating the defect with a corrected severity/note is fine: only its Item key matters.
+        // "On an open work order" is IsHeldByWorkOrder — the same rule CanAttachDefect refuses
+        // on, so the legacy generated work order's hold counts here exactly as it does there.
+        var incomingItems = defects
+            .Select(d => NormalizeItem(d.Item))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var droppedAttached = Defects.FirstOrDefault(d =>
+            IsHeldByWorkOrder(d, generatedWorkOrderIsOpen) && !incomingItems.Contains(NormalizeItem(d.Item)));
+        if (droppedAttached is not null)
+        {
+            return NorthernLink.Shared.Kernel.Result.Failure(
+                InspectionErrors.AttachedDefectCannotBeDropped(droppedAttached.Item));
+        }
+
+        if (Defects.Any(d => IsHeldByWorkOrder(d, generatedWorkOrderIsOpen)) && ChangesVehicle(vehicleId, unit))
+        {
+            return NorthernLink.Shared.Kernel.Result.Failure(InspectionErrors.VehicleChangeWithDefectOnActiveWorkOrder);
         }
 
         var merged = MergeResolutions(Defects, defects);
@@ -326,6 +362,18 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
         Raise(new VehicleInspectionAmendedDomainEvent(Id, TenantId));
         return NorthernLink.Shared.Kernel.Result.Success();
     }
+
+    /// <summary>
+    /// Whether an amend to (<paramref name="vehicleId"/>, <paramref name="unit"/>) would put this
+    /// report on a different truck. Any change of the hard link counts — including linking a
+    /// unit-only record to a vehicle or unlinking one, since this aggregate cannot see whether the
+    /// new link names the same truck. A legacy unit-only record (no link either side) compares on
+    /// the trimmed unit, ordinally — the same rule work-order creation uses to match it to a
+    /// vehicle. For a linked record the unit is display text and may be corrected freely.
+    /// </summary>
+    private bool ChangesVehicle(Guid? vehicleId, string unit) =>
+        VehicleId != vehicleId
+        || (VehicleId is null && !string.Equals(Unit.Trim(), unit.Trim(), StringComparison.Ordinal));
 
     /// <summary>
     /// Flags this inspection for hard removal. Raised just before the repository deletes the row
@@ -473,30 +521,89 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
     public bool HasDefectOnActiveWorkOrder => Defects.Any(d => d.WorkOrderId is not null);
 
     /// <summary>
-    /// Attaches one open defect to the active work order <paramref name="workOrderId"/>. A defect
-    /// is on at most one active work order: a second attach fails with
-    /// <see cref="InspectionErrors.DefectAlreadyOnWorkOrder"/> (even for the same work order —
-    /// attaching happens once, at creation), and a resolved defect cannot be attached at all.
+    /// THE rule for whether the defect addressed by <paramref name="item"/> is free to go on a
+    /// new work order — every attach path (explicit defects, the whole-inspection form, and
+    /// <see cref="AssignDefectToWorkOrder"/> itself) asks this, so they cannot disagree.
+    ///
+    /// A defect is NOT free when it is unknown (<see cref="InspectionErrors.DefectNotFound"/>),
+    /// resolved (<see cref="InspectionErrors.DefectAlreadyResolved"/>), on a per-defect work order
+    /// of its own (<see cref="InspectionDefect.WorkOrderId"/>), or — the legacy case — still held
+    /// by this inspection's <see cref="GeneratedWorkOrderId"/>: a work order created before
+    /// per-defect links claims every unresolved defect with no own link, for as long as it is open,
+    /// because its completion (the #106 path) is what resolves them. Both of the last two fail
+    /// with <see cref="InspectionErrors.DefectAlreadyOnWorkOrder"/>.
+    ///
+    /// <paramref name="generatedWorkOrderIsOpen"/> is whether <see cref="GeneratedWorkOrderId"/>
+    /// names a work order that exists and is neither Completed nor Cancelled — a cross-aggregate
+    /// fact, so the caller loads it. It is ignored when there is no generated work order.
     /// </summary>
-    public Result AssignDefectToWorkOrder(string item, Guid workOrderId)
+    public Result CanAttachDefect(string? item, bool generatedWorkOrderIsOpen)
     {
-        var index = IndexOfDefect(item);
-        if (index < 0)
+        var defect = FindDefect(item);
+        if (defect is null)
         {
             return NorthernLink.Shared.Kernel.Result.Failure(InspectionErrors.DefectNotFound);
         }
 
-        var defect = Defects[index];
         if (defect.IsResolved)
         {
             return NorthernLink.Shared.Kernel.Result.Failure(InspectionErrors.DefectAlreadyResolved);
         }
 
-        if (defect.WorkOrderId is not null)
+        if (IsHeldByWorkOrder(defect, generatedWorkOrderIsOpen))
         {
             return NorthernLink.Shared.Kernel.Result.Failure(InspectionErrors.DefectAlreadyOnWorkOrder);
         }
 
+        return NorthernLink.Shared.Kernel.Result.Success();
+    }
+
+    /// <summary>
+    /// Every defect that <see cref="CanAttachDefect"/> would accept, in list order — the
+    /// whole-inspection form's attach set. Empty while an open legacy generated work order holds
+    /// the inspection.
+    /// </summary>
+    public IReadOnlyList<InspectionDefect> AttachableDefects(bool generatedWorkOrderIsOpen) =>
+        [.. Defects.Where(d => CanAttachDefect(d.Item, generatedWorkOrderIsOpen).IsSuccess)];
+
+    /// <summary>
+    /// THE "held" rule, shared by <see cref="CanAttachDefect"/> and <see cref="Amend"/> so the two
+    /// can never disagree: a defect is held by an open work order when it carries its own
+    /// <see cref="InspectionDefect.WorkOrderId"/> (resolved by hand or not — the work order still
+    /// lists it until it completes or lets go), or when it is unresolved, has no own link, and
+    /// <see cref="GeneratedWorkOrderId"/> names a work order that is still open.
+    ///
+    /// A RESOLVED defect with no own link is not held by the legacy work order: that work
+    /// order's completion (<see cref="ResolveDefectsForWorkOrder"/>) skips resolved defects, so
+    /// nothing it will do depends on the row still being there.
+    /// </summary>
+    private bool IsHeldByWorkOrder(InspectionDefect defect, bool generatedWorkOrderIsOpen) =>
+        defect.WorkOrderId is not null || IsHeldByGeneratedWorkOrder(defect, generatedWorkOrderIsOpen);
+
+    private bool IsHeldByGeneratedWorkOrder(InspectionDefect defect, bool generatedWorkOrderIsOpen) =>
+        generatedWorkOrderIsOpen
+        && GeneratedWorkOrderId is not null
+        && !defect.IsResolved
+        && defect.WorkOrderId is null;
+
+    /// <summary>
+    /// Attaches one open defect to the active work order <paramref name="workOrderId"/>. A defect
+    /// is on at most one active work order: a second attach fails with
+    /// <see cref="InspectionErrors.DefectAlreadyOnWorkOrder"/> (even for the same work order —
+    /// attaching happens once, at creation), a defect still held by an open legacy generated work
+    /// order fails the same way, and a resolved defect cannot be attached at all. See
+    /// <see cref="CanAttachDefect"/> for the rule and <paramref name="generatedWorkOrderIsOpen"/>.
+    /// </summary>
+    public Result AssignDefectToWorkOrder(string item, Guid workOrderId, bool generatedWorkOrderIsOpen)
+    {
+        var attachable = CanAttachDefect(item, generatedWorkOrderIsOpen);
+        if (attachable.IsFailure)
+        {
+            return attachable;
+        }
+
+        var index = IndexOfDefect(item);
+        var defect = Defects[index];
         ReplaceDefect(index, defect with { WorkOrderId = workOrderId });
         Raise(new VehicleInspectionDefectWorkOrderChangedDomainEvent(Id, TenantId, defect.Item, workOrderId));
         return NorthernLink.Shared.Kernel.Result.Success();
@@ -689,7 +796,9 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
     /// resolution stamp onto the survivor. Item / Severity / Note always take the AMENDED values —
     /// correcting a severity is the whole point of an amend. A defect the amendment drops takes
     /// its resolution with it (the report of the fault is being retracted, so the record of
-    /// clearing it is meaningless). A defect the amendment adds starts unresolved.
+    /// clearing it is meaningless) — except a defect on an open work order, which
+    /// <see cref="Amend"/> refuses to drop before this runs. A defect the amendment adds starts
+    /// unresolved.
     ///
     /// Resolution fields on the incoming records are discarded unconditionally, so no caller can
     /// ever mark a defect resolved through this path — ResolveDefect and work-order completion

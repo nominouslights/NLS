@@ -85,6 +85,25 @@ public static class InspectionErrors
         "A defect on this inspection is on an open work order — complete or cancel it first.");
 
     /// <summary>
+    /// An amendment left out (or renamed) a defect that is on an open work order. Same code as
+    /// <see cref="DefectOnActiveWorkOrder"/> — it is the same conflict, reached by amending
+    /// rather than deleting — but the message names the item so the dispatcher knows which row
+    /// to put back, or which work order to complete, cancel, or defer it from first.
+    /// </summary>
+    public static Error AttachedDefectCannotBeDropped(string item) => Error.Conflict(
+        DefectOnActiveWorkOrder.Code,
+        $"The defect \"{item.Trim()}\" is on an open work order and cannot be removed from this inspection — complete or cancel the work order, or defer the defect, first.");
+
+    /// <summary>
+    /// An amendment would move this inspection to another vehicle (a different vehicle link, or
+    /// a different unit on a unit-only record) while one of its defects is on an open work
+    /// order — leaving that work order on one truck repairing another truck's defect.
+    /// </summary>
+    public static readonly Error VehicleChangeWithDefectOnActiveWorkOrder = Error.Conflict(
+        "Fleet.Inspection.VehicleChangeWithDefectOnActiveWorkOrder",
+        "This inspection cannot be moved to another vehicle while one of its defects is on an open work order — complete or cancel the work order, or defer the defect, first.");
+
+    /// <summary>
     /// Two defects on one inspection share an item. <c>Item</c> is the addressing key for
     /// resolution, so a duplicate would make both rows resolve together — rejected on entry and
     /// on amendment rather than left to corrupt the maintenance record.

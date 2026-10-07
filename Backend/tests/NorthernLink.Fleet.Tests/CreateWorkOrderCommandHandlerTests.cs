@@ -181,7 +181,7 @@ public class CreateWorkOrderCommandHandlerTests
         var (handler, workOrders, inspections, vehicleId) = Setup();
         var inspection = TestInspections.PreTrip(vehicleId: vehicleId, defects: [Defect("Brakes"), Defect("Wipers")]);
         var earlierWorkOrderId = Guid.NewGuid();
-        Assert.True(inspection.AssignDefectToWorkOrder("Brakes", earlierWorkOrderId).IsSuccess);
+        Assert.True(inspection.AssignDefectToWorkOrder("Brakes", earlierWorkOrderId, generatedWorkOrderIsOpen: false).IsSuccess);
         inspections.Add(inspection);
 
         var result = await handler.Handle(
@@ -244,7 +244,7 @@ public class CreateWorkOrderCommandHandlerTests
             .ResolveDefect("Wipers", DefectResolutionReason.PreviouslyRepaired, null, "Dispatch", DateTimeOffset.UtcNow)
             .IsSuccess);
         var otherWorkOrderId = Guid.NewGuid();
-        Assert.True(inspection.AssignDefectToWorkOrder("Mirrors", otherWorkOrderId).IsSuccess);
+        Assert.True(inspection.AssignDefectToWorkOrder("Mirrors", otherWorkOrderId, generatedWorkOrderIsOpen: false).IsSuccess);
         inspections.Add(inspection);
 
         var result = await handler.Handle(Command(vehicleId, inspection.Id), CancellationToken.None);
@@ -348,6 +348,132 @@ public class CreateWorkOrderCommandHandlerTests
         Assert.Equal(InspectionErrors.NotFound, result.Error);
         Assert.Empty(workOrders.WorkOrders);
         Assert.Equal(0, workOrders.SaveChangesCallCount);
+    }
+
+    /// <summary>
+    /// An inspection whose whole-inspection work order predates per-defect links: the legacy
+    /// work order (no defect lines) is in the repository in <paramref name="status"/>, and
+    /// <c>GeneratedWorkOrderId</c> points at it. Its defects carry no own work-order link.
+    /// </summary>
+    private static (VehicleInspection Inspection, WorkOrder Legacy) WithLegacyWorkOrder(
+        InMemoryWorkOrderRepository workOrders,
+        InMemoryVehicleInspectionRepository inspections,
+        Guid vehicleId,
+        WorkOrderStatus status)
+    {
+        var inspection = TestInspections.PostTrip(vehicleId: vehicleId, defects: [Defect("Brakes"), Defect("Horn")]);
+        var legacy = WorkOrder.Create(
+            TestVehicles.TenantId, vehicleId, "WO-LEGACY", "Repair DVIR defects", null,
+            WorkOrderPriority.High, WorkOrderSource.PostTripInspection, null, "Dispatch", null, null,
+            ["Brakes — Major", "Horn — Major"], null, null, null, null).Value;
+
+        Assert.True(inspection.LinkWorkOrder(legacy.Id).IsSuccess);
+
+        switch (status)
+        {
+            case WorkOrderStatus.Completed:
+                Assert.True(legacy.Complete(Guid.NewGuid()).IsSuccess);
+                break;
+            case WorkOrderStatus.Open:
+                break;
+            default:
+                Assert.True(legacy.ChangeStatus(status).IsSuccess);
+                break;
+        }
+
+        workOrders.Add(legacy);
+        inspections.Add(inspection);
+        return (inspection, legacy);
+    }
+
+    [Theory]
+    [InlineData(WorkOrderStatus.Open)]
+    [InlineData(WorkOrderStatus.InProgress)]
+    [InlineData(WorkOrderStatus.AwaitingParts)]
+    public async Task An_open_legacy_work_order_holds_its_inspections_defects_against_an_explicit_request(WorkOrderStatus status)
+    {
+        var (handler, workOrders, inspections, vehicleId) = Setup();
+        var (inspection, legacy) = WithLegacyWorkOrder(workOrders, inspections, vehicleId, status);
+
+        var result = await handler.Handle(
+            Command(vehicleId, defects: [new(inspection.Id, "Brakes")]), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(InspectionErrors.DefectAlreadyOnWorkOrder, result.Error);
+        Assert.Equal(ErrorType.Conflict, result.Error.Type);
+        Assert.Equal(legacy.Id, Assert.Single(workOrders.WorkOrders).Id);
+        Assert.Equal(0, workOrders.SaveChangesCallCount);
+        Assert.All(inspection.Defects, d => Assert.Null(d.WorkOrderId));
+    }
+
+    [Fact]
+    public async Task An_open_legacy_work_order_leaves_nothing_for_the_whole_inspection_form()
+    {
+        var (handler, workOrders, inspections, vehicleId) = Setup();
+        var (inspection, legacy) = WithLegacyWorkOrder(workOrders, inspections, vehicleId, WorkOrderStatus.InProgress);
+
+        var result = await handler.Handle(Command(vehicleId, inspection.Id), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(InspectionErrors.NoOpenDefectsToAttach, result.Error);
+        Assert.Equal(legacy.Id, Assert.Single(workOrders.WorkOrders).Id);
+        Assert.Equal(0, workOrders.SaveChangesCallCount);
+        Assert.All(inspection.Defects, d => Assert.Null(d.WorkOrderId));
+    }
+
+    [Fact]
+    public async Task An_open_legacy_work_order_on_one_inspection_does_not_hold_another_inspections_defects()
+    {
+        // The union of an explicit defect from a free inspection with the whole-inspection form
+        // of a held one: the held inspection contributes nothing, the free defect is attached.
+        var (handler, workOrders, inspections, vehicleId) = Setup();
+        var (held, _) = WithLegacyWorkOrder(workOrders, inspections, vehicleId, WorkOrderStatus.Open);
+        var free = TestInspections.PreTrip(vehicleId: vehicleId, defects: [Defect("Wipers")]);
+        inspections.Add(free);
+
+        var result = await handler.Handle(
+            Command(vehicleId, held.Id, defects: [new(free.Id, "Wipers")]), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        var line = Assert.Single(workOrders.WorkOrders.Single(w => w.Id == result.Value).Defects);
+        Assert.Equal((free.Id, "Wipers"), (line.InspectionId, line.Item));
+        Assert.Equal(result.Value, free.FindDefect("Wipers")!.WorkOrderId);
+        Assert.All(held.Defects, d => Assert.Null(d.WorkOrderId));
+    }
+
+    [Theory]
+    [InlineData(WorkOrderStatus.Completed)]
+    [InlineData(WorkOrderStatus.Cancelled)]
+    public async Task A_closed_legacy_work_order_no_longer_holds_anything(WorkOrderStatus status)
+    {
+        var (handler, workOrders, inspections, vehicleId) = Setup();
+        var (explicitInspection, _) = WithLegacyWorkOrder(workOrders, inspections, vehicleId, status);
+        var (wholeInspection, _) = WithLegacyWorkOrder(workOrders, inspections, vehicleId, status);
+
+        var named = await handler.Handle(
+            Command(vehicleId, defects: [new(explicitInspection.Id, "Brakes")]), CancellationToken.None);
+        var whole = await handler.Handle(Command(vehicleId, wholeInspection.Id), CancellationToken.None);
+
+        Assert.True(named.IsSuccess);
+        Assert.Equal(named.Value, explicitInspection.FindDefect("Brakes")!.WorkOrderId);
+        Assert.Null(explicitInspection.FindDefect("Horn")!.WorkOrderId);
+
+        Assert.True(whole.IsSuccess);
+        Assert.All(wholeInspection.Defects, d => Assert.Equal(whole.Value, d.WorkOrderId));
+    }
+
+    [Fact]
+    public async Task A_generated_work_order_id_that_names_no_work_order_holds_nothing()
+    {
+        var (handler, _, inspections, vehicleId) = Setup();
+        var inspection = TestInspections.PostTrip(vehicleId: vehicleId, defects: [Defect("Brakes")]);
+        Assert.True(inspection.LinkWorkOrder(Guid.NewGuid()).IsSuccess);
+        inspections.Add(inspection);
+
+        var result = await handler.Handle(Command(vehicleId, inspection.Id), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(result.Value, inspection.FindDefect("Brakes")!.WorkOrderId);
     }
 
     [Fact]

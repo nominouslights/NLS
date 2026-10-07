@@ -70,7 +70,7 @@ public class WorkOrderDefectOutcomeHandlerTests
 
             foreach (var (inspection, item) in defects)
             {
-                Assert.True(inspection.AssignDefectToWorkOrder(item, workOrder.Id).IsSuccess);
+                Assert.True(inspection.AssignDefectToWorkOrder(item, workOrder.Id, generatedWorkOrderIsOpen: false).IsSuccess);
             }
 
             WorkOrders.Add(workOrder);
@@ -278,26 +278,51 @@ public class WorkOrderDefectOutcomeHandlerTests
     }
 
     [Fact]
-    public async Task A_removed_inspection_or_an_amended_away_item_is_skipped_but_the_outcome_is_recorded()
+    public async Task An_inspection_gone_from_under_a_work_order_is_skipped_but_the_outcome_is_recorded()
     {
+        // Neither the remove nor the amend path can take a defect out from under an open work
+        // order any more (both refuse with DefectOnActiveWorkOrder) — but completion stays
+        // defensive against a row that vanished anyway, so the row is deleted behind the
+        // handlers' backs here.
         var f = new Fixture();
         var gone = f.Inspection(Defect("Horn"));
-        var amended = f.Inspection(Defect("Brakes"), Defect("Wipers"));
-        var workOrder = f.WorkOrderFor((gone, "Horn"), (amended, "Brakes"));
+        var kept = f.Inspection(Defect("Brakes"), Defect("Wipers"));
+        var workOrder = f.WorkOrderFor((gone, "Horn"), (kept, "Brakes"));
 
         f.Inspections.Remove(gone);
-        Assert.True(TestInspections.AmendWith(amended, [Defect("Wipers")]).IsSuccess);
 
         var result = await f.Complete.Handle(
             Command(workOrder.Id, [
                 Outcome(gone, "Horn", DefectRepairOutcome.Repaired),
-                Outcome(amended, "Brakes", DefectRepairOutcome.Repaired),
+                Outcome(kept, "Brakes", DefectRepairOutcome.Repaired),
             ]),
             CancellationToken.None);
 
         Assert.True(result.IsSuccess);
         Assert.All(workOrder.Defects, l => Assert.Equal(DefectRepairOutcome.Repaired, l.Outcome));
-        Assert.False(amended.FindDefect("Wipers")!.IsResolved);
+        Assert.True(kept.FindDefect("Brakes")!.IsResolved);
+        Assert.False(kept.FindDefect("Wipers")!.IsResolved);
+    }
+
+    [Fact]
+    public async Task An_amend_that_drops_a_defect_on_an_open_work_order_is_refused_until_the_work_order_lets_go()
+    {
+        var f = new Fixture();
+        var inspection = f.Inspection(Defect("Brakes"), Defect("Wipers"));
+        var workOrder = f.WorkOrderFor((inspection, "Brakes"));
+
+        var blocked = TestInspections.AmendWith(inspection, [Defect("Wipers")]);
+
+        Assert.Equal(InspectionErrors.DefectOnActiveWorkOrder.Code, blocked.Error.Code);
+        Assert.Equal(workOrder.Id, inspection.FindDefect("Brakes")!.WorkOrderId);
+
+        // Once the work order is cancelled the defect is released and the amend goes through.
+        Assert.True((await f.ChangeStatus.Handle(
+            new ChangeWorkOrderStatusCommand(TestVehicles.TenantId, workOrder.Id, WorkOrderStatus.Cancelled),
+            CancellationToken.None)).IsSuccess);
+
+        Assert.True(TestInspections.AmendWith(inspection, [Defect("Wipers")]).IsSuccess);
+        Assert.Null(inspection.FindDefect("Brakes"));
     }
 
     [Fact]
@@ -308,7 +333,7 @@ public class WorkOrderDefectOutcomeHandlerTests
         var post = f.Inspection(Defect("Horn"));
         var workOrder = f.WorkOrderFor((pre, "Brakes"), (post, "Horn"));
         var other = Guid.NewGuid();
-        Assert.True(pre.AssignDefectToWorkOrder("Wipers", other).IsSuccess);
+        Assert.True(pre.AssignDefectToWorkOrder("Wipers", other, generatedWorkOrderIsOpen: false).IsSuccess);
 
         var result = await f.ChangeStatus.Handle(
             new ChangeWorkOrderStatusCommand(TestVehicles.TenantId, workOrder.Id, WorkOrderStatus.Cancelled),

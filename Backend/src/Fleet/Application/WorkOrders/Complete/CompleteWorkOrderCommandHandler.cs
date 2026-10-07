@@ -18,8 +18,10 @@ namespace NorthernLink.Fleet.Application.WorkOrders.Complete;
 /// <list type="bullet">
 /// <item>WITH defect lines — Repaired resolves the defect as RepairedUnderWorkOrder, NoFaultFound
 /// as NoFaultFound (both attributed to the service record's PerformedBy and this work order);
-/// Deferred releases it, still open, for a later work order. An inspection or item that has since
-/// gone (removed, or amended away) is skipped — the outcome is still recorded on the line. The
+/// Deferred releases it, still open, for a later work order. Neither removing the inspection nor
+/// amending the item away is allowed while the defect is on this (open) work order — both refuse
+/// with <c>Fleet.Inspection.DefectOnActiveWorkOrder</c> — but an inspection or item that is
+/// missing anyway is skipped defensively, and the outcome is still recorded on the line. The
 /// inspections are loaded BEFORE the work order completes, so the "OutOfService is never
 /// Deferred" rule is judged against each defect's current severity, not the line's snapshot.</item>
 /// <item>WITHOUT lines (manual, or created before per-defect links) — the interim #106 behaviour,

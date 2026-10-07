@@ -15,7 +15,17 @@ namespace NorthernLink.Fleet.Application.WorkOrders.Create;
 /// another vehicle, a missing/resolved/already-attached defect each fail the whole request
 /// with nothing changed. A request naming an inspection that leaves nothing to attach fails
 /// with <see cref="InspectionErrors.NoOpenDefectsToAttach"/>; a plain manual work order (no
-/// inspection, no defects) is still created with no defect lines. New code never calls <see cref="VehicleInspection.LinkWorkOrder"/>:
+/// inspection, no defects) is still created with no defect lines.
+///
+/// Whether a defect is free is decided by <see cref="VehicleInspection.CanAttachDefect"/> alone,
+/// for both request forms. That includes the legacy hold: while an inspection's
+/// <c>GeneratedWorkOrderId</c> names a work order that is still open (loaded here — it is another
+/// aggregate), its unresolved, unattached defects belong to that work order, so naming one fails
+/// with <see cref="InspectionErrors.DefectAlreadyOnWorkOrder"/> and the whole-inspection form
+/// leaves them out (an inspection held entirely that way fails with
+/// <see cref="InspectionErrors.NoOpenDefectsToAttach"/>).
+///
+/// New code never calls <see cref="VehicleInspection.LinkWorkOrder"/>:
 /// <c>GeneratedWorkOrderId</c> stays on the inspection as history for work orders created
 /// before per-defect links.
 /// </summary>
@@ -31,10 +41,10 @@ public sealed class CreateWorkOrderCommandHandler(
             return Result.Failure<Guid>(VehicleErrors.NotFound);
         }
 
-        var inspections = new Dictionary<Guid, VehicleInspection>();
+        var inspections = new Dictionary<Guid, (VehicleInspection Inspection, bool GeneratedWorkOrderIsOpen)>();
         string? vehicleUnit = null;
 
-        async Task<Result<VehicleInspection>> LoadAsync(Guid inspectionId)
+        async Task<Result<(VehicleInspection Inspection, bool GeneratedWorkOrderIsOpen)>> LoadAsync(Guid inspectionId)
         {
             if (inspections.TryGetValue(inspectionId, out var cached))
             {
@@ -44,7 +54,7 @@ public sealed class CreateWorkOrderCommandHandler(
             var inspection = await inspectionRepository.GetByIdAsync(inspectionId, cancellationToken);
             if (inspection is null)
             {
-                return Result.Failure<VehicleInspection>(InspectionErrors.NotFound);
+                return Result.Failure<(VehicleInspection, bool)>(InspectionErrors.NotFound);
             }
 
             // Same vehicle only. A legacy unit-only inspection (no vehicle link) matches on the
@@ -58,14 +68,25 @@ public sealed class CreateWorkOrderCommandHandler(
 
             if (!belongs)
             {
-                return Result.Failure<VehicleInspection>(InspectionErrors.VehicleMismatch);
+                return Result.Failure<(VehicleInspection, bool)>(InspectionErrors.VehicleMismatch);
             }
 
-            inspections[inspectionId] = inspection;
-            return Result.Success(inspection);
+            // A legacy whole-inspection work order (before per-defect links) still holds this
+            // inspection's unattached defects while it is open — its completion resolves them.
+            // A generated id naming no work order holds nothing.
+            var generatedWorkOrderIsOpen = false;
+            if (inspection.GeneratedWorkOrderId is { } generatedWorkOrderId)
+            {
+                var generated = await repository.GetByIdAsync(generatedWorkOrderId, cancellationToken);
+                generatedWorkOrderIsOpen = generated is { IsTerminal: false };
+            }
+
+            var entry = (inspection, generatedWorkOrderIsOpen);
+            inspections[inspectionId] = entry;
+            return Result.Success(entry);
         }
 
-        var requested = new List<(VehicleInspection Inspection, InspectionDefect Defect)>();
+        var requested = new List<(VehicleInspection Inspection, bool GeneratedWorkOrderIsOpen, InspectionDefect Defect)>();
 
         foreach (var reference in command.Defects ?? [])
         {
@@ -75,23 +96,14 @@ public sealed class CreateWorkOrderCommandHandler(
                 return Result.Failure<Guid>(loaded.Error);
             }
 
-            var defect = loaded.Value.FindDefect(reference.Item);
-            if (defect is null)
+            var (inspection, generatedWorkOrderIsOpen) = loaded.Value;
+            var attachable = inspection.CanAttachDefect(reference.Item, generatedWorkOrderIsOpen);
+            if (attachable.IsFailure)
             {
-                return Result.Failure<Guid>(InspectionErrors.DefectNotFound);
+                return Result.Failure<Guid>(attachable.Error);
             }
 
-            if (defect.IsResolved)
-            {
-                return Result.Failure<Guid>(InspectionErrors.DefectAlreadyResolved);
-            }
-
-            if (defect.WorkOrderId is not null)
-            {
-                return Result.Failure<Guid>(InspectionErrors.DefectAlreadyOnWorkOrder);
-            }
-
-            requested.Add((loaded.Value, defect));
+            requested.Add((inspection, generatedWorkOrderIsOpen, inspection.FindDefect(reference.Item)!));
         }
 
         // The legacy whole-inspection form: every open, unattached defect, through the same path.
@@ -104,11 +116,12 @@ public sealed class CreateWorkOrderCommandHandler(
                 return Result.Failure<Guid>(loaded.Error);
             }
 
-            foreach (var defect in loaded.Value.Defects.Where(d => !d.IsResolved && d.WorkOrderId is null))
+            var (inspection, generatedWorkOrderIsOpen) = loaded.Value;
+            foreach (var defect in inspection.AttachableDefects(generatedWorkOrderIsOpen))
             {
                 if (!requested.Any(r => r.Inspection.Id == wholeInspectionId && ReferenceEquals(r.Defect, defect)))
                 {
-                    requested.Add((loaded.Value, defect));
+                    requested.Add((inspection, generatedWorkOrderIsOpen, defect));
                 }
             }
 
@@ -162,9 +175,9 @@ public sealed class CreateWorkOrderCommandHandler(
 
         // Pre-validated above and duplicates rejected by Create, so these cannot fail in
         // practice — but the aggregate stays the authority, and nothing has been saved yet.
-        foreach (var (inspection, defect) in requested)
+        foreach (var (inspection, generatedWorkOrderIsOpen, defect) in requested)
         {
-            var assigned = inspection.AssignDefectToWorkOrder(defect.Item, workOrder.Id);
+            var assigned = inspection.AssignDefectToWorkOrder(defect.Item, workOrder.Id, generatedWorkOrderIsOpen);
             if (assigned.IsFailure)
             {
                 return Result.Failure<Guid>(assigned.Error);

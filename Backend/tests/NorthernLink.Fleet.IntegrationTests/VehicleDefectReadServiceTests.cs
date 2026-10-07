@@ -503,7 +503,7 @@ public class VehicleDefectReadServiceTests(PostgresFixture fixture)
         // carries them: item, severity, note — and no resolution fields at all.
         await using (var writer = fixture.CreateContext(PostgresFixture.TenantA))
         {
-            var handler = new UpdateInspectionCommandHandler(new VehicleInspectionRepository(writer));
+            var handler = new UpdateInspectionCommandHandler(new VehicleInspectionRepository(writer), new WorkOrderRepository(writer));
 
             var result = await handler.Handle(
                 new UpdateInspectionCommand(

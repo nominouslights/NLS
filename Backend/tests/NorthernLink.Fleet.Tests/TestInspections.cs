@@ -115,10 +115,14 @@ internal static class TestInspections
         string driverName = "J. Spence",
         IReadOnlyList<InspectionChecklistItem>? checklistItems = null,
         string? certificationStatement = null,
-        string? location = null) =>
+        string? location = null,
+        bool replaceVehicleId = false,
+        Guid? vehicleId = null,
+        bool generatedWorkOrderIsOpen = false) =>
         inspection.Amend(
             InspectionSource.Dispatcher,
-            vehicleId: inspection.VehicleId,
+            // Keeps the inspection's own link unless the caller asks to replace it (with null too).
+            vehicleId: replaceVehicleId ? vehicleId : inspection.VehicleId,
             unit,
             driverName,
             enteredBy: null,
@@ -139,6 +143,7 @@ internal static class TestInspections
             fuelAdded: false,
             fuelLitres: null,
             fuelCostCad: null,
+            generatedWorkOrderIsOpen,
             certificationStatement,
             location);
 

@@ -171,7 +171,7 @@ public class InspectionLocationTests
         var repository = new InMemoryVehicleInspectionRepository();
         var stored = TestInspections.PreTrip(location: "Thompson, MB");
         repository.Add(stored);
-        var handler = new UpdateInspectionCommandHandler(repository);
+        var handler = new UpdateInspectionCommandHandler(repository, new InMemoryWorkOrderRepository());
 
         var result = await handler.Handle(UpdateCommand(stored.Id, location: "Lynn Lake"), CancellationToken.None);
 
