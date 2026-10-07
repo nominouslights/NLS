@@ -207,6 +207,52 @@ public class WorkOrderDefectLinesTests
     }
 
     [Fact]
+    public void Deferring_judges_the_current_severity_not_the_snapshot_when_it_has_risen_to_out_of_service()
+    {
+        var workOrder = Create([Line(InspectionA, "Brakes", InspectionDefectSeverity.Minor)]).Value;
+
+        var result = workOrder.Complete(
+            Guid.NewGuid(),
+            [Outcome(InspectionA, "Brakes", DefectRepairOutcome.Deferred, "no parts in town")],
+            _ => InspectionDefectSeverity.OutOfService);
+
+        Assert.Equal(WorkOrderErrors.OutOfServiceCannotBeDeferred, result.Error);
+        AssertUnchanged(workOrder);
+        Assert.Equal(InspectionDefectSeverity.Minor, workOrder.Defects.Single().Severity);
+    }
+
+    [Fact]
+    public void Deferring_a_snapshot_out_of_service_defect_since_downgraded_is_allowed_and_the_line_takes_the_current_severity()
+    {
+        var workOrder = Create([Line(InspectionA, "Brakes", InspectionDefectSeverity.OutOfService)]).Value;
+
+        var result = workOrder.Complete(
+            Guid.NewGuid(),
+            [Outcome(InspectionA, "Brakes", DefectRepairOutcome.Deferred, "minor after all")],
+            _ => InspectionDefectSeverity.Minor);
+
+        Assert.True(result.IsSuccess);
+        var line = workOrder.Defects.Single();
+        Assert.Equal(DefectRepairOutcome.Deferred, line.Outcome);
+        Assert.Equal(InspectionDefectSeverity.Minor, line.Severity);
+    }
+
+    [Fact]
+    public void With_no_current_severity_the_snapshot_still_decides()
+    {
+        var workOrder = Create([Line(InspectionA, "Brakes", InspectionDefectSeverity.OutOfService)]).Value;
+
+        // The defect has gone from its inspection: the lookup has nothing to say.
+        var result = workOrder.Complete(
+            Guid.NewGuid(),
+            [Outcome(InspectionA, "Brakes", DefectRepairOutcome.Deferred, "no parts in town")],
+            _ => null);
+
+        Assert.Equal(WorkOrderErrors.OutOfServiceCannotBeDeferred, result.Error);
+        AssertUnchanged(workOrder);
+    }
+
+    [Fact]
     public void A_work_order_without_lines_completes_as_before_and_accepts_no_outcomes()
     {
         var legacy = Create(null).Value;

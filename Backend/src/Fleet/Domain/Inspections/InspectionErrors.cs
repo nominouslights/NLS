@@ -40,6 +40,16 @@ public static class InspectionErrors
         "Fleet.Inspection.DefectAlreadyResolved", "That defect has already been resolved.");
 
     /// <summary>
+    /// <see cref="DefectResolutionReason.RepairedUnderWorkOrder"/> and
+    /// <see cref="DefectResolutionReason.NoFaultFound"/> assert that a mechanic touched the truck
+    /// under a work order, so only work-order completion may set them. A dispatcher clearing a
+    /// defect by hand picks one of the other reasons.
+    /// </summary>
+    public static readonly Error ResolutionReasonReservedForWorkOrder = Error.Validation(
+        "Fleet.Inspection.ResolutionReasonReservedForWorkOrder",
+        "That resolution reason is set only by completing a work order — choose another reason to resolve the defect by hand.");
+
+    /// <summary>
     /// A defect is on at most one active work order. Attaching it to a second one is refused
     /// until the first completes (and defers it) or is cancelled.
     /// </summary>

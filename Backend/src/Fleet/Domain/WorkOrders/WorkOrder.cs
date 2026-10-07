@@ -161,20 +161,32 @@ public sealed class WorkOrder : AggregateRoot, ITenantScoped
     /// (<see cref="WorkOrderErrors.DefectOutcomeMissing"/>), none for anything that is not a line
     /// (<see cref="WorkOrderErrors.UnknownDefectOutcome"/>), a note on every Deferred one
     /// (<see cref="WorkOrderErrors.DeferredNoteRequired"/>), and never Deferred for an
-    /// OutOfService line (<see cref="WorkOrderErrors.OutOfServiceCannotBeDeferred"/>). The
+    /// OutOfService defect (<see cref="WorkOrderErrors.OutOfServiceCannotBeDeferred"/>). The
     /// outcomes are recorded on the lines; what they do to the inspections is the handler's job.
+    ///
+    /// "OutOfService" means the defect's CURRENT severity on its inspection, supplied by
+    /// <paramref name="currentSeverity"/> (returning null when the defect no longer exists there):
+    /// an inspection amended after the work order was raised can make a defect worse — or
+    /// better — than the line's creation-time snapshot, and the rule must follow the live safety
+    /// record, not what the work order happened to say. With no current severity (the defect or
+    /// its inspection is gone, or no lookup was given) the snapshot is used. The severity the rule
+    /// was judged against is written back onto the line, so a completed work order never reads as
+    /// "OutOfService — Deferred", nor hides an escalation behind a stale "Minor".
     ///
     /// A work order WITHOUT lines (manual, or legacy) completes exactly as before and accepts no
     /// outcomes. Completion never changes the vehicle's status.
     /// </summary>
-    public Result Complete(Guid resolvingServiceId, IReadOnlyList<WorkOrderDefectOutcome>? outcomes = null)
+    public Result Complete(
+        Guid resolvingServiceId,
+        IReadOnlyList<WorkOrderDefectOutcome>? outcomes = null,
+        Func<WorkOrderDefectLine, InspectionDefectSeverity?>? currentSeverity = null)
     {
         if (IsTerminal)
         {
             return Result.Failure(WorkOrderErrors.Terminal);
         }
 
-        var recorded = RecordOutcomes(outcomes ?? []);
+        var recorded = RecordOutcomes(outcomes ?? [], currentSeverity);
         if (recorded.IsFailure)
         {
             return Result.Failure(recorded.Error);
@@ -190,7 +202,9 @@ public sealed class WorkOrder : AggregateRoot, ITenantScoped
     }
 
     /// <summary>Validates <paramref name="outcomes"/> against the lines and returns a copy of the lines with outcomes recorded. Mutates nothing.</summary>
-    private Result<List<WorkOrderDefectLine>> RecordOutcomes(IReadOnlyList<WorkOrderDefectOutcome> outcomes)
+    private Result<List<WorkOrderDefectLine>> RecordOutcomes(
+        IReadOnlyList<WorkOrderDefectOutcome> outcomes,
+        Func<WorkOrderDefectLine, InspectionDefectSeverity?>? currentSeverity)
     {
         var lines = new List<WorkOrderDefectLine>(Defects);
         var given = new WorkOrderDefectOutcome?[lines.Count];
@@ -226,10 +240,11 @@ public sealed class WorkOrder : AggregateRoot, ITenantScoped
             }
 
             var note = string.IsNullOrWhiteSpace(outcome.Note) ? null : outcome.Note.Trim();
+            var severity = currentSeverity?.Invoke(lines[i]) ?? lines[i].Severity;
 
             if (outcome.Outcome == DefectRepairOutcome.Deferred)
             {
-                if (lines[i].Severity == InspectionDefectSeverity.OutOfService)
+                if (severity == InspectionDefectSeverity.OutOfService)
                 {
                     return Result.Failure<List<WorkOrderDefectLine>>(WorkOrderErrors.OutOfServiceCannotBeDeferred);
                 }
@@ -240,7 +255,7 @@ public sealed class WorkOrder : AggregateRoot, ITenantScoped
                 }
             }
 
-            lines[i] = lines[i] with { Outcome = outcome.Outcome, OutcomeNote = note };
+            lines[i] = lines[i] with { Severity = severity, Outcome = outcome.Outcome, OutcomeNote = note };
         }
 
         return Result.Success(lines);

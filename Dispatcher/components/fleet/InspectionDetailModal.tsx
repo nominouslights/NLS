@@ -56,14 +56,28 @@ export default function InspectionDetailModal({
 }) {
   const [woPrefill, setWoPrefill] = useState<WorkOrderPrefillWire | null>(null);
   const [resolving, setResolving] = useState<ChecklistRow | null>(null);
-  // The inspection list is a projected read model (≈5s behind a write), so a
-  // defect resolved from HERE is shown resolved immediately rather than
-  // offering RESOLVE again until the projection catches up.
+  // The inspection list is a projected read model (≈5s behind a write — the
+  // same lag DefectsPanel/VehicleDefects cover with their "updating" overlay),
+  // so a defect resolved or put on a work order from HERE still reads back as
+  // open for a few seconds. Offering RESOLVE / CREATE WORK ORDER again in that
+  // gap ends in a 409 (DefectAlreadyResolved / DefectAlreadyOnWorkOrder).
+  // Overlay keyed by item (this modal is one inspection); a work-order entry
+  // carries the new work order's id. An entry only applies while the incoming
+  // `inspection` still shows the defect as open, so it drops away by itself the
+  // moment the parent's refetch (now, and again after the projector has run)
+  // reflects the change — nothing has to be cleared by hand.
   const [resolvedHere, setResolvedHere] = useState<ReadonlySet<string>>(new Set());
+  const [attachedHere, setAttachedHere] = useState<ReadonlyMap<string, string>>(new Map());
 
   const typeLabel = inspection.type === "PreTrip" ? "Pre-Trip" : "Post-Trip";
   const rm = INSPECTION_RESULT_META[inspection.result] ?? INSPECTION_RESULT_META.Pass;
-  const openDefects = inspection.defects.filter((d) => isAttachable(d) && !resolvedHere.has(d.item));
+  const overlayOf = (d: InspectionDefectWire | undefined): Overlay | undefined => {
+    if (!d || !isAttachable(d)) return undefined; // the data already reflects it
+    if (resolvedHere.has(d.item)) return { kind: "resolved" };
+    const woId = attachedHere.get(d.item);
+    return woId !== undefined ? { kind: "workOrder", workOrderId: woId } : undefined;
+  };
+  const openDefects = inspection.defects.filter((d) => isAttachable(d) && !overlayOf(d));
 
   // Checklist joined with defects by item name; manifest-derived records can
   // carry defects without a checklist, so synthesize rows from the defects then.
@@ -150,7 +164,7 @@ export default function InspectionDetailModal({
                 {isDefect && (
                   <DefectState
                     row={c}
-                    resolvedHere={resolvedHere.has(c.item)}
+                    overlay={overlayOf(c.defect)}
                     workOrderNumberOf={workOrderNumberOf}
                     onResolve={() => setResolving(c)}
                     onCreateWorkOrder={(d) => setWoPrefill(prefillFromInspection(inspection, inspection.unit, [d]))}
@@ -183,9 +197,13 @@ export default function InspectionDetailModal({
           defaultVehicleId={inspection.vehicleId ?? vehicleId}
           prefill={woPrefill}
           onClose={() => setWoPrefill(null)}
-          onSaved={() => {
+          onSaved={(workOrderId) => {
+            // Stay open: the attached rows flip to "Work order created ·
+            // updating" here instead of the dispatcher reopening the
+            // inspection and being offered the same defects again.
+            const items = woPrefill.defects.map((d) => d.item);
+            setAttachedHere((prev) => new Map([...prev, ...items.map((i) => [i, workOrderId] as const)]));
             onWorkOrderCreated();
-            onClose();
           }}
         />
       )}
@@ -193,22 +211,34 @@ export default function InspectionDetailModal({
   );
 }
 
-/** Resolved / On WO-x / open (RESOLVE + CREATE WORK ORDER) — from the defect's own fields. */
+/** A change made from this modal that the projected read model has not caught up with. */
+type Overlay = { kind: "resolved" } | { kind: "workOrder"; workOrderId: string };
+
+/** Resolved / On WO-x / open (RESOLVE + CREATE WORK ORDER) — from the defect's own
+ *  fields, or from the local overlay while those fields are still catching up. */
 function DefectState({
   row,
-  resolvedHere,
+  overlay,
   workOrderNumberOf,
   onResolve,
   onCreateWorkOrder,
 }: {
   row: ChecklistRow;
-  resolvedHere: boolean;
+  overlay?: Overlay;
   workOrderNumberOf?: (id: string) => string | undefined;
   onResolve: () => void;
   onCreateWorkOrder: (d: InspectionDefectWire) => void;
 }) {
   const d = row.defect;
-  if (resolvedHere) return <StatusChip kind="ontime" label="Resolved" />;
+  if (overlay?.kind === "resolved") return <StatusChip kind="ontime" label="Resolved · updating" />;
+  if (overlay?.kind === "workOrder") {
+    // The work-order list may already know the new number even while the
+    // inspection projection does not; otherwise say what happened, plainly.
+    const number = workOrderNumberOf?.(overlay.workOrderId);
+    return (
+      <StatusChip kind="soon" label={number ? `On ${number} · updating` : "Work order created · updating"} />
+    );
+  }
   // A checklist failure with no defect entry cannot be addressed by the API.
   if (!d) return null;
   if (d.resolvedAtUtc != null) {

@@ -415,6 +415,11 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
     /// deliberately no reopen: a fault that comes back is re-reported as a NEW defect on a later
     /// inspection, pointing here via <see cref="InspectionDefect.RecurrenceOfInspectionId"/>, so
     /// the original audit record stays intact.
+    ///
+    /// This is the MANUAL path: <see cref="DefectResolutionReason.RepairedUnderWorkOrder"/> and
+    /// <see cref="DefectResolutionReason.NoFaultFound"/> are reserved for work-order completion
+    /// (<see cref="ResolveDefectUnderWorkOrder"/>) and fail with
+    /// <see cref="InspectionErrors.ResolutionReasonReservedForWorkOrder"/>.
     /// </summary>
     public Result ResolveDefect(
         string item,
@@ -423,6 +428,11 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
         string resolvedBy,
         DateTimeOffset atUtc)
     {
+        if (reason is DefectResolutionReason.RepairedUnderWorkOrder or DefectResolutionReason.NoFaultFound)
+        {
+            return NorthernLink.Shared.Kernel.Result.Failure(InspectionErrors.ResolutionReasonReservedForWorkOrder);
+        }
+
         var key = NormalizeItem(item);
         var index = Defects.FindIndex(d => NormalizeItem(d.Item).Equals(key, StringComparison.OrdinalIgnoreCase));
 

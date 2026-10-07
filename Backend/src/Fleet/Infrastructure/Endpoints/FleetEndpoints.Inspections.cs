@@ -140,7 +140,9 @@ public static partial class FleetEndpoints
     /// <summary>
     /// Clears one defect on this inspection. 404 when the inspection or the item is unknown,
     /// 409 when it was already resolved (resolution is final — in practice this is a
-    /// double-click guard, since the panel removes the row optimistically).
+    /// double-click guard, since the panel removes the row optimistically), 400
+    /// (<c>Fleet.Inspection.ResolutionReasonReservedForWorkOrder</c>) for
+    /// <c>RepairedUnderWorkOrder</c> or <c>NoFaultFound</c>, which only work-order completion sets.
     /// </summary>
     private static async Task<IResult> ResolveInspectionDefect(
         Guid id,

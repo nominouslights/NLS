@@ -37,7 +37,8 @@ export default function WorkOrderModal({
   defaultVehicleId?: string;
   prefill?: WorkOrderPrefillWire;
   onClose: () => void;
-  onSaved: () => void;
+  /** Receives the new work order's id (its WO-n number is not in the response). */
+  onSaved: (workOrderId: string) => void;
 }) {
   const [vehicleId, setVehicleId] = useState(defaultVehicleId ?? vehicles[0]?.id ?? "");
   const [title, setTitle] = useState(prefill?.title ?? "");
@@ -86,7 +87,7 @@ export default function WorkOrderModal({
     setBusy(true);
     setError(null);
     try {
-      await createWorkOrder({
+      const id = await createWorkOrder({
         vehicleId,
         title: title.trim(),
         description: description.trim() || null,
@@ -102,10 +103,13 @@ export default function WorkOrderModal({
         dateRequiredOrOos: dueDate.trim() ? toUtcIso(dueDate.trim()) : null,
         ...(attached.length ? { defects: defectRefs(attached) } : {}),
       });
-      onSaved();
+      onSaved(id);
       onClose();
     } catch (e) {
       setBusy(false);
+      // An ApiError carries the server's own message — e.g. a 409
+      // Fleet.Inspection.DefectAlreadyOnWorkOrder names the defect — so it is
+      // shown as-is; only a non-API failure gets the generic line.
       setError(e instanceof ApiError ? e.message : "Failed to create the work order — please try again.");
     }
   }

@@ -11,8 +11,12 @@ namespace NorthernLink.Fleet.Domain.WorkOrders;
 ///
 /// <see cref="Severity"/> and <see cref="Note"/> are a SNAPSHOT taken when the work order was
 /// created — the mechanic works from what the work order said, and a later amendment of the
-/// inspection does not rewrite the work order. <see cref="Outcome"/>/<see cref="OutcomeNote"/>
-/// are null until the work order completes.
+/// inspection does not rewrite an OPEN work order. The one exception is <see cref="Severity"/>
+/// at completion: <see cref="WorkOrder.Complete"/> judges the "OutOfService is never Deferred"
+/// rule against the defect's CURRENT severity on its inspection and writes that severity back
+/// onto the line (the snapshot stands when the defect is gone), so a completed line records the
+/// severity its outcome was actually validated against. <see cref="Outcome"/>/
+/// <see cref="OutcomeNote"/> are null until the work order completes.
 /// </summary>
 public sealed record WorkOrderDefectLine
 {

@@ -188,6 +188,56 @@ public class WorkOrderDefectOutcomeHandlerTests
     }
 
     [Fact]
+    public async Task Deferring_a_defect_amended_up_to_out_of_service_after_the_work_order_was_raised_is_rejected()
+    {
+        var f = new Fixture();
+        var inspection = f.Inspection(Defect("Brakes", InspectionDefectSeverity.Minor));
+        var workOrder = f.WorkOrderFor((inspection, "Brakes"));
+
+        // The line's snapshot still says Minor; the live safety record now says OutOfService.
+        Assert.True(TestInspections.AmendWith(
+            inspection, [Defect("Brakes", InspectionDefectSeverity.OutOfService)]).IsSuccess);
+        Assert.Equal(workOrder.Id, inspection.FindDefect("Brakes")!.WorkOrderId);
+
+        var result = await f.Complete.Handle(
+            Command(workOrder.Id, [Outcome(inspection, "Brakes", DefectRepairOutcome.Deferred, "no parts")]),
+            CancellationToken.None);
+
+        Assert.Equal(WorkOrderErrors.OutOfServiceCannotBeDeferred, result.Error);
+        Assert.Equal(WorkOrderStatus.Open, workOrder.Status);
+        Assert.Empty(f.Services.Records);
+        Assert.Equal(0, f.WorkOrders.SaveChangesCallCount);
+        Assert.Equal(workOrder.Id, inspection.FindDefect("Brakes")!.WorkOrderId);
+    }
+
+    [Fact]
+    public async Task Deferring_a_defect_amended_down_from_out_of_service_is_allowed_and_the_line_records_the_current_severity()
+    {
+        var f = new Fixture();
+        var inspection = f.Inspection(Defect("Brakes", InspectionDefectSeverity.OutOfService));
+        var workOrder = f.WorkOrderFor((inspection, "Brakes"));
+
+        Assert.True(TestInspections.AmendWith(
+            inspection, [Defect("Brakes", InspectionDefectSeverity.Minor)]).IsSuccess);
+
+        var result = await f.Complete.Handle(
+            Command(workOrder.Id, [Outcome(inspection, "Brakes", DefectRepairOutcome.Deferred, "minor after all")]),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(WorkOrderStatus.Completed, workOrder.Status);
+
+        var line = workOrder.Defects.Single();
+        Assert.Equal(DefectRepairOutcome.Deferred, line.Outcome);
+        Assert.Equal(InspectionDefectSeverity.Minor, line.Severity);
+
+        // Deferred: still open, released for a later work order.
+        var brakes = inspection.FindDefect("Brakes")!;
+        Assert.False(brakes.IsResolved);
+        Assert.Null(brakes.WorkOrderId);
+    }
+
+    [Fact]
     public async Task A_missing_outcome_is_rejected_and_nothing_is_saved()
     {
         var f = new Fixture();
