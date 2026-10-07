@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Vehicle } from "@/lib/api";
 import type { VehicleDefectWire } from "@/lib/api/maintenance";
-import { prefillFromDefects, type WorkOrderPrefillWire } from "@/lib/inspectionWorkOrder";
+import { prefillFromDefects, type PendingWorkOrder, type WorkOrderPrefillWire } from "@/lib/inspectionWorkOrder";
 import type { VehicleOption } from "@/components/screens/fleet/vehicle-detail/shared";
 import DefectsPanel from "@/components/fleet/DefectsPanel";
 import InspectionEntryModal from "@/components/InspectionEntryModal";
@@ -25,8 +25,13 @@ export default function VehicleDefects({ vehicle, vehicles = [] }: { vehicle: Ve
   const [reReport, setReReport] = useState<VehicleDefectWire | null>(null);
   const [woPrefill, setWoPrefill] = useState<{ prefill: WorkOrderPrefillWire; keys: string[] } | null>(null);
   // Rows a work order was just raised for — shown as such until the read model
-  // reflects the link, so the same defect is not offered twice in the gap.
-  const [pending, setPending] = useState<ReadonlySet<string>>(new Set());
+  // reflects the link, so the same defect is not offered twice in the gap. Each
+  // mark heals itself: DefectsPanel reports, after every load, the marks that
+  // load settled (the row now shows the work order / is resolved, or the load
+  // came after the mark's own recheck window — whichever action triggered it).
+  // Nothing here clears marks wholesale on a timer, so a later refresh (a
+  // re-report, say) can never strand one.
+  const [pending, setPending] = useState<ReadonlyMap<string, PendingWorkOrder>>(new Map());
   const [refresh, setRefresh] = useState(0);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -36,20 +41,33 @@ export default function VehicleDefects({ vehicle, vehicles = [] }: { vehicle: Ve
     };
   }, []);
 
-  function scheduleRefresh(afterReconcile?: () => void) {
+  function scheduleRefresh() {
     // Refresh once now (in case the projection is already there) and again
-    // after the projector has certainly run.
+    // after the projector has certainly run. Replacing an earlier timer is
+    // safe: the new one fires later, so it is still past every older mark's
+    // recheck window.
     setRefresh((n) => n + 1);
     if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => {
-      setRefresh((n) => n + 1);
-      afterReconcile?.();
-    }, PROJECTION_RECONCILE_MS);
+    timer.current = setTimeout(() => setRefresh((n) => n + 1), PROJECTION_RECONCILE_MS);
   }
 
-  function onWorkOrderCreated(keys: string[]) {
-    setPending((prev) => new Set([...prev, ...keys]));
-    scheduleRefresh(() => setPending(new Set()));
+  function onWorkOrderCreated(keys: string[], workOrderId: string) {
+    const mark: PendingWorkOrder = { workOrderId, recheckAfter: Date.now() + PROJECTION_RECONCILE_MS };
+    setPending((prev) => {
+      const next = new Map(prev);
+      for (const k of keys) next.set(k, mark);
+      return next;
+    });
+    scheduleRefresh();
+  }
+
+  function onSettled(keys: string[]) {
+    setPending((prev) => {
+      if (!keys.some((k) => prev.has(k))) return prev;
+      const next = new Map(prev);
+      for (const k of keys) next.delete(k);
+      return next;
+    });
   }
 
   // The vehicle itself must be selectable in the work-order modal even when the
@@ -72,7 +90,8 @@ export default function VehicleDefects({ vehicle, vehicles = [] }: { vehicle: Ve
         onCreateWorkOrder={(rows) =>
           setWoPrefill({ prefill: prefillFromDefects(rows, vehicle.unitNumber), keys: rows.map(defectKey) })
         }
-        pendingWorkOrderKeys={pending}
+        pendingWorkOrders={pending}
+        onPendingWorkOrdersSettled={onSettled}
       />
 
       {reReport && (
@@ -98,7 +117,7 @@ export default function VehicleDefects({ vehicle, vehicles = [] }: { vehicle: Ve
           defaultVehicleId={vehicle.id}
           prefill={woPrefill.prefill}
           onClose={() => setWoPrefill(null)}
-          onSaved={() => onWorkOrderCreated(woPrefill.keys)}
+          onSaved={(id) => onWorkOrderCreated(woPrefill.keys, id)}
         />
       )}
     </div>

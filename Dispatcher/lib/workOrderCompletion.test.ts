@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  currentSeverityOf,
   outcomesFor,
   remainingBlockingDefects,
   validateDefectOutcomes,
@@ -91,6 +92,49 @@ describe("validateDefectOutcomes", () => {
       draft({ item: "wipers", outcome: "NoFaultFound" }),
     ]);
     expect(r.ok).toBe(true);
+  });
+});
+
+describe("current severity (an inspection amended after the work order was raised)", () => {
+  // The line snapshots severity when the work order is raised; the backend
+  // judges Deferred on the defect's CURRENT severity on its inspection, falling
+  // back to the snapshot only when the defect is gone.
+
+  it("blocks Deferred on a line amended UP to out-of-service", () => {
+    const current = [vehicleDefect({ inspectionId: "i-1", item: "Wipers", severity: "OutOfService" })];
+    const r = validateDefectOutcomes(
+      lines,
+      [draft({ item: "Brakes", outcome: "Repaired" }), draft({ item: "Wipers", outcome: "Deferred", note: "Parts" })],
+      current,
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.issues).toEqual([
+      { inspectionId: "i-1", item: "Wipers", message: "An out-of-service defect cannot be deferred." },
+    ]);
+  });
+
+  it("allows Deferred on a line amended DOWN from out-of-service", () => {
+    const current = [vehicleDefect({ inspectionId: "i-1", item: "brakes ", severity: "Major" })];
+    const r = validateDefectOutcomes(
+      lines,
+      [draft({ item: "Brakes", outcome: "Deferred", note: "Next shop visit" }), draft({ item: "Wipers", outcome: "Repaired" })],
+      current,
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it("falls back to the snapshot when the defect is not in the list", () => {
+    expect(currentSeverityOf(lines[0], [])).toBe("OutOfService");
+    expect(currentSeverityOf(lines[0], null)).toBe("OutOfService");
+    expect(currentSeverityOf(lines[1], [vehicleDefect({ inspectionId: "i-2", item: "Wipers", severity: "Major" })])).toBe(
+      "Minor",
+    );
+  });
+
+  it("matches the defect trimmed and case-insensitively", () => {
+    expect(currentSeverityOf(lines[1], [vehicleDefect({ inspectionId: "i-1", item: " WIPERS", severity: "Major" })])).toBe(
+      "Major",
+    );
   });
 });
 

@@ -7,6 +7,8 @@ import {
   isAttachable,
   isInspectionDefectAttachable,
   isVehicleDefectAttachable,
+  settledPendingWorkOrders,
+  type PendingWorkOrder,
   prefillFromDefects,
   prefillFromInspection,
 } from "./inspectionWorkOrder";
@@ -200,5 +202,44 @@ describe("inspectionDefectWorkOrderId", () => {
 
   it("is null with no work order at all", () => {
     expect(inspectionDefectWorkOrderId(defect({ item: "A" }), null)).toBeNull();
+  });
+});
+
+describe("settledPendingWorkOrders", () => {
+  const key = (d: { inspectionId: string; item: string }) => `${d.inspectionId}:${d.item}`;
+  const mark = (over: Partial<PendingWorkOrder> = {}): PendingWorkOrder => ({
+    workOrderId: "wo-9",
+    recheckAfter: 10_000,
+    ...over,
+  });
+  const pending = new Map([["insp-1:A", mark()]]);
+
+  it("keeps a mark while the row still reads stale inside the window", () => {
+    expect(settledPendingWorkOrders(pending, [vehicleDefect({ item: "A" })], 5_000, key)).toEqual([]);
+  });
+
+  it("settles once the row is on an open work order", () => {
+    const row = vehicleDefect({ item: "A", workOrderId: "wo-9", workOrderStatus: "Open" });
+    expect(settledPendingWorkOrders(pending, [row], 5_000, key)).toEqual(["insp-1:A"]);
+  });
+
+  it("settles when the row carries this work order even if it was cancelled", () => {
+    const row = vehicleDefect({ item: "A", workOrderId: "wo-9", workOrderStatus: "Cancelled" });
+    expect(settledPendingWorkOrders(pending, [row], 5_000, key)).toEqual(["insp-1:A"]);
+  });
+
+  it("settles a resolved or vanished row", () => {
+    const resolved = vehicleDefect({ item: "A", resolvedAtUtc: "2026-10-02T00:00:00Z" });
+    expect(settledPendingWorkOrders(pending, [resolved], 5_000, key)).toEqual(["insp-1:A"]);
+    expect(settledPendingWorkOrders(pending, [], 5_000, key)).toEqual(["insp-1:A"]);
+  });
+
+  it("settles on any load at or after the recheck window, whatever the data says", () => {
+    expect(settledPendingWorkOrders(pending, [vehicleDefect({ item: "A" })], 10_000, key)).toEqual(["insp-1:A"]);
+  });
+
+  it("does not settle on another work order's cancelled link", () => {
+    const row = vehicleDefect({ item: "A", workOrderId: "wo-1", workOrderStatus: "Cancelled" });
+    expect(settledPendingWorkOrders(pending, [row], 5_000, key)).toEqual([]);
   });
 });

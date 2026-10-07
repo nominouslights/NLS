@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { colors, fonts } from "@/lib/theme";
 import type { ServiceCategory } from "@/lib/types";
 import { addService } from "@/lib/maintenanceStore";
@@ -9,10 +9,12 @@ import {
   completeWorkOrder,
   listVehicleDefects,
   type DefectOutcomeInputWire,
+  type VehicleDefectWire,
   type WorkOrderDefectLineWire,
 } from "@/lib/api/maintenance";
 import { CATEGORY_WIRE } from "@/lib/workOrderDisplay";
 import {
+  currentSeverityOf,
   defectKeyOf,
   remainingBlockingDefects,
   validateDefectOutcomes,
@@ -71,6 +73,40 @@ export default function ServiceRecordModal({
     lines.map((l) => ({ inspectionId: l.inspectionId, item: l.item, outcome: null, note: "" })),
   );
   const [outcomeIssues, setOutcomeIssues] = useState<Map<string, string>>(new Map());
+  // The vehicle's defects, for each line's CURRENT severity — an inspection
+  // amended after the work order was raised can move a defect into or out of
+  // Out-of-Service, and the server judges Deferred on the current one. Null
+  // while loading or if unavailable: the line's snapshot is used instead.
+  const [currentDefects, setCurrentDefects] = useState<VehicleDefectWire[] | null>(null);
+  const hasLines = lines.length > 0;
+  const vehicleId = vehicle?.id;
+
+  useEffect(() => {
+    if (!hasLines || !vehicleId) return;
+    let active = true;
+    listVehicleDefects(vehicleId, true).then(
+      (rows) => {
+        if (!active) return;
+        setCurrentDefects(rows);
+        // A Deferred picked against the snapshot that the current severity now
+        // forbids goes back to "choose" — never silently swapped for another.
+        setDrafts((prev) =>
+          prev.map((d) => {
+            const line = lines.find((l) => defectKeyOf(l) === defectKeyOf(d));
+            return d.outcome === "Deferred" && line && currentSeverityOf(line, rows) === "OutOfService"
+              ? { ...d, outcome: null }
+              : d;
+          }),
+        );
+      },
+      (e) => console.error("Defects unavailable for the current-severity check:", e),
+    );
+    return () => {
+      active = false;
+    };
+    // `lines` comes from the work order being closed, fixed for the modal's life.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasLines, vehicleId]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Set once the work order is completed and the return-to-service offer applies.
@@ -86,7 +122,7 @@ export default function ServiceRecordModal({
 
     let defectOutcomes: DefectOutcomeInputWire[] = [];
     if (lines.length > 0) {
-      const checked = validateDefectOutcomes(lines, drafts);
+      const checked = validateDefectOutcomes(lines, drafts, currentDefects);
       if (!checked.ok) {
         setOutcomeIssues(new Map(checked.issues.map((i) => [defectKeyOf(i), i.message])));
         return setError(
@@ -234,6 +270,7 @@ export default function ServiceRecordModal({
           drafts={drafts}
           onChange={setDrafts}
           issues={outcomeIssues}
+          currentDefects={currentDefects}
           disabled={busy}
         />
       )}

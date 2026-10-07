@@ -103,7 +103,7 @@ describe("DefectsPanel — create work order", () => {
         vehicleId="veh-1"
         unit="NL-02"
         onCreateWorkOrder={() => {}}
-        pendingWorkOrderKeys={new Set(["i-1:Brakes"])}
+        pendingWorkOrders={new Map([["i-1:Brakes", { workOrderId: "wo-9", recheckAfter: Number.MAX_SAFE_INTEGER }]])}
       />,
     );
 

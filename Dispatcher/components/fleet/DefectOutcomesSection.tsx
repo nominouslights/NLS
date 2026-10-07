@@ -1,7 +1,7 @@
 "use client";
 
 import { colors, fonts, statusMeta } from "@/lib/theme";
-import type { DefectRepairOutcomeWire, WorkOrderDefectLineWire } from "@/lib/api/maintenance";
+import type { DefectRepairOutcomeWire, VehicleDefectWire, WorkOrderDefectLineWire } from "@/lib/api/maintenance";
 import {
   DEFECT_OUTCOME_HELP,
   DEFECT_OUTCOME_LABEL,
@@ -9,7 +9,7 @@ import {
   DEFECT_SEVERITY_LABEL,
   DEFECT_SEVERITY_META,
 } from "@/lib/workOrderDisplay";
-import { defectKeyOf, outcomesFor, type DefectOutcomeDraft } from "@/lib/workOrderCompletion";
+import { currentSeverityOf, defectKeyOf, outcomesFor, type DefectOutcomeDraft } from "@/lib/workOrderCompletion";
 import { SectionLabel } from "@/components/ui/Panel";
 import { StatusChip } from "@/components/ui/Chip";
 import { SelectField, TextField } from "@/components/ui/Field";
@@ -17,13 +17,17 @@ import { SelectField, TextField } from "@/components/ui/Field";
 // "Defect outcomes" on the close-work-order form: one row per defect line, each
 // needing an outcome the dispatcher picks — there is NO default, so a defect is
 // never cleared by someone who did not look at it. Deferred is not offered for
-// an out-of-service defect, and needs a note.
+// an out-of-service defect, and needs a note. "Out-of-service" means the
+// defect's CURRENT severity on its inspection (it may have been amended since
+// the work order snapshotted it), falling back to that snapshot — the same rule
+// the backend applies.
 
 export default function DefectOutcomesSection({
   lines,
   drafts,
   onChange,
   issues,
+  currentDefects = null,
   disabled = false,
 }: {
   lines: WorkOrderDefectLineWire[];
@@ -31,6 +35,9 @@ export default function DefectOutcomesSection({
   onChange: (next: DefectOutcomeDraft[]) => void;
   /** Per-row messages from validateDefectOutcomes, keyed by defectKeyOf. */
   issues: Map<string, string>;
+  /** The vehicle's defect list, for each line's current severity; null while
+   *  loading or unavailable (the line's snapshot is used). */
+  currentDefects?: readonly VehicleDefectWire[] | null;
   disabled?: boolean;
 }) {
   function update(key: string, patch: Partial<DefectOutcomeDraft>) {
@@ -48,7 +55,9 @@ export default function DefectOutcomesSection({
         {lines.map((line) => {
           const key = defectKeyOf(line);
           const draft = drafts.find((d) => defectKeyOf(d) === key);
-          const sev = DEFECT_SEVERITY_META[line.severity] ?? DEFECT_SEVERITY_META.Major;
+          const severity = currentSeverityOf(line, currentDefects);
+          const amended = severity !== line.severity;
+          const sev = DEFECT_SEVERITY_META[severity] ?? DEFECT_SEVERITY_META.Major;
           const chosen = draft?.outcome ?? null;
           const out = chosen ? DEFECT_OUTCOME_META[chosen] : null;
           const issue = issues.get(key);
@@ -64,7 +73,12 @@ export default function DefectOutcomesSection({
               }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-                <StatusChip kind={sev.kind} glyph={sev.glyph} label={DEFECT_SEVERITY_LABEL[line.severity]} />
+                <StatusChip kind={sev.kind} glyph={sev.glyph} label={DEFECT_SEVERITY_LABEL[severity]} />
+                {amended && (
+                  <span style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim }}>
+                    was {DEFECT_SEVERITY_LABEL[line.severity]}
+                  </span>
+                )}
                 <span style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: 700, color: colors.headingBright }}>
                   {line.item}
                 </span>
@@ -87,7 +101,7 @@ export default function DefectOutcomesSection({
                   onChange={(v) => update(key, { outcome: (v || null) as DefectRepairOutcomeWire | null })}
                   options={[
                     { value: "", label: "— choose —" },
-                    ...outcomesFor(line.severity).map((o) => ({ value: o, label: DEFECT_OUTCOME_LABEL[o] })),
+                    ...outcomesFor(severity).map((o) => ({ value: o, label: DEFECT_OUTCOME_LABEL[o] })),
                   ]}
                   hint={<span style={{ color: colors.textFaint }}>· required</span>}
                 />
@@ -103,7 +117,7 @@ export default function DefectOutcomesSection({
               <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim, marginTop: 6 }}>
                 {chosen
                   ? DEFECT_OUTCOME_HELP[chosen]
-                  : line.severity === "OutOfService"
+                  : severity === "OutOfService"
                     ? "Out-of-service defects cannot be deferred."
                     : " "}
               </div>

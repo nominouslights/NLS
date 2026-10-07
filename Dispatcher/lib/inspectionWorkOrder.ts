@@ -166,3 +166,49 @@ export function prefillFromDefects(rows: VehicleDefectWire[], unit: string): Wor
     defects: rows.map((r) => ({ inspectionId: r.inspectionId, item: r.item, severity: r.severity, note: r.note })),
   };
 }
+
+/** A work order just raised from the Open Defects tab for one defect row, held
+ *  as "Work order created · updating" until the defect read model (≈5s behind
+ *  the write) reflects it. */
+export interface PendingWorkOrder {
+  /** The work order raised — null if the caller did not get one back. */
+  workOrderId: string | null;
+  /** Epoch ms after which the projector has certainly run: any refresh at or
+   *  after this moment is authoritative, whatever triggered it. */
+  recheckAfter: number;
+}
+
+/**
+ * The pending marks a freshly loaded `rows` list settles — derived from the
+ * data, never from a timer alone, so a mark cannot outlive the gap it covers.
+ * A mark settles when its row:
+ *  - is gone from the list, or is resolved / on an open work order (the data
+ *    now says what the mark was saying);
+ *  - carries THIS work order, in any status (it got through — and if it has
+ *    since been cancelled, CREATE WORK ORDER must come back);
+ *  - or was loaded at/after the mark's recheck window, whichever action
+ *    triggered the refresh (the projection has certainly caught up by then).
+ * `rowKey` must be the same key the marks are stored under.
+ */
+export function settledPendingWorkOrders(
+  pending: ReadonlyMap<string, PendingWorkOrder>,
+  rows: readonly VehicleDefectWire[],
+  now: number,
+  rowKey: (d: VehicleDefectWire) => string,
+): string[] {
+  if (pending.size === 0) return [];
+  const byKey = new Map(rows.map((r) => [rowKey(r), r]));
+  const settled: string[] = [];
+  for (const [key, mark] of pending) {
+    const row = byKey.get(key);
+    if (
+      !row ||
+      !isVehicleDefectAttachable(row) ||
+      (mark.workOrderId !== null && row.workOrderId === mark.workOrderId) ||
+      now >= mark.recheckAfter
+    ) {
+      settled.push(key);
+    }
+  }
+  return settled;
+}

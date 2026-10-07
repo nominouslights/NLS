@@ -11,7 +11,11 @@ import {
   type VehicleDefectWire,
   type WorkOrderStatusWire,
 } from "@/lib/api/maintenance";
-import { isVehicleDefectAttachable } from "@/lib/inspectionWorkOrder";
+import {
+  isVehicleDefectAttachable,
+  settledPendingWorkOrders,
+  type PendingWorkOrder,
+} from "@/lib/inspectionWorkOrder";
 import {
   DEFECT_RESOLUTION_LABEL,
   DEFECT_RESOLUTION_META,
@@ -66,7 +70,8 @@ export default function DefectsPanel({
   refreshKey = 0,
   onReReport,
   onCreateWorkOrder,
-  pendingWorkOrderKeys,
+  pendingWorkOrders,
+  onPendingWorkOrdersSettled,
 }: {
   vehicleId: string | null;
   unit?: string | null;
@@ -79,9 +84,13 @@ export default function DefectsPanel({
   onReReport?: (defect: VehicleDefectWire) => void;
   /** Raise one work order against the given open, unattached rows (same vehicle). */
   onCreateWorkOrder?: (rows: VehicleDefectWire[]) => void;
-  /** Row keys (`inspectionId:item`) a work order was just created for, while the
-   *  read model catches up — shown as "work order created", never re-offered. */
-  pendingWorkOrderKeys?: ReadonlySet<string>;
+  /** Rows (keyed `inspectionId:item`) a work order was just created for, while
+   *  the read model catches up — shown as "work order created", never re-offered. */
+  pendingWorkOrders?: ReadonlyMap<string, PendingWorkOrder>;
+  /** After every load, the pending marks that load settled (see
+   *  settledPendingWorkOrders) — the parent drops them. Reports only keys the
+   *  parent itself passed in, never "this vehicle has defects". */
+  onPendingWorkOrdersSettled?: (keys: string[]) => void;
 }) {
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [includeResolved, setIncludeResolved] = useState(false);
@@ -95,6 +104,12 @@ export default function DefectsPanel({
   const [fetched, setFetched] = useState<{ vehicleId: string; rows: VehicleDefectWire[] } | null>(null);
   const [resolving, setResolving] = useState<VehicleDefectWire | null>(null);
   const reconcileTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The load effect must not re-run when the marks change, so it reads the
+  // latest marks and callback through a ref.
+  const pendingRef = useRef({ pendingWorkOrders, onPendingWorkOrdersSettled });
+  useEffect(() => {
+    pendingRef.current = { pendingWorkOrders, onPendingWorkOrdersSettled };
+  });
 
   useEffect(() => {
     // No vehicle on the trip yet — no request is issued at all.
@@ -105,6 +120,11 @@ export default function DefectsPanel({
         if (active) {
           setFetched({ vehicleId, rows });
           setLoadError(null);
+          const { pendingWorkOrders: marks, onPendingWorkOrdersSettled: settle } = pendingRef.current;
+          if (marks && settle) {
+            const settled = settledPendingWorkOrders(marks, rows, Date.now(), defectKey);
+            if (settled.length) settle(settled);
+          }
         }
       },
       (e) => {
@@ -146,7 +166,7 @@ export default function DefectsPanel({
   const heading = title ?? "Open defects";
 
   const canCreate = (d: VehicleDefectWire) =>
-    !!onCreateWorkOrder && isVehicleDefectAttachable(d) && !pendingWorkOrderKeys?.has(defectKey(d));
+    !!onCreateWorkOrder && isVehicleDefectAttachable(d) && !pendingWorkOrders?.has(defectKey(d));
   // Selection is derived against the CURRENT rows, so a stale key (another
   // vehicle, a row since attached or resolved) silently drops out.
   const selectedRows = (rows ?? []).filter((r) => selected.has(defectKey(r)) && canCreate(r));
@@ -230,7 +250,7 @@ export default function DefectsPanel({
               canResolve={canResolve}
               onResolve={() => setResolving(d)}
               onReReport={onReReport}
-              pendingWorkOrder={!!pendingWorkOrderKeys?.has(defectKey(d))}
+              pendingWorkOrder={isVehicleDefectAttachable(d) && !!pendingWorkOrders?.has(defectKey(d))}
               onCreateWorkOrder={canCreate(d) ? () => create([d]) : undefined}
               selectable={canCreate(d) && attachableCount > 1}
               selected={selected.has(defectKey(d))}

@@ -44,14 +44,34 @@ export function outcomesFor(severity: DefectSeverityWire): DefectRepairOutcomeWi
 }
 
 /**
+ * The severity the Deferred rule is judged on: the defect's CURRENT severity on
+ * its inspection (an amended inspection can move it either way), looked up in
+ * the vehicle's defect list by the same addressing as the backend — falling
+ * back to the severity snapshotted on the work-order line when the defect is
+ * not in the list (gone, or the list could not be read). Same rule as the
+ * backend's WorkOrder completion.
+ */
+export function currentSeverityOf(
+  line: DefectLineForCompletion,
+  currentDefects: readonly VehicleDefectWire[] | null | undefined,
+): DefectSeverityWire {
+  if (!currentDefects) return line.severity;
+  const key = defectKeyOf(line);
+  return currentDefects.find((d) => defectKeyOf(d) === key)?.severity ?? line.severity;
+}
+
+/**
  * Every line answered exactly once, a note on every Deferred, and no Deferred on
- * an out-of-service line. On success returns the `defectOutcomes` body (notes
- * trimmed, blank → null), in line order. A work order with no lines validates
- * to an empty list — the caller then omits the field.
+ * an out-of-service line — judged on the defect's current severity when
+ * `currentDefects` knows it, else the line's snapshot (see currentSeverityOf).
+ * On success returns the `defectOutcomes` body (notes trimmed, blank → null), in
+ * line order. A work order with no lines validates to an empty list — the
+ * caller then omits the field.
  */
 export function validateDefectOutcomes(
   lines: DefectLineForCompletion[],
   outcomes: DefectOutcomeDraft[],
+  currentDefects?: readonly VehicleDefectWire[] | null,
 ): DefectOutcomeValidation {
   const byKey = new Map<string, DefectOutcomeDraft>();
   const issues: DefectOutcomeIssue[] = [];
@@ -78,7 +98,7 @@ export function validateDefectOutcomes(
     }
     const note = draft.note.trim();
     if (draft.outcome === "Deferred") {
-      if (line.severity === "OutOfService") {
+      if (currentSeverityOf(line, currentDefects) === "OutOfService") {
         issues.push({ ...ref, message: "An out-of-service defect cannot be deferred." });
         continue;
       }
