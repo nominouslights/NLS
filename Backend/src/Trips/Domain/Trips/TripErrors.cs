@@ -131,6 +131,38 @@ public static class TripErrors
     public static readonly Error DeadheadReturnOfEmptyLeg = Error.Conflict(
         "Trips.Trip.DeadheadReturnOfEmptyLeg", "An empty leg cannot get a deadhead return of its own.");
 
+    public static readonly Error UseChangeRoute = Error.Conflict(
+        "Trips.Trip.UseChangeRoute",
+        "A trip's route is changed through POST /api/trips/{id}/change-route, which also moves a still-scheduled paired leg — an edit can only keep the current route.");
+
+    public static readonly Error RouteChangeNotScheduled = Error.Conflict(
+        "Trips.Trip.RouteChangeNotScheduled", "Only a scheduled trip's route can be changed — this run has already started or ended.");
+
+    public static readonly Error RouteOwnedByBooking = Error.Conflict(
+        "Trips.Trip.RouteOwnedByBooking",
+        "This trip was confirmed from a community booking day, so its route belongs to the booking — change the booking instead.");
+
+    public static readonly Error RouteUnchanged = Error.Conflict(
+        "Trips.Trip.RouteUnchanged", "The trip already runs on this route.");
+
+    public static readonly Error RouteInactive = Error.Validation(
+        "Trips.Trip.RouteInactive", "An inactive route cannot be given to a trip.");
+
+    public static readonly Error RouteChangeNeedsAcknowledgement = Error.Conflict(
+        "Trips.Trip.RouteChangeNeedsAcknowledgement",
+        "Changing the route affects passengers, cargo, or an imported booking — review the warnings and confirm to proceed.");
+
+    public static readonly Error ChangedConcurrently = Error.Conflict(
+        "Trips.Trip.ChangedConcurrently", "Someone else changed this trip at the same time — reload it and try again.");
+
+    public static Error RouteChangePartnerOwnedByBooking(string partnerTripNumber) => Error.Conflict(
+        "Trips.Trip.RouteOwnedByBooking",
+        $"The paired leg {partnerTripNumber} was confirmed from a community booking day, so its route belongs to the booking.");
+
+    public static Error RouteChangeCargoUnderway(string tripNumber) => Error.Conflict(
+        "Trips.Trip.RouteChangeCargoUnderway",
+        $"Freight has already been picked up or dropped on {tripNumber}, so its route can no longer change.");
+
     public static Error InvalidStatusTransition(TripStatus from, TripStatus to) => Error.Conflict(
         "Trips.Trip.InvalidStatusTransition", $"A trip cannot move from {from} to {to}.");
 

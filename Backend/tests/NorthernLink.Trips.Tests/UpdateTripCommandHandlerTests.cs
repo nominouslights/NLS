@@ -9,14 +9,15 @@ namespace NorthernLink.Trips.Tests;
 /// <summary>
 /// Regression: the Dispatcher's edit form always re-sends the trip's current routeId, and the
 /// handler used to re-snapshot the catalogue route in OUTBOUND order on every edit — so
-/// changing just the PO on a return leg flipped its stops and origin/destination.
+/// changing just the PO on a return leg flipped its stops and origin/destination. Re-routing via
+/// PUT is now refused (UseChangeRoute) — that coverage lives in TripChangeRouteHandlerTests.
 /// </summary>
 public class UpdateTripCommandHandlerTests
 {
     private readonly FakeTripRepository _trips = new();
     private readonly FakeRouteRepository _routes = new();
 
-    private UpdateTripCommandHandler Handler => new(_trips, _routes);
+    private UpdateTripCommandHandler Handler => new(_trips);
 
     private static Route CreateRoute(params string[] names) =>
         Route.Create(
@@ -155,51 +156,72 @@ public class UpdateTripCommandHandlerTests
         Assert.Equal(before, trip.Stops);
     }
 
+    // Re-routing moved to ChangeTripRouteCommand (TripChangeRouteHandlerTests): it must move the
+    // paired leg too, so PUT may only keep the trip's current route.
+
     [Fact]
-    public async Task Rerouting_an_inbound_trip_snapshots_the_new_route_reversed()
+    public async Task A_different_route_id_is_refused_with_UseChangeRoute_and_nothing_changes()
     {
         var original = CreateRoute("Thompson", "Leaf Rapids", "Lynn Lake");
         var trip = AddTrip(original, TripDirection.Inbound);
         var replacement = CreateRoute("Thompson", "Snow Lake", "Flin Flon");
-        _routes.Add(replacement);
+        var before = trip.Stops.ToList();
 
-        var result = await Handler.Handle(EditCommand(trip, replacement.Id, "PO-OLD"), CancellationToken.None);
+        var result = await Handler.Handle(EditCommand(trip, replacement.Id, "PO-NEW"), CancellationToken.None);
 
-        Assert.True(result.IsSuccess);
-        Assert.Equal(replacement.Id, trip.RouteId);
-        Assert.Equal(replacement.Name, trip.RouteName);
-        Assert.Equal("Flin Flon", trip.Origin);
-        Assert.Equal("Thompson", trip.Destination);
-        Assert.Equal(["Flin Flon", "Snow Lake", "Thompson"], Names(trip));
-        // Offsets stay attached to their own stop; Inbound selects the return one (0 first).
-        Assert.Equal([0, 40, 80], trip.Stops.OrderBy(s => s.Order).Select(s => s.ReturnOffsetMinutes!.Value));
-        Assert.Equal([60, 30, 0], trip.Stops.OrderBy(s => s.Order).Select(s => s.OutboundOffsetMinutes!.Value));
-    }
-
-    [Fact]
-    public async Task Rerouting_an_outbound_trip_snapshots_the_new_route_in_outbound_order()
-    {
-        var original = CreateRoute("Thompson", "Leaf Rapids", "Lynn Lake");
-        var trip = AddTrip(original, TripDirection.Outbound);
-        var replacement = CreateRoute("Thompson", "Snow Lake", "Flin Flon");
-        _routes.Add(replacement);
-
-        var result = await Handler.Handle(EditCommand(trip, replacement.Id, "PO-OLD"), CancellationToken.None);
-
-        Assert.True(result.IsSuccess);
-        Assert.Equal("Thompson", trip.Origin);
-        Assert.Equal("Flin Flon", trip.Destination);
-        Assert.Equal(["Thompson", "Snow Lake", "Flin Flon"], Names(trip));
-    }
-
-    [Fact]
-    public async Task Rerouting_to_an_unknown_route_fails_without_saving()
-    {
-        var trip = AddTrip(CreateRoute("Thompson", "Lynn Lake"), TripDirection.Inbound);
-
-        var result = await Handler.Handle(EditCommand(trip, Guid.NewGuid(), "PO-NEW"), CancellationToken.None);
-
-        Assert.Equal(RouteErrors.NotFound, result.Error);
+        Assert.Equal(TripErrors.UseChangeRoute, result.Error);
+        Assert.Equal(original.Id, trip.RouteId);
+        Assert.Equal(before, trip.Stops);
+        Assert.Equal("PO-OLD", trip.PoNumber);
         Assert.Equal(0, _trips.SaveCount);
+    }
+
+    [Fact]
+    public async Task Detaching_a_catalogue_trip_to_free_form_is_also_a_route_change()
+    {
+        var trip = AddTrip(CreateRoute("Thompson", "Lynn Lake"), TripDirection.Outbound);
+
+        var result = await Handler.Handle(EditCommand(trip, routeId: null, "PO-NEW"), CancellationToken.None);
+
+        Assert.Equal(TripErrors.UseChangeRoute, result.Error);
+        Assert.Equal(0, _trips.SaveCount);
+    }
+
+    [Fact]
+    public async Task A_free_form_trip_still_edits_its_corridor_text()
+    {
+        var trip = Trip.Schedule(
+            TestPlanning.TenantId, "TR-2001", new DateOnly(2026, 7, 21), new TimeOnly(9, 0), null,
+            TripServiceType.Charter, routeId: null, "Charter run", "Thompson", "Gillam", [], 280,
+            scheduleTemplateId: null, roundTripKey: null, direction: null, isEmptyLeg: false,
+            clientId: null, clientName: null, poNumber: null,
+            TestPlanning.DriverId, TestPlanning.DriverName, TestPlanning.VehicleId, TestPlanning.VehicleUnit,
+            seatsCapacity: null, seatsMinimum: null).Value;
+        _trips.Add(trip);
+
+        var command = EditCommand(trip, routeId: null, "PO-1") with { Destination = "Churchill", DistanceKm = 400 };
+        var result = await Handler.Handle(command, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Null(trip.RouteId);
+        Assert.Equal("Churchill", trip.Destination);
+        Assert.Equal(400, trip.DistanceKm);
+    }
+
+    [Fact]
+    public async Task Attaching_a_catalogue_route_to_a_free_form_trip_goes_through_change_route()
+    {
+        var trip = Trip.Schedule(
+            TestPlanning.TenantId, "TR-2002", new DateOnly(2026, 7, 21), new TimeOnly(9, 0), null,
+            TripServiceType.Charter, routeId: null, "Charter run", "Thompson", "Gillam", [], 280,
+            scheduleTemplateId: null, roundTripKey: null, direction: null, isEmptyLeg: false,
+            clientId: null, clientName: null, poNumber: null,
+            TestPlanning.DriverId, TestPlanning.DriverName, TestPlanning.VehicleId, TestPlanning.VehicleUnit,
+            seatsCapacity: null, seatsMinimum: null).Value;
+        _trips.Add(trip);
+
+        var result = await Handler.Handle(EditCommand(trip, Guid.NewGuid(), "PO-1"), CancellationToken.None);
+
+        Assert.Equal(TripErrors.UseChangeRoute, result.Error);
     }
 }

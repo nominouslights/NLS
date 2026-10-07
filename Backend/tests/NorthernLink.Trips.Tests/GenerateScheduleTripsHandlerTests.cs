@@ -561,6 +561,9 @@ public class GenerateScheduleTripsHandlerTests
         public Task<bool> TryAddGeneratedAsync(IReadOnlyList<Trip> trips, CancellationToken cancellationToken = default) =>
             inner.TryAddGeneratedAsync(trips, cancellationToken);
 
+        public Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken = default) =>
+            inner.TrySaveChangesAsync(cancellationToken);
+
         public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
             inner.SaveChangesAsync(cancellationToken);
     }

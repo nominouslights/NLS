@@ -24,6 +24,7 @@ using NorthernLink.Trips.Application.Stops.SetActive;
 using NorthernLink.Trips.Application.Stops.Update;
 using NorthernLink.Trips.Application.Trips;
 using NorthernLink.Trips.Application.Trips.Assign;
+using NorthernLink.Trips.Application.Trips.ChangeRoute;
 using NorthernLink.Trips.Application.Trips.ChangeStatus;
 using NorthernLink.Trips.Application.Trips.CloseWithoutBilling;
 using NorthernLink.Trips.Application.Trips.Create;
@@ -73,6 +74,10 @@ internal static class TripPlanningEndpoints
         tripPlanning.MapPost("{id:guid}/merge-round-trip", MergeRoundTrip);
         tripPlanning.MapPost("{id:guid}/unpair-round-trip", UnpairRoundTrip);
         tripPlanning.MapPost("{id:guid}/deadhead-return", CreateDeadheadReturn);
+        // Route change: preview is a pure read (?routeId=), the POST re-checks and applies to
+        // the trip AND its paired leg in one save. PUT {id} refuses a different routeId.
+        tripPlanning.MapGet("{id:guid}/change-route/preview", PreviewTripRouteChange);
+        tripPlanning.MapPost("{id:guid}/change-route", ChangeTripRoute);
 
         // The driver-facing half: reading the board and advancing a trip's status from the cab.
         //
@@ -289,6 +294,41 @@ internal static class TripPlanningEndpoints
             request.SeatsMinimum);
 
         var result = await sender.Send(command, cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>
+    /// What moving the trip (and its paired leg) onto <paramref name="routeId"/> would do —
+    /// blockers, warnings needing acknowledgement, notices, and each leg's new oriented corridor.
+    /// 200 for any existing trip (problems are blockers in the body); 404 only for an unknown trip.
+    /// </summary>
+    private static async Task<IResult> PreviewTripRouteChange(
+        Guid id, Guid routeId, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(new PreviewTripRouteChangeQuery(id, routeId), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>
+    /// Moves a Scheduled trip and its paired leg onto another catalogue route. 204 on success;
+    /// the first blocker as its error otherwise; 409 <c>Trips.Trip.RouteChangeNeedsAcknowledgement</c>
+    /// when the preview had warnings and <c>acknowledgeWarnings</c> was not true.
+    /// </summary>
+    private static async Task<IResult> ChangeTripRoute(
+        Guid id, ChangeTripRouteRequest request, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(
+            new ChangeTripRouteCommand(id, request.RouteId, request.AcknowledgeWarnings), cancellationToken);
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
@@ -887,7 +927,11 @@ public sealed record CreateTripRequest(
     Guid? VehicleId,
     int? SeatsMinimum);
 
-/// <summary>Request body for PUT /api/trips/{id} — editable only while Scheduled.</summary>
+/// <summary>
+/// Request body for PUT /api/trips/{id} — editable only while Scheduled. <c>routeId</c> must be
+/// the trip's current one (409 <c>Trips.Trip.UseChangeRoute</c> otherwise); re-routing is
+/// POST /api/trips/{id}/change-route.
+/// </summary>
 public sealed record UpdateTripRequest(
     DateOnly ServiceDate,
     TimeOnly WindowStart,
@@ -905,6 +949,12 @@ public sealed record UpdateTripRequest(
     string? PoNumber,
     int? SeatsCapacity,
     int? SeatsMinimum);
+
+/// <summary>
+/// Request body for POST /api/trips/{id}/change-route. <c>acknowledgeWarnings</c> must be true
+/// when GET .../change-route/preview reported warnings (it may always be sent true).
+/// </summary>
+public sealed record ChangeTripRouteRequest(Guid RouteId, bool AcknowledgeWarnings = false);
 
 /// <summary>
 /// Request body for POST /api/trips/{id}/assign — null driverId unassigns; null vehicleId

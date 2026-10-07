@@ -132,4 +132,31 @@ internal sealed class TripRepository(TripsDbContext context) : ITripRepository
 
     public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
         context.SaveChangesAsync(cancellationToken);
+
+    public async Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await context.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // The transaction rolled back. Drop everything the tracker still holds (aggregates
+            // plus the journal/snapshot/outbox rows the audit pipeline staged) — the same
+            // cleanup BookeoImportRepository does — so a later save in this scope can't
+            // resurrect the half-applied change.
+            foreach (var entry in context.ChangeTracker.Entries().ToList())
+            {
+                if (entry.Entity is Shared.Kernel.AggregateRoot aggregate)
+                {
+                    aggregate.ClearDomainEvents();
+                }
+
+                entry.State = EntityState.Detached;
+            }
+
+            return false;
+        }
+    }
 }
