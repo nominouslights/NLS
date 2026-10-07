@@ -30,9 +30,12 @@ public class AmendInspectionResolutionTests
         var workOrderId = Guid.NewGuid();
 
         Assert.True(inspection.LinkWorkOrder(workOrderId).IsSuccess);
-        Assert.True(inspection
-            .ResolveDefect("Brakes", DefectResolutionReason.RepairedUnderWorkOrder, "new line fitted", "M. Cardinal", ResolvedAt)
-            .IsSuccess);
+
+        // RepairedUnderWorkOrder is reserved for work-order completion, so resolve it that way.
+        Assert.True(inspection.AssignDefectToWorkOrder("Brakes", workOrderId, generatedWorkOrderIsOpen: false).IsSuccess);
+        inspection.ResolveDefectUnderWorkOrder(
+            "Brakes", workOrderId, DefectResolutionReason.RepairedUnderWorkOrder, "new line fitted", "M. Cardinal", ResolvedAt);
+        Assert.True(inspection.FindDefect("Brakes")!.IsResolved);
 
         return (inspection, workOrderId);
     }

@@ -2007,6 +2007,8 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                             b1.Property<string>("Severity")
                                 .IsRequired();
 
+                            b1.Property<Guid?>("WorkOrderId");
+
                             b1.HasKey("VehicleInspectionId", "__synthesizedOrdinal");
 
                             b1.ToTable("vehicle_inspections", "fleet");
@@ -2144,6 +2146,42 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                         });
 
                     b.Navigation("PartsUsed");
+                });
+
+            modelBuilder.Entity("NorthernLink.Fleet.Domain.WorkOrders.WorkOrder", b =>
+                {
+                    b.OwnsMany("NorthernLink.Fleet.Domain.WorkOrders.WorkOrderDefectLine", "Defects", b1 =>
+                        {
+                            b1.Property<Guid>("WorkOrderId");
+
+                            b1.Property<int>("__synthesizedOrdinal")
+                                .ValueGeneratedOnAdd();
+
+                            b1.Property<Guid>("InspectionId");
+
+                            b1.Property<string>("Item")
+                                .IsRequired();
+
+                            b1.Property<string>("Note");
+
+                            b1.Property<string>("Outcome");
+
+                            b1.Property<string>("OutcomeNote");
+
+                            b1.Property<string>("Severity")
+                                .IsRequired();
+
+                            b1.HasKey("WorkOrderId", "__synthesizedOrdinal");
+
+                            b1.ToTable("work_orders", "fleet");
+
+                            b1.ToJson("defects");
+
+                            b1.WithOwner()
+                                .HasForeignKey("WorkOrderId");
+                        });
+
+                    b.Navigation("Defects");
                 });
 
             modelBuilder.Entity("NorthernLink.Fleet.Infrastructure.Persistence.ReadModels.MaintenancePlanReadModel", b =>
@@ -2327,6 +2365,8 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                             b1.Property<string>("Severity")
                                 .IsRequired();
 
+                            b1.Property<Guid?>("WorkOrderId");
+
                             b1.HasKey("VehicleInspectionReadModelId", "__synthesizedOrdinal");
 
                             b1.ToTable("rm_vehicle_inspections", "fleet");
@@ -2338,6 +2378,42 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                         });
 
                     b.Navigation("ChecklistItems");
+
+                    b.Navigation("Defects");
+                });
+
+            modelBuilder.Entity("NorthernLink.Fleet.Infrastructure.Persistence.ReadModels.WorkOrderReadModel", b =>
+                {
+                    b.OwnsMany("NorthernLink.Fleet.Domain.WorkOrders.WorkOrderDefectLine", "Defects", b1 =>
+                        {
+                            b1.Property<Guid>("WorkOrderReadModelId");
+
+                            b1.Property<int>("__synthesizedOrdinal")
+                                .ValueGeneratedOnAdd();
+
+                            b1.Property<Guid>("InspectionId");
+
+                            b1.Property<string>("Item")
+                                .IsRequired();
+
+                            b1.Property<string>("Note");
+
+                            b1.Property<string>("Outcome");
+
+                            b1.Property<string>("OutcomeNote");
+
+                            b1.Property<string>("Severity")
+                                .IsRequired();
+
+                            b1.HasKey("WorkOrderReadModelId", "__synthesizedOrdinal");
+
+                            b1.ToTable("rm_work_orders", "fleet");
+
+                            b1.ToJson("defects");
+
+                            b1.WithOwner()
+                                .HasForeignKey("WorkOrderReadModelId");
+                        });
 
                     b.Navigation("Defects");
                 });

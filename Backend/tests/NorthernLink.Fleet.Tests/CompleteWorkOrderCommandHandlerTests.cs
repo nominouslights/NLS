@@ -97,6 +97,26 @@ public class CompleteWorkOrderCommandHandlerTests
     }
 
     [Fact]
+    public async Task The_legacy_path_attributes_the_resolution_to_the_service_records_normalized_performer()
+    {
+        var (handler, workOrders, services, inspections) = Setup();
+        var vehicleId = Guid.NewGuid();
+        var workOrder = OpenWorkOrder(vehicleId, ["Brakes — Major: as found"]);
+        workOrders.Add(workOrder);
+
+        var inspection = TestInspections.PreTrip(vehicleId: vehicleId, defects: [Defect("Brakes")]);
+        Assert.True(inspection.LinkWorkOrder(workOrder.Id).IsSuccess);
+        inspections.Add(inspection);
+
+        var result = await handler.Handle(Command(workOrder.Id, performedBy: "  M. Cardinal  "), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        var service = Assert.Single(services.Records);
+        Assert.Equal("M. Cardinal", service.PerformedBy);
+        Assert.Equal(service.PerformedBy, inspection.Defects.Single().ResolvedBy);
+    }
+
+    [Fact]
     public async Task A_defect_already_resolved_by_hand_keeps_its_own_attribution()
     {
         var (handler, workOrders, _, inspections) = Setup();

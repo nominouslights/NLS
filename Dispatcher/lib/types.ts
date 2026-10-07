@@ -168,6 +168,16 @@ export interface WorkOrder {
   authorizedLimitCad?: number;
   budgetCode?: string;
   dateRequiredOrOos?: string;
+  /** The inspection defects this work order was raised against, as display
+   *  text (severity is its label, e.g. "Out-of-Service"). NL-WO-01 §5 prints
+   *  one row per defect line, ahead of the free-text line items. */
+  defectLines?: WorkOrderDefectLine[];
+}
+
+export interface WorkOrderDefectLine {
+  item: string;
+  severity: string;
+  note?: string;
 }
 
 /** A shop or partner the dispatcher registers once and reuses on work orders. */

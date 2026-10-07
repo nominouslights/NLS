@@ -12,7 +12,13 @@ import {
   type WorkOrderStatusWire,
 } from "@/lib/api/maintenance";
 import {
+  isVehicleDefectAttachable,
+  settledPendingWorkOrders,
+  type PendingWorkOrder,
+} from "@/lib/inspectionWorkOrder";
+import {
   DEFECT_RESOLUTION_LABEL,
+  DEFECT_RESOLUTION_META,
   DEFECT_SEVERITY_LABEL,
   DEFECT_SEVERITY_META,
   DEFECT_WO_KIND,
@@ -35,6 +41,11 @@ import RetiredKeyNote from "@/components/inspection/RetiredKeyNote";
 // WARN ONLY. There is deliberately no callback reporting "this vehicle has
 // defects" to a parent, so no mount point can grow into a block on trip
 // creation or vehicle assignment without a considered prop change.
+//
+// `onCreateWorkOrder` is an ACTION, not a report: when passed (the vehicle's
+// Open Defects tab only — never the trip detail), every open row with no open
+// work order gets a CREATE WORK ORDER button, plus a checkbox so several open
+// defects can go on one work order. A defect is on at most one open work order.
 
 /** Read models are projector-maintained on a 5s poll (Backend
  *  Shared/Persistence/Projections/ProjectionOptions.cs), so a defect resolved a
@@ -58,6 +69,9 @@ export default function DefectsPanel({
   showResolvedToggle = false,
   refreshKey = 0,
   onReReport,
+  onCreateWorkOrder,
+  pendingWorkOrders,
+  onPendingWorkOrdersSettled,
 }: {
   vehicleId: string | null;
   unit?: string | null;
@@ -68,7 +82,17 @@ export default function DefectsPanel({
   showResolvedToggle?: boolean;
   refreshKey?: number;
   onReReport?: (defect: VehicleDefectWire) => void;
+  /** Raise one work order against the given open, unattached rows (same vehicle). */
+  onCreateWorkOrder?: (rows: VehicleDefectWire[]) => void;
+  /** Rows (keyed `inspectionId:item`) a work order was just created for, while
+   *  the read model catches up — shown as "work order created", never re-offered. */
+  pendingWorkOrders?: ReadonlyMap<string, PendingWorkOrder>;
+  /** After every load, the pending marks that load settled (see
+   *  settledPendingWorkOrders) — the parent drops them. Reports only keys the
+   *  parent itself passed in, never "this vehicle has defects". */
+  onPendingWorkOrdersSettled?: (keys: string[]) => void;
 }) {
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [includeResolved, setIncludeResolved] = useState(false);
   const [reload, setReload] = useState(0);
   // Both the rows and any error are tagged with the vehicle they came from, so
@@ -80,6 +104,12 @@ export default function DefectsPanel({
   const [fetched, setFetched] = useState<{ vehicleId: string; rows: VehicleDefectWire[] } | null>(null);
   const [resolving, setResolving] = useState<VehicleDefectWire | null>(null);
   const reconcileTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The load effect must not re-run when the marks change, so it reads the
+  // latest marks and callback through a ref.
+  const pendingRef = useRef({ pendingWorkOrders, onPendingWorkOrdersSettled });
+  useEffect(() => {
+    pendingRef.current = { pendingWorkOrders, onPendingWorkOrdersSettled };
+  });
 
   useEffect(() => {
     // No vehicle on the trip yet — no request is issued at all.
@@ -90,6 +120,11 @@ export default function DefectsPanel({
         if (active) {
           setFetched({ vehicleId, rows });
           setLoadError(null);
+          const { pendingWorkOrders: marks, onPendingWorkOrdersSettled: settle } = pendingRef.current;
+          if (marks && settle) {
+            const settled = settledPendingWorkOrders(marks, rows, Date.now(), defectKey);
+            if (settled.length) settle(settled);
+          }
         }
       },
       (e) => {
@@ -129,6 +164,29 @@ export default function DefectsPanel({
   const hidden = rows === null ? 0 : rows.length - (shown?.length ?? 0);
 
   const heading = title ?? "Open defects";
+
+  const canCreate = (d: VehicleDefectWire) =>
+    !!onCreateWorkOrder && isVehicleDefectAttachable(d) && !pendingWorkOrders?.has(defectKey(d));
+  // Selection is derived against the CURRENT rows, so a stale key (another
+  // vehicle, a row since attached or resolved) silently drops out.
+  const selectedRows = (rows ?? []).filter((r) => selected.has(defectKey(r)) && canCreate(r));
+  const attachableCount = (shown ?? []).filter(canCreate).length;
+
+  function toggle(d: VehicleDefectWire) {
+    const key = defectKey(d);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function create(rowsToAttach: VehicleDefectWire[]) {
+    if (!onCreateWorkOrder || rowsToAttach.length === 0) return;
+    onCreateWorkOrder(rowsToAttach);
+    setSelected(new Set());
+  }
 
   const body = (
     <>
@@ -170,6 +228,21 @@ export default function DefectsPanel({
         <StatusChip kind="ontime" label={`No open defects${unit ? ` on ${unit}` : ""}`} />
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+          {onCreateWorkOrder && attachableCount > 1 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={dim}>
+                Tick several open defects to put them on one work order.
+              </span>
+              <ActionButton
+                variant="primary"
+                disabled={selectedRows.length === 0}
+                onClick={() => create(selectedRows)}
+                style={{ marginLeft: "auto", fontSize: 11.5, padding: "4px 10px" }}
+              >
+                CREATE WORK ORDER FOR {selectedRows.length} SELECTED
+              </ActionButton>
+            </div>
+          )}
           {shown.map((d) => (
             <DefectRow
               key={defectKey(d)}
@@ -177,6 +250,11 @@ export default function DefectsPanel({
               canResolve={canResolve}
               onResolve={() => setResolving(d)}
               onReReport={onReReport}
+              pendingWorkOrder={isVehicleDefectAttachable(d) && !!pendingWorkOrders?.has(defectKey(d))}
+              onCreateWorkOrder={canCreate(d) ? () => create([d]) : undefined}
+              selectable={canCreate(d) && attachableCount > 1}
+              selected={selected.has(defectKey(d))}
+              onToggle={() => toggle(d)}
             />
           ))}
           {hidden > 0 && (
@@ -233,15 +311,27 @@ function DefectRow({
   canResolve,
   onResolve,
   onReReport,
+  pendingWorkOrder = false,
+  onCreateWorkOrder,
+  selectable = false,
+  selected = false,
+  onToggle,
 }: {
   defect: VehicleDefectWire;
   canResolve: boolean;
   onResolve: () => void;
   onReReport?: (defect: VehicleDefectWire) => void;
+  pendingWorkOrder?: boolean;
+  onCreateWorkOrder?: () => void;
+  selectable?: boolean;
+  selected?: boolean;
+  onToggle?: () => void;
 }) {
   const meta = DEFECT_SEVERITY_META[d.severity] ?? DEFECT_SEVERITY_META.Major;
   const resolved = d.resolvedAtUtc !== null;
   const woStatus = d.workOrderStatus as WorkOrderStatusWire | null;
+  const resolutionMeta = DEFECT_RESOLUTION_META[d.resolutionReason as DefectResolutionReasonWire] ?? { kind: "ontime" as const };
+  const hasActions = (canResolve && !resolved) || (resolved && onReReport) || onCreateWorkOrder;
 
   return (
     <div
@@ -253,12 +343,23 @@ function DefectRow({
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+        {selectable && (
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggle}
+            aria-label={`Select ${d.item} for a work order`}
+            style={{ width: 16, height: 16, margin: 0, cursor: "pointer", accentColor: colors.blue }}
+          />
+        )}
         <StatusChip kind={meta.kind} glyph={meta.glyph} label={DEFECT_SEVERITY_LABEL[d.severity]} />
         <span style={{ fontFamily: fonts.body, fontSize: 13, fontWeight: 700, color: colors.headingBright }}>
           {d.item}
         </span>
         {d.tripNumber && <MonoTag color={colors.skyBlue}>{d.tripNumber}</MonoTag>}
-        {woStatus && d.workOrderNumber ? (
+        {pendingWorkOrder && !resolved ? (
+          <StatusChip kind="soon" label="Work order created · updating" />
+        ) : woStatus && d.workOrderNumber ? (
           <StatusChip
             kind={DEFECT_WO_KIND[woStatus] ?? "info"}
             label={`${d.workOrderNumber} · ${WO_STATUS_LABEL[woStatus] ?? woStatus}`}
@@ -266,8 +367,13 @@ function DefectRow({
         ) : (
           !resolved && <MonoTag>no work order</MonoTag>
         )}
-        {(canResolve && !resolved) || (resolved && onReReport) ? (
+        {hasActions ? (
           <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+            {onCreateWorkOrder && (
+              <ActionButton onClick={onCreateWorkOrder} style={{ fontSize: 11.5, padding: "4px 10px" }}>
+                CREATE WORK ORDER
+              </ActionButton>
+            )}
             {canResolve && !resolved && (
               <ActionButton onClick={onResolve} style={{ fontSize: 11.5, padding: "4px 10px" }}>
                 RESOLVE
@@ -304,7 +410,8 @@ function DefectRow({
       {resolved && (
         <div style={{ marginTop: 7 }}>
           <StatusChip
-            kind="ontime"
+            kind={resolutionMeta.kind}
+            glyph={resolutionMeta.glyph}
             label={`${reasonLabel(d.resolutionReason)} · ${d.resolvedBy ?? "Dispatch"} · ${formatUtcDate(d.resolvedAtUtc)}`}
           />
           {d.resolutionNote && <div style={{ ...dim, marginTop: 4 }}>{d.resolutionNote}</div>}
@@ -365,9 +472,10 @@ function reasonLabel(reason: string | null): string {
   return DEFECT_RESOLUTION_LABEL[reason as DefectResolutionReasonWire] ?? reason;
 }
 
-/** The three reasons a dispatcher may choose. RepairedUnderWorkOrder is absent
- *  deliberately: it is stamped by work-order completion, where a mechanic
- *  actually touched the truck, and picking it by hand would forge that. */
+/** The three reasons a dispatcher may choose. RepairedUnderWorkOrder and
+ *  NoFaultFound are absent deliberately: they are stamped by work-order
+ *  completion, where a mechanic actually touched the truck, and picking either
+ *  by hand would forge that. */
 const MANUAL_REASONS: DefectResolutionReasonWire[] = [
   "PreviouslyRepaired",
   "ReportedInError",

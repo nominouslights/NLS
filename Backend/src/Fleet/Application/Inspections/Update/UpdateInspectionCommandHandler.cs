@@ -12,8 +12,16 @@ namespace NorthernLink.Fleet.Application.Inspections.Update;
 /// check is needed: the record's <c>Type</c> and <c>TripNumber</c> are fixed. Timestamps are
 /// normalized to UTC exactly as on the enter path (Npgsql rejects a non-zero offset for
 /// <c>timestamp with time zone</c>).
+///
+/// While a defect is on an open work order the aggregate refuses (409, nothing saved) an amend
+/// that drops that defect's item or moves the report to another vehicle — see
+/// <see cref="VehicleInspection.Amend"/>. "On an open work order" includes the legacy hold of an
+/// open <c>GeneratedWorkOrderId</c> work order; that work order is another aggregate, so this
+/// handler loads it and passes whether it is open, and the aggregate applies the rule.
 /// </summary>
-public sealed class UpdateInspectionCommandHandler(IVehicleInspectionRepository repository)
+public sealed class UpdateInspectionCommandHandler(
+    IVehicleInspectionRepository repository,
+    IWorkOrderRepository workOrderRepository)
     : ICommandHandler<UpdateInspectionCommand>
 {
     public async Task<Result> Handle(UpdateInspectionCommand command, CancellationToken cancellationToken)
@@ -49,6 +57,16 @@ public sealed class UpdateInspectionCommandHandler(IVehicleInspectionRepository 
             })
             .ToList();
 
+        // A legacy whole-inspection work order (before per-defect links) holds this inspection's
+        // unresolved, unattached defects while it is open — exactly as on the create path, and
+        // judged the same way: it exists and is neither Completed nor Cancelled.
+        var generatedWorkOrderIsOpen = false;
+        if (inspection.GeneratedWorkOrderId is { } generatedWorkOrderId)
+        {
+            var generated = await workOrderRepository.GetByIdAsync(generatedWorkOrderId, cancellationToken);
+            generatedWorkOrderIsOpen = generated is { IsTerminal: false };
+        }
+
         var amendResult = inspection.Amend(
             command.Source,
             command.VehicleId,
@@ -72,6 +90,7 @@ public sealed class UpdateInspectionCommandHandler(IVehicleInspectionRepository 
             command.FuelAdded,
             command.FuelLitres,
             command.FuelCostCad,
+            generatedWorkOrderIsOpen,
             command.CertificationStatement,
             command.Location);
 

@@ -18,7 +18,9 @@ import {
   formatClock,
   formatDurationH,
   hosRemaining,
-  openDefects,
+  assignedVehicleOpenDefects as vehicleOpen,
+  openDefectWorkOrderText,
+  worstDefectKind,
 } from "@/lib/data";
 
 // The screen a driver opens on. Answers four questions without a tap: how many hours do I have
@@ -77,12 +79,21 @@ export default function Today({
           statusLabel={assignedVehicle.status}
           footnote={assignedVehicle.description}
         />
+        {/* Open = not resolved. A defect already on a work order is still open and still
+            counted here — the driver must see it before the pre-trip. Scoped to the assigned
+            vehicle: this tile answers "is anything wrong with what I am driving". */}
         <TouchTile
           label="Open defects"
-          value={String(openDefects.length)}
-          kind={openDefects.length === 0 ? "ontime" : "soon"}
-          statusLabel={openDefects.length === 0 ? "None" : "Reported"}
-          footnote={openDefects[0]?.item ?? "Nothing outstanding"}
+          value={String(vehicleOpen.length)}
+          kind={worstDefectKind(vehicleOpen)}
+          statusLabel={vehicleOpen.length === 0 ? "None" : "Open"}
+          footnote={
+            vehicleOpen[0]
+              ? vehicleOpen[0].workOrder
+                ? `${vehicleOpen[0].item} · ${openDefectWorkOrderText(vehicleOpen[0])}`
+                : vehicleOpen[0].item
+              : "Nothing outstanding"
+          }
         />
       </div>
 

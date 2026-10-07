@@ -26,10 +26,7 @@ public static class VehicleInspectionResponseMapper
             // fallback here rather than in four client apps is the whole point of the property.
             item.EffectiveState.ToString(),
             item.Note)).ToList(),
-        inspection.Defects.Select(defect => new InspectionDefectResponse(
-            defect.Item,
-            defect.Severity.ToString(),
-            defect.Note)).ToList(),
+        inspection.Defects.Select(InspectionDefectResponse.From).ToList(),
         inspection.Weather.Select(w => w.ToString()).ToList(),
         inspection.TemperatureC,
         inspection.RoadConditions.Select(r => r.ToString()).ToList(),

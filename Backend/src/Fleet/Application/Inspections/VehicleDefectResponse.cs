@@ -15,9 +15,9 @@ namespace NorthernLink.Fleet.Application.Inspections;
 /// <para><b>Resolution is final — there is no reopen.</b> All five resolution fields are null
 /// while the defect is open. A fault that comes back is a NEW defect on a later inspection, and
 /// <see cref="Recurrence"/> points at the earlier one that was cleared, so the original record
-/// stays intact. Completing a work order resolves EVERY unresolved defect on the inspection that
-/// generated it (one work order per inspection is the aggregate's rule), all of them attributed
-/// to that work order.</para>
+/// stays intact. Completing a work order resolves exactly the defects attached to it whose
+/// outcome was Repaired or NoFaultFound, each attributed to that work order; a Deferred one stays
+/// open and is released.</para>
 ///
 /// <para><b>No <c>since</c> or <c>limit</c> parameter, deliberately.</b> The most dangerous row
 /// is the oldest one — an out-of-service defect from fourteen months ago with no work order is
@@ -33,9 +33,11 @@ namespace NorthernLink.Fleet.Application.Inspections;
 /// <param name="Item">The other half of the row's key. Free text, as graded on the DVIR.</param>
 /// <param name="Severity">"Minor", "Major", or "OutOfService".</param>
 /// <param name="WorkOrderId">
-/// The inspection's work order whatever its status — "repair underway" context, present on open
-/// and resolved rows alike. A cancelled work order still shows here: the dispatcher should see
-/// that a repair was attempted and called off.
+/// Per defect: the open work order it is attached to, else the work order that resolved it, else
+/// (work orders created before per-defect links) the work order its inspection generated —
+/// whatever that work order's status. A legacy cancelled work order still shows here; a
+/// per-defect one releases its defects on cancel, so it no longer does.
+/// <see cref="WorkOrderNumber"/>/<see cref="WorkOrderStatus"/> describe this same work order.
 /// </param>
 /// <param name="ResolutionReason">A <c>DefectResolutionReason</c> name, or null while open.</param>
 /// <param name="Recurrence">

@@ -40,6 +40,70 @@ public static class InspectionErrors
         "Fleet.Inspection.DefectAlreadyResolved", "That defect has already been resolved.");
 
     /// <summary>
+    /// <see cref="DefectResolutionReason.RepairedUnderWorkOrder"/> and
+    /// <see cref="DefectResolutionReason.NoFaultFound"/> assert that a mechanic touched the truck
+    /// under a work order, so only work-order completion may set them. A dispatcher clearing a
+    /// defect by hand picks one of the other reasons.
+    /// </summary>
+    public static readonly Error ResolutionReasonReservedForWorkOrder = Error.Validation(
+        "Fleet.Inspection.ResolutionReasonReservedForWorkOrder",
+        "That resolution reason is set only by completing a work order — choose another reason to resolve the defect by hand.");
+
+    /// <summary>
+    /// A defect is on at most one active work order. Attaching it to a second one is refused
+    /// until the first completes (and defers it) or is cancelled.
+    /// </summary>
+    public static readonly Error DefectAlreadyOnWorkOrder = Error.Conflict(
+        "Fleet.Inspection.DefectAlreadyOnWorkOrder",
+        "That defect is already on an open work order.");
+
+    /// <summary>
+    /// A create request naming an inspection (the legacy whole-inspection form, with or without
+    /// explicit defects) found nothing to attach: every defect is resolved or already on a work
+    /// order — typically a double-submit. Refused so it never creates an empty, unlinked
+    /// inspection-sourced work order whose completion resolves nothing.
+    /// </summary>
+    public static readonly Error NoOpenDefectsToAttach = Error.Conflict(
+        "Fleet.Inspection.NoOpenDefectsToAttach",
+        "Every defect on this inspection is already resolved or on a work order.");
+
+    /// <summary>
+    /// A work order may only take defects reported against its own vehicle. An inspection with
+    /// no vehicle link (legacy, unit-only) matches when its unit equals the vehicle's unit
+    /// number — the same rule the defects panel uses to list it under that vehicle.
+    /// </summary>
+    public static readonly Error VehicleMismatch = Error.Validation(
+        "Fleet.Inspection.VehicleMismatch",
+        "That inspection was not recorded against this work order's vehicle.");
+
+    /// <summary>
+    /// Deleting an inspection while one of its defects is on an open work order would leave the
+    /// work order pointing at nothing. Complete or cancel the work order first.
+    /// </summary>
+    public static readonly Error DefectOnActiveWorkOrder = Error.Conflict(
+        "Fleet.Inspection.DefectOnActiveWorkOrder",
+        "A defect on this inspection is on an open work order — complete or cancel it first.");
+
+    /// <summary>
+    /// An amendment left out (or renamed) a defect that is on an open work order. Same code as
+    /// <see cref="DefectOnActiveWorkOrder"/> — it is the same conflict, reached by amending
+    /// rather than deleting — but the message names the item so the dispatcher knows which row
+    /// to put back, or which work order to complete, cancel, or defer it from first.
+    /// </summary>
+    public static Error AttachedDefectCannotBeDropped(string item) => Error.Conflict(
+        DefectOnActiveWorkOrder.Code,
+        $"The defect \"{item.Trim()}\" is on an open work order and cannot be removed from this inspection — complete or cancel the work order, or defer the defect, first.");
+
+    /// <summary>
+    /// An amendment would move this inspection to another vehicle (a different vehicle link, or
+    /// a different unit on a unit-only record) while one of its defects is on an open work
+    /// order — leaving that work order on one truck repairing another truck's defect.
+    /// </summary>
+    public static readonly Error VehicleChangeWithDefectOnActiveWorkOrder = Error.Conflict(
+        "Fleet.Inspection.VehicleChangeWithDefectOnActiveWorkOrder",
+        "This inspection cannot be moved to another vehicle while one of its defects is on an open work order — complete or cancel the work order, or defer the defect, first.");
+
+    /// <summary>
     /// Two defects on one inspection share an item. <c>Item</c> is the addressing key for
     /// resolution, so a duplicate would make both rows resolve together — rejected on entry and
     /// on amendment rather than left to corrupt the maintenance record.

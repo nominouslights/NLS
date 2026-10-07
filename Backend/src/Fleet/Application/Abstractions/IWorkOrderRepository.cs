@@ -16,6 +16,12 @@ public interface IWorkOrderRepository
 
     Task<bool> VehicleExistsAsync(Guid vehicleId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// The vehicle's unit number, or null when it does not exist — used to match a legacy
+    /// unit-only inspection (no vehicle link) to the work order's vehicle.
+    /// </summary>
+    Task<string?> FindVehicleUnitNumberAsync(Guid vehicleId, CancellationToken cancellationToken = default);
+
     void Add(WorkOrder workOrder);
 
     /// <summary>Next per-tenant sequence for WO-{seq} numbering.</summary>

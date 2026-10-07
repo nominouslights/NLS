@@ -9,7 +9,16 @@ import { StatusBanner } from "@/components/ui-tablet/StatusBanner";
 import { Screen, MockTag, Heading, CardRow, FieldLine, TabletChip, EmptyNote } from "./shared";
 import { enqueue } from "@/lib/sync/queue";
 import { severityGlyph } from "@/lib/inspectionGate";
-import { assignedVehicle, fuelEntries, vehicleDefects } from "@/lib/data";
+import {
+  assignedVehicle,
+  defectResolutionLabel,
+  defectResolutionText,
+  fuelEntries,
+  isDefectOpen,
+  openDefectWorkOrderText,
+  recentlyResolved,
+  vehicleDefects,
+} from "@/lib/data";
 
 // The narrow Fleet slice architecture §6 allows the Driver Field App: vehicle status and fault
 // reporting, nothing more. No work-order management, no PM scheduling, no parts — those belong
@@ -24,6 +33,8 @@ export default function Vehicle() {
   const [reported, setReported] = useState(false);
 
   const defects = vehicleDefects.filter((d) => d.vehicleId === assignedVehicle.id);
+  const open = defects.filter(isDefectOpen);
+  const resolved = recentlyResolved(defects);
 
   async function reportFault() {
     await enqueue("vehicle.fault", { vehicleId: assignedVehicle.id, note: faultNote });
@@ -99,11 +110,14 @@ export default function Vehicle() {
         </div>
       </Panel>
 
+      {/* Open = not resolved. A defect on a work order is still open ("On WO-2231") until the
+          work order's completion records Repaired or No fault found against it; a Deferred
+          outcome leaves it here too. */}
       <Heading right={<MockTag />}>Open defects</Heading>
-      {defects.length === 0 ? (
+      {open.length === 0 ? (
         <EmptyNote>Nothing outstanding on {assignedVehicle.unit}.</EmptyNote>
       ) : (
-        defects.map((d) => (
+        open.map((d) => (
           <CardRow key={d.id}>
             <div style={{ flex: "none", width: 130 }}>
               <span style={{ fontFamily: fonts.mono, fontSize: 15, color: colors.textDim }}>
@@ -118,12 +132,33 @@ export default function Vehicle() {
                   copy), so the glyph is what separates them — ✕ for out-of-service. Same
                   override, same reason, as the review step's severity chips. */}
               <TabletChip kind={d.dk} glyph={severityGlyph(d.severity)} label={d.severity} />
-              <span style={{ fontFamily: fonts.mono, fontSize: 14, color: colors.textDim, width: 90 }}>
-                {d.workOrder ?? "No WO"}
+              <span style={{ fontFamily: fonts.mono, fontSize: 14, color: colors.textDim, width: 120 }}>
+                {openDefectWorkOrderText(d)}
               </span>
             </div>
           </CardRow>
         ))
+      )}
+
+      {resolved.length > 0 && (
+        <>
+          <Heading right={<MockTag />}>Recently resolved</Heading>
+          {resolved.map((d) => (
+            <CardRow key={d.id}>
+              <div style={{ flex: "none", width: 130 }}>
+                <span style={{ fontFamily: fonts.mono, fontSize: 15, color: colors.textDim }}>
+                  {d.reportedOn}
+                </span>
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <FieldLine label={d.item} value={defectResolutionText(d)} />
+              </div>
+              <div style={{ flex: "none" }}>
+                <TabletChip kind="ontime" label={defectResolutionLabel(d)} />
+              </div>
+            </CardRow>
+          ))}
+        </>
       )}
 
       <Heading right={<MockTag />}>Fuel</Heading>

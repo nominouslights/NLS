@@ -87,8 +87,16 @@ export default function VehicleDetail({ tab, setTab, vehicleOptions, ...overview
       {tab === tabIndex("Preventive Maintenance") && (
         <VehiclePm vehicle={f} onOpenWorkOrders={() => setTab(tabIndex("Work Orders"))} />
       )}
-      {tab === tabIndex("Work Orders") && <VehicleWorkOrders vehicle={f} vehicles={vehicleOptions} />}
-      {tab === tabIndex("Open Defects") && <VehicleDefects vehicle={f} />}
+      {tab === tabIndex("Work Orders") && (
+        <VehicleWorkOrders
+          vehicle={f}
+          vehicles={vehicleOptions}
+          // runAction refetches the vehicle list after its fn; the status change
+          // itself already happened inside the close-work-order modal.
+          onVehicleChanged={() => overview.runAction(() => Promise.resolve())}
+        />
+      )}
+      {tab === tabIndex("Open Defects") && <VehicleDefects vehicle={f} vehicles={vehicleOptions} />}
       {tab === tabIndex("Inspections") && <VehicleInspections vehicle={f} vehicles={vehicleOptions} />}
 
       {/* DTC alerts (mock) */}

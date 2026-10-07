@@ -59,7 +59,7 @@ function item(over: Partial<InspectionChecklistItemWire> & { item: string }): In
 }
 
 function defect(over: Partial<InspectionDefectWire> & { item: string }): InspectionDefectWire {
-  return { severity: "Major", note: null, ...over };
+  return { severity: "Major", note: null, workOrderId: null, resolutionReason: null, resolvedAtUtc: null, ...over };
 }
 
 const NL02_CTX = { unit: "NL-02", mode: "PreTrip" as const, tripNumber: "NL-2026-0042" };

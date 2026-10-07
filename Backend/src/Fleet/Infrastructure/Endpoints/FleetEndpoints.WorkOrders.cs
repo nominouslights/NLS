@@ -62,7 +62,8 @@ public static partial class FleetEndpoints
             request.AuthorizedLimitCad,
             request.BudgetCode,
             request.DateRequiredOrOos,
-            request.InspectionId);
+            request.InspectionId,
+            request.Defects?.Select(d => new WorkOrderDefectRef(d.InspectionId, d.Item)).ToList() ?? []);
 
         var result = await sender.Send(command, cancellationToken);
         return result.IsSuccess
@@ -102,7 +103,10 @@ public static partial class FleetEndpoints
             request.PartsUsed ?? [],
             request.LaborHours,
             request.CostCad,
-            request.Notes);
+            request.Notes,
+            request.DefectOutcomes?
+                .Select(o => new WorkOrderDefectOutcome(o.InspectionId, o.Item ?? string.Empty, o.Outcome, o.Note))
+                .ToList() ?? []);
 
         var result = await sender.Send(command, cancellationToken);
         // result.Value is the resolving service record's id.
@@ -112,7 +116,12 @@ public static partial class FleetEndpoints
     }
 }
 
-/// <summary>Request body for POST /api/fleet/work-orders.</summary>
+/// <summary>
+/// Request body for POST /api/fleet/work-orders. <see cref="Defects"/> attaches each named
+/// inspection defect (open, unattached, same vehicle) to the new work order;
+/// <see cref="InspectionId"/> is the older whole-inspection form ("every open, unattached
+/// defect of that inspection"). Both optional; the union is attached.
+/// </summary>
 public sealed record CreateWorkOrderRequest(
     Guid VehicleId,
     string? Title,
@@ -127,12 +136,30 @@ public sealed record CreateWorkOrderRequest(
     decimal? AuthorizedLimitCad,
     string? BudgetCode,
     DateTimeOffset? DateRequiredOrOos,
-    Guid? InspectionId);
+    Guid? InspectionId,
+    IReadOnlyList<WorkOrderDefectInput>? Defects = null);
+
+/// <summary>One defect to attach, addressed by its inspection and item (a defect has no id).</summary>
+public sealed record WorkOrderDefectInput(Guid InspectionId, string? Item);
+
+/// <summary>
+/// The outcome for one defect line at completion. <see cref="Outcome"/> is "Repaired",
+/// "NoFaultFound" or "Deferred"; <see cref="Note"/> is required for Deferred.
+/// </summary>
+public sealed record WorkOrderDefectOutcomeInput(
+    Guid InspectionId,
+    string? Item,
+    DefectRepairOutcome Outcome,
+    string? Note);
 
 /// <summary>Request body for POST /api/fleet/work-orders/{id}/status.</summary>
 public sealed record ChangeWorkOrderStatusRequest(WorkOrderStatus Status);
 
-/// <summary>Request body for POST /api/fleet/work-orders/{id}/complete (logs the resolving service).</summary>
+/// <summary>
+/// Request body for POST /api/fleet/work-orders/{id}/complete (logs the resolving service).
+/// <see cref="DefectOutcomes"/> needs exactly one entry per defect line when the work order has
+/// lines, and must be empty/omitted when it has none.
+/// </summary>
 public sealed record CompleteWorkOrderRequest(
     DateTimeOffset? Date,
     string? PerformedBy,
@@ -143,4 +170,5 @@ public sealed record CompleteWorkOrderRequest(
     IReadOnlyList<ServicePartInput>? PartsUsed,
     decimal? LaborHours,
     decimal? CostCad,
-    string? Notes);
+    string? Notes,
+    IReadOnlyList<WorkOrderDefectOutcomeInput>? DefectOutcomes = null);

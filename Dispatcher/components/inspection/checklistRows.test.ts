@@ -26,7 +26,16 @@ import {
 // one rev 3 retired (and so is known, with a replacement) or one nobody has ever
 // seen. Rebuilding would drop the old answers and, on save, overwrite the record.
 
-function inspection(checklist: InspectionChecklistItemWire[], defects: InspectionDefectWire[] = []): VehicleInspection {
+type DefectFixture = Pick<InspectionDefectWire, "item" | "severity" | "note"> & Partial<InspectionDefectWire>;
+
+function inspection(checklist: InspectionChecklistItemWire[], defectFixtures: DefectFixture[] = []): VehicleInspection {
+  // Open and unattached unless a test says otherwise.
+  const defects: InspectionDefectWire[] = defectFixtures.map((d) => ({
+    workOrderId: null,
+    resolutionReason: null,
+    resolvedAtUtc: null,
+    ...d,
+  }));
   return {
     id: "insp-1",
     type: "PreTrip",

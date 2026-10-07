@@ -1,3 +1,4 @@
+using NorthernLink.Fleet.Domain.Inspections;
 using NorthernLink.Fleet.Domain.WorkOrders.Events;
 using NorthernLink.Shared.Kernel;
 
@@ -5,7 +6,7 @@ namespace NorthernLink.Fleet.Domain.WorkOrders;
 
 /// <summary>
 /// A maintenance work order for a vehicle — the NL-WO-01 form's data. Created manually or
-/// from an inspection's defects; advances through a status lifecycle and closes by logging
+/// from inspection defects; advances through a status lifecycle and closes by logging
 /// the service that resolved it (<see cref="ResolvingServiceId"/>). <see cref="Number"/>
 /// (WO-…) is the business key printed on the form.
 /// </summary>
@@ -41,6 +42,17 @@ public sealed class WorkOrder : AggregateRoot, ITenantScoped
     public string? BudgetCode { get; private set; }
     public DateTimeOffset? DateRequiredOrOos { get; private set; }
 
+    /// <summary>
+    /// The inspection defects this work order was raised against — fixed at creation (no
+    /// add/remove afterwards), each given an outcome at completion. Empty on a manual work order
+    /// and on every work order created before per-defect links existed: the "legacy" path, whose
+    /// completion still matches <see cref="LineItems"/> against the generating inspection.
+    /// </summary>
+    public List<WorkOrderDefectLine> Defects { get; private set; } = [];
+
+    /// <summary>True when this work order carries per-defect links (see <see cref="Defects"/>).</summary>
+    public bool HasDefectLines => Defects.Count > 0;
+
     public bool IsTerminal => Status is WorkOrderStatus.Completed or WorkOrderStatus.Cancelled;
 
     public static Result<WorkOrder> Create(
@@ -59,11 +71,40 @@ public sealed class WorkOrder : AggregateRoot, ITenantScoped
         Guid? shopId,
         decimal? authorizedLimitCad,
         string? budgetCode,
-        DateTimeOffset? dateRequiredOrOos)
+        DateTimeOffset? dateRequiredOrOos,
+        IReadOnlyList<WorkOrderDefectLine>? defects = null)
     {
         if (string.IsNullOrWhiteSpace(title))
         {
             return Result.Failure<WorkOrder>(WorkOrderErrors.TitleRequired);
+        }
+
+        if ((defects ?? []).Any(d => string.IsNullOrWhiteSpace(d.Item)))
+        {
+            return Result.Failure<WorkOrder>(WorkOrderErrors.DefectItemRequired);
+        }
+
+        var lines = (defects ?? [])
+            .Select(d => d with
+            {
+                Item = d.Item.Trim(),
+                Note = string.IsNullOrWhiteSpace(d.Note) ? null : d.Note.Trim(),
+                // Outcomes are recorded only by Complete — never accepted at creation.
+                Outcome = null,
+                OutcomeNote = null,
+            })
+            .ToList();
+
+        // (InspectionId, Item) is the line's key — the same address the defect has on its
+        // inspection — so two lines for one defect would make its outcome ambiguous.
+        var distinct = lines
+            .Select(l => (l.InspectionId, Item: l.Item.ToUpperInvariant()))
+            .Distinct()
+            .Count();
+
+        if (distinct != lines.Count)
+        {
+            return Result.Failure<WorkOrder>(WorkOrderErrors.DuplicateDefect);
         }
 
         var workOrder = new WorkOrder
@@ -86,6 +127,7 @@ public sealed class WorkOrder : AggregateRoot, ITenantScoped
             AuthorizedLimitCad = authorizedLimitCad,
             BudgetCode = string.IsNullOrWhiteSpace(budgetCode) ? null : budgetCode.Trim(),
             DateRequiredOrOos = dateRequiredOrOos,
+            Defects = lines,
         };
 
         workOrder.Raise(new WorkOrderCreatedDomainEvent(workOrder.Id, vehicleId, tenantId));
@@ -112,19 +154,110 @@ public sealed class WorkOrder : AggregateRoot, ITenantScoped
         return Result.Success();
     }
 
-    /// <summary>Closes the work order, recording the service that resolved it.</summary>
-    public Result Complete(Guid resolvingServiceId)
+    /// <summary>
+    /// Closes the work order, recording the service that resolved it.
+    ///
+    /// A work order WITH defect lines needs exactly one outcome per line
+    /// (<see cref="WorkOrderErrors.DefectOutcomeMissing"/>), none for anything that is not a line
+    /// (<see cref="WorkOrderErrors.UnknownDefectOutcome"/>), a note on every Deferred one
+    /// (<see cref="WorkOrderErrors.DeferredNoteRequired"/>), and never Deferred for an
+    /// OutOfService defect (<see cref="WorkOrderErrors.OutOfServiceCannotBeDeferred"/>). The
+    /// outcomes are recorded on the lines; what they do to the inspections is the handler's job.
+    ///
+    /// "OutOfService" means the defect's CURRENT severity on its inspection, supplied by
+    /// <paramref name="currentSeverity"/> (returning null when the defect no longer exists there):
+    /// an inspection amended after the work order was raised can make a defect worse — or
+    /// better — than the line's creation-time snapshot, and the rule must follow the live safety
+    /// record, not what the work order happened to say. With no current severity (the defect or
+    /// its inspection is gone, or no lookup was given) the snapshot is used. The severity the rule
+    /// was judged against is written back onto the line, so a completed work order never reads as
+    /// "OutOfService — Deferred", nor hides an escalation behind a stale "Minor".
+    ///
+    /// A work order WITHOUT lines (manual, or legacy) completes exactly as before and accepts no
+    /// outcomes. Completion never changes the vehicle's status.
+    /// </summary>
+    public Result Complete(
+        Guid resolvingServiceId,
+        IReadOnlyList<WorkOrderDefectOutcome>? outcomes = null,
+        Func<WorkOrderDefectLine, InspectionDefectSeverity?>? currentSeverity = null)
     {
         if (IsTerminal)
         {
             return Result.Failure(WorkOrderErrors.Terminal);
         }
 
+        var recorded = RecordOutcomes(outcomes ?? [], currentSeverity);
+        if (recorded.IsFailure)
+        {
+            return Result.Failure(recorded.Error);
+        }
+
+        Defects = recorded.Value;
         Status = WorkOrderStatus.Completed;
         CompletedAt = DateTimeOffset.UtcNow;
         ResolvingServiceId = resolvingServiceId;
 
         Raise(new WorkOrderCompletedDomainEvent(Id, resolvingServiceId));
         return Result.Success();
+    }
+
+    /// <summary>Validates <paramref name="outcomes"/> against the lines and returns a copy of the lines with outcomes recorded. Mutates nothing.</summary>
+    private Result<List<WorkOrderDefectLine>> RecordOutcomes(
+        IReadOnlyList<WorkOrderDefectOutcome> outcomes,
+        Func<WorkOrderDefectLine, InspectionDefectSeverity?>? currentSeverity)
+    {
+        var lines = new List<WorkOrderDefectLine>(Defects);
+        var given = new WorkOrderDefectOutcome?[lines.Count];
+
+        foreach (var outcome in outcomes)
+        {
+            // JsonStringEnumConverter still admits raw numbers, so an out-of-range integer
+            // would otherwise reach the jsonb as a name that does not exist.
+            if (!Enum.IsDefined(outcome.Outcome))
+            {
+                return Result.Failure<List<WorkOrderDefectLine>>(WorkOrderErrors.InvalidDefectOutcome);
+            }
+
+            var index = lines.FindIndex(l => l.Addresses(outcome.InspectionId, outcome.Item));
+            if (index < 0)
+            {
+                return Result.Failure<List<WorkOrderDefectLine>>(WorkOrderErrors.UnknownDefectOutcome);
+            }
+
+            if (given[index] is not null)
+            {
+                return Result.Failure<List<WorkOrderDefectLine>>(WorkOrderErrors.DuplicateDefectOutcome);
+            }
+
+            given[index] = outcome;
+        }
+
+        for (var i = 0; i < lines.Count; i++)
+        {
+            if (given[i] is not { } outcome)
+            {
+                return Result.Failure<List<WorkOrderDefectLine>>(WorkOrderErrors.DefectOutcomeMissing);
+            }
+
+            var note = string.IsNullOrWhiteSpace(outcome.Note) ? null : outcome.Note.Trim();
+            var severity = currentSeverity?.Invoke(lines[i]) ?? lines[i].Severity;
+
+            if (outcome.Outcome == DefectRepairOutcome.Deferred)
+            {
+                if (severity == InspectionDefectSeverity.OutOfService)
+                {
+                    return Result.Failure<List<WorkOrderDefectLine>>(WorkOrderErrors.OutOfServiceCannotBeDeferred);
+                }
+
+                if (note is null)
+                {
+                    return Result.Failure<List<WorkOrderDefectLine>>(WorkOrderErrors.DeferredNoteRequired);
+                }
+            }
+
+            lines[i] = lines[i] with { Severity = severity, Outcome = outcome.Outcome, OutcomeNote = note };
+        }
+
+        return Result.Success(lines);
     }
 }
