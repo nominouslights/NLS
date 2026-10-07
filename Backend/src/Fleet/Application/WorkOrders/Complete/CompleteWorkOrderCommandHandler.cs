@@ -8,7 +8,7 @@ namespace NorthernLink.Fleet.Application.WorkOrders.Complete;
 
 /// <summary>
 /// Logs the service record that resolved the work order and closes it — and, when the work order
-/// came from a DVIR, clears that DVIR's defects. Completion is the only point that asserts a
+/// came from a DVIR, clears the defects of that DVIR it covers. Completion is the only point that asserts a
 /// mechanic actually touched the truck: creating or starting a work order shows as "repair
 /// underway" on the defects panel but leaves every defect open.
 /// </summary>
@@ -69,14 +69,22 @@ public sealed class CompleteWorkOrderCommandHandler(
             return Result.Failure<Guid>(completeResult.Error);
         }
 
-        // The repair is now evidence, so the defects it was raised against stop being open. No
-        // source inspection is the normal case for a directly-raised work order, not an error.
+        // The repair is now evidence, so the defects it was raised against stop being open — only
+        // those its line items name, since a per-item work order covers one defect of several
+        // (null coverage = unrecognisable line items = every open defect, the legacy behaviour).
+        // No source inspection is the normal case for a directly-raised work order, not an error.
         // Already-resolved defects are skipped inside the aggregate, so this is idempotent.
         var sourceInspection = await inspectionRepository.GetByGeneratedWorkOrderIdAsync(
             workOrder.Id, cancellationToken);
 
-        sourceInspection?.ResolveDefectsForWorkOrder(
-            workOrder.Id, command.PerformedBy, DateTimeOffset.UtcNow);
+        if (sourceInspection is not null)
+        {
+            sourceInspection.ResolveDefectsForWorkOrder(
+                workOrder.Id,
+                command.PerformedBy,
+                DateTimeOffset.UtcNow,
+                sourceInspection.DefectItemsCoveredBy(workOrder.LineItems));
+        }
 
         // All three aggregates live on the same scoped DbContext — one save commits together,
         // the same pattern CreateWorkOrderCommandHandler uses for LinkWorkOrder.

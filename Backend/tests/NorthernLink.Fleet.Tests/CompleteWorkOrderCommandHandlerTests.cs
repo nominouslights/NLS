@@ -41,7 +41,7 @@ public class CompleteWorkOrderCommandHandlerTests
             workOrders, services, inspections);
     }
 
-    private static WorkOrder OpenWorkOrder(Guid vehicleId) =>
+    private static WorkOrder OpenWorkOrder(Guid vehicleId, IReadOnlyList<string>? lineItems = null) =>
         WorkOrder.Create(
             TestVehicles.TenantId,
             vehicleId,
@@ -55,7 +55,7 @@ public class CompleteWorkOrderCommandHandlerTests
             createdBy: "Dispatch",
             assignedTo: null,
             dueDate: null,
-            lineItems: ["Brakes — Major"],
+            lineItems: lineItems ?? ["Brakes — Major"],
             shopId: null,
             authorizedLimitCad: null,
             budgetCode: null,
@@ -69,7 +69,8 @@ public class CompleteWorkOrderCommandHandlerTests
     {
         var (handler, workOrders, services, inspections) = Setup();
         var vehicleId = Guid.NewGuid();
-        var workOrder = OpenWorkOrder(vehicleId);
+        // Built from every defect, as the Dispatcher's "Create work order" (all defects) does.
+        var workOrder = OpenWorkOrder(vehicleId, ["Brakes — Major: as found", "Defroster — Major: as found"]);
         workOrders.Add(workOrder);
 
         var inspection = TestInspections.PreTrip(
@@ -122,6 +123,101 @@ public class CompleteWorkOrderCommandHandlerTests
 
         var brakes = inspection.Defects.Single(d => d.Item == "Brakes");
         Assert.Equal(DefectResolutionReason.RepairedUnderWorkOrder, brakes.ResolutionReason);
+    }
+
+    /// <summary>Links <paramref name="workOrder"/> to a fresh 3-defect inspection and completes it.</summary>
+    private static async Task<VehicleInspection> CompleteAgainstThreeDefectInspection(WorkOrder workOrder)
+    {
+        var (handler, workOrders, _, inspections) = Setup();
+        workOrders.Add(workOrder);
+
+        var inspection = TestInspections.PreTrip(
+            vehicleId: workOrder.VehicleId,
+            defects: [Defect("Brakes"), Defect("Defroster"), Defect("Wipers")]);
+        Assert.True(inspection.LinkWorkOrder(workOrder.Id).IsSuccess);
+        inspections.Add(inspection);
+
+        var result = await handler.Handle(Command(workOrder.Id), CancellationToken.None);
+        Assert.True(result.IsSuccess);
+        return inspection;
+    }
+
+    [Fact]
+    public async Task A_work_order_built_for_one_defect_resolves_only_that_defect()
+    {
+        // Regression: the per-item "Create work order" builds a single line item, yet completing
+        // it used to stamp every defect on the inspection as repaired.
+        var workOrder = OpenWorkOrder(Guid.NewGuid(), ["Defroster — Major: as found"]);
+
+        var inspection = await CompleteAgainstThreeDefectInspection(workOrder);
+
+        var defroster = inspection.Defects.Single(d => d.Item == "Defroster");
+        Assert.Equal(DefectResolutionReason.RepairedUnderWorkOrder, defroster.ResolutionReason);
+        Assert.Equal(workOrder.Id, defroster.ResolvedByWorkOrderId);
+
+        Assert.False(inspection.Defects.Single(d => d.Item == "Brakes").IsResolved);
+        Assert.False(inspection.Defects.Single(d => d.Item == "Wipers").IsResolved);
+
+        // The siblings are still open in the ordinary sense — a dispatcher can clear them by hand.
+        Assert.True(inspection
+            .ResolveDefect("Wipers", DefectResolutionReason.PreviouslyRepaired, null, "Dispatch", DateTimeOffset.UtcNow)
+            .IsSuccess);
+        Assert.False(inspection.Defects.Single(d => d.Item == "Brakes").IsResolved);
+    }
+
+    [Fact]
+    public async Task A_work_order_built_from_every_defect_resolves_them_all()
+    {
+        var workOrder = OpenWorkOrder(
+            Guid.NewGuid(),
+            ["Brakes — Major: as found", "Defroster — Major: as found", "Wipers — Major: as found"]);
+
+        var inspection = await CompleteAgainstThreeDefectInspection(workOrder);
+
+        Assert.All(inspection.Defects, d =>
+        {
+            Assert.Equal(DefectResolutionReason.RepairedUnderWorkOrder, d.ResolutionReason);
+            Assert.Equal(workOrder.Id, d.ResolvedByWorkOrderId);
+        });
+    }
+
+    [Fact]
+    public async Task A_work_order_whose_line_items_name_no_defect_resolves_them_all_as_before()
+    {
+        // A manually written work order (or one whose line items were rewritten) gives no
+        // per-defect signal — keep the legacy whole-inspection behaviour rather than resolving
+        // nothing.
+        var workOrder = OpenWorkOrder(Guid.NewGuid(), ["Replace brake line", "Inspect cab heater"]);
+
+        var inspection = await CompleteAgainstThreeDefectInspection(workOrder);
+
+        Assert.All(inspection.Defects, d =>
+            Assert.Equal(DefectResolutionReason.RepairedUnderWorkOrder, d.ResolutionReason));
+    }
+
+    [Fact]
+    public async Task A_one_defect_work_order_whose_defect_was_cleared_by_hand_resolves_nothing_else()
+    {
+        // Coverage is decided against every defect, resolved or not — otherwise a cleared
+        // target would fall back to "resolve all" and sweep its siblings.
+        var (handler, workOrders, _, inspections) = Setup();
+        var vehicleId = Guid.NewGuid();
+        var workOrder = OpenWorkOrder(vehicleId, ["Brakes — Major: as found"]);
+        workOrders.Add(workOrder);
+
+        var inspection = TestInspections.PreTrip(
+            vehicleId: vehicleId, defects: [Defect("Brakes"), Defect("Defroster")]);
+        Assert.True(inspection.LinkWorkOrder(workOrder.Id).IsSuccess);
+        Assert.True(inspection
+            .ResolveDefect("Brakes", DefectResolutionReason.PreviouslyRepaired, null, "Dispatch", DateTimeOffset.UtcNow)
+            .IsSuccess);
+        inspections.Add(inspection);
+
+        var result = await handler.Handle(Command(workOrder.Id), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("Dispatch", inspection.Defects.Single(d => d.Item == "Brakes").ResolvedBy);
+        Assert.False(inspection.Defects.Single(d => d.Item == "Defroster").IsResolved);
     }
 
     [Fact]

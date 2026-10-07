@@ -435,22 +435,9 @@ public static partial class BookeoImportPlanner
         }
     }
 
-    public static List<RouteStop> OrientedStops(Route route, TripDirection? direction)
-    {
-        var outbound = route.Stops.OrderBy(s => s.Order).ToList();
-        if (direction != TripDirection.Inbound)
-        {
-            return outbound;
-        }
-
-        // Same reversal as generation and deadhead returns: only Order is re-sequenced, both
-        // timetable offsets stay attached to their own stop.
-        return outbound
-            .AsEnumerable()
-            .Reverse()
-            .Select((stop, index) => stop with { Order = index })
-            .ToList();
-    }
+    /// <summary>Same orientation as generation and deadhead returns (<see cref="RouteStop.OrientedFor"/>).</summary>
+    public static List<RouteStop> OrientedStops(Route route, TripDirection? direction) =>
+        RouteStop.OrientedFor(route.Stops, direction);
 
     private readonly record struct StopRef(Guid? StopId, string? Name);
 
