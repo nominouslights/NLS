@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  addNewDefect,
   certifiedToday,
   discardDraft,
   draftKey,
@@ -11,24 +12,28 @@ import {
   INSPECTION_STORE_VERSION,
   markSectionOk,
   recordCertification,
+  removeNewDefect,
   setAnswer,
   setDefect,
   setLocation,
+  setNewDefectsFound,
   setNote,
   setOdometer,
   setStep,
   startDraft,
   storageFailed,
+  updateNewDefect,
   type InspectionDraft,
   type LocalCertification,
 } from "./inspectionStore";
 import { today } from "./data";
-import { itemsFor, NL_PTI_01, RETIRED_KEYS } from "./inspectionForm";
+import { itemsFor, NL_PTI_01, RETIRED_KEYS, WITHDRAWN_KEYS } from "./inspectionForm";
 
 // The DVIR draft store.
 //
-// What is being protected here is a driver's whole NL-PTI-01 walk-around — 28 to 64 answers
-// depending on the unit and the half of the form — and the honesty of a compliance record.
+// What is being protected here is a driver's whole NL-PTI-01 walk-around — 53 to 64 answers on
+// a pre-trip, and on a post-trip the six Close-Out answers plus the new defects found since the
+// pre-trip (rev 4) — and the honesty of a compliance record.
 // Every test below is a failure mode somebody would otherwise hit in a vehicle: yesterday's
 // pre-trip resuming into today's certification, a vehicle reassignment silently re-attributing
 // answers, a retired form row resurrecting from storage into a payload, or storage quietly
@@ -48,12 +53,15 @@ const ITEM_B = NL01_PRE[1].items[0].key;
 /** Keys on each half of the form, for any unit — what the store's per-mode filter keeps. */
 const PRE_KEYS = itemsFor(null, "PreTrip").flatMap((g) => g.items.map((i) => i.key));
 const POST_KEYS = itemsFor(null, "PostTrip").flatMap((g) => g.items.map((i) => i.key));
-/** A real post-trip row ("Defects noticed while driving" is the rev 2 one). */
-const POST_ITEM = "Defects noticed while driving";
-/** A row rev 2 moved OFF the post-trip: on the pre-trip, no longer on the post-trip. */
-const PRE_ONLY = PRE_KEYS.find((k) => !POST_KEYS.includes(k)) as string;
-/** A row that is on BOTH halves. */
-const BOTH = PRE_KEYS.find((k) => POST_KEYS.includes(k)) as string;
+/** A real post-trip row — since rev 4 that means a Close-Out row. */
+const POST_ITEM = POST_KEYS[0];
+/** The rev 2 post-trip's en-route row, WITHDRAWN in rev 4 with no replacement. */
+const WITHDRAWN = "Defects noticed while driving";
+/**
+ * A row that rev 2 and rev 3 asked on BOTH halves and rev 4 made pre-trip-only — a stale
+ * post-trip draft's likeliest leftover. "Tire condition" was a "Both" row through rev 3.
+ */
+const FORMER_BOTH = "Tire condition";
 
 function seed(key: string, value: unknown): void {
   window.localStorage.setItem(key, JSON.stringify(value));
@@ -71,6 +79,8 @@ function validDraft(over: Partial<InspectionDraft> = {}): InspectionDraft {
     defects: {},
     odometerKm: 184_930,
     location: "Lynn Lake",
+    newDefectsFound: null,
+    newDefects: [],
     stepId: `check:${ITEM_A}`,
     ...over,
   };
@@ -84,6 +94,7 @@ const certification: LocalCertification = {
   certifiedAt: `${today}T06:12:00.000Z`,
   result: "Pass",
   defectCount: 0,
+  defectItems: [],
   outOfService: false,
 };
 
@@ -255,11 +266,29 @@ describe("draft rejection", () => {
     // Rev 2 moved rows between the halves and added the location. No key was renamed, so a v2
     // draft would LOAD — and that is the reason for discarding it rather than trusting the key
     // filter alone: it is answers to a different revision of a legal form.
-    expect(INSPECTION_STORE_VERSION).toBe(3);
     seed(draftKey("PostTrip", "VEH-11"), validDraft({ v: 2, mode: "PostTrip" }));
 
     expect(getDraft("PostTrip", "VEH-11")).toBeNull();
     expect(window.localStorage.getItem(draftKey("PostTrip", "VEH-11"))).toBeNull();
+  });
+
+  it("discards a v3 draft — rev 2/3's re-check post-trip — on BOTH halves", () => {
+    // Rev 4 made every vehicle row pre-trip-only, withdrew "Defects noticed while driving" and
+    // gave the post-trip its new-defects answer. Same reasoning as v2 → v3: rows moved between
+    // the halves and the shape grew, so a v3 draft is answers to a different revision. The
+    // pre-trip's rows did not change, but one version covers the store — it is discarded too,
+    // not selectively kept.
+    expect(INSPECTION_STORE_VERSION).toBe(4);
+    seed(
+      draftKey("PostTrip", "VEH-11"),
+      validDraft({ v: 3, mode: "PostTrip", answers: { [FORMER_BOTH]: "pass", [WITHDRAWN]: "na" } }),
+    );
+    seed(draftKey("PreTrip", "VEH-11"), validDraft({ v: 3 }));
+
+    expect(getDraft("PostTrip", "VEH-11")).toBeNull();
+    expect(getDraft("PreTrip", "VEH-11")).toBeNull();
+    expect(window.localStorage.getItem(draftKey("PostTrip", "VEH-11"))).toBeNull();
+    expect(window.localStorage.getItem(draftKey("PreTrip", "VEH-11"))).toBeNull();
   });
 
   it("discards yesterday's draft, and removes the key", () => {
@@ -305,25 +334,38 @@ describe("draft rejection", () => {
     expect(draft?.defects).toEqual({});
   });
 
+  it("shares no key between the two halves of the form since rev 4", () => {
+    // The premise of the next test, pinned on its own: the post-trip checklist is Close-Out
+    // alone, so a post-trip draft may hold nothing a pre-trip asks — and a new defect, which is
+    // filed against a PRE-trip key, can never collide with a Close-Out checklist defect.
+    expect(POST_KEYS.length).toBeGreaterThan(0);
+    for (const key of POST_KEYS) expect(PRE_KEYS).not.toContain(key);
+    expect(PRE_KEYS).toContain(FORMER_BOTH);
+    expect(WITHDRAWN_KEYS.has(WITHDRAWN)).toBe(true);
+  });
+
   it("drops every answer, note and defect for a row not on THIS half of the form", () => {
-    // THE stale-draft case: a post-trip draft holding rows that rev 2 moved to the pre-trip
-    // only. They are in the catalogue, so the catalogue-wide check alone would keep them, and a
-    // graded defect among them would be filed on a post-trip that never asked the question.
-    expect(PRE_ONLY).toBeTruthy();
-    expect(BOTH).toBeTruthy();
+    // THE stale-draft case, even at the current version (a bump is the first line, this filter
+    // the second): a post-trip draft holding a row rev 4 made pre-trip-only, and the withdrawn
+    // en-route row. Both are known strings, so a catalogue-wide check alone would keep the
+    // first — and a graded defect on it would be filed as a CHECKLIST row on a post-trip that
+    // no longer asks the question.
     seed(
       draftKey("PostTrip", "VEH-11"),
       validDraft({
         mode: "PostTrip",
-        answers: { [PRE_ONLY]: "defect", [BOTH]: "pass", [POST_ITEM]: "na" },
-        notes: { [PRE_ONLY]: "from the old post-trip", [BOTH]: "ok" },
-        defects: { [PRE_ONLY]: { severity: "Major", note: "from the old post-trip" } },
+        answers: { [FORMER_BOTH]: "defect", [WITHDRAWN]: "defect", [POST_ITEM]: "na" },
+        notes: { [FORMER_BOTH]: "from the old post-trip", [POST_ITEM]: "ok" },
+        defects: {
+          [FORMER_BOTH]: { severity: "Major", note: "from the old post-trip" },
+          [WITHDRAWN]: { severity: "Minor", note: "noticed en route" },
+        },
       }),
     );
 
     const draft = getDraft("PostTrip", "VEH-11");
-    expect(draft?.answers).toEqual({ [BOTH]: "pass", [POST_ITEM]: "na" });
-    expect(draft?.notes).toEqual({ [BOTH]: "ok" });
+    expect(draft?.answers).toEqual({ [POST_ITEM]: "na" });
+    expect(draft?.notes).toEqual({ [POST_ITEM]: "ok" });
     expect(draft?.defects).toEqual({});
     // Every key that survives is on the current post-trip.
     for (const key of Object.keys(draft?.answers ?? {})) expect(POST_KEYS).toContain(key);
@@ -340,17 +382,18 @@ describe("draft rejection", () => {
     expect(unanswered).toHaveLength(PRE_KEYS.length - 1);
   });
 
-  it("drops a rev 2 pre-trip draft's RETIRED keys on load, and leaves their replacements blank", () => {
+  it("drops a draft's RETIRED keys on load, and leaves their replacements blank", () => {
     // NL-PTI-01 rev 3 consolidated the non-NSC pre-trip rows (engine bay 10 → 3, remote/winter
-    // kit 5 → 1, comms 4 → 1) and removed the duplicate interior-lights group. The draft SHAPE
-    // did not change, so INSPECTION_STORE_VERSION was deliberately not bumped and a rev 2
-    // draft still loads — which makes this filter the whole defence. What it must guarantee:
+    // kit 5 → 1, comms 4 → 1) and removed the duplicate interior-lights group. That changed no
+    // shape, so rev 3 did not bump and a rev 2 draft kept loading on this filter alone. Rev 4's
+    // bump (v4) has since discarded every such draft, but the filter is still the defence for
+    // any CURRENT-version draft that holds a retired key, so it is pinned at the current
+    // version. What it must guarantee:
     //   • no retired key survives load, so none can reach a payload;
     //   • the replacement row reads unanswered — an answer to "Engine oil" is NOT an answer to
     //     "Engine fluid levels", which also covers coolant, power steering and washer fluid.
     //     RETIRED_KEYS is display metadata, never a mapping to carry answers across;
     //   • every surviving key's answer, note and defect is kept.
-    expect(INSPECTION_STORE_VERSION).toBe(3);
     const retired = [...RETIRED_KEYS.keys()];
     const replacements = new Set(RETIRED_KEYS.values());
     expect(retired.length).toBeGreaterThan(0);
@@ -376,7 +419,7 @@ describe("draft rejection", () => {
     );
 
     const draft = getDraft("PreTrip", "VEH-11");
-    if (!draft) throw new Error("a rev 2 v3 draft should still load");
+    if (!draft) throw new Error("a current-version draft holding retired keys should still load");
     for (const key of retired) {
       expect(draft.answers[key]).toBeUndefined();
       expect(draft.notes[key]).toBeUndefined();
@@ -477,6 +520,8 @@ describe("markSectionOk — the per-section All OK write", () => {
         "defects",
         "location",
         "mode",
+        "newDefects",
+        "newDefectsFound",
         "notes",
         "odometerKm",
         "startedAt",
@@ -490,7 +535,156 @@ describe("markSectionOk — the per-section All OK write", () => {
   });
 });
 
+describe("the post-trip's new defects (rev 4)", () => {
+  // "Any defect found after the pre-trip?" and the list of new defects, each filed against a
+  // PRE-trip key. The rules lib/newDefects.test.ts pins are about what may be CERTIFIED; these
+  // are about what the draft may HOLD, and that nothing in it is ever defaulted.
+
+  it("starts unanswered and empty — never defaulted to No", () => {
+    const draft = startDraft("PostTrip", "VEH-11");
+    expect(draft.newDefectsFound).toBeNull();
+    expect(draft.newDefects).toEqual([]);
+  });
+
+  it("seeds one BLANK row on Yes — no item, no severity, no note", () => {
+    const draft = setNewDefectsFound("PostTrip", "VEH-11", true);
+    expect(draft.newDefectsFound).toBe(true);
+    expect(draft.newDefects).toEqual([{ itemKey: "", severity: null, note: "" }]);
+  });
+
+  it("does not seed a second row when Yes is tapped again", () => {
+    setNewDefectsFound("PostTrip", "VEH-11", true);
+    expect(setNewDefectsFound("PostTrip", "VEH-11", true).newDefects).toHaveLength(1);
+  });
+
+  it("keeps the entered rows on No — a mis-tap must not destroy them", () => {
+    setNewDefectsFound("PostTrip", "VEH-11", true);
+    updateNewDefect("PostTrip", "VEH-11", 0, { itemKey: FORMER_BOTH, severity: "Major" });
+    const draft = setNewDefectsFound("PostTrip", "VEH-11", false);
+    expect(draft.newDefectsFound).toBe(false);
+    expect(draft.newDefects).toEqual([{ itemKey: FORMER_BOTH, severity: "Major", note: "" }]);
+  });
+
+  it("adds, patches and removes rows by index, and ignores an index that does not exist", () => {
+    setNewDefectsFound("PostTrip", "VEH-11", true);
+    addNewDefect("PostTrip", "VEH-11");
+    updateNewDefect("PostTrip", "VEH-11", 1, { itemKey: "Horn", note: "Silent." });
+    updateNewDefect("PostTrip", "VEH-11", 7, { itemKey: "Steering" });
+    expect(getDraft("PostTrip", "VEH-11")?.newDefects).toEqual([
+      { itemKey: "", severity: null, note: "" },
+      { itemKey: "Horn", severity: null, note: "Silent." },
+    ]);
+
+    const draft = removeNewDefect("PostTrip", "VEH-11", 0);
+    expect(draft.newDefects).toEqual([{ itemKey: "Horn", severity: null, note: "Silent." }]);
+  });
+
+  it("leaves the answer at Yes when the last row is removed — an empty list is not a No", () => {
+    setNewDefectsFound("PostTrip", "VEH-11", true);
+    const draft = removeNewDefect("PostTrip", "VEH-11", 0);
+    expect(draft.newDefectsFound).toBe(true);
+    expect(draft.newDefects).toEqual([]);
+  });
+
+  it("is a no-op on a pre-trip draft — a new defect can never ride a pre-trip", () => {
+    expect(setNewDefectsFound("PreTrip", "VEH-11", true).newDefectsFound).toBeNull();
+    expect(addNewDefect("PreTrip", "VEH-11").newDefects).toEqual([]);
+  });
+
+  it("survives a reload", () => {
+    setNewDefectsFound("PostTrip", "VEH-11", true);
+    updateNewDefect("PostTrip", "VEH-11", 0, {
+      itemKey: FORMER_BOTH,
+      severity: "Minor",
+      note: "Sidewall scuff, left rear.",
+    });
+    const raw = window.localStorage.getItem(draftKey("PostTrip", "VEH-11"));
+    window.localStorage.clear();
+    window.localStorage.setItem(draftKey("PostTrip", "VEH-11"), raw ?? "");
+
+    const draft = getDraft("PostTrip", "VEH-11");
+    expect(draft?.newDefectsFound).toBe(true);
+    expect(draft?.newDefects).toEqual([
+      { itemKey: FORMER_BOTH, severity: "Minor", note: "Sidewall scuff, left rear." },
+    ]);
+  });
+
+  it("drops a stored row whose item is not a pre-trip key, and keeps an unpicked one", () => {
+    // A withdrawn key, a Close-Out key (post-trip half — not something a new defect is filed
+    // against), a retired key and an invented one all go. "" is a row the driver has not
+    // finished, which must stay so it can block Certify on screen.
+    const retired = [...RETIRED_KEYS.keys()][0];
+    seed(
+      draftKey("PostTrip", "VEH-11"),
+      validDraft({
+        mode: "PostTrip",
+        answers: {},
+        newDefectsFound: true,
+        newDefects: [
+          { itemKey: WITHDRAWN, severity: "Minor", note: "x" },
+          { itemKey: POST_ITEM, severity: "Minor", note: "x" },
+          { itemKey: retired, severity: "Minor", note: "x" },
+          { itemKey: "CHK-UH-1", severity: "Minor", note: "x" },
+          { itemKey: "", severity: null, note: "half done" },
+          { itemKey: FORMER_BOTH, severity: "Major", note: "kept" },
+        ],
+      }),
+    );
+
+    expect(getDraft("PostTrip", "VEH-11")?.newDefects).toEqual([
+      { itemKey: "", severity: null, note: "half done" },
+      { itemKey: FORMER_BOTH, severity: "Major", note: "kept" },
+    ]);
+  });
+
+  it("reads a stored severity outside the form's two boxes as ungraded, never as a grade", () => {
+    // "Out of Service" is wire vocabulary the form never offers; a garbage value is garbage.
+    seed(
+      draftKey("PostTrip", "VEH-11"),
+      validDraft({
+        mode: "PostTrip",
+        answers: {},
+        newDefectsFound: true,
+        newDefects: [
+          { itemKey: FORMER_BOTH, severity: "Out of Service" as never, note: "x" },
+          { itemKey: "Horn", severity: "Catastrophic" as never, note: "y" },
+        ],
+      }),
+    );
+    expect(getDraft("PostTrip", "VEH-11")?.newDefects.map((d) => d.severity)).toEqual([
+      null,
+      null,
+    ]);
+  });
+
+  it("forces a stored PRE-trip draft's new-defect fields empty", () => {
+    seed(
+      draftKey("PreTrip", "VEH-11"),
+      validDraft({
+        newDefectsFound: true,
+        newDefects: [{ itemKey: FORMER_BOTH, severity: "Major", note: "x" }],
+      }),
+    );
+    const draft = getDraft("PreTrip", "VEH-11");
+    expect(draft?.newDefectsFound).toBeNull();
+    expect(draft?.newDefects).toEqual([]);
+  });
+});
+
 describe("certifications", () => {
+  it("keeps the defect items a certification filed, across a reload", () => {
+    // The post-trip reads a pre-trip certification's items as "already reported".
+    recordCertification({ ...certification, defectCount: 1, defectItems: [FORMER_BOTH] });
+    expect(certifiedToday("PreTrip", "VEH-11")?.defectItems).toEqual([FORMER_BOTH]);
+  });
+
+  it("reads an entry stored before rev 4 (no defectItems) as filing none, and keeps it", () => {
+    const { defectItems: _omit, ...legacy } = certification;
+    void _omit;
+    seed("nl.driverfield.inspectionCertified", { v: 2, items: [legacy] });
+    expect(certifiedToday("PreTrip", "VEH-11")?.defectItems).toEqual([]);
+  });
+
   it("returns a certification for the mode, vehicle and day it was made for", () => {
     recordCertification(certification);
 

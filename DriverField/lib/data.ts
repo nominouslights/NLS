@@ -609,6 +609,14 @@ export function hosRemaining(entries: HosEntry[] = hosEntries): HosRemaining {
  * satisfied on first paint cannot be demonstrated — the same argument this file already makes
  * for greying ineligible trips rather than hiding them. lib/inspectionGate.test.ts pins it, so
  * restoring the old date fails a test that says why.
+ *
+ * `defects` carry real catalogue KEYS (pinned in lib/newDefects.test.ts) and agree with each
+ * row's `result` under deriveResult (pinned in lib/inspectionGate.test.ts). They are what the
+ * post-trip's "New defects since the pre-trip" step reads as "already reported" — through
+ * preTripDefectItems() in lib/inspectionGate.ts, which picks the SAME pre-trip record the boarding
+ * gate does (this device's certification first, then a row here for the same vehicle and service
+ * day). Because no row here is dated today, on first paint that is whatever the driver certified
+ * on this device; DVR-8101's washer defect is what it looks like asked as of its own day.
  */
 export const dvirSubmissions: DvirSubmission[] = [
   {
@@ -621,7 +629,8 @@ export const dvirSubmissions: DvirSubmission[] = [
     odometerKm: 184_920,
     result: "Pass with defects",
     rk: "soon",
-    defectCount: 1,
+    // The intermittent washer pump DF-5301 tracks, filed against the row it concerns.
+    defects: [{ item: "Wipers & washers", severity: "Minor" }],
   },
   {
     id: "DVR-8102",
@@ -633,7 +642,7 @@ export const dvirSubmissions: DvirSubmission[] = [
     odometerKm: 184_612,
     result: "Pass",
     rk: "ontime",
-    defectCount: 0,
+    defects: [],
   },
   {
     id: "DVR-8103",
@@ -645,7 +654,11 @@ export const dvirSubmissions: DvirSubmission[] = [
     odometerKm: 268_431,
     result: "Fail",
     rk: "over",
-    defectCount: 2,
+    // DF-5302's corroded rear brake line, plus a worn tire found on the same walk-around.
+    defects: [
+      { item: "Service brake pedal", severity: "Out of Service" },
+      { item: "Tire condition", severity: "Minor" },
+    ],
   },
 ];
 

@@ -1,11 +1,16 @@
-import type { ChecklistRow } from "./ChecklistGroupEditor";
+import { groupResult, type ChecklistRow } from "./ChecklistGroupEditor";
 import {
   NL_PTI_01,
   itemsFor,
   type InspectionFormMode,
   type InspectionSubGroup,
 } from "@/lib/inspectionForm";
-import type { ChecklistItemStateWire, InspectionInput, VehicleInspection } from "@/lib/api/maintenance";
+import type {
+  ChecklistItemStateWire,
+  DefectSeverityWire,
+  InspectionInput,
+  VehicleInspection,
+} from "@/lib/api/maintenance";
 
 // Shared NL-PTI-01 row plumbing for the two inspection-entry modals (trip-scoped
 // TripInspectionModal and vehicle-scoped InspectionEntryModal). Both build their
@@ -17,18 +22,47 @@ const CATALOGUE_KEYS: ReadonlySet<string> = new Set(
   NL_PTI_01.flatMap((group) => group.items.map((item) => item.key)),
 );
 
-/** Fresh, UNANSWERED rows for this unit and mode, in form order. */
-export function rowsFor(unit: string | null, mode: InspectionFormMode): ChecklistRow[] {
+/** Fresh rows for this unit and mode, in form order — UNANSWERED unless `initial`
+ *  says otherwise (see `TRIP_ROW_START`). */
+export function rowsFor(
+  unit: string | null,
+  mode: InspectionFormMode,
+  initial: ChecklistItemStateWire | null = null,
+): ChecklistRow[] {
   return itemsFor(unit, mode).flatMap((group) =>
     group.items.map((item) => ({
       groupKey: group.key,
       itemKey: item.key,
       label: item.label,
-      state: null,
+      state: initial,
       severity: "Minor" as const,
       note: "",
     })),
   );
+}
+
+/**
+ * The answer a NEW trip inspection's rows start with: OK, in both modes, by the
+ * owner's decision (2026-10). The dispatcher transcribes an inspection the driver
+ * already did, and marking the few defects is faster than ticking 53–64 OKs (the
+ * post-trip's six Close-Out rows follow suit). Never applied to a saved record —
+ * rows the record does not carry still come back unanswered (`rowsFromRecord`).
+ */
+export const TRIP_ROW_START: ChecklistItemStateWire = "Ok";
+
+/**
+ * Rows for a newly chosen unit, carrying over every answer already given to a row
+ * both forms share. Rows the new unit does not have are DROPPED, never kept hidden:
+ * a hidden row would either block the save as unanswered or — once it starts at
+ * OK — be sent as "OK" for equipment the vehicle does not have.
+ */
+export function rowsForUnitChange(
+  prev: ChecklistRow[],
+  unit: string | null,
+  mode: InspectionFormMode,
+): ChecklistRow[] {
+  const byKey = new Map(prev.map((r) => [r.itemKey, r]));
+  return rowsFor(unit, mode, TRIP_ROW_START).map((row) => byKey.get(row.itemKey) ?? row);
 }
 
 /**
@@ -129,4 +163,71 @@ export function defectsWire(rows: ChecklistRow[]): InspectionInput["defects"] {
       note: r.note.trim() || null,
       ...(r.recurrenceOfInspectionId ? { recurrenceOfInspectionId: r.recurrenceOfInspectionId } : {}),
     }));
+}
+
+// ---- post-trip "new defects" (rev 4) ----------------------------------------------
+
+/** One defect found AFTER the pre-trip, filed against the pre-trip row it concerns.
+ *  `itemKey` is "" until the dispatcher picks the item. */
+export interface NewDefect {
+  itemKey: string;
+  severity: DefectSeverityWire;
+  note: string;
+}
+
+export interface NewDefectOption {
+  key: string;
+  label: string;
+}
+
+/**
+ * What a new post-trip defect may be filed against: every pre-trip row this unit has,
+ * minus the rows the trip's pre-trip already reported a defect on — a defect the
+ * pre-trip recorded is not new. Filed against the real item key (never free text) so
+ * work orders and recurrence tracking still match it.
+ */
+export function newDefectOptions(unit: string | null, preTrip: VehicleInspection | null): NewDefectOption[] {
+  const alreadyReported = new Set((preTrip?.defects ?? []).map((d) => d.item));
+  return itemsFor(unit, "PreTrip").flatMap((group) =>
+    group.items
+      .filter((item) => !alreadyReported.has(item.key))
+      .map((item) => ({ key: item.key, label: `${group.title} · ${item.label}` })),
+  );
+}
+
+/** Un-pick (keep the note and severity) any new defect whose item is no longer
+ *  offered — e.g. a bus-only row after the unit changed to NL-01. */
+export function withoutUnofferedItems(defects: NewDefect[], options: NewDefectOption[]): NewDefect[] {
+  const offered = new Set(options.map((o) => o.key));
+  return defects.map((d) => (d.itemKey && !offered.has(d.itemKey) ? { ...d, itemKey: "" } : d));
+}
+
+/** A saved post-trip's new defects: every defect not filed against one of its
+ *  checklist (Close-Out) rows. */
+export function newDefectsFromRecord(existing: VehicleInspection, rows: ChecklistRow[]): NewDefect[] {
+  const rowKeys = new Set(rows.map((r) => r.itemKey));
+  return existing.defects
+    .filter((d) => !rowKeys.has(d.item))
+    .map((d) => ({ itemKey: d.item, severity: d.severity, note: d.note ?? "" }));
+}
+
+export function newDefectsWire(defects: NewDefect[]): InspectionInput["defects"] {
+  return defects.map((d) => ({ item: d.itemKey, severity: d.severity, note: d.note.trim() || null }));
+}
+
+/** The first problem that blocks saving these new defects, or null. */
+export function newDefectsProblem(defects: NewDefect[]): string | null {
+  if (defects.some((d) => !d.itemKey)) return "Pick the item each new defect concerns.";
+  const noNote = defects.find((d) => !d.note.trim());
+  if (noNote) return "New defects need a note — describe what was found.";
+  return null;
+}
+
+/** The inspection result over checklist rows AND new defects — same rule as
+ *  `groupResult`: any Major fails, any other defect is "Pass with defects". */
+export function inspectionResult(rows: ChecklistRow[], defects: NewDefect[]): ReturnType<typeof groupResult> {
+  const fromRows = groupResult(rows);
+  if (fromRows === "Fail" || defects.some((d) => d.severity === "Major" || d.severity === "OutOfService")) return "Fail";
+  if (fromRows === "Pass with defects" || defects.length > 0) return "Pass with defects";
+  return "Pass";
 }

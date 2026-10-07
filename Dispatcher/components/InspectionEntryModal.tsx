@@ -25,8 +25,13 @@ import {
   areaLegendKeys,
   checklistWire,
   defectsWire,
+  newDefectOptions,
+  newDefectsProblem,
+  newDefectsWire,
   rowsFor,
+  type NewDefect,
 } from "@/components/inspection/checklistRows";
+import NewDefectsEditor from "@/components/inspection/NewDefectsEditor";
 import RetiredKeyNote from "@/components/inspection/RetiredKeyNote";
 
 /** NL-PTI-01 classifies a defect Minor or Major; OutOfService stays in the wire
@@ -146,6 +151,18 @@ export default function InspectionEntryModal({
     };
   });
 
+  // Post-trip only (NL-PTI-01 rev 4): defects found after the pre-trip, each filed
+  // against the pre-trip row it concerns. No trip context here, so no pre-trip
+  // defects are left out of the picker; a re-reported item is, since it is already
+  // filed as `extra` and the backend allows one defect per item.
+  const isPost = type === "PostTrip";
+  const [newDefects, setNewDefects] = useState<NewDefect[]>([]);
+  const [newDefectsFound, setNewDefectsFound] = useState(false);
+  const defectOptions = useMemo(
+    () => newDefectOptions(unit, null).filter((o) => o.key !== extra?.item),
+    [unit, extra?.item],
+  );
+
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -165,6 +182,7 @@ export default function InspectionEntryModal({
           },
         ]
       : []),
+    ...(isPost && newDefectsFound ? newDefectsWire(newDefects) : []),
   ];
   const result: InspectionResultWire = defects.some(
     (d) => d.severity === "OutOfService" || d.severity === "Major",
@@ -183,6 +201,10 @@ export default function InspectionEntryModal({
     if (extra && !extra.note.trim()) return `Defect rows need a note — add one for "${extra.item}".`;
     if (unanswered > 0) {
       return `${unanswered} of ${rows.length} checks ${unanswered === 1 ? "is" : "are"} unanswered — every row needs OK, Defect or N-A.`;
+    }
+    if (isPost && newDefectsFound) {
+      if (newDefects.length === 0) return "Add the new defect, or answer No to \"Any defect found after the pre-trip?\".";
+      return newDefectsProblem(newDefects);
     }
     return null;
   }
@@ -381,6 +403,31 @@ export default function InspectionEntryModal({
           legend={legendKeys.has(g.key)}
         />
       ))}
+
+      {isPost && (
+        <>
+          <div
+            style={{
+              fontFamily: fonts.semiCondensed,
+              fontSize: 10.5,
+              letterSpacing: ".12em",
+              textTransform: "uppercase",
+              color: colors.textLabel,
+              margin: "6px 0 8px",
+            }}
+          >
+            New defects since the pre-trip
+          </div>
+          <NewDefectsEditor
+            found={newDefectsFound}
+            onFoundChange={setNewDefectsFound}
+            defects={newDefects}
+            onChange={setNewDefects}
+            options={defectOptions}
+            preTripReported={0}
+          />
+        </>
+      )}
 
       {defects.some((d) => d.severity === "OutOfService" || d.severity === "Major") && (
         <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: statusMeta("over").t, marginTop: 12, fontWeight: 600 }}>

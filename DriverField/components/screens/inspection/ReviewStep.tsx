@@ -6,7 +6,7 @@ import { Panel } from "@/components/ui/Panel";
 import { TouchButton } from "@/components/ui-tablet/TouchButton";
 import { StatusBanner } from "@/components/ui-tablet/StatusBanner";
 import { CardRow, FieldLine, Heading, MockTag, TabletChip } from "../shared";
-import { checkStepId, defectStepId } from "@/lib/inspectionSteps";
+import { checkStepId, defectStepId, NEW_DEFECTS_STEP_ID } from "@/lib/inspectionSteps";
 import {
   locationError,
   normalizeLocation,
@@ -16,9 +16,12 @@ import {
 } from "@/lib/inspectionGate";
 import { NL_PTI_01_CERTIFICATION, type InspectionSubGroup } from "@/lib/inspectionForm";
 import type { DraftDefect } from "@/lib/inspectionStore";
-import type { CheckState, DvirSubmission, InspectionMode } from "@/lib/types";
+import type { CheckState, DvirSubmission, InspectionMode, NewDefectDraft } from "@/lib/types";
 
 // APP-LOCAL. The last step: everything the driver is about to attest to, then the attestation.
+//
+// On a post-trip (NL-PTI-01 rev 4) it also lists the "New defects since the pre-trip" answer and
+// each new defect, and Certify waits on newDefectsProblem as well as on the checklist.
 //
 // THE ONLY SCROLLING SURFACE IN THE FLOW. WizardFrame deliberately has no scroll container —
 // a driver must never be able to leave part of a single question off screen — but up to 64 rows
@@ -64,6 +67,7 @@ export function ReviewStep({
   result,
   unansweredCount,
   ungradedCount,
+  newDefects,
   recent,
   storageFailed,
   submitError,
@@ -83,6 +87,17 @@ export function ReviewStep({
   result: InspectionResultName;
   unansweredCount: number;
   ungradedCount: number;
+  /**
+   * POST-TRIP ONLY (NL-PTI-01 rev 4) — null on a pre-trip. The No/Yes answer, every entered new
+   * defect, display labels for their item keys, and the first thing blocking Certify (from
+   * newDefectsProblem), or null.
+   */
+  newDefects: {
+    found: boolean | null;
+    defects: NewDefectDraft[];
+    labels: ReadonlyMap<string, string>;
+    problem: string | null;
+  } | null;
   recent: DvirSubmission[];
   storageFailed: boolean;
   /** Set when the queue rejected the capture. The draft is still on the device. */
@@ -93,8 +108,13 @@ export function ReviewStep({
   const rm = RESULT_META[result];
   const locError = locationError(location);
   const shownLocation = normalizeLocation(location);
+  const newDefectsProblem = newDefects?.problem ?? null;
   const complete =
-    unansweredCount === 0 && ungradedCount === 0 && odometerKm !== null && locError === null;
+    unansweredCount === 0 &&
+    ungradedCount === 0 &&
+    odometerKm !== null &&
+    locError === null &&
+    newDefectsProblem === null;
 
   const blockedReason =
     odometerKm === null
@@ -105,7 +125,7 @@ export function ReviewStep({
           ? `${unansweredCount} item(s) still unanswered — an inspection cannot be certified with blanks.`
           : ungradedCount > 0
             ? `${ungradedCount} defect(s) have no severity — a defect without one cannot be graded.`
-            : "";
+            : (newDefectsProblem ?? "");
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingBottom: gap.page }}>
@@ -259,6 +279,75 @@ export function ReviewStep({
         </div>
       ))}
 
+      {newDefects ? (
+        <div>
+          {/* NL-PTI-01 rev 4. The answer is shown even when it is No, because "no new defects"
+              is a statement the driver is certifying, not the absence of a section. Rows entered
+              and then answered No are NOT shown — they are not part of what is being certified
+              and will not be sent. */}
+          <Heading>New defects since the pre-trip</Heading>
+          <CardRow>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <FieldLine
+                label="Any defect found after the pre-trip?"
+                value={
+                  newDefects.found === null
+                    ? "Not answered — required"
+                    : newDefects.found
+                      ? `Yes — ${newDefects.defects.length} new defect(s)`
+                      : "No"
+                }
+              />
+            </div>
+            <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 10 }}>
+              {newDefects.found === null ? (
+                <TabletChip kind="off" label="Not answered" />
+              ) : newDefects.found ? (
+                <TabletChip kind="over" label="Yes" />
+              ) : (
+                <TabletChip kind="ontime" label="No" />
+              )}
+              <TouchButton variant="secondary" onClick={() => onGoToStep(NEW_DEFECTS_STEP_ID)}>
+                Change
+              </TouchButton>
+            </div>
+          </CardRow>
+          {newDefects.found === true
+            ? newDefects.defects.map((d, i) => (
+                <CardRow key={i}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <FieldLine
+                      label={
+                        d.itemKey === ""
+                          ? `New defect ${i + 1} · item not picked`
+                          : `New defect ${i + 1} · ${newDefects.labels.get(d.itemKey) ?? d.itemKey}`
+                      }
+                      value={d.note.trim() || "No note — required"}
+                    />
+                  </div>
+                  <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 10 }}>
+                    {d.severity ? (
+                      <TabletChip
+                        kind={severityKind(d.severity)}
+                        glyph={severityGlyph(d.severity)}
+                        label={d.severity}
+                      />
+                    ) : (
+                      <TabletChip kind="off" label="No severity" />
+                    )}
+                    <TouchButton
+                      variant="secondary"
+                      onClick={() => onGoToStep(NEW_DEFECTS_STEP_ID)}
+                    >
+                      Change
+                    </TouchButton>
+                  </div>
+                </CardRow>
+              ))
+            : null}
+        </div>
+      ) : null}
+
       <Heading>Certify</Heading>
       <Panel style={{ padding: "18px 20px" }}>
         <div
@@ -309,7 +398,7 @@ export function ReviewStep({
           <div style={{ flex: 1, minWidth: 0 }}>
             <FieldLine
               label={`${s.type} · ${s.unit}`}
-              value={`${s.odometerKm.toLocaleString("en-CA")} km${s.defectCount > 0 ? ` · ${s.defectCount} defect(s)` : ""}`}
+              value={`${s.odometerKm.toLocaleString("en-CA")} km${s.defects.length > 0 ? ` · ${s.defects.length} defect(s)` : ""}`}
             />
           </div>
           <div style={{ flex: "none" }}>

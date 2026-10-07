@@ -152,14 +152,15 @@ describe("inspectionReportHtml — unit and mode filtering", () => {
     expect(nl02).toContain("Accessibility lift / ramp &amp; kneeling (if equipped, NL-02)");
   });
 
-  it("prints the short post-trip: no pre-trip-only rows, plus En-Route Observations", () => {
+  it("prints the rev 4 post-trip: Close-Out only, new defects go in the Defect Log", () => {
     const post = inspectionReportHtml(null, { unit: "NL-02", mode: "PostTrip" }, COMPANY);
     expect(post).not.toContain("Engine fluid levels");
     expect(post).not.toContain("Emergency exits / windows (NL-02)");
     expect(post).not.toContain("Emergency Equipment");
-    expect(post).toContain("Wheel nuts / studs");
-    expect(post).toContain("En-Route Observations");
-    expect(post).toContain("Defects noticed while driving");
+    expect(post).not.toContain("Wheel nuts / studs");
+    expect(post).not.toContain("Defects noticed while driving");
+    expect(post).toContain("Close-Out");
+    expect(post).toContain("Defect Log");
   });
 
   it("has no Close-Out or En-Route section on a pre-trip sheet, and both on a post-trip sheet", () => {

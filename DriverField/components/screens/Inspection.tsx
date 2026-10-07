@@ -12,6 +12,7 @@ import { OdometerStep } from "./inspection/OdometerStep";
 import { CheckStep } from "./inspection/CheckStep";
 import { DefectStep } from "./inspection/DefectStep";
 import { ReviewStep } from "./inspection/ReviewStep";
+import { NewDefectsStep } from "./inspection/NewDefectsStep";
 import { enqueue } from "@/lib/sync/queue";
 import {
   buildSteps,
@@ -28,22 +29,33 @@ import {
   type InspectionSubGroup,
 } from "@/lib/inspectionForm";
 import {
+  addNewDefect,
   certifiedToday,
   discardDraft,
   getDraft,
   markSectionOk,
   recordCertification,
+  removeNewDefect,
   setAnswer,
   setDefect,
+  setNewDefectsFound,
   setNote,
   setLocation,
   setOdometer,
   setStep,
   startDraft,
   storageFailed,
+  updateNewDefect,
   type DraftDefect,
   type LocalCertification,
 } from "@/lib/inspectionStore";
+import {
+  newDefectOptions,
+  newDefectSeverities,
+  newDefectsProblem,
+  newDefectsWire,
+  reportedNewDefects,
+} from "@/lib/newDefects";
 import { useInspectionStoreHydrated } from "@/lib/useInspectionStore";
 import {
   checkStatePassed,
@@ -54,6 +66,7 @@ import {
   locationError,
   normalizeLocation,
   odometerError,
+  preTripDefectItems,
   severityToWire,
 } from "@/lib/inspectionGate";
 import {
@@ -64,7 +77,7 @@ import {
   dvirSubmissions,
   today,
 } from "@/lib/data";
-import type { CheckState, DefectSeverity, InspectionMode } from "@/lib/types";
+import type { CheckState, DefectSeverity, InspectionMode, NewDefectDraft } from "@/lib/types";
 
 // Driver Vehicle Inspection Report — NSC Standard 11, ONE QUESTION PER SCREEN.
 //
@@ -78,7 +91,13 @@ import type { CheckState, DefectSeverity, InspectionMode } from "@/lib/types";
 // three or four screens deep, with the legal attestation at the bottom. On a dash-mounted
 // 10-inch tablet, in northern daylight, with gloves on, a driver loses their place and sees the
 // attestation least. That was true of the old 22-item list and is unarguable now the checklist
-// is form NL-PTI-01: 64 pre-trip rows (53 on NL-01, rev 3), and the 28-row en-route post-trip.
+// is form NL-PTI-01: 64 pre-trip rows (53 on NL-01, rev 3).
+//
+// THE POST-TRIP (rev 4) is the six Close-Out checks plus one "New defects since the pre-trip"
+// step: No/Yes, and on Yes each new defect filed against the PRE-trip row it concerns. Those
+// defects are not checklist rows — they go on the wire as `defects` entries only. The rules
+// live in lib/newDefects.ts; what counts as "already reported" is preTripDefectItems() in
+// lib/inspectionGate.ts, the same pre-trip record the boarding gate reads.
 //
 // THE CHECKLIST IS NOT MOCK DATA. It comes from lib/inspectionForm.ts, a byte-identical copy of
 // Dispatcher/lib/inspectionForm.ts, narrowed by itemsFor(unit, mode). `unit` is the assigned
@@ -148,6 +167,28 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
   ).length;
   const locError = locationError(location);
 
+  // --- the post-trip's new defects (rev 4) ----------------------------------
+  // All empty on a pre-trip, so every use below is a no-op there.
+  const isPost = mode === "PostTrip";
+  const newDefectsFound = draft?.newDefectsFound ?? null;
+  const enteredNewDefects: NewDefectDraft[] = draft?.newDefects ?? [];
+  // preTripDefectItems reads this device's certifications from localStorage, so it waits for
+  // hydration like every other store read here.
+  const alreadyReported: ReadonlySet<string> =
+    isPost && hydrated ? preTripDefectItems(vehicleId) : new Set<string>();
+  const newOptions = isPost ? newDefectOptions(unit, alreadyReported) : [];
+  const newProblem = isPost
+    ? newDefectsProblem(newDefectsFound, enteredNewDefects, newOptions)
+    : null;
+  // Only on Yes do new defects count — toward the result, the review and the payload.
+  const reportedNew = isPost ? reportedNewDefects(newDefectsFound, enteredNewDefects) : [];
+  const allSeverities: DefectSeverity[] = [...severities, ...newDefectSeverities(reportedNew)];
+  // Labels for every pre-trip row of this unit — not just the options — so a stale pick still
+  // reads as its row on the review rather than as a bare key.
+  const preTripLabels: ReadonlyMap<string, string> = new Map(
+    isPost ? itemsFor(unit, "PreTrip").flatMap((g) => g.items.map((i) => [i.key, i.label])) : [],
+  );
+
   // --- navigation ---------------------------------------------------------
 
   function goTo(stepId: string) {
@@ -192,6 +233,16 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
   const section =
     step.kind === "check" ? sectionShortcut(steps, answers, step.id, wizard.sectionMaxRows) : null;
 
+  /**
+   * The No/Yes answer to "Any defect found after the pre-trip?". No AUTO-ADVANCES to Review, as
+   * a check's answer does — one tap per question. Yes stays put: the step itself opens the
+   * first defect to fill in.
+   */
+  function answerNewDefects(found: boolean) {
+    setNewDefectsFound(mode, vehicleId, found);
+    if (!found) goTo("review");
+  }
+
   // --- submit -------------------------------------------------------------
 
   async function submit() {
@@ -210,7 +261,21 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
       if (d?.severity) graded.push({ itemId, severity: d.severity, note: d.note });
     }
 
-    const result = deriveResult(graded.map((g) => g.severity));
+    // Rev 4's new defects, re-derived from the CURRENT draft and the pre-trip as it stands now,
+    // not from the render's values. The review step disables Certify on newDefectsProblem
+    // already; this is the belt to that braces — an unanswered "Any defect found after the
+    // pre-trip?", an unpicked item or an ungraded new defect never reaches the queue.
+    let newOnes: NewDefectDraft[] = [];
+    if (mode === "PostTrip") {
+      const options = newDefectOptions(unit, preTripDefectItems(vehicleId));
+      if (newDefectsProblem(current.newDefectsFound, current.newDefects, options) !== null) return;
+      newOnes = reportedNewDefects(current.newDefectsFound, current.newDefects);
+    }
+
+    const result = deriveResult([
+      ...graded.map((g) => g.severity),
+      ...newDefectSeverities(newOnes),
+    ]);
     const certifiedAt = new Date().toISOString();
 
     // THE ONLY WRITE. Every screen mutation in this app goes through queue.enqueue() — never a
@@ -254,6 +319,12 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
     //  • Weather, temperature, road conditions, visibility and fuel are omitted: more steps on
     //    a screen that posts nowhere. Vehicle.tsx already says on screen that fuel has no
     //    backend resource.
+    //  • POST-TRIP NEW DEFECTS (rev 4) are ordinary `defects` entries against the PRE-trip
+    //    row's key, appended after the checklist's own defects, and are NOT checklist rows —
+    //    the post-trip checklist is Close-Out alone. Their keys cannot collide with a Close-Out
+    //    defect (the two halves share no key), and newDefectsProblem refuses a duplicate among
+    //    them, so `Enter` cannot fail with DuplicateDefectItem on this payload. The No/Yes
+    //    answer has no wire field and is not sent: "No" is an empty new-defect list.
     let commandId: string;
     try {
       commandId = await enqueue("dvir.submit", {
@@ -283,11 +354,14 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
               note: (current.notes[i.key] ?? "").trim() || null,
             };
           }),
-        defects: graded.map((g) => ({
-          item: g.itemId,
-          severity: severityToWire(g.severity),
-          note: g.note.trim() === "" ? null : g.note.trim(),
-        })),
+        defects: [
+          ...graded.map((g) => ({
+            item: g.itemId,
+            severity: severityToWire(g.severity),
+            note: g.note.trim() === "" ? null : g.note.trim(),
+          })),
+          ...newDefectsWire(newOnes),
+        ],
         certificationStatement: NL_PTI_01_CERTIFICATION,
         attestations: [true],
         driverSignatureName: currentDriver.name,
@@ -312,7 +386,9 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
       onDate: today,
       certifiedAt,
       result,
-      defectCount: graded.length,
+      defectCount: graded.length + newOnes.length,
+      // What a later post-trip reads as "already reported" when this is a pre-trip.
+      defectItems: [...graded.map((g) => g.itemId), ...newOnes.map((d) => d.itemKey)],
       // NL-PTI-01 offers Minor and Major only, so this is false for anything certified here.
       // The field stays because LocalCertification is also read for records graded before the
       // form change, and the gate's banner branches on it.
@@ -406,7 +482,7 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
             <div style={{ flex: 1, minWidth: 0 }}>
               <FieldLine
                 label={`${s.type} · ${s.unit}`}
-                value={`${s.odometerKm.toLocaleString("en-CA")} km${s.defectCount > 0 ? ` · ${s.defectCount} defect(s)` : ""}`}
+                value={`${s.odometerKm.toLocaleString("en-CA")} km${s.defects.length > 0 ? ` · ${s.defects.length} defect(s)` : ""}`}
               />
             </div>
             <div style={{ flex: "none" }}>
@@ -440,9 +516,13 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
           ? "over"
           : step.kind !== "review"
             ? "info"
-            : unansweredCount > 0 || ungradedCount > 0 || odometerKm === null || locError !== null
+            : unansweredCount > 0 ||
+                ungradedCount > 0 ||
+                odometerKm === null ||
+                locError !== null ||
+                newProblem !== null
               ? "soon"
-              : deriveResult(severities) === "Fail"
+              : deriveResult(allSeverities) === "Fail"
                 ? "over"
                 : "ontime"
       }
@@ -482,6 +562,16 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
               onClick={goNext}
               disabled={!defects[step.itemId]?.severity}
               disabledReason="Choose a severity — a defect without one cannot be graded."
+            >
+              Continue
+            </TouchButton>
+          ) : null}
+
+          {step.kind === "newDefects" ? (
+            <TouchButton
+              onClick={goNext}
+              disabled={newProblem !== null}
+              disabledReason={newProblem ?? ""}
             >
               Continue
             </TouchButton>
@@ -538,6 +628,19 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
         />
       ) : null}
 
+      {step.kind === "newDefects" ? (
+        <NewDefectsStep
+          found={newDefectsFound}
+          defects={enteredNewDefects}
+          options={newOptions}
+          preTripReported={alreadyReported.size}
+          onAnswer={answerNewDefects}
+          onAdd={() => addNewDefect(mode, vehicleId)}
+          onUpdate={(index, patch) => updateNewDefect(mode, vehicleId, index, patch)}
+          onRemove={(index) => removeNewDefect(mode, vehicleId, index)}
+        />
+      ) : null}
+
       {step.kind === "review" ? (
         <ReviewStep
           mode={mode}
@@ -548,9 +651,19 @@ export default function Inspection({ mode: requested }: { mode: InspectionMode |
           answers={answers}
           notes={notes}
           defects={defects}
-          result={deriveResult(severities)}
+          result={deriveResult(allSeverities)}
           unansweredCount={unansweredCount}
           ungradedCount={ungradedCount}
+          newDefects={
+            isPost
+              ? {
+                  found: newDefectsFound,
+                  defects: reportedNew,
+                  labels: preTripLabels,
+                  problem: newProblem,
+                }
+              : null
+          }
           recent={dvirSubmissions}
           storageFailed={hydrated && storageFailed()}
           submitError={submitError}

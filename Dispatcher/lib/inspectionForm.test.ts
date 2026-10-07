@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   NL_PTI_01,
   RETIRED_KEYS,
+  WITHDRAWN_KEYS,
   checkCount,
   retiredKeyReplacement,
   itemsFor,
@@ -230,7 +231,20 @@ describe("wire keys", () => {
     expect(PRE_REV3_KEYS).toHaveLength(89);
     expect(new Set(PRE_REV3_KEYS).size).toBe(89);
     const current = currentKeys();
-    expect(PRE_REV3_KEYS.filter((key) => !current.has(key) && !RETIRED_KEYS.has(key))).toEqual([]);
+    expect(
+      PRE_REV3_KEYS.filter((key) => !current.has(key) && !RETIRED_KEYS.has(key) && !WITHDRAWN_KEYS.has(key)),
+    ).toEqual([]);
+  });
+
+  it("withdraws only the rev-2 en-route row, and never lets a current row reuse it", () => {
+    // Rev 4: the post-trip files each en-route defect against the item it concerns.
+    expect([...WITHDRAWN_KEYS]).toEqual(["Defects noticed while driving"]);
+    const current = currentKeys();
+    for (const key of WITHDRAWN_KEYS) {
+      expect(PRE_REV3_KEYS).toContain(key);
+      expect(current.has(key)).toBe(false);
+      expect(RETIRED_KEYS.has(key)).toBe(false);
+    }
   });
 
   it("maps every retired key onto a CURRENT key", () => {
@@ -260,7 +274,9 @@ describe("wire keys", () => {
     const rev2Nsc13 = PRE_REV3_KEYS.filter((key) => !REV2_COMPANY_KEYS.has(key));
     expect(rev2Nsc13).toHaveLength(89 - 19);
 
-    const missing = rev2Nsc13.filter((key) => !current.has(key));
+    // Rev 4's withdrawn en-route row is not a Schedule 2 part either — it was the
+    // s.17(2) recording duty, which the post-trip's "New defects" section now carries.
+    const missing = rev2Nsc13.filter((key) => !current.has(key) && !WITHDRAWN_KEYS.has(key));
     expect(missing.sort()).toEqual(Object.keys(REV3_NSC13_EXCEPTIONS).sort());
 
     for (const key of rev2Nsc13.filter((k) => current.has(k))) {
@@ -390,17 +406,11 @@ describe("itemsFor — mode scoping", () => {
   });
 
   it.each(["NL-01", "NL-02", null] as const)(
-    "puts En-Route Observations on the post-trip only, right before Close-Out (%s)",
+    "makes the post-trip checklist Close-Out alone — no vehicle row, no en-route row (%s)",
     (unit) => {
-      // The end-of-day duty under Man. Reg. 95/2008 s.17(2): record defects found
-      // while driving. It has nothing to answer before the run.
+      // Rev 4: new en-route defects are filed against their own items instead.
+      expect(itemsFor(unit, "PostTrip").map((g) => g.key)).toEqual(["Close-Out"]);
       expect(itemsFor(unit, "PreTrip").map((g) => g.key)).not.toContain("En-Route Observations");
-      const post = itemsFor(unit, "PostTrip").map((g) => g.key);
-      expect(post).toContain("En-Route Observations");
-      expect(post.indexOf("En-Route Observations")).toBe(post.indexOf("Close-Out") - 1);
-      expect(flatten(unit, "PostTrip").map((i) => i.key)).toContain(
-        "Defects noticed while driving",
-      );
     },
   );
 
@@ -473,7 +483,7 @@ describe("checkCount", () => {
     };
     console.log("NL-PTI-01 check counts:", counts);
 
-    // Rev 2: the post-trip is the short "can change while driving" set.
+    // Rev 4: the post-trip checklist is Close-Out alone.
     expect(counts["NL-01 post-trip"]).toBeLessThan(counts["NL-01 pre-trip"]);
     expect(counts["NL-02 post-trip"]).toBeLessThan(counts["NL-02 pre-trip"]);
     expect(counts["NL-01 pre-trip"]).toBeLessThan(counts["NL-02 pre-trip"]);
@@ -494,54 +504,28 @@ describe("checkCount", () => {
     //   Rev 2 was 82 / 71; rev 3 removed 18 rows from every unit's pre-trip, none of
     //   them a Schedule 2 part (Engine Bay 10 → 3, the 4 duplicate interior lights,
     //   Emergency Equipment's 5 winter items → 1, Comms & Nav 4 → 1).
-    //   Post-trip: 21 "Both" rows that can change while driving + 1 En-Route
-    //   Observations row + 6 Close-Out = 28, identical for every unit — unchanged
-    //   from rev 2 (no retired row was "Both").
+    //   Post-trip (rev 4): the 6 Close-Out rows, identical for every unit. Rev 2/3's
+    //   21 "can change while driving" rows are pre-trip only now and the en-route row
+    //   is withdrawn; new defects are entered against pre-trip items instead.
     //
     // If the owner changes the form, change these numbers in the same commit and say
     // so in the message. Never "fix" a failure here by relaxing the assertion.
     expect(checkCount("NL-01", "PreTrip")).toBe(53);
-    expect(checkCount("NL-01", "PostTrip")).toBe(28);
+    expect(checkCount("NL-01", "PostTrip")).toBe(6);
     expect(checkCount("NL-02", "PreTrip")).toBe(64);
-    expect(checkCount("NL-02", "PostTrip")).toBe(28);
+    expect(checkCount("NL-02", "PostTrip")).toBe(6);
     expect(checkCount(null, "PreTrip")).toBe(64);
-    expect(checkCount(null, "PostTrip")).toBe(28);
+    expect(checkCount(null, "PostTrip")).toBe(6);
 
     // The arithmetic those numbers encode, stated so a future edit that changes one
     // without the others fails loudly rather than drifting.
     const rows = NL_PTI_01.flatMap((g) => g.items);
     expect(checkCount("NL-02", "PreTrip") - checkCount("NL-01", "PreTrip")).toBe(11);
-    expect(rows.filter((i) => i.mode === "Both")).toHaveLength(21);
-    expect(rows.filter((i) => i.mode === "PostTripOnly")).toHaveLength(7);
-    expect(checkCount("NL-02", "PostTrip")).toBe(21 + 7);
+    expect(rows.filter((i) => i.mode === "PostTripOnly")).toHaveLength(6);
+    expect(rows.filter((i) => i.mode === "PreTripOnly")).toHaveLength(64);
   });
 
-  it("keeps the post-trip's 28 keys exactly as rev 2 had them", () => {
-    // The pre-trip consolidation must not touch the post-trip at all.
-    expect(flatten("NL-02", "PostTrip").map((i) => i.key)).toEqual([
-      "Ground beneath the vehicle",
-      "Springs (leaf / coil)",
-      "Tire condition",
-      "Wheel nuts / studs",
-      "Windshield & windows",
-      "Exterior mirrors (both sides)",
-      "Exhaust system",
-      "Fuel tank & cap",
-      "Headlights — low & high beam, both sides",
-      "Tail lights",
-      "Brake lights (incl. centre high-mount if equipped)",
-      "Turn signals — front & rear, both sides",
-      "Hazard (4-way) lights",
-      "Steering",
-      "Accelerator pedal",
-      "Gauges (oil pressure, temperature, volt/ammeter, fuel)",
-      "Wipers & washers",
-      "Defrost / heater",
-      "Service brake pedal",
-      "Parking brake",
-      "Brake warning light",
-      "Defects noticed while driving",
-      ...CLOSE_OUT_LABELS,
-    ]);
+  it("keeps the post-trip's Close-Out keys exactly as they have always been", () => {
+    expect(flatten("NL-02", "PostTrip").map((i) => i.key)).toEqual(CLOSE_OUT_LABELS);
   });
 });

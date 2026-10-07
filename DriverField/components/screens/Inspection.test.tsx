@@ -6,6 +6,7 @@ import {
   draftKey,
   getDraft,
   INSPECTION_STORE_VERSION,
+  recordCertification,
 } from "@/lib/inspectionStore";
 import { checkCount, itemsFor, NL_PTI_01, NL_PTI_01_CERTIFICATION } from "@/lib/inspectionForm";
 import { today } from "@/lib/data";
@@ -702,6 +703,239 @@ describe("the per-section All OK shortcut", () => {
     },
     30_000,
   );
+});
+
+// ---------------------------------------------------------------------------
+// The post-trip (NL-PTI-01 rev 4): the six Close-Out checks, then "Any defect found after the
+// pre-trip?" — No, or Yes and each new defect against the PRE-trip row it concerns. The helpers
+// are pinned in lib/newDefects.test.ts; this proves the screen applies them and pins the payload.
+// ---------------------------------------------------------------------------
+
+const POST_ITEMS = itemsFor("NL-01", "PostTrip").flatMap((g) => g.items);
+const POST_COUNT = checkCount("NL-01", "PostTrip");
+
+function renderPostTrip() {
+  return render(<Inspection mode="PostTrip" />);
+}
+
+/** A post-trip draft with every Close-Out row answered Pass, parked on the review step. */
+function seedPost(over: {
+  newDefectsFound?: boolean | null;
+  newDefects?: { itemKey: string; severity: string | null; note: string }[];
+  stepId?: string;
+} = {}) {
+  window.localStorage.setItem(
+    draftKey("PostTrip", "VEH-11"),
+    JSON.stringify({
+      v: INSPECTION_STORE_VERSION,
+      mode: "PostTrip",
+      vehicleId: "VEH-11",
+      startedOn: today,
+      startedAt: `${today}T19:40:00.000Z`,
+      answers: Object.fromEntries(POST_ITEMS.map((i) => [i.key, "pass"])),
+      notes: {},
+      defects: {},
+      odometerKm: 185_210,
+      location: "Thompson yard",
+      newDefectsFound: over.newDefectsFound ?? null,
+      newDefects: over.newDefects ?? [],
+      stepId: over.stepId ?? "review",
+    }),
+  );
+}
+
+function certifyButton(): HTMLButtonElement {
+  return screen.getByRole("button", { name: /Certify & submit/i }) as HTMLButtonElement;
+}
+
+describe("the post-trip (rev 4)", () => {
+  it("asks the six Close-Out checks, then the new-defects question — nothing defaulted", () => {
+    renderPostTrip();
+    setOdometer("185210", "Thompson yard");
+    expect(POST_COUNT).toBe(6);
+    expect(screen.getByText(`Check 1 of ${POST_COUNT}`)).toBeTruthy();
+    expect(screen.getByText(POST_ITEMS[0].label)).toBeTruthy();
+    // The en-route row is gone.
+    expect(screen.queryByText("Defects noticed while driving")).toBeNull();
+
+    for (let i = 0; i < POST_COUNT; i += 1) tap("Pass");
+
+    expect(screen.getByText("Any defect found after the pre-trip?")).toBeTruthy();
+    expect(screen.getByText(`New defects · ${POST_COUNT} of ${POST_COUNT} checks done`)).toBeTruthy();
+    expect(screen.getAllByText("MOCK").length).toBeGreaterThan(0);
+    // Both tiles unselected, and Continue blocked until one is chosen.
+    expect(screen.getByRole("button", { name: /^No/ }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: /^Yes/ }).getAttribute("aria-pressed")).toBe("false");
+    expect(continueButton().disabled).toBe(true);
+    expect(getDraft("PostTrip", "VEH-11")?.newDefectsFound).toBeNull();
+  });
+
+  it("goes straight to Review on No, and sends the Close-Out rows with no defects", () => {
+    seedPost({ stepId: "newDefects" });
+    renderPostTrip();
+    fireEvent.click(screen.getByRole("button", { name: /^No/ }));
+
+    expect(screen.getByText(NL_PTI_01_CERTIFICATION)).toBeTruthy();
+    expect(screen.getByText("New defects since the pre-trip")).toBeTruthy();
+    expect(certifyButton().disabled).toBe(false);
+    certify();
+    const p = payload();
+
+    expect(p.type).toBe("PostTrip");
+    expect(p.checklist).toHaveLength(POST_COUNT);
+    expect(new Set(p.checklist.map((c) => c.item))).toEqual(new Set(POST_ITEMS.map((i) => i.key)));
+    expect(p.defects).toEqual([]);
+    // No invented field for the No/Yes answer — "No" is an empty new-defect list.
+    expect(JSON.stringify(p)).not.toMatch(/newDefect|defectsFound/);
+  });
+
+  it("files a Yes defect against the PRE-trip key — as a defect, never as a checklist row", async () => {
+    seedPost({ stepId: "newDefects" });
+    renderPostTrip();
+    fireEvent.click(screen.getByRole("button", { name: /^Yes/ }));
+
+    // Yes opens the first (blank) defect straight away.
+    expect(screen.getByText("What did you find?")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Item — the pre-trip row it concerns"), {
+      target: { value: "Tire condition" },
+    });
+    expect(screen.getByText(/Major if cord exposed/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^Major/ }));
+    fireEvent.change(screen.getByLabelText("Note about new defect 1"), {
+      target: { value: "  Cord showing, right rear.  " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Done/ }));
+
+    expect(screen.getByRole("list", { name: "New defects" }).textContent).toContain("Tire condition");
+    expect(continueButton().disabled).toBe(false);
+    fireEvent.click(continueButton());
+
+    certify();
+    const p = payload();
+    expect(p.defects).toEqual([
+      { item: "Tire condition", severity: "Major", note: "Cord showing, right rear." },
+    ]);
+    expect(p.checklist).toHaveLength(POST_COUNT);
+    expect(p.checklist.some((c) => c.item === "Tire condition")).toBe(false);
+
+    // A Major new defect fails the post-trip, and the certification remembers the item. The
+    // certification is recorded after `await enqueue`, so wait for the certified pane.
+    await screen.findByText("Post-trip inspection certified");
+    const cert = certifiedToday("PostTrip", "VEH-11");
+    expect(cert?.result).toBe("Fail");
+    expect(cert?.defectCount).toBe(1);
+    expect(cert?.defectItems).toEqual(["Tire condition"]);
+  });
+
+  it("leaves out items today's pre-trip already reported, and says how many", () => {
+    recordCertification({
+      commandId: "pre-1",
+      mode: "PreTrip",
+      vehicleId: "VEH-11",
+      onDate: today,
+      certifiedAt: `${today}T06:12:00.000Z`,
+      result: "PassWithDefects",
+      defectCount: 1,
+      defectItems: ["Tire condition"],
+      outOfService: false,
+    });
+    seedPost({ stepId: "newDefects" });
+    renderPostTrip();
+
+    expect(screen.getByText(/1 item already reported on today’s pre-trip is not listed/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^Yes/ }));
+    const picker = screen.getByLabelText("Item — the pre-trip row it concerns") as HTMLSelectElement;
+    const values = [...picker.options].map((o) => o.value);
+    expect(values).not.toContain("Tire condition");
+    expect(values).toContain("Tire pressure");
+    // Never a Close-Out row: those are the post-trip's own checklist.
+    for (const item of POST_ITEMS) expect(values).not.toContain(item.key);
+  });
+
+  it("does not offer an item already picked on another new defect", () => {
+    seedPost({
+      newDefectsFound: true,
+      newDefects: [
+        { itemKey: "Horn", severity: "Minor", note: "Weak." },
+        { itemKey: "", severity: null, note: "" },
+      ],
+      stepId: "newDefects",
+    });
+    renderPostTrip();
+    fireEvent.click(screen.getAllByRole("button", { name: /^Edit/ })[1]);
+
+    const picker = screen.getByLabelText("Item — the pre-trip row it concerns") as HTMLSelectElement;
+    expect([...picker.options].map((o) => o.value)).not.toContain("Horn");
+  });
+
+  it("blocks Certify while the question is unanswered, and enqueues nothing", () => {
+    seedPost({ newDefectsFound: null });
+    renderPostTrip();
+
+    expect(screen.getByText("Not answered — required")).toBeTruthy();
+    expect(certifyButton().disabled).toBe(true);
+    expect(screen.getAllByText(/Any defect found after the pre-trip\?” — No, or Yes/).length).toBeGreaterThan(0);
+    certify();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("blocks Certify on Yes with an ungraded or note-less defect", () => {
+    seedPost({
+      newDefectsFound: true,
+      newDefects: [{ itemKey: "Horn", severity: null, note: "Weak." }],
+    });
+    renderPostTrip();
+    expect(certifyButton().disabled).toBe(true);
+    expect(screen.getAllByText("Grade each new defect Minor or Major.").length).toBeGreaterThan(0);
+    cleanup();
+
+    seedPost({
+      newDefectsFound: true,
+      newDefects: [{ itemKey: "Horn", severity: "Minor", note: "  " }],
+    });
+    renderPostTrip();
+    expect(certifyButton().disabled).toBe(true);
+    certify();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("never sends rows entered before the answer was changed to No", async () => {
+    seedPost({
+      newDefectsFound: false,
+      newDefects: [{ itemKey: "Horn", severity: "Major", note: "Dead." }],
+    });
+    renderPostTrip();
+    expect(certifyButton().disabled).toBe(false);
+    certify();
+    expect(payload().defects).toEqual([]);
+    await screen.findByText("Post-trip inspection certified");
+    expect(certifiedToday("PostTrip", "VEH-11")?.result).toBe("Pass");
+  });
+
+  it("sends a Close-Out defect and a new defect side by side, each once", async () => {
+    const closeOut = POST_ITEMS[0];
+    window.localStorage.clear();
+    seedPost({
+      newDefectsFound: true,
+      newDefects: [{ itemKey: "Horn", severity: "Minor", note: "Weak." }],
+    });
+    // Mark one Close-Out row a defect on top of the seeded draft.
+    const raw = JSON.parse(window.localStorage.getItem(draftKey("PostTrip", "VEH-11")) ?? "{}");
+    raw.answers[closeOut.key] = "defect";
+    raw.defects = { [closeOut.key]: { severity: "Minor", note: "Scraped mirror." } };
+    window.localStorage.setItem(draftKey("PostTrip", "VEH-11"), JSON.stringify(raw));
+
+    renderPostTrip();
+    certify();
+    const p = payload();
+    expect(p.defects).toEqual([
+      { item: closeOut.key, severity: "Minor", note: "Scraped mirror." },
+      { item: "Horn", severity: "Minor", note: "Weak." },
+    ]);
+    expect(new Set(p.defects.map((x) => x.item)).size).toBe(p.defects.length);
+    await screen.findByText("Post-trip inspection certified");
+    expect(certifiedToday("PostTrip", "VEH-11")?.result).toBe("PassWithDefects");
+  });
 });
 
 describe("when the queue rejects the capture", () => {

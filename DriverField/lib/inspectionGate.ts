@@ -242,6 +242,8 @@ interface PreTripRecord {
   outOfService: boolean;
   /** True when this device certified it, false when it came from the mock history. */
   local: boolean;
+  /** Catalogue keys of the defects that pre-trip filed — "already reported" for the post-trip. */
+  defectItems: string[];
 }
 
 /**
@@ -260,6 +262,7 @@ function preTripToday(vehicleId: string, asOf: string): PreTripRecord | null {
       at: clockOf(local.certifiedAt),
       outOfService: local.outOfService,
       local: true,
+      defectItems: local.defectItems,
     };
   }
 
@@ -271,10 +274,32 @@ function preTripToday(vehicleId: string, asOf: string): PreTripRecord | null {
   return {
     result: resultFromProse(row.result),
     at: clockOf(row.performedAt),
-    // The mock rows carry no severity breakdown, so this cannot be claimed either way.
+    // Left false, as it was before the mock rows carried their defects: `result` (prose) is
+    // what the gate branches on for the mock history, and the banner wording is not worth a
+    // second source of truth.
     outOfService: false,
     local: false,
+    defectItems: row.defects.map((d) => d.item),
   };
+}
+
+/**
+ * The catalogue keys of every defect the trip's PRE-trip already reported — what the post-trip's
+ * "New defects since the pre-trip" step leaves out of its item list (NL-PTI-01 rev 4: a defect
+ * the pre-trip recorded is not new). Mirrors `newDefectOptions` in
+ * Dispatcher/components/inspection/checklistRows.ts, which reads the trip's saved pre-trip.
+ *
+ * "The trip's pre-trip" is the SAME record the boarding gate reads (preTripToday): this device's
+ * certification for the vehicle and service day first, then a mock submission for that vehicle
+ * and day. One definition, so the gate and the post-trip can never disagree about which pre-trip
+ * the vehicle is running on. No pre-trip today → nothing is excluded, which offers more items,
+ * never fewer.
+ */
+export function preTripDefectItems(
+  vehicleId: string = assignedVehicleId,
+  asOf: string = today,
+): ReadonlySet<string> {
+  return new Set(preTripToday(vehicleId, asOf)?.defectItems ?? []);
 }
 
 /** The mock layer stores `result` as prose. Nothing branches on prose except here. */

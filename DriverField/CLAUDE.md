@@ -200,14 +200,16 @@ deployment.
 
 **`lib/inspectionStore.ts` is deliberately NOT under `lib/sync/`, and the distinction is the
 point.** An in-progress DVIR **draft** is uncertified, private to the device, and costs a driver the
-whole NL-PTI-01 walk-around (53 or 64 pre-trip questions depending on the unit, 28 post-trip) if
-lost — so it lives in `localStorage`, synchronously, and survives a reload. The post-trip is the
-reduced en-route set **by design** (NL-PTI-01 rev 2): NSC 13 requires no full post-trip
-inspection — the duty at the end of a run is to record defects noticed en route, which is what
-its "En-Route Observations" row is for — so do not "restore" the full list to it.
+whole NL-PTI-01 walk-around (53 or 64 pre-trip questions depending on the unit; the post-trip is 6 Close-Out checks plus
+its new-defects list) if lost — so it lives in `localStorage`, synchronously, and survives a
+reload. The post-trip is **not a re-check list, by design** (NL-PTI-01 rev 4): NSC 13 requires no
+full post-trip inspection — the duty at the end of a run is to record defects found en route — so
+after Close-Out the driver answers "Any defect found after the pre-trip?" and files each new
+defect against the pre-trip item it concerns (`lib/newDefects.ts`). Do not "restore" a list to it.
 
 A draft whose **shape** a form revision changes is **discarded, not migrated**
-(`INSPECTION_STORE_VERSION` is bumped — v3 for rev 2 and the location field), and on load the
+(`INSPECTION_STORE_VERSION` is bumped — v3 for rev 2 and the location field, v4 for rev 4's
+new-defects step), and on load the
 store also drops any answer, note or defect whose key is not on that half of the form; the screen
 then narrows to the exact unit before counting or submitting. A row new to the form has no answer,
 so it reads "Not answered" and blocks Certify — nothing ever defaults to Ok. **Rev 3 did not
@@ -298,7 +300,8 @@ fails to resolve at run time.
 | `lib/wire.test.ts` | Exact spelling of the duty and source strings against `HosDisplay`'s constants, and of the three inspection enums (`InspectionDefectSeverity`, `InspectionType`, `InspectionSource`) — including `"Out of Service"` → `"OutOfService"` |
 | `lib/sync/queue.test.ts` | Distinct client-generated id per `enqueue`; the no-op still satisfies the `SyncState` contract |
 | `lib/inspectionForm.copy.test.ts` | The NL-PTI-01 copy is byte-identical to `Dispatcher/lib/inspectionForm.ts` below its two-line header, read from disk. Drift means the tablet and the console collect **different legal forms** |
-| `lib/inspectionSteps.test.ts` | The DVIR wizard's step model: unique item keys, the real denominators (NL-01 pre 53, NL-02 pre 64, post 28 for both units and an unknown one, pre 64 for an unknown unit) **derived, never written as a literal**, the post-trip being the en-route set, a denominator that cannot be inflated however many defect follow-ups are injected, and when the per-section All OK is offered and where it lands — plus the pin that no sub-group outgrows `wizard.sectionMaxRows` |
+| `lib/newDefects.test.ts` | The rev 4 post-trip's new-defects rules: items offered are the unit's pre-trip rows minus what today's pre-trip already reported and what this report already picked, the wire shape (real item key, never a checklist row), and what blocks Certify (unanswered No/Yes, Yes with no defect, a defect missing item, grade or note) |
+| `lib/inspectionSteps.test.ts` | The DVIR wizard's step model: unique item keys, the real denominators (NL-01 pre 53, NL-02 pre 64, post 6 Close-Out for both units and an unknown one, pre 64 for an unknown unit) **derived, never written as a literal**, the post-trip being Close-Out plus the new-defects step, a denominator that cannot be inflated however many defect follow-ups are injected, and when the per-section All OK is offered and where it lands — plus the pin that no sub-group outgrows `wizard.sectionMaxRows` |
 | `lib/inspectionStore.test.ts` | The draft: per-mode-per-vehicle keys, a reload, a version bump (including a rev-1 v2 draft) and a stale service day both discarding rather than migrating, unknown and other-half item ids dropped on load, a rev 2 draft's **retired** keys dropped with their replacements left unanswered, new rows left unanswered, `markSectionOk` filling blanks in one sub-group only, the location kept raw, certifications surviving a draft bump, and hostile storage failing honestly |
 | `lib/inspectionGate.test.ts` | `deriveResult` against `VehicleInspection.DeriveResult`, `odometerError` against `Vehicle.RecordOdometer` and `locationError` against `VehicleInspection.Create`'s Normalize + `LocationMaxLength` (200 vs 201, trimmed), both sides of each boundary; the boarding gate in both directions; **the negative pin** that this is deliberately *not* a sixth §5.4 rule |
 | `components/screens/Manifest.test.tsx` | The gate as a driver meets it — both buttons disabled with the reason **on screen**, the not-server-enforced admission present, and **a badge scan boarding nobody** |

@@ -11,7 +11,9 @@
 //
 // THE CRUX — KEEPING PROGRESS HONEST, AND THE DENOMINATOR IS NO LONGER ONE NUMBER.
 // The denominator a driver reads is the checklist for THIS unit and THIS mode: NL-01 pre-trip
-// 53, NL-02 pre-trip 64 (rev 3), and the post-trip 28 for both (rev 2 made it the en-route set).
+// 53, NL-02 pre-trip 64 (rev 3), and the post-trip 6 for both — since rev 4 its checklist is the
+// Close-Out rows alone, followed by the "New defects since the pre-trip" step, which is a
+// question about the run rather than a check and so is NOT counted in the denominator.
 // It is DERIVED, every time, from checkCount(unit, mode) in the copied catalogue — never
 // written here as a literal and never cached in a module-level constant.
 //
@@ -103,6 +105,19 @@ export interface DefectStep {
   parentOf: number;
 }
 
+/**
+ * POST-TRIP ONLY (NL-PTI-01 rev 4): "Any defect found after the pre-trip?", and on Yes the list
+ * of new defects, each filed against a pre-trip item. Placed after the Close-Out checks and
+ * before the review. It is not a check, so it takes no `n`: it carries the checklist's `of` only
+ * so its progress line can say the checks are behind the driver, and the denominator stays the
+ * number of CHECKS — "7 of 6" is unreachable for the same reason "54 of 53" is.
+ */
+export interface NewDefectsStep {
+  kind: "newDefects";
+  id: "newDefects";
+  of: number;
+}
+
 /** The attestation. The only scrolling surface in the flow. */
 export interface ReviewStep {
   kind: "review";
@@ -115,9 +130,10 @@ export interface ReviewStep {
   of: number;
 }
 
-export type InspectionStep = OdometerStep | CheckStep | DefectStep | ReviewStep;
+export type InspectionStep = OdometerStep | CheckStep | DefectStep | NewDefectsStep | ReviewStep;
 
 export const ODOMETER_STEP_ID = "odometer";
+export const NEW_DEFECTS_STEP_ID = "newDefects";
 export const REVIEW_STEP_ID = "review";
 
 export function checkStepId(itemId: string): string {
@@ -130,7 +146,8 @@ export function defectStepId(itemId: string): string {
 
 /**
  * odometer → every NL-PTI-01 row that applies to this unit and mode as a check (with a defect
- * step after any answered "defect") → review. Total: 1 + checkCount + defectCount + 1.
+ * step after any answered "defect") → [post-trip only: the new-defects step] → review.
+ * Total: 1 + checkCount + defectCount + (PostTrip ? 1 : 0) + 1.
  *
  * `unit` and `mode` are what narrow the list: itemsFor() drops NL02Only rows for a recognised
  * NL-01 and PostTripOnly rows on a pre-trip, and an UNKNOWN unit deliberately gets every row
@@ -189,6 +206,11 @@ export function buildSteps(
     }
   }
 
+  // Rev 4: the post-trip asks for NEW defects instead of re-checking the vehicle. One step,
+  // whatever the answer — the defects themselves are entered on it, not injected as more steps,
+  // so nothing about it can move a check's number.
+  if (mode === "PostTrip") steps.push({ kind: "newDefects", id: "newDefects", of });
+
   steps.push({ kind: "review", id: "review", of });
   return steps;
 }
@@ -227,6 +249,8 @@ export function progressLabel(step: InspectionStep): string {
       return `Check ${step.n} of ${step.of}`;
     case "defect":
       return `Follow-up · check ${step.parentN} of ${step.parentOf}`;
+    case "newDefects":
+      return `New defects · ${step.of} of ${step.of} checks done`;
     case "review":
       return `Review · ${step.of} of ${step.of}`;
   }
@@ -244,6 +268,9 @@ export function progressFraction(step: InspectionStep): number {
       return step.n / step.of;
     case "defect":
       return step.parentN / step.parentOf;
+    case "newDefects":
+      // Every check is behind the driver by now; the bar is full and stays full into Review.
+      return 1;
     case "review":
       return 1;
   }
@@ -334,7 +361,8 @@ export function sectionShortcut(
 
 /**
  * Where the wizard goes after the shortcut fills `groupKey`: the first still-unanswered check
- * AFTER that sub-group, or the review step when none is left. Rows left blank BEFORE the
+ * AFTER that sub-group, else the post-trip's new-defects step if this form has one, else the
+ * review step. Rows left blank BEFORE the
  * sub-group are not jumped back to — the review step lists them as "Not answered" and blocks
  * Certify on them, exactly as for a driver who skipped ahead with the Review button.
  *
@@ -357,6 +385,9 @@ export function nextAfterSection(
   for (let i = lastInGroup + 1; i < steps.length; i += 1) {
     const s = steps[i];
     if (s.kind === "check" && answers[s.itemId] === undefined) return s;
+    // On a post-trip the new-defects question follows the checks and is never skipped past:
+    // "All OK" on Close-Out says the six checks are fine, not that nothing broke on the run.
+    if (s.kind === "newDefects") return s;
   }
   return review;
 }

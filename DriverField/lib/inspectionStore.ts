@@ -8,7 +8,7 @@
 //   State          | Uncertified, private to the      | Certified — it IS the compliance
 //                  | device                           | record
 //   Cost of loss   | Re-answer the whole NL-PTI-01    | A COMPLIANCE FAILURE
-//                  | walk-around (28-64 questions)    |
+//                  | walk-around (6-64 questions)     |
 //   Home           | localStorage — synchronous,      | IndexedDB + navigator.storage
 //                  | survives reload, ~2KB            | .persist(), the offline batch's job
 //
@@ -39,7 +39,13 @@
 import { today } from "./data";
 // The NL-PTI-01 catalogue, a byte-identical copy of Dispatcher's. Item keys are WIRE VALUES.
 import { itemsFor, type InspectionFormMode } from "./inspectionForm";
-import type { CheckState, DefectSeverity, InspectionMode } from "./types";
+import type {
+  CheckState,
+  DefectSeverity,
+  FormSeverity,
+  InspectionMode,
+  NewDefectDraft,
+} from "./types";
 // Type-only, so there is no runtime import cycle with inspectionGate.ts (which imports
 // certifiedToday from here). `import type` is erased at compile time.
 import type { InspectionResultName } from "./inspectionGate";
@@ -59,13 +65,29 @@ import type { InspectionResultName } from "./inspectionGate";
  * per-mode key filter in validateDraft is the second line: it keeps a stale draft from
  * submitting off-form rows even without a bump.)
  *
+ * v4: NL-PTI-01 rev 4. The post-trip stopped being a re-check list: every vehicle row became
+ * pre-trip-only, the "Defects noticed while driving" row was withdrawn, and the post-trip gained
+ * `newDefectsFound` (the No/Yes answer to "Any defect found after the pre-trip?") and
+ * `newDefects` (each new defect, filed against a pre-trip item). Rows moved between the halves
+ * again and the shape grew, so — exactly as for v3 — a v3 draft is an answer sheet for a
+ * different revision of a legal form and is discarded, not migrated. That includes a v3 PRE-trip
+ * draft, whose rows did not change: one version number covers the store, and the rule is not
+ * "discard only the drafts that would obviously break".
+ *
  * DRAFTS ONLY. Local certifications carry their own CERTIFIED_STORE_VERSION, because their
  * shape did not change — sharing one number would make a form revision silently drop today's
  * certifications and re-block boarding for a driver who had already certified.
  */
-export const INSPECTION_STORE_VERSION = 3;
+export const INSPECTION_STORE_VERSION = 4;
 
-/** The local-certification list's version. Independent of the draft's — see above. */
+/**
+ * The local-certification list's version. Independent of the draft's — see above.
+ *
+ * NOT bumped for rev 4's `defectItems`, deliberately: bumping would drop this morning's
+ * certifications and re-block boarding. An entry written before the field existed reads as
+ * `defectItems: []` — the one consequence being that the post-trip's new-defect picker does not
+ * hide the items that pre-trip reported, which offers MORE choices, never fewer.
+ */
 export const CERTIFIED_STORE_VERSION = 2;
 
 /** Follows lib/auth.ts's `nl.driverfield.refreshToken` convention. */
@@ -121,6 +143,18 @@ export interface InspectionDraft {
    * a driver just typed after "Lynn". Trimmed once, at submit, by normalizeLocation().
    */
   location: string;
+  /**
+   * POST-TRIP ONLY (rev 4): the answer to "Any defect found after the pre-trip?". `null` until
+   * the driver answers — it blocks Certify and is never defaulted to No, because "no new
+   * defects" must be a recorded answer, not an omission. Always null on a pre-trip draft.
+   */
+  newDefectsFound: boolean | null;
+  /**
+   * POST-TRIP ONLY (rev 4): each defect found after the pre-trip, in the order entered. Kept
+   * when the answer flips to No (a mis-tap must not destroy them) but never counted, shown as
+   * reported or sent unless `newDefectsFound === true`. Always [] on a pre-trip draft.
+   */
+  newDefects: NewDefectDraft[];
   /** A step ID, never an index — an injected defect step shifts every later index. */
   stepId: string;
 }
@@ -135,6 +169,12 @@ export interface LocalCertification {
   certifiedAt: string;
   result: InspectionResultName;
   defectCount: number;
+  /**
+   * The catalogue KEY of every defect this inspection filed (checklist defects and, on a
+   * post-trip, new defects). A pre-trip's list is what the same day's post-trip treats as
+   * "already reported" — see preTripDefectItems() in lib/inspectionGate.ts.
+   */
+  defectItems: string[];
   outOfService: boolean;
 }
 
@@ -246,8 +286,10 @@ function removeRaw(key: string): void {
  * fail-safe superset an unknown unit gets.
  *
  * Narrowed by MODE, because the mode is part of the draft's identity (it is in draftKey()) and
- * rev 2 of NL-PTI-01 moved rows between the halves: a post-trip draft holding an answer for a
- * row that is now pre-trip-only would otherwise carry it toward a post-trip payload.
+ * revs 2 and 4 of NL-PTI-01 moved rows between the halves: a post-trip draft holding an answer
+ * for a row that is now pre-trip-only would otherwise carry it toward a post-trip payload. Since
+ * rev 4 the post-trip's checklist half is Close-Out alone; its new defects are validated
+ * separately, against the PRE-trip keys they are filed on (PRE_TRIP_ITEM_IDS below).
  * Deliberately NOT narrowed by unit: the unit follows from the vehicle, which is also in the key,
  * and the screen narrows to the exact unit itself when it builds the payload.
  */
@@ -262,6 +304,20 @@ const SEVERITIES: ReadonlySet<string> = new Set<DefectSeverity>([
   "Major",
   "Out of Service",
 ]);
+
+/** A new defect is graded on the FORM's two boxes only — see FormSeverity in lib/types.ts. */
+const FORM_SEVERITIES: ReadonlySet<string> = new Set<FormSeverity>(["Minor", "Major"]);
+
+/**
+ * Every item a new post-trip defect may be filed against, for ANY unit: the pre-trip superset.
+ * A stored new defect whose item is outside it (a retired, withdrawn or invented key) is
+ * dropped on load. Narrowing to the exact unit and excluding what the pre-trip already reported
+ * is the screen's job (newDefectsProblem in lib/newDefects.ts), where the driver SEES the
+ * problem instead of a defect silently disappearing.
+ */
+const PRE_TRIP_ITEM_IDS: ReadonlySet<string> = new Set(
+  itemsFor(null, "PreTrip").flatMap((g) => g.items.map((i) => i.key)),
+);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -325,6 +381,30 @@ function validateDraft(
 
   const location = typeof parsed.location === "string" ? parsed.location : "";
 
+  // Rev 4's post-trip fields. On a pre-trip draft they are forced empty whatever storage says,
+  // so a new defect can never ride a pre-trip payload.
+  let newDefectsFound: boolean | null = null;
+  const newDefects: NewDefectDraft[] = [];
+  if (mode === "PostTrip") {
+    if (typeof parsed.newDefectsFound === "boolean") newDefectsFound = parsed.newDefectsFound;
+    if (Array.isArray(parsed.newDefects)) {
+      for (const raw of parsed.newDefects) {
+        if (!isPlainObject(raw)) continue;
+        const itemKey = typeof raw.itemKey === "string" ? raw.itemKey : "";
+        // "" is a row whose item the driver has not picked yet — kept, and it blocks Certify.
+        if (itemKey !== "" && !PRE_TRIP_ITEM_IDS.has(itemKey)) continue;
+        newDefects.push({
+          itemKey,
+          severity:
+            typeof raw.severity === "string" && FORM_SEVERITIES.has(raw.severity)
+              ? (raw.severity as FormSeverity)
+              : null,
+          note: typeof raw.note === "string" ? raw.note : "",
+        });
+      }
+    }
+  }
+
   return {
     v: INSPECTION_STORE_VERSION,
     mode,
@@ -336,6 +416,8 @@ function validateDraft(
     defects,
     odometerKm,
     location,
+    newDefectsFound,
+    newDefects,
     stepId: parsed.stepId,
   };
 }
@@ -426,6 +508,8 @@ export function startDraft(
     defects: {},
     odometerKm: null,
     location: "",
+    newDefectsFound: null,
+    newDefects: [],
     stepId: "odometer",
   };
   return persist(draft);
@@ -459,6 +543,8 @@ function update(
       defects: {},
       odometerKm: null,
       location: "",
+      newDefectsFound: null,
+      newDefects: [],
       stepId: "odometer",
     };
   return persist(change(current));
@@ -582,6 +668,81 @@ export function setLocation(
   return update(mode, vehicleId, asOf, (draft) => ({ ...draft, location }));
 }
 
+// --- the post-trip's new defects (NL-PTI-01 rev 4) -------------------------
+//
+// Post-trip only: on a pre-trip each of these returns the draft unchanged, so no caller can
+// attach a new defect to the half of the form that does not ask for them.
+
+/**
+ * Records the answer to "Any defect found after the pre-trip?". Answering Yes to an empty list
+ * seeds one blank row, as the Dispatch Console's editor does, so the driver lands on something
+ * to fill in. Answering No keeps any rows already entered — they are simply not sent.
+ */
+export function setNewDefectsFound(
+  mode: InspectionMode,
+  vehicleId: string,
+  found: boolean,
+  asOf: string = today,
+): InspectionDraft {
+  return update(mode, vehicleId, asOf, (draft) => {
+    if (mode !== "PostTrip") return draft;
+    const newDefects =
+      found && draft.newDefects.length === 0 ? [blankNewDefect()] : draft.newDefects;
+    return { ...draft, newDefectsFound: found, newDefects };
+  });
+}
+
+/** Appends a blank new defect — no item, no severity, no note. */
+export function addNewDefect(
+  mode: InspectionMode,
+  vehicleId: string,
+  asOf: string = today,
+): InspectionDraft {
+  return update(mode, vehicleId, asOf, (draft) =>
+    mode !== "PostTrip" ? draft : { ...draft, newDefects: [...draft.newDefects, blankNewDefect()] },
+  );
+}
+
+/** Patches the new defect at `index`. An index that does not exist changes nothing. */
+export function updateNewDefect(
+  mode: InspectionMode,
+  vehicleId: string,
+  index: number,
+  patch: Partial<NewDefectDraft>,
+  asOf: string = today,
+): InspectionDraft {
+  return update(mode, vehicleId, asOf, (draft) =>
+    mode !== "PostTrip" || index < 0 || index >= draft.newDefects.length
+      ? draft
+      : {
+          ...draft,
+          newDefects: draft.newDefects.map((d, i) => (i === index ? { ...d, ...patch } : d)),
+        },
+  );
+}
+
+/**
+ * Removes the new defect at `index`. Removing the last one leaves the answer at Yes with an
+ * empty list, which blocks Certify until the driver adds one or answers No — an empty list is
+ * never silently re-read as "No".
+ */
+export function removeNewDefect(
+  mode: InspectionMode,
+  vehicleId: string,
+  index: number,
+  asOf: string = today,
+): InspectionDraft {
+  return update(mode, vehicleId, asOf, (draft) =>
+    mode !== "PostTrip"
+      ? draft
+      : { ...draft, newDefects: draft.newDefects.filter((_, i) => i !== index) },
+  );
+}
+
+function blankNewDefect(): NewDefectDraft {
+  return { itemKey: "", severity: null, note: "" };
+}
+
 export function setStep(
   mode: InspectionMode,
   vehicleId: string,
@@ -638,6 +799,10 @@ function readCertifications(): LocalCertification[] {
       certifiedAt: entry.certifiedAt,
       result: entry.result,
       defectCount: typeof entry.defectCount === "number" ? entry.defectCount : 0,
+      // Absent on an entry written before rev 4 — see CERTIFIED_STORE_VERSION.
+      defectItems: Array.isArray(entry.defectItems)
+        ? entry.defectItems.filter((k): k is string => typeof k === "string")
+        : [],
       outOfService: entry.outOfService === true,
     });
   }

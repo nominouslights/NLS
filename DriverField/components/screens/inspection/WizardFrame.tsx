@@ -13,7 +13,8 @@ import { MockTag, TabletChip } from "../shared";
 // must never be able to leave part of that question off screen — a scrollbar here means a
 // half-read check can be answered. So this is three FIXED rows (header, question, footer) with
 // a progress bar between the first two, and NO scroll container anywhere in the file. The
-// review step is the only surface in the flow that scrolls, and it owns that itself.
+// review step scrolls, and owns that itself; so does the post-trip's list of entered new defects
+// (NewDefectsStep), inside a bounded region below its question — never the question itself.
 //
 // Sizes come from lib/tablet.ts's `wizard` group — never a hardcoded number here, and never a
 // number from lib/theme.ts, which owns colour and type family only.

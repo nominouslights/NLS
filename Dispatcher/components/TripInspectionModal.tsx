@@ -26,7 +26,6 @@ import { SectionLabel } from "@/components/ui/Panel";
 import { FieldLabel, NumberField, SelectField, TextAreaField, TextField } from "@/components/ui/Field";
 import { OptChip } from "@/components/manifest/manifestRows";
 import ChecklistGroupEditor, {
-  groupResult,
   unansweredCount,
   type ChecklistRow,
 } from "@/components/inspection/ChecklistGroupEditor";
@@ -37,18 +36,28 @@ import {
   isRetiredFormRecord,
   itemsOutsideForm,
   rowsFor,
+  TRIP_ROW_START,
+  inspectionResult,
+  newDefectOptions,
+  newDefectsFromRecord,
+  newDefectsProblem,
+  newDefectsWire,
+  rowsForUnitChange,
+  withoutUnofferedItems,
   rowsFromRecord,
+  type NewDefect,
 } from "@/components/inspection/checklistRows";
+import NewDefectsEditor from "@/components/inspection/NewDefectsEditor";
 import RetiredFormChecklist from "@/components/inspection/RetiredFormChecklist";
 
 // Trip-context Fleet inspection entry. Posts a real Fleet VehicleInspection
 // (POST /api/fleet/inspections) tagged with the trip's tripNumber + vehicleId,
-// source "Dispatcher". Both halves of the form are now the SAME thing — the
-// NL-PTI-01 catalogue narrowed by `itemsFor(unit, mode)`: the pre-trip is the
-// full NSC 13 list, the post-trip the reduced "can change while driving" set plus
-// En-Route Observations and Close-Out. Pre-trip additionally carries
+// source "Dispatcher". Both halves start from the NL-PTI-01 catalogue narrowed by
+// `itemsFor(unit, mode)`: the pre-trip is the full NSC 13 list; the post-trip
+// (rev 4) is the six Close-Out rows plus "New defects since the pre-trip", each
+// filed against the pre-trip row it concerns. Pre-trip additionally carries
 // weather/road/fuel; post-trip carries issues, fuel-added and the §10
-// certification.
+// certification. A new record's rows start at OK (`TRIP_ROW_START`).
 
 const WEATHER_OPTIONS: { value: InspectionWeather; label: string }[] = [
   { value: "Clear", label: "Clear" },
@@ -95,12 +104,16 @@ export default function TripInspectionModal({
   trip,
   type,
   existing,
+  preTrip = null,
   enteredBy,
   onClose,
   onSaved,
 }: {
   trip: TripRecord;
   type: InspectionType;
+  /** This trip's pre-trip, if one is on file. A post-trip's "new defects" leave out
+   *  the items it already reported. */
+  preTrip?: VehicleInspection | null;
   /** When set, the modal edits this inspection (PUT) instead of creating one.
    *  Its type is fixed and immutable — the `type` prop is ignored in that case. */
   existing?: VehicleInspection;
@@ -195,8 +208,19 @@ export default function TripInspectionModal({
   const [location, setLocation] = useState(existing?.location ?? "");
   const locationRequired = inspectionLocationRequired(existing);
   const [checklist, setChecklist] = useState<ChecklistRow[]>(() =>
-    existing ? rebuilt : rowsFor(unit || null, mode),
+    existing ? rebuilt : rowsFor(unit || null, mode, TRIP_ROW_START),
   );
+
+  // The unit decides which rows exist, so choosing one rebuilds the rows (keeping
+  // answers already given). Only reachable on a new record — the select is locked
+  // in edit mode.
+  function changeUnit(next: string) {
+    setUnit(next);
+    setChecklist((prev) => rowsForUnitChange(prev, next || null, mode));
+    // A new defect picked against a row the new unit does not have is un-picked
+    // (its note kept), so the save blocks until the dispatcher re-picks.
+    setNewDefects((prev) => withoutUnofferedItems(prev, newDefectOptions(next || null, preTrip)));
+  }
 
   // Pre-trip sections
   const [weather, setWeather] = useState<InspectionWeather[]>(existing?.weather ?? []);
@@ -207,6 +231,21 @@ export default function TripInspectionModal({
   const [fuelLevel, setFuelLevel] = useState<InspectionFuelLevel | null>(existing?.fuelLevel ?? null);
 
   // Post-trip sections
+  const [newDefects, setNewDefects] = useState<NewDefect[]>(() =>
+    existing && !isPre && !retired ? newDefectsFromRecord(existing, rebuilt) : [],
+  );
+  const [newDefectsFound, setNewDefectsFound] = useState(newDefects.length > 0);
+  const defectOptions = useMemo(() => newDefectOptions(unit || null, preTrip), [unit, preTrip]);
+  // Items the SAVED record already filed must stay pickable even if the pre-trip
+  // (or a later edit to it) also reports them — never silently drop an answer.
+  // Only those: on a new record a pick outside the options is stale, not saved.
+  const [savedDefectKeys] = useState(() => new Set(newDefects.map((d) => d.itemKey)));
+  const pickable = useMemo(() => {
+    const keys = new Set(defectOptions.map((o) => o.key));
+    const kept = [...savedDefectKeys].filter((k) => !keys.has(k)).map((k) => ({ key: k, label: k }));
+    return [...defectOptions, ...kept];
+  }, [defectOptions, savedDefectKeys]);
+  const preTripReported = preTrip?.defects.length ?? 0;
   const [issues, setIssues] = useState<string[]>(existing?.issues ?? []);
   const [signature, setSignature] = useState(existing?.driverSignatureName ?? trip.driverName ?? "");
   const [certifiedAt, setCertifiedAt] = useState(existing ? isoToLocal(existing.certifiedAt) : nowLocal());
@@ -221,7 +260,7 @@ export default function TripInspectionModal({
     setChecklist((prev) => prev.map((r) => (r.itemKey === itemKey ? { ...r, ...patch } : r)));
   }
 
-  const result = groupResult(checklist);
+  const result = inspectionResult(checklist, !isPre && newDefectsFound ? newDefects : []);
   const resultMeta = statusMeta(result === "Pass" ? "ontime" : result === "Fail" ? "over" : "soon");
   const unanswered = unansweredCount(checklist);
 
@@ -242,6 +281,11 @@ export default function TripInspectionModal({
       return `${unanswered} of ${checklist.length} checks ${unanswered === 1 ? "is" : "are"} unanswered — every row needs OK, Defect or N-A.`;
     }
     if (!isPre) {
+      if (newDefectsFound) {
+        if (newDefects.length === 0) return "Add the new defect, or answer No to \"Any defect found after the pre-trip?\".";
+        const problem = newDefectsProblem(newDefects);
+        if (problem) return problem;
+      }
       if (!signature.trim()) return "Driver signature name is required.";
       if (fuelAdded && !(parseFloat(fuelLitres) > 0)) return "Fuel was added — enter the litres.";
     }
@@ -264,7 +308,7 @@ export default function TripInspectionModal({
       location: location.trim() || null,
       // Every row, in both modes — close-out rows are ordinary checklist rows now.
       checklist: checklistWire(checklist),
-      defects: defectsWire(checklist),
+      defects: [...defectsWire(checklist), ...(!isPre && newDefectsFound ? newDefectsWire(newDefects) : [])],
     };
     if (isPre) {
       return {
@@ -392,7 +436,7 @@ export default function TripInspectionModal({
             <SelectField
               label="Unit"
               value={unit}
-              onChange={setUnit}
+              onChange={changeUnit}
               // Locked once saved: the unit decides which rows exist, so changing it on an
               // existing record would rebuild it against a different form and shed answers.
               disabled={existing != null}
@@ -439,7 +483,7 @@ export default function TripInspectionModal({
           </div>
 
           <SectionLabel>
-            {isPre ? "Pre-trip checklist" : "Post-trip checklist"} · Form NL-PTI-01 · {checklist.length} checks
+            {isPre ? "Pre-trip checklist" : "Post-trip close-out"} · Form NL-PTI-01 · {checklist.length} checks
           </SectionLabel>
           {groups.map((g) => (
             <ChecklistGroupEditor
@@ -513,7 +557,17 @@ export default function TripInspectionModal({
             </>
           ) : (
             <>
-              <SectionLabel>Issues / defects</SectionLabel>
+              <SectionLabel>New defects since the pre-trip</SectionLabel>
+              <NewDefectsEditor
+                found={newDefectsFound}
+                onFoundChange={setNewDefectsFound}
+                defects={newDefects}
+                onChange={setNewDefects}
+                options={pickable}
+                preTripReported={preTripReported}
+              />
+
+              <SectionLabel>Other issues (not a vehicle defect)</SectionLabel>
               <div style={{ marginBottom: 16 }}>
                 {issues.map((line, i) => (
                   <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "end", marginBottom: 8 }}>
