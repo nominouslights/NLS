@@ -23,6 +23,13 @@ public sealed class RemoveInspectionCommandHandler(IVehicleInspectionRepository 
             return Result.Failure(InspectionErrors.NotFound);
         }
 
+        // A defect attached to an open work order is that work order's subject; deleting the
+        // report under it would leave the work order pointing at nothing.
+        if (inspection.HasDefectOnActiveWorkOrder)
+        {
+            return Result.Failure(InspectionErrors.DefectOnActiveWorkOrder);
+        }
+
         inspection.MarkRemoved();
         repository.Remove(inspection);
         await repository.SaveChangesAsync(cancellationToken);

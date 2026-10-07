@@ -32,6 +32,8 @@ internal sealed class WorkOrderProjection : FleetProjection<WorkOrder, WorkOrder
         row.AuthorizedLimitCad = source.AuthorizedLimitCad;
         row.BudgetCode = source.BudgetCode;
         row.DateRequiredOrOos = source.DateRequiredOrOos;
+        // Fresh list — the read row must never alias the aggregate's owned collection.
+        row.Defects = [.. source.Defects];
         row.Version = source.Version;
     }
 }

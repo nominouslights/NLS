@@ -40,6 +40,31 @@ public static class InspectionErrors
         "Fleet.Inspection.DefectAlreadyResolved", "That defect has already been resolved.");
 
     /// <summary>
+    /// A defect is on at most one active work order. Attaching it to a second one is refused
+    /// until the first completes (and defers it) or is cancelled.
+    /// </summary>
+    public static readonly Error DefectAlreadyOnWorkOrder = Error.Conflict(
+        "Fleet.Inspection.DefectAlreadyOnWorkOrder",
+        "That defect is already on an open work order.");
+
+    /// <summary>
+    /// A work order may only take defects reported against its own vehicle. An inspection with
+    /// no vehicle link (legacy, unit-only) matches when its unit equals the vehicle's unit
+    /// number — the same rule the defects panel uses to list it under that vehicle.
+    /// </summary>
+    public static readonly Error VehicleMismatch = Error.Validation(
+        "Fleet.Inspection.VehicleMismatch",
+        "That inspection was not recorded against this work order's vehicle.");
+
+    /// <summary>
+    /// Deleting an inspection while one of its defects is on an open work order would leave the
+    /// work order pointing at nothing. Complete or cancel the work order first.
+    /// </summary>
+    public static readonly Error DefectOnActiveWorkOrder = Error.Conflict(
+        "Fleet.Inspection.DefectOnActiveWorkOrder",
+        "A defect on this inspection is on an open work order — complete or cancel it first.");
+
+    /// <summary>
     /// Two defects on one inspection share an item. <c>Item</c> is the addressing key for
     /// resolution, so a duplicate would make both rows resolve together — rejected on entry and
     /// on amendment rather than left to corrupt the maintenance record.

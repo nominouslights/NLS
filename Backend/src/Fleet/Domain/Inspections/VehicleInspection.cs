@@ -336,7 +336,10 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
     public void MarkRemoved() => Raise(new VehicleInspectionRemovedDomainEvent(Id, TenantId));
 
     /// <summary>
-    /// Links the work order generated from this inspection's defects. One generation per
+    /// LEGACY — new work orders attach individual defects through
+    /// <see cref="AssignDefectToWorkOrder"/> and never call this; it stays so
+    /// <see cref="GeneratedWorkOrderId"/> keeps its history for work orders created before
+    /// per-defect links. Links the work order generated from this inspection's defects. One generation per
     /// inspection: fails once <see cref="GeneratedWorkOrderId"/> is set — deliberately even if
     /// that earlier work order was cancelled (the cancelled-WO escape hatch needs a
     /// cross-aggregate read and is a documented follow-up).
@@ -449,8 +452,125 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
         return NorthernLink.Shared.Kernel.Result.Success();
     }
 
+    /// <summary>The defect addressed by <paramref name="item"/> (trimmed, case-insensitive), or null.</summary>
+    public InspectionDefect? FindDefect(string? item)
+    {
+        var index = IndexOfDefect(item);
+        return index < 0 ? null : Defects[index];
+    }
+
+    /// <summary>True while any defect on this inspection is attached to an active work order.</summary>
+    public bool HasDefectOnActiveWorkOrder => Defects.Any(d => d.WorkOrderId is not null);
+
     /// <summary>
-    /// Stamps the still-unresolved defects on this inspection as repaired under
+    /// Attaches one open defect to the active work order <paramref name="workOrderId"/>. A defect
+    /// is on at most one active work order: a second attach fails with
+    /// <see cref="InspectionErrors.DefectAlreadyOnWorkOrder"/> (even for the same work order —
+    /// attaching happens once, at creation), and a resolved defect cannot be attached at all.
+    /// </summary>
+    public Result AssignDefectToWorkOrder(string item, Guid workOrderId)
+    {
+        var index = IndexOfDefect(item);
+        if (index < 0)
+        {
+            return NorthernLink.Shared.Kernel.Result.Failure(InspectionErrors.DefectNotFound);
+        }
+
+        var defect = Defects[index];
+        if (defect.IsResolved)
+        {
+            return NorthernLink.Shared.Kernel.Result.Failure(InspectionErrors.DefectAlreadyResolved);
+        }
+
+        if (defect.WorkOrderId is not null)
+        {
+            return NorthernLink.Shared.Kernel.Result.Failure(InspectionErrors.DefectAlreadyOnWorkOrder);
+        }
+
+        ReplaceDefect(index, defect with { WorkOrderId = workOrderId });
+        Raise(new VehicleInspectionDefectWorkOrderChangedDomainEvent(Id, TenantId, defect.Item, workOrderId));
+        return NorthernLink.Shared.Kernel.Result.Success();
+    }
+
+    /// <summary>
+    /// Detaches one defect from <paramref name="workOrderId"/> — the work order deferred it or
+    /// was cancelled. The defect stays exactly as resolved or open as it was; it is simply free
+    /// for another work order. A no-op (no change, no event) when the item is gone or the defect
+    /// is not on that work order.
+    /// </summary>
+    public void ReleaseDefectFromWorkOrder(string item, Guid workOrderId)
+    {
+        var index = IndexOfDefect(item);
+        if (index < 0 || Defects[index].WorkOrderId != workOrderId)
+        {
+            return;
+        }
+
+        var defect = Defects[index];
+        ReplaceDefect(index, defect with { WorkOrderId = null });
+        Raise(new VehicleInspectionDefectWorkOrderChangedDomainEvent(Id, TenantId, defect.Item, null));
+    }
+
+    /// <summary>
+    /// Resolves one defect as the outcome of completing <paramref name="workOrderId"/> (reason
+    /// <see cref="DefectResolutionReason.RepairedUnderWorkOrder"/> or
+    /// <see cref="DefectResolutionReason.NoFaultFound"/>), attributing it to that work order and
+    /// detaching it. Only a defect actually on that work order is touched — a missing item or a
+    /// defect on another (or no) work order is a no-op.
+    ///
+    /// A defect that was already resolved by hand keeps its own resolution stamp (resolution is
+    /// final); it is only detached from the work order.
+    /// </summary>
+    public void ResolveDefectUnderWorkOrder(
+        string item,
+        Guid workOrderId,
+        DefectResolutionReason reason,
+        string? note,
+        string resolvedBy,
+        DateTimeOffset atUtc)
+    {
+        var index = IndexOfDefect(item);
+        if (index < 0 || Defects[index].WorkOrderId != workOrderId)
+        {
+            return;
+        }
+
+        var defect = Defects[index];
+        if (defect.IsResolved)
+        {
+            ReplaceDefect(index, defect with { WorkOrderId = null });
+            Raise(new VehicleInspectionDefectWorkOrderChangedDomainEvent(Id, TenantId, defect.Item, null));
+            return;
+        }
+
+        ReplaceDefect(index, defect with
+        {
+            WorkOrderId = null,
+            ResolutionReason = reason,
+            ResolutionNote = Normalize(note),
+            ResolvedBy = Normalize(resolvedBy),
+            ResolvedAtUtc = atUtc,
+            ResolvedByWorkOrderId = workOrderId,
+        });
+        Raise(new VehicleInspectionDefectsResolvedDomainEvent(Id, TenantId));
+    }
+
+    private int IndexOfDefect(string? item)
+    {
+        var key = NormalizeItem(item);
+        return Defects.FindIndex(d => NormalizeItem(d.Item).Equals(key, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void ReplaceDefect(int index, InspectionDefect replacement)
+    {
+        var updated = new List<InspectionDefect>(Defects);
+        updated[index] = replacement;
+        Defects = updated;
+    }
+
+    /// <summary>
+    /// LEGACY PATH ONLY — work orders with no defect lines (created before per-defect links, or
+    /// manually). Stamps the still-unresolved defects on this inspection as repaired under
     /// <paramref name="workOrderId"/> — only those whose Item is in <paramref name="items"/>
     /// (trimmed, case-insensitive), or every open one when <paramref name="items"/> is null.
     /// Called when that work order completes — creating or starting one shows as "repair
@@ -471,8 +591,13 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
             .Select(NormalizeItem)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        // A defect attached to an active per-defect work order belongs to THAT work order: a
+        // legacy completion must never sweep it, or it would end up resolved while still
+        // attached (breaking "WorkOrderId set ⇔ on an open work order").
         bool InScope(InspectionDefect d) =>
-            !d.IsResolved && (wanted is null || wanted.Contains(NormalizeItem(d.Item)));
+            !d.IsResolved
+            && d.WorkOrderId is null
+            && (wanted is null || wanted.Contains(NormalizeItem(d.Item)));
 
         if (!Defects.Any(InScope))
         {
@@ -566,7 +691,7 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
         IReadOnlyList<InspectionDefect> incoming)
     {
         var priorByItem = existing
-            .Where(d => d.IsResolved)
+            .Where(d => d.IsResolved || d.WorkOrderId is not null)
             .GroupBy(d => NormalizeItem(d.Item), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
@@ -578,6 +703,9 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
                 ResolvedBy = prior.ResolvedBy,
                 ResolvedAtUtc = prior.ResolvedAtUtc,
                 ResolvedByWorkOrderId = prior.ResolvedByWorkOrderId,
+                // The active work-order link is maintenance history too: an amend that keeps the
+                // item keeps it on its work order.
+                WorkOrderId = prior.WorkOrderId,
             }
             : StripResolution(d))];
     }
@@ -604,7 +732,10 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
             ? item with { Passed = state != ChecklistItemState.Defect }
             : item)];
 
-    /// <summary>Nulls the five resolution fields; <c>RecurrenceOfInspectionId</c> is left alone.</summary>
+    /// <summary>
+    /// Nulls the five resolution fields and the active work-order link — none of them can ever be
+    /// set from the wire; <c>RecurrenceOfInspectionId</c> is left alone.
+    /// </summary>
     private static InspectionDefect StripResolution(InspectionDefect defect) => defect with
     {
         ResolutionReason = null,
@@ -612,6 +743,7 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
         ResolvedBy = null,
         ResolvedAtUtc = null,
         ResolvedByWorkOrderId = null,
+        WorkOrderId = null,
     };
 
     /// <summary><c>Item</c> is the addressing key, so it must be unique within one inspection.</summary>

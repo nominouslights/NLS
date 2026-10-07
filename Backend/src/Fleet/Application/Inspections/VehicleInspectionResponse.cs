@@ -63,5 +63,25 @@ public sealed record InspectionChecklistItemResponse(
     string State,
     string? Note);
 
-/// <summary>One defect. Severity is "Minor", "Major", or "OutOfService".</summary>
-public sealed record InspectionDefectResponse(string Item, string Severity, string? Note);
+/// <summary>
+/// One defect. Severity is "Minor", "Major", or "OutOfService". <see cref="WorkOrderId"/> is the
+/// ACTIVE work order the defect is attached to (null when none). <see cref="ResolutionReason"/>
+/// is a <c>DefectResolutionReason</c> name and, with <see cref="ResolvedAtUtc"/>, is null while
+/// the defect is open.
+/// </summary>
+public sealed record InspectionDefectResponse(
+    string Item,
+    string Severity,
+    string? Note,
+    Guid? WorkOrderId,
+    string? ResolutionReason,
+    DateTimeOffset? ResolvedAtUtc)
+{
+    public static InspectionDefectResponse From(Domain.Inspections.InspectionDefect defect) => new(
+        defect.Item,
+        defect.Severity.ToString(),
+        defect.Note,
+        defect.WorkOrderId,
+        defect.ResolutionReason?.ToString(),
+        defect.ResolvedAtUtc);
+}

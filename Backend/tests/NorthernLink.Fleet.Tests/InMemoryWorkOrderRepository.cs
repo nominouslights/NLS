@@ -21,6 +21,12 @@ internal sealed class InMemoryWorkOrderRepository : IWorkOrderRepository
     public Task<bool> VehicleExistsAsync(Guid vehicleId, CancellationToken cancellationToken = default) =>
         Task.FromResult(KnownVehicleIds.Contains(vehicleId));
 
+    /// <summary>Unit numbers for known vehicles; a vehicle with no entry has no unit to match.</summary>
+    public Dictionary<Guid, string> VehicleUnitNumbers { get; } = [];
+
+    public Task<string?> FindVehicleUnitNumberAsync(Guid vehicleId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(VehicleUnitNumbers.TryGetValue(vehicleId, out var unit) ? unit : null);
+
     public void Add(WorkOrder workOrder) => WorkOrders.Add(workOrder);
 
     public Task<int> NextSequenceAsync(Guid tenantId, CancellationToken cancellationToken = default) =>

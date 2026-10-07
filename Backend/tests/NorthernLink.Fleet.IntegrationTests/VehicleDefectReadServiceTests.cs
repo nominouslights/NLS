@@ -2,6 +2,7 @@ using NorthernLink.Fleet.Application.Inspections.Enter;
 using NorthernLink.Fleet.Application.Inspections.Update;
 using NorthernLink.Fleet.Application.Services.Add;
 using NorthernLink.Fleet.Application.WorkOrders.Complete;
+using NorthernLink.Fleet.Application.WorkOrders.Create;
 using NorthernLink.Fleet.Domain.Inspections;
 using NorthernLink.Fleet.Domain.Services;
 using NorthernLink.Fleet.Domain.Vehicles;
@@ -315,6 +316,101 @@ public class VehicleDefectReadServiceTests(PostgresFixture fixture)
         });
 
         Assert.NotEqual(Guid.Empty, inspectionId);
+    }
+
+    [Fact]
+    public async Task A_per_defect_work_order_shows_on_its_own_defect_only_and_resolves_only_that_defect()
+    {
+        var vehicle = await SeedVehicleAsync();
+        Guid inspectionId;
+
+        await using (var writer = fixture.CreateContext(PostgresFixture.TenantA))
+        {
+            var inspection = Inspection(
+                PostgresFixture.TenantA, vehicle.Id, vehicle.UnitNumber,
+                [Defect("Brakes", InspectionDefectSeverity.OutOfService), Defect("Defroster")]);
+            writer.VehicleInspections.Add(inspection);
+            await writer.SaveChangesAsync();
+            inspectionId = inspection.Id;
+        }
+
+        // Create through the real handler on real repositories — one work order, one defect.
+        Guid workOrderId;
+        await using (var writer = fixture.CreateContext(PostgresFixture.TenantA))
+        {
+            var handler = new CreateWorkOrderCommandHandler(
+                new WorkOrderRepository(writer), new VehicleInspectionRepository(writer));
+
+            var created = await handler.Handle(
+                new CreateWorkOrderCommand(
+                    PostgresFixture.TenantA,
+                    vehicle.Id,
+                    Title: "Brakes out of service",
+                    Description: null,
+                    Priority: WorkOrderPriority.Critical,
+                    Source: WorkOrderSource.PreTripInspection,
+                    SourceRef: null,
+                    AssignedTo: null,
+                    DueDate: null,
+                    LineItems: [],
+                    ShopId: null,
+                    AuthorizedLimitCad: null,
+                    BudgetCode: null,
+                    DateRequiredOrOos: null,
+                    InspectionId: null,
+                    Defects: [new WorkOrderDefectRef(inspectionId, "Brakes")]),
+                CancellationToken.None);
+
+            Assert.True(created.IsSuccess, $"Create failed: {(created.IsFailure ? created.Error.Code : string.Empty)}");
+            workOrderId = created.Value;
+        }
+
+        var underway = await ReadAsync(vehicle.Id);
+        var brakes = underway.Single(d => d.Item == "Brakes");
+        Assert.Equal(workOrderId, brakes.WorkOrderId);
+        Assert.Equal("Open", brakes.WorkOrderStatus);
+        Assert.NotNull(brakes.WorkOrderNumber);
+        Assert.Null(underway.Single(d => d.Item == "Defroster").WorkOrderId);
+
+        await using (var writer = fixture.CreateContext(PostgresFixture.TenantA))
+        {
+            var handler = new CompleteWorkOrderCommandHandler(
+                new WorkOrderRepository(writer),
+                new ServiceRecordRepository(writer),
+                new VehicleInspectionRepository(writer));
+
+            var completed = await handler.Handle(
+                new CompleteWorkOrderCommand(
+                    PostgresFixture.TenantA,
+                    workOrderId,
+                    Date: DateTimeOffset.UtcNow,
+                    PerformedBy: "M. Cardinal",
+                    Category: ServiceCategory.InspectionFix,
+                    OdometerKm: 118_500,
+                    ItemsChanged: ["Brake pads"],
+                    Reason: "DVIR defect",
+                    PartsUsed: [],
+                    LaborHours: 2m,
+                    CostCad: 300m,
+                    Notes: null,
+                    DefectOutcomes: [new WorkOrderDefectOutcome(inspectionId, "Brakes", DefectRepairOutcome.NoFaultFound, "bench-tested fine")]),
+                CancellationToken.None);
+
+            Assert.True(completed.IsSuccess, $"Completion failed: {(completed.IsFailure ? completed.Error.Code : string.Empty)}");
+        }
+
+        var open = await ReadAsync(vehicle.Id);
+        var defroster = Assert.Single(open);
+        Assert.Equal("Defroster", defroster.Item);
+        Assert.Null(defroster.WorkOrderId);
+
+        var resolved = (await ReadAsync(vehicle.Id, includeResolved: true)).Single(d => d.Item == "Brakes");
+        Assert.Equal("NoFaultFound", resolved.ResolutionReason);
+        Assert.Equal("bench-tested fine", resolved.ResolutionNote);
+        Assert.Equal("M. Cardinal", resolved.ResolvedBy);
+        Assert.Equal(workOrderId, resolved.ResolvedByWorkOrderId);
+        Assert.Equal(workOrderId, resolved.WorkOrderId);
+        Assert.Equal("Completed", resolved.WorkOrderStatus);
     }
 
     [Fact]

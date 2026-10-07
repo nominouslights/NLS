@@ -75,7 +75,11 @@ internal sealed class VehicleDefectReadService(FleetDbContext context) : IVehicl
                     continue;
                 }
 
-                var workOrder = inspection.GeneratedWorkOrderId is { } workOrderId
+                // Per defect: the active work order it is attached to, else the one that resolved
+                // it, else (legacy, pre-link work orders) the one its inspection generated.
+                var defectWorkOrderId = WorkOrderIdFor(inspection, defect);
+
+                var workOrder = defectWorkOrderId is { } workOrderId
                     && workOrdersById.TryGetValue(workOrderId, out var found)
                         ? found
                         : default;
@@ -96,7 +100,7 @@ internal sealed class VehicleDefectReadService(FleetDbContext context) : IVehicl
                         defect.Note,
                         // The id is carried even when the row is missing (fail loud, not silent):
                         // number and status simply come back null.
-                        inspection.GeneratedWorkOrderId,
+                        defectWorkOrderId,
                         workOrder.Number,
                         workOrder.Status,
                         defect.ResolutionReason?.ToString(),
@@ -121,9 +125,12 @@ internal sealed class VehicleDefectReadService(FleetDbContext context) : IVehicl
         IReadOnlyList<VehicleInspectionReadModel> reporting,
         CancellationToken cancellationToken)
     {
+        // Every id any row (or any recurrence citation) can show: the per-defect active and
+        // resolving work orders as well as the legacy inspection-level one.
         var generatedIds = reporting
-            .Where(i => i.GeneratedWorkOrderId is not null)
-            .Select(i => i.GeneratedWorkOrderId!.Value)
+            .SelectMany(i => i.Defects.SelectMany(d => new[] { WorkOrderIdFor(i, d), d.ResolvedByWorkOrderId }))
+            .Where(id => id is not null)
+            .Select(id => id!.Value)
             .Distinct()
             .ToList();
 
@@ -190,6 +197,9 @@ internal sealed class VehicleDefectReadService(FleetDbContext context) : IVehicl
             workOrderNumber,
             Explicit: defect.RecurrenceOfInspectionId is not null);
     }
+
+    private static Guid? WorkOrderIdFor(VehicleInspectionReadModel inspection, InspectionDefect defect) =>
+        defect.WorkOrderId ?? defect.ResolvedByWorkOrderId ?? inspection.GeneratedWorkOrderId;
 
     private static int SeverityRank(InspectionDefectSeverity severity) => severity switch
     {
