@@ -155,6 +155,42 @@ public static class TripErrors
     public static readonly Error ChangedConcurrently = Error.Conflict(
         "Trips.Trip.ChangedConcurrently", "Someone else changed this trip at the same time — reload it and try again.");
 
+    public static readonly Error DeadheadConversionNotScheduled = Error.Conflict(
+        "Trips.Trip.DeadheadConversionNotScheduled",
+        "Only a scheduled trip can be converted to a deadhead — this run has already started or ended.");
+
+    public static readonly Error AlreadyEmptyLeg = Error.Conflict(
+        "Trips.Trip.AlreadyEmptyLeg", "The trip is already a deadhead.");
+
+    public static readonly Error DeadheadConversionBookingSourced = Error.Conflict(
+        "Trips.Trip.DeadheadConversionBookingSourced",
+        "This trip was confirmed from a community booking day — its passengers are booked in Community Booking, so it cannot become a deadhead.");
+
+    public static readonly Error PassengerTripConversionNotScheduled = Error.Conflict(
+        "Trips.Trip.PassengerTripConversionNotScheduled",
+        "Only a scheduled deadhead can be converted back — this run has already started or ended.");
+
+    public static readonly Error NotEmptyLeg = Error.Conflict(
+        "Trips.Trip.NotEmptyLeg", "The trip is not a deadhead.");
+
+    public static Error DeadheadConversionHasDemand(int seatsConfirmed, bool demandGuaranteed) => Error.Conflict(
+        "Trips.Trip.DeadheadConversionHasDemand",
+        demandGuaranteed
+            ? $"This trip has a gift-a-seat pledge{(seatsConfirmed > 0 ? $" and {seatsConfirmed} confirmed seat{(seatsConfirmed == 1 ? string.Empty : "s")}" : string.Empty)} — clear its demand before converting it to a deadhead."
+            : $"This trip has {seatsConfirmed} confirmed seat{(seatsConfirmed == 1 ? string.Empty : "s")} — clear its demand before converting it to a deadhead.");
+
+    public static Error DeadheadConversionManifestNotEmpty(int passengers, int cargoItems) => Error.Conflict(
+        "Trips.Trip.DeadheadConversionManifestNotEmpty",
+        $"This trip's manifest still lists {passengers} passenger{(passengers == 1 ? string.Empty : "s")} and {cargoItems} cargo item{(cargoItems == 1 ? string.Empty : "s")} — empty it before converting the trip to a deadhead.");
+
+    public static Error DeadheadConversionHasExternalBookings(int bookings) => Error.Conflict(
+        "Trips.Trip.DeadheadConversionHasExternalBookings",
+        $"{bookings} imported Bookeo booking{(bookings == 1 ? " is" : "s are")} placed on this trip — cancel or move {(bookings == 1 ? "it" : "them")} in Bookeo and re-import before converting it to a deadhead.");
+
+    public static Error RoundTripBothLegsEmpty(string partnerTripNumber) => Error.Conflict(
+        "Trips.Trip.RoundTripBothLegsEmpty",
+        $"The paired leg {partnerTripNumber} is already a deadhead — both legs of a round trip cannot run empty. Unpair them first.");
+
     public static Error RouteChangePartnerOwnedByBooking(string partnerTripNumber) => Error.Conflict(
         "Trips.Trip.RouteOwnedByBooking",
         $"The paired leg {partnerTripNumber} was confirmed from a community booking day, so its route belongs to the booking.");

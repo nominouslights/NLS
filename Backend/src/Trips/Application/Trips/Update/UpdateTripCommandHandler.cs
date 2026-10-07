@@ -54,7 +54,6 @@ public sealed class UpdateTripCommandHandler(ITripRepository tripRepository)
             destination,
             stops,
             distanceKm,
-            command.IsEmptyLeg,
             command.ClientId,
             command.ClientName,
             command.PoNumber,

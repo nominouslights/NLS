@@ -44,6 +44,9 @@ internal sealed class BookeoImportRepository(TripsDbContext context) : IBookeoIm
 
     public void AddBooking(BookeoBooking booking) => context.BookeoBookings.Add(booking);
 
+    public Task<int> CountBookingsOnTripAsync(Guid tripId, CancellationToken cancellationToken = default) =>
+        context.BookeoBookings.CountAsync(b => b.TripId == tripId, cancellationToken);
+
     public async Task<IReadOnlyList<BookeoProductMapping>> GetProductMappingsAsync(CancellationToken cancellationToken = default) =>
         await context.BookeoProductMappings.ToListAsync(cancellationToken);
 

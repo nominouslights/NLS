@@ -201,6 +201,9 @@ internal sealed class FakeBookeoImportRepository : IBookeoImportRepository
 
     public void AddBooking(BookeoBooking booking) => Bookings.Add(booking);
 
+    public Task<int> CountBookingsOnTripAsync(Guid tripId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Bookings.Count(b => b.TripId == tripId));
+
     public Task<IReadOnlyList<BookeoProductMapping>> GetProductMappingsAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<BookeoProductMapping>>(ProductMappings.ToList());
 

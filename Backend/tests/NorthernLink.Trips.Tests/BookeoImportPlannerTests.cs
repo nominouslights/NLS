@@ -321,6 +321,41 @@ public class BookeoImportPlannerTests
         Assert.True(RowOf(plan, "003").Blocked);
     }
 
+    [Fact]
+    public async Task A_deadhead_at_the_departure_is_never_targeted_so_new_bookings_get_their_own_trip()
+    {
+        var bed = new BookeoTestBed();
+        var deadhead = bed.AddExistingTrip(Oct6, new TimeOnly(13, 30), TripDirection.Inbound);
+        Assert.True(deadhead.ConvertToDeadhead([], 0, []).IsSuccess);
+
+        var plan = await bed.PlanAsync(BookeoTestBed.FixtureRows());
+
+        var group = GroupOf(plan, "003");
+        Assert.Null(group.Target);
+        Assert.Equal(BookeoGroupAction.Create, group.Action);
+        Assert.DoesNotContain(plan.Groups, g => g.Target?.Id == deadhead.Id);
+    }
+
+    [Fact]
+    public async Task TripIsDeadhead_blocks_a_change_to_bookings_already_on_a_trip_that_became_a_deadhead()
+    {
+        var bed = new BookeoTestBed();
+        await bed.ImportAsync(BookeoTestBed.FixtureRows());
+        var trip = bed.Repo.Trips.Single(t => t.ServiceDate == Oct6 && t.WindowStart == new TimeOnly(13, 30));
+        // Only reachable through a race with the conversion (which refuses a trip with ledger
+        // rows), so the aggregate is driven directly here, demand cleared first.
+        Assert.True(trip.RecordDemand(0, demandGuaranteed: false).IsSuccess);
+        Assert.True(trip.ConvertToDeadhead([], 0, []).IsSuccess);
+
+        var plan = await bed.PlanAsync([BookeoTestBed.FixtureRow("003") with { CustomerPhone = "2045559999" }]);
+
+        var blocking = Assert.Single(plan.Groups, g => g.Target?.Id == trip.Id);
+        Assert.Contains(BookeoIssueCodes.TripIsDeadhead, Codes(blocking.Issues));
+        Assert.Equal(BookeoGroupAction.Blocked, blocking.Action);
+        Assert.True(RowOf(plan, "003").Blocked);
+        Assert.DoesNotContain(plan.Groups, g => g.Action is BookeoGroupAction.Create or BookeoGroupAction.Update);
+    }
+
     // ------------------------------------------------------------------ Warning issues
 
     [Fact]
@@ -564,7 +599,7 @@ public class BookeoImportPlannerTests
         var source = File.ReadAllText(Path.Combine(
             AppContext.BaseDirectory, "..", "..", "..", "BookeoImportPlannerTests.cs"));
 
-        Assert.Equal(20, codes.Count);
+        Assert.Equal(21, codes.Count);
         Assert.All(codes, code => Assert.Contains($"BookeoIssueCodes.{code}", source, StringComparison.Ordinal));
     }
 }

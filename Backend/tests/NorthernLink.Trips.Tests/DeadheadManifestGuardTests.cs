@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using NorthernLink.Trips.Application.Manifests.Create;
 using NorthernLink.Trips.Application.Trips.AttachManifest;
@@ -75,5 +76,40 @@ public class DeadheadManifestGuardTests
         Assert.True(result.IsSuccess); // logged-and-skipped, never an error loop
         Assert.Null(deadhead.ManifestId);
         Assert.Equal(0, _trips.SaveCount);
+    }
+
+    [Theory]
+    [InlineData(true, LogLevel.Warning)]
+    [InlineData(false, LogLevel.Information)]
+    public async Task Attach_skip_is_a_Warning_only_when_the_skipped_manifest_lists_passengers(bool withPassenger, LogLevel expected)
+    {
+        var deadhead = TestPlanning.ScheduleTrip(tripNumber: "TR-7004", isEmptyLeg: true).Value;
+        _trips.Add(deadhead);
+        var manifest = TestManifests.Create(tripNumber: "TR-7004", passengers: withPassenger ? null : []).Value;
+        _manifests.Add(manifest);
+        var logger = new ListLogger<AttachManifestToTripCommandHandler>();
+        var handler = new AttachManifestToTripCommandHandler(_manifests, _trips, logger);
+
+        var result = await handler.Handle(new AttachManifestToTripCommand(manifest.Id), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Null(deadhead.ManifestId);
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(expected, entry.Level);
+        Assert.Contains(manifest.Id.ToString(), entry.Message, StringComparison.Ordinal);
+    }
+
+    private sealed class ListLogger<T> : ILogger<T>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
     }
 }

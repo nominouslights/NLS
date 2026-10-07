@@ -172,7 +172,9 @@ export interface TripInput {
   seatsMinimum?: number | null;
 }
 
-/** PUT /api/trips/{id} body (UpdateTripRequest) — editable only while Scheduled. */
+/** PUT /api/trips/{id} body (UpdateTripRequest) — editable only while Scheduled.
+ *  No isEmptyLeg: the server ignores it here. A trip becomes a deadhead only
+ *  through convertTripToDeadhead (and back through convertTripToPassengerTrip). */
 export interface TripUpdateInput {
   serviceDate: string;
   windowStart: string;
@@ -184,7 +186,6 @@ export interface TripUpdateInput {
   destination?: string | null;
   stops?: TripStop[] | null;
   distanceKm: number;
-  isEmptyLeg: boolean;
   clientId?: string | null;
   clientName?: string | null;
   poNumber?: string | null;
@@ -326,6 +327,84 @@ export function unpairRoundTrip(id: string): Promise<void> {
   return request<void>(`/api/trips/${id}/unpair-round-trip`, {
     method: "POST",
   });
+}
+
+// ---------------------------------------------------------------------------
+// Deadhead conversion — a Scheduled trip nobody is booked on can be turned into
+// an empty repositioning run, and back. Both take no body and return 204.
+// ---------------------------------------------------------------------------
+
+/** POST /api/trips/{id}/convert-to-deadhead → 204. 409s (each with the server's
+ *  own message): DeadheadConversionNotScheduled, AlreadyEmptyLeg,
+ *  DeadheadConversionBookingSourced, DeadheadConversionHasDemand,
+ *  DeadheadConversionManifestNotEmpty, DeadheadConversionHasExternalBookings,
+ *  RoundTripBothLegsEmpty, ChangedConcurrently. On success the server deletes the
+ *  trip's empty manifest record(s) and clears its manifestId. */
+export function convertTripToDeadhead(id: string): Promise<void> {
+  return request<void>(`/api/trips/${id}/convert-to-deadhead`, {
+    method: "POST",
+  });
+}
+
+/** POST /api/trips/{id}/convert-to-passenger-trip → 204. 409s:
+ *  PassengerTripConversionNotScheduled, NotEmptyLeg, ChangedConcurrently. */
+export function convertTripToPassengerTrip(id: string): Promise<void> {
+  return request<void>(`/api/trips/${id}/convert-to-passenger-trip`, {
+    method: "POST",
+  });
+}
+
+function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+/**
+ * Why CONVERT TO DEADHEAD is not offered, or null when it is — the part of the
+ * server's rule the client can see, in the server's order. Null for a trip the
+ * button never shows on (not Scheduled, or already a deadhead).
+ *
+ * The server stays the final authority: it also refuses a trip confirmed from a
+ * community booking day (TripRecord does not carry bookingDayId), imported
+ * Bookeo bookings placed on the trip, a manifest found by trip number but not
+ * linked, and a paired leg that is not on the loaded page. Its 409 message is
+ * shown when any of those bite.
+ *
+ * @param manifest the trip's linked manifest, or null when it has none (or it
+ *   failed to load — the server re-checks).
+ * @param partner the other leg of the round trip when it is on the page, else null.
+ * @param loading the linked manifest is still being fetched.
+ */
+export function deadheadConversionBlockReason(
+  trip: TripRecord,
+  manifest: TripManifest | null,
+  partner: TripRecord | null,
+  loading: boolean,
+): string | null {
+  if (trip.status !== "Scheduled" || trip.isEmptyLeg) return null;
+
+  if (trip.demandGuaranteed) {
+    return trip.seatsConfirmed > 0
+      ? `gift-a-seat pledge and ${plural(trip.seatsConfirmed, "seat")} confirmed`
+      : "gift-a-seat pledge on this trip";
+  }
+  if (trip.seatsConfirmed > 0) return `${plural(trip.seatsConfirmed, "seat")} confirmed`;
+
+  if (loading) return "checking the manifest…";
+  if (manifest) {
+    const pax = manifest.passengers.length;
+    const cargo = manifest.cargo.length;
+    if (pax > 0 || cargo > 0) {
+      const listed = [pax > 0 ? plural(pax, "passenger") : null, cargo > 0 ? plural(cargo, "cargo item") : null]
+        .filter(Boolean)
+        .join(" and ");
+      return `manifest lists ${listed}`;
+    }
+  }
+
+  if (partner && partner.id !== trip.id && partner.isEmptyLeg) {
+    return `paired leg ${partner.tripNumber} is already a deadhead`;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------

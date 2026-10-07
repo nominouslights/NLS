@@ -27,6 +27,8 @@ using NorthernLink.Trips.Application.Trips.Assign;
 using NorthernLink.Trips.Application.Trips.ChangeRoute;
 using NorthernLink.Trips.Application.Trips.ChangeStatus;
 using NorthernLink.Trips.Application.Trips.CloseWithoutBilling;
+using NorthernLink.Trips.Application.Trips.ConvertToDeadhead;
+using NorthernLink.Trips.Application.Trips.ConvertToPassengerTrip;
 using NorthernLink.Trips.Application.Trips.Create;
 using NorthernLink.Trips.Application.Trips.CreateDeadheadReturn;
 using NorthernLink.Trips.Application.Trips.FinishOperations;
@@ -78,6 +80,11 @@ internal static class TripPlanningEndpoints
         // the trip AND its paired leg in one save. PUT {id} refuses a different routeId.
         tripPlanning.MapGet("{id:guid}/change-route/preview", PreviewTripRouteChange);
         tripPlanning.MapPost("{id:guid}/change-route", ChangeTripRoute);
+        // Deadhead conversion: no body, 204. Converting refuses a trip anyone is booked on and
+        // deletes its empty manifest(s); converting back only clears the flag. PUT {id} can no
+        // longer flip isEmptyLeg.
+        tripPlanning.MapPost("{id:guid}/convert-to-deadhead", ConvertTripToDeadhead);
+        tripPlanning.MapPost("{id:guid}/convert-to-passenger-trip", ConvertTripToPassengerTrip);
 
         // The driver-facing half: reading the board and advancing a trip's status from the cab.
         //
@@ -286,7 +293,6 @@ internal static class TripPlanningEndpoints
             request.Destination,
             request.Stops ?? [],
             request.DistanceKm,
-            request.IsEmptyLeg,
             request.ClientId,
             request.ClientName,
             request.PoNumber,
@@ -329,6 +335,41 @@ internal static class TripPlanningEndpoints
 
         var result = await sender.Send(
             new ChangeTripRouteCommand(id, request.RouteId, request.AcknowledgeWarnings), cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>
+    /// Turns a Scheduled trip nobody is booked on into a deadhead. 204 on success; 404
+    /// <c>Trips.Trip.NotFound</c>; otherwise a 409 naming the first rule that failed (not
+    /// Scheduled, already a deadhead, booking-sourced, demand, a non-empty manifest, imported
+    /// Bookeo bookings, a paired leg already empty) or <c>Trips.Trip.ChangedConcurrently</c>.
+    /// </summary>
+    private static async Task<IResult> ConvertTripToDeadhead(
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(new ConvertTripToDeadheadCommand(id), cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>
+    /// Turns a Scheduled deadhead back into an ordinary trip. 204 on success; 404
+    /// <c>Trips.Trip.NotFound</c>; 409 <c>Trips.Trip.PassengerTripConversionNotScheduled</c>,
+    /// <c>Trips.Trip.NotEmptyLeg</c>, or <c>Trips.Trip.ChangedConcurrently</c>.
+    /// </summary>
+    private static async Task<IResult> ConvertTripToPassengerTrip(
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(new ConvertTripToPassengerTripCommand(id), cancellationToken);
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
@@ -930,7 +971,10 @@ public sealed record CreateTripRequest(
 /// <summary>
 /// Request body for PUT /api/trips/{id} — editable only while Scheduled. <c>routeId</c> must be
 /// the trip's current one (409 <c>Trips.Trip.UseChangeRoute</c> otherwise); re-routing is
-/// POST /api/trips/{id}/change-route.
+/// POST /api/trips/{id}/change-route. There is no <c>isEmptyLeg</c>: a trip becomes a deadhead
+/// only through POST /api/trips/{id}/convert-to-deadhead (and back through
+/// .../convert-to-passenger-trip). A client still sending the old member is ignored — unknown
+/// JSON members are skipped by the default serializer settings.
 /// </summary>
 public sealed record UpdateTripRequest(
     DateOnly ServiceDate,
@@ -943,7 +987,6 @@ public sealed record UpdateTripRequest(
     string? Destination,
     IReadOnlyList<RouteStop>? Stops,
     int DistanceKm,
-    bool IsEmptyLeg,
     Guid? ClientId,
     string? ClientName,
     string? PoNumber,
