@@ -74,30 +74,38 @@ export function routeChangeNeedsAcknowledgement(preview: TripRouteChangePreview 
   return preview.requiresAcknowledgement || preview.warnings.length > 0 || localWarnings > 0;
 }
 
-/** Submit enablement. CHANGE ROUTE is live only with a loaded preview, no
- *  blockers, and the acknowledgement ticked when one is needed. */
+/** Submit enablement. CHANGE ROUTE is live only with a loaded preview FOR THE
+ *  ROUTE NOW PICKED, no blockers, and the acknowledgement ticked when needed. */
 export function routeChangeSubmitEnabled(args: {
   preview: TripRouteChangePreview | null;
+  /** The picker's current value — a preview for any other route never enables submit. */
+  routeId: string;
   loading: boolean;
   busy: boolean;
   acknowledged: boolean;
   localWarnings: number;
 }): boolean {
-  const { preview, loading, busy, acknowledged, localWarnings } = args;
+  const { preview, routeId, loading, busy, acknowledged, localWarnings } = args;
   if (!preview || loading || busy) return false;
+  if (!routeId || preview.newRouteId !== routeId) return false;
   if (preview.blockers.length > 0 || !preview.canChange) return false;
   if (routeChangeNeedsAcknowledgement(preview, localWarnings) && !acknowledged) return false;
   return true;
 }
 
-/** "Return leg TR-0042 changes too (reversed)" / "… is already on this route",
- *  or null for an unpaired trip. */
+/** "Return leg TR-0042 changes too (reversed)" / "… is already on this route" /
+ *  "… is InProgress — it keeps its route", or null for an unpaired trip. A paired
+ *  leg that is no longer Scheduled is left alone (the server warns about it). */
 export function partnerLegLine(preview: TripRouteChangePreview): string | null {
   const partner = preview.partner;
   if (!partner) return null;
   const leg = preview.legs.find((l) => l.tripId === partner.tripId);
   const which = partner.direction === "Outbound" ? "Outbound leg" : "Return leg";
-  if (leg && !leg.willChange) return `${which} ${partner.tripNumber} is already on this route`;
+  if (leg && !leg.willChange) {
+    return partner.status === "Scheduled"
+      ? `${which} ${partner.tripNumber} is already on this route`
+      : `${which} ${partner.tripNumber} is ${partner.status} — it keeps its route`;
+  }
   return `${which} ${partner.tripNumber} changes too (reversed)`;
 }
 

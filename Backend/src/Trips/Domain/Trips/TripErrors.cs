@@ -133,7 +133,7 @@ public static class TripErrors
 
     public static readonly Error UseChangeRoute = Error.Conflict(
         "Trips.Trip.UseChangeRoute",
-        "A trip's route is changed through POST /api/trips/{id}/change-route, which also moves its paired leg — an edit can only keep the current route.");
+        "A trip's route is changed through POST /api/trips/{id}/change-route, which also moves a still-scheduled paired leg — an edit can only keep the current route.");
 
     public static readonly Error RouteChangeNotScheduled = Error.Conflict(
         "Trips.Trip.RouteChangeNotScheduled", "Only a scheduled trip's route can be changed — this run has already started or ended.");
@@ -154,10 +154,6 @@ public static class TripErrors
 
     public static readonly Error ChangedConcurrently = Error.Conflict(
         "Trips.Trip.ChangedConcurrently", "Someone else changed this trip at the same time — reload it and try again.");
-
-    public static Error RouteChangePartnerNotScheduled(string partnerTripNumber, TripStatus status) => Error.Conflict(
-        "Trips.Trip.RouteChangePartnerNotScheduled",
-        $"The paired leg {partnerTripNumber} is {status}, so the round trip's route can no longer change — both legs must still be scheduled.");
 
     public static Error RouteChangePartnerOwnedByBooking(string partnerTripNumber) => Error.Conflict(
         "Trips.Trip.RouteOwnedByBooking",

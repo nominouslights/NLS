@@ -11,16 +11,21 @@ namespace NorthernLink.Trips.Application.Trips.ChangeRoute;
 /// route would do — the single source of truth behind both the preview query and the change
 /// command, so the dialog can never promise something the command then refuses.
 /// <list type="bullet">
-/// <item><b>Blockers</b> (the command returns the first as its error): either leg not Scheduled;
-/// either leg confirmed from a community booking day; the route missing, inactive, or the
-/// trip's current route; freight already picked up or dropped on either leg.</item>
-/// <item><b>Warnings</b> (the command needs <c>acknowledgeWarnings</c>): manifest passengers
-/// whose pickup or drop-off is off the new route; Planned shipment legs whose from/to stop is
-/// off it; a Bookeo-imported leg.</item>
+/// <item><b>Blockers</b> (the command returns the first as its error): the requested trip not
+/// Scheduled; any leg that would change confirmed from a community booking day; the route
+/// missing, inactive, or the trip's current route; freight already picked up or dropped on any
+/// leg that would change.</item>
+/// <item><b>Warnings</b> (the command needs <c>acknowledgeWarnings</c>): a paired leg that is no
+/// longer Scheduled and so stays on its old route; manifest passengers whose pickup or drop-off
+/// is off the new route; Planned shipment legs whose from/to stop is off it; a Bookeo-imported
+/// leg.</item>
 /// <item><b>Notices</b> (info only): a schedule-generated leg — only this date changes.</item>
 /// </list>
-/// A paired leg is always moved too, oriented for its own direction; one that already runs on
-/// the target route is left alone rather than blocking.
+/// A Scheduled paired leg is moved too, oriented for its own direction. A paired leg is left
+/// alone (<see cref="TripRouteChangeLeg.WillChange"/> false) when it already runs on the target
+/// route, or when it has departed, finished, or been cancelled — its run is history, so only the
+/// requested trip changes and a warning says the pair no longer mirrors. Nothing about a leg that
+/// is left alone can block the change.
 /// </summary>
 public sealed class TripRouteChangeImpactCalculator(
     ITripRepository trips,
@@ -75,26 +80,39 @@ public sealed class TripRouteChangeImpactCalculator(
             blockers.Add((TripErrors.RouteInactive, null));
         }
 
-        foreach (var partner in partners)
-        {
-            if (partner.Status != TripStatus.Scheduled)
-            {
-                blockers.Add((TripErrors.RouteChangePartnerNotScheduled(partner.TripNumber, partner.Status), partner));
-            }
-
-            if (partner.BookingDayId is not null)
-            {
-                blockers.Add((TripErrors.RouteChangePartnerOwnedByBooking(partner.TripNumber), partner));
-            }
-        }
-
         var legs = new List<TripRouteChangeLeg>();
         foreach (var (leg, isRequested) in partners.Select(p => (p, false)).Prepend((trip, true)))
         {
-            // A paired leg already on the target route has nothing to change.
-            var willChange = isRequested || route is null || leg.RouteId != route.Id;
+            var alreadyOnTarget = route is not null && leg.RouteId == route.Id;
+
+            // A paired leg changes with the requested trip only while it is still Scheduled and
+            // not already on the target route. One that has departed, finished, or been
+            // cancelled keeps the route it ran (or would have run) on.
+            var willChange = isRequested || (leg.Status == TripStatus.Scheduled && !alreadyOnTarget);
             var manifest = await manifests.GetForTripAsync(leg.ManifestId, leg.TripNumber, cancellationToken);
             legs.Add(new TripRouteChangeLeg(leg, manifest, isRequested, route is null ? null : leg.RouteSnapshotFor(route), willChange));
+
+            if (!willChange)
+            {
+                if (route is not null && !alreadyOnTarget)
+                {
+                    warnings.Add(new TripRouteChangeFinding(
+                        TripRouteChangeFindingCodes.PartnerNotChanged,
+                        $"The paired leg {leg.TripNumber} is {leg.Status}, so it keeps {leg.RouteName} — only {trip.TripNumber} " +
+                        $"moves to {route.Name}, and the two legs will no longer mirror each other.",
+                        leg.Id,
+                        leg.TripNumber,
+                        null));
+                }
+
+                // Nothing about a leg that is left alone (its booking, its freight) can block.
+                continue;
+            }
+
+            if (!isRequested && leg.BookingDayId is not null)
+            {
+                blockers.Add((TripErrors.RouteChangePartnerOwnedByBooking(leg.TripNumber), leg));
+            }
 
             var legShipments = await shipments.GetForTripAsync(leg.Id, cancellationToken);
             var onThisTrip = legShipments
@@ -106,11 +124,6 @@ public sealed class TripRouteChangeImpactCalculator(
             if (onThisTrip.Any(x => x.Leg.Status is ShipmentLegStatus.PickedUp or ShipmentLegStatus.Dropped))
             {
                 blockers.Add((TripErrors.RouteChangeCargoUnderway(leg.TripNumber), leg));
-            }
-
-            if (!willChange)
-            {
-                continue;
             }
 
             if (route is not null)

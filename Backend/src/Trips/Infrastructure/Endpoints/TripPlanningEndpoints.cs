@@ -951,6 +951,12 @@ public sealed record UpdateTripRequest(
     int? SeatsMinimum);
 
 /// <summary>
+/// Request body for POST /api/trips/{id}/change-route. <c>acknowledgeWarnings</c> must be true
+/// when GET .../change-route/preview reported warnings (it may always be sent true).
+/// </summary>
+public sealed record ChangeTripRouteRequest(Guid RouteId, bool AcknowledgeWarnings = false);
+
+/// <summary>
 /// Request body for POST /api/trips/{id}/assign — null driverId unassigns; null vehicleId
 /// with null vehicleUnit clears the vehicle. A non-null vehicleId is validated against
 /// vehicle_lookup (exists + Active) and its unit number AND seating capacity snapshotted
@@ -959,12 +965,6 @@ public sealed record UpdateTripRequest(
 /// (Trips.Trip.VehicleCapacityBelowConfirmed). Clearing the vehicle (or a free-form unit)
 /// keeps the last-known capacity.
 /// </summary>
-/// <summary>
-/// Request body for POST /api/trips/{id}/change-route. <c>acknowledgeWarnings</c> must be true
-/// when GET .../change-route/preview reported warnings (it may always be sent true).
-/// </summary>
-public sealed record ChangeTripRouteRequest(Guid RouteId, bool AcknowledgeWarnings = false);
-
 public sealed record AssignTripRequest(Guid? DriverId, Guid? VehicleId, string? VehicleUnit);
 
 /// <summary>

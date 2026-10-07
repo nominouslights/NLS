@@ -8,6 +8,12 @@ namespace NorthernLink.Trips.Application.Trips.ChangeRoute;
 /// <summary>Codes for the non-blocking findings of a route change (warnings and notices).</summary>
 public static class TripRouteChangeFindingCodes
 {
+    /// <summary>
+    /// Warning: the paired leg is no longer Scheduled (departed, finished, or cancelled), so it
+    /// keeps its route and only the requested trip changes — the pair stops mirroring.
+    /// </summary>
+    public const string PartnerNotChanged = "Trips.RouteChange.PartnerNotChanged";
+
     /// <summary>Warning: manifest passengers whose pickup or drop-off is not on the new route. Count = passengers.</summary>
     public const string PassengerStopsOffRoute = "Trips.RouteChange.PassengerStopsOffRoute";
 
@@ -42,7 +48,8 @@ public sealed record TripRouteChangeFinding(
 /// <summary>
 /// One leg of the change, with what it would look like afterwards (<see cref="NewSnapshot"/> is
 /// null only when the target route does not exist). <see cref="WillChange"/> is false for a paired
-/// leg that already runs on the target route — it is left as it is.
+/// leg that already runs on the target route, or that is no longer Scheduled — it is left as it
+/// is, and its <see cref="NewSnapshot"/> is what it would have become, not what it becomes.
 /// </summary>
 public sealed record TripRouteChangeLeg(
     Trip Trip,

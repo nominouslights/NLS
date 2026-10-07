@@ -168,19 +168,154 @@ public class TripChangeRouteHandlerTests
         Assert.Equal(TripErrors.RouteUnchanged, (await Change(trip, _original.Id)).Error);
     }
 
-    [Fact]
-    public async Task A_partner_that_is_not_scheduled_blocks_the_whole_change()
+    [Theory]
+    [InlineData(TripStatus.InProgress)]
+    [InlineData(TripStatus.ReadyForBilling)] // finished (the pair carries a client, so finishing lands here, not Completed)
+    [InlineData(TripStatus.Cancelled)]
+    public async Task A_partner_that_is_no_longer_scheduled_is_left_alone_and_only_the_requested_trip_changes(TripStatus partnerStatus)
     {
         var (outbound, inbound) = AddPair();
-        Assert.True(inbound.Start().IsSuccess);
+        MoveTo(outbound, partnerStatus);
+        var outboundStopsBefore = Names(outbound);
+
+        var refused = await Change(inbound, _replacement.Id);
+
+        Assert.Equal(TripErrors.RouteChangeNeedsAcknowledgement, refused.Error);
+        Assert.Equal(_original.Id, inbound.RouteId);
+        Assert.Equal(0, _trips.SaveCount);
+
+        var accepted = await Change(inbound, _replacement.Id, acknowledge: true);
+
+        Assert.True(accepted.IsSuccess);
+        Assert.Equal(1, _trips.SaveCount);
+        Assert.Equal(_replacement.Id, inbound.RouteId);
+        Assert.Equal(["Flin Flon", "Snow Lake", "Thompson"], Names(inbound));
+        Assert.Equal(_original.Id, outbound.RouteId);
+        Assert.Equal(partnerStatus, outbound.Status);
+        Assert.Equal(outboundStopsBefore, Names(outbound));
+        Assert.DoesNotContain(outbound.DomainEvents, e => e is TripRouteChangedDomainEvent);
+    }
+
+    [Theory]
+    [InlineData(TripStatus.InProgress)]
+    [InlineData(TripStatus.ReadyForBilling)] // finished (the pair carries a client, so finishing lands here, not Completed)
+    [InlineData(TripStatus.Cancelled)]
+    public async Task Preview_warns_that_a_partner_no_longer_scheduled_keeps_its_route(TripStatus partnerStatus)
+    {
+        var (outbound, inbound) = AddPair();
+        MoveTo(outbound, partnerStatus);
+
+        var preview = await PreviewOf(inbound, _replacement.Id);
+
+        Assert.True(preview.CanChange);
+        Assert.Empty(preview.Blockers);
+        Assert.True(preview.RequiresAcknowledgement);
+        var warning = Assert.Single(preview.Warnings);
+        Assert.Equal(TripRouteChangeFindingCodes.PartnerNotChanged, warning.Code);
+        Assert.Equal(("TR-1001", outbound.Id), (warning.TripNumber, warning.TripId));
+        Assert.Null(warning.Count);
+        Assert.Contains("TR-1001", warning.Message);
+        Assert.Contains(partnerStatus.ToString(), warning.Message);
+        Assert.Contains("no longer mirror", warning.Message);
+        Assert.Equal([true, false], preview.Legs.Select(l => l.WillChange));
+        Assert.Equal(partnerStatus.ToString(), preview.Partner!.Status);
+    }
+
+    [Fact]
+    public async Task A_finished_partner_already_on_the_target_route_needs_no_warning()
+    {
+        var (outbound, inbound) = AddPair();
+        Assert.True(outbound.ChangeRoute(_replacement).IsSuccess);
+        MoveTo(outbound, TripStatus.ReadyForBilling);
+
+        var preview = await PreviewOf(inbound, _replacement.Id);
+
+        Assert.True(preview.CanChange);
+        Assert.Empty(preview.Warnings);
+        Assert.Equal([true, false], preview.Legs.Select(l => l.WillChange));
+        Assert.True((await Change(inbound, _replacement.Id)).IsSuccess);
+    }
+
+    [Fact]
+    public async Task Freight_underway_on_a_partner_that_is_left_alone_does_not_block()
+    {
+        var (outbound, inbound) = AddPair();
+        var shipment = AddShipmentOn(outbound, "Thompson", "Lynn Lake");
+        Assert.True(shipment.RecordLegPickup(1, DateTimeOffset.UtcNow, "driver").IsSuccess);
+        Assert.True(outbound.Start().IsSuccess);
+
+        var result = await Change(inbound, _replacement.Id, acknowledge: true);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(_replacement.Id, inbound.RouteId);
+        Assert.Equal(_original.Id, outbound.RouteId);
+    }
+
+    [Fact]
+    public async Task A_scheduled_booking_confirmed_partner_blocks_the_change()
+    {
+        var outbound = Add(TestRouteChange.TripOn(_original, TripDirection.Outbound, "TR-1001", roundTripKey: "tpl:pair"));
+        var inbound = AddBookingPartner(outbound);
 
         var result = await Change(outbound, _replacement.Id, acknowledge: true);
 
-        Assert.Equal("Trips.Trip.RouteChangePartnerNotScheduled", result.Error.Code);
-        Assert.Contains("TR-1002", result.Error.Message);
+        Assert.Equal("Trips.Trip.RouteOwnedByBooking", result.Error.Code);
+        Assert.Contains("TR-3002", result.Error.Message);
         Assert.Equal(_original.Id, outbound.RouteId);
         Assert.Equal(_original.Id, inbound.RouteId);
         Assert.Equal(0, _trips.SaveCount);
+    }
+
+    [Theory]
+    [InlineData(TripStatus.Cancelled)]
+    [InlineData(TripStatus.Completed)] // a booking run has no client, so finishing completes it
+    public async Task A_booking_confirmed_partner_no_longer_scheduled_is_left_alone_rather_than_blocking(TripStatus partnerStatus)
+    {
+        var outbound = Add(TestRouteChange.TripOn(_original, TripDirection.Outbound, "TR-1001", roundTripKey: "tpl:pair"));
+        var inbound = AddBookingPartner(outbound);
+        MoveTo(inbound, partnerStatus);
+
+        var preview = await PreviewOf(outbound, _replacement.Id);
+        var result = await Change(outbound, _replacement.Id, acknowledge: true);
+
+        Assert.Empty(preview.Blockers);
+        Assert.Equal(TripRouteChangeFindingCodes.PartnerNotChanged, Assert.Single(preview.Warnings).Code);
+        Assert.True(result.IsSuccess);
+        Assert.Equal(_replacement.Id, outbound.RouteId);
+        Assert.Equal(_original.Id, inbound.RouteId);
+    }
+
+    private Trip AddBookingPartner(Trip outbound)
+    {
+        var inbound = Trip.ScheduleFromBooking(
+            TestPlanning.TenantId, "TR-3002", Guid.NewGuid(), outbound.ServiceDate, new TimeOnly(16, 0),
+            _original.Id, _original.Name, _original.Destination, _original.Origin,
+            RouteStop.OrientedFor(_original.Stops, TripDirection.Inbound), _original.DistanceKm,
+            seatsConfirmed: 6, seatsCapacity: 12, seatsMinimum: 4).Value;
+        Assert.True(inbound.AssignRoundTrip(outbound.RoundTripKey!, TripDirection.Inbound).IsSuccess);
+        return Add(inbound);
+    }
+
+    private static void MoveTo(Trip trip, TripStatus status)
+    {
+        switch (status)
+        {
+            case TripStatus.InProgress:
+                Assert.True(trip.Start().IsSuccess);
+                break;
+            case TripStatus.ReadyForBilling or TripStatus.Completed: // client trip → billing; no client → completed
+                Assert.True(trip.Start().IsSuccess);
+                Assert.True(trip.RecordPostTripInspection().IsSuccess);
+                Assert.True(trip.FinishOperations().IsSuccess);
+                break;
+            case TripStatus.Cancelled:
+                Assert.True(trip.Cancel("weather").IsSuccess);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(status), status, null);
+        }
+
+        Assert.Equal(status, trip.Status);
     }
 
     [Fact]
@@ -318,14 +453,15 @@ public class TripChangeRouteHandlerTests
     {
         var (outbound, inbound) = AddPair();
         Assert.True(outbound.Start().IsSuccess);
-        Assert.True(inbound.Cancel("weather").IsSuccess);
+        var shipment = AddShipmentOn(inbound, "Lynn Lake", "Thompson");
+        Assert.True(shipment.RecordLegPickup(1, DateTimeOffset.UtcNow, "driver").IsSuccess);
 
         var preview = await PreviewOf(outbound, Guid.NewGuid());
 
         Assert.False(preview.CanChange);
         Assert.Null(preview.NewRouteName);
         Assert.Equal(
-            ["Trips.Trip.RouteChangeNotScheduled", "Trips.Route.NotFound", "Trips.Trip.RouteChangePartnerNotScheduled"],
+            ["Trips.Trip.RouteChangeNotScheduled", "Trips.Route.NotFound", "Trips.Trip.RouteChangeCargoUnderway"],
             preview.Blockers.Select(b => b.Code));
         Assert.All(preview.Legs, leg => Assert.Null(leg.NewStops));
     }

@@ -107,8 +107,13 @@ export default function ChangeRouteModal({
     setError(null);
     setPreview(null);
     setPreviewError(null);
-    if (!id) return;
+    // Bump the sequence BEFORE the early return: clearing the picker must also
+    // invalidate a preview still in flight, or it lands for a blank routeId.
     const seq = ++previewSeq.current;
+    if (!id) {
+      setPreviewLoading(false);
+      return;
+    }
     setPreviewLoading(true);
     try {
       const p = await previewTripRouteChange(trip.id, id);
@@ -132,7 +137,7 @@ export default function ChangeRouteModal({
     : [];
   const localWarnings = emailWarnings.length;
   const needsAck = routeChangeNeedsAcknowledgement(preview, localWarnings);
-  const canSubmit = routeChangeSubmitEnabled({ preview, loading: previewLoading, busy, acknowledged, localWarnings });
+  const canSubmit = routeChangeSubmitEnabled({ preview, routeId, loading: previewLoading, busy, acknowledged, localWarnings });
 
   async function submit() {
     if (!canSubmit || !preview) return;

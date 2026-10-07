@@ -47,7 +47,10 @@ public sealed record TripRouteChangePreviewResponse(
     }
 }
 
-/// <summary>The paired leg of a round trip — the one that always moves with the requested trip.</summary>
+/// <summary>
+/// The paired leg of a round trip. It moves with the requested trip while it is Scheduled; check
+/// its leg's <c>willChange</c> — a departed, finished, or cancelled partner is left alone.
+/// </summary>
 public sealed record TripRouteChangePartnerResponse(
     Guid TripId,
     string TripNumber,
@@ -57,7 +60,8 @@ public sealed record TripRouteChangePartnerResponse(
 /// <summary>
 /// One leg as it is now and as it would be. The <c>new*</c> corridor fields are null when the
 /// target route does not exist. <see cref="WillChange"/> is false for a paired leg already on
-/// the target route. <see cref="NewWindowEnd"/> is departure + the route's estimated duration
+/// the target route or no longer Scheduled — its <c>new*</c> fields then describe what it would
+/// have become, so a client must not present them as the outcome. <see cref="NewWindowEnd"/> is departure + the route's estimated duration
 /// when the leg has a window end today, and null when its window is open-ended (it stays
 /// open-ended).
 /// </summary>

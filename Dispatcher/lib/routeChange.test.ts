@@ -129,7 +129,12 @@ describe("routeChangeSummaryChips", () => {
 });
 
 describe("routeChangeSubmitEnabled", () => {
-  const base = { loading: false, busy: false, acknowledged: false, localWarnings: 0 };
+  const base = { routeId: "new", loading: false, busy: false, acknowledged: false, localWarnings: 0 };
+
+  it("is off when the preview is for a different (or no) route than the one picked", () => {
+    expect(routeChangeSubmitEnabled({ ...base, routeId: "", preview: preview() })).toBe(false);
+    expect(routeChangeSubmitEnabled({ ...base, routeId: "other", preview: preview() })).toBe(false);
+  });
 
   it("is off with no preview, while loading, or while busy", () => {
     expect(routeChangeSubmitEnabled({ ...base, preview: null })).toBe(false);
@@ -201,6 +206,14 @@ describe("partnerLegLine", () => {
       legs: [leg(), leg({ tripId: "t2", tripNumber: "TR-0002", isRequestedTrip: false, willChange: false })],
     });
     expect(partnerLegLine(p)).toBe("Return leg TR-0002 is already on this route");
+  });
+
+  it("says a partner that has already left or been cancelled keeps its route", () => {
+    const p = preview({
+      partner: { tripId: "t2", tripNumber: "TR-0002", status: "InProgress", direction: "Inbound" },
+      legs: [leg(), leg({ tripId: "t2", tripNumber: "TR-0002", isRequestedTrip: false, willChange: false })],
+    });
+    expect(partnerLegLine(p)).toBe("Return leg TR-0002 is InProgress — it keeps its route");
   });
 });
 
