@@ -364,7 +364,7 @@ function buildAll(all) {
         'no phone breakpoints, no @media queries. Auth and the Driver role gate are real; every',
         'other value on screen comes from lib/data.ts and each screen carries a MockTag.',
         '',
-        '22 design-system files are a **verbatim copy of Dispatcher** — change Dispatcher first,',
+        '23 files (the design system plus lib/inspectionForm.ts) are a **verbatim copy of Dispatcher** — change Dispatcher first,',
         'then re-copy; never edit the copy in place. NavRail is deliberately NOT copied (its',
         'geometry is hardcoded); the rail here is components/DutyRail.tsx. Sizes live in',
         'lib/tablet.ts, colours in the copied lib/theme.ts. Manifest + drift check:',
@@ -384,7 +384,7 @@ function buildAll(all) {
       title: 'Code Map — Website, AppHost & workspace root',
       intro: [
         'Website: public marketing site (static/prototype, no API calls). AppHost: Aspire local-dev',
-        'orchestrator (Postgres/RabbitMQ/API/frontends).',
+        'orchestrator (RabbitMQ/API/frontends; no local Postgres — every environment uses the managed DigitalOcean database).',
       ],
       sections: [...websiteSections(all), appHostSection(all), rootSection(all)],
     },
