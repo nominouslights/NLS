@@ -950,21 +950,8 @@ public sealed class Trip : AggregateRoot, ITenantScoped
             return Result.Failure<Trip>(TripErrors.DeadheadReturnOfEmptyLeg);
         }
 
-        // Only Order is re-sequenced — both timetable offsets stay attached to their own stop,
-        // and the new leg's Inbound direction is what selects the return one.
-        var reversedStops = Stops
-            .OrderByDescending(s => s.Order)
-            .Select((stop, index) => new RouteStop
-            {
-                StopId = stop.StopId,
-                Name = stop.Name,
-                Order = index,
-                Latitude = stop.Latitude,
-                Longitude = stop.Longitude,
-                OutboundOffsetMinutes = stop.OutboundOffsetMinutes,
-                ReturnOffsetMinutes = stop.ReturnOffsetMinutes,
-            })
-            .ToList();
+        // The new leg's Inbound direction is what selects the return timetable offsets.
+        var reversedStops = RouteStop.Reversed(Stops);
 
         var key = NewMergeRoundTripKey();
         var returnTrip = Schedule(

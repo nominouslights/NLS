@@ -1,6 +1,7 @@
 using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Trips.Application.Abstractions;
+using NorthernLink.Trips.Domain.Manifests;
 using NorthernLink.Trips.Domain.Routes;
 using NorthernLink.Trips.Domain.Trips;
 
@@ -26,19 +27,35 @@ public sealed class UpdateTripCommandHandler(
         var stops = command.Stops;
         var distanceKm = command.DistanceKm;
 
-        if (command.RouteId is { } requestedRouteId)
+        if (command.RouteId is { } requestedRouteId && requestedRouteId == trip.RouteId)
         {
-            var route = await routeRepository.GetByIdAsync(requestedRouteId, cancellationToken);
+            // Same route: keep the trip's own snapshot. The Dispatcher's edit form always
+            // re-sends the current routeId, so re-snapshotting the catalogue here would flip
+            // an Inbound leg to outbound order and pull in later catalogue edits on an
+            // unrelated change (a PO number, a time).
+            routeId = trip.RouteId;
+            routeName = trip.RouteName;
+            origin = trip.Origin;
+            destination = trip.Destination;
+            stops = trip.Stops;
+            distanceKm = trip.DistanceKm;
+        }
+        else if (command.RouteId is { } newRouteId)
+        {
+            var route = await routeRepository.GetByIdAsync(newRouteId, cancellationToken);
             if (route is null)
             {
                 return Result.Failure(RouteErrors.NotFound);
             }
 
+            // A genuine re-route snapshots the catalogue route oriented for this leg: an
+            // Inbound trip runs it backwards, exactly as generation does.
+            var inbound = trip.Direction == TripDirection.Inbound;
             routeId = route.Id;
             routeName = route.Name;
-            origin = route.Origin;
-            destination = route.Destination;
-            stops = route.Stops;
+            origin = inbound ? route.Destination : route.Origin;
+            destination = inbound ? route.Origin : route.Destination;
+            stops = RouteStop.OrientedFor(route.Stops, trip.Direction);
             distanceKm = route.DistanceKm;
         }
 

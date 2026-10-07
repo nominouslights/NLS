@@ -450,23 +450,36 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
     }
 
     /// <summary>
-    /// Stamps every still-unresolved defect on this inspection as repaired under
-    /// <paramref name="workOrderId"/>. Called when that work order completes — creating or
-    /// starting one shows as "repair underway" but leaves the defects open, because only
-    /// completion asserts a mechanic actually touched the truck.
+    /// Stamps the still-unresolved defects on this inspection as repaired under
+    /// <paramref name="workOrderId"/> — only those whose Item is in <paramref name="items"/>
+    /// (trimmed, case-insensitive), or every open one when <paramref name="items"/> is null.
+    /// Called when that work order completes — creating or starting one shows as "repair
+    /// underway" but leaves the defects open, because only completion asserts a mechanic
+    /// actually touched the truck. <see cref="DefectItemsCoveredBy"/> decides the item set.
     ///
     /// Idempotent by construction: already-resolved defects are skipped, and a run that changes
     /// nothing mutates nothing and raises no event (which matters — the audit pipeline rejects an
     /// eventless write, so a no-op must also be a no-write).
     /// </summary>
-    public void ResolveDefectsForWorkOrder(Guid workOrderId, string resolvedBy, DateTimeOffset atUtc)
+    public void ResolveDefectsForWorkOrder(
+        Guid workOrderId,
+        string resolvedBy,
+        DateTimeOffset atUtc,
+        IReadOnlyCollection<string>? items = null)
     {
-        if (Defects.All(d => d.IsResolved))
+        var wanted = items?
+            .Select(NormalizeItem)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        bool InScope(InspectionDefect d) =>
+            !d.IsResolved && (wanted is null || wanted.Contains(NormalizeItem(d.Item)));
+
+        if (!Defects.Any(InScope))
         {
             return;
         }
 
-        Defects = [.. Defects.Select(d => d.IsResolved
+        Defects = [.. Defects.Select(d => !InScope(d)
             ? d
             : d with
             {
@@ -479,6 +492,57 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
 
         Raise(new VehicleInspectionDefectsResolvedDomainEvent(Id, TenantId));
     }
+
+    /// <summary>
+    /// Which of this inspection's defects (resolved or not) a work order's line items cover —
+    /// the interim stand-in for a real per-defect link. The Dispatcher builds a DVIR work order's
+    /// line items one per defect as <c>"{item} — {severity}[: {note}]"</c>
+    /// (<c>Dispatcher/lib/inspectionWorkOrder.ts</c> <c>prefillFromInspection</c>), so a line item
+    /// covers a defect when, compared case-insensitively with whitespace trimmed and collapsed, it
+    /// equals the defect's Item or starts with the Item followed by a separator (<c>—</c>,
+    /// <c>–</c>, <c>-</c> or <c>:</c>, spaces optional). When several Items match one line (one Item
+    /// a prefix of another) only the longest counts.
+    ///
+    /// Returns null when no line item matches any defect — a manual work order or an unknown
+    /// format — which <see cref="ResolveDefectsForWorkOrder"/> reads as "resolve every open
+    /// defect", the pre-existing behaviour, so legacy work orders don't regress. Already-resolved
+    /// defects are matched too: a work order raised for one defect that was then cleared by hand
+    /// must still resolve nothing else, not fall back to everything.
+    /// </summary>
+    public IReadOnlyCollection<string>? DefectItemsCoveredBy(IEnumerable<string> lineItems)
+    {
+        var defectItems = Defects
+            .Select(d => (Item: d.Item, Key: CollapseWhitespace(d.Item)))
+            .Where(d => d.Key.Length > 0)
+            .OrderByDescending(d => d.Key.Length)
+            .ToList();
+
+        var covered = new List<string>();
+        foreach (var line in lineItems.Select(CollapseWhitespace))
+        {
+            var match = defectItems.FirstOrDefault(d => LineItemNamesDefect(line, d.Key));
+            if (match.Key is not null)
+            {
+                covered.Add(match.Item);
+            }
+        }
+
+        return covered.Count == 0 ? null : covered;
+    }
+
+    private static bool LineItemNamesDefect(string line, string item)
+    {
+        if (!line.StartsWith(item, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var rest = line.AsSpan(item.Length).TrimStart();
+        return rest.IsEmpty || rest[0] is '—' or '–' or '-' or ':';
+    }
+
+    private static string CollapseWhitespace(string? value) =>
+        string.Join(' ', (value ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
 
     /// <summary>
     /// Carries resolution stamps across an amendment. An amend re-states what the DVIR found; it

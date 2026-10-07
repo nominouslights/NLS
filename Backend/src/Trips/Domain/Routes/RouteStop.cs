@@ -1,3 +1,5 @@
+using NorthernLink.Trips.Domain.Manifests;
+
 namespace NorthernLink.Trips.Domain.Routes;
 
 /// <summary>
@@ -43,4 +45,27 @@ public sealed record RouteStop
     /// unchanged rather than swapping them.
     /// </remarks>
     public int? ReturnOffsetMinutes { get; init; }
+
+    /// <summary>
+    /// The stop list run backwards — the one reversal every return leg uses (inbound
+    /// generation, deadhead returns, the Bookeo import, re-routing an Inbound trip). Stops are
+    /// taken in descending <see cref="Order"/> and only <see cref="Order"/> is re-sequenced
+    /// 0..n-1: both timetable offsets stay attached to their own stop, because the leg's
+    /// <see cref="TripDirection"/> (not the list position) selects which one applies —
+    /// swapping them would double-reverse the return timetable.
+    /// </summary>
+    public static List<RouteStop> Reversed(IEnumerable<RouteStop> stops) =>
+        [.. stops
+            .OrderByDescending(stop => stop.Order)
+            .Select((stop, index) => stop with { Order = index })];
+
+    /// <summary>
+    /// <paramref name="stops"/> oriented for a leg: <see cref="Reversed"/> for
+    /// <see cref="TripDirection.Inbound"/>, otherwise (Outbound or an unpaired trip with no
+    /// direction) the outbound order, ascending by <see cref="Order"/>.
+    /// </summary>
+    public static List<RouteStop> OrientedFor(IEnumerable<RouteStop> stops, TripDirection? direction) =>
+        direction == TripDirection.Inbound
+            ? Reversed(stops)
+            : [.. stops.OrderBy(stop => stop.Order)];
 }

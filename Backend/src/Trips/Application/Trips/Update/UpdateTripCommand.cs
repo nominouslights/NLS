@@ -6,8 +6,9 @@ namespace NorthernLink.Trips.Application.Trips.Update;
 
 /// <summary>
 /// Edits a trip's plan while it is still Scheduled (the aggregate rejects later edits).
-/// Same route-snapshot rule as creation: a referenced route wins over the free-form
-/// corridor fields. Trip number, template provenance, assignment, demand, and status
+/// A referenced route wins over the free-form corridor fields — but the trip's CURRENT
+/// <see cref="RouteId"/> keeps the trip's own snapshot (never re-read from the catalogue),
+/// and a changed one is snapshotted oriented for the trip's direction. Trip number, template provenance, assignment, demand, and status
 /// never change here.
 /// </summary>
 public sealed record UpdateTripCommand(

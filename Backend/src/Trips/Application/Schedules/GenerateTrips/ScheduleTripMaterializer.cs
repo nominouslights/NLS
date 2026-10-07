@@ -152,24 +152,8 @@ public sealed class ScheduleTripMaterializer(
         var template = plan.Template;
         var route = plan.Route;
 
-        var outboundStops = route.Stops.OrderBy(s => s.Order).ToList();
-        // Only Order is re-sequenced: both timetable offsets stay attached to their own stop,
-        // because the leg's TripDirection — not the position in the list — decides which one
-        // applies. Swapping them here would double-reverse the return timetable.
-        var returnStops = outboundStops
-            .AsEnumerable()
-            .Reverse()
-            .Select((stop, index) => new RouteStop
-            {
-                StopId = stop.StopId,
-                Name = stop.Name,
-                Order = index,
-                Latitude = stop.Latitude,
-                Longitude = stop.Longitude,
-                OutboundOffsetMinutes = stop.OutboundOffsetMinutes,
-                ReturnOffsetMinutes = stop.ReturnOffsetMinutes,
-            })
-            .ToList();
+        var outboundStops = RouteStop.OrientedFor(route.Stops, TripDirection.Outbound);
+        var returnStops = RouteStop.OrientedFor(route.Stops, TripDirection.Inbound);
 
         var built = new List<Trip>(plan.Drafts.Count);
         foreach (var draft in plan.Drafts)

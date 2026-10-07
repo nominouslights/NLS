@@ -242,7 +242,9 @@ public class VehicleDefectReadServiceTests(PostgresFixture fixture)
                 createdBy: "Dispatch",
                 assignedTo: null,
                 dueDate: null,
-                lineItems: ["Brakes — Major"],
+                // Built from both defects, as the Dispatcher's "all defects" prefill does — a
+                // work order resolves only the defects its line items name.
+                lineItems: ["Brakes — Major: as found", "Defroster — Major: as found"],
                 shopId: null,
                 authorizedLimitCad: null,
                 budgetCode: null,
