@@ -83,6 +83,9 @@ export default function VehicleInspections({
   const woNumberById = new Map(
     (woFetch?.vehicleId === vehicleId ? woFetch.rows : []).map((w) => [w.id, w.number]),
   );
+  const woStatusById = new Map(
+    (woFetch?.vehicleId === vehicleId ? woFetch.rows : []).map((w) => [w.id, w.status]),
+  );
   const woLink = (id: string) => woNumberById.get(id) ?? "work order";
   const detail = detailId ? (rows?.find((r) => r.id === detailId) ?? null) : null;
 
@@ -208,6 +211,7 @@ export default function VehicleInspections({
           vehicleId={vehicleId}
           woNumber={detail.generatedWorkOrderId ? woLink(detail.generatedWorkOrderId) : undefined}
           workOrderNumberOf={(id) => woNumberById.get(id)}
+          workOrderStatusOf={(id) => woStatusById.get(id)}
           vehicles={vehicles}
           onWorkOrderCreated={refreshSoon}
           onChanged={refreshSoon}

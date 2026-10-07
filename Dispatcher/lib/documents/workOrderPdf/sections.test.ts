@@ -47,6 +47,19 @@ describe("workRequestedItems", () => {
     expect(items).toEqual(["Brakes — Major: Soft pedal", "Road test"]);
   });
 
+  it("prints a defect once when completion changed its severity, keeping unrelated free text", () => {
+    // Raised as Major; the inspection was amended to Out-of-Service and the
+    // completed line carries the new severity — the free-text copy still says Major.
+    const items = workRequestedItems(
+      wo({
+        defectLines: [{ item: "Brakes", severity: "Out-of-Service", note: "Soft pedal" }],
+        lineItems: ["brakes  — Major: Soft pedal", "Brake fluid flush", "Road test"],
+      }),
+    );
+    expect(items).toEqual(["Brakes — Out-of-Service: Soft pedal", "Brake fluid flush", "Road test"]);
+    expect(items.filter((i) => /Major/.test(i))).toHaveLength(0);
+  });
+
   it("falls back to the title with neither defects nor line items", () => {
     expect(workRequestedItems(wo())).toEqual(["Pre-Trip defects — NL-02"]);
   });

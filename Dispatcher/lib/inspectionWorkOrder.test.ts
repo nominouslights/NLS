@@ -3,7 +3,9 @@ import type { InspectionDefectWire, VehicleInspection } from "./api/maintenance"
 import {
   defectLineText,
   defectRefs,
+  inspectionDefectWorkOrderId,
   isAttachable,
+  isInspectionDefectAttachable,
   isVehicleDefectAttachable,
   prefillFromDefects,
   prefillFromInspection,
@@ -166,5 +168,37 @@ describe("prefillFromDefects", () => {
 
   it("refuses an empty selection", () => {
     expect(() => prefillFromDefects([], "NL-02")).toThrow();
+  });
+});
+
+describe("inspectionDefectWorkOrderId", () => {
+  const statusOf = (s: string | undefined) => () => s;
+
+  it("prefers the defect's own work order", () => {
+    expect(inspectionDefectWorkOrderId(defect({ item: "A", workOrderId: "wo-own" }), "wo-legacy", statusOf("Completed"))).toBe("wo-own");
+  });
+
+  it.each(["Open", "InProgress", "AwaitingParts", undefined])("holds an open defect on a %s legacy work order", (s) => {
+    expect(inspectionDefectWorkOrderId(defect({ item: "A" }), "wo-legacy", statusOf(s))).toBe("wo-legacy");
+    expect(isInspectionDefectAttachable(defect({ item: "A" }), "wo-legacy", statusOf(s))).toBe(false);
+  });
+
+  it("treats a legacy work order as holding when no status lookup is given", () => {
+    expect(inspectionDefectWorkOrderId(defect({ item: "A" }), "wo-legacy")).toBe("wo-legacy");
+  });
+
+  it.each(["Completed", "Cancelled"])("releases the defect once the legacy work order is %s", (s) => {
+    expect(inspectionDefectWorkOrderId(defect({ item: "A" }), "wo-legacy", statusOf(s))).toBeNull();
+    expect(isInspectionDefectAttachable(defect({ item: "A" }), "wo-legacy", statusOf(s))).toBe(true);
+  });
+
+  it("never attaches a resolved defect", () => {
+    const resolved = defect({ item: "A", resolvedAtUtc: "2026-10-02T00:00:00Z" });
+    expect(inspectionDefectWorkOrderId(resolved, "wo-legacy", statusOf("Open"))).toBeNull();
+    expect(isInspectionDefectAttachable(resolved, "wo-legacy", statusOf("Open"))).toBe(false);
+  });
+
+  it("is null with no work order at all", () => {
+    expect(inspectionDefectWorkOrderId(defect({ item: "A" }), null)).toBeNull();
   });
 });

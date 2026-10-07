@@ -126,15 +126,21 @@ export function reasonBlock(wo: WorkOrder): string {
  * §5's rows, in order: one per defect line ("Item — Severity: note"), then the
  * free-text line items. A work order raised from defects also carries those
  * defects as free-text lines in exactly the same form (the prefill builds them
- * for the paper form), so a free-text line that repeats a defect line verbatim
- * is printed once. With neither, the title stands in as the single row.
+ * for the paper form), so a free-text line about a defect's ITEM is dropped and
+ * the defect line printed once. The match is on the item alone (the part before
+ * " — ", trimmed, case-insensitive), never the full text: completion overwrites
+ * a defect line's severity with the inspection's current one, so after an
+ * amendment (Major → Out-of-Service) the free-text copy no longer matches
+ * verbatim and would print the defect twice with conflicting severities.
+ * With neither, the title stands in as the single row. Page 2's performed-work
+ * rows count this same list.
  */
 export function workRequestedItems(wo: WorkOrder): string[] {
-  const defectRows = (wo.defectLines ?? []).map(
-    (d) => `${d.item} — ${d.severity}${d.note ? `: ${d.note}` : ""}`,
-  );
-  const seen = new Set(defectRows);
-  const free = wo.lineItems.filter((li) => !seen.has(li));
+  const defectLines = wo.defectLines ?? [];
+  const defectRows = defectLines.map((d) => `${d.item} — ${d.severity}${d.note ? `: ${d.note}` : ""}`);
+  const itemKey = (s: string) => s.split(" — ")[0].trim().toLowerCase();
+  const defectItems = new Set(defectLines.map((d) => itemKey(d.item)));
+  const free = wo.lineItems.filter((li) => !defectItems.has(itemKey(li)));
   const items = [...defectRows, ...free];
   return items.length ? items : [wo.title];
 }

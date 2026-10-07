@@ -1,4 +1,5 @@
 using NorthernLink.Fleet.Application.WorkOrders.Create;
+using NorthernLink.Shared.Kernel;
 using NorthernLink.Fleet.Domain.Inspections;
 using NorthernLink.Fleet.Domain.Inspections.Events;
 using NorthernLink.Fleet.Domain.Vehicles;
@@ -274,6 +275,65 @@ public class CreateWorkOrderCommandHandlerTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(2, Assert.Single(workOrders.WorkOrders).Defects.Count);
+    }
+
+    [Fact]
+    public async Task The_legacy_inspection_id_with_every_defect_already_attached_is_a_conflict_and_nothing_is_saved()
+    {
+        // A double-submit: the first request attached everything; the second must not create an
+        // empty, unlinked inspection-sourced work order whose completion resolves nothing.
+        var (handler, workOrders, inspections, vehicleId) = Setup();
+        var inspection = TestInspections.PostTrip(vehicleId: vehicleId, defects: [Defect("Brakes"), Defect("Horn")]);
+        inspections.Add(inspection);
+
+        var first = await handler.Handle(Command(vehicleId, inspection.Id), CancellationToken.None);
+        Assert.True(first.IsSuccess);
+
+        var second = await handler.Handle(Command(vehicleId, inspection.Id), CancellationToken.None);
+
+        Assert.True(second.IsFailure);
+        Assert.Equal(InspectionErrors.NoOpenDefectsToAttach, second.Error);
+        Assert.Equal(ErrorType.Conflict, second.Error.Type);
+        Assert.Equal("Fleet.Inspection.NoOpenDefectsToAttach", second.Error.Code);
+        Assert.Equal(first.Value, Assert.Single(workOrders.WorkOrders).Id);
+        Assert.Equal(1, workOrders.SaveChangesCallCount);
+        Assert.Equal(first.Value, inspection.FindDefect("Brakes")!.WorkOrderId);
+        Assert.Equal(first.Value, inspection.FindDefect("Horn")!.WorkOrderId);
+    }
+
+    [Fact]
+    public async Task The_legacy_inspection_id_with_every_defect_resolved_is_a_conflict_and_nothing_is_saved()
+    {
+        var (handler, workOrders, inspections, vehicleId) = Setup();
+        var inspection = TestInspections.PostTrip(vehicleId: vehicleId, defects: [Defect("Brakes"), Defect("Horn")]);
+        foreach (var item in new[] { "Brakes", "Horn" })
+        {
+            Assert.True(inspection
+                .ResolveDefect(item, DefectResolutionReason.PreviouslyRepaired, null, "Dispatch", DateTimeOffset.UtcNow)
+                .IsSuccess);
+        }
+        inspections.Add(inspection);
+
+        var result = await handler.Handle(Command(vehicleId, inspection.Id), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(InspectionErrors.NoOpenDefectsToAttach, result.Error);
+        Assert.Empty(workOrders.WorkOrders);
+        Assert.Equal(0, workOrders.SaveChangesCallCount);
+        Assert.Null(inspection.FindDefect("Brakes")!.WorkOrderId);
+        Assert.Null(inspection.FindDefect("Horn")!.WorkOrderId);
+    }
+
+    [Fact]
+    public async Task A_manual_work_order_naming_neither_an_inspection_nor_defects_still_succeeds_with_no_lines()
+    {
+        var (handler, workOrders, _, vehicleId) = Setup();
+
+        var result = await handler.Handle(Command(vehicleId, inspectionId: null, defects: null), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Empty(Assert.Single(workOrders.WorkOrders).Defects);
+        Assert.Equal(1, workOrders.SaveChangesCallCount);
     }
 
     [Fact]

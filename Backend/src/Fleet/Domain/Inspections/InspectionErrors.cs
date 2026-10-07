@@ -58,6 +58,16 @@ public static class InspectionErrors
         "That defect is already on an open work order.");
 
     /// <summary>
+    /// A create request naming an inspection (the legacy whole-inspection form, with or without
+    /// explicit defects) found nothing to attach: every defect is resolved or already on a work
+    /// order — typically a double-submit. Refused so it never creates an empty, unlinked
+    /// inspection-sourced work order whose completion resolves nothing.
+    /// </summary>
+    public static readonly Error NoOpenDefectsToAttach = Error.Conflict(
+        "Fleet.Inspection.NoOpenDefectsToAttach",
+        "Every defect on this inspection is already resolved or on a work order.");
+
+    /// <summary>
     /// A work order may only take defects reported against its own vehicle. An inspection with
     /// no vehicle link (legacy, unit-only) matches when its unit equals the vehicle's unit
     /// number — the same rule the defects panel uses to list it under that vehicle.

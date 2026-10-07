@@ -13,7 +13,9 @@ namespace NorthernLink.Fleet.Application.WorkOrders.Create;
 ///
 /// Every check runs BEFORE anything is mutated or added: an unknown inspection, a defect on
 /// another vehicle, a missing/resolved/already-attached defect each fail the whole request
-/// with nothing changed. New code never calls <see cref="VehicleInspection.LinkWorkOrder"/>:
+/// with nothing changed. A request naming an inspection that leaves nothing to attach fails
+/// with <see cref="InspectionErrors.NoOpenDefectsToAttach"/>; a plain manual work order (no
+/// inspection, no defects) is still created with no defect lines. New code never calls <see cref="VehicleInspection.LinkWorkOrder"/>:
 /// <c>GeneratedWorkOrderId</c> stays on the inspection as history for work orders created
 /// before per-defect links.
 /// </summary>
@@ -108,6 +110,14 @@ public sealed class CreateWorkOrderCommandHandler(
                 {
                     requested.Add((loaded.Value, defect));
                 }
+            }
+
+            // Naming an inspection is a request to put its defects on a work order. With nothing
+            // left to attach (a double-submit, or everything resolved since), refuse rather than
+            // create an empty, unlinked inspection-sourced work order that resolves nothing.
+            if (requested.Count == 0)
+            {
+                return Result.Failure<Guid>(InspectionErrors.NoOpenDefectsToAttach);
             }
         }
 

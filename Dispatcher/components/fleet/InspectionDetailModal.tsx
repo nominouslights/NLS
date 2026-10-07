@@ -3,8 +3,18 @@
 import { useState } from "react";
 import { colors, fonts, statusMeta } from "@/lib/theme";
 import { formatKm, formatUtcDate } from "@/lib/api";
-import type { DefectSeverityWire, InspectionDefectWire, VehicleInspection } from "@/lib/api/maintenance";
-import { isAttachable, prefillFromInspection, type WorkOrderPrefillWire } from "@/lib/inspectionWorkOrder";
+import type {
+  DefectSeverityWire,
+  InspectionDefectWire,
+  VehicleInspection,
+  WorkOrderStatusWire,
+} from "@/lib/api/maintenance";
+import {
+  inspectionDefectWorkOrderId,
+  isInspectionDefectAttachable,
+  prefillFromInspection,
+  type WorkOrderPrefillWire,
+} from "@/lib/inspectionWorkOrder";
 import {
   DEFECT_RESOLUTION_LABEL,
   DEFECT_RESOLUTION_META,
@@ -22,7 +32,10 @@ import { ResolveDefectModal } from "@/components/fleet/DefectsPanel";
 // what failed). Each failed item reads its own state from the defect: Resolved,
 // on an open work order, or open — and only an open, unattached defect offers
 // RESOLVE and CREATE WORK ORDER. "All defects" attaches every open, unattached
-// defect; a defect already on an open work order is never offered twice.
+// defect; a defect already on an open work order is never offered twice. That
+// includes a work order from before per-defect links (the inspection's
+// `generatedWorkOrderId`) while it is still open — the same rule the Open
+// Defects tab applies (`inspectionDefectWorkOrderId`), so the two never disagree.
 
 interface ChecklistRow {
   item: string;
@@ -37,6 +50,7 @@ export default function InspectionDetailModal({
   vehicleId,
   woNumber,
   workOrderNumberOf,
+  workOrderStatusOf,
   vehicles,
   onWorkOrderCreated,
   onChanged,
@@ -48,6 +62,10 @@ export default function InspectionDetailModal({
   woNumber?: string;
   /** Resolves a defect's `workOrderId` to its WO-n number. */
   workOrderNumberOf?: (id: string) => string | undefined;
+  /** Resolves a work order's status — needed for the legacy `generatedWorkOrderId`,
+   *  which holds the inspection's defects only while it is not Completed/Cancelled.
+   *  Unknown (absent, or the id is not found) counts as still open. */
+  workOrderStatusOf?: (id: string) => WorkOrderStatusWire | undefined;
   vehicles: VehicleOption[];
   onWorkOrderCreated: () => void;
   /** A defect was resolved here — the parent refetches. */
@@ -71,13 +89,15 @@ export default function InspectionDetailModal({
 
   const typeLabel = inspection.type === "PreTrip" ? "Pre-Trip" : "Post-Trip";
   const rm = INSPECTION_RESULT_META[inspection.result] ?? INSPECTION_RESULT_META.Pass;
+  const attachable = (d: InspectionDefectWire) =>
+    isInspectionDefectAttachable(d, inspection.generatedWorkOrderId, workOrderStatusOf);
   const overlayOf = (d: InspectionDefectWire | undefined): Overlay | undefined => {
-    if (!d || !isAttachable(d)) return undefined; // the data already reflects it
+    if (!d || !attachable(d)) return undefined; // the data already reflects it
     if (resolvedHere.has(d.item)) return { kind: "resolved" };
     const woId = attachedHere.get(d.item);
     return woId !== undefined ? { kind: "workOrder", workOrderId: woId } : undefined;
   };
-  const openDefects = inspection.defects.filter((d) => isAttachable(d) && !overlayOf(d));
+  const openDefects = inspection.defects.filter((d) => attachable(d) && !overlayOf(d));
 
   // Checklist joined with defects by item name; manifest-derived records can
   // carry defects without a checklist, so synthesize rows from the defects then.
@@ -165,6 +185,11 @@ export default function InspectionDetailModal({
                   <DefectState
                     row={c}
                     overlay={overlayOf(c.defect)}
+                    workOrderId={
+                      c.defect
+                        ? inspectionDefectWorkOrderId(c.defect, inspection.generatedWorkOrderId, workOrderStatusOf)
+                        : null
+                    }
                     workOrderNumberOf={workOrderNumberOf}
                     onResolve={() => setResolving(c)}
                     onCreateWorkOrder={(d) => setWoPrefill(prefillFromInspection(inspection, inspection.unit, [d]))}
@@ -219,12 +244,15 @@ type Overlay = { kind: "resolved" } | { kind: "workOrder"; workOrderId: string }
 function DefectState({
   row,
   overlay,
+  workOrderId,
   workOrderNumberOf,
   onResolve,
   onCreateWorkOrder,
 }: {
   row: ChecklistRow;
   overlay?: Overlay;
+  /** The open work order holding this defect — its own, or the inspection's legacy one. */
+  workOrderId: string | null;
   workOrderNumberOf?: (id: string) => string | undefined;
   onResolve: () => void;
   onCreateWorkOrder: (d: InspectionDefectWire) => void;
@@ -252,8 +280,8 @@ function DefectState({
       />
     );
   }
-  if (d.workOrderId != null) {
-    return <StatusChip kind="soon" label={`On ${workOrderNumberOf?.(d.workOrderId) ?? "open work order"}`} />;
+  if (workOrderId != null) {
+    return <StatusChip kind="soon" label={`On ${workOrderNumberOf?.(workOrderId) ?? "open work order"}`} />;
   }
   return (
     <>

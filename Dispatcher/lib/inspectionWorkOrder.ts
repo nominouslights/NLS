@@ -45,12 +45,51 @@ export function isAttachable(d: Pick<InspectionDefectWire, "resolvedAtUtc" | "wo
   return d.resolvedAtUtc == null && d.workOrderId == null;
 }
 
+/** Whether a work order still holds the defects it was raised against: any
+ *  work order that is not Completed/Cancelled. An UNKNOWN status (null or
+ *  undefined — e.g. the work-order list failed to load) counts as holding:
+ *  offering a second work order for a defect that is in fact still on one lets
+ *  the server move it, and the original work order's completion then skips it. */
+export function workOrderHoldsDefect(workOrderId: string | null | undefined, status: string | null | undefined): boolean {
+  if (workOrderId == null) return false;
+  return status !== "Completed" && status !== "Cancelled";
+}
+
 /** The same rule for a vehicle-defect row, whose `workOrderId` may also name a
  *  completed/cancelled (legacy) work order — only an OPEN one blocks. */
 export function isVehicleDefectAttachable(d: VehicleDefectWire): boolean {
   if (d.resolvedAtUtc !== null) return false;
-  if (d.workOrderId === null) return true;
-  return d.workOrderStatus === "Completed" || d.workOrderStatus === "Cancelled";
+  return !workOrderHoldsDefect(d.workOrderId, d.workOrderStatus);
+}
+
+/**
+ * The work order an inspection's still-open defect is on, or null — the
+ * inspection-side twin of the `workOrderId` a vehicle-defect row carries, so the
+ * inspection detail and the Open Defects tab agree. The defect's own per-defect
+ * link wins (it is released on cancel and resolved on completion, so a set one is
+ * open). Without one, a work order from before per-defect links — the
+ * inspection's `generatedWorkOrderId` — holds every defect of the inspection
+ * while it is not Completed/Cancelled (`workOrderHoldsDefect`).
+ */
+export function inspectionDefectWorkOrderId(
+  d: Pick<InspectionDefectWire, "resolvedAtUtc" | "workOrderId">,
+  generatedWorkOrderId: string | null,
+  workOrderStatusOf?: (id: string) => string | null | undefined,
+): string | null {
+  if (d.resolvedAtUtc != null) return null;
+  if (d.workOrderId != null) return d.workOrderId;
+  return workOrderHoldsDefect(generatedWorkOrderId, generatedWorkOrderId ? workOrderStatusOf?.(generatedWorkOrderId) : null)
+    ? generatedWorkOrderId
+    : null;
+}
+
+/** `isAttachable` with the legacy inspection-level work order taken into account. */
+export function isInspectionDefectAttachable(
+  d: Pick<InspectionDefectWire, "resolvedAtUtc" | "workOrderId">,
+  generatedWorkOrderId: string | null,
+  workOrderStatusOf?: (id: string) => string | null | undefined,
+): boolean {
+  return d.resolvedAtUtc == null && inspectionDefectWorkOrderId(d, generatedWorkOrderId, workOrderStatusOf) === null;
 }
 
 /** Worst severity present → work-order priority. */

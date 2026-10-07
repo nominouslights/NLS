@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import InspectionDetailModal from "./InspectionDetailModal";
 import { ApiError } from "@/lib/api";
-import type { InspectionDefectWire, ShopWire, VehicleInspection } from "@/lib/api/maintenance";
+import type { InspectionDefectWire, ShopWire, VehicleInspection, WorkOrderStatusWire } from "@/lib/api/maintenance";
 
 // The inspection list is a projected read model, so for ~5s after a work order
 // is raised from this modal the reloaded inspection still shows the defect as
@@ -55,11 +55,16 @@ const inspectionWith = (defects: InspectionDefectWire[]): VehicleInspection =>
 
 const stale = inspectionWith([defect({ item: "Brakes" }), defect({ item: "Wipers", severity: "Minor" })]);
 
-function renderModal(inspection: VehicleInspection, workOrderNumberOf?: (id: string) => string | undefined) {
+function renderModal(
+  inspection: VehicleInspection,
+  workOrderNumberOf?: (id: string) => string | undefined,
+  workOrderStatusOf?: (id: string) => WorkOrderStatusWire | undefined,
+) {
   const props = {
     vehicleId: "veh-1",
     vehicles: [{ id: "veh-1", unit: "NL-02", label: "NL-02" }],
     workOrderNumberOf,
+    workOrderStatusOf,
     onWorkOrderCreated: vi.fn(),
     onClose: vi.fn(),
   };
@@ -130,5 +135,54 @@ describe("InspectionDetailModal — work order just created", () => {
 
     await screen.findByText("Defect 'Brakes' is already on an open work order.");
     await waitFor(() => expect(screen.queryByText(/Failed to create/)).toBeNull());
+  });
+});
+
+// A work order from before per-defect links sits on the INSPECTION
+// (`generatedWorkOrderId`), not on each defect. While it is open it holds every
+// open defect of the inspection — the Open Defects tab shows them on it — so
+// the modal must not offer a second work order (the server would move the
+// defect, and the old work order's completion would then skip it).
+describe("InspectionDetailModal — legacy inspection-level work order", () => {
+  const legacy = (status?: WorkOrderStatusWire) => {
+    const insp = { ...stale, generatedWorkOrderId: "wo-legacy" } as VehicleInspection;
+    return renderModal(
+      insp,
+      (id) => (id === "wo-legacy" ? "WO-3" : undefined),
+      status ? (id) => (id === "wo-legacy" ? status : undefined) : undefined,
+    );
+  };
+
+  it("offers no CREATE/RESOLVE while the legacy work order is open, and shows it as the defects' work order", () => {
+    legacy("InProgress");
+    expect(screen.queryByText("CREATE WORK ORDER")).toBeNull();
+    expect(screen.queryByText("RESOLVE")).toBeNull();
+    expect(screen.queryByText(/CREATE WORK ORDER FOR ALL/)).toBeNull();
+    expect(screen.getAllByText("On WO-3")).toHaveLength(2);
+  });
+
+  it("treats an unknown legacy status as still open", () => {
+    legacy(undefined);
+    expect(screen.queryByText("CREATE WORK ORDER")).toBeNull();
+    expect(screen.getAllByText("On WO-3")).toHaveLength(2);
+  });
+
+  it.each(["Completed", "Cancelled"] as const)("offers CREATE/RESOLVE again once the legacy work order is %s", (status) => {
+    legacy(status);
+    expect(screen.getAllByText("CREATE WORK ORDER")).toHaveLength(2);
+    expect(screen.getAllByText("RESOLVE")).toHaveLength(2);
+    expect(screen.getByText("CREATE WORK ORDER FOR ALL 2 OPEN DEFECTS")).toBeTruthy();
+    expect(screen.queryByText("On WO-3")).toBeNull();
+  });
+
+  it("a defect's own work order still wins over a closed legacy one", () => {
+    const insp = {
+      ...inspectionWith([defect({ item: "Brakes", workOrderId: "wo-own" }), defect({ item: "Wipers", severity: "Minor" })]),
+      generatedWorkOrderId: "wo-legacy",
+    } as VehicleInspection;
+    renderModal(insp, (id) => ({ "wo-own": "WO-7", "wo-legacy": "WO-3" })[id], () => "Completed");
+    expect(screen.getByText("On WO-7")).toBeTruthy();
+    expect(screen.getAllByText("CREATE WORK ORDER")).toHaveLength(1);
+    expect(screen.queryByText(/CREATE WORK ORDER FOR ALL/)).toBeNull();
   });
 });
