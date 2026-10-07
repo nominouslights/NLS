@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { driverPackageHtml, partsFollowText, type DriverPackageInput } from "./index";
+import { DEADHEAD_COVER_LINE, driverPackageHtml, partsFollowText, type DriverPackageInput } from "./index";
 import { enRouteDefectReportHtml } from "../defectReportPdf";
 import { itemsFor } from "@/lib/inspectionForm";
 import { COMPANY } from "@/lib/company";
@@ -359,6 +359,46 @@ describe("driverPackageHtml — nothing on file", () => {
     }
     // A blank form has not been inspected — it must not claim a clean result.
     expect(p.preTrip).not.toContain("No defects found");
+  });
+});
+
+describe("driverPackageHtml — a deadhead", () => {
+  // A deadhead carries no passengers and the server refuses a manifest for it,
+  // so the package leaves NL-TM-01 out rather than printing a blank one a
+  // driver might fill in. Shipments may still ride it.
+  const html = driverPackageHtml(
+    full({ trip: trip({ isEmptyLeg: true, manifestId: null, seatsConfirmed: 0 }), manifest: null }),
+    COMPANY,
+  );
+  const at = partOffsets(html);
+  const cover = html.slice(at.cover, at.itinerary);
+
+  it("prints no trip manifest sheet", () => {
+    expect(at.manifest).toBe(-1);
+    expect(html).not.toContain("Trip Manifest (NL-TM-01)");
+  });
+
+  it("still prints the itinerary, pre-trip and en-route defect report, in order", () => {
+    expect(at.cover).toBeLessThan(at.itinerary);
+    expect(at.itinerary).toBeLessThan(at.preTrip);
+    expect(at.preTrip).toBeLessThan(at.defectReport);
+    expect([...html.matchAll(/class="nlpkg-brk"/g)].length).toBe(2);
+  });
+
+  it("says it is a deadhead on the cover, and counts three parts", () => {
+    expect(cover).toContain(DEADHEAD_COVER_LINE);
+    expect(cover).toContain("Three parts follow, one per sheet.");
+    const rows = [...cover.matchAll(/<tr>\s*<td class="num">(\d+)<\/td>\s*<td>(.*?)<\/td>/g)].map((m) => m[2]);
+    expect(rows).toEqual(["Trip Itinerary", "Pre-Trip Inspection (NL-PTI-01)", "En-Route Defect Report"]);
+    expect(cover).not.toContain("The manifest, itinerary and pre-trip");
+  });
+
+  it("keeps shipments on the itinerary", () => {
+    expect(html.slice(at.itinerary, at.preTrip)).toContain("Pallet of drill core boxes");
+  });
+
+  it("never says deadhead on an ordinary trip's cover", () => {
+    expect(driverPackageHtml(full(), COMPANY)).not.toContain(DEADHEAD_COVER_LINE);
   });
 });
 

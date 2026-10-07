@@ -17,7 +17,13 @@
 // it changes in ITS folder, so the standalone print and the package can never
 // show different sheets.
 //
-// Every part is ALWAYS present. A missing manifest or pre-trip prints as its
+// Every part is present — with ONE exception: a deadhead (`trip.isEmptyLeg`)
+// carries no passengers and the server refuses a manifest for it, so its package
+// leaves the NL-TM-01 part out entirely and the cover says "Deadhead — no
+// passengers carried" instead. A blank manifest on a deadhead would invite a
+// driver to write passengers onto a run that may not carry any.
+//
+// Otherwise every part is ALWAYS present. A missing manifest or pre-trip prints as its
 // own blank form (those sub-documents take `null` and render blank paper), and
 // the cover's contents list marks it `BLANK — to be completed by hand`. The
 // en-route defect report has no record behind it at all, so it is always marked
@@ -67,6 +73,9 @@ interface PackagePart {
   html: string;
 }
 
+/** The cover line that stands in for the manifest part on a deadhead. */
+export const DEADHEAD_COVER_LINE = "Deadhead — no passengers carried";
+
 const COUNT_WORDS = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"];
 
 /** The parts, in print order — the single source for the cover and the sheets. */
@@ -78,16 +87,23 @@ function packageParts(pkg: DriverPackageInput, company: CompanyInfo): PackagePar
   const unit = trip.vehicleUnit;
   const tripNumber = trip.tripNumber;
 
+  // A deadhead has no manifest part at all — see the header comment.
+  const manifestPart: PackagePart[] = trip.isEmptyLeg
+    ? []
+    : [
+        {
+          title: "Trip Manifest (NL-TM-01)",
+          detail: manifest
+            ? `${manifest.passengers.length} passenger(s), ${manifest.cargo.length} cargo item(s)`
+            : "No manifest on file",
+          filled: manifest !== null,
+          handOnly: false,
+          html: tripManifestHtml(manifest, company),
+        },
+      ];
+
   return [
-    {
-      title: "Trip Manifest (NL-TM-01)",
-      detail: manifest
-        ? `${manifest.passengers.length} passenger(s), ${manifest.cargo.length} cargo item(s)`
-        : "No manifest on file",
-      filled: manifest !== null,
-      handOnly: false,
-      html: tripManifestHtml(manifest, company),
-    },
+    ...manifestPart,
     {
       title: "Trip Itinerary",
       detail:
@@ -156,7 +172,9 @@ function coverSheet(trip: TripRecord, parts: PackagePart[], company: CompanyInfo
     <div class="warn">${
       recordMissing
         ? "One or more parts of this package are BLANK FORMS. A blank inspection is not a passed inspection — it must be completed and signed by hand."
-        : "The manifest, itinerary and pre-trip are filled from the system of record. Check them against the vehicle before departure, and complete the en-route defect report by hand during the run."
+        : trip.isEmptyLeg
+          ? "The itinerary and pre-trip are filled from the system of record. Check them against the vehicle before departure, and complete the en-route defect report by hand during the run."
+          : "The manifest, itinerary and pre-trip are filled from the system of record. Check them against the vehicle before departure, and complete the en-route defect report by hand during the run."
     }</div>
 
     ${sectionBar("Trip")}
@@ -170,6 +188,7 @@ function coverSheet(trip: TripRecord, parts: PackagePart[], company: CompanyInfo
       field("Corridor", `${trip.origin} → ${trip.destination}`),
       field("Client", trip.clientName),
     ], 2)}
+    ${trip.isEmptyLeg ? grid([field("Run", DEADHEAD_COVER_LINE, { wide: true })]) : ""}
 
     ${sectionBar("Contents")}
     <table>
