@@ -163,9 +163,11 @@ describe("entered period storage", () => {
 });
 
 describe("isPeriodScoped", () => {
-  it("is false for Settings alone — Budget Codes is scoped since codes moved under the period", () => {
+  it("is false for Settings and Vendors only — Budget Codes is scoped since codes moved under the period", () => {
     const all: ScreenId[] = NAV_GROUPS.flatMap((g) => g.items.map((i) => i.id));
-    expect(all.filter((id) => !isPeriodScoped(id)).sort()).toEqual(["settings"]);
+    // Vendors is deliberately unscoped: the register is tenant-wide (/api/budgeting/vendors has
+    // no period in the route), so it must never sit behind the period chooser.
+    expect(all.filter((id) => !isPeriodScoped(id)).sort()).toEqual(["settings", "vendors"]);
     expect(all.filter(isPeriodScoped).sort()).toEqual([
       "actuals",
       "codes",
@@ -173,5 +175,14 @@ describe("isPeriodScoped", () => {
       "reports",
       "variance",
     ]);
+  });
+
+  it("lists Vendors in PLANNING with the VN code tile", () => {
+    const planning = NAV_GROUPS.find((g) => g.label === "PLANNING");
+    expect(planning?.items.find((i) => i.id === "vendors")).toEqual({
+      id: "vendors",
+      label: "Vendors",
+      code: "VN",
+    });
   });
 });

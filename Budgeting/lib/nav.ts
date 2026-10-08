@@ -4,7 +4,7 @@
 // JetBrains Mono code tile and an optional count badge. Settings sits last in the second
 // group and keeps Dispatcher's "ST" code — a deliberate cross-app tell.
 
-// Planning is two items, not three: allocations are planned on the period's own dashboard
+// Planning has no Allocations item: allocations are planned on the period's own dashboard
 // (screens/periods/), so a separate Allocations screen was a second place to do the same job —
 // and the worse one, since it could not refresh Console's period list after a save. Removed
 // rather than fixed; "one place to plan a period" is the point.
@@ -12,6 +12,7 @@
 export type ScreenId =
   | "periods"
   | "codes"
+  | "vendors"
   | "actuals"
   | "variance"
   | "reports"
@@ -20,8 +21,11 @@ export type ScreenId =
 /**
  * The screens that act on ONE budget period — they render only once a period is entered, inside
  * Console's banner, and every switch remounts them. Budget Codes joined when codes moved under
- * the period (each period has its own chart, routes periods/{id}/codes). Settings is the one
- * screen left out: a profile belongs to a person, not to a period.
+ * the period (each period has its own chart, routes periods/{id}/codes). Two screens are left
+ * out: Settings (a profile belongs to a person, not to a period) and Vendors (the register is
+ * tenant-wide — a vendor is the same counterparty in every period, routes /api/budgeting/vendors
+ * with no period in them). Leaving Vendors out is deliberate, not an oversight: scoping it would
+ * hide the register behind the period chooser for no reason.
  */
 export const PERIOD_SCOPED: ReadonlySet<ScreenId> = new Set<ScreenId>([
   "periods",
@@ -55,6 +59,8 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: "periods", label: "Period Dashboard", code: "BP" },
       { id: "codes", label: "Budget Codes", code: "BC" },
+      // In PLANNING because vendors are planning reference data, but NOT period-scoped.
+      { id: "vendors", label: "Vendors", code: "VN" },
     ],
   },
   {

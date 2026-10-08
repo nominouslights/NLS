@@ -23,6 +23,7 @@ import BudgetPeriodFormModal from "@/components/BudgetPeriodFormModal";
 import PeriodChooser from "@/components/screens/periods/PeriodChooser";
 import BudgetPeriods from "@/components/screens/BudgetPeriods";
 import BudgetCodes from "@/components/screens/BudgetCodes";
+import Vendors from "@/components/screens/Vendors";
 import ActualsVsBudget from "@/components/screens/ActualsVsBudget";
 import Variance from "@/components/screens/Variance";
 import Reports from "@/components/screens/Reports";
@@ -41,8 +42,9 @@ import Settings from "@/components/screens/Settings";
 //
 // Period-scoped screens (lib/nav.ts PERIOD_SCOPED) render the chooser until a period is entered,
 // and render inside a Fragment keyed by the period id, so every switch resets their state. Budget
-// Codes is one of them — each period has its own chart. Settings is the one screen not tied to a
-// period and renders regardless; the banner says which case applies.
+// Codes is one of them — each period has its own chart. Settings and Vendors (the vendor register
+// is tenant-wide) are the two screens not tied to a period and render regardless; the banner says
+// which case applies. Vendors owns its own fetch, like Budget Codes.
 //
 // A request against the entered period takes a hold (lib/periodHold.ts). While any hold is
 // taken, SWITCH PERIOD and + NEW PERIOD refuse, so a result can never land on a period the
@@ -278,6 +280,7 @@ export default function Console() {
                       onSelect={setCodeSel}
                     />
                   )}
+                  {screen === "vendors" && <Vendors />}
                   {screen === "actuals" && period && <ActualsVsBudget period={period} />}
                   {screen === "variance" && period && (
                     <Variance period={period} onOpenCode={openCode} />

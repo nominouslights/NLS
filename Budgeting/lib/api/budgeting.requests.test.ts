@@ -15,6 +15,13 @@ import {
   seedStarterBudgetCodes,
   setBudgetCodeActive,
   updateBudgetCode,
+  createVendor,
+  deleteVendor,
+  getVendor,
+  listVendors,
+  setVendorActive,
+  updateVendor,
+  type VendorInput,
   type BudgetCodeInput,
   type BudgetCodeUpdateInput,
   type BudgetItemInput,
@@ -632,5 +639,214 @@ describe("budget item requests", () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(status, { code, message }));
 
     await expect(updateBudgetItem(PERIOD, ITEM, input)).rejects.toMatchObject({ code, message, status });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Vendors — TENANT-WIDE routes (BudgetingEndpoints.cs: budgeting.Map*("vendors...")), directly
+// under /api/budgeting and never under a period. Messages below are verbatim from VendorErrors.
+// ---------------------------------------------------------------------------
+
+const VENDOR_ID = "5f2b1e1c-0000-4000-8000-0000000000c1";
+
+const VENDOR_INPUT: VendorInput = {
+  name: "Kal Tire Thompson",
+  contactName: null,
+  email: "orders@kaltire.example",
+  phone: null,
+  address: null,
+  notes: null,
+  gstRegistrationNumber: "123456789 RT0001",
+  qboDisplayName: null,
+  defaultBudgetCode: "FLEET-TIRES",
+};
+
+/** VendorRequest's nine keys — what both POST and PUT must always carry. */
+const VENDOR_REQUEST_KEYS = [
+  "address",
+  "contactName",
+  "defaultBudgetCode",
+  "email",
+  "gstRegistrationNumber",
+  "name",
+  "notes",
+  "phone",
+  "qboDisplayName",
+];
+
+describe("listVendors", () => {
+  it("GETs the tenant-wide register, active only by default", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, []));
+
+    await listVendors();
+
+    expect(callPath()).toBe("/api/budgeting/vendors?includeInactive=false");
+    expect(callInit().method ?? "GET").toBe("GET");
+  });
+
+  it("asks for retired vendors too when told to — and is never built under a period", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, []));
+
+    await listVendors(true);
+
+    expect(callPath()).toBe("/api/budgeting/vendors?includeInactive=true");
+    expect(callPath()).not.toContain("/periods/");
+  });
+});
+
+describe("getVendor", () => {
+  it("GETs the vendor's own route", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { id: VENDOR_ID }));
+
+    await getVendor(VENDOR_ID);
+
+    expect(callPath()).toBe(`/api/budgeting/vendors/${VENDOR_ID}`);
+  });
+
+  it("surfaces a 404 NotFound verbatim", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(404, { code: "Budgeting.Vendor.NotFound", message: "The vendor was not found." }),
+    );
+
+    await expect(getVendor(VENDOR_ID)).rejects.toMatchObject({
+      code: "Budgeting.Vendor.NotFound",
+      status: 404,
+      message: "The vendor was not found.",
+    });
+  });
+});
+
+describe("createVendor", () => {
+  it("POSTs every VendorRequest key, nulls explicit, and returns the 201's id", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(201, { id: VENDOR_ID }));
+
+    const id = await createVendor(VENDOR_INPUT);
+
+    expect(id).toBe(VENDOR_ID);
+    expect(callPath()).toBe("/api/budgeting/vendors");
+    expect(callInit().method).toBe("POST");
+    const body = JSON.parse(String(callInit().body));
+    expect(Object.keys(body).sort()).toEqual(VENDOR_REQUEST_KEYS);
+    expect(body).toEqual(VENDOR_INPUT);
+    expect(body.contactName).toBeNull();
+  });
+
+  it("surfaces the active-vendor DuplicateName 409 verbatim", async () => {
+    const message =
+      'A vendor named "Kal Tire Thompson" already exists. Vendor names are unique, ignoring case.';
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(409, { code: "Budgeting.Vendor.DuplicateName", message }),
+    );
+
+    await expect(createVendor(VENDOR_INPUT)).rejects.toMatchObject({
+      code: "Budgeting.Vendor.DuplicateName",
+      status: 409,
+      message,
+    });
+  });
+
+  it("surfaces the retired-vendor DuplicateName 409 verbatim — it says to reactivate", async () => {
+    const message =
+      'A retired vendor named "Kal Tire Thompson" already exists. Reactivate it instead of adding it again.';
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(409, { code: "Budgeting.Vendor.DuplicateName", message }),
+    );
+
+    const err = await createVendor(VENDOR_INPUT).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).message).toBe(message);
+  });
+
+  it.each([
+    ["Budgeting.Vendor.NameRequired", "A vendor needs a name."],
+    ["Budgeting.Vendor.NameTooLong", "The vendor name must be 120 characters or fewer."],
+    ["Budgeting.Vendor.EmailInvalid", "The email must look like an address (name@example.com)."],
+    [
+      "Budgeting.Vendor.DefaultBudgetCodeInvalidFormat",
+      "The default budget code may use letters, digits and hyphens only, and must start and end with a letter or digit (for example FLEET-MAINT).",
+    ],
+    [
+      "Budgeting.Vendor.GstRegistrationNumberTooLong",
+      "The GST registration number must be 32 characters or fewer.",
+    ],
+  ])("surfaces a 400 %s verbatim", async (code, message) => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(400, { code, message }));
+
+    await expect(createVendor(VENDOR_INPUT)).rejects.toMatchObject({ code, status: 400, message });
+  });
+});
+
+describe("updateVendor", () => {
+  it("PUTs to the vendor's route with EVERY key — PUT is a full replace", async () => {
+    fetchMock.mockResolvedValueOnce(noContent());
+    const cleared: VendorInput = { ...VENDOR_INPUT, email: null, gstRegistrationNumber: null };
+
+    await updateVendor(VENDOR_ID, cleared);
+
+    expect(callPath()).toBe(`/api/budgeting/vendors/${VENDOR_ID}`);
+    expect(callInit().method).toBe("PUT");
+    const body = JSON.parse(String(callInit().body));
+    // An omitted key would clear the field server-side; a cleared one must be an explicit null.
+    expect(Object.keys(body).sort()).toEqual(VENDOR_REQUEST_KEYS);
+    expect(body.email).toBeNull();
+    expect(body.gstRegistrationNumber).toBeNull();
+    expect(body.name).toBe("Kal Tire Thompson");
+  });
+
+  it("surfaces a rename onto another vendor's name (409) verbatim", async () => {
+    const message =
+      'A vendor named "Esso Thompson" already exists. Vendor names are unique, ignoring case.';
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(409, { code: "Budgeting.Vendor.DuplicateName", message }),
+    );
+
+    await expect(updateVendor(VENDOR_ID, VENDOR_INPUT)).rejects.toMatchObject({
+      status: 409,
+      message,
+    });
+  });
+});
+
+describe("setVendorActive", () => {
+  it("deactivates on false — the retire route", async () => {
+    fetchMock.mockResolvedValueOnce(noContent());
+
+    await setVendorActive(VENDOR_ID, false);
+
+    expect(callPath()).toBe(`/api/budgeting/vendors/${VENDOR_ID}/deactivate`);
+    expect(callInit().method).toBe("POST");
+  });
+
+  it("activates on true — the restore route", async () => {
+    fetchMock.mockResolvedValueOnce(noContent());
+
+    await setVendorActive(VENDOR_ID, true);
+
+    expect(callPath()).toBe(`/api/budgeting/vendors/${VENDOR_ID}/activate`);
+    expect(callInit().method).toBe("POST");
+  });
+});
+
+describe("deleteVendor", () => {
+  it("issues a DELETE to the vendor's own route", async () => {
+    fetchMock.mockResolvedValueOnce(noContent());
+
+    await deleteVendor(VENDOR_ID);
+
+    expect(callPath()).toBe(`/api/budgeting/vendors/${VENDOR_ID}`);
+    expect(callInit().method).toBe("DELETE");
+  });
+
+  it("surfaces the InUse 409 verbatim — its words name retiring as the alternative", async () => {
+    // Verbatim from VendorErrors.InUse.
+    const message =
+      "This vendor is referenced by budget items and cannot be deleted. Retire it instead — a retired vendor stays listed so existing items keep resolving.";
+    fetchMock.mockResolvedValueOnce(jsonResponse(409, { code: "Budgeting.Vendor.InUse", message }));
+
+    const err = await deleteVendor(VENDOR_ID).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err).toMatchObject({ code: "Budgeting.Vendor.InUse", status: 409, message });
   });
 });
