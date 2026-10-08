@@ -269,22 +269,36 @@ public sealed class BudgetCode : AggregateRoot, ITenantScoped
             return Result.Failure(BudgetCodeErrors.CodeTooLong);
         }
 
-        // Letters, digits and interior hyphens only. Hand-rolled rather than a regex: the rule is
-        // three conditions long, and this keeps the code readable next to the error it produces.
-        if (normalizedCode[0] == '-' || normalizedCode[^1] == '-')
+        return HasValidCodeFormat(normalizedCode)
+            ? Result.Success()
+            : Result.Failure(BudgetCodeErrors.CodeInvalidFormat);
+    }
+
+    /// <summary>
+    /// The code-string format rule on its own — letters, digits and interior hyphens only — for an
+    /// already-normalized (<see cref="NormalizeCode"/>), non-empty string. Public so anything that
+    /// stores a code string without a code row behind it (a vendor's default budget code) checks
+    /// it by this rule rather than by a copy of it. Length is the caller's check
+    /// (<see cref="CodeMaxLength"/>), so each caller can report it under its own error.
+    /// </summary>
+    public static bool HasValidCodeFormat(string normalizedCode)
+    {
+        // Hand-rolled rather than a regex: the rule is three conditions long, and this keeps the
+        // code readable next to the error it produces.
+        if (normalizedCode.Length == 0 || normalizedCode[0] == '-' || normalizedCode[^1] == '-')
         {
-            return Result.Failure(BudgetCodeErrors.CodeInvalidFormat);
+            return false;
         }
 
         foreach (var character in normalizedCode)
         {
             if (character != '-' && !char.IsAsciiLetterOrDigit(character))
             {
-                return Result.Failure(BudgetCodeErrors.CodeInvalidFormat);
+                return false;
             }
         }
 
-        return Result.Success();
+        return true;
     }
 
     private static Result Validate(BudgetCodeDetails details)

@@ -21,9 +21,16 @@ using NorthernLink.Budgeting.Application.Periods.Create;
 using NorthernLink.Budgeting.Application.Periods.GetPeriodById;
 using NorthernLink.Budgeting.Application.Periods.GetPeriods;
 using NorthernLink.Budgeting.Application.Periods.Transition;
+using NorthernLink.Budgeting.Application.Vendors.Create;
+using NorthernLink.Budgeting.Application.Vendors.Delete;
+using NorthernLink.Budgeting.Application.Vendors.GetVendorById;
+using NorthernLink.Budgeting.Application.Vendors.GetVendors;
+using NorthernLink.Budgeting.Application.Vendors.SetActive;
+using NorthernLink.Budgeting.Application.Vendors.Update;
 using NorthernLink.Budgeting.Domain.Allocations;
 using NorthernLink.Budgeting.Domain.Codes;
 using NorthernLink.Budgeting.Domain.Periods;
+using NorthernLink.Budgeting.Domain.Vendors;
 
 namespace NorthernLink.Budgeting.Infrastructure.Endpoints;
 
@@ -100,6 +107,20 @@ public static class BudgetingEndpoints
 
         // Tenant-wide by design: it lists the people who can own a code, not codes.
         budgeting.MapGet("codes/owners", GetOwnerCandidates);
+
+        // The vendor register — tenant-wide, not per period: a vendor is the same counterparty in
+        // every period. Names are unique per tenant ignoring case (409 Budgeting.Vendor.DuplicateName).
+        // Retiring (activate/deactivate) is the normal end of a vendor's life; DELETE is for a
+        // vendor created in error and answers 409 Budgeting.Vendor.InUse once anything references
+        // it (IVendorUsageProbe — nothing can yet). GET lists active vendors unless
+        // ?includeInactive=true.
+        budgeting.MapGet("vendors", GetVendors);
+        budgeting.MapGet("vendors/{vendorId:guid}", GetVendor);
+        budgeting.MapPost("vendors", CreateVendor);
+        budgeting.MapPut("vendors/{vendorId:guid}", UpdateVendor);
+        budgeting.MapPost("vendors/{vendorId:guid}/activate", ActivateVendor);
+        budgeting.MapPost("vendors/{vendorId:guid}/deactivate", DeactivateVendor);
+        budgeting.MapDelete("vendors/{vendorId:guid}", DeleteVendor);
 
         return app;
     }
@@ -420,6 +441,94 @@ public static class BudgetingEndpoints
             : EndpointResults.Problem(result.Error);
     }
 
+    private static async Task<IResult> GetVendors(
+        bool? includeInactive, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(new GetVendorsQuery(tenantId, includeInactive ?? false), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> GetVendor(
+        Guid vendorId, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(new GetVendorByIdQuery(tenantId, vendorId), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>Adds a vendor to the register: 201 with <c>{ id }</c> and a Location at the vendor.</summary>
+    private static async Task<IResult> CreateVendor(
+        VendorRequest request,
+        ITenantContext tenantContext,
+        ICurrentActor currentActor,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(
+            new CreateVendorCommand(tenantId, request.ToDetails(), currentActor.UserId), cancellationToken);
+        return result.IsSuccess
+            ? Results.Created($"/api/budgeting/vendors/{result.Value}", new EntityCreatedResponse(result.Value))
+            : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>Rewrites every editable field of a vendor (omitted optional fields are cleared): 204.</summary>
+    private static Task<IResult> UpdateVendor(
+        Guid vendorId,
+        VendorRequest request,
+        ITenantContext tenantContext,
+        ICurrentActor currentActor,
+        ISender sender,
+        CancellationToken cancellationToken) =>
+        SendCommand(
+            tenantContext,
+            sender,
+            tenantId => new UpdateVendorCommand(tenantId, vendorId, request.ToDetails(), currentActor.UserId),
+            cancellationToken);
+
+    private static Task<IResult> ActivateVendor(
+        Guid vendorId,
+        ITenantContext tenantContext,
+        ICurrentActor currentActor,
+        ISender sender,
+        CancellationToken cancellationToken) =>
+        SendCommand(
+            tenantContext,
+            sender,
+            tenantId => new SetVendorActiveCommand(tenantId, vendorId, true, currentActor.UserId),
+            cancellationToken);
+
+    private static Task<IResult> DeactivateVendor(
+        Guid vendorId,
+        ITenantContext tenantContext,
+        ICurrentActor currentActor,
+        ISender sender,
+        CancellationToken cancellationToken) =>
+        SendCommand(
+            tenantContext,
+            sender,
+            tenantId => new SetVendorActiveCommand(tenantId, vendorId, false, currentActor.UserId),
+            cancellationToken);
+
+    // No actor: a deleted row has nowhere to record who deleted it. See DeleteVendorCommand.
+    private static Task<IResult> DeleteVendor(
+        Guid vendorId, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken) =>
+        SendCommand(
+            tenantContext, sender, tenantId => new DeleteVendorCommand(tenantId, vendorId), cancellationToken);
+
     /// <summary>
     /// Resolve tenant → build command → dispatch → 204, for every bodiless write (code edits,
     /// period transitions, allocation removal). The command is built by a callback rather than
@@ -624,5 +733,39 @@ public sealed record UpdateBudgetCodeRequest(
         TaxTreatment = TaxTreatment,
         BudgetOwnerUserId = BudgetOwnerUserId,
         ReviewFrequency = ReviewFrequency ?? BudgetReviewFrequency.Quarterly,
+    };
+}
+
+/// <summary>
+/// Request body for POST /api/budgeting/vendors and PUT /api/budgeting/vendors/{vendorId} — the
+/// same shape both ways, and PUT is a full replace: an omitted optional field is cleared. Every
+/// field is nullable on the wire so a missing name fails as a readable
+/// <c>Budgeting.Vendor.NameRequired</c> rather than a model-binding 400 with no code in it.
+/// Strings are trimmed server-side and blank becomes null. <see cref="DefaultBudgetCode"/> is a
+/// code string, normalized like one (trim + upper case) but not required to exist.
+/// <see cref="GstRegistrationNumber"/> is reference data — nothing computes tax from it.
+/// </summary>
+public sealed record VendorRequest(
+    string? Name,
+    string? ContactName,
+    string? Email,
+    string? Phone,
+    string? Address,
+    string? Notes,
+    string? GstRegistrationNumber,
+    string? QboDisplayName,
+    string? DefaultBudgetCode)
+{
+    public VendorDetails ToDetails() => new()
+    {
+        Name = Name,
+        ContactName = ContactName,
+        Email = Email,
+        Phone = Phone,
+        Address = Address,
+        Notes = Notes,
+        GstRegistrationNumber = GstRegistrationNumber,
+        QboDisplayName = QboDisplayName,
+        DefaultBudgetCode = DefaultBudgetCode,
     };
 }

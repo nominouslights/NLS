@@ -1,8 +1,8 @@
 # Budgeting — Zero-Based Budgeting Console
 
 Next.js 16 app on port **3003**, consuming the shared API. Scaffolded by US-6.0.1 (Track 6,
-Stage 6.0). Budget **periods**, **codes** and **budget items** are real — including the period
-lifecycle and the period dashboard; actuals and variance are still mock — see
+Stage 6.0). Budget **periods**, **codes**, **budget items** and the **vendor register** are real —
+including the period lifecycle and the period dashboard; actuals and variance are still mock — see
 [Data](#data-periods-codes-and-budget-items-are-real-actuals-and-variance-are-still-mock).
 
 ## Commands
@@ -63,8 +63,8 @@ Run it before touching anything on the list, and whenever a Dispatcher UI story 
 | `app/layout.tsx` | `Dispatcher/app/layout.tsx` | **no** — title/description only; the four Google Fonts `<link>` tags are byte-identical and must stay that way |
 | `lib/auth.ts` | `Dispatcher/lib/auth.ts` | **no** — see below |
 | `components/TopBar.tsx`, `AuthGate.tsx`, `LoginScreen.tsx`, `Console.tsx` | same paths | **no** — adapted |
-| `lib/nav.ts`, `lib/data.ts`, `lib/money.ts`, `lib/types.ts`, `lib/claims.ts`, `lib/roles.ts`, `lib/workingPeriod.ts`, `lib/periodHold.ts`, `lib/api/budgeting.ts`, `lib/api/identity.ts` | — | new |
-| `components/Brandmark.tsx`, `ErrorNotice.tsx`, `RoleGate.tsx`, `AccessDeniedScreen.tsx`, `SetupPendingScreen.tsx`, `PeriodBanner.tsx`, `BudgetPeriodFormModal.tsx`, `BudgetCodeFormModal.tsx`, `BudgetItemFormModal.tsx`, `ProfileForm.tsx`, `screens/*`, `screens/periods/*` (incl. `PeriodChooser.tsx`, `PriorityBreakdown.tsx`), `screens/codes/*` (`CopyCodesPanel.tsx`) | — | new |
+| `lib/nav.ts`, `lib/vendors.ts`, `lib/data.ts`, `lib/money.ts`, `lib/types.ts`, `lib/claims.ts`, `lib/roles.ts`, `lib/workingPeriod.ts`, `lib/periodHold.ts`, `lib/api/budgeting.ts`, `lib/api/identity.ts` | — | new |
+| `components/Brandmark.tsx`, `ErrorNotice.tsx`, `RoleGate.tsx`, `AccessDeniedScreen.tsx`, `SetupPendingScreen.tsx`, `PeriodBanner.tsx`, `BudgetPeriodFormModal.tsx`, `BudgetCodeFormModal.tsx`, `BudgetItemFormModal.tsx`, `VendorFormModal.tsx`, `ProfileForm.tsx`, `screens/*`, `screens/vendors/*`, `screens/periods/*` (incl. `PeriodChooser.tsx`, `PriorityBreakdown.tsx`), `screens/codes/*` (`CopyCodesPanel.tsx`) | — | new |
 
 `theme.ts` and the 12 `ui/` files are copied **unpruned**, including parts this app never uses
 (`ServiceType`, `DutyStatus`, `CorridorStepper`, the two upload fields). Pruning them would break
@@ -122,7 +122,7 @@ it. Config is `vitest.config.mts` — the `.mts` extension is load-bearing (Vite
 `.ts` config as CommonJS and warns), and it must therefore use `import.meta.dirname` for the
 `@` alias, never `__dirname`. `@types/node` declares `__dirname` globally, so TypeScript and
 `next build` both stay green while every `@/lib/...` import in the suite fails to resolve at
-run time. Fifteen files; seven need a DOM (the six component tests, plus `workingPeriod`'s
+run time. Seventeen files; eight need a DOM (the seven component tests, plus `workingPeriod`'s
 storage tests, which need `sessionStorage`):
 
 - `lib/roles.test.ts` — US-6.0.1's acceptance criterion: a Dispatcher account is rejected.
@@ -264,8 +264,8 @@ a copy, a report — is under the period the banner names, and nothing changes t
 silently.
 
 - **Enter, then switch.** A period-scoped screen — Period Dashboard, Budget Codes, Actuals vs
-  Budget, Variance, Reports (`PERIOD_SCOPED` / `isPeriodScoped` in `lib/nav.ts`; Settings is
-  the only screen outside it) — shows
+  Budget, Variance, Reports (`PERIOD_SCOPED` / `isPeriodScoped` in `lib/nav.ts`; Settings and
+  Vendors are the two screens outside it) — shows
   `screens/periods/PeriodChooser.tsx` until a period is entered. Once one is, a strip at the top
   of the main column (`components/PeriodBanner.tsx`) always shows WORKING IN, the label, dates,
   the state chip and "Plan editable / read-only"; leaving takes its explicit **SWITCH PERIOD**.
@@ -311,9 +311,9 @@ silently.
   button labels are unchanged — tests pin them.
 - **Budget codes belong to the period** (they used to be tenant-wide; the owner reversed that).
   Budget Codes is scoped like the dashboard, shows the entered period's chart, and is read-only
-  outside Draft/Open. RETIRE and DELETE are both two-click. Only Settings renders with or without
-  an entered period; there the banner says "This screen isn't tied to a period." or offers
-  CHOOSE A PERIOD.
+  outside Draft/Open. RETIRE and DELETE are both two-click. Only Settings and Vendors render with
+  or without an entered period; there the banner says "This screen isn't tied to a period." or
+  offers CHOOSE A PERIOD.
 
 ## Data: periods, codes and budget items are real; actuals and variance are still mock
 
@@ -511,6 +511,28 @@ guessable from the form:
 on the string Trips and Billing already emit. `budgeting.test.ts` pins those six spellings; do not
 "tidy" `Nihb` into `NIHB`.
 
+**The vendor register is real, and tenant-wide — NOT period-scoped.** A vendor is the same
+counterparty in every period, so `screens/Vendors.tsx` (rail item Vendors, code `VN`, in
+PLANNING) is deliberately left out of `PERIOD_SCOPED`, names no period and takes no period hold.
+Routes (same `BudgetAccess` group): `GET vendors?includeInactive=` (ordered by name), `GET
+vendors/{id}`, `POST vendors` → 201 `{ id }`, `PUT vendors/{id}` (**full replace** — an omitted
+optional field is cleared, so `draftToVendorInput` always sends all nine keys, null when blank),
+`POST vendors/{id}/activate|deactivate` → 204, `DELETE vendors/{id}` → 204 / 409
+`Budgeting.Vendor.InUse`. The screen fetches the whole register (`includeInactive=true`) and its
+"Show retired" toggle filters client-side, because the duplicate-name check must see retired
+vendors: names are unique per tenant **ignoring case, retired included** (`VendorNameRule`), so
+the modal warns live in the server's own words (`duplicateVendorMessage` ↔
+`VendorErrors.DuplicateName`) and links to the existing vendor — or arms a restore when it is
+retired. Delete is offered blind (usage is not knowable client-side); its 409 shows verbatim with
+RETIRE … INSTEAD. Retire, restore and delete are each two-click. The GST registration number is
+reference data only (its hint says the platform never calculates tax); the QuickBooks display
+name is the future import's match key. `lib/vendors.ts` mirrors `Vendor.Normalize` rule for rule
+(`vendorError`, server order and messages), `Vendor.NormalizeName`, `VendorNameRule`
+(`findDuplicateVendor`, with `exceptId`), and the default code's `BudgetCode.NormalizeCode` /
+`HasValidCodeFormat` (`hasValidCodeFormat` in `lib/api/budgeting.ts`, shared with the code
+form). Tests: `lib/vendors.test.ts`, the vendor block in `budgeting.requests.test.ts`, and
+`components/screens/Vendors.test.tsx` (screen and modal, `api` prop injected).
+
 `lib/data.ts` holds the not-yet-real remainder: actuals and variance. Its `budgetCodes` array
 survives **only** as the name-and-category lookup those two still need — the Budget Codes screen
 no longer reads it, and the array is typed `Pick<BudgetCode, "id" | "code" | "name" | "category">`
@@ -558,6 +580,7 @@ Known hazards documented in `theme.ts`: `colors.amber` is a fill/border/icon col
 | 2026-09-29 | Code audit after the period workspace | **Pass** — the one new `statusMeta` call (`PeriodChooser`'s accent stripe) sits beside the row's state `StatusChip`; the banner and chooser carry state only via `StatusChip`; no new protected hex |
 | 2026-09-29 | Code audit after budget items | **Pass** — no new `statusMeta` call and no new protected hex; the priority chip is a `StatusChip` with a per-priority glyph (M / S / N) + written label, because Must and Should share the `info` colour; the modal's segmented choices use `aria-pressed` plus a ✓ and bold on the selected option |
 | 2026-09-29 | Code audit after per-period codes | **Pass** — no new `statusMeta` call and no new protected hex; the "Applies to every period" chip is gone; the Copy codes outcome is a `StatusChip` (Copied / Nothing copied) beside the written summary, as on the items copy |
+| 2026-10-08 | Code audit after the vendor register | **Pass** — no new `statusMeta` call and no new protected hex; Active/Retired is a `StatusChip` (glyph + label) on every row and in the detail pane; the duplicate-name note carries a "Name taken" `StatusChip` beside the written message |
 | — | Grayscale (DevTools → Rendering → Achromatopsia) | **Not yet run** |
 | — | Deuteranopia / Protanopia / Tritanopia | **Not yet run** |
 | — | Side-by-side against Dispatcher at equal width | **Not yet run** |

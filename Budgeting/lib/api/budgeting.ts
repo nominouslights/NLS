@@ -1543,10 +1543,21 @@ export function budgetCodeFormatError(code: string): string | null {
   if (normalized.length > BUDGET_CODE_MAX_LENGTH) {
     return `The code must be ${BUDGET_CODE_MAX_LENGTH} characters or fewer.`;
   }
-  if (!/^[A-Z0-9]([A-Z0-9-]*[A-Z0-9])?$/.test(normalized)) {
+  if (!hasValidCodeFormat(normalized)) {
     return "Use letters, digits and hyphens only, starting and ending with a letter or digit.";
   }
   return null;
+}
+
+/**
+ * Mirrors BudgetCode.HasValidCodeFormat, which takes an ALREADY-NORMALIZED code: non-empty, ASCII
+ * letters/digits/hyphens only (char.IsAsciiLetterOrDigit — "É" is refused), and no leading or
+ * trailing hyphen. Upper-case letters only, because the input is normalized first. Shared by the
+ * code form and the vendor form's default budget code, which the server checks with the same
+ * method.
+ */
+export function hasValidCodeFormat(normalizedCode: string): boolean {
+  return /^[A-Z0-9]([A-Z0-9-]*[A-Z0-9])?$/.test(normalizedCode);
 }
 
 /**
@@ -1637,4 +1648,107 @@ export function toBudgetCode(r: BudgetCodeRecord): BudgetCode {
     modifiedByName: r.modifiedByName,
     modifiedByEmail: r.modifiedByEmail,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Vendors — the tenant's vendor register. TENANT-WIDE, NOT PER PERIOD: a vendor is the same
+// counterparty in every period (unlike a budget code), so these routes sit directly under
+// /api/budgeting, never under periods/{id}. Same BudgetAccess group as every other route here.
+// Shapes mirror VendorRequest / VendorResponse in BudgetingEndpoints.cs and
+// Application/Vendors/VendorResponse.cs. The pure mirrors of Vendor's rules live in
+// lib/vendors.ts.
+// ---------------------------------------------------------------------------
+
+/** Mirrors VendorResponse. Optional text is null when blank, never "". */
+export interface VendorRecord {
+  id: string;
+  name: string;
+  contactName: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  notes: string | null;
+  /** Reference data only — the platform never computes tax from it. */
+  gstRegistrationNumber: string | null;
+  /** The vendor's DisplayName in QuickBooks, reserved as the match key for a future import. */
+  qboDisplayName: string | null;
+  /** A budget code STRING (normalized), not an id — not required to exist in any period. */
+  defaultBudgetCode: string | null;
+  isActive: boolean;
+  /** User ids only — the response resolves no names; the screen looks them up in codes/owners. */
+  createdBy: string | null;
+  modifiedBy: string | null;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+}
+
+/**
+ * VendorRequest — the body of both POST vendors and PUT vendors/{id}. PUT is a FULL REPLACE: an
+ * omitted optional field is cleared server-side, so every key is always sent, null when blank.
+ */
+export interface VendorInput {
+  name: string;
+  contactName: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  notes: string | null;
+  gstRegistrationNumber: string | null;
+  qboDisplayName: string | null;
+  defaultBudgetCode: string | null;
+}
+
+/**
+ * GET vendors?includeInactive= — ordered by name (case-insensitively) server-side. The server
+ * lists active vendors only unless asked; the screen asks for everything, because the duplicate-
+ * name check has to see retired vendors too (a retired name still blocks a new one).
+ */
+export function listVendors(includeInactive = false): Promise<VendorRecord[]> {
+  return request<VendorRecord[]>(`/api/budgeting/vendors?includeInactive=${includeInactive}`);
+}
+
+/** GET vendors/{id} → 200, or 404 Budgeting.Vendor.NotFound. The 201 Location target. */
+export function getVendor(id: string): Promise<VendorRecord> {
+  return request<VendorRecord>(`/api/budgeting/vendors/${id}`);
+}
+
+/**
+ * POST vendors → 201 { id } (the row lands on the next projection read). 400 for a field rule
+ * (lib/vendors.ts VENDOR_MESSAGES), 409 Budgeting.Vendor.DuplicateName naming the vendor that
+ * already holds the name — surface it verbatim.
+ */
+export async function createVendor(input: VendorInput): Promise<string> {
+  const res = await request<{ id: string }>("/api/budgeting/vendors", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return res.id;
+}
+
+/** PUT vendors/{id} → 204. Full replace — see VendorInput. 400 / 404 / 409 DuplicateName. */
+export function updateVendor(id: string, input: VendorInput): Promise<void> {
+  return request<void>(`/api/budgeting/vendors/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+/**
+ * POST vendors/{id}/activate|deactivate → 204. A route built from a boolean, like
+ * setBudgetCodeActive: an inverted ternary would answer 204 either way and silently retire the
+ * vendor the planner asked to restore — the request test pins both directions.
+ */
+export function setVendorActive(id: string, active: boolean): Promise<void> {
+  return request<void>(`/api/budgeting/vendors/${id}/${active ? "activate" : "deactivate"}`, {
+    method: "POST",
+  });
+}
+
+/**
+ * DELETE vendors/{id} → 204, or 409 Budgeting.Vendor.InUse once anything references the vendor.
+ * The console cannot know usage client-side, so it offers Delete and shows that 409 verbatim —
+ * its message names retirement as the alternative.
+ */
+export function deleteVendor(id: string): Promise<void> {
+  return request<void>(`/api/budgeting/vendors/${id}`, { method: "DELETE" });
 }
