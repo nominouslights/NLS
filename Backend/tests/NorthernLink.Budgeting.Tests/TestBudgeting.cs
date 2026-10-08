@@ -1,5 +1,6 @@
 using NorthernLink.Budgeting.Domain.Allocations;
 using NorthernLink.Budgeting.Domain.Codes;
+using NorthernLink.Budgeting.Domain.CostCentres;
 using NorthernLink.Budgeting.Domain.Periods;
 
 namespace NorthernLink.Budgeting.Tests;
@@ -61,6 +62,42 @@ internal static class TestBudgeting
         }
 
         return result.Value;
+    }
+
+    /// <summary>A valid cost-centre register entry, every field overridable. Events are cleared.</summary>
+    public static CostCentre CreateCostCentre(
+        string code = "THOMPSON",
+        string name = "Thompson base",
+        Guid? parentId = null,
+        Guid? ownerUserId = null,
+        string? description = null,
+        bool active = true,
+        Guid? tenantId = null)
+    {
+        var result = CostCentre.Create(
+            tenantId ?? TenantId,
+            code,
+            new CostCentreDetails
+            {
+                Name = name,
+                ParentId = parentId,
+                OwnerUserId = ownerUserId,
+                Description = description,
+            },
+            ActorId);
+        if (result.IsFailure)
+        {
+            throw new InvalidOperationException($"Test cost centre invalid: {result.Error.Code}");
+        }
+
+        var costCentre = result.Value;
+        if (!active)
+        {
+            costCentre.SetActive(false, ActorId);
+        }
+
+        costCentre.ClearDomainEvents();
+        return costCentre;
     }
 
     public static BudgetPeriod CreatePeriod(

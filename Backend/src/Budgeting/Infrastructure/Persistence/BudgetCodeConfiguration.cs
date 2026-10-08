@@ -82,6 +82,10 @@ public sealed class BudgetCodeConfiguration : IEntityTypeConfiguration<BudgetCod
         // aggregate boundary.
         builder.HasIndex(c => new { c.TenantId, c.ParentCodeId });
 
+        // Serves AnyWithCostCentreAsync — the cost-centre register's delete guard, which asks
+        // across every period whether any code still carries the string.
+        builder.HasIndex(c => new { c.TenantId, c.CostCentre });
+
         // DomainEvents ignore + Version concurrency token come from ModuleDbContext's
         // central aggregate conventions.
     }

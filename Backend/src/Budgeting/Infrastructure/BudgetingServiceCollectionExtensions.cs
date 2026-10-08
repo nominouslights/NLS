@@ -27,6 +27,14 @@ using NorthernLink.Budgeting.Application.Codes.GetOwnerCandidates;
 using NorthernLink.Budgeting.Application.Codes.SeedStarterSet;
 using NorthernLink.Budgeting.Application.Codes.SetActive;
 using NorthernLink.Budgeting.Application.Codes.Update;
+using NorthernLink.Budgeting.Application.CostCentres;
+using NorthernLink.Budgeting.Application.CostCentres.Create;
+using NorthernLink.Budgeting.Application.CostCentres.Delete;
+using NorthernLink.Budgeting.Application.CostCentres.GetCostCentreById;
+using NorthernLink.Budgeting.Application.CostCentres.GetCostCentres;
+using NorthernLink.Budgeting.Application.CostCentres.GetPlannedRollup;
+using NorthernLink.Budgeting.Application.CostCentres.SetActive;
+using NorthernLink.Budgeting.Application.CostCentres.Update;
 using NorthernLink.Budgeting.Application.Periods;
 using NorthernLink.Budgeting.Application.Periods.Create;
 using NorthernLink.Budgeting.Application.Periods.GetPeriodById;
@@ -85,6 +93,8 @@ public static class BudgetingServiceCollectionExtensions
         services.AddScoped<IUserLookupRepository, UserLookupRepository>();
         services.AddScoped<IVendorRepository, VendorRepository>();
         services.AddScoped<IVendorReadService, VendorReadService>();
+        services.AddScoped<ICostCentreRepository, CostCentreRepository>();
+        services.AddScoped<ICostCentreReadService, CostCentreReadService>();
 
         // Allocation lines reference codes by id and by string, so "is this code in use" is now
         // a real question with a real answer — the delete-code path refuses with 409 InUse the
@@ -96,6 +106,9 @@ public static class BudgetingServiceCollectionExtensions
         // vendor can be in use and this probe always says so. The slice that links items to
         // vendors replaces this registration with a probe that checks them.
         services.AddScoped<IVendorUsageProbe, UnreferencedVendorUsageProbe>();
+        // A cost centre is "in use" while any budget code in any period carries its code string;
+        // the register's delete path refuses with 409 Budgeting.CostCentre.InUse then.
+        services.AddScoped<ICostCentreUsageProbe, BudgetCodeCostCentreUsageProbe>();
 
         // 3. Command/query handlers — registered explicitly, one line per handler.
         services.AddScoped<ICommandHandler<CreateBudgetPeriodCommand, Guid>, CreateBudgetPeriodCommandHandler>();
@@ -121,6 +134,13 @@ public static class BudgetingServiceCollectionExtensions
         services.AddScoped<ICommandHandler<DeleteVendorCommand>, DeleteVendorCommandHandler>();
         services.AddScoped<IQueryHandler<GetVendorsQuery, IReadOnlyList<VendorResponse>>, GetVendorsQueryHandler>();
         services.AddScoped<IQueryHandler<GetVendorByIdQuery, VendorResponse>, GetVendorByIdQueryHandler>();
+        services.AddScoped<ICommandHandler<CreateCostCentreCommand, Guid>, CreateCostCentreCommandHandler>();
+        services.AddScoped<ICommandHandler<UpdateCostCentreCommand>, UpdateCostCentreCommandHandler>();
+        services.AddScoped<ICommandHandler<SetCostCentreActiveCommand>, SetCostCentreActiveCommandHandler>();
+        services.AddScoped<ICommandHandler<DeleteCostCentreCommand>, DeleteCostCentreCommandHandler>();
+        services.AddScoped<IQueryHandler<GetCostCentresQuery, IReadOnlyList<CostCentreResponse>>, GetCostCentresQueryHandler>();
+        services.AddScoped<IQueryHandler<GetCostCentreByIdQuery, CostCentreResponse>, GetCostCentreByIdQueryHandler>();
+        services.AddScoped<IQueryHandler<GetCostCentreRollupQuery, CostCentreRollupResponse>, GetCostCentreRollupQueryHandler>();
 
         // 4. Integration event consumers — the Identity replica that keeps user_lookup current,
         //    so a budget code can name an accountable owner and its created_by/modified_by
@@ -141,7 +161,8 @@ public static class BudgetingServiceCollectionExtensions
             .Project(new BudgetPeriodProjection())
             .Project(new BudgetCodeProjection())
             .Project(new BudgetAllocationProjection())
-            .Project(new VendorProjection()));
+            .Project(new VendorProjection())
+            .Project(new CostCentreProjection()));
 
         return services;
     }

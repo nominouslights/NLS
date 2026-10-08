@@ -32,6 +32,17 @@ namespace NorthernLink.Budgeting.Application.Codes.CopyFromPeriod;
 /// code that already rolls up into another cannot become a parent, and the child is then copied
 /// top-level too.
 /// </para>
+/// <para>
+/// <b>Cost centre: carried as-is, with no register check.</b> The string was validated against
+/// the register when the source code was written, and it cannot have vanished since — the
+/// register refuses to delete an entry any code in any period carries
+/// (<c>Budgeting.CostCentre.InUse</c>), and the <c>AddCostCentres</c> migration backfilled an
+/// entry for every value that predates the register. A <em>retired</em> entry is still carried:
+/// it is the same value moving forward, the "unchanged is allowed" leniency the edit path gives
+/// (<see cref="BudgetCodeCostCentreRule"/>), and refusing it would make one stale cost centre
+/// block — or silently strip — a whole chart copy. The planner sees the retired cost centre on
+/// the copied code and changes it there.
+/// </para>
 /// </summary>
 public sealed class CopyBudgetCodesCommandHandler(
     IBudgetCodeRepository codes,
