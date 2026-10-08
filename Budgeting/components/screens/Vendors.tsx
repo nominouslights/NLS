@@ -140,7 +140,10 @@ export default function Vendors({ api = DEFAULT_API }: { api?: VendorsApi }) {
     setForm({ vendor });
   }
 
-  function handleSaved(records: VendorRecord[], id: string) {
+  function handleSaved(records: VendorRecord[] | null, id: string) {
+    setSelId(id);
+    // The save landed but its refetch failed: reload rather than show a stale list.
+    if (records === null) return load();
     applyLoaded(records);
     const saved = records.find((v) => v.id === id);
     // Keep the saved vendor visible: clear a search that would hide it.

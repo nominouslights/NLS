@@ -74,7 +74,8 @@ export default function VendorFormModal({
   vendors: readonly VendorRecord[];
   onClose: () => void;
   /** Fresh register (already reflecting the change) plus the saved vendor's id. */
-  onSaved: (records: VendorRecord[], id: string) => void;
+  /** `records` is null when the save succeeded but the follow-up refetch failed — reload. */
+  onSaved: (records: VendorRecord[] | null, id: string) => void;
   /** The duplicate note's link: open that vendor instead (the screen arms a restore if retired). */
   onOpenExisting: (existing: VendorRecord) => void;
   api?: VendorFormApi;
@@ -107,22 +108,14 @@ export default function VendorFormModal({
 
     setBusy(true);
     setError(null);
+    let id: string;
     try {
-      let id: string;
       if (editing) {
         id = vendor.id;
         await api.update(id, input);
       } else {
         id = await api.create(input);
       }
-
-      // Reads trail writes by one projection poll. Wait for the row to carry every value just
-      // written — on edit the row was always there, so the id alone proves nothing.
-      const records = await refetchUntil(api.list, (rows) =>
-        rows.some((r) => r.id === id && vendorReflects(r, input)),
-      );
-      onSaved(records, id);
-      onClose();
     } catch (e) {
       setError(
         e instanceof ApiError
@@ -130,7 +123,23 @@ export default function VendorFormModal({
           : `Failed to ${editing ? "save the" : "create the"} vendor — please try again.`,
       );
       setBusy(false);
+      return;
     }
+
+    // The write succeeded. Reads trail writes by one projection poll, so wait for the row to carry
+    // every value just written (on edit the row was always there, so the id alone proves nothing).
+    // A failed refetch is NOT a failed save: close anyway and let the screen reload, or a retry
+    // would POST again and hit DuplicateName on the vendor just created.
+    let records: VendorRecord[] | null = null;
+    try {
+      records = await refetchUntil(api.list, (rows) =>
+        rows.some((r) => r.id === id && vendorReflects(r, input)),
+      );
+    } catch {
+      records = null;
+    }
+    onSaved(records, id);
+    onClose();
   }
 
   return (

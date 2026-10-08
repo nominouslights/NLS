@@ -115,6 +115,20 @@ describe("VendorFormModal — create", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it("treats a failed refetch after a successful create as saved — closes, never offers a second POST", async () => {
+    const api = makeApi();
+    api.list.mockRejectedValue(new Error("network down"));
+    const { onSaved, onClose } = renderModal({ api });
+
+    type(NAME, "Esso Thompson");
+    fireEvent.click(screen.getByText("CREATE VENDOR"));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(api.create).toHaveBeenCalledTimes(1);
+    expect(onSaved).toHaveBeenCalledWith(null, "new-vendor");
+    expect(screen.queryByText(/Failed to create the vendor/)).toBeNull();
+  });
+
   it("says the GST number is reference only, and what the QuickBooks name is for", () => {
     renderModal();
     expect(screen.getByText(/Reference only — the platform never calculates tax/)).toBeTruthy();
