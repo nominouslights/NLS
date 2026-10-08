@@ -26,6 +26,14 @@ public static class VendorErrors
             ? $"A vendor named \"{existingName}\" already exists. Vendor names are unique, ignoring case."
             : $"A retired vendor named \"{existingName}\" already exists. Reactivate it instead of adding it again.");
 
+    /// <summary>
+    /// <see cref="DuplicateName"/>'s fallback when a save lost the race on the unique index and the
+    /// winner can no longer be read back to name it. Same code, so clients branch identically.
+    /// </summary>
+    public static readonly Error DuplicateNameTaken = Error.Conflict(
+        "Budgeting.Vendor.DuplicateName",
+        "Another vendor with this name was just saved. Vendor names are unique, ignoring case.");
+
     public static readonly Error ContactNameTooLong = Error.Validation(
         "Budgeting.Vendor.ContactNameTooLong",
         $"The contact name must be {Vendor.ContactNameMaxLength} characters or fewer.");

@@ -28,14 +28,61 @@ internal sealed class InMemoryVendorRepository : IVendorRepository
         Task.FromResult(Visible.FirstOrDefault(v =>
             string.Equals(v.NormalizedName, normalizedName, StringComparison.Ordinal)));
 
-    public void Add(Vendor vendor) => Vendors.Add(vendor);
+    private readonly List<Vendor> _pendingAdds = [];
+
+    /// <summary>
+    /// When true, the next <see cref="TrySaveChangesAsync"/> simulates losing the race on the
+    /// unique (tenant_id, normalized_name) index: it persists nothing (pending adds are dropped,
+    /// as the real repository's cleared tracker would), lets <see cref="RaceWinner"/> appear as
+    /// the row that won, and returns false. One-shot.
+    /// </summary>
+    public bool UniqueNameViolationOnNextSave { get; set; }
+
+    /// <summary>The concurrently saved vendor that holds the name, or null to model a winner
+    /// that can no longer be read back (renamed or deleted since).</summary>
+    public Vendor? RaceWinner { get; set; }
+
+    public void Add(Vendor vendor)
+    {
+        Vendors.Add(vendor);
+        _pendingAdds.Add(vendor);
+    }
 
     public void Remove(Vendor vendor) => Vendors.Remove(vendor);
 
     public Task SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         SaveChangesCallCount++;
+        _pendingAdds.Clear();
         return Task.CompletedTask;
+    }
+
+    public Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        SaveChangesCallCount++; // a save attempt either way, like the real SaveChanges round trip
+
+        if (!UniqueNameViolationOnNextSave)
+        {
+            _pendingAdds.Clear();
+            return Task.FromResult(true);
+        }
+
+        UniqueNameViolationOnNextSave = false;
+        foreach (var pending in _pendingAdds)
+        {
+            Vendors.Remove(pending);
+        }
+
+        _pendingAdds.Clear();
+
+        // First in the list so a name lookup finds the winner ahead of an in-memory rename of
+        // the loser (the real tracker clear reverts that rename; this fake cannot).
+        if (RaceWinner is not null)
+        {
+            Vendors.Insert(0, RaceWinner);
+        }
+
+        return Task.FromResult(false);
     }
 }
 

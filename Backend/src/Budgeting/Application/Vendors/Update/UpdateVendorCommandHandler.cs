@@ -41,7 +41,14 @@ public sealed class UpdateVendorCommandHandler(IVendorRepository repository)
             return result;
         }
 
-        await repository.SaveChangesAsync(cancellationToken);
+        // A concurrent create/rename onto the same normalized name can pass the check above
+        // too; the unique index rejects the loser here, and that is a 409 like the pre-check.
+        if (!await repository.TrySaveChangesAsync(cancellationToken))
+        {
+            return Result.Failure(await VendorNameRule.ConflictAfterLostRaceAsync(
+                repository, command.Details.Name, vendor.Id, cancellationToken));
+        }
+
         return Result.Success();
     }
 }

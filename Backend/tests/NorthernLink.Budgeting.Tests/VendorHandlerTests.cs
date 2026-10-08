@@ -154,6 +154,66 @@ public class VendorHandlerTests
         Assert.Equal(2, _repository.SaveChangesCallCount);
     }
 
+    // --- Unique-index race (the pre-check passed, the commit lost) -------------------------------
+
+    [Fact]
+    public async Task A_create_that_loses_the_unique_index_race_is_a_409_naming_the_winner()
+    {
+        var winner = Vendor.Create(TestBudgeting.TenantId, Named("ACME Fuel"), null).Value;
+        _repository.UniqueNameViolationOnNextSave = true;
+        _repository.RaceWinner = winner;
+
+        var result = await CreateAsync("acme fuel");
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Budgeting.Vendor.DuplicateName", result.Error.Code);
+        Assert.Equal(ErrorType.Conflict, result.Error.Type);
+        Assert.Contains("\"ACME Fuel\"", result.Error.Message);
+        Assert.Equal(winner.Id, Assert.Single(_repository.Vendors).Id); // the loser persisted nothing
+    }
+
+    [Fact]
+    public async Task A_create_that_loses_the_race_to_an_unreadable_winner_is_a_generic_409()
+    {
+        _repository.UniqueNameViolationOnNextSave = true;
+
+        var result = await CreateAsync("Acme Fuel");
+
+        Assert.Equal("Budgeting.Vendor.DuplicateName", result.Error.Code);
+        Assert.Equal(ErrorType.Conflict, result.Error.Type);
+        Assert.Equal(VendorErrors.DuplicateNameTaken.Message, result.Error.Message);
+        Assert.Empty(_repository.Vendors);
+    }
+
+    [Fact]
+    public async Task A_rename_that_loses_the_unique_index_race_is_a_409_naming_the_winner()
+    {
+        var vendor = await SeedAsync("Borealis Tire");
+        var winner = Vendor.Create(TestBudgeting.TenantId, Named("Acme Fuel"), null).Value;
+        _repository.UniqueNameViolationOnNextSave = true;
+        _repository.RaceWinner = winner;
+
+        var result = await UpdateAsync(vendor.Id, "ACME FUEL");
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Budgeting.Vendor.DuplicateName", result.Error.Code);
+        Assert.Equal(ErrorType.Conflict, result.Error.Type);
+        Assert.Contains("\"Acme Fuel\"", result.Error.Message);
+    }
+
+    [Fact]
+    public async Task A_rename_that_loses_the_race_to_an_unreadable_winner_is_a_generic_409()
+    {
+        var vendor = await SeedAsync("Borealis Tire");
+        _repository.UniqueNameViolationOnNextSave = true;
+
+        // The only row now matching the name is the loser's own (unsaved) rename — never itself a conflict.
+        var result = await UpdateAsync(vendor.Id, "Acme Fuel");
+
+        Assert.Equal("Budgeting.Vendor.DuplicateName", result.Error.Code);
+        Assert.Equal(VendorErrors.DuplicateNameTaken.Message, result.Error.Message);
+    }
+
     [Fact]
     public async Task Updating_a_missing_vendor_is_NotFound()
     {

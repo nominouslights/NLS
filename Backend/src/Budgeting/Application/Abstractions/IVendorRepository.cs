@@ -24,4 +24,14 @@ public interface IVendorRepository
     void Remove(Vendor vendor);
 
     Task SaveChangesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Saves like <see cref="SaveChangesAsync"/>, but returns false — instead of throwing — when
+    /// the save lost a race on the unique (tenant_id, normalized_name) index: another request
+    /// claimed the name between the handler's <see cref="GetByNormalizedNameAsync"/> check and
+    /// this commit. On false nothing was persisted and the unit of work has been cleared, so the
+    /// caller can re-read (see <see cref="Vendors.VendorNameRule.ConflictAfterLostRaceAsync"/>)
+    /// and report a 409. Any other failure still throws.
+    /// </summary>
+    Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken = default);
 }

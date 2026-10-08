@@ -7,7 +7,8 @@ namespace NorthernLink.Budgeting.Application.Vendors.Create;
 
 /// <summary>
 /// Handles <see cref="CreateVendorCommand"/>: domain validation first, then the case-insensitive
-/// name check (<see cref="VendorNameRule"/>), then one save. A malformed payload reports its
+/// name check (<see cref="VendorNameRule"/>), then one save — whose
+/// unique-index race is also a 409, never a 500. A malformed payload reports its
 /// validation error, never a conflict.
 /// </summary>
 public sealed class CreateVendorCommandHandler(IVendorRepository repository)
@@ -30,7 +31,15 @@ public sealed class CreateVendorCommandHandler(IVendorRepository repository)
         }
 
         repository.Add(vendor);
-        await repository.SaveChangesAsync(cancellationToken);
+
+        // The check above is not atomic with the insert: a concurrent create of the same
+        // normalized name can pass it too, and the unique index rejects the loser here.
+        if (!await repository.TrySaveChangesAsync(cancellationToken))
+        {
+            return Result.Failure<Guid>(await VendorNameRule.ConflictAfterLostRaceAsync(
+                repository, vendor.Name, selfId: null, cancellationToken));
+        }
+
         return Result.Success(vendor.Id);
     }
 }
