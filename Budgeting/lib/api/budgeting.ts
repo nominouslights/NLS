@@ -1752,3 +1752,159 @@ export function setVendorActive(id: string, active: boolean): Promise<void> {
 export function deleteVendor(id: string): Promise<void> {
   return request<void>(`/api/budgeting/vendors/${id}`, { method: "DELETE" });
 }
+
+// ---------------------------------------------------------------------------
+// Cost centres — the tenant's register of organisational units and bases that
+// cost is attributed to. TENANT-WIDE, not under a period: a cost centre
+// outlives every period's chart. A budget code still carries its cost centre as
+// the register entry's CODE STRING (BudgetCode.CostCentre), validated against
+// this register on create/edit (BudgetCodeCostCentreRule). Mirrors
+// CostCentreResponse, CostCentreRequest and CostCentreRollupResponse
+// (BudgetingEndpoints.cs, Application/CostCentres/). The pure client-side
+// mirrors of the register's rules live in lib/costCentres.ts.
+// ---------------------------------------------------------------------------
+
+/** Mirrors CostCentreResponse. The `…Code`/`…Name`/`…Email` companions are resolved server-side on every read. */
+export interface CostCentreRecord {
+  id: string;
+  /** Trimmed, case PRESERVED (never upper-cased); set once at creation. */
+  code: string;
+  name: string;
+  description: string | null;
+  ownerUserId: string | null;
+  /** Null until that user sets a name — render the email instead (userDisplay). */
+  ownerName: string | null;
+  ownerEmail: string | null;
+  parentId: string | null;
+  parentCode: string | null;
+  parentName: string | null;
+  isActive: boolean;
+  createdBy: string | null;
+  createdByName: string | null;
+  createdByEmail: string | null;
+  modifiedBy: string | null;
+  modifiedByName: string | null;
+  modifiedByEmail: string | null;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+}
+
+/**
+ * POST /api/budgeting/cost-centres body (CostCentreRequest). Optional fields go as explicit
+ * nulls, the BudgetCodeInput convention.
+ */
+export interface CostCentreInput {
+  code: string;
+  name: string;
+  description: string | null;
+  ownerUserId: string | null;
+  parentId: string | null;
+}
+
+/**
+ * PUT /api/budgeting/cost-centres/{id} body. No `code`: the server accepts it omitted (and refuses
+ * any DIFFERENT code with 400 Budgeting.CostCentre.CodeImmutable), so this app never sends it —
+ * there is nothing to round-trip wrongly.
+ */
+export type CostCentreUpdateInput = Omit<CostCentreInput, "code">;
+
+/**
+ * GET cost-centres?includeInactive= — ordered by code. Retired entries are left out unless
+ * `includeInactive` is true. The query is always written out, so the wire never relies on the
+ * server's default.
+ */
+export function listCostCentres(options: { includeInactive: boolean }): Promise<CostCentreRecord[]> {
+  return request<CostCentreRecord[]>(
+    `/api/budgeting/cost-centres?includeInactive=${options.includeInactive ? "true" : "false"}`,
+  );
+}
+
+/** GET cost-centres/{id} → 200, or 404 Budgeting.CostCentre.NotFound. The 201 Location target. */
+export function getCostCentre(id: string): Promise<CostCentreRecord> {
+  return request<CostCentreRecord>(`/api/budgeting/cost-centres/${id}`);
+}
+
+/**
+ * POST cost-centres → 201 { id }. 400 CodeRequired / CodeTooLong / NameRequired / NameTooLong /
+ * DescriptionTooLong / ParentIsNotTopLevel, 404 OwnerNotFound / ParentNotFound, 409 DuplicateCode /
+ * ParentRetired — every message shown verbatim.
+ */
+export async function createCostCentre(input: CostCentreInput): Promise<string> {
+  const res = await request<{ id: string }>("/api/budgeting/cost-centres", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return res.id;
+}
+
+/**
+ * PUT cost-centres/{id} → 204. Beyond create's refusals: 404 NotFound, 400 ParentIsSelf,
+ * 409 HasChildrenCannotHaveParent. Keeping a parent that has since been retired is accepted.
+ */
+export function updateCostCentre(id: string, input: CostCentreUpdateInput): Promise<void> {
+  return request<void>(`/api/budgeting/cost-centres/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+/**
+ * POST cost-centres/{id}/activate|deactivate → 204. Built from a boolean like setBudgetCodeActive,
+ * so the request test pins both directions. Deactivating a parent with active children is 409
+ * Budgeting.CostCentre.HasActiveChildren (refused, never cascaded).
+ */
+export function setCostCentreActive(id: string, active: boolean): Promise<void> {
+  return request<void>(`/api/budgeting/cost-centres/${id}/${active ? "activate" : "deactivate"}`, {
+    method: "POST",
+  });
+}
+
+/**
+ * DELETE cost-centres/{id} → 204; 409 HasChildren (checked first), then 409 InUse when any budget
+ * code in any period carries the code string. Retiring is the normal end of life; the server's
+ * InUse message says so.
+ */
+export function deleteCostCentre(id: string): Promise<void> {
+  return request<void>(`/api/budgeting/cost-centres/${id}`, { method: "DELETE" });
+}
+
+/** Mirrors CostCentreRollupRow. `costCentreId` is null only for a string no register entry matches. */
+export interface CostCentreRollupRow {
+  costCentreId: string | null;
+  code: string;
+  name: string;
+  isActive: boolean;
+  parentId: string | null;
+  parentCode: string | null;
+  ownerUserId: string | null;
+  ownerName: string | null;
+  ownerEmail: string | null;
+  budgetCodeCount: number;
+  itemCount: number;
+  plannedCad: number;
+}
+
+/** Mirrors NoCostCentreRollup — expense planned on codes with no cost centre. */
+export interface NoCostCentreRollup {
+  budgetCodeCount: number;
+  itemCount: number;
+  plannedCad: number;
+}
+
+/**
+ * Mirrors CostCentreRollupResponse. PLANNED ONLY — there is deliberately no actual field until
+ * the actuals slice lands. `totalPlannedExpenseCad` is every row plus `noCostCentre`, and equals
+ * the period's own `plannedExpenseCad`.
+ */
+export interface CostCentreRollup {
+  periodId: string;
+  /** Ordered by code (ordinal). Every active entry, plus retired ones this period still carries. */
+  costCentres: CostCentreRollupRow[];
+  noCostCentre: NoCostCentreRollup;
+  totalPlannedExpenseCad: number;
+}
+
+/** GET periods/{periodId}/rollups/cost-centres → 200; 404 Budgeting.Period.NotFound. */
+export function getCostCentreRollup(periodId: string): Promise<CostCentreRollup> {
+  return request<CostCentreRollup>(`/api/budgeting/periods/${periodId}/rollups/cost-centres`);
+}

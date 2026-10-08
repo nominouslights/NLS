@@ -20,6 +20,9 @@ import {
   leftToAssignCad,
   listBudgetAllocations,
   listBudgetCodes,
+  getCostCentreRollup,
+  sumCad,
+  type CostCentreRollup,
   listBudgetPeriods,
   nextTransition,
   planBalanced,
@@ -44,6 +47,7 @@ import {
 import { ErrorNotice } from "@/components/ErrorNotice";
 import BudgetItemFormModal from "@/components/BudgetItemFormModal";
 import PriorityBreakdown from "@/components/screens/periods/PriorityBreakdown";
+import CostCentreBreakdown from "@/components/screens/periods/CostCentreBreakdown";
 import { EmptyNote } from "@/components/screens/shared";
 import { usePeriodHold } from "@/lib/periodHold";
 import LifecycleStepper from "@/components/screens/periods/LifecycleStepper";
@@ -127,6 +131,9 @@ export default function PeriodDashboard({
   // null = still loading.
   const [lines, setLines] = useState<BudgetAllocationRecord[] | null>(null);
   const [codes, setCodes] = useState<BudgetCode[] | null>(null);
+  /** The server's planned-expense rollup by cost centre; null while loading. */
+  const [rollup, setRollup] = useState<CostCentreRollup | null>(null);
+  const [rollupError, setRollupError] = useState<string | null>(null);
   const [error, setError] = useState<{ message: string; code: string } | null>(null);
   const [busy, setBusy] = useState(false);
   /** Two-click confirms — transition, remove and copy — exactly one of which can be pending. */
@@ -189,6 +196,38 @@ export default function PeriodDashboard({
       active = false;
     };
   }, [load]);
+
+  // The by-cost-centre rollup follows the items: it is refetched whenever a fresh items list lands
+  // (initial load, and after every save, remove and copy — each of which already waited for its
+  // own change to be visible). The rollup is a separate read, so it is retried until its total
+  // agrees with the expense items just loaded. A failure stays inside the panel; it never blocks
+  // the plan.
+  useEffect(() => {
+    if (lines === null) return;
+    let active = true;
+    const expected = sumCad(lines.filter((l) => l.category === "Expense").map((l) => l.amountCad));
+    refetchUntil(
+      () => getCostCentreRollup(periodId),
+      (r) => r.totalPlannedExpenseCad === expected,
+    ).then(
+      (r) => {
+        if (active) {
+          setRollup(r);
+          setRollupError(null);
+        }
+      },
+      (e) => {
+        if (active) {
+          setRollupError(
+            e instanceof ApiError ? e.message : "The cost-centre rollup could not be loaded.",
+          );
+        }
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [periodId, lines]);
 
   const editable = canEditAllocations(period.state);
   const stateLabel = PERIOD_STATE_LABELS[period.state];
@@ -502,8 +541,17 @@ export default function PeriodDashboard({
       )}
 
       {loaded && (
-        <div style={{ marginBottom: 14 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+            gap: 12,
+            alignItems: "start",
+            marginBottom: 14,
+          }}
+        >
           <PriorityBreakdown title="Expense by priority" buckets={expenseByPriority} />
+          <CostCentreBreakdown rollup={rollup} error={rollupError} />
         </div>
       )}
 

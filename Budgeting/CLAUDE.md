@@ -65,6 +65,7 @@ Run it before touching anything on the list, and whenever a Dispatcher UI story 
 | `components/TopBar.tsx`, `AuthGate.tsx`, `LoginScreen.tsx`, `Console.tsx` | same paths | **no** — adapted |
 | `lib/nav.ts`, `lib/vendors.ts`, `lib/data.ts`, `lib/money.ts`, `lib/types.ts`, `lib/claims.ts`, `lib/roles.ts`, `lib/workingPeriod.ts`, `lib/periodHold.ts`, `lib/api/budgeting.ts`, `lib/api/identity.ts` | — | new |
 | `components/Brandmark.tsx`, `ErrorNotice.tsx`, `RoleGate.tsx`, `AccessDeniedScreen.tsx`, `SetupPendingScreen.tsx`, `PeriodBanner.tsx`, `BudgetPeriodFormModal.tsx`, `BudgetCodeFormModal.tsx`, `BudgetItemFormModal.tsx`, `VendorFormModal.tsx`, `ProfileForm.tsx`, `screens/*`, `screens/vendors/*`, `screens/periods/*` (incl. `PeriodChooser.tsx`, `PriorityBreakdown.tsx`), `screens/codes/*` (`CopyCodesPanel.tsx`) | — | new |
+| `lib/costCentres.ts`, `components/CostCentreFormModal.tsx`, `screens/CostCentres.tsx`, `screens/periods/CostCentreBreakdown.tsx` | — | new (cost-centre register) |
 
 `theme.ts` and the 12 `ui/` files are copied **unpruned**, including parts this app never uses
 (`ServiceType`, `DutyStatus`, `CorridorStepper`, the two upload fields). Pruning them would break
@@ -122,7 +123,7 @@ it. Config is `vitest.config.mts` — the `.mts` extension is load-bearing (Vite
 `.ts` config as CommonJS and warns), and it must therefore use `import.meta.dirname` for the
 `@` alias, never `__dirname`. `@types/node` declares `__dirname` globally, so TypeScript and
 `next build` both stay green while every `@/lib/...` import in the suite fails to resolve at
-run time. Seventeen files; eight need a DOM (the seven component tests, plus `workingPeriod`'s
+run time. Twenty-one files; ten need a DOM (the nine component tests, plus `workingPeriod`'s
 storage tests, which need `sessionStorage`):
 
 - `lib/roles.test.ts` — US-6.0.1's acceptance criterion: a Dispatcher account is rejected.
@@ -229,8 +230,8 @@ storage tests, which need `sessionStorage`):
   good load, **not** lost after a failed load or while loading), the storage key differing by
   tenant and by user and `null` without claims, the `sessionStorage` round trip, `null` removing
   the entry, a throwing store degrading quietly, **never touching `localStorage`**, and
-  `isPeriodScoped` being false for `settings` alone (Budget Codes became scoped when codes moved
-  under the period).
+  `isPeriodScoped` being false for `settings` and `costCentres` only (Budget Codes became scoped
+  when codes moved under the period; the cost-centre register is tenant-wide).
 - `components/screens/periods/PeriodChooser.test.tsx` — `vi.fn()` props, as `ProfileForm` does:
   a row click enters that row's id, each row writes its state out, the suggested row carries
   its tag and focus, the eyebrow names the destination screen, the empty state's create button,
@@ -239,6 +240,24 @@ storage tests, which need `sessionStorage`):
   PERIOD is `aria-disabled`, does not call `onSwitch`, and the reason is written beside it; the
   "isn't tied to a period" sentence on Settings, with no "every period" wording left anywhere;
   CHOOSE A PERIOD with nothing entered.
+
+- `lib/costCentres.test.ts` — every `lib/costCentres.ts` mirror against the C# it names: the
+  limits and every `CostCentreErrors` message, trim-only + case-sensitive matching,
+  `costCentreError` in the create and the (different) update order, `parentCandidates` against
+  `CostCentreParentRule` (self, top-level, retired-current-parent kept, children → none),
+  `budgetCodeCostCentreError` against `BudgetCodeCostCentreRule` (unchanged always accepted), that
+  `costCentreOptions` never offers a value the server would refuse, and `groupRollup` /
+  `rollupSum`.
+- `lib/api/costCentres.requests.test.ts` — every cost-centre route/method/body (PUT never carries
+  `code`; activate/deactivate both directions; `includeInactive` written out), each of the 17
+  `Budgeting.CostCentre.*` refusals and the two new `Budgeting.Code.CostCentre*` refusals
+  verbatim, and the rollup route. A separate file from `budgeting.requests.test.ts` on purpose.
+- `components/BudgetCodeFormModal.test.tsx` — the cost-centre picker: active entries only, a
+  retired / unregistered current value kept and marked and saved unchanged, Revenue hides it and
+  sends `null`, inline create selects the new entry (case kept), an inline refusal verbatim.
+- `components/screens/periods/CostCentreBreakdown.test.tsx` — grouping under a parent, an absent
+  parent named, retired / unregistered chips, owners, "No cost centre" at $0, the server's total,
+  and no actual column.
 
 `lib/api/transport.ts` is a **copied** file. Tests against it belong here (a test file is not on
 the copy manifest), but anything they reveal is a change to *Dispatcher's* source first, then a
@@ -265,7 +284,7 @@ silently.
 
 - **Enter, then switch.** A period-scoped screen — Period Dashboard, Budget Codes, Actuals vs
   Budget, Variance, Reports (`PERIOD_SCOPED` / `isPeriodScoped` in `lib/nav.ts`; Settings and
-  Vendors are the two screens outside it) — shows
+  the two tenant-wide registers, Vendors and Cost Centres, are the only screens outside it) — shows
   `screens/periods/PeriodChooser.tsx` until a period is entered. Once one is, a strip at the top
   of the main column (`components/PeriodBanner.tsx`) always shows WORKING IN, the label, dates,
   the state chip and "Plan editable / read-only"; leaving takes its explicit **SWITCH PERIOD**.
@@ -311,8 +330,8 @@ silently.
   button labels are unchanged — tests pin them.
 - **Budget codes belong to the period** (they used to be tenant-wide; the owner reversed that).
   Budget Codes is scoped like the dashboard, shows the entered period's chart, and is read-only
-  outside Draft/Open. RETIRE and DELETE are both two-click. Only Settings and Vendors render with
-  or without an entered period; there the banner says "This screen isn't tied to a period." or
+  outside Draft/Open. RETIRE and DELETE are both two-click. Only Settings, Vendors and Cost Centres render
+  with or without an entered period; there the banner says "This screen isn't tied to a period." or
   offers CHOOSE A PERIOD.
 
 ## Data: periods, codes and budget items are real; actuals and variance are still mock
@@ -551,6 +570,46 @@ future report agrees with the screen by construction. The signed formatters
 (`formatDeltaCad` / `formatDeltaPct`) live in `lib/money.ts`, **not** in `lib/data.ts`, so a
 screen on real data (the dashboard's Net tile) never imports the mock module.
 
+## Cost centres: a tenant-wide register
+
+A cost centre is an organisational unit or base (owner decision — never a vehicle). The register
+is **tenant-wide, not per period** — the opposite of budget codes — so it is its own rail item,
+**Cost Centres** (`CC`, id `costCentres`, PLANNING group), **not** a tab on Budget Codes and
+**not** in `PERIOD_SCOPED`: Budget Codes is one period's chart and remounts on every switch, and
+an edit under a period banner would read as "this period only". It renders with or without an
+entered period, like Settings.
+
+| Route | |
+|---|---|
+| `GET /api/budgeting/cost-centres?includeInactive=` | ordered by code; the app always sends the flag and always asks for `true` (the parent and children rules need retired entries) |
+| `GET /api/budgeting/cost-centres/{id}` | 404 `NotFound` |
+| `POST /api/budgeting/cost-centres` | `{ code, name, description, ownerUserId, parentId }` → 201 `{ id }` |
+| `PUT /api/budgeting/cost-centres/{id}` | same body **without `code`** (immutable; a different code is 400 `CodeImmutable`) → 204 |
+| `POST /api/budgeting/cost-centres/{id}/activate\|deactivate` | 204; deactivate is 409 `HasActiveChildren` for a parent with active children (never cascaded) |
+| `DELETE /api/budgeting/cost-centres/{id}` | 204; 409 `HasChildren`, then 409 `InUse` (any budget code in any period carries it) — the screen then offers RETIRE INSTEAD |
+| `GET /api/budgeting/periods/{id}/rollups/cost-centres` | the period's **planned** expense per cost centre + `noCostCentre` + `totalPlannedExpenseCad` (= the period's planned-expense tile). No actual field — the panel shows no actual column |
+
+- **The code is trimmed only — case preserved — and every match is ordinal.** Never route a
+  cost-centre string through `normalizeBudgetCode` (which upper-cases). `lib/costCentres.ts`
+  mirrors `CostCentre.NormalizeCode`, `CostCentre.Create`/`Validate` + the update handler's order
+  (`costCentreError`), `CostCentreParentRule` (`parentCandidates`: active top-level only, the
+  current parent kept even if retired since, nothing for an entry that has children), and
+  `BudgetCodeCostCentreRule` (`budgetCodeCostCentreError`); messages verbatim in
+  `COST_CENTRE_MESSAGES` / `BUDGET_CODE_COST_CENTRE_MESSAGES`.
+- **The budget-code form's cost centre is a picker of ACTIVE entries** (still absent for Revenue).
+  A code whose current value is retired or not in the register keeps it, selectable and marked
+  with a chip — the server accepts an **unchanged** value unconditionally (`costCentreOptions`).
+  "+ New cost centre…" opens `CostCentreFormModal` as a sibling overlay (not a child — the
+  shell's `backdrop-filter` would trap a nested fixed overlay) and selects what it creates.
+- **The dashboard's "Expense by cost centre" panel** (`screens/periods/CostCentreBreakdown.tsx`)
+  sits beside "Expense by priority". It is the server's rollup, refetched whenever the items list
+  lands (retried until its total agrees with the loaded expense items); children nest under a
+  parent present in the rollup (`groupRollup`), "No cost centre" is always listed, and the total
+  shown is the server's `totalPlannedExpenseCad`.
+- Writes refetch with `refetchUntil` (`costCentreReflects` after a save; `isActive` / absence
+  after retire, restore, delete). The register writes take **no period hold** — they belong to no
+  period.
+
 ## Accessibility
 
 Status is **never** carried by colour alone — the platform rule, and the reason `StatusMeta`
@@ -581,6 +640,7 @@ Known hazards documented in `theme.ts`: `colors.amber` is a fill/border/icon col
 | 2026-09-29 | Code audit after budget items | **Pass** — no new `statusMeta` call and no new protected hex; the priority chip is a `StatusChip` with a per-priority glyph (M / S / N) + written label, because Must and Should share the `info` colour; the modal's segmented choices use `aria-pressed` plus a ✓ and bold on the selected option |
 | 2026-09-29 | Code audit after per-period codes | **Pass** — no new `statusMeta` call and no new protected hex; the "Applies to every period" chip is gone; the Copy codes outcome is a `StatusChip` (Copied / Nothing copied) beside the written summary, as on the items copy |
 | 2026-10-08 | Code audit after the vendor register | **Pass** — no new `statusMeta` call and no new protected hex; Active/Retired is a `StatusChip` (glyph + label) on every row and in the detail pane; the duplicate-name note carries a "Name taken" `StatusChip` beside the written message |
+| 2026-10-08 | Code audit after the cost-centre register | **Pass** — no new `statusMeta` call and no new protected hex; status on the register rows/detail, the code form's kept value and the rollup's retired/unregistered rows is always a `StatusChip` (glyph + written label) |
 | — | Grayscale (DevTools → Rendering → Achromatopsia) | **Not yet run** |
 | — | Deuteranopia / Protanopia / Tritanopia | **Not yet run** |
 | — | Side-by-side against Dispatcher at equal width | **Not yet run** |
