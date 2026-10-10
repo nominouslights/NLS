@@ -35,8 +35,20 @@ internal sealed class InMemoryBudgetCodeRepository : IBudgetCodeRepository
 
     // A copy of the list, like the real repository's ToListAsync: the copy handler adds to the
     // repository while it works through the chart it read.
-    public Task<IReadOnlyList<BudgetCode>> ListForPeriodAsync(Guid periodId, CancellationToken cancellationToken = default) =>
-        Task.FromResult<IReadOnlyList<BudgetCode>>(Visible.Where(c => c.PeriodId == periodId).ToList());
+    public Task<IReadOnlyList<BudgetCode>> ListForPeriodAsync(Guid periodId, CancellationToken cancellationToken = default)
+    {
+        Calls.Add("ListForPeriod");
+        return Task.FromResult<IReadOnlyList<BudgetCode>>(Visible.Where(c => c.PeriodId == periodId).ToList());
+    }
+
+    /// <summary>The order the cost-centre probe and the chart reads ran in, for lock-ordering tests.</summary>
+    public List<string> Calls { get; } = [];
+
+    public Task<bool> AnyWithCostCentreInPeriodAsync(Guid periodId, CancellationToken cancellationToken = default)
+    {
+        Calls.Add("AnyWithCostCentreInPeriod");
+        return Task.FromResult(Visible.Any(c => c.PeriodId == periodId && c.CostCentre is not null));
+    }
 
     // Every period, ordinal — matching the real repository's cross-period cost-centre probe.
     public Task<bool> AnyWithCostCentreAsync(string costCentreCode, CancellationToken cancellationToken = default) =>

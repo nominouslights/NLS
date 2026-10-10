@@ -46,6 +46,14 @@ public interface IBudgetCodeRepository
     /// </summary>
     Task<bool> AnyWithCostCentreAsync(string costCentreCode, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Whether any of the period's codes, retired or not, carries a cost centre. An existence
+    /// query that materializes no entity, so it leaves nothing tracked: the code-chart copy asks
+    /// it before deciding whether to take the register lock, and its tracked read of the chart
+    /// then still happens after that lock.
+    /// </summary>
+    Task<bool> AnyWithCostCentreInPeriodAsync(Guid periodId, CancellationToken cancellationToken = default);
+
     void Add(BudgetCode budgetCode);
 
     /// <summary>

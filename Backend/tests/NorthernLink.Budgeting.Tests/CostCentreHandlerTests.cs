@@ -563,6 +563,16 @@ public class CostCentreHandlerTests
     }
 
     [Fact]
+    public async Task Update_reports_validation_without_taking_the_lock()
+    {
+        var costCentre = Add("THOMPSON");
+
+        Assert.Equal(CostCentreErrors.NameRequired, (await UpdateAsync(costCentre.Id, Details(name: ""))).Error);
+        Assert.Empty(_repository.Locks);
+        Assert.Equal("THOMPSON unit", costCentre.Name);
+    }
+
+    [Fact]
     public async Task A_child_added_while_the_update_waited_on_the_lock_stops_it_taking_a_parent()
     {
         var parent = Add("NORTH");
