@@ -185,4 +185,61 @@ public class BudgetCodeCostCentreRuleTests
         Assert.True((await UpdateAsync(code.Id, Expense(null))).IsSuccess);
         Assert.Null(code.CostCentre);
     }
+
+    // --- The (tenant, code) lock shared with the cost-centre delete ------------------------------
+
+    [Fact]
+    public async Task Create_checks_the_register_under_the_code_lock_and_commits_it_after_the_save()
+    {
+        _costCentres.Add(TestBudgeting.CreateCostCentre("THOMPSON"));
+        var savesWhenLocked = -1;
+        _costCentres.OnLockAcquired = _ => savesWhenLocked = _codes.SaveChangesCallCount;
+
+        var result = await CreateAsync(Expense("  THOMPSON "));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal((TestBudgeting.TenantId, "THOMPSON"), Assert.Single(_costCentres.Locks));
+        Assert.Equal(0, savesWhenLocked);
+        Assert.Equal(["THOMPSON"], _costCentres.CommittedLocks);
+    }
+
+    [Fact]
+    public async Task A_delete_that_won_the_lock_first_is_seen_by_the_create_as_not_found()
+    {
+        // The cost-centre delete committed while this request waited on the lock: the register
+        // lookup runs after acquisition, so it sees the entry gone rather than a stale "exists".
+        var entry = TestBudgeting.CreateCostCentre("THOMPSON");
+        _costCentres.Add(entry);
+        _costCentres.OnLockAcquired = _ => _costCentres.CostCentres.Remove(entry);
+
+        var result = await CreateAsync(Expense("THOMPSON"));
+
+        Assert.Equal(BudgetCodeErrors.CostCentreNotFound, result.Error);
+        Assert.Empty(_codes.Codes);
+        Assert.Empty(_costCentres.CommittedLocks);
+    }
+
+    [Fact]
+    public async Task Update_locks_a_changed_cost_centre_only()
+    {
+        _costCentres.Add(TestBudgeting.CreateCostCentre("THOMPSON"));
+        _costCentres.Add(TestBudgeting.CreateCostCentre("CHURCHILL"));
+        var code = AddCode("THOMPSON");
+
+        Assert.True((await UpdateAsync(code.Id, Expense("THOMPSON"))).IsSuccess);
+        Assert.Empty(_costCentres.Locks);
+
+        Assert.True((await UpdateAsync(code.Id, Expense("CHURCHILL"))).IsSuccess);
+        Assert.Equal((TestBudgeting.TenantId, "CHURCHILL"), Assert.Single(_costCentres.Locks));
+        Assert.Equal(["CHURCHILL"], _costCentres.CommittedLocks);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("   ")]
+    public async Task No_cost_centre_takes_no_lock(string? costCentre)
+    {
+        Assert.True((await CreateAsync(Expense(costCentre))).IsSuccess);
+        Assert.Empty(_costCentres.Locks);
+    }
 }

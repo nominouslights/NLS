@@ -9,12 +9,21 @@ namespace NorthernLink.Budgeting.Application.CostCentres.SetActive;
 /// Handles <see cref="SetCostCentreActiveCommand"/>. Asking for the state the entry is already in
 /// is a success that changes nothing.
 /// <para>
-/// <b>Retiring a parent that still has active children is refused</b>
-/// (<see cref="CostCentreErrors.HasActiveChildren"/>, 409) rather than cascaded: silently
-/// retiring a branch would hide units a planner never touched, and leaving active children under
-/// a retired parent would make the rollup's hierarchy lie. Restoring a child under a retired
-/// parent is allowed — restoring is never the harmful direction, and the parent can be restored
-/// too.
+/// <b>No active child under a retired parent, guarded from both directions</b>, so the rollup's
+/// hierarchy never shows a live unit hanging off a dead one:
+/// <list type="bullet">
+/// <item><b>Retiring a parent that still has active children is refused</b>
+/// (<see cref="CostCentreErrors.HasActiveChildren"/>, 409) rather than cascaded: silently retiring
+/// a branch would hide units a planner never touched.</item>
+/// <item><b>Restoring a child whose parent is retired is refused</b>
+/// (<see cref="CostCentreErrors.ParentRetired"/>, 409, the same error and fix as choosing a
+/// retired parent: restore the parent first, or move the child). A parent id that resolves to
+/// nothing does not block the restore. Delete refuses to orphan children, so that state only
+/// comes from a hand-written row, and refusing would leave the child unrestorable.</item>
+/// </list>
+/// Because both directions hold, an <em>active</em> child never has a retired parent. The parent
+/// rule's "keep an existing retired parent" leniency on edit
+/// (<see cref="CostCentreParentRule"/>) therefore only ever applies to a retired child.
 /// </para>
 /// </summary>
 public sealed class SetCostCentreActiveCommandHandler(ICostCentreRepository repository)
@@ -28,11 +37,22 @@ public sealed class SetCostCentreActiveCommandHandler(ICostCentreRepository repo
             return Result.Failure(CostCentreErrors.NotFound);
         }
 
+        if (command.IsActive == costCentre.IsActive)
+        {
+            return Result.Success();
+        }
+
         if (!command.IsActive
-            && costCentre.IsActive
             && await repository.HasActiveChildrenAsync(costCentre.Id, cancellationToken))
         {
             return Result.Failure(CostCentreErrors.HasActiveChildren);
+        }
+
+        if (command.IsActive
+            && costCentre.ParentId is { } parentId
+            && await repository.GetByIdAsync(parentId, cancellationToken) is { IsActive: false })
+        {
+            return Result.Failure(CostCentreErrors.ParentRetired);
         }
 
         var result = costCentre.SetActive(command.IsActive, command.ActorId);

@@ -7,18 +7,20 @@ import { ActionButton } from "@/components/ui/Button";
 import { DetailRow, Panel, SectionLabel } from "@/components/ui/Panel";
 import { ApiError } from "@/lib/api/transport";
 import {
+  createCostCentre,
   deleteCostCentre,
   listBudgetOwnerCandidates,
   listCostCentres,
   refetchUntil,
   setCostCentreActive,
+  updateCostCentre,
   userDisplay,
   type BudgetOwnerOption,
   type CostCentreRecord,
 } from "@/lib/api/budgeting";
 import { costCentreStatus, hasChildren } from "@/lib/costCentres";
 import { ErrorNotice } from "@/components/ErrorNotice";
-import CostCentreFormModal from "@/components/CostCentreFormModal";
+import CostCentreFormModal, { type CostCentreApi } from "@/components/CostCentreFormModal";
 import { EmptyNote, Screen } from "@/components/screens/shared";
 
 // The cost-centre register — a screen of its own, NOT a tab on Budget Codes, and NOT
@@ -39,11 +41,38 @@ import { EmptyNote, Screen } from "@/components/screens/shared";
 
 type PendingConfirm = { kind: "retire" | "delete"; id: string } | null;
 
-export default function CostCentres() {
+/** Every request this screen and its modal make. A prop so the component test can inject vi.fn()s. */
+export interface CostCentresApi extends CostCentreApi {
+  setActive: typeof setCostCentreActive;
+  remove: typeof deleteCostCentre;
+  users: typeof listBudgetOwnerCandidates;
+}
+
+const DEFAULT_API: CostCentresApi = {
+  create: createCostCentre,
+  update: updateCostCentre,
+  list: listCostCentres,
+  setActive: setCostCentreActive,
+  remove: deleteCostCentre,
+  users: listBudgetOwnerCandidates,
+};
+
+type ScreenError = {
+  message: string;
+  code: string;
+  /**
+   * For an action's refusal, the entry it was about. The InUse banner's RETIRE INSTEAD acts on
+   * THIS entry only, and a selection change clears the error — so it can never land on another.
+   * Absent for a load failure, which survives a selection change and offers RETRY.
+   */
+  entryId?: string;
+};
+
+export default function CostCentres({ api = DEFAULT_API }: { api?: CostCentresApi }) {
   // null = still loading.
   const [register, setRegister] = useState<CostCentreRecord[] | null>(null);
   const [owners, setOwners] = useState<BudgetOwnerOption[]>([]);
-  const [error, setError] = useState<{ message: string; code: string } | null>(null);
+  const [error, setError] = useState<ScreenError | null>(null);
   const [selId, setSelId] = useState<string | null>(null);
   const [showRetired, setShowRetired] = useState(false);
   const [form, setForm] = useState<{ entry: CostCentreRecord | null } | null>(null);
@@ -65,12 +94,12 @@ export default function CostCentres() {
   }, []);
 
   const load = useCallback(() => {
-    listCostCentres({ includeInactive: true }).then(applyLoaded, applyError);
-  }, [applyLoaded, applyError]);
+    api.list({ includeInactive: true }).then(applyLoaded, applyError);
+  }, [api, applyLoaded, applyError]);
 
   useEffect(() => {
     let active = true;
-    listCostCentres({ includeInactive: true }).then(
+    api.list({ includeInactive: true }).then(
       (records) => {
         if (active) applyLoaded(records);
       },
@@ -79,7 +108,7 @@ export default function CostCentres() {
       },
     );
     // The owner picker's options. A failure only narrows the picker to "Unassigned".
-    listBudgetOwnerCandidates().then(
+    api.users().then(
       (rows) => {
         if (active) setOwners(rows);
       },
@@ -88,7 +117,7 @@ export default function CostCentres() {
     return () => {
       active = false;
     };
-  }, [applyLoaded, applyError]);
+  }, [api, applyLoaded, applyError]);
 
   const all = register ?? [];
   const list = showRetired ? all : all.filter((c) => c.isActive);
@@ -98,21 +127,44 @@ export default function CostCentres() {
   const confirmingRetire = selected !== null && confirm?.kind === "retire" && confirm.id === selected.id;
   const confirmingDelete = selected !== null && confirm?.kind === "delete" && confirm.id === selected.id;
 
+  // An InUse refusal offers RETIRE INSTEAD only while the entry it was about is the one shown.
+  const inUseTarget =
+    error?.code === "Budgeting.CostCentre.InUse" &&
+    selected !== null &&
+    error.entryId === selected.id &&
+    selected.isActive
+      ? selected
+      : null;
+
   function select(id: string) {
     setSelId(id);
     setConfirm(null); // a pending confirm never survives a selection change
+    // Nor does an action's refusal: it was about the entry that was selected.
+    setError((prev) => (prev?.entryId !== undefined ? null : prev));
   }
 
-  async function run(action: () => Promise<unknown>, settled: (rows: CostCentreRecord[]) => boolean) {
+  async function run(
+    target: CostCentreRecord,
+    action: () => Promise<unknown>,
+    settled: (rows: CostCentreRecord[]) => boolean,
+    onAccepted?: () => void,
+  ) {
     if (busy) return;
     setBusy(true);
     setError(null);
     try {
       await action();
-      applyLoaded(await refetchUntil(() => listCostCentres({ includeInactive: true }), settled));
+      // Only once the server has accepted the write — a refused one must leave the screen as it was.
+      onAccepted?.();
+      applyLoaded(await refetchUntil(() => api.list({ includeInactive: true }), settled));
     } catch (e) {
-      // Keep the list; show the server's refusal verbatim.
-      applyError(e);
+      // Keep the list; show the server's refusal verbatim, bound to the entry it was about.
+      setRegister((prev) => prev ?? []);
+      setError(
+        e instanceof ApiError
+          ? { message: e.message, code: e.code, entryId: target.id }
+          : { message: `Failed to update ${target.code} — please try again.`, code: "Unknown", entryId: target.id },
+      );
     } finally {
       setBusy(false);
     }
@@ -126,11 +178,13 @@ export default function CostCentres() {
     setConfirm(null);
     const next = !target.isActive;
     // A retired entry would vanish from a list that hides retired ones — show them, so the
-    // planner sees the result of the click.
-    if (!next) setShowRetired(true);
+    // planner sees the result of the click. Only after the server accepts: a refused retire
+    // (409 HasActiveChildren) leaves the entry active and the toggle where the planner put it.
     await run(
-      () => setCostCentreActive(target.id, next),
+      target,
+      () => api.setActive(target.id, next),
       (rows) => rows.some((r) => r.id === target.id && r.isActive === next),
+      next ? undefined : () => setShowRetired(true),
     );
   }
 
@@ -141,7 +195,8 @@ export default function CostCentres() {
     }
     setConfirm(null);
     await run(
-      () => deleteCostCentre(target.id),
+      target,
+      () => api.remove(target.id),
       (rows) => !rows.some((r) => r.id === target.id),
     );
   }
@@ -184,8 +239,8 @@ export default function CostCentres() {
         <div style={{ marginBottom: 12 }}>
           <ErrorNotice title="Cost centres" message={error.message} code={error.code} />
           <div style={{ marginTop: 9, display: "flex", gap: 10 }}>
-            {error.code === "Budgeting.CostCentre.InUse" && selected?.isActive ? (
-              <ActionButton variant="amber" onClick={() => void toggleActive(selected)} disabled={busy}>
+            {inUseTarget ? (
+              <ActionButton variant="amber" onClick={() => void toggleActive(inUseTarget)} disabled={busy}>
                 {confirmingRetire ? "CONFIRM RETIRE" : "RETIRE INSTEAD"}
               </ActionButton>
             ) : (
@@ -373,6 +428,7 @@ export default function CostCentres() {
           owners={owners}
           onClose={() => setForm(null)}
           onSaved={handleSaved}
+          api={api}
         />
       )}
     </Screen>

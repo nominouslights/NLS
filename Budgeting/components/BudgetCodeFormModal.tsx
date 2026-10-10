@@ -27,7 +27,11 @@ import {
   type BudgetOwnerOption,
   type CostCentreRecord,
 } from "@/lib/api/budgeting";
-import { costCentreOptions, normalizeCostCentreCode } from "@/lib/costCentres";
+import {
+  budgetCodeCostCentreError,
+  costCentreOptions,
+  normalizeCostCentreCode,
+} from "@/lib/costCentres";
 import CostCentreFormModal, { type CostCentreApi } from "@/components/CostCentreFormModal";
 import { StatusChip } from "@/components/ui/Chip";
 import { ModalShell } from "@/components/ui/ModalShell";
@@ -153,8 +157,14 @@ export default function BudgetCodeFormModal({
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  /** Local copy, so an entry created inline is offered at once. */
-  const [register, setRegister] = useState<CostCentreRecord[] | null>(costCentres);
+  /**
+   * The register as of an inline create here — kept so the new entry is offered at once, even
+   * before the caller's copy (fed back via onCostCentresChanged) arrives as the prop.
+   */
+  const [createdHere, setCreatedHere] = useState<CostCentreRecord[] | null>(null);
+  // Derived, never copied once at mount: the caller's listCostCentres runs in parallel with the
+  // modal opening and may resolve AFTER it, and the picker must follow when it does.
+  const register = mergeRegister(costCentres, createdHere);
   const [creatingCostCentre, setCreatingCostCentre] = useState(false);
   usePeriodHold(busy);
   /** Inert while saving, so a result can never land on a modal that is gone. */
@@ -192,7 +202,7 @@ export default function BudgetCodeFormModal({
   }
 
   function handleCostCentreCreated(records: CostCentreRecord[], id: string) {
-    setRegister(records);
+    setCreatedHere(records);
     onCostCentresChanged?.(records);
     const created = records.find((r) => r.id === id);
     if (created) setCostCentre(created.code);
@@ -210,6 +220,16 @@ export default function BudgetCodeFormModal({
     // The server re-checks all of it and its answer is the one that counts.
     if (!editing && codeError) return setError(codeError);
     if (!name.trim()) return setError("Enter a name for the code.");
+    // BudgetCodeCostCentreRule, caught before the round trip — only when the register loaded
+    // (without it there is nothing to check against, and the server decides).
+    if (costCentreApplies(category) && register !== null) {
+      const ccError = budgetCodeCostCentreError(
+        costCentre,
+        normalizeCostCentreCode(code?.costCentre) || null,
+        register,
+      );
+      if (ccError) return setError(ccError);
+    }
 
     setBusy(true);
     setError(null);
@@ -462,6 +482,23 @@ export default function BudgetCodeFormModal({
     )}
     </>
   );
+}
+
+/**
+ * The caller's register plus any entry an inline create added that the caller's copy does not
+ * have yet (matched by id; the caller's copy wins otherwise), in register (code, ordinal) order.
+ * null only when neither has loaded.
+ */
+function mergeRegister(
+  fromProp: CostCentreRecord[] | null,
+  createdHere: CostCentreRecord[] | null,
+): CostCentreRecord[] | null {
+  if (createdHere === null) return fromProp;
+  if (fromProp === null) return createdHere;
+  const known = new Set(fromProp.map((c) => c.id));
+  const extra = createdHere.filter((c) => !known.has(c.id));
+  if (extra.length === 0) return fromProp;
+  return [...fromProp, ...extra].sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
 }
 
 /** The modal's two-column row, matching BudgetPeriodFormModal's grid. */

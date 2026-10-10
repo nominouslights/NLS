@@ -22,6 +22,12 @@ namespace NorthernLink.Budgeting.Application.Codes;
 /// <see cref="BudgetCode.CostCentreMaxLength"/> characters. Checking the register first would
 /// report "not in the register" for what is really a category or length mistake.
 /// </para>
+/// <para>
+/// <b>Callers lock first.</b> A register lookup that passes can still be followed by a
+/// cost-centre delete before the budget code commits. Callers therefore take
+/// <see cref="LockIfCheckedAsync"/> before <see cref="ValidateAsync"/> and commit it after their
+/// save. The delete handler probes usage under the same lock.
+/// </para>
 /// </summary>
 public static class BudgetCodeCostCentreRule
 {
@@ -34,15 +40,7 @@ public static class BudgetCodeCostCentreRule
         string? currentCostCentre,
         CancellationToken cancellationToken)
     {
-        var requested = CostCentre.NormalizeCode(details.CostCentre);
-        if (requested.Length == 0
-            || requested.Length > BudgetCode.CostCentreMaxLength
-            || details.Category == BudgetCodeCategory.Revenue)
-        {
-            return Result.Success();
-        }
-
-        if (currentCostCentre is not null && string.Equals(requested, currentCostCentre, StringComparison.Ordinal))
+        if (RegisterCheckFor(details, currentCostCentre) is not { } requested)
         {
             return Result.Success();
         }
@@ -56,5 +54,40 @@ public static class BudgetCodeCostCentreRule
         return entry.IsActive
             ? Result.Success()
             : Result.Failure(BudgetCodeErrors.CostCentreRetired);
+    }
+
+    /// <summary>
+    /// Takes the register's (tenant, code) lock (<see cref="ICostCentreRepository.LockCodeAsync"/>)
+    /// when, and only when, <see cref="ValidateAsync"/> would look the code up. The caller holds
+    /// the returned scope across <see cref="ValidateAsync"/> and its save, then commits it. That
+    /// stops a concurrent cost-centre delete from passing its usage probe between this register
+    /// lookup and the commit that starts carrying the string. Returns null when there is nothing
+    /// to lock: a blank or unchanged value, or one the aggregate will refuse anyway. An unchanged
+    /// value is already committed on this code, so the delete's probe sees it without a lock.
+    /// </summary>
+    public static async Task<ICostCentreCodeLock?> LockIfCheckedAsync(
+        ICostCentreRepository costCentres,
+        Guid tenantId,
+        BudgetCodeDetails details,
+        string? currentCostCentre,
+        CancellationToken cancellationToken) =>
+        RegisterCheckFor(details, currentCostCentre) is { } requested
+            ? await costCentres.LockCodeAsync(tenantId, requested, cancellationToken)
+            : null;
+
+    /// <summary>The normalized code <see cref="ValidateAsync"/> must look up, or null when it skips the register.</summary>
+    private static string? RegisterCheckFor(BudgetCodeDetails details, string? currentCostCentre)
+    {
+        var requested = CostCentre.NormalizeCode(details.CostCentre);
+        if (requested.Length == 0
+            || requested.Length > BudgetCode.CostCentreMaxLength
+            || details.Category == BudgetCodeCategory.Revenue)
+        {
+            return null;
+        }
+
+        return currentCostCentre is not null && string.Equals(requested, currentCostCentre, StringComparison.Ordinal)
+            ? null
+            : requested;
     }
 }

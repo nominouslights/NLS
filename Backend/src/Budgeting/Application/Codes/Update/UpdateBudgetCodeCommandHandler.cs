@@ -53,6 +53,11 @@ public sealed class UpdateBudgetCodeCommandHandler(
 
         // The code's stored value is passed so an unchanged cost centre is accepted even if it has
         // since been retired in the register — retiring an entry must not freeze existing codes.
+        // A changed value is checked under the register's (tenant, code) lock, held through the
+        // commit, so a concurrent cost-centre delete cannot slip between the lookup and the save.
+        await using var costCentreLock = await BudgetCodeCostCentreRule.LockIfCheckedAsync(
+            costCentres, command.TenantId, command.Details, budgetCode.CostCentre, cancellationToken);
+
         var costCentreResult = await BudgetCodeCostCentreRule.ValidateAsync(
             costCentres, command.Details, budgetCode.CostCentre, cancellationToken);
         if (costCentreResult.IsFailure)
@@ -67,6 +72,11 @@ public sealed class UpdateBudgetCodeCommandHandler(
         }
 
         await repository.SaveChangesAsync(cancellationToken);
+        if (costCentreLock is not null)
+        {
+            await costCentreLock.CommitAsync(cancellationToken);
+        }
+
         return Result.Success();
     }
 }

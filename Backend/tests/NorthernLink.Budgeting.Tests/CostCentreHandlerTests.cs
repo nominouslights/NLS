@@ -100,6 +100,22 @@ public class CostCentreHandlerTests
     }
 
     [Fact]
+    public async Task A_lost_duplicate_code_race_is_the_same_409_not_a_500()
+    {
+        // Both requests passed the read-first check; the unique (tenant_id, code) index rejected
+        // this one at commit.
+        _repository.UniqueCodeViolationOnNextSave = true;
+        _repository.RaceWinner = TestBudgeting.CreateCostCentre("THOMPSON", "Thompson (the winner)");
+
+        var result = await CreateAsync("THOMPSON");
+
+        Assert.Equal(CostCentreErrors.DuplicateCode, result.Error);
+        Assert.Equal(ErrorType.Conflict, result.Error.Type);
+        Assert.Equal(_repository.RaceWinner.Id, Assert.Single(_repository.CostCentres).Id);
+        Assert.Equal(1, _repository.SaveChangesCallCount);
+    }
+
+    [Fact]
     public async Task Codes_differing_only_in_case_are_distinct_entries()
     {
         // Ordinal, matching how budget codes have always stored the string — see CostCentre.
@@ -269,14 +285,39 @@ public class CostCentreHandlerTests
     [Fact]
     public async Task Keeping_a_parent_that_has_since_been_retired_is_allowed()
     {
+        // Only a retired child can sit under a retired parent (the parent's retirement waits for
+        // its children, and a child cannot be restored under it), so that is the case this covers.
         var parent = Add("NORTH");
         var child = Add("THOMPSON", parentId: parent.Id);
-        parent.SetActive(false, null);
+        Assert.True((await SetActiveAsync(child.Id, false)).IsSuccess);
+        Assert.True((await SetActiveAsync(parent.Id, false)).IsSuccess);
 
         var result = await UpdateAsync(child.Id, Details(name: "Thompson yard", parentId: parent.Id));
 
         Assert.True(result.IsSuccess);
         Assert.Equal("Thompson yard", child.Name);
+    }
+
+    [Fact]
+    public async Task Update_reports_field_validation_before_the_parent_lookup()
+    {
+        var costCentre = Add("THOMPSON");
+
+        var result = await UpdateAsync(costCentre.Id, Details(name: " ", parentId: Guid.NewGuid()));
+
+        Assert.Equal(CostCentreErrors.NameRequired, result.Error);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+        Assert.Equal(0, _repository.SaveChangesCallCount);
+    }
+
+    [Fact]
+    public async Task Update_reports_field_validation_before_the_owner_lookup()
+    {
+        var costCentre = Add("THOMPSON");
+
+        var result = await UpdateAsync(costCentre.Id, Details(name: "", ownerUserId: Guid.NewGuid()));
+
+        Assert.Equal(CostCentreErrors.NameRequired, result.Error);
     }
 
     // --- Activate / deactivate ------------------------------------------------------------------
@@ -318,6 +359,57 @@ public class CostCentreHandlerTests
         Assert.Equal(CostCentreErrors.NotFound, (await SetActiveAsync(Guid.NewGuid(), false)).Error);
     }
 
+    [Fact]
+    public async Task Restoring_a_child_under_a_retired_parent_is_refused()
+    {
+        var parent = Add("NORTH", active: false);
+        var child = Add("THOMPSON", parentId: parent.Id, active: false);
+
+        var result = await SetActiveAsync(child.Id, true);
+
+        Assert.Equal(CostCentreErrors.ParentRetired, result.Error);
+        Assert.Equal(ErrorType.Conflict, result.Error.Type);
+        Assert.False(child.IsActive);
+        Assert.Equal(0, _repository.SaveChangesCallCount);
+    }
+
+    [Fact]
+    public async Task Restoring_a_child_under_an_active_parent_succeeds()
+    {
+        var parent = Add("NORTH");
+        var child = Add("THOMPSON", parentId: parent.Id, active: false);
+
+        var result = await SetActiveAsync(child.Id, true);
+
+        Assert.True(result.IsSuccess);
+        Assert.True(child.IsActive);
+        Assert.Equal(1, _repository.SaveChangesCallCount);
+    }
+
+    [Fact]
+    public async Task Restoring_the_parent_first_then_the_child_succeeds()
+    {
+        var parent = Add("NORTH", active: false);
+        var child = Add("THOMPSON", parentId: parent.Id, active: false);
+
+        Assert.True((await SetActiveAsync(parent.Id, true)).IsSuccess);
+        Assert.True((await SetActiveAsync(child.Id, true)).IsSuccess);
+        Assert.True(child.IsActive);
+    }
+
+    [Fact]
+    public async Task Retiring_a_child_under_a_retired_parent_is_still_allowed_and_a_no_op_restore_is_not_refused()
+    {
+        // Only the restore direction is guarded; asking for the state the entry is already in is
+        // a success even when its parent is retired.
+        var parent = Add("NORTH");
+        var child = Add("THOMPSON", parentId: parent.Id);
+        Assert.True((await SetActiveAsync(child.Id, false)).IsSuccess);
+        Assert.True((await SetActiveAsync(parent.Id, false)).IsSuccess);
+
+        Assert.True((await SetActiveAsync(child.Id, false)).IsSuccess);
+    }
+
     // --- Delete ---------------------------------------------------------------------------------
 
     [Fact]
@@ -349,6 +441,38 @@ public class CostCentreHandlerTests
         Assert.Equal(CostCentreErrors.InUse, result.Error);
         Assert.Single(_repository.CostCentres);
         Assert.Equal(0, _repository.SaveChangesCallCount);
+    }
+
+    [Fact]
+    public async Task The_usage_probe_and_delete_run_under_the_code_lock_and_commit_together()
+    {
+        var costCentre = Add("THOMPSON");
+        var removedWhenLocked = true;
+        _repository.OnLockAcquired = _ => removedWhenLocked = !_repository.CostCentres.Contains(costCentre);
+
+        Assert.True((await DeleteAsync(costCentre.Id)).IsSuccess);
+
+        Assert.Equal((TestBudgeting.TenantId, "THOMPSON"), Assert.Single(_repository.Locks));
+        Assert.False(removedWhenLocked);
+        Assert.Equal(["THOMPSON"], _repository.CommittedLocks);
+    }
+
+    [Fact]
+    public async Task A_budget_code_that_won_the_lock_first_makes_the_delete_in_use()
+    {
+        // The delete-vs-use race: a budget code started carrying the string and committed while
+        // this delete waited on the lock. The probe runs after acquisition, so it sees that code.
+        var costCentre = Add("THOMPSON");
+        _repository.OnLockAcquired = _ => _codes.Add(TestBudgeting.CreateCode(
+            "ZBB-FUEL-01",
+            TestBudgeting.CodeDetails(category: BudgetCodeCategory.Expense, costCentre: "THOMPSON")));
+
+        var result = await DeleteAsync(costCentre.Id);
+
+        Assert.Equal(CostCentreErrors.InUse, result.Error);
+        Assert.Single(_repository.CostCentres);
+        Assert.Equal(0, _repository.SaveChangesCallCount);
+        Assert.Empty(_repository.CommittedLocks);
     }
 
     [Fact]

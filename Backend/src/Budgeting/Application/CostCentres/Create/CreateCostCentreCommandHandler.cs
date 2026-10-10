@@ -10,7 +10,14 @@ namespace NorthernLink.Budgeting.Application.CostCentres.Create;
 /// Creates a cost centre after enforcing per-tenant uniqueness of the (trimmed, ordinal) code.
 /// The order is the budget-code create handler's: domain validation first, then the cross-row
 /// lookups (duplicate, parent, owner), so a malformed payload reports its validation error. The
-/// unique (tenant_id, code) index is the double-click backstop.
+/// unique (tenant_id, code) index is the double-click backstop, and losing that race is the same
+/// <see cref="CostCentreErrors.DuplicateCode"/> 409 as the pre-check
+/// (<see cref="ICostCentreRepository.TrySaveChangesAsync"/>), never a 500.
+/// <para>
+/// Unlike the vendor precedent there is no re-read of the winner after a lost race: the
+/// DuplicateCode message is fixed text that names nothing, and the winner holds the exact code
+/// the caller sent, so a re-read would only produce the same error.
+/// </para>
 /// </summary>
 public sealed class CreateCostCentreCommandHandler(
     ICostCentreRepository repository,
@@ -53,7 +60,14 @@ public sealed class CreateCostCentreCommandHandler(
         }
 
         repository.Add(costCentre);
-        await repository.SaveChangesAsync(cancellationToken);
+
+        // The duplicate check above is not atomic with the insert: a concurrent create of the
+        // same code can pass it too, and the unique index rejects the loser here — still a 409.
+        if (!await repository.TrySaveChangesAsync(cancellationToken))
+        {
+            return Result.Failure<Guid>(CostCentreErrors.DuplicateCode);
+        }
+
         return Result.Success(costCentre.Id);
     }
 }

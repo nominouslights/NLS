@@ -10,8 +10,11 @@ namespace NorthernLink.Budgeting.Application.CostCentres;
 /// a cost centre that already has children cannot take a parent).
 /// <para>
 /// <b>The parent must be active when it is chosen</b> — on create, and on an edit that changes
-/// the parent. An edit that keeps an existing parent which has since been retired is allowed:
-/// otherwise retiring a parent would freeze every child's name and owner.
+/// the parent. An edit that keeps an existing parent which has since been retired is allowed.
+/// That case only arises for a <em>retired</em> child. A parent cannot be retired while it has
+/// active children, and a child cannot be restored under a retired parent (both in
+/// <c>SetCostCentreActiveCommandHandler</c>), so an active child never has a retired parent.
+/// Without the leniency, retiring a branch would freeze every retired child's name and owner.
 /// </para>
 /// </summary>
 public static class CostCentreParentRule

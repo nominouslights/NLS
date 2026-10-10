@@ -3,7 +3,6 @@ import {
   sumCad,
   type CostCentreInput,
   type CostCentreRecord,
-  type CostCentreRollup,
   type CostCentreRollupRow,
 } from "@/lib/api/budgeting";
 
@@ -72,14 +71,6 @@ export const BUDGET_CODE_COST_CENTRE_MESSAGES = {
  */
 export function normalizeCostCentreCode(code: string | null | undefined): string {
   return code?.trim() ?? "";
-}
-
-/**
- * Whether two cost-centre strings name the same entry: normalized, then compared ORDINALLY —
- * the server's StringComparer.Ordinal / StringComparison.Ordinal. "ops-01" is not "OPS-01".
- */
-export function sameCostCentreCode(a: string | null | undefined, b: string | null | undefined): boolean {
-  return normalizeCostCentreCode(a) === normalizeCostCentreCode(b);
 }
 
 /** Mirrors CostCentre.Normalize for optional text: blank → null, anything else trimmed. */
@@ -261,13 +252,4 @@ export function groupRollup(rows: CostCentreRollupRow[]): RollupGroup[] {
       const children = rows.filter((r) => nested(r) && r.parentId === row.costCentreId);
       return { row, children, subtotalCad: sumCad([row.plannedCad, ...children.map((c) => c.plannedCad)]) };
     });
-}
-
-/**
- * Every row plus "No cost centre", summed in cents. The server guarantees this equals
- * totalPlannedExpenseCad (CostCentrePlannedRollup.Build computes the total exactly so); the panel
- * shows the server's figure, and the test pins that the two agree.
- */
-export function rollupSum(rollup: CostCentreRollup): number {
-  return sumCad([...rollup.costCentres.map((r) => r.plannedCad), rollup.noCostCentre.plannedCad]);
 }
