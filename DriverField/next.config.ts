@@ -38,6 +38,11 @@ const nextConfig: NextConfig = {
   // Next rejects an empty string here — omit the key entirely when unmounted.
   ...(basePath ? { basePath } : {}),
 
+  // basePath is server-side config; client code cannot see BASE_PATH. lib/legal.ts needs it to
+  // prefix the static policy page's href (a plain <a> to a public/ file gets no automatic
+  // basePath). Derived here so BASE_PATH stays the single build-time source.
+  env: { NEXT_PUBLIC_BASE_PATH: basePath },
+
   // The browser only ever talks to this app's own origin (:3004); Next proxies /api/* to the
   // API server-side. That is why there is no CORS configuration anywhere in the stack — keep
   // it that way rather than adding a CORS policy to the backend.

@@ -7,6 +7,7 @@ import { DetailRow, Panel, SectionLabel } from "@/components/ui/Panel";
 import { StatusChip, MonoTag } from "@/components/ui/Chip";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import ProfileForm from "@/components/ProfileForm";
+import LegalLinks from "@/components/LegalLinks";
 import { getClaims } from "@/lib/auth";
 import { updateMyProfile, type MyProfile } from "@/lib/api/identity";
 import { BUDGET_ROLES, hasBudgetAccess } from "@/lib/roles";
@@ -208,6 +209,17 @@ export default function Settings({
           </div>
         </Panel>
       )}
+
+      {/* Outside the tabs on purpose: the policies stay one click away whichever tab is open. */}
+      <div
+        style={{
+          marginTop: 18,
+          paddingTop: 10,
+          borderTop: `1px solid ${colors.border}`,
+        }}
+      >
+        <LegalLinks align="left" />
+      </div>
     </Screen>
   );
 }

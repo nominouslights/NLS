@@ -4,6 +4,7 @@ import '../data/mock_data.dart';
 import '../theme/nl_theme.dart';
 import '../widgets/nl_button.dart';
 import '../widgets/progress_bar.dart';
+import '../widgets/legal_links.dart';
 import '../widgets/section_card.dart';
 
 /// Screen 11 — Profile & Badges.
@@ -104,6 +105,9 @@ class ProfileScreen extends StatelessWidget {
           ),
           const SizedBox(height: 18),
           NLButton.gold(label: 'View All Badges', onPressed: () {}),
+          const SizedBox(height: 22),
+          const SectionLabel('Legal'),
+          const LegalLinksCard(),
         ],
       ),
     );

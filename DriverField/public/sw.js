@@ -10,8 +10,15 @@
 //      operational problem, and a cached 200 hides it completely.
 //   2. The shell is cache-first, everything else falls through to the network. A driver opening
 //      the app in a dead zone must get the UI, not a browser error page.
+//
+// The one non-shell page precached is ./legal/policies.html — the owner's Privacy Policy and
+// Licence Agreement, linked from sign-in and My Profile. It is a navigation, so it is
+// NETWORK-first (a policy revision shows up on the next online open, no VERSION bump needed)
+// and refreshes its cached copy on every successful fetch; offline, it serves that copy rather
+// than falling back to the app shell, so a driver can read what they agreed to in a dead zone.
 
-const VERSION = "v1";
+// v2: adds the policy page. A bump re-runs install, so existing tablets precache it too.
+const VERSION = "v2";
 const SHELL_CACHE = `nl-driver-shell-${VERSION}`;
 
 const SHELL_URLS = [
@@ -19,6 +26,7 @@ const SHELL_URLS = [
   "./icons/icon-192.png",
   "./icons/icon-512.png",
   "./icons/icon-maskable-512.png",
+  "./legal/policies.html",
 ];
 
 self.addEventListener("install", (event) => {
@@ -73,11 +81,24 @@ self.addEventListener("fetch", (event) => {
   }
 
   // Rule 2: a navigation offline renders the cached shell rather than the browser's error page.
+  // The policy page answers from its own cached copy first (caches.match ignores the
+  // #privacy / #eula fragment — it is never part of the request URL).
   if (request.mode === "navigate") {
+    const isPolicy = url.pathname.includes("/legal/");
     event.respondWith(
-      fetch(request).catch(() =>
-        caches.match("./").then((hit) => hit ?? Response.error()),
-      ),
+      fetch(request)
+        .then((res) => {
+          if (isPolicy && res.ok) {
+            const copy = res.clone();
+            caches.open(SHELL_CACHE).then((cache) => cache.put(request, copy));
+          }
+          return res;
+        })
+        .catch(() =>
+          (isPolicy ? caches.match(request, { ignoreVary: true }) : Promise.resolve(undefined))
+            .then((hit) => hit ?? caches.match("./"))
+            .then((hit) => hit ?? Response.error()),
+        ),
     );
   }
 });
