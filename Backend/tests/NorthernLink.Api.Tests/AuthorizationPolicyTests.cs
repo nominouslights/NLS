@@ -66,6 +66,7 @@ public class AuthorizationPolicyTests
     [InlineData(Roles.Supervisor)]
     [InlineData(Roles.Driver)]
     [InlineData(Roles.BoardMember)]
+    [InlineData(Roles.ComplianceOfficer)]
     public async Task BudgetAccess_denies_every_other_role(string role) =>
         Assert.False(await Allows(AuthorizationPolicies.BudgetAccess, role));
 
@@ -93,6 +94,7 @@ public class AuthorizationPolicyTests
     [InlineData(Roles.Accountant)]
     [InlineData(Roles.BoardMember)]
     [InlineData(Roles.Driver)]
+    [InlineData(Roles.ComplianceOfficer)]
     public async Task DispatchAccess_denies_every_other_role(string role) =>
         Assert.False(await Allows(AuthorizationPolicies.DispatchAccess, role));
 
@@ -125,8 +127,86 @@ public class AuthorizationPolicyTests
     [Theory]
     [InlineData(Roles.Accountant)]
     [InlineData(Roles.BoardMember)]
+    [InlineData(Roles.ComplianceOfficer)]
     public async Task DriverAccess_denies_the_back_office_roles(string role) =>
         Assert.False(await Allows(AuthorizationPolicies.DriverAccess, role));
+
+    /// <summary>
+    /// The hours-of-service override boundary: deferral approval, out-of-service, ELD malfunction
+    /// resolution. Owner may act as compliance officer (owner's decision, 2026-10-09); nobody
+    /// else may, so a Dispatcher can never approve the override that lets a driver past the gate.
+    /// </summary>
+    [Theory]
+    [InlineData(Roles.Owner)]
+    [InlineData(Roles.ComplianceOfficer)]
+    public async Task ComplianceAccess_admits_the_compliance_roles(string role) =>
+        Assert.True(await Allows(AuthorizationPolicies.ComplianceAccess, role));
+
+    [Theory]
+    [InlineData(Roles.Dispatcher)]
+    [InlineData(Roles.Supervisor)]
+    [InlineData(Roles.Accountant)]
+    [InlineData(Roles.BoardMember)]
+    [InlineData(Roles.Driver)]
+    public async Task ComplianceAccess_denies_every_other_role(string role) =>
+        Assert.False(await Allows(AuthorizationPolicies.ComplianceAccess, role));
+
+    /// <summary>HosAccess is DriverAccess widened with ComplianceOfficer — a new policy, not an edit to DriverAccess.</summary>
+    [Theory]
+    [InlineData(Roles.Owner)]
+    [InlineData(Roles.Dispatcher)]
+    [InlineData(Roles.Supervisor)]
+    [InlineData(Roles.ComplianceOfficer)]
+    [InlineData(Roles.Driver)]
+    public async Task HosAccess_admits_the_duty_status_roles(string role) =>
+        Assert.True(await Allows(AuthorizationPolicies.HosAccess, role));
+
+    [Theory]
+    [InlineData(Roles.Accountant)]
+    [InlineData(Roles.BoardMember)]
+    public async Task HosAccess_denies_the_back_office_roles(string role) =>
+        Assert.False(await Allows(AuthorizationPolicies.HosAccess, role));
+
+    /// <summary>DriverRosterAccess is DispatchAccess widened with ComplianceOfficer, for the roster's read routes only.</summary>
+    [Theory]
+    [InlineData(Roles.Owner)]
+    [InlineData(Roles.Dispatcher)]
+    [InlineData(Roles.Supervisor)]
+    [InlineData(Roles.ComplianceOfficer)]
+    public async Task DriverRosterAccess_admits_dispatch_and_compliance(string role) =>
+        Assert.True(await Allows(AuthorizationPolicies.DriverRosterAccess, role));
+
+    [Theory]
+    [InlineData(Roles.Accountant)]
+    [InlineData(Roles.BoardMember)]
+    [InlineData(Roles.Driver)]
+    public async Task DriverRosterAccess_denies_every_other_role(string role) =>
+        Assert.False(await Allows(AuthorizationPolicies.DriverRosterAccess, role));
+
+    [Theory]
+    [InlineData(AuthorizationPolicies.ComplianceAccess)]
+    [InlineData(AuthorizationPolicies.HosAccess)]
+    [InlineData(AuthorizationPolicies.DriverRosterAccess)]
+    public async Task Hours_of_service_policies_never_accept_the_legacy_Admin_literal(string policy) =>
+        Assert.False(await Allows(policy, Roles.LegacyAdmin));
+
+    /// <summary>
+    /// The containment the HOS group layout will depend on: HosAccess ⊇ DriverAccess and
+    /// DriverRosterAccess ⊇ DispatchAccess, while the original two lists are untouched. If
+    /// either superset relation breaks, re-read every call site attaching the wider policy.
+    /// </summary>
+    [Fact]
+    public void Hours_of_service_lists_widen_without_editing_the_originals()
+    {
+        Assert.Equal([Roles.Owner, Roles.Dispatcher, Roles.Supervisor], Roles.DispatchAccess);
+        Assert.Equal([Roles.Owner, Roles.Dispatcher, Roles.Supervisor, Roles.Driver], Roles.DriverAccess);
+        Assert.All(Roles.DriverAccess, role => Assert.Contains(role, Roles.HosAccess));
+        Assert.All(Roles.DispatchAccess, role => Assert.Contains(role, Roles.DriverRosterAccess));
+        Assert.All(Roles.HosRecordOverride, role => Assert.Contains(role, Roles.HosAccess));
+        Assert.DoesNotContain(Roles.Driver, Roles.HosRecordOverride);
+        Assert.DoesNotContain(Roles.Driver, Roles.DriverRosterAccess);
+        Assert.Equal([Roles.Owner, Roles.ComplianceOfficer], Roles.ComplianceAccess);
+    }
 
     [Fact]
     public async Task DriverAccess_never_accepts_the_legacy_Admin_literal()
@@ -167,6 +247,7 @@ public class AuthorizationPolicyTests
     [InlineData(Roles.Accountant)]
     [InlineData(Roles.Supervisor)]
     [InlineData(Roles.Driver)]
+    [InlineData(Roles.ComplianceOfficer)]
     public async Task AdminOnly_denies_non_owner_roles(string role) =>
         Assert.False(await Allows(AuthorizationPolicies.AdminOnly, role));
 
@@ -175,6 +256,9 @@ public class AuthorizationPolicyTests
     [InlineData(AuthorizationPolicies.BudgetAccess)]
     [InlineData(AuthorizationPolicies.DispatchAccess)]
     [InlineData(AuthorizationPolicies.DriverAccess)]
+    [InlineData(AuthorizationPolicies.ComplianceAccess)]
+    [InlineData(AuthorizationPolicies.HosAccess)]
+    [InlineData(AuthorizationPolicies.DriverRosterAccess)]
     public async Task Unauthenticated_principals_satisfy_nothing(string policy)
     {
         var anonymous = new ClaimsPrincipal(new ClaimsIdentity());
@@ -189,6 +273,9 @@ public class AuthorizationPolicyTests
     [InlineData(AuthorizationPolicies.BudgetAccess)]
     [InlineData(AuthorizationPolicies.DispatchAccess)]
     [InlineData(AuthorizationPolicies.DriverAccess)]
+    [InlineData(AuthorizationPolicies.ComplianceAccess)]
+    [InlineData(AuthorizationPolicies.HosAccess)]
+    [InlineData(AuthorizationPolicies.DriverRosterAccess)]
     public void Every_policy_name_constant_resolves_to_a_registered_policy(string policy)
     {
         // A name constant with no matching AddPolicy call throws only when a request first hits
