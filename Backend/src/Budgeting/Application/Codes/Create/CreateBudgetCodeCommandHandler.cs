@@ -70,7 +70,13 @@ public sealed class CreateBudgetCodeCommandHandler(
             return Result.Failure<Guid>(ownerResult.Error);
         }
 
-        // currentCostCentre: null — a new code has no existing value to be lenient about.
+        // currentCostCentre: null — a new code has no existing value to be lenient about. The
+        // tenant's register lock (null when there is nothing to check) is taken before the register
+        // lookup and held through the commit, so a concurrent cost-centre delete or retirement
+        // cannot slip between the two.
+        await using var costCentreLock = await BudgetCodeCostCentreRule.LockIfCheckedAsync(
+            costCentres, command.TenantId, command.Details, currentCostCentre: null, cancellationToken);
+
         var costCentreResult = await BudgetCodeCostCentreRule.ValidateAsync(
             costCentres, command.Details, currentCostCentre: null, cancellationToken);
         if (costCentreResult.IsFailure)
@@ -80,6 +86,11 @@ public sealed class CreateBudgetCodeCommandHandler(
 
         repository.Add(budgetCode);
         await repository.SaveChangesAsync(cancellationToken);
+        if (costCentreLock is not null)
+        {
+            await costCentreLock.CommitAsync(cancellationToken);
+        }
+
         return Result.Success(budgetCode.Id);
     }
 }

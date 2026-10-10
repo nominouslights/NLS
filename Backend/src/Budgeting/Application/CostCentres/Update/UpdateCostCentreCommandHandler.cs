@@ -8,10 +8,21 @@ namespace NorthernLink.Budgeting.Application.CostCentres.Update;
 
 /// <summary>
 /// Handles <see cref="UpdateCostCentreCommand"/>. The entry is looked up through the
-/// tenant-filtered repository (another tenant's id is NotFound), then the code-immutability
-/// guard, the parent rule (with <c>checkChildren: true</c> — a parent cannot take a parent) and
-/// the owner rule, and finally the aggregate's own validation. An edit that changes nothing
-/// raises no event.
+/// tenant-filtered repository (another tenant's id is NotFound). Then come the payload's own
+/// checks: the code-immutability guard and the aggregate's field validation
+/// (<see cref="CostCentre.Validate"/>). The cross-row lookups run last: the parent rule (with
+/// <c>checkChildren: true</c>, because a parent cannot take a parent) and then the owner rule.
+/// That is the create handler's order and the <c>Invalid_details_report_validation_not_conflict</c>
+/// rule: a malformed payload reports its validation error, never a not-found or conflict for a
+/// lookup it was never going to pass. An edit that changes nothing raises no event.
+/// <para>
+/// <b>Everything runs under the register lock</b> (<see cref="ICostCentreRepository.LockRegisterAsync"/>),
+/// taken before the entry itself is read and committed after the save. The parent check (exists,
+/// top-level, active when newly chosen) and the children check (an entry with children cannot take
+/// a parent) both read other rows that a concurrent create, edit, retirement or delete could change
+/// between the check and this commit. Under the lock, those writes either committed before this
+/// request read anything or wait until it commits.
+/// </para>
 /// </summary>
 public sealed class UpdateCostCentreCommandHandler(
     ICostCentreRepository repository,
@@ -20,6 +31,8 @@ public sealed class UpdateCostCentreCommandHandler(
 {
     public async Task<Result> Handle(UpdateCostCentreCommand command, CancellationToken cancellationToken)
     {
+        await using var registerLock = await repository.LockRegisterAsync(command.TenantId, cancellationToken);
+
         var costCentre = await repository.GetByIdAsync(command.CostCentreId, cancellationToken);
         if (costCentre is null)
         {
@@ -30,6 +43,12 @@ public sealed class UpdateCostCentreCommandHandler(
         if (requestedCode.Length > 0 && !string.Equals(requestedCode, costCentre.Code, StringComparison.Ordinal))
         {
             return Result.Failure(CostCentreErrors.CodeImmutable);
+        }
+
+        var validation = CostCentre.Validate(command.Details);
+        if (validation.IsFailure)
+        {
+            return validation;
         }
 
         var parentResult = await CostCentreParentRule.ValidateAsync(
@@ -58,6 +77,7 @@ public sealed class UpdateCostCentreCommandHandler(
         }
 
         await repository.SaveChangesAsync(cancellationToken);
+        await registerLock.CommitAsync(cancellationToken);
         return Result.Success();
     }
 }

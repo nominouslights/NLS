@@ -1819,11 +1819,6 @@ export function listCostCentres(options: { includeInactive: boolean }): Promise<
   );
 }
 
-/** GET cost-centres/{id} → 200, or 404 Budgeting.CostCentre.NotFound. The 201 Location target. */
-export function getCostCentre(id: string): Promise<CostCentreRecord> {
-  return request<CostCentreRecord>(`/api/budgeting/cost-centres/${id}`);
-}
-
 /**
  * POST cost-centres → 201 { id }. 400 CodeRequired / CodeTooLong / NameRequired / NameTooLong /
  * DescriptionTooLong / ParentIsNotTopLevel, 404 OwnerNotFound / ParentNotFound, 409 DuplicateCode /

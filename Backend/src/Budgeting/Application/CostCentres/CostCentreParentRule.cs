@@ -10,8 +10,18 @@ namespace NorthernLink.Budgeting.Application.CostCentres;
 /// a cost centre that already has children cannot take a parent).
 /// <para>
 /// <b>The parent must be active when it is chosen</b> — on create, and on an edit that changes
-/// the parent. An edit that keeps an existing parent which has since been retired is allowed:
-/// otherwise retiring a parent would freeze every child's name and owner.
+/// the parent. An edit that keeps an existing parent which has since been retired is allowed.
+/// That case only arises for a <em>retired</em> child. A parent cannot be retired while it has
+/// active children, and a child cannot be restored under a retired parent (both in
+/// <c>SetCostCentreActiveCommandHandler</c>), so an active child never has a retired parent.
+/// Without the leniency, retiring a branch would freeze every retired child's name and owner.
+/// </para>
+/// <para>
+/// <b>Callers hold the register lock</b> (<see cref="ICostCentreRepository.LockRegisterAsync"/>)
+/// across this check and their save. Every read here is of another row (the parent, or this
+/// entry's children), and the writes that change those rows (retire, delete, create or edit with
+/// this entry as parent) take the same lock before their own checks. So the parent cannot be
+/// retired or deleted, and a child cannot be added, between this check and the caller's commit.
 /// </para>
 /// </summary>
 public static class CostCentreParentRule

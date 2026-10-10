@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { colors, fonts, rowSurface } from "@/lib/theme";
 import type { BudgetCode, BudgetPeriod } from "@/lib/types";
 import { MonoTag, StatusChip } from "@/components/ui/Chip";
@@ -93,6 +93,11 @@ export default function BudgetCodes({
   const [owners, setOwners] = useState<BudgetOwnerOption[]>([]);
   /** The tenant-wide cost-centre register (retired included), for the code form's picker. */
   const [costCentres, setCostCentres] = useState<CostCentreRecord[] | null>(null);
+  /**
+   * Bumped by every register request and every register pushed up from the code modal; a load
+   * whose number is no longer current is stale and is dropped, so `costCentres` never regresses.
+   */
+  const costCentresSeq = useRef(0);
   const [error, setError] = useState<{ message: string; code: string } | null>(null);
   const [editing, setEditing] = useState<BudgetCode | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -146,9 +151,12 @@ export default function BudgetCodes({
     );
     // The cost-centre register, tenant-wide. A failure leaves the picker offering only a code's
     // current value (the modal says the register did not load) — not worth blocking the chart.
+    // Sequenced against acceptCostCentres: an inline create in the code modal pushes a NEWER
+    // register up, and this slower initial read must not land on top of it afterwards.
+    const ccRequest = ++costCentresSeq.current;
     listCostCentres({ includeInactive: true }).then(
       (rows) => {
-        if (active) setCostCentres(rows);
+        if (active && ccRequest === costCentresSeq.current) setCostCentres(rows);
       },
       () => {},
     );
@@ -175,6 +183,12 @@ export default function BudgetCodes({
     setCodes(records.map(toBudgetCode));
     setError(null);
     onSelect(id);
+  }
+
+  /** The register the code modal read after an inline create — newer than any load in flight. */
+  function acceptCostCentres(records: CostCentreRecord[]) {
+    costCentresSeq.current += 1;
+    setCostCentres(records);
   }
 
   function selectCode(id: string) {
@@ -628,7 +642,7 @@ export default function BudgetCodes({
           allCodes={list}
           owners={owners}
           costCentres={costCentres}
-          onCostCentresChanged={setCostCentres}
+          onCostCentresChanged={acceptCostCentres}
           onClose={() => setShowForm(false)}
           onSaved={handleSaved}
         />

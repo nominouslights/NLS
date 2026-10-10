@@ -33,11 +33,23 @@ namespace NorthernLink.Budgeting.Application.Codes.CopyFromPeriod;
 /// top-level too.
 /// </para>
 /// <para>
-/// <b>Cost centre: carried as-is, with no register check.</b> The string was validated against
-/// the register when the source code was written, and it cannot have vanished since — the
-/// register refuses to delete an entry any code in any period carries
-/// (<c>Budgeting.CostCentre.InUse</c>), and the <c>AddCostCentres</c> migration backfilled an
-/// entry for every value that predates the register. A <em>retired</em> entry is still carried:
+/// <b>Cost centre: carried as-is, with no register check, under the register lock.</b> The string
+/// was validated against the register when the source code was written
+/// (<see cref="BudgetCodeCostCentreRule"/>), and while any code carries it the register refuses to
+/// delete it (<c>Budgeting.CostCentre.InUse</c>). The <c>AddCostCentres</c> migration backfilled an
+/// entry for every value that predates the register. What keeps that true across the copy is the
+/// tenant's register lock (<see cref="ICostCentreRepository.LockRegisterAsync"/>), taken
+/// <em>before</em> the source chart is read and committed with the copies. A cost-centre delete
+/// probes usage under the same lock, so it either committed before this read (and then no source
+/// code still carried the string, because its probe saw none) or waits and then sees the copies.
+/// <para>
+/// The lock is taken whenever the guards pass, not only when the source turns out to carry a cost
+/// centre. Deciding that needs the source chart, and the read that decides must itself be under
+/// the lock: a re-read after locking would hand back EF's already-tracked, possibly stale
+/// instances. A chart copy is a once-a-period action, so serializing it with register writes
+/// costs nothing.
+/// </para>
+/// A <em>retired</em> entry is still carried:
 /// it is the same value moving forward, the "unchanged is allowed" leniency the edit path gives
 /// (<see cref="BudgetCodeCostCentreRule"/>), and refusing it would make one stale cost centre
 /// block — or silently strip — a whole chart copy. The planner sees the retired cost centre on
@@ -46,7 +58,8 @@ namespace NorthernLink.Budgeting.Application.Codes.CopyFromPeriod;
 /// </summary>
 public sealed class CopyBudgetCodesCommandHandler(
     IBudgetCodeRepository codes,
-    IBudgetPeriodRepository periods)
+    IBudgetPeriodRepository periods,
+    ICostCentreRepository costCentres)
     : ICommandHandler<CopyBudgetCodesCommand, BudgetCodeCopyResult>
 {
     public async Task<Result<BudgetCodeCopyResult>> Handle(
@@ -74,6 +87,10 @@ public sealed class CopyBudgetCodesCommandHandler(
         {
             return Result.Failure<BudgetCodeCopyResult>(BudgetCodeErrors.CopySourceNotFound);
         }
+
+        // Before the source read, so every cost-centre string the copy carries is read under the
+        // lock that a cost-centre delete probes usage under — see the class comment.
+        await using var registerLock = await costCentres.LockRegisterAsync(command.TenantId, cancellationToken);
 
         var sourceCodes = await codes.ListForPeriodAsync(sourcePeriodId, cancellationToken);
         if (sourceCodes.Count == 0)
@@ -126,6 +143,7 @@ public sealed class CopyBudgetCodesCommandHandler(
         if (copied > 0)
         {
             await codes.SaveChangesAsync(cancellationToken);
+            await registerLock.CommitAsync(cancellationToken);
         }
 
         return Result.Success(new BudgetCodeCopyResult(

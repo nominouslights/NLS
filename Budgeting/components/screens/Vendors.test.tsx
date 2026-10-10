@@ -267,6 +267,33 @@ describe("Vendors screen", () => {
     await waitFor(() => expect(screen.getByText("RESTORE")).toBeTruthy());
   });
 
+  it("a refused retire leaves Show retired unticked and the vendor active", async () => {
+    const message = "This vendor cannot be retired right now.";
+    const api = makeApi();
+    api.setActive.mockRejectedValueOnce(new ApiError("Budgeting.Vendor.Conflict", message, 409));
+    await renderScreen(api);
+
+    fireEvent.click(screen.getByText("RETIRE"));
+    fireEvent.click(screen.getByText("CONFIRM RETIRE"));
+
+    expect(await screen.findByText(message)).toBeTruthy();
+    expect(api.setActive).toHaveBeenCalledWith("v1", false);
+    expect((screen.getByLabelText("Show retired (1)") as HTMLInputElement).checked).toBe(false);
+    expect(screen.queryByText("Old Hardware Co")).toBeNull();
+    expect(screen.getByText("RETIRE")).toBeTruthy();
+  });
+
+  it("an accepted retire ticks Show retired, so the vendor stays in view", async () => {
+    const api = await renderScreen();
+    api.list.mockResolvedValue([{ ...ACME, isActive: false }, KAL, OLD]);
+
+    fireEvent.click(screen.getByText("RETIRE"));
+    fireEvent.click(screen.getByText("CONFIRM RETIRE"));
+
+    await waitFor(() => expect((screen.getByLabelText("Show retired (2)") as HTMLInputElement).checked).toBe(true));
+    expect(screen.getByText("Old Hardware Co")).toBeTruthy();
+  });
+
   it("shows a delete's InUse 409 verbatim and offers to retire instead", async () => {
     const message =
       "This vendor is referenced by budget items and cannot be deleted. Retire it instead — a retired vendor stays listed so existing items keep resolving.";
@@ -293,6 +320,40 @@ describe("Vendors screen", () => {
     expect(screen.queryByText("CREATE VENDOR")).toBeNull();
     expect(screen.getByText("CONFIRM RESTORE")).toBeTruthy();
     expect(screen.getByText(/Restoring Old Hardware Co/)).toBeTruthy();
+  });
+
+  it("a delete that landed but whose refetch failed says saved, never 'failed', and RETRY only reloads", async () => {
+    const api = await renderScreen();
+    api.list.mockRejectedValueOnce(new Error("network down"));
+
+    fireEvent.click(screen.getByText("DELETE"));
+    fireEvent.click(screen.getByText("CONFIRM DELETE"));
+
+    const note = await screen.findByTestId("vendors-stale");
+    expect(note.textContent).toContain("Acme Fuel: saved — couldn't refresh the list.");
+    expect(screen.queryByText(/Failed to/)).toBeNull();
+    expect(api.remove).toHaveBeenCalledTimes(1);
+
+    // RETRY reloads the list; it never repeats the delete.
+    api.list.mockResolvedValue([KAL, OLD]);
+    fireEvent.click(screen.getByText("RETRY"));
+    await waitFor(() => expect(screen.queryByTestId("vendors-stale")).toBeNull());
+    expect(api.remove).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Acme Fuel")).toBeNull();
+  });
+
+  it("an action's refusal (InUse) offers no RETRY", async () => {
+    const message = "This vendor is referenced by budget items and cannot be deleted.";
+    const api = makeApi();
+    api.remove.mockRejectedValueOnce(new ApiError("Budgeting.Vendor.InUse", message, 409));
+    await renderScreen(api);
+
+    fireEvent.click(screen.getByText("DELETE"));
+    fireEvent.click(screen.getByText("CONFIRM DELETE"));
+
+    expect(await screen.findByText(message)).toBeTruthy();
+    expect(screen.getByText("RETIRE ACME FUEL INSTEAD")).toBeTruthy();
+    expect(screen.queryByText("RETRY")).toBeNull();
   });
 
   it("shows a load failure verbatim with RETRY", async () => {

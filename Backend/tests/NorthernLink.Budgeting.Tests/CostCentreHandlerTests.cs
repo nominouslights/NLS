@@ -100,6 +100,22 @@ public class CostCentreHandlerTests
     }
 
     [Fact]
+    public async Task A_lost_duplicate_code_race_is_the_same_409_not_a_500()
+    {
+        // Both requests passed the read-first check; the unique (tenant_id, code) index rejected
+        // this one at commit.
+        _repository.UniqueCodeViolationOnNextSave = true;
+        _repository.RaceWinner = TestBudgeting.CreateCostCentre("THOMPSON", "Thompson (the winner)");
+
+        var result = await CreateAsync("THOMPSON");
+
+        Assert.Equal(CostCentreErrors.DuplicateCode, result.Error);
+        Assert.Equal(ErrorType.Conflict, result.Error.Type);
+        Assert.Equal(_repository.RaceWinner.Id, Assert.Single(_repository.CostCentres).Id);
+        Assert.Equal(1, _repository.SaveChangesCallCount);
+    }
+
+    [Fact]
     public async Task Codes_differing_only_in_case_are_distinct_entries()
     {
         // Ordinal, matching how budget codes have always stored the string — see CostCentre.
@@ -269,14 +285,39 @@ public class CostCentreHandlerTests
     [Fact]
     public async Task Keeping_a_parent_that_has_since_been_retired_is_allowed()
     {
+        // Only a retired child can sit under a retired parent (the parent's retirement waits for
+        // its children, and a child cannot be restored under it), so that is the case this covers.
         var parent = Add("NORTH");
         var child = Add("THOMPSON", parentId: parent.Id);
-        parent.SetActive(false, null);
+        Assert.True((await SetActiveAsync(child.Id, false)).IsSuccess);
+        Assert.True((await SetActiveAsync(parent.Id, false)).IsSuccess);
 
         var result = await UpdateAsync(child.Id, Details(name: "Thompson yard", parentId: parent.Id));
 
         Assert.True(result.IsSuccess);
         Assert.Equal("Thompson yard", child.Name);
+    }
+
+    [Fact]
+    public async Task Update_reports_field_validation_before_the_parent_lookup()
+    {
+        var costCentre = Add("THOMPSON");
+
+        var result = await UpdateAsync(costCentre.Id, Details(name: " ", parentId: Guid.NewGuid()));
+
+        Assert.Equal(CostCentreErrors.NameRequired, result.Error);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+        Assert.Equal(0, _repository.SaveChangesCallCount);
+    }
+
+    [Fact]
+    public async Task Update_reports_field_validation_before_the_owner_lookup()
+    {
+        var costCentre = Add("THOMPSON");
+
+        var result = await UpdateAsync(costCentre.Id, Details(name: "", ownerUserId: Guid.NewGuid()));
+
+        Assert.Equal(CostCentreErrors.NameRequired, result.Error);
     }
 
     // --- Activate / deactivate ------------------------------------------------------------------
@@ -318,6 +359,57 @@ public class CostCentreHandlerTests
         Assert.Equal(CostCentreErrors.NotFound, (await SetActiveAsync(Guid.NewGuid(), false)).Error);
     }
 
+    [Fact]
+    public async Task Restoring_a_child_under_a_retired_parent_is_refused()
+    {
+        var parent = Add("NORTH", active: false);
+        var child = Add("THOMPSON", parentId: parent.Id, active: false);
+
+        var result = await SetActiveAsync(child.Id, true);
+
+        Assert.Equal(CostCentreErrors.ParentRetired, result.Error);
+        Assert.Equal(ErrorType.Conflict, result.Error.Type);
+        Assert.False(child.IsActive);
+        Assert.Equal(0, _repository.SaveChangesCallCount);
+    }
+
+    [Fact]
+    public async Task Restoring_a_child_under_an_active_parent_succeeds()
+    {
+        var parent = Add("NORTH");
+        var child = Add("THOMPSON", parentId: parent.Id, active: false);
+
+        var result = await SetActiveAsync(child.Id, true);
+
+        Assert.True(result.IsSuccess);
+        Assert.True(child.IsActive);
+        Assert.Equal(1, _repository.SaveChangesCallCount);
+    }
+
+    [Fact]
+    public async Task Restoring_the_parent_first_then_the_child_succeeds()
+    {
+        var parent = Add("NORTH", active: false);
+        var child = Add("THOMPSON", parentId: parent.Id, active: false);
+
+        Assert.True((await SetActiveAsync(parent.Id, true)).IsSuccess);
+        Assert.True((await SetActiveAsync(child.Id, true)).IsSuccess);
+        Assert.True(child.IsActive);
+    }
+
+    [Fact]
+    public async Task Retiring_a_child_under_a_retired_parent_is_still_allowed_and_a_no_op_restore_is_not_refused()
+    {
+        // Only the restore direction is guarded; asking for the state the entry is already in is
+        // a success even when its parent is retired.
+        var parent = Add("NORTH");
+        var child = Add("THOMPSON", parentId: parent.Id);
+        Assert.True((await SetActiveAsync(child.Id, false)).IsSuccess);
+        Assert.True((await SetActiveAsync(parent.Id, false)).IsSuccess);
+
+        Assert.True((await SetActiveAsync(child.Id, false)).IsSuccess);
+    }
+
     // --- Delete ---------------------------------------------------------------------------------
 
     [Fact]
@@ -352,6 +444,55 @@ public class CostCentreHandlerTests
     }
 
     [Fact]
+    public async Task Delete_reads_and_checks_everything_under_the_register_lock_and_commits_with_the_delete()
+    {
+        var costCentre = Add("THOMPSON");
+        var removedWhenLocked = true;
+        _repository.OnLockAcquired = () => removedWhenLocked = !_repository.CostCentres.Contains(costCentre);
+
+        Assert.True((await DeleteAsync(costCentre.Id)).IsSuccess);
+
+        Assert.Equal(TestBudgeting.TenantId, Assert.Single(_repository.Locks));
+        Assert.Equal(["Lock", "GetById", "HasChildren", "Save", "Commit"], _repository.Calls);
+        Assert.False(removedWhenLocked);
+        Assert.Equal([TestBudgeting.TenantId], _repository.CommittedLocks);
+    }
+
+    [Fact]
+    public async Task A_child_added_while_the_delete_waited_on_the_lock_refuses_the_delete()
+    {
+        // The delete-vs-new-child race: a create choosing this entry as parent committed while
+        // this delete waited. The children check runs after acquisition, so it sees the child.
+        var costCentre = Add("NORTH");
+        _repository.OnLockAcquired = () => Add("THOMPSON", parentId: costCentre.Id);
+
+        var result = await DeleteAsync(costCentre.Id);
+
+        Assert.Equal(CostCentreErrors.HasChildren, result.Error);
+        Assert.Contains(_repository.CostCentres, c => c.Id == costCentre.Id);
+        Assert.Equal(0, _repository.SaveChangesCallCount);
+        Assert.Empty(_repository.CommittedLocks);
+    }
+
+    [Fact]
+    public async Task A_budget_code_that_won_the_lock_first_makes_the_delete_in_use()
+    {
+        // The delete-vs-use race: a budget code started carrying the string and committed while
+        // this delete waited on the lock. The probe runs after acquisition, so it sees that code.
+        var costCentre = Add("THOMPSON");
+        _repository.OnLockAcquired = () => _codes.Add(TestBudgeting.CreateCode(
+            "ZBB-FUEL-01",
+            TestBudgeting.CodeDetails(category: BudgetCodeCategory.Expense, costCentre: "THOMPSON")));
+
+        var result = await DeleteAsync(costCentre.Id);
+
+        Assert.Equal(CostCentreErrors.InUse, result.Error);
+        Assert.Single(_repository.CostCentres);
+        Assert.Equal(0, _repository.SaveChangesCallCount);
+        Assert.Empty(_repository.CommittedLocks);
+    }
+
+    [Fact]
     public async Task Usage_matching_is_ordinal()
     {
         var costCentre = Add("THOMPSON");
@@ -375,5 +516,127 @@ public class CostCentreHandlerTests
     public async Task Deleting_an_unknown_id_is_not_found()
     {
         Assert.Equal(CostCentreErrors.NotFound, (await DeleteAsync(Guid.NewGuid())).Error);
+    }
+
+    // --- The register lock: taken before every read, committed after the save -------------------
+
+    [Fact]
+    public async Task Create_takes_the_register_lock_before_the_duplicate_and_parent_checks()
+    {
+        var parent = Add("NORTH");
+
+        Assert.True((await CreateAsync("THOMPSON", Details(parentId: parent.Id))).IsSuccess);
+
+        Assert.Equal(TestBudgeting.TenantId, Assert.Single(_repository.Locks));
+        Assert.Equal(["Lock", "GetByCode", "GetById", "Save", "Commit"], _repository.Calls);
+    }
+
+    [Fact]
+    public async Task Create_reports_validation_without_taking_the_lock()
+    {
+        Assert.Equal(CostCentreErrors.NameRequired, (await CreateAsync("THOMPSON", Details(name: ""))).Error);
+        Assert.Empty(_repository.Locks);
+    }
+
+    [Fact]
+    public async Task A_parent_retired_while_the_create_waited_on_the_lock_is_refused()
+    {
+        var parent = Add("NORTH");
+        _repository.OnLockAcquired = () => parent.SetActive(false, TestBudgeting.ActorId);
+
+        var result = await CreateAsync("THOMPSON", Details(parentId: parent.Id));
+
+        Assert.Equal(CostCentreErrors.ParentRetired, result.Error);
+        Assert.Empty(_repository.CommittedLocks);
+    }
+
+    [Fact]
+    public async Task Update_takes_the_register_lock_before_reading_the_entry_parent_and_children()
+    {
+        var parent = Add("NORTH");
+        var costCentre = Add("THOMPSON");
+
+        Assert.True((await UpdateAsync(costCentre.Id, Details(parentId: parent.Id))).IsSuccess);
+
+        Assert.Equal(TestBudgeting.TenantId, Assert.Single(_repository.Locks));
+        Assert.Equal(["Lock", "GetById", "GetById", "HasChildren", "Save", "Commit"], _repository.Calls);
+    }
+
+    [Fact]
+    public async Task A_child_added_while_the_update_waited_on_the_lock_stops_it_taking_a_parent()
+    {
+        var parent = Add("NORTH");
+        var costCentre = Add("THOMPSON");
+        _repository.OnLockAcquired = () => Add("YARD", parentId: costCentre.Id);
+
+        var result = await UpdateAsync(costCentre.Id, Details(parentId: parent.Id));
+
+        Assert.Equal(CostCentreErrors.HasChildrenCannotHaveParent, result.Error);
+        Assert.Null(costCentre.ParentId);
+        Assert.Empty(_repository.CommittedLocks);
+    }
+
+    [Fact]
+    public async Task Retiring_takes_the_register_lock_before_reading_the_entry_and_its_children()
+    {
+        var costCentre = Add("NORTH");
+
+        Assert.True((await SetActiveAsync(costCentre.Id, false)).IsSuccess);
+
+        Assert.Equal(["Lock", "GetById", "HasActiveChildren", "Save", "Commit"], _repository.Calls);
+    }
+
+    [Fact]
+    public async Task Restoring_takes_the_register_lock_before_reading_the_entry_and_its_parent()
+    {
+        var parent = Add("NORTH");
+        var child = Add("THOMPSON", parentId: parent.Id, active: false);
+
+        Assert.True((await SetActiveAsync(child.Id, true)).IsSuccess);
+
+        Assert.Equal(["Lock", "GetById", "GetById", "Save", "Commit"], _repository.Calls);
+    }
+
+    [Fact]
+    public async Task Retire_parent_then_restore_child_cannot_both_succeed()
+    {
+        // The two requests race; the retirement gets the lock first and commits while the restore
+        // waits. The restore's parent check runs after acquisition, so it sees the retired parent.
+        var parent = Add("NORTH");
+        var child = Add("THOMPSON", parentId: parent.Id, active: false);
+        Result? retire = null;
+        _repository.OnLockAcquiredAsync = async () =>
+        {
+            _repository.OnLockAcquiredAsync = null;
+            retire = await SetActiveAsync(parent.Id, false);
+        };
+
+        var restore = await SetActiveAsync(child.Id, true);
+
+        Assert.True(retire!.IsSuccess);
+        Assert.Equal(CostCentreErrors.ParentRetired, restore.Error);
+        Assert.False(parent.IsActive);
+        Assert.False(child.IsActive);
+    }
+
+    [Fact]
+    public async Task Restore_child_then_retire_parent_cannot_both_succeed()
+    {
+        // The other order: the restore commits first, and the retirement's children check sees it.
+        var parent = Add("NORTH");
+        var child = Add("THOMPSON", parentId: parent.Id, active: false);
+        Result? restore = null;
+        _repository.OnLockAcquiredAsync = async () =>
+        {
+            _repository.OnLockAcquiredAsync = null;
+            restore = await SetActiveAsync(child.Id, true);
+        };
+
+        var retire = await SetActiveAsync(parent.Id, false);
+
+        Assert.True(restore!.IsSuccess);
+        Assert.Equal(CostCentreErrors.HasActiveChildren, retire.Error);
+        Assert.True(parent.IsActive);
+        Assert.True(child.IsActive);
     }
 }
