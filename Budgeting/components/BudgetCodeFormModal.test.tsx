@@ -85,7 +85,7 @@ function renderModal(props: Partial<Parameters<typeof BudgetCodeFormModal>[0]> =
   } satisfies BudgetCodeApi;
   const onSaved = vi.fn();
   const onCostCentresChanged = vi.fn();
-  render(
+  const element = (over: Partial<Parameters<typeof BudgetCodeFormModal>[0]> = {}) => (
     <BudgetCodeFormModal
       periodId={PERIOD}
       periodLabel="Q4 2026"
@@ -98,9 +98,13 @@ function renderModal(props: Partial<Parameters<typeof BudgetCodeFormModal>[0]> =
       onSaved={onSaved}
       api={api}
       {...props}
-    />,
+      {...over}
+    />
   );
-  return { api, onSaved, onCostCentresChanged };
+  const { rerender } = render(element());
+  /** Re-renders with changed props — the caller's register arriving or changing. */
+  const update = (over: Partial<Parameters<typeof BudgetCodeFormModal>[0]>) => rerender(element(over));
+  return { api, onSaved, onCostCentresChanged, update };
 }
 
 /** The cost-centre <select> — found by its first option, since ui/Field labels carry no htmlFor. */
@@ -197,6 +201,60 @@ describe("BudgetCodeFormModal — cost-centre picker", () => {
     fireEvent.click(screen.getByText("CREATE CODE"));
     await waitFor(() => expect(api.create).toHaveBeenCalled());
     expect(api.create.mock.calls[0][1]).toMatchObject({ code: "DIESEL", costCentre: "Snow Lake" });
+  });
+
+  it("follows the register when it arrives AFTER the modal opened (the parallel listCostCentres)", () => {
+    const { update } = renderModal({ code: code({ costCentre: "Thompson" }), costCentres: null });
+    // Not loaded yet: only the code's own value, marked, because nothing says it is registered.
+    expect(screen.getByTestId("cost-centre-kept").textContent).toContain("Not in register");
+
+    update({ costCentres: REGISTER });
+
+    const select = ccSelect()!;
+    expect(optionTexts(select)).toEqual(["— No cost centre —", "Thompson · Thompson base", "+ New cost centre…"]);
+    expect(select.value).toBe("Thompson");
+    expect(screen.queryByTestId("cost-centre-kept")).toBeNull();
+  });
+
+  it("keeps an entry created inline when the caller's register arrives without it", async () => {
+    const created = cc("cc-snow", "Snow Lake", "Snow Lake base");
+    const costCentreApi = {
+      create: vi.fn().mockResolvedValue("cc-snow"),
+      update: vi.fn(),
+      list: vi.fn().mockResolvedValue([...REGISTER, created]),
+    } satisfies CostCentreApi;
+    const { update } = renderModal({ costCentreApi, costCentres: null });
+
+    fireEvent.change(ccSelect()!, { target: { value: "__new_cost_centre__" } });
+    fireEvent.change(screen.getByPlaceholderText("THOMPSON"), { target: { value: "Snow Lake" } });
+    fireEvent.change(screen.getByPlaceholderText("Thompson base"), { target: { value: "Snow Lake base" } });
+    fireEvent.click(screen.getByText("CREATE COST CENTRE"));
+    await waitFor(() => expect(ccSelect()!.value).toBe("Snow Lake"));
+
+    // The caller's slower, pre-create load lands now.
+    update({ costCentres: REGISTER });
+    expect(optionTexts(ccSelect()!)).toEqual([
+      "— No cost centre —",
+      "Snow Lake · Snow Lake base",
+      "Thompson · Thompson base",
+      "+ New cost centre…",
+    ]);
+    expect(ccSelect()!.value).toBe("Snow Lake");
+  });
+
+  it("refuses, before the round trip, a chosen entry retired since it was picked (CostCentreRetired)", () => {
+    const { api, update } = renderModal({ code: code() });
+    fireEvent.change(ccSelect()!, { target: { value: "Thompson" } });
+
+    update({ costCentres: [REGISTER[0], { ...REGISTER[1], isActive: false }] });
+    fireEvent.click(screen.getByText("SAVE CHANGES"));
+
+    expect(
+      screen.getByText(
+        "That cost centre is retired and cannot be given to a budget code. Choose an active one, or restore it in the register first.",
+      ),
+    ).toBeTruthy();
+    expect(api.update).not.toHaveBeenCalled();
   });
 
   it("shows a refused inline create's message verbatim and keeps the code form's value", async () => {

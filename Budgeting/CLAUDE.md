@@ -246,15 +246,21 @@ storage tests, which need `sessionStorage`):
   `costCentreError` in the create and the (different) update order, `parentCandidates` against
   `CostCentreParentRule` (self, top-level, retired-current-parent kept, children → none),
   `budgetCodeCostCentreError` against `BudgetCodeCostCentreRule` (unchanged always accepted), that
-  `costCentreOptions` never offers a value the server would refuse, and `groupRollup` /
-  `rollupSum`.
+  `costCentreOptions` never offers a value the server would refuse, and `groupRollup`.
 - `lib/api/costCentres.requests.test.ts` — every cost-centre route/method/body (PUT never carries
   `code`; activate/deactivate both directions; `includeInactive` written out), each of the 17
   `Budgeting.CostCentre.*` refusals and the two new `Budgeting.Code.CostCentre*` refusals
   verbatim, and the rollup route. A separate file from `budgeting.requests.test.ts` on purpose.
 - `components/BudgetCodeFormModal.test.tsx` — the cost-centre picker: active entries only, a
   retired / unregistered current value kept and marked and saved unchanged, Revenue hides it and
-  sends `null`, inline create selects the new entry (case kept), an inline refusal verbatim.
+  sends `null`, inline create selects the new entry (case kept), an inline refusal verbatim; the
+  picker follows a register that arrives **after** the modal opened (and keeps an inline-created
+  entry the late copy lacks), and a pick retired since is refused before the round trip.
+- `components/screens/CostCentres.test.tsx` — an action's refusal is bound to its entry: a
+  delete's InUse 409 on one entry never offers RETIRE INSTEAD on another (a selection change
+  clears it), RETIRE INSTEAD retires the entry it was for, and "Show retired" switches on only
+  after the server accepts a retire (a 409 `HasActiveChildren` leaves it, and the entry, as they
+  were).
 - `components/screens/periods/CostCentreBreakdown.test.tsx` — grouping under a parent, an absent
   parent named, retired / unregistered chips, owners, "No cost centre" at $0, the server's total,
   and no actual column.
@@ -582,11 +588,11 @@ entered period, like Settings.
 | Route | |
 |---|---|
 | `GET /api/budgeting/cost-centres?includeInactive=` | ordered by code; the app always sends the flag and always asks for `true` (the parent and children rules need retired entries) |
-| `GET /api/budgeting/cost-centres/{id}` | 404 `NotFound` |
+| `GET /api/budgeting/cost-centres/{id}` | 404 `NotFound` — the 201's `Location` target; the app never calls it (it refetches the list) |
 | `POST /api/budgeting/cost-centres` | `{ code, name, description, ownerUserId, parentId }` → 201 `{ id }` |
 | `PUT /api/budgeting/cost-centres/{id}` | same body **without `code`** (immutable; a different code is 400 `CodeImmutable`) → 204 |
 | `POST /api/budgeting/cost-centres/{id}/activate\|deactivate` | 204; deactivate is 409 `HasActiveChildren` for a parent with active children (never cascaded) |
-| `DELETE /api/budgeting/cost-centres/{id}` | 204; 409 `HasChildren`, then 409 `InUse` (any budget code in any period carries it) — the screen then offers RETIRE INSTEAD |
+| `DELETE /api/budgeting/cost-centres/{id}` | 204; 409 `HasChildren`, then 409 `InUse` (any budget code in any period carries it) — the screen then offers RETIRE INSTEAD **for that entry only**: the refusal carries the entry's id, and selecting another clears it |
 | `GET /api/budgeting/periods/{id}/rollups/cost-centres` | the period's **planned** expense per cost centre + `noCostCentre` + `totalPlannedExpenseCad` (= the period's planned-expense tile). No actual field — the panel shows no actual column |
 
 - **The code is trimmed only — case preserved — and every match is ordinal.** Never route a
@@ -599,7 +605,11 @@ entered period, like Settings.
 - **The budget-code form's cost centre is a picker of ACTIVE entries** (still absent for Revenue).
   A code whose current value is retired or not in the register keeps it, selectable and marked
   with a chip — the server accepts an **unchanged** value unconditionally (`costCentreOptions`).
-  "+ New cost centre…" opens `CostCentreFormModal` as a sibling overlay (not a child — the
+  The register is a **prop, derived each render** — never copied into state at mount, because
+  Budget Codes loads it in parallel and it may land after the modal opened; only entries created
+  inline are held locally and merged in by id. Before submit, `budgetCodeCostCentreError` runs
+  against the loaded register (skipped while it is `null`), so a pick retired since is refused in
+  the server's own words. "+ New cost centre…" opens `CostCentreFormModal` as a sibling overlay (not a child — the
   shell's `backdrop-filter` would trap a nested fixed overlay) and selects what it creates.
 - **The dashboard's "Expense by cost centre" panel** (`screens/periods/CostCentreBreakdown.tsx`)
   sits beside "Expense by priority". It is the server's rollup, refetched whenever the items list
