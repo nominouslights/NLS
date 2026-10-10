@@ -163,11 +163,12 @@ describe("entered period storage", () => {
 });
 
 describe("isPeriodScoped", () => {
-  it("is false for Settings and Vendors only — Budget Codes is scoped since codes moved under the period", () => {
+  // Vendors and Cost Centres are deliberately unscoped: both registers are tenant-wide (their
+  // routes have no period in them), so they render without an entered period and never remount
+  // on a switch. Budget Codes stays scoped — codes moved under the period.
+  it("is false for Settings, Vendors and Cost Centres only — Budget Codes is scoped since codes moved under the period", () => {
     const all: ScreenId[] = NAV_GROUPS.flatMap((g) => g.items.map((i) => i.id));
-    // Vendors is deliberately unscoped: the register is tenant-wide (/api/budgeting/vendors has
-    // no period in the route), so it must never sit behind the period chooser.
-    expect(all.filter((id) => !isPeriodScoped(id)).sort()).toEqual(["settings", "vendors"]);
+    expect(all.filter((id) => !isPeriodScoped(id)).sort()).toEqual(["costCentres", "settings", "vendors"]);
     expect(all.filter(isPeriodScoped).sort()).toEqual([
       "actuals",
       "codes",

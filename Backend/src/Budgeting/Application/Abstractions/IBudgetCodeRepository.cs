@@ -39,6 +39,13 @@ public interface IBudgetCodeRepository
     /// </summary>
     Task<IReadOnlyList<BudgetCode>> ListForPeriodAsync(Guid periodId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Whether any of the tenant's codes, <b>in any period</b> and retired or not, carries this
+    /// cost-centre string (ordinal). The one deliberately period-less lookup here: the cost-centre
+    /// register is tenant-wide, and a delete of an entry must see every period that uses it.
+    /// </summary>
+    Task<bool> AnyWithCostCentreAsync(string costCentreCode, CancellationToken cancellationToken = default);
+
     void Add(BudgetCode budgetCode);
 
     /// <summary>

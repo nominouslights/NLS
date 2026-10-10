@@ -17,6 +17,13 @@ using NorthernLink.Budgeting.Application.Codes.GetOwnerCandidates;
 using NorthernLink.Budgeting.Application.Codes.SeedStarterSet;
 using NorthernLink.Budgeting.Application.Codes.SetActive;
 using NorthernLink.Budgeting.Application.Codes.Update;
+using NorthernLink.Budgeting.Application.CostCentres.Create;
+using NorthernLink.Budgeting.Application.CostCentres.Delete;
+using NorthernLink.Budgeting.Application.CostCentres.GetCostCentreById;
+using NorthernLink.Budgeting.Application.CostCentres.GetCostCentres;
+using NorthernLink.Budgeting.Application.CostCentres.GetPlannedRollup;
+using NorthernLink.Budgeting.Application.CostCentres.SetActive;
+using NorthernLink.Budgeting.Application.CostCentres.Update;
 using NorthernLink.Budgeting.Application.Periods.Create;
 using NorthernLink.Budgeting.Application.Periods.GetPeriodById;
 using NorthernLink.Budgeting.Application.Periods.GetPeriods;
@@ -29,6 +36,7 @@ using NorthernLink.Budgeting.Application.Vendors.SetActive;
 using NorthernLink.Budgeting.Application.Vendors.Update;
 using NorthernLink.Budgeting.Domain.Allocations;
 using NorthernLink.Budgeting.Domain.Codes;
+using NorthernLink.Budgeting.Domain.CostCentres;
 using NorthernLink.Budgeting.Domain.Periods;
 using NorthernLink.Budgeting.Domain.Vendors;
 
@@ -121,6 +129,23 @@ public static class BudgetingEndpoints
         budgeting.MapPost("vendors/{vendorId:guid}/activate", ActivateVendor);
         budgeting.MapPost("vendors/{vendorId:guid}/deactivate", DeactivateVendor);
         budgeting.MapDelete("vendors/{vendorId:guid}", DeleteVendor);
+
+        // The cost-centre register — tenant-wide, NOT under a period: a cost centre is an
+        // organisational unit or base, and outlives every period's chart. Budget codes carry an
+        // entry's code string, validated against this register on create/edit. Retiring is the
+        // normal end of life; DELETE is for an entry nothing carries (409 InUse / HasChildren
+        // otherwise). Every id route keeps the :guid constraint, so no literal can bind as an id.
+        budgeting.MapGet("cost-centres", GetCostCentres);
+        budgeting.MapGet("cost-centres/{id:guid}", GetCostCentre);
+        budgeting.MapPost("cost-centres", CreateCostCentre);
+        budgeting.MapPut("cost-centres/{id:guid}", UpdateCostCentre);
+        budgeting.MapPost("cost-centres/{id:guid}/activate", ActivateCostCentre);
+        budgeting.MapPost("cost-centres/{id:guid}/deactivate", DeactivateCostCentre);
+        budgeting.MapDelete("cost-centres/{id:guid}", DeleteCostCentre);
+
+        // A period's planned expense per cost centre, plus a "No cost centre" bucket. Planned only
+        // — actuals arrive in a later slice and the shape carries no actual field until then.
+        budgeting.MapGet("periods/{id:guid}/rollups/cost-centres", GetCostCentreRollup);
 
         return app;
     }
@@ -529,6 +554,101 @@ public static class BudgetingEndpoints
         SendCommand(
             tenantContext, sender, tenantId => new DeleteVendorCommand(tenantId, vendorId), cancellationToken);
 
+    private static async Task<IResult> GetCostCentres(
+        bool? includeInactive, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(
+            new GetCostCentresQuery(tenantId, includeInactive ?? false), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> GetCostCentre(
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(new GetCostCentreByIdQuery(tenantId, id), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>Adds a register entry: 201 with <c>{ id }</c>, Location the entry's own GET.</summary>
+    private static async Task<IResult> CreateCostCentre(
+        CostCentreRequest request,
+        ITenantContext tenantContext,
+        ICurrentActor currentActor,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var command = new CreateCostCentreCommand(
+            tenantId, request.Code, request.ToDetails(), currentActor.UserId);
+
+        var result = await sender.Send(command, cancellationToken);
+        return result.IsSuccess
+            ? Results.Created($"/api/budgeting/cost-centres/{result.Value}", new EntityCreatedResponse(result.Value))
+            : EndpointResults.Problem(result.Error);
+    }
+
+    private static Task<IResult> UpdateCostCentre(
+        Guid id,
+        CostCentreRequest request,
+        ITenantContext tenantContext,
+        ICurrentActor currentActor,
+        ISender sender,
+        CancellationToken cancellationToken) =>
+        SendCommand(
+            tenantContext,
+            sender,
+            tenantId => new UpdateCostCentreCommand(
+                tenantId, id, request.Code, request.ToDetails(), currentActor.UserId),
+            cancellationToken);
+
+    private static Task<IResult> ActivateCostCentre(
+        Guid id, ITenantContext tenantContext, ICurrentActor currentActor, ISender sender, CancellationToken cancellationToken) =>
+        SendCommand(
+            tenantContext,
+            sender,
+            tenantId => new SetCostCentreActiveCommand(tenantId, id, true, currentActor.UserId),
+            cancellationToken);
+
+    private static Task<IResult> DeactivateCostCentre(
+        Guid id, ITenantContext tenantContext, ICurrentActor currentActor, ISender sender, CancellationToken cancellationToken) =>
+        SendCommand(
+            tenantContext,
+            sender,
+            tenantId => new SetCostCentreActiveCommand(tenantId, id, false, currentActor.UserId),
+            cancellationToken);
+
+    // No actor: a deleted row has nowhere to record who deleted it. See DeleteCostCentreCommand.
+    private static Task<IResult> DeleteCostCentre(
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken) =>
+        SendCommand(
+            tenantContext, sender, tenantId => new DeleteCostCentreCommand(tenantId, id), cancellationToken);
+
+    private static async Task<IResult> GetCostCentreRollup(
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(new GetCostCentreRollupQuery(tenantId, id), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
     /// <summary>
     /// Resolve tenant → build command → dispatch → 204, for every bodiless write (code edits,
     /// period transitions, allocation removal). The command is built by a callback rather than
@@ -767,5 +887,31 @@ public sealed record VendorRequest(
         GstRegistrationNumber = GstRegistrationNumber,
         QboDisplayName = QboDisplayName,
         DefaultBudgetCode = DefaultBudgetCode,
+    };
+}
+
+/// <summary>
+/// Request body for POST /api/budgeting/cost-centres and PUT /api/budgeting/cost-centres/{id}.
+/// Every string is nullable on the wire so a missing one fails as a readable domain error.
+/// <para>
+/// <see cref="Code"/> is required on POST (trimmed server-side, case preserved). On PUT it is
+/// optional and never written: omitted/null/blank or the entry's own code is accepted, anything
+/// else is 400 <c>Budgeting.CostCentre.CodeImmutable</c> — so a client that round-trips the whole
+/// record gets a clear refusal instead of a silently ignored rename.
+/// </para>
+/// </summary>
+public sealed record CostCentreRequest(
+    string? Code,
+    string? Name,
+    string? Description,
+    Guid? OwnerUserId,
+    Guid? ParentId)
+{
+    public CostCentreDetails ToDetails() => new()
+    {
+        Name = Name ?? string.Empty,
+        Description = Description,
+        OwnerUserId = OwnerUserId,
+        ParentId = ParentId,
     };
 }

@@ -100,6 +100,14 @@ public class BudgetingEndpointMetadataTests : IAsyncLifetime
     [InlineData("POST", "/api/budgeting/vendors/{vendorId:guid}/activate")]
     [InlineData("POST", "/api/budgeting/vendors/{vendorId:guid}/deactivate")]
     [InlineData("DELETE", "/api/budgeting/vendors/{vendorId:guid}")]
+    [InlineData("GET", "/api/budgeting/cost-centres")]
+    [InlineData("GET", "/api/budgeting/cost-centres/{id:guid}")]
+    [InlineData("POST", "/api/budgeting/cost-centres")]
+    [InlineData("PUT", "/api/budgeting/cost-centres/{id:guid}")]
+    [InlineData("POST", "/api/budgeting/cost-centres/{id:guid}/activate")]
+    [InlineData("POST", "/api/budgeting/cost-centres/{id:guid}/deactivate")]
+    [InlineData("DELETE", "/api/budgeting/cost-centres/{id:guid}")]
+    [InlineData("GET", "/api/budgeting/periods/{id:guid}/rollups/cost-centres")]
     public void Every_budgeting_endpoint_carries_the_BudgetAccess_policy(string method, string pattern)
     {
         var endpoint = Endpoint(method, pattern);
@@ -133,7 +141,7 @@ public class BudgetingEndpointMetadataTests : IAsyncLifetime
     {
         // Guards the guard: without this, an endpoint added to the group would be silently
         // absent from the Theory above (which asserts only the routes it names).
-        Assert.Equal(28, _endpoints.Count);
+        Assert.Equal(36, _endpoints.Count);
     }
 
     [Theory]
@@ -146,6 +154,16 @@ public class BudgetingEndpointMetadataTests : IAsyncLifetime
     {
         // Codes belong to a period now. A surviving tenant-wide route would read or write a chart
         // with no period, and a console still calling it must fail loudly (404), not half-work.
+        Assert.DoesNotContain(_endpoints, e => e.RoutePattern.RawText == pattern);
+    }
+
+    [Theory]
+    [InlineData("/api/budgeting/periods/{id:guid}/cost-centres")]
+    [InlineData("/api/budgeting/periods/{id:guid}/cost-centres/{costCentreId:guid}")]
+    public void The_cost_centre_register_is_not_period_scoped(string pattern)
+    {
+        // A cost centre is an organisational unit, not a line of one period's chart: the register
+        // is tenant-wide. Only the planned rollup lives under a period.
         Assert.DoesNotContain(_endpoints, e => e.RoutePattern.RawText == pattern);
     }
 

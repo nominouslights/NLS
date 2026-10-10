@@ -7,12 +7,14 @@
 // Planning has no Allocations item: allocations are planned on the period's own dashboard
 // (screens/periods/), so a separate Allocations screen was a second place to do the same job —
 // and the worse one, since it could not refresh Console's period list after a save. Removed
-// rather than fixed; "one place to plan a period" is the point.
+// rather than fixed; "one place to plan a period" is the point. Cost Centres (the tenant-wide
+// register budget codes pick from) is a Planning item but plans nothing itself.
 
 export type ScreenId =
   | "periods"
   | "codes"
   | "vendors"
+  | "costCentres"
   | "actuals"
   | "variance"
   | "reports"
@@ -22,10 +24,11 @@ export type ScreenId =
  * The screens that act on ONE budget period — they render only once a period is entered, inside
  * Console's banner, and every switch remounts them. Budget Codes joined when codes moved under
  * the period (each period has its own chart, routes periods/{id}/codes). Two screens are left
- * out: Settings (a profile belongs to a person, not to a period) and Vendors (the register is
- * tenant-wide — a vendor is the same counterparty in every period, routes /api/budgeting/vendors
- * with no period in them). Leaving Vendors out is deliberate, not an oversight: scoping it would
- * hide the register behind the period chooser for no reason.
+ * out: Settings (a profile belongs to a person, not to a period) and the two tenant-wide
+ * registers — Vendors (a vendor is the same counterparty in every period; routes
+ * /api/budgeting/vendors) and Cost Centres (one list for every period; routes
+ * /api/budgeting/cost-centres). Leaving them out is deliberate: scoping either would hide the
+ * register behind the period chooser for no reason.
  */
 export const PERIOD_SCOPED: ReadonlySet<ScreenId> = new Set<ScreenId>([
   "periods",
@@ -61,6 +64,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "codes", label: "Budget Codes", code: "BC" },
       // In PLANNING because vendors are planning reference data, but NOT period-scoped.
       { id: "vendors", label: "Vendors", code: "VN" },
+      { id: "costCentres", label: "Cost Centres", code: "CC" },
     ],
   },
   {

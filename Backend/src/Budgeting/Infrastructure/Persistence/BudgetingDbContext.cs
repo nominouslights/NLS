@@ -5,6 +5,7 @@ using NorthernLink.Budgeting.Application;
 using NorthernLink.Budgeting.Application.Integration;
 using NorthernLink.Budgeting.Domain.Allocations;
 using NorthernLink.Budgeting.Domain.Codes;
+using NorthernLink.Budgeting.Domain.CostCentres;
 using NorthernLink.Budgeting.Domain.Periods;
 using NorthernLink.Budgeting.Domain.Vendors;
 using NorthernLink.Budgeting.Infrastructure.Persistence.ReadModels;
@@ -29,6 +30,7 @@ public sealed class BudgetingDbContext(
     public DbSet<BudgetCode> BudgetCodes => Set<BudgetCode>();
     public DbSet<BudgetAllocation> BudgetAllocations => Set<BudgetAllocation>();
     public DbSet<Vendor> Vendors => Set<Vendor>();
+    public DbSet<CostCentre> CostCentres => Set<CostCentre>();
 
     // Read-side projections — ordinary rm_* tables the projection worker upserts into,
     // secured by the same native RLS policy as every other table.
@@ -36,6 +38,7 @@ public sealed class BudgetingDbContext(
     public DbSet<BudgetCodeReadModel> BudgetCodeReadModels => Set<BudgetCodeReadModel>();
     public DbSet<BudgetAllocationReadModel> BudgetAllocationReadModels => Set<BudgetAllocationReadModel>();
     public DbSet<VendorReadModel> VendorReadModels => Set<VendorReadModel>();
+    public DbSet<CostCentreReadModel> CostCentreReadModels => Set<CostCentreReadModel>();
 
     // Replica of Identity's users, upserted from identity.user-changed. Not an aggregate and not
     // a read model — a plain keyed table this module owns but does not author.
@@ -51,6 +54,8 @@ public sealed class BudgetingDbContext(
         modelBuilder.ApplyConfiguration(new BudgetAllocationReadModelConfiguration());
         modelBuilder.ApplyConfiguration(new VendorConfiguration());
         modelBuilder.ApplyConfiguration(new VendorReadModelConfiguration());
+        modelBuilder.ApplyConfiguration(new CostCentreConfiguration());
+        modelBuilder.ApplyConfiguration(new CostCentreReadModelConfiguration());
         modelBuilder.ApplyConfiguration(new UserLookupConfiguration());
 
         // Tenant isolation, API half. Never remove: RLS is the backstop, not the substitute.
@@ -60,12 +65,14 @@ public sealed class BudgetingDbContext(
         modelBuilder.Entity<BudgetCode>().HasQueryFilter(c => c.TenantId == TenantId);
         modelBuilder.Entity<BudgetAllocation>().HasQueryFilter(a => a.TenantId == TenantId);
         modelBuilder.Entity<Vendor>().HasQueryFilter(v => v.TenantId == TenantId);
+        modelBuilder.Entity<CostCentre>().HasQueryFilter(c => c.TenantId == TenantId);
 
         // Same tenant filter on the read models — the retained API half of dual enforcement.
         modelBuilder.Entity<BudgetPeriodReadModel>().HasQueryFilter(p => p.TenantId == TenantId);
         modelBuilder.Entity<BudgetCodeReadModel>().HasQueryFilter(c => c.TenantId == TenantId);
         modelBuilder.Entity<BudgetAllocationReadModel>().HasQueryFilter(a => a.TenantId == TenantId);
         modelBuilder.Entity<VendorReadModel>().HasQueryFilter(v => v.TenantId == TenantId);
+        modelBuilder.Entity<CostCentreReadModel>().HasQueryFilter(c => c.TenantId == TenantId);
 
         // And on the replica. UserLookupRepository's upsert bypasses this deliberately — see the
         // reasoning in LookupRepositories.cs — but every read path goes through it.

@@ -19,7 +19,8 @@ namespace NorthernLink.Budgeting.Application.Codes.Update;
 public sealed class UpdateBudgetCodeCommandHandler(
     IBudgetCodeRepository repository,
     IBudgetPeriodRepository periods,
-    IUserLookupRepository users)
+    IUserLookupRepository users,
+    ICostCentreRepository costCentres)
     : ICommandHandler<UpdateBudgetCodeCommand>
 {
     public async Task<Result> Handle(UpdateBudgetCodeCommand command, CancellationToken cancellationToken)
@@ -48,6 +49,15 @@ public sealed class UpdateBudgetCodeCommandHandler(
         if (ownerResult.IsFailure)
         {
             return ownerResult;
+        }
+
+        // The code's stored value is passed so an unchanged cost centre is accepted even if it has
+        // since been retired in the register — retiring an entry must not freeze existing codes.
+        var costCentreResult = await BudgetCodeCostCentreRule.ValidateAsync(
+            costCentres, command.Details, budgetCode.CostCentre, cancellationToken);
+        if (costCentreResult.IsFailure)
+        {
+            return costCentreResult;
         }
 
         var result = budgetCode.Update(command.Details, command.ActorId);

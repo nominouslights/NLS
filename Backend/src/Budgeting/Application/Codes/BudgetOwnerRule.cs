@@ -16,19 +16,31 @@ namespace NorthernLink.Budgeting.Application.Codes;
 /// </summary>
 public static class BudgetOwnerRule
 {
-    public static async Task<Result> ValidateAsync(
+    public static Task<Result> ValidateAsync(
         IUserLookupRepository users,
         Guid? budgetOwnerUserId,
+        CancellationToken cancellationToken) =>
+        ValidateAsync(users, budgetOwnerUserId, BudgetCodeErrors.BudgetOwnerNotFound, cancellationToken);
+
+    /// <summary>
+    /// The same rule for any aggregate that names an accountable user (the cost-centre register
+    /// uses it too), reporting <paramref name="notFound"/> — the caller's own error — when the id
+    /// names nobody in this tenant's replica.
+    /// </summary>
+    public static async Task<Result> ValidateAsync(
+        IUserLookupRepository users,
+        Guid? ownerUserId,
+        Error notFound,
         CancellationToken cancellationToken)
     {
-        if (budgetOwnerUserId is not { } userId)
+        if (ownerUserId is not { } userId)
         {
             return Result.Success();
         }
 
         var owner = await users.GetAsync(userId, cancellationToken);
         return owner is null
-            ? Result.Failure(BudgetCodeErrors.BudgetOwnerNotFound)
+            ? Result.Failure(notFound)
             : Result.Success();
     }
 }

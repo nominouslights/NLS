@@ -16,13 +16,15 @@ namespace NorthernLink.Budgeting.Application.Codes.Create;
 /// Order matters and is deliberate: domain validation runs first, then the period (exists, and
 /// Draft or Open), then the cross-row lookups. A malformed payload reports the validation error
 /// rather than a conflict or a not-found for a parent it was never going to reach — the rule
-/// <c>Invalid_details_report_validation_not_conflict</c> pins.
+/// <c>Invalid_details_report_validation_not_conflict</c> pins. The cost centre is checked last,
+/// against the tenant's register (<see cref="BudgetCodeCostCentreRule"/>).
 /// </para>
 /// </summary>
 public sealed class CreateBudgetCodeCommandHandler(
     IBudgetCodeRepository repository,
     IBudgetPeriodRepository periods,
-    IUserLookupRepository users)
+    IUserLookupRepository users,
+    ICostCentreRepository costCentres)
     : ICommandHandler<CreateBudgetCodeCommand, Guid>
 {
     public async Task<Result<Guid>> Handle(CreateBudgetCodeCommand command, CancellationToken cancellationToken)
@@ -66,6 +68,14 @@ public sealed class CreateBudgetCodeCommandHandler(
         if (ownerResult.IsFailure)
         {
             return Result.Failure<Guid>(ownerResult.Error);
+        }
+
+        // currentCostCentre: null — a new code has no existing value to be lenient about.
+        var costCentreResult = await BudgetCodeCostCentreRule.ValidateAsync(
+            costCentres, command.Details, currentCostCentre: null, cancellationToken);
+        if (costCentreResult.IsFailure)
+        {
+            return Result.Failure<Guid>(costCentreResult.Error);
         }
 
         repository.Add(budgetCode);

@@ -42,6 +42,21 @@ public static class BudgetCodeErrors
         "Budgeting.Code.CostCentreNotAllowedForRevenue",
         "A revenue code cannot carry a cost centre — a cost centre attributes cost, not revenue.");
 
+    // --- The cost centre must name an entry of the tenant's register (BudgetCodeCostCentreRule).
+    // Checked in the application layer: the aggregate cannot see the register. ---
+
+    public static readonly Error CostCentreNotFound = Error.Validation(
+        "Budgeting.Code.CostCentreNotFound",
+        "That cost centre is not in the cost-centre register. Add it to the register first, or choose an existing one.");
+
+    /// <summary>
+    /// Only when the value is being set or changed: a code that already carries a cost centre
+    /// which has since been retired keeps it, and can still be saved with it unchanged.
+    /// </summary>
+    public static readonly Error CostCentreRetired = Error.Conflict(
+        "Budgeting.Code.CostCentreRetired",
+        "That cost centre is retired and cannot be given to a budget code. Choose an active one, or restore it in the register first.");
+
     public static readonly Error GlAccountCodeTooLong = Error.Validation(
         "Budgeting.Code.GlAccountCodeTooLong",
         $"The GL account code must be {BudgetCode.GlAccountCodeMaxLength} characters or fewer.");

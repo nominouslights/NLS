@@ -15,6 +15,7 @@ import {
   deleteBudgetCode,
   listBudgetCodes,
   listBudgetOwnerCandidates,
+  listCostCentres,
   refetchUntil,
   seedStarterBudgetCodes,
   setBudgetCodeActive,
@@ -27,7 +28,9 @@ import {
   type BudgetCodeCopyResult,
   type BudgetCodeRecord,
   type BudgetOwnerOption,
+  type CostCentreRecord,
 } from "@/lib/api/budgeting";
+import { findCostCentre } from "@/lib/costCentres";
 import { usePeriodHold } from "@/lib/periodHold";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import BudgetCodeFormModal from "@/components/BudgetCodeFormModal";
@@ -88,6 +91,8 @@ export default function BudgetCodes({
   // null = still loading.
   const [codes, setCodes] = useState<BudgetCode[] | null>(null);
   const [owners, setOwners] = useState<BudgetOwnerOption[]>([]);
+  /** The tenant-wide cost-centre register (retired included), for the code form's picker. */
+  const [costCentres, setCostCentres] = useState<CostCentreRecord[] | null>(null);
   const [error, setError] = useState<{ message: string; code: string } | null>(null);
   const [editing, setEditing] = useState<BudgetCode | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -136,6 +141,14 @@ export default function BudgetCodes({
     listBudgetOwnerCandidates().then(
       (rows) => {
         if (active) setOwners(rows);
+      },
+      () => {},
+    );
+    // The cost-centre register, tenant-wide. A failure leaves the picker offering only a code's
+    // current value (the modal says the register did not load) — not worth blocking the chart.
+    listCostCentres({ includeInactive: true }).then(
+      (rows) => {
+        if (active) setCostCentres(rows);
       },
       () => {},
     );
@@ -525,7 +538,7 @@ export default function BudgetCodes({
                       }
                     />
                     {costCentreApplies(selected.category) && (
-                      <DetailRow label="Cost centre" value={selected.costCentre ?? "—"} />
+                      <DetailRow label="Cost centre" value={costCentreDisplay(selected.costCentre, costCentres)} />
                     )}
                     <DetailRow
                       label="Parent code"
@@ -614,12 +627,25 @@ export default function BudgetCodes({
           code={editing}
           allCodes={list}
           owners={owners}
+          costCentres={costCentres}
+          onCostCentresChanged={setCostCentres}
           onClose={() => setShowForm(false)}
           onSaved={handleSaved}
         />
       )}
     </Screen>
   );
+}
+
+/**
+ * A code's cost centre as "THOMPSON · Thompson base", with the register's name when it resolves
+ * (ordinal match, as the server joins) and "(retired)" when that entry is retired.
+ */
+function costCentreDisplay(value: string | null, register: CostCentreRecord[] | null): string {
+  if (!value) return "—";
+  const entry = findCostCentre(register ?? [], value);
+  if (!entry) return value;
+  return `${entry.code} · ${entry.name}${entry.isActive ? "" : " (retired)"}`;
 }
 
 /** The text under a pending two-click confirm, naming what the second click will do. */

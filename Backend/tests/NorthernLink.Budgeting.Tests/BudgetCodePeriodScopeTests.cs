@@ -21,6 +21,7 @@ public class BudgetCodePeriodScopeTests
     private readonly InMemoryBudgetCodeRepository _codes = new();
     private readonly InMemoryBudgetPeriodRepository _periods = new();
     private readonly InMemoryUserLookupRepository _users = new();
+    private readonly InMemoryCostCentreRepository _costCentres = new();
     private readonly StubBudgetCodeUsageProbe _usageProbe = new();
 
     private readonly BudgetPeriod _q3 = TestBudgeting.PeriodIn(PeriodState.Draft, PeriodGranularity.Quarter, 2026, 3);
@@ -36,8 +37,8 @@ public class BudgetCodePeriodScopeTests
     {
         _periods.Add(_q3);
         _periods.Add(_q4);
-        _create = new CreateBudgetCodeCommandHandler(_codes, _periods, _users);
-        _update = new UpdateBudgetCodeCommandHandler(_codes, _periods, _users);
+        _create = new CreateBudgetCodeCommandHandler(_codes, _periods, _users, _costCentres);
+        _update = new UpdateBudgetCodeCommandHandler(_codes, _periods, _users, _costCentres);
         _setActive = new SetBudgetCodeActiveCommandHandler(_codes, _periods);
         _delete = new DeleteBudgetCodeCommandHandler(_codes, _periods, _usageProbe);
         _seed = new SeedStarterBudgetCodesCommandHandler(_codes, _periods);

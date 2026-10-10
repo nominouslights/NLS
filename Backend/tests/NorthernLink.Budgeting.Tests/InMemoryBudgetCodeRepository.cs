@@ -38,6 +38,10 @@ internal sealed class InMemoryBudgetCodeRepository : IBudgetCodeRepository
     public Task<IReadOnlyList<BudgetCode>> ListForPeriodAsync(Guid periodId, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<BudgetCode>>(Visible.Where(c => c.PeriodId == periodId).ToList());
 
+    // Every period, ordinal — matching the real repository's cross-period cost-centre probe.
+    public Task<bool> AnyWithCostCentreAsync(string costCentreCode, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Visible.Any(c => string.Equals(c.CostCentre, costCentreCode, StringComparison.Ordinal)));
+
     public void Add(BudgetCode budgetCode) => Codes.Add(budgetCode);
 
     public void Remove(BudgetCode budgetCode) => Codes.Remove(budgetCode);
