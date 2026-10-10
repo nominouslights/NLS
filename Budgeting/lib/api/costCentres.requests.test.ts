@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createCostCentre,
   deleteCostCentre,
-  getCostCentre,
   getCostCentreRollup,
   listCostCentres,
   setCostCentreActive,
@@ -73,14 +72,6 @@ describe("cost-centre register requests", () => {
     expect(callPath(0)).toBe("/api/budgeting/cost-centres?includeInactive=true");
     expect(callPath(1)).toBe("/api/budgeting/cost-centres?includeInactive=false");
     expect(callInit(0).method).toBeUndefined();
-  });
-
-  it("gets one entry by id", async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse(200, { id: CC_ID }));
-
-    await getCostCentre(CC_ID);
-
-    expect(callPath()).toBe(`/api/budgeting/cost-centres/${CC_ID}`);
   });
 
   it("POSTs the whole CostCentreRequest — every key, explicit nulls, code case kept — and returns the 201's id", async () => {

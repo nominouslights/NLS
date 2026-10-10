@@ -33,11 +33,18 @@ namespace NorthernLink.Budgeting.Application.Codes.CopyFromPeriod;
 /// top-level too.
 /// </para>
 /// <para>
-/// <b>Cost centre: carried as-is, with no register check.</b> The string was validated against
-/// the register when the source code was written, and it cannot have vanished since — the
-/// register refuses to delete an entry any code in any period carries
-/// (<c>Budgeting.CostCentre.InUse</c>), and the <c>AddCostCentres</c> migration backfilled an
-/// entry for every value that predates the register. A <em>retired</em> entry is still carried:
+/// <b>Cost centre: carried as-is, with no register check and no register lock.</b> The string was
+/// validated against the register when the source code was written (under the (tenant, code)
+/// lock — <see cref="BudgetCodeCostCentreRule.LockIfCheckedAsync"/>), and while the source code
+/// still carries it the register refuses to delete it (<c>Budgeting.CostCentre.InUse</c>, probed
+/// under the same lock). The <c>AddCostCentres</c> migration backfilled an entry for every value
+/// that predates the register. One window is left open on purpose. If, between this handler's
+/// read of the source chart and its commit, the <em>last</em> code carrying the string is edited
+/// off it <em>and</em> the entry is deleted, the copy carries an unregistered string. That needs
+/// two further writes to land inside one request. The read side lists such a string as its own
+/// rollup row rather than losing it, and an edit that changes the copied code's cost centre must
+/// pick a registered entry. Closing it would mean locking and re-checking every distinct string the copy carries.
+/// A <em>retired</em> entry is still carried:
 /// it is the same value moving forward, the "unchanged is allowed" leniency the edit path gives
 /// (<see cref="BudgetCodeCostCentreRule"/>), and refusing it would make one stale cost centre
 /// block — or silently strip — a whole chart copy. The planner sees the retired cost centre on

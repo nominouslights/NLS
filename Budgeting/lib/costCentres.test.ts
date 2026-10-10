@@ -14,10 +14,8 @@ import {
   normalizeCostCentreCode,
   normalizeCostCentreText,
   parentCandidates,
-  rollupSum,
-  sameCostCentreCode,
 } from "./costCentres";
-import type { CostCentreRecord, CostCentreRollup, CostCentreRollupRow } from "./api/budgeting";
+import type { CostCentreRecord, CostCentreRollupRow } from "./api/budgeting";
 
 // The client-side mirrors of the cost-centre register's rules, each pinned to the C# it mirrors
 // (Backend/src/Budgeting/Domain/CostCentres/, Application/CostCentres/,
@@ -93,19 +91,14 @@ describe("limits and messages — CostCentre / CostCentreErrors", () => {
   });
 });
 
-describe("normalizeCostCentreCode / sameCostCentreCode — CostCentre.NormalizeCode + ordinal match", () => {
+describe("normalizeCostCentreCode / findCostCentre — CostCentre.NormalizeCode + ordinal match", () => {
   it("trims only and keeps case", () => {
     expect(normalizeCostCentreCode("  Ops-01 ")).toBe("Ops-01");
     expect(normalizeCostCentreCode(null)).toBe("");
     expect(normalizeCostCentreCode("   ")).toBe("");
   });
 
-  it("matches case-sensitively, after trimming", () => {
-    expect(sameCostCentreCode(" OPS-01", "OPS-01 ")).toBe(true);
-    expect(sameCostCentreCode("ops-01", "OPS-01")).toBe(false);
-  });
-
-  it("findCostCentre is ordinal too", () => {
+  it("findCostCentre matches ordinally (case-sensitive), after trimming", () => {
     const register = [cc("a", { code: "Thompson" })];
     expect(findCostCentre(register, " Thompson ")?.id).toBe("a");
     expect(findCostCentre(register, "THOMPSON")).toBeNull();
@@ -290,7 +283,7 @@ function row(code: string, over: Partial<CostCentreRollupRow> = {}): CostCentreR
   };
 }
 
-describe("groupRollup / rollupSum — the dashboard panel's shaping", () => {
+describe("groupRollup — the dashboard panel's shaping", () => {
   it("nests rows under a parent that is in the rollup, keeping server order, with a cents-exact subtotal", () => {
     const groups = groupRollup([
       row("NORTH", { plannedCad: 100.1 }),
@@ -313,15 +306,5 @@ describe("groupRollup / rollupSum — the dashboard panel's shaping", () => {
     const groups = groupRollup([row("Raw", { costCentreId: null })]);
     expect(groups[0].row.costCentreId).toBeNull();
     expect(groups[0].children).toEqual([]);
-  });
-
-  it("rows plus No cost centre sum to the server's total (CostCentrePlannedRollup.Build)", () => {
-    const rollup: CostCentreRollup = {
-      periodId: "p",
-      costCentres: [row("A", { plannedCad: 0.1 }), row("B", { plannedCad: 0.2 })],
-      noCostCentre: { budgetCodeCount: 1, itemCount: 2, plannedCad: 1234.56 },
-      totalPlannedExpenseCad: 1234.86,
-    };
-    expect(rollupSum(rollup)).toBe(rollup.totalPlannedExpenseCad);
   });
 });

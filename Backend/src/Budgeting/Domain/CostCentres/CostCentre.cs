@@ -173,7 +173,12 @@ public sealed class CostCentre : AggregateRoot, ITenantScoped
         ParentId = details.ParentId;
     }
 
-    private static Result Validate(CostCentreDetails details)
+    /// <summary>
+    /// The field rules <see cref="Create"/> and <see cref="Update"/> both run. Public (the
+    /// <c>Vendor.Validate</c> precedent) so the update handler can report a malformed payload
+    /// before its parent and owner lookups.
+    /// </summary>
+    public static Result Validate(CostCentreDetails details)
     {
         if (string.IsNullOrWhiteSpace(details.Name))
         {
