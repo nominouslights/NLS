@@ -8,10 +8,12 @@ namespace NorthernLink.Trips.Application.Integration;
 
 /// <summary>
 /// Keeps <c>trips.driver_lookup</c> current from the Drivers module's change stream, so
-/// driver assignment can validate existence + Active status without a library reference.
-/// Handlers run outside any HTTP request, so the event's tenant is pushed as the ambient
-/// tenant for the write (RLS session variable). Delivery is at-least-once: the upsert is
-/// keyed on DriverId, so replays converge on the same row.
+/// driver assignment can validate existence + Active status, and the driver-facing routes
+/// can resolve a caller to their driver row (<see cref="DriverLookup.UserId"/>), without a
+/// library reference. Handlers run outside any HTTP request, so the event's tenant is
+/// pushed as the ambient tenant for the write (RLS session variable). Delivery is
+/// at-least-once: the upsert is keyed on DriverId, so replays converge on the same row —
+/// including a null <c>UserId</c>, which an unlink must write through (it revokes access).
 /// </summary>
 public sealed class DriverChangedIntegrationEventHandler(
     IDriverLookupRepository repository,
@@ -30,6 +32,7 @@ public sealed class DriverChangedIntegrationEventHandler(
                     Name = integrationEvent.Name,
                     LicenceClass = integrationEvent.LicenceClass,
                     Status = integrationEvent.Status,
+                    UserId = integrationEvent.UserId,
                     UpdatedAtUtc = DateTimeOffset.UtcNow,
                 },
                 cancellationToken);

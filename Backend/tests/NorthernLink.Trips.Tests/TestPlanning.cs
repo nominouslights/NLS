@@ -110,14 +110,20 @@ internal static class TestPlanning
             defaultDriverId: defaultDriverId,
             generationHorizonDays: generationHorizonDays);
 
-    /// <summary>The baseline driver as an Active driver_lookup row — what a template's default driver resolves to.</summary>
-    public static DriverLookup ActiveDriver(string status = DriverLookup.ActiveStatus) => new()
+    /// <summary>
+    /// The baseline driver as an Active driver_lookup row — what a template's default driver
+    /// resolves to. <paramref name="userId"/> links it to a signed-in account for the identity
+    /// gate tests; <paramref name="driverId"/> mints a second driver.
+    /// </summary>
+    public static DriverLookup ActiveDriver(
+        string status = DriverLookup.ActiveStatus, Guid? userId = null, Guid? driverId = null) => new()
     {
-        DriverId = DriverId,
+        DriverId = driverId ?? DriverId,
         TenantId = TenantId,
         Name = DriverName,
         LicenceClass = "Class 4",
         Status = status,
+        UserId = userId,
         UpdatedAtUtc = DateTimeOffset.UtcNow,
     };
 

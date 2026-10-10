@@ -1,4 +1,5 @@
 using NorthernLink.Trips.Application.Abstractions;
+using NorthernLink.Trips.Application.Trips;
 using NorthernLink.Trips.Application.Trips.GetActivity;
 using NorthernLink.Trips.Domain.Trips;
 using Xunit;
@@ -10,7 +11,10 @@ public class GetTripActivityQueryHandlerTests
     private readonly FakeTripRepository _trips = new();
     private readonly FakeTripActivityReadService _activity = new();
 
-    private GetTripActivityQueryHandler Handler => new(_trips, _activity);
+    private readonly FakeDriverLookupRepository _drivers = new();
+
+    private GetTripActivityQueryHandler Handler =>
+        new(_trips, _activity, new TripOperatorAccess(FakeCurrentActor.Dispatcher, _drivers));
 
     private static readonly DateTimeOffset T0 = new(2026, 7, 21, 6, 30, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset T1 = T0.AddMinutes(5);

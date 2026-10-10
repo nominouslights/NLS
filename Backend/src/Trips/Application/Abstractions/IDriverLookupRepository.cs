@@ -11,5 +11,12 @@ public interface IDriverLookupRepository
 {
     Task<DriverLookup?> GetAsync(Guid driverId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// The driver row the Identity user <paramref name="userId"/> is linked to, in the current
+    /// tenant, or null when the account owns no driver. At most one per tenant (partial unique
+    /// index on <c>(tenant_id, user_id)</c>).
+    /// </summary>
+    Task<DriverLookup?> GetByUserIdAsync(Guid userId, CancellationToken cancellationToken = default);
+
     Task UpsertAsync(DriverLookup driver, CancellationToken cancellationToken = default);
 }

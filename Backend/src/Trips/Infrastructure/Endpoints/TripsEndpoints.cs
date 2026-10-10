@@ -34,8 +34,10 @@ public static class TripsEndpoints
 
         // …reading one is what the driver does at the door: the manifest IS the passenger list
         // for the run. Reads only — boarding (marking riders on/off) has no endpoint yet; when
-        // it lands it belongs on this group, with a caller-owns-this-trip check once Trips can
-        // resolve a caller to a driver (see the KNOWN GAP note in TripPlanningEndpoints).
+        // it lands it belongs on this group, behind the same caller-owns-this-trip check the trip
+        // routes run (TripOperatorAccess) — these two reads do not run it yet, so a Driver-role
+        // caller can still read any manifest in the tenant; narrowing them to the caller's own
+        // trips is the open follow-up.
         var manifestReading = app.MapGroup("/api/trips/manifests")
             .RequireAuthorization(AuthorizationPolicies.DriverAccess);
 
