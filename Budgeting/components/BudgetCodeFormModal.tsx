@@ -158,10 +158,13 @@ export default function BudgetCodeFormModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /**
-   * The register as of an inline create here — kept so the new entry is offered at once, even
-   * before the caller's copy (fed back via onCostCentresChanged) arrives as the prop.
+   * ONLY the entries created inline in this modal — never the register snapshot that came back
+   * with them. A snapshot would be merged against every later prop, so an entry deleted since
+   * would come back. These are kept so a new entry is offered even when the caller does not take
+   * the register via onCostCentresChanged (the caller that does, Budget Codes, ignores its own
+   * stale initial load, so its copy never regresses below what was pushed up).
    */
-  const [createdHere, setCreatedHere] = useState<CostCentreRecord[] | null>(null);
+  const [createdHere, setCreatedHere] = useState<CostCentreRecord[]>([]);
   // Derived, never copied once at mount: the caller's listCostCentres runs in parallel with the
   // modal opening and may resolve AFTER it, and the picker must follow when it does.
   const register = mergeRegister(costCentres, createdHere);
@@ -202,10 +205,12 @@ export default function BudgetCodeFormModal({
   }
 
   function handleCostCentreCreated(records: CostCentreRecord[], id: string) {
-    setCreatedHere(records);
     onCostCentresChanged?.(records);
     const created = records.find((r) => r.id === id);
-    if (created) setCostCentre(created.code);
+    if (created) {
+      setCreatedHere((prev) => [...prev.filter((c) => c.id !== created.id), created]);
+      setCostCentre(created.code);
+    }
   }
 
   const ownerOptions = [
@@ -485,15 +490,16 @@ export default function BudgetCodeFormModal({
 }
 
 /**
- * The caller's register plus any entry an inline create added that the caller's copy does not
- * have yet (matched by id; the caller's copy wins otherwise), in register (code, ordinal) order.
- * null only when neither has loaded.
+ * The caller's register plus any entry created inline here that the caller's copy does not have
+ * (matched by id; the caller's copy wins otherwise), in register (code, ordinal) order. Only the
+ * inline-created entries are ever added, so nothing the caller's register has dropped returns.
+ * null only when the register has not loaded and nothing was created here.
  */
 function mergeRegister(
   fromProp: CostCentreRecord[] | null,
-  createdHere: CostCentreRecord[] | null,
+  createdHere: CostCentreRecord[],
 ): CostCentreRecord[] | null {
-  if (createdHere === null) return fromProp;
+  if (createdHere.length === 0) return fromProp;
   if (fromProp === null) return createdHere;
   const known = new Set(fromProp.map((c) => c.id));
   const extra = createdHere.filter((c) => !known.has(c.id));

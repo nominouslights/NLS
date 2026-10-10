@@ -61,9 +61,14 @@ type ScreenError = {
   message: string;
   code: string;
   /**
+   * "load" offers RETRY (a reload). An action's refusal does NOT — reloading would only clear
+   * the explanation — and offers just the action relevant to it (InUse → RETIRE INSTEAD).
+   */
+  source: "load" | "action";
+  /**
    * For an action's refusal, the entry it was about. The InUse banner's RETIRE INSTEAD acts on
    * THIS entry only, and a selection change clears the error — so it can never land on another.
-   * Absent for a load failure, which survives a selection change and offers RETRY.
+   * Absent for a load failure, which survives a selection change.
    */
   entryId?: string;
 };
@@ -78,18 +83,26 @@ export default function CostCentres({ api = DEFAULT_API }: { api?: CostCentresAp
   const [form, setForm] = useState<{ entry: CostCentreRecord | null } | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<PendingConfirm>(null);
+  /**
+   * A write the server ACCEPTED whose follow-up refetch failed. Deliberately not an error: the
+   * change is saved, and calling it "failed" would invite a repeat (a second delete 404s). Its
+   * only action is RETRY, which reloads the list.
+   */
+  const [staleNote, setStaleNote] = useState<string | null>(null);
 
   const applyLoaded = useCallback((records: CostCentreRecord[]) => {
     setRegister(records);
     setError(null);
+    setStaleNote(null);
   }, []);
 
   const applyError = useCallback((e: unknown) => {
     setRegister((prev) => prev ?? []);
+    setStaleNote(null);
     setError(
       e instanceof ApiError
-        ? { message: e.message, code: e.code }
-        : { message: "Failed to load the cost-centre register.", code: "Unknown" },
+        ? { message: e.message, code: e.code, source: "load" }
+        : { message: "Failed to load the cost-centre register.", code: "Unknown", source: "load" },
     );
   }, []);
 
@@ -152,19 +165,33 @@ export default function CostCentres({ api = DEFAULT_API }: { api?: CostCentresAp
     if (busy) return;
     setBusy(true);
     setError(null);
+    setStaleNote(null);
     try {
       await action();
-      // Only once the server has accepted the write — a refused one must leave the screen as it was.
-      onAccepted?.();
-      applyLoaded(await refetchUntil(() => api.list({ includeInactive: true }), settled));
     } catch (e) {
-      // Keep the list; show the server's refusal verbatim, bound to the entry it was about.
+      // The write itself was refused or failed: keep the list, and show the server's refusal
+      // verbatim, bound to the entry it was about.
       setRegister((prev) => prev ?? []);
       setError(
         e instanceof ApiError
-          ? { message: e.message, code: e.code, entryId: target.id }
-          : { message: `Failed to update ${target.code} — please try again.`, code: "Unknown", entryId: target.id },
+          ? { message: e.message, code: e.code, source: "action", entryId: target.id }
+          : {
+              message: `Failed to update ${target.code} — please try again.`,
+              code: "Unknown",
+              source: "action",
+              entryId: target.id,
+            },
       );
+      setBusy(false);
+      return;
+    }
+    // Only once the server has accepted the write — a refused one must leave the screen as it was.
+    onAccepted?.();
+    try {
+      applyLoaded(await refetchUntil(() => api.list({ includeInactive: true }), settled));
+    } catch {
+      // The write landed; only the re-read failed. Never "failed" — that would invite a repeat.
+      setStaleNote(`${target.code}: saved — couldn't refresh the list.`);
     } finally {
       setBusy(false);
     }
@@ -238,15 +265,38 @@ export default function CostCentres({ api = DEFAULT_API }: { api?: CostCentresAp
       {error && (
         <div style={{ marginBottom: 12 }}>
           <ErrorNotice title="Cost centres" message={error.message} code={error.code} />
-          <div style={{ marginTop: 9, display: "flex", gap: 10 }}>
-            {inUseTarget ? (
-              <ActionButton variant="amber" onClick={() => void toggleActive(inUseTarget)} disabled={busy}>
-                {confirmingRetire ? "CONFIRM RETIRE" : "RETIRE INSTEAD"}
-              </ActionButton>
-            ) : (
-              <ActionButton onClick={load}>RETRY</ActionButton>
-            )}
-          </div>
+          {/* RETRY only for a load failure. An action's refusal explains a rule; reloading would
+              just clear that explanation. It keeps only its own relevant action, if any. */}
+          {(error.source === "load" || inUseTarget) && (
+            <div style={{ marginTop: 9, display: "flex", gap: 10 }}>
+              {error.source === "load" && <ActionButton onClick={load}>RETRY</ActionButton>}
+              {inUseTarget && (
+                <ActionButton variant="amber" onClick={() => void toggleActive(inUseTarget)} disabled={busy}>
+                  {confirmingRetire ? "CONFIRM RETIRE" : "RETIRE INSTEAD"}
+                </ActionButton>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {staleNote && !error && (
+        <div
+          data-testid="cost-centres-stale"
+          style={{
+            marginBottom: 12,
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            flexWrap: "wrap",
+            fontFamily: fonts.body,
+            fontSize: 11.5,
+            color: colors.textSecondary,
+            lineHeight: 1.6,
+          }}
+        >
+          <span>{staleNote} The list below may be out of date.</span>
+          <ActionButton onClick={load}>RETRY</ActionButton>
         </div>
       )}
 

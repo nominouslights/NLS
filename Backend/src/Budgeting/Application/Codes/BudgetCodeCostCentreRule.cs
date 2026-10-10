@@ -24,9 +24,10 @@ namespace NorthernLink.Budgeting.Application.Codes;
 /// </para>
 /// <para>
 /// <b>Callers lock first.</b> A register lookup that passes can still be followed by a
-/// cost-centre delete before the budget code commits. Callers therefore take
-/// <see cref="LockIfCheckedAsync"/> before <see cref="ValidateAsync"/> and commit it after their
-/// save. The delete handler probes usage under the same lock.
+/// cost-centre delete or retirement before the budget code commits. Callers therefore take
+/// <see cref="LockIfCheckedAsync"/> (the tenant's register lock,
+/// <see cref="ICostCentreRepository.LockRegisterAsync"/>) before <see cref="ValidateAsync"/> and
+/// commit it after their save. The delete handler probes usage under the same lock.
 /// </para>
 /// </summary>
 public static class BudgetCodeCostCentreRule
@@ -57,7 +58,7 @@ public static class BudgetCodeCostCentreRule
     }
 
     /// <summary>
-    /// Takes the register's (tenant, code) lock (<see cref="ICostCentreRepository.LockCodeAsync"/>)
+    /// Takes the tenant's register lock (<see cref="ICostCentreRepository.LockRegisterAsync"/>)
     /// when, and only when, <see cref="ValidateAsync"/> would look the code up. The caller holds
     /// the returned scope across <see cref="ValidateAsync"/> and its save, then commits it. That
     /// stops a concurrent cost-centre delete from passing its usage probe between this register
@@ -65,14 +66,14 @@ public static class BudgetCodeCostCentreRule
     /// to lock: a blank or unchanged value, or one the aggregate will refuse anyway. An unchanged
     /// value is already committed on this code, so the delete's probe sees it without a lock.
     /// </summary>
-    public static async Task<ICostCentreCodeLock?> LockIfCheckedAsync(
+    public static async Task<ICostCentreRegisterLock?> LockIfCheckedAsync(
         ICostCentreRepository costCentres,
         Guid tenantId,
         BudgetCodeDetails details,
         string? currentCostCentre,
         CancellationToken cancellationToken) =>
-        RegisterCheckFor(details, currentCostCentre) is { } requested
-            ? await costCentres.LockCodeAsync(tenantId, requested, cancellationToken)
+        RegisterCheckFor(details, currentCostCentre) is not null
+            ? await costCentres.LockRegisterAsync(tenantId, cancellationToken)
             : null;
 
     /// <summary>The normalized code <see cref="ValidateAsync"/> must look up, or null when it skips the register.</summary>

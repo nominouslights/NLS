@@ -34,38 +34,37 @@ internal sealed class CostCentreReadService(BudgetingDbContext context) : ICostC
             return [];
         }
 
-        var users = await LoadUsersAsync(userIds: null, cancellationToken);
+        var listed = all.Where(c => includeInactive || c.IsActive).ToList();
+        var users = await LoadUsersAsync(
+            listed.SelectMany(c => new[] { c.OwnerUserId, c.CreatedBy, c.ModifiedBy }), cancellationToken);
         var byId = all.ToDictionary(c => c.Id);
 
-        return all
-            .Where(c => includeInactive || c.IsActive)
-            .Select(c => ToResponse(c, byId, users))
-            .ToList();
+        return listed.Select(c => ToResponse(c, byId, users)).ToList();
     }
 
     public async Task<CostCentreResponse?> GetCostCentreAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        // The entry and its parent in one round trip: the parent is whichever row's id equals the
-        // entry's parent_id (a correlated lookup on the same table).
-        var rows = await context.CostCentreReadModels
+        // Two primary-key seeks (the entry, then its parent by id) rather than one OR'd query with
+        // a correlated EXISTS, which the planner cannot answer from the primary key index.
+        var costCentre = await context.CostCentreReadModels
             .AsNoTracking()
-            .Where(c => c.Id == id
-                || context.CostCentreReadModels.Any(child => child.Id == id && child.ParentId == c.Id))
-            .ToListAsync(cancellationToken);
-
-        var costCentre = rows.FirstOrDefault(c => c.Id == id);
+            .FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
         if (costCentre is null)
         {
             return null;
         }
 
-        var byId = rows.ToDictionary(c => c.Id);
+        var byId = new Dictionary<Guid, CostCentreReadModel> { [costCentre.Id] = costCentre };
+        if (costCentre.ParentId is { } parentId
+            && await context.CostCentreReadModels
+                .AsNoTracking()
+                .FirstOrDefaultAsync(c => c.Id == parentId, cancellationToken) is { } parent)
+        {
+            byId[parent.Id] = parent;
+        }
 
-        Guid?[] referenced = [costCentre.OwnerUserId, costCentre.CreatedBy, costCentre.ModifiedBy];
-        var userIds = referenced.OfType<Guid>().Distinct().ToList();
-        var users = userIds.Count == 0
-            ? new Dictionary<Guid, UserDisplay>()
-            : await LoadUsersAsync(userIds, cancellationToken);
+        var users = await LoadUsersAsync(
+            [costCentre.OwnerUserId, costCentre.CreatedBy, costCentre.ModifiedBy], cancellationToken);
 
         return ToResponse(costCentre, byId, users);
     }
@@ -91,22 +90,29 @@ internal sealed class CostCentreReadService(BudgetingDbContext context) : ICostC
                 c.Id, c.Code, c.Name, c.IsActive, c.ParentId, c.OwnerUserId))
             .ToListAsync(cancellationToken);
 
-        var users = await LoadUsersAsync(userIds: null, cancellationToken);
+        // The rollup displays only each register entry's owner.
+        var users = await LoadUsersAsync(register.Select(e => e.OwnerUserId), cancellationToken);
 
         return CostCentrePlannedRollup.Build(periodId, items, codes, register, users);
     }
 
-    /// <summary>The tenant's user_lookup rows as display values: all of them, or only <paramref name="userIds"/>.</summary>
-    private Task<Dictionary<Guid, UserDisplay>> LoadUsersAsync(
-        IReadOnlyCollection<Guid>? userIds, CancellationToken cancellationToken)
+    /// <summary>
+    /// The user_lookup rows for exactly the ids the caller will display (nulls dropped, distinct),
+    /// as display values. No ids, no query.
+    /// </summary>
+    private async Task<Dictionary<Guid, UserDisplay>> LoadUsersAsync(
+        IEnumerable<Guid?> userIds, CancellationToken cancellationToken)
     {
-        var query = context.UserLookups.AsNoTracking();
-        if (userIds is not null)
+        var ids = userIds.OfType<Guid>().Distinct().ToList();
+        if (ids.Count == 0)
         {
-            query = query.Where(u => userIds.Contains(u.UserId));
+            return [];
         }
 
-        return query.ToDictionaryAsync(u => u.UserId, u => new UserDisplay(u.Email, u.FullName), cancellationToken);
+        return await context.UserLookups
+            .AsNoTracking()
+            .Where(u => ids.Contains(u.UserId))
+            .ToDictionaryAsync(u => u.UserId, u => new UserDisplay(u.Email, u.FullName), cancellationToken);
     }
 
     private static CostCentreResponse ToResponse(

@@ -71,8 +71,9 @@ public sealed class CreateBudgetCodeCommandHandler(
         }
 
         // currentCostCentre: null — a new code has no existing value to be lenient about. The
-        // lock (null when there is nothing to check) is held from the register lookup through the
-        // commit, so a concurrent cost-centre delete cannot slip between the two.
+        // tenant's register lock (null when there is nothing to check) is taken before the register
+        // lookup and held through the commit, so a concurrent cost-centre delete or retirement
+        // cannot slip between the two.
         await using var costCentreLock = await BudgetCodeCostCentreRule.LockIfCheckedAsync(
             costCentres, command.TenantId, command.Details, currentCostCentre: null, cancellationToken);
 

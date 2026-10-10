@@ -231,7 +231,8 @@ describe("BudgetCodeFormModal — cost-centre picker", () => {
     fireEvent.click(screen.getByText("CREATE COST CENTRE"));
     await waitFor(() => expect(ccSelect()!.value).toBe("Snow Lake"));
 
-    // The caller's slower, pre-create load lands now.
+    // A caller that hands back a register without the new entry (Budget Codes itself drops its
+    // stale pre-create load — see BudgetCodes.test.tsx — but the modal does not rely on that).
     update({ costCentres: REGISTER });
     expect(optionTexts(ccSelect()!)).toEqual([
       "— No cost centre —",
@@ -240,6 +241,31 @@ describe("BudgetCodeFormModal — cost-centre picker", () => {
       "+ New cost centre…",
     ]);
     expect(ccSelect()!.value).toBe("Snow Lake");
+  });
+
+  it("never resurrects an entry the caller's register has dropped since an inline create", async () => {
+    const created = cc("cc-snow", "Snow Lake", "Snow Lake base");
+    const costCentreApi = {
+      create: vi.fn().mockResolvedValue("cc-snow"),
+      update: vi.fn(),
+      // The register as the inline create's refetch saw it — Thompson still present.
+      list: vi.fn().mockResolvedValue([...REGISTER, created]),
+    } satisfies CostCentreApi;
+    const { update } = renderModal({ costCentreApi });
+
+    fireEvent.change(ccSelect()!, { target: { value: "__new_cost_centre__" } });
+    fireEvent.change(screen.getByPlaceholderText("THOMPSON"), { target: { value: "Snow Lake" } });
+    fireEvent.change(screen.getByPlaceholderText("Thompson base"), { target: { value: "Snow Lake base" } });
+    fireEvent.click(screen.getByText("CREATE COST CENTRE"));
+    await waitFor(() => expect(ccSelect()!.value).toBe("Snow Lake"));
+
+    // Thompson is deleted afterwards; the caller's newer register no longer has it.
+    update({ costCentres: [REGISTER[0], created] });
+    expect(optionTexts(ccSelect()!)).toEqual([
+      "— No cost centre —",
+      "Snow Lake · Snow Lake base",
+      "+ New cost centre…",
+    ]);
   });
 
   it("refuses, before the round trip, a chosen entry retired since it was picked (CostCentreRetired)", () => {

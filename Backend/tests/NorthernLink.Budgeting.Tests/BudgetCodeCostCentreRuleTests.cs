@@ -186,21 +186,36 @@ public class BudgetCodeCostCentreRuleTests
         Assert.Null(code.CostCentre);
     }
 
-    // --- The (tenant, code) lock shared with the cost-centre delete ------------------------------
+    // --- The tenant's register lock, shared with the cost-centre writes --------------------------
 
     [Fact]
-    public async Task Create_checks_the_register_under_the_code_lock_and_commits_it_after_the_save()
+    public async Task Create_checks_the_register_under_the_register_lock_and_commits_it_after_the_save()
     {
         _costCentres.Add(TestBudgeting.CreateCostCentre("THOMPSON"));
         var savesWhenLocked = -1;
-        _costCentres.OnLockAcquired = _ => savesWhenLocked = _codes.SaveChangesCallCount;
+        _costCentres.OnLockAcquired = () => savesWhenLocked = _codes.SaveChangesCallCount;
 
         var result = await CreateAsync(Expense("  THOMPSON "));
 
         Assert.True(result.IsSuccess);
-        Assert.Equal((TestBudgeting.TenantId, "THOMPSON"), Assert.Single(_costCentres.Locks));
+        Assert.Equal(TestBudgeting.TenantId, Assert.Single(_costCentres.Locks));
+        Assert.Equal(["Lock", "GetByCode", "Commit"], _costCentres.Calls);
         Assert.Equal(0, savesWhenLocked);
-        Assert.Equal(["THOMPSON"], _costCentres.CommittedLocks);
+        Assert.Equal([TestBudgeting.TenantId], _costCentres.CommittedLocks);
+    }
+
+    [Fact]
+    public async Task A_retirement_that_won_the_lock_first_is_seen_by_the_create_as_retired()
+    {
+        var entry = TestBudgeting.CreateCostCentre("THOMPSON");
+        _costCentres.Add(entry);
+        _costCentres.OnLockAcquired = () => entry.SetActive(false, null);
+
+        var result = await CreateAsync(Expense("THOMPSON"));
+
+        Assert.Equal(BudgetCodeErrors.CostCentreRetired, result.Error);
+        Assert.Empty(_codes.Codes);
+        Assert.Empty(_costCentres.CommittedLocks);
     }
 
     [Fact]
@@ -210,7 +225,7 @@ public class BudgetCodeCostCentreRuleTests
         // lookup runs after acquisition, so it sees the entry gone rather than a stale "exists".
         var entry = TestBudgeting.CreateCostCentre("THOMPSON");
         _costCentres.Add(entry);
-        _costCentres.OnLockAcquired = _ => _costCentres.CostCentres.Remove(entry);
+        _costCentres.OnLockAcquired = () => _costCentres.CostCentres.Remove(entry);
 
         var result = await CreateAsync(Expense("THOMPSON"));
 
@@ -230,8 +245,9 @@ public class BudgetCodeCostCentreRuleTests
         Assert.Empty(_costCentres.Locks);
 
         Assert.True((await UpdateAsync(code.Id, Expense("CHURCHILL"))).IsSuccess);
-        Assert.Equal((TestBudgeting.TenantId, "CHURCHILL"), Assert.Single(_costCentres.Locks));
-        Assert.Equal(["CHURCHILL"], _costCentres.CommittedLocks);
+        Assert.Equal(TestBudgeting.TenantId, Assert.Single(_costCentres.Locks));
+        Assert.Equal(["Lock", "GetByCode", "Commit"], _costCentres.Calls);
+        Assert.Equal([TestBudgeting.TenantId], _costCentres.CommittedLocks);
     }
 
     [Theory]

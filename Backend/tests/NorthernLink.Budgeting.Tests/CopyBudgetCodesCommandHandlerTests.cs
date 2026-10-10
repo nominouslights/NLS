@@ -18,6 +18,7 @@ public class CopyBudgetCodesCommandHandlerTests
 {
     private readonly InMemoryBudgetCodeRepository _codes = new();
     private readonly InMemoryBudgetPeriodRepository _periods = new();
+    private readonly InMemoryCostCentreRepository _costCentres = new();
     private readonly CopyBudgetCodesCommandHandler _handler;
 
     private readonly BudgetPeriod _source = TestBudgeting.PeriodIn(PeriodState.Closed, PeriodGranularity.Quarter, 2026, 3);
@@ -25,7 +26,7 @@ public class CopyBudgetCodesCommandHandlerTests
 
     public CopyBudgetCodesCommandHandlerTests()
     {
-        _handler = new CopyBudgetCodesCommandHandler(_codes, _periods);
+        _handler = new CopyBudgetCodesCommandHandler(_codes, _periods, _costCentres);
         _periods.Add(_source);
         _periods.Add(_target);
     }
@@ -401,5 +402,53 @@ public class CopyBudgetCodesCommandHandlerTests
         Assert.Equal(new BudgetCodeCopyResult(1, 0, 0, 1), result.Value);
         Assert.DoesNotContain(TargetChart(), c => c.Code == "BYSTANDER");
         Assert.Equal(elsewhere.Id, bystander.PeriodId);
+    }
+
+    // --- The cost-centre register lock ----------------------------------------------------------
+
+    private static BudgetCodeDetails WithCostCentre(string costCentre) =>
+        TestBudgeting.CodeDetails(category: BudgetCodeCategory.Expense, serviceLine: null, costCentre: costCentre);
+
+    [Fact]
+    public async Task A_copy_carrying_a_cost_centre_runs_under_the_register_lock_and_commits_it()
+    {
+        AddCode(_source, "FUEL", details: WithCostCentre("THOMPSON"));
+        var savesWhenLocked = -1;
+        _costCentres.OnLockAcquired = () => savesWhenLocked = _codes.SaveChangesCallCount;
+
+        var result = await CopyAsync();
+
+        Assert.Equal(1, result.Value.Copied);
+        Assert.Equal("THOMPSON", InTarget("FUEL").CostCentre);
+        Assert.Equal(TestBudgeting.TenantId, Assert.Single(_costCentres.Locks));
+        Assert.Equal(0, savesWhenLocked);
+        Assert.Equal([TestBudgeting.TenantId], _costCentres.CommittedLocks);
+    }
+
+    [Fact]
+    public async Task The_source_chart_is_read_after_the_register_lock_is_taken()
+    {
+        // A source code committed while the copy waited on the lock is in the chart the copy
+        // reads, which is what makes the delete's usage probe (under the same lock) authoritative.
+        AddCode(_source, "FUEL", details: WithCostCentre("THOMPSON"));
+        _costCentres.OnLockAcquired = () => AddCode(_source, "TIRES", details: WithCostCentre("CHURCHILL"));
+
+        var result = await CopyAsync();
+
+        Assert.Equal(new BudgetCodeCopyResult(2, 0, 0, 2), result.Value);
+        Assert.Equal("CHURCHILL", InTarget("TIRES").CostCentre);
+    }
+
+    [Fact]
+    public async Task A_refused_copy_takes_no_lock_and_one_that_copies_nothing_commits_nothing()
+    {
+        Assert.Equal(BudgetCodeErrors.CopySourceNotFound, (await CopyAsync(sourcePeriodId: Guid.NewGuid())).Error);
+        Assert.Empty(_costCentres.Locks);
+
+        AddCode(_source, "FUEL", details: WithCostCentre("THOMPSON"));
+        AddCode(_target, "FUEL");
+        Assert.Equal(0, (await CopyAsync()).Value.Copied);
+        Assert.Single(_costCentres.Locks);
+        Assert.Empty(_costCentres.CommittedLocks);
     }
 }

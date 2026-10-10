@@ -16,6 +16,13 @@ namespace NorthernLink.Budgeting.Application.CostCentres;
 /// <c>SetCostCentreActiveCommandHandler</c>), so an active child never has a retired parent.
 /// Without the leniency, retiring a branch would freeze every retired child's name and owner.
 /// </para>
+/// <para>
+/// <b>Callers hold the register lock</b> (<see cref="ICostCentreRepository.LockRegisterAsync"/>)
+/// across this check and their save. Every read here is of another row (the parent, or this
+/// entry's children), and the writes that change those rows (retire, delete, create or edit with
+/// this entry as parent) take the same lock before their own checks. So the parent cannot be
+/// retired or deleted, and a child cannot be added, between this check and the caller's commit.
+/// </para>
 /// </summary>
 public static class CostCentreParentRule
 {

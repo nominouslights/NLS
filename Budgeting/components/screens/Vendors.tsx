@@ -78,14 +78,22 @@ export default function Vendors({ api = DEFAULT_API }: { api?: VendorsApi }) {
   const [confirmAction, setConfirmAction] = useState<PendingConfirm>(null);
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState<{ vendor: VendorRecord | null } | null>(null);
+  /**
+   * A write the server ACCEPTED whose follow-up refetch failed. Deliberately not an error: the
+   * change is saved, and calling it "failed" would invite a repeat (a second delete 404s). Its
+   * only action is RETRY, which reloads the list.
+   */
+  const [staleNote, setStaleNote] = useState<string | null>(null);
 
   const applyLoaded = useCallback((records: VendorRecord[]) => {
     setVendors(records);
     setError(null);
+    setStaleNote(null);
   }, []);
 
   const applyLoadError = useCallback((e: unknown) => {
     setVendors((prev) => prev ?? []);
+    setStaleNote(null);
     setError(
       e instanceof ApiError
         ? { message: e.message, code: e.code, source: "load" }
@@ -164,14 +172,16 @@ export default function Vendors({ api = DEFAULT_API }: { api?: VendorsApi }) {
     target: VendorRecord,
     action: () => Promise<unknown>,
     settled: (rows: VendorRecord[]) => boolean,
+    onAccepted?: () => void,
   ) {
     if (busy) return;
     setBusy(true);
     setError(null);
+    setStaleNote(null);
     try {
       await action();
-      applyLoaded(await refetchUntil(api.list, settled));
     } catch (e) {
+      // The write itself was refused or failed: show it verbatim, bound to the vendor it was about.
       setError(
         e instanceof ApiError
           ? { message: e.message, code: e.code, source: "action", vendorId: target.id }
@@ -182,6 +192,16 @@ export default function Vendors({ api = DEFAULT_API }: { api?: VendorsApi }) {
               vendorId: target.id,
             },
       );
+      setBusy(false);
+      return;
+    }
+    // Only once the server has accepted the write — a refused one must leave the screen as it was.
+    onAccepted?.();
+    try {
+      applyLoaded(await refetchUntil(api.list, settled));
+    } catch {
+      // The write landed; only the re-read failed. Never "failed" — that would invite a repeat.
+      setStaleNote(`${target.name}: saved — couldn't refresh the list.`);
     } finally {
       setBusy(false);
     }
@@ -196,12 +216,14 @@ export default function Vendors({ api = DEFAULT_API }: { api?: VendorsApi }) {
     setConfirmAction(null);
     const active = !target.isActive;
     // Restoring while "Show retired" is off would otherwise be invisible; retiring with it off
-    // would make the row vanish. Show retired after a retire so the planner sees what happened.
-    if (!active) setShowRetired(true);
+    // would make the row vanish. Show retired after a retire so the planner sees what happened —
+    // but only once the server accepts it: a refused retire leaves the vendor active and the
+    // toggle where the planner put it.
     void runAction(
       target,
       () => api.setActive(target.id, active),
       (rows) => rows.some((r) => r.id === target.id && r.isActive === active),
+      active ? undefined : () => setShowRetired(true),
     );
   }
 
@@ -260,6 +282,26 @@ export default function Vendors({ api = DEFAULT_API }: { api?: VendorsApi }) {
               </span>
             </div>
           )}
+        </div>
+      )}
+
+      {staleNote && !error && (
+        <div
+          data-testid="vendors-stale"
+          style={{
+            marginBottom: 12,
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            flexWrap: "wrap",
+            fontFamily: fonts.body,
+            fontSize: 11.5,
+            color: colors.textSecondary,
+            lineHeight: 1.6,
+          }}
+        >
+          <span>{staleNote} The list below may be out of date.</span>
+          <ActionButton onClick={load}>RETRY</ActionButton>
         </div>
       )}
 

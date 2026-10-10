@@ -31,29 +31,55 @@ internal sealed class InMemoryCostCentreRepository : ICostCentreRepository
     /// <summary>The concurrently saved entry that holds the code, if any.</summary>
     public CostCentre? RaceWinner { get; set; }
 
-    /// <summary>Every (tenant, code) lock taken, in order.</summary>
-    public List<(Guid TenantId, string Code)> Locks { get; } = [];
+    /// <summary>The tenant of every register lock taken, in order.</summary>
+    public List<Guid> Locks { get; } = [];
 
-    /// <summary>Locks whose scope was committed, in order.</summary>
-    public List<string> CommittedLocks { get; } = [];
+    /// <summary>The tenant of every lock scope that was committed, in order.</summary>
+    public List<Guid> CommittedLocks { get; } = [];
+
+    /// <summary>
+    /// Every repository call in order — <c>Lock</c>, <c>GetById</c>, <c>GetByCode</c>,
+    /// <c>HasChildren</c>, <c>HasActiveChildren</c>, <c>Save</c>, <c>Commit</c> — so a test can
+    /// pin that the register lock comes before the first register read.
+    /// </summary>
+    public List<string> Calls { get; } = [];
 
     /// <summary>
     /// Runs as each lock is acquired: models a competing write that committed just before this
     /// request got the lock (the waiter then sees it).
     /// </summary>
-    public Action<string>? OnLockAcquired { get; set; }
+    public Action? OnLockAcquired { get; set; }
 
-    public Task<CostCentre?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
-        Task.FromResult(Visible.FirstOrDefault(c => c.Id == id));
+    /// <summary>
+    /// The async form of <see cref="OnLockAcquired"/>: lets a test run a whole competing handler
+    /// to completion "while this request waited on the lock". Clear it inside the callback, or
+    /// the competing handler's own lock acquisition re-enters it.
+    /// </summary>
+    public Func<Task>? OnLockAcquiredAsync { get; set; }
 
-    public Task<CostCentre?> GetByCodeAsync(string normalizedCode, CancellationToken cancellationToken = default) =>
-        Task.FromResult(Visible.FirstOrDefault(c => string.Equals(c.Code, normalizedCode, StringComparison.Ordinal)));
+    public Task<CostCentre?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        Calls.Add("GetById");
+        return Task.FromResult(Visible.FirstOrDefault(c => c.Id == id));
+    }
 
-    public Task<bool> HasChildrenAsync(Guid parentId, CancellationToken cancellationToken = default) =>
-        Task.FromResult(Visible.Any(c => c.ParentId == parentId));
+    public Task<CostCentre?> GetByCodeAsync(string normalizedCode, CancellationToken cancellationToken = default)
+    {
+        Calls.Add("GetByCode");
+        return Task.FromResult(Visible.FirstOrDefault(c => string.Equals(c.Code, normalizedCode, StringComparison.Ordinal)));
+    }
 
-    public Task<bool> HasActiveChildrenAsync(Guid parentId, CancellationToken cancellationToken = default) =>
-        Task.FromResult(Visible.Any(c => c.ParentId == parentId && c.IsActive));
+    public Task<bool> HasChildrenAsync(Guid parentId, CancellationToken cancellationToken = default)
+    {
+        Calls.Add("HasChildren");
+        return Task.FromResult(Visible.Any(c => c.ParentId == parentId));
+    }
+
+    public Task<bool> HasActiveChildrenAsync(Guid parentId, CancellationToken cancellationToken = default)
+    {
+        Calls.Add("HasActiveChildren");
+        return Task.FromResult(Visible.Any(c => c.ParentId == parentId && c.IsActive));
+    }
 
     public void Add(CostCentre costCentre)
     {
@@ -65,6 +91,7 @@ internal sealed class InMemoryCostCentreRepository : ICostCentreRepository
 
     public Task SaveChangesAsync(CancellationToken cancellationToken = default)
     {
+        Calls.Add("Save");
         SaveChangesCallCount++;
         _pendingAdds.Clear();
         return Task.CompletedTask;
@@ -72,6 +99,7 @@ internal sealed class InMemoryCostCentreRepository : ICostCentreRepository
 
     public Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken = default)
     {
+        Calls.Add("Save");
         SaveChangesCallCount++; // a save attempt either way, like the real SaveChanges round trip
 
         if (!UniqueCodeViolationOnNextSave)
@@ -95,19 +123,25 @@ internal sealed class InMemoryCostCentreRepository : ICostCentreRepository
         return Task.FromResult(false);
     }
 
-    public Task<ICostCentreCodeLock> LockCodeAsync(
-        Guid tenantId, string normalizedCode, CancellationToken cancellationToken = default)
+    public async Task<ICostCentreRegisterLock> LockRegisterAsync(Guid tenantId, CancellationToken cancellationToken = default)
     {
-        Locks.Add((tenantId, normalizedCode));
-        OnLockAcquired?.Invoke(normalizedCode);
-        return Task.FromResult<ICostCentreCodeLock>(new RecordingLock(this, normalizedCode));
+        Calls.Add("Lock");
+        Locks.Add(tenantId);
+        OnLockAcquired?.Invoke();
+        if (OnLockAcquiredAsync is { } competing)
+        {
+            await competing();
+        }
+
+        return new RecordingLock(this, tenantId);
     }
 
-    private sealed class RecordingLock(InMemoryCostCentreRepository owner, string code) : ICostCentreCodeLock
+    private sealed class RecordingLock(InMemoryCostCentreRepository owner, Guid tenantId) : ICostCentreRegisterLock
     {
         public Task CommitAsync(CancellationToken cancellationToken = default)
         {
-            owner.CommittedLocks.Add(code);
+            owner.Calls.Add("Commit");
+            owner.CommittedLocks.Add(tenantId);
             return Task.CompletedTask;
         }
 

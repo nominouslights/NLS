@@ -55,8 +55,8 @@ internal sealed class CostCentreRepository(BudgetingDbContext context) : ICostCe
         }
     }
 
-    public async Task<ICostCentreCodeLock> LockCodeAsync(
-        Guid tenantId, string normalizedCode, CancellationToken cancellationToken = default)
+    public async Task<ICostCentreRegisterLock> LockRegisterAsync(
+        Guid tenantId, CancellationToken cancellationToken = default)
     {
         // Own the transaction only when the caller has not already opened one; a nested caller's
         // commit is then a no-op and the outer transaction decides.
@@ -68,10 +68,12 @@ internal sealed class CostCentreRepository(BudgetingDbContext context) : ICostCe
         {
             // Transaction-scoped advisory lock (the UserRepository.TryAddFirstUserAsync and
             // ModuleMigrationRunner primitive), released by Postgres at commit or rollback, so a
-            // crashed request can never leak it. The key is a 64-bit hash of a namespaced
-            // (tenant, code) string: no table, no migration. A hash collision only makes two
-            // unrelated codes wait for each other briefly; it can never let a race through.
-            var key = $"budgeting.cost-centre-code:{tenantId:D}:{normalizedCode}";
+            // crashed request can never leak it. The key is a 64-bit hash of a fixed namespace plus
+            // the tenant id: no table, no migration. One key per tenant on purpose — see the
+            // interface comment; the register is low-volume, so serializing its writes is cheap.
+            // A hash collision only makes two unrelated tenants (or an unrelated advisory-lock
+            // user) wait for each other briefly; it can never let a race through.
+            var key = $"budgeting.cost-centre-register:{tenantId:D}";
             await context.Database.ExecuteSqlAsync(
                 $"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", cancellationToken);
         }
@@ -85,10 +87,10 @@ internal sealed class CostCentreRepository(BudgetingDbContext context) : ICostCe
             throw;
         }
 
-        return new CodeLock(transaction);
+        return new RegisterLock(transaction);
     }
 
-    private sealed class CodeLock(IDbContextTransaction? transaction) : ICostCentreCodeLock
+    private sealed class RegisterLock(IDbContextTransaction? transaction) : ICostCentreRegisterLock
     {
         public Task CommitAsync(CancellationToken cancellationToken = default) =>
             transaction?.CommitAsync(cancellationToken) ?? Task.CompletedTask;

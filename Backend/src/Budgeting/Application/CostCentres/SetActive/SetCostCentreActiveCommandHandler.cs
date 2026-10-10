@@ -21,9 +21,18 @@ namespace NorthernLink.Budgeting.Application.CostCentres.SetActive;
 /// nothing does not block the restore. Delete refuses to orphan children, so that state only
 /// comes from a hand-written row, and refusing would leave the child unrestorable.</item>
 /// </list>
-/// Because both directions hold, an <em>active</em> child never has a retired parent. The parent
-/// rule's "keep an existing retired parent" leniency on edit
-/// (<see cref="CostCentreParentRule"/>) therefore only ever applies to a retired child.
+/// </para>
+/// <para>
+/// <b>The two directions are only exclusive because both run under the register lock</b>
+/// (<see cref="ICostCentreRepository.LockRegisterAsync"/>), taken before the entry is read and
+/// committed after the save. Each check reads a <em>different</em> row from the one it writes:
+/// restoring a child reads the parent, retiring a parent reads the children. Without the lock a
+/// restore and a retirement could each pass their check against the other's pre-commit state and
+/// both commit. Under it, whichever request runs second sees the first one's outcome and is
+/// refused. The same lock covers a create or edit choosing a parent
+/// (<see cref="CostCentreParentRule"/>), so a retirement cannot slip in after that check either.
+/// Because all of this holds, an <em>active</em> child never has a retired parent, and the parent
+/// rule's "keep an existing retired parent" leniency on edit only ever applies to a retired child.
 /// </para>
 /// </summary>
 public sealed class SetCostCentreActiveCommandHandler(ICostCentreRepository repository)
@@ -31,6 +40,8 @@ public sealed class SetCostCentreActiveCommandHandler(ICostCentreRepository repo
 {
     public async Task<Result> Handle(SetCostCentreActiveCommand command, CancellationToken cancellationToken)
     {
+        await using var registerLock = await repository.LockRegisterAsync(command.TenantId, cancellationToken);
+
         var costCentre = await repository.GetByIdAsync(command.CostCentreId, cancellationToken);
         if (costCentre is null)
         {
@@ -62,6 +73,7 @@ public sealed class SetCostCentreActiveCommandHandler(ICostCentreRepository repo
         }
 
         await repository.SaveChangesAsync(cancellationToken);
+        await registerLock.CommitAsync(cancellationToken);
         return Result.Success();
     }
 }

@@ -125,6 +125,64 @@ describe("CostCentres screen", () => {
     expect(row("North").textContent).toContain("Active");
   });
 
+  it("an action's refusal offers no RETRY — reloading would only clear the explanation", async () => {
+    const api = makeApi();
+    api.remove.mockRejectedValueOnce(
+      new ApiError("Budgeting.CostCentre.HasChildren", COST_CENTRE_MESSAGES.HasChildren, 409),
+    );
+    await renderScreen(api);
+
+    fireEvent.click(screen.getByText("DELETE"));
+    fireEvent.click(screen.getByText("CONFIRM DELETE"));
+
+    expect(await screen.findByText(COST_CENTRE_MESSAGES.HasChildren)).toBeTruthy();
+    expect(screen.queryByText("RETRY")).toBeNull();
+    expect(screen.queryByText("RETIRE INSTEAD")).toBeNull();
+  });
+
+  it("an InUse refusal keeps only RETIRE INSTEAD, no RETRY", async () => {
+    const api = makeApi();
+    api.remove.mockRejectedValueOnce(new ApiError("Budgeting.CostCentre.InUse", COST_CENTRE_MESSAGES.InUse, 409));
+    await renderScreen(api);
+
+    fireEvent.click(screen.getByText("DELETE"));
+    fireEvent.click(screen.getByText("CONFIRM DELETE"));
+
+    expect(await screen.findByText("RETIRE INSTEAD")).toBeTruthy();
+    expect(screen.queryByText("RETRY")).toBeNull();
+  });
+
+  it("a load failure still offers RETRY, which reloads", async () => {
+    const api = makeApi();
+    api.list.mockRejectedValueOnce(new ApiError("Network.Unreachable", "The budgeting service is unreachable.", 0));
+    render(<CostCentres api={api} />);
+
+    expect(await screen.findByText("The budgeting service is unreachable.")).toBeTruthy();
+    fireEvent.click(screen.getByText("RETRY"));
+    await screen.findAllByText("North region");
+  });
+
+  it("a write that landed but whose refetch failed says saved, never 'failed', and RETRY only reloads", async () => {
+    const api = makeApi();
+    await renderScreen(api);
+    api.list.mockRejectedValueOnce(new Error("network down"));
+
+    fireEvent.click(screen.getByText("DELETE"));
+    fireEvent.click(screen.getByText("CONFIRM DELETE"));
+
+    const note = await screen.findByTestId("cost-centres-stale");
+    expect(note.textContent).toContain("North: saved — couldn't refresh the list.");
+    expect(screen.queryByText(/Failed to/)).toBeNull();
+    expect(api.remove).toHaveBeenCalledTimes(1);
+
+    // RETRY reloads the list; it never repeats the delete.
+    api.list.mockResolvedValue([NORTH_A, OLD]);
+    fireEvent.click(screen.getByText("RETRY"));
+    await waitFor(() => expect(screen.queryByTestId("cost-centres-stale")).toBeNull());
+    expect(api.remove).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("North region")).toBeNull();
+  });
+
   it("an accepted retire switches Show retired on, so the entry stays in view", async () => {
     const api = makeApi();
     await renderScreen(api);

@@ -444,17 +444,34 @@ public class CostCentreHandlerTests
     }
 
     [Fact]
-    public async Task The_usage_probe_and_delete_run_under_the_code_lock_and_commit_together()
+    public async Task Delete_reads_and_checks_everything_under_the_register_lock_and_commits_with_the_delete()
     {
         var costCentre = Add("THOMPSON");
         var removedWhenLocked = true;
-        _repository.OnLockAcquired = _ => removedWhenLocked = !_repository.CostCentres.Contains(costCentre);
+        _repository.OnLockAcquired = () => removedWhenLocked = !_repository.CostCentres.Contains(costCentre);
 
         Assert.True((await DeleteAsync(costCentre.Id)).IsSuccess);
 
-        Assert.Equal((TestBudgeting.TenantId, "THOMPSON"), Assert.Single(_repository.Locks));
+        Assert.Equal(TestBudgeting.TenantId, Assert.Single(_repository.Locks));
+        Assert.Equal(["Lock", "GetById", "HasChildren", "Save", "Commit"], _repository.Calls);
         Assert.False(removedWhenLocked);
-        Assert.Equal(["THOMPSON"], _repository.CommittedLocks);
+        Assert.Equal([TestBudgeting.TenantId], _repository.CommittedLocks);
+    }
+
+    [Fact]
+    public async Task A_child_added_while_the_delete_waited_on_the_lock_refuses_the_delete()
+    {
+        // The delete-vs-new-child race: a create choosing this entry as parent committed while
+        // this delete waited. The children check runs after acquisition, so it sees the child.
+        var costCentre = Add("NORTH");
+        _repository.OnLockAcquired = () => Add("THOMPSON", parentId: costCentre.Id);
+
+        var result = await DeleteAsync(costCentre.Id);
+
+        Assert.Equal(CostCentreErrors.HasChildren, result.Error);
+        Assert.Contains(_repository.CostCentres, c => c.Id == costCentre.Id);
+        Assert.Equal(0, _repository.SaveChangesCallCount);
+        Assert.Empty(_repository.CommittedLocks);
     }
 
     [Fact]
@@ -463,7 +480,7 @@ public class CostCentreHandlerTests
         // The delete-vs-use race: a budget code started carrying the string and committed while
         // this delete waited on the lock. The probe runs after acquisition, so it sees that code.
         var costCentre = Add("THOMPSON");
-        _repository.OnLockAcquired = _ => _codes.Add(TestBudgeting.CreateCode(
+        _repository.OnLockAcquired = () => _codes.Add(TestBudgeting.CreateCode(
             "ZBB-FUEL-01",
             TestBudgeting.CodeDetails(category: BudgetCodeCategory.Expense, costCentre: "THOMPSON")));
 
@@ -499,5 +516,127 @@ public class CostCentreHandlerTests
     public async Task Deleting_an_unknown_id_is_not_found()
     {
         Assert.Equal(CostCentreErrors.NotFound, (await DeleteAsync(Guid.NewGuid())).Error);
+    }
+
+    // --- The register lock: taken before every read, committed after the save -------------------
+
+    [Fact]
+    public async Task Create_takes_the_register_lock_before_the_duplicate_and_parent_checks()
+    {
+        var parent = Add("NORTH");
+
+        Assert.True((await CreateAsync("THOMPSON", Details(parentId: parent.Id))).IsSuccess);
+
+        Assert.Equal(TestBudgeting.TenantId, Assert.Single(_repository.Locks));
+        Assert.Equal(["Lock", "GetByCode", "GetById", "Save", "Commit"], _repository.Calls);
+    }
+
+    [Fact]
+    public async Task Create_reports_validation_without_taking_the_lock()
+    {
+        Assert.Equal(CostCentreErrors.NameRequired, (await CreateAsync("THOMPSON", Details(name: ""))).Error);
+        Assert.Empty(_repository.Locks);
+    }
+
+    [Fact]
+    public async Task A_parent_retired_while_the_create_waited_on_the_lock_is_refused()
+    {
+        var parent = Add("NORTH");
+        _repository.OnLockAcquired = () => parent.SetActive(false, TestBudgeting.ActorId);
+
+        var result = await CreateAsync("THOMPSON", Details(parentId: parent.Id));
+
+        Assert.Equal(CostCentreErrors.ParentRetired, result.Error);
+        Assert.Empty(_repository.CommittedLocks);
+    }
+
+    [Fact]
+    public async Task Update_takes_the_register_lock_before_reading_the_entry_parent_and_children()
+    {
+        var parent = Add("NORTH");
+        var costCentre = Add("THOMPSON");
+
+        Assert.True((await UpdateAsync(costCentre.Id, Details(parentId: parent.Id))).IsSuccess);
+
+        Assert.Equal(TestBudgeting.TenantId, Assert.Single(_repository.Locks));
+        Assert.Equal(["Lock", "GetById", "GetById", "HasChildren", "Save", "Commit"], _repository.Calls);
+    }
+
+    [Fact]
+    public async Task A_child_added_while_the_update_waited_on_the_lock_stops_it_taking_a_parent()
+    {
+        var parent = Add("NORTH");
+        var costCentre = Add("THOMPSON");
+        _repository.OnLockAcquired = () => Add("YARD", parentId: costCentre.Id);
+
+        var result = await UpdateAsync(costCentre.Id, Details(parentId: parent.Id));
+
+        Assert.Equal(CostCentreErrors.HasChildrenCannotHaveParent, result.Error);
+        Assert.Null(costCentre.ParentId);
+        Assert.Empty(_repository.CommittedLocks);
+    }
+
+    [Fact]
+    public async Task Retiring_takes_the_register_lock_before_reading_the_entry_and_its_children()
+    {
+        var costCentre = Add("NORTH");
+
+        Assert.True((await SetActiveAsync(costCentre.Id, false)).IsSuccess);
+
+        Assert.Equal(["Lock", "GetById", "HasActiveChildren", "Save", "Commit"], _repository.Calls);
+    }
+
+    [Fact]
+    public async Task Restoring_takes_the_register_lock_before_reading_the_entry_and_its_parent()
+    {
+        var parent = Add("NORTH");
+        var child = Add("THOMPSON", parentId: parent.Id, active: false);
+
+        Assert.True((await SetActiveAsync(child.Id, true)).IsSuccess);
+
+        Assert.Equal(["Lock", "GetById", "GetById", "Save", "Commit"], _repository.Calls);
+    }
+
+    [Fact]
+    public async Task Retire_parent_then_restore_child_cannot_both_succeed()
+    {
+        // The two requests race; the retirement gets the lock first and commits while the restore
+        // waits. The restore's parent check runs after acquisition, so it sees the retired parent.
+        var parent = Add("NORTH");
+        var child = Add("THOMPSON", parentId: parent.Id, active: false);
+        Result? retire = null;
+        _repository.OnLockAcquiredAsync = async () =>
+        {
+            _repository.OnLockAcquiredAsync = null;
+            retire = await SetActiveAsync(parent.Id, false);
+        };
+
+        var restore = await SetActiveAsync(child.Id, true);
+
+        Assert.True(retire!.IsSuccess);
+        Assert.Equal(CostCentreErrors.ParentRetired, restore.Error);
+        Assert.False(parent.IsActive);
+        Assert.False(child.IsActive);
+    }
+
+    [Fact]
+    public async Task Restore_child_then_retire_parent_cannot_both_succeed()
+    {
+        // The other order: the restore commits first, and the retirement's children check sees it.
+        var parent = Add("NORTH");
+        var child = Add("THOMPSON", parentId: parent.Id, active: false);
+        Result? restore = null;
+        _repository.OnLockAcquiredAsync = async () =>
+        {
+            _repository.OnLockAcquiredAsync = null;
+            restore = await SetActiveAsync(child.Id, true);
+        };
+
+        var retire = await SetActiveAsync(parent.Id, false);
+
+        Assert.True(restore!.IsSuccess);
+        Assert.Equal(CostCentreErrors.HasActiveChildren, retire.Error);
+        Assert.True(parent.IsActive);
+        Assert.True(child.IsActive);
     }
 }

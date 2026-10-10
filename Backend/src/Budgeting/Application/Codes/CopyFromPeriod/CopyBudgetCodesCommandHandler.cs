@@ -33,17 +33,22 @@ namespace NorthernLink.Budgeting.Application.Codes.CopyFromPeriod;
 /// top-level too.
 /// </para>
 /// <para>
-/// <b>Cost centre: carried as-is, with no register check and no register lock.</b> The string was
-/// validated against the register when the source code was written (under the (tenant, code)
-/// lock — <see cref="BudgetCodeCostCentreRule.LockIfCheckedAsync"/>), and while the source code
-/// still carries it the register refuses to delete it (<c>Budgeting.CostCentre.InUse</c>, probed
-/// under the same lock). The <c>AddCostCentres</c> migration backfilled an entry for every value
-/// that predates the register. One window is left open on purpose. If, between this handler's
-/// read of the source chart and its commit, the <em>last</em> code carrying the string is edited
-/// off it <em>and</em> the entry is deleted, the copy carries an unregistered string. That needs
-/// two further writes to land inside one request. The read side lists such a string as its own
-/// rollup row rather than losing it, and an edit that changes the copied code's cost centre must
-/// pick a registered entry. Closing it would mean locking and re-checking every distinct string the copy carries.
+/// <b>Cost centre: carried as-is, with no register check, under the register lock.</b> The string
+/// was validated against the register when the source code was written
+/// (<see cref="BudgetCodeCostCentreRule"/>), and while any code carries it the register refuses to
+/// delete it (<c>Budgeting.CostCentre.InUse</c>). The <c>AddCostCentres</c> migration backfilled an
+/// entry for every value that predates the register. What keeps that true across the copy is the
+/// tenant's register lock (<see cref="ICostCentreRepository.LockRegisterAsync"/>), taken
+/// <em>before</em> the source chart is read and committed with the copies. A cost-centre delete
+/// probes usage under the same lock, so it either committed before this read (and then no source
+/// code still carried the string, because its probe saw none) or waits and then sees the copies.
+/// <para>
+/// The lock is taken whenever the guards pass, not only when the source turns out to carry a cost
+/// centre. Deciding that needs the source chart, and the read that decides must itself be under
+/// the lock: a re-read after locking would hand back EF's already-tracked, possibly stale
+/// instances. A chart copy is a once-a-period action, so serializing it with register writes
+/// costs nothing.
+/// </para>
 /// A <em>retired</em> entry is still carried:
 /// it is the same value moving forward, the "unchanged is allowed" leniency the edit path gives
 /// (<see cref="BudgetCodeCostCentreRule"/>), and refusing it would make one stale cost centre
@@ -53,7 +58,8 @@ namespace NorthernLink.Budgeting.Application.Codes.CopyFromPeriod;
 /// </summary>
 public sealed class CopyBudgetCodesCommandHandler(
     IBudgetCodeRepository codes,
-    IBudgetPeriodRepository periods)
+    IBudgetPeriodRepository periods,
+    ICostCentreRepository costCentres)
     : ICommandHandler<CopyBudgetCodesCommand, BudgetCodeCopyResult>
 {
     public async Task<Result<BudgetCodeCopyResult>> Handle(
@@ -81,6 +87,10 @@ public sealed class CopyBudgetCodesCommandHandler(
         {
             return Result.Failure<BudgetCodeCopyResult>(BudgetCodeErrors.CopySourceNotFound);
         }
+
+        // Before the source read, so every cost-centre string the copy carries is read under the
+        // lock that a cost-centre delete probes usage under — see the class comment.
+        await using var registerLock = await costCentres.LockRegisterAsync(command.TenantId, cancellationToken);
 
         var sourceCodes = await codes.ListForPeriodAsync(sourcePeriodId, cancellationToken);
         if (sourceCodes.Count == 0)
@@ -133,6 +143,7 @@ public sealed class CopyBudgetCodesCommandHandler(
         if (copied > 0)
         {
             await codes.SaveChangesAsync(cancellationToken);
+            await registerLock.CommitAsync(cancellationToken);
         }
 
         return Result.Success(new BudgetCodeCopyResult(
