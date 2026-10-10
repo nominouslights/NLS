@@ -63,8 +63,8 @@ Run it before touching anything on the list, and whenever a Dispatcher UI story 
 | `app/layout.tsx` | `Dispatcher/app/layout.tsx` | **no** — title/description only; the four Google Fonts `<link>` tags are byte-identical and must stay that way |
 | `lib/auth.ts` | `Dispatcher/lib/auth.ts` | **no** — see below |
 | `components/TopBar.tsx`, `AuthGate.tsx`, `LoginScreen.tsx`, `Console.tsx` | same paths | **no** — adapted |
-| `lib/nav.ts`, `lib/data.ts`, `lib/money.ts`, `lib/types.ts`, `lib/claims.ts`, `lib/roles.ts`, `lib/workingPeriod.ts`, `lib/periodHold.ts`, `lib/api/budgeting.ts`, `lib/api/identity.ts` | — | new |
-| `components/Brandmark.tsx`, `ErrorNotice.tsx`, `RoleGate.tsx`, `AccessDeniedScreen.tsx`, `SetupPendingScreen.tsx`, `PeriodBanner.tsx`, `BudgetPeriodFormModal.tsx`, `BudgetCodeFormModal.tsx`, `BudgetItemFormModal.tsx`, `ProfileForm.tsx`, `screens/*`, `screens/periods/*` (incl. `PeriodChooser.tsx`, `PriorityBreakdown.tsx`), `screens/codes/*` (`CopyCodesPanel.tsx`) | — | new |
+| `lib/nav.ts`, `lib/data.ts`, `lib/money.ts`, `lib/types.ts`, `lib/claims.ts`, `lib/roles.ts`, `lib/workingPeriod.ts`, `lib/periodHold.ts`, `lib/legal.ts`, `lib/api/budgeting.ts`, `lib/api/identity.ts` | — | new |
+| `components/Brandmark.tsx`, `ErrorNotice.tsx`, `LegalLinks.tsx`, `RoleGate.tsx`, `AccessDeniedScreen.tsx`, `SetupPendingScreen.tsx`, `PeriodBanner.tsx`, `BudgetPeriodFormModal.tsx`, `BudgetCodeFormModal.tsx`, `BudgetItemFormModal.tsx`, `ProfileForm.tsx`, `screens/*`, `screens/periods/*` (incl. `PeriodChooser.tsx`, `PriorityBreakdown.tsx`), `screens/codes/*` (`CopyCodesPanel.tsx`) | — | new |
 
 `theme.ts` and the 12 `ui/` files are copied **unpruned**, including parts this app never uses
 (`ServiceType`, `DutyStatus`, `CorridorStepper`, the two upload fields). Pruning them would break
@@ -86,6 +86,32 @@ directly.
 Nothing authored for this app lints dirty. Per the rule above, the fix belongs in Dispatcher
 first — `useToday` needs its clock value moved into state, which is a real behavioural change to
 a shipped screen and was out of scope for US-6.0.1.
+
+## Legal policies: a shared static copy
+
+`public/legal/policies.html` is the owner's Privacy Policy + End-User Licence Agreement, a
+self-contained static page with `#privacy` and `#eula` anchors. It is a **byte-identical copy**
+of the same file in `Website/`, `Dispatcher/` and `DriverField/` (`public/legal/policies.html` in
+each). It is the owner's document, not this app's: **never edit it here** — a change lands in all
+four at once, by copying one file over the others. Check they agree from the repo root (all four
+hashes must match):
+
+```sh
+sha256sum */public/legal/policies.html
+```
+
+It must be reachable **without signing in**:
+`https://budget.northernlinkshuttleandcargo.com/legal/policies.html#privacy` and `#eula` are the
+Privacy Policy and EULA links registered on the Intuit (QuickBooks) app profile. Nothing gates it
+— there is no `middleware.ts`/`proxy.ts`, the only rewrite is `/api/*`, `AuthGate` is a client
+component inside `app/page.tsx` and never sees a `public/` request, and `.dockerignore` does not
+exclude `public/` (the Dockerfile copies it into the runtime image). Adding middleware or a
+catch-all rewrite later must keep `/legal/` open.
+
+Links: `components/LegalLinks.tsx` (sign-in screen, and the foot of Settings under every tab),
+hrefs from `legalHref` in `lib/legal.ts`. A plain `<a>` does not get Next's `basePath`, so
+`next.config.ts` inlines `BASE_PATH` into the client via its `env` block and `legalHref`
+prefixes it.
 
 ## Auth and the role gate
 
@@ -122,7 +148,7 @@ it. Config is `vitest.config.mts` — the `.mts` extension is load-bearing (Vite
 `.ts` config as CommonJS and warns), and it must therefore use `import.meta.dirname` for the
 `@` alias, never `__dirname`. `@types/node` declares `__dirname` globally, so TypeScript and
 `next build` both stay green while every `@/lib/...` import in the suite fails to resolve at
-run time. Fifteen files; seven need a DOM (the six component tests, plus `workingPeriod`'s
+run time. Sixteen files; eight need a DOM (the seven component tests, plus `workingPeriod`'s
 storage tests, which need `sessionStorage`):
 
 - `lib/roles.test.ts` — US-6.0.1's acceptance criterion: a Dispatcher account is rejected.
@@ -235,6 +261,10 @@ storage tests, which need `sessionStorage`):
   a row click enters that row's id, each row writes its state out, the suggested row carries
   its tag and focus, the eyebrow names the destination screen, the empty state's create button,
   a load error shown verbatim with RETRY, the lost notice, and "Returning to your period…".
+- `components/LoginScreen.test.tsx` — the sign-in screen renders **Privacy Policy** and
+  **Licence Agreement** links to `/legal/policies.html#privacy` / `#eula` in a new tab with
+  `rel="noopener"`, and `legalHref` carries a `basePath` (trailing slash tolerated). Those two
+  URLs are registered on the Intuit app profile — see [Legal policies](#legal-policies-a-shared-static-copy).
 - `components/PeriodBanner.test.tsx` — label, dates, state and editability; while held, SWITCH
   PERIOD is `aria-disabled`, does not call `onSwitch`, and the reason is written beside it; the
   "isn't tied to a period" sentence on Settings, with no "every period" wording left anywhere;

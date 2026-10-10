@@ -6,6 +6,7 @@ import { Panel, SectionLabel } from "@/components/ui/Panel";
 import { TextField } from "@/components/ui/Field";
 import { login, redeemAdminInvite } from "@/lib/auth";
 import { ApiError } from "@/lib/api";
+import LegalLinks from "@/components/LegalLinks";
 
 // Full-screen sign-in for the Dispatch Console. On success, lib/auth notifies
 // AuthGate (onAuthChange) which swaps this screen for the Console — no
@@ -324,6 +325,7 @@ export default function LoginScreen() {
         >
           Internal system — dispatchers &amp; supervisors. Contact your administrator for access.
         </div>
+        <LegalLinks style={{ marginTop: 10 }} />
       </div>
     </div>
   );

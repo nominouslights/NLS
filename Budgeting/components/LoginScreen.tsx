@@ -6,6 +6,7 @@ import { Panel, SectionLabel } from "@/components/ui/Panel";
 import { TextField } from "@/components/ui/Field";
 import { BrandScreen } from "@/components/Brandmark";
 import { ErrorNotice } from "@/components/ErrorNotice";
+import LegalLinks from "@/components/LegalLinks";
 import { login } from "@/lib/auth";
 import { ApiError } from "@/lib/api/transport";
 
@@ -108,6 +109,10 @@ export default function LoginScreen() {
         Internal system — owner &amp; accountant accounts only.
         <br />
         Contact your administrator for access.
+      </div>
+
+      <div style={{ marginTop: 10 }}>
+        <LegalLinks />
       </div>
     </BrandScreen>
   );

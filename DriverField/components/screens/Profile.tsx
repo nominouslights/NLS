@@ -3,6 +3,7 @@
 import { colors, fonts } from "@/lib/theme";
 import { gap, type } from "@/lib/tablet";
 import { Panel } from "@/components/ui/Panel";
+import LegalLinks from "@/components/LegalLinks";
 import { Screen, MockTag, Heading, CardRow, FieldLine, TabletChip } from "./shared";
 import { clearances, clientContracts, credentials, currentDriver } from "@/lib/data";
 
@@ -108,6 +109,10 @@ export default function Profile() {
           </div>
         </CardRow>
       ))}
+
+      {/* Real, not mock: the owner's policy document, served from public/legal/. No MockTag. */}
+      <Heading>Privacy &amp; licence</Heading>
+      <LegalLinks align="start" />
     </Screen>
   );
 }

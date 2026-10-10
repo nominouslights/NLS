@@ -8,6 +8,7 @@ import { useToday } from "@/lib/useToday";
 import { PageHeader, Panel } from "@/components/ui/Panel";
 import { ActionButton } from "@/components/ui/Button";
 import { StatusChip } from "@/components/ui/Chip";
+import LegalLinks from "@/components/LegalLinks";
 
 // Home — the launcher. One tile per app from the manifest (lib/apps.ts), gated by role as a UX
 // gate only (the API policies are the boundary). A tile the role may not use is rendered
@@ -62,6 +63,8 @@ export default function Home({
             <Tile key={app.id} app={app} role={role} onOpenApp={onOpenApp} />
           ))}
         </div>
+
+        <LegalLinks style={{ marginTop: 28 }} />
       </div>
     </div>
   );

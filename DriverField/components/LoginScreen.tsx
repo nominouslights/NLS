@@ -6,6 +6,7 @@ import { Panel, SectionLabel } from "@/components/ui/Panel";
 import { TextField } from "@/components/ui/Field";
 import { BrandScreen } from "@/components/Brandmark";
 import { ErrorNotice } from "@/components/ErrorNotice";
+import LegalLinks from "@/components/LegalLinks";
 import { touch } from "@/lib/tablet";
 import { login } from "@/lib/auth";
 import { ApiError } from "@/lib/api/transport";
@@ -109,6 +110,10 @@ export default function LoginScreen() {
         Company device — driver accounts only.
         <br />
         Contact dispatch for access.
+      </div>
+
+      <div style={{ marginTop: 8 }}>
+        <LegalLinks />
       </div>
     </BrandScreen>
   );
