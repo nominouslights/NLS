@@ -25,11 +25,12 @@ namespace NorthernLink.Budgeting.Domain.Codes;
 /// </para>
 /// <para>
 /// <b><see cref="GlAccountCode"/> is validated for length and nothing else, by decision.</b>
-/// QuickBooks work on this platform is manual: <c>Invoice.EnteredInQbo</c> is a flag a bookkeeper
-/// ticks after keying an invoice in by hand, and the platform never calls the QBO API. There is
-/// no OAuth-connected company, no tenant→realm mapping and no synced chart of accounts to check
-/// this string against, and this story does not add one. It is a reference a person types and a
-/// bookkeeper reads. Validating it later is a new slice, not a hole left open here.
+/// Billing's QuickBooks work is still manual (<c>Invoice.EnteredInQbo</c> is a flag a bookkeeper
+/// ticks after keying an invoice in by hand). Budgeting does hold a read-only QuickBooks Online
+/// connection (owner decision 2026-10-08, <c>Domain/Qbo/QboConnection</c>), but it reads expenses
+/// only — it does not sync the chart of accounts, so there is still nothing to check this string
+/// against. It is a reference a person types and a bookkeeper reads. Validating it against a
+/// synced chart of accounts is a new slice, not a hole left open here.
 /// </para>
 /// <para>
 /// <b>A Revenue code cannot carry a <see cref="CostCentre"/>.</b> A cost centre attributes cost,
