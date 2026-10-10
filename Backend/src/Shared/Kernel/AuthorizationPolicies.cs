@@ -37,4 +37,25 @@ public static class AuthorizationPolicies
     /// </para>
     /// </summary>
     public const string DriverAccess = "DriverAccess";
+
+    /// <summary>
+    /// Hours-of-service compliance decisions — Owner and ComplianceOfficer only
+    /// (<see cref="Roles.ComplianceAccess"/>). Registered ahead of the endpoints that will carry
+    /// it (deferral approval, out-of-service, ELD malfunction resolution, findings).
+    /// </summary>
+    public const string ComplianceAccess = "ComplianceAccess";
+
+    /// <summary>
+    /// Duty-status reads and writes — <see cref="DriverAccess"/> widened with ComplianceOfficer
+    /// (<see cref="Roles.HosAccess"/>). Contains Driver, so like <see cref="DriverAccess"/> it
+    /// belongs only on its own sibling group, never on a dispatch group.
+    /// </summary>
+    public const string HosAccess = "HosAccess";
+
+    /// <summary>
+    /// The driver roster's read routes — <see cref="DispatchAccess"/> widened with
+    /// ComplianceOfficer (<see cref="Roles.DriverRosterAccess"/>). Reads only; the write routes
+    /// keep <see cref="DispatchAccess"/>.
+    /// </summary>
+    public const string DriverRosterAccess = "DriverRosterAccess";
 }

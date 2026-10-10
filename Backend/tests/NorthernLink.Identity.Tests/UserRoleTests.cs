@@ -22,6 +22,7 @@ public class UserRoleTests
     [InlineData(Roles.Accountant)]
     [InlineData(Roles.BoardMember)]
     [InlineData(Roles.Driver)]
+    [InlineData(Roles.ComplianceOfficer)]
     public void Every_internal_role_is_accepted(string role)
     {
         var result = Create(role);
@@ -119,5 +120,20 @@ public class UserRoleTests
         Assert.DoesNotContain(Roles.Driver, Roles.DispatchAccess);
         Assert.DoesNotContain(Roles.LegacyAdmin, Roles.BudgetAccess);
         Assert.DoesNotContain(Roles.LegacyAdmin, Roles.DispatchAccess);
+        Assert.DoesNotContain(Roles.ComplianceOfficer, Roles.BudgetAccess);
+        Assert.DoesNotContain(Roles.ComplianceOfficer, Roles.DispatchAccess);
+    }
+
+    [Fact]
+    public void Hours_of_service_role_lists_are_subsets_of_the_internal_roles()
+    {
+        // Same failure mode as BudgetAccess: a literal here that no user can hold makes the policy
+        // deny everyone silently. ComplianceAccess guards the only overrides past the hours gate.
+        Assert.All(Roles.ComplianceAccess, role => Assert.Contains(role, Roles.Internal));
+        Assert.All(Roles.HosAccess, role => Assert.Contains(role, Roles.Internal));
+        Assert.All(Roles.HosRecordOverride, role => Assert.Contains(role, Roles.Internal));
+        Assert.All(Roles.DriverRosterAccess, role => Assert.Contains(role, Roles.Internal));
+        Assert.Equal([Roles.Owner, Roles.ComplianceOfficer], Roles.ComplianceAccess);
+        Assert.True(Create(Roles.ComplianceOfficer).IsSuccess);
     }
 }
