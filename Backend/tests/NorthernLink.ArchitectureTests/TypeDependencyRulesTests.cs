@@ -57,7 +57,9 @@ public class TypeDependencyRulesTests
                 "Microsoft.EntityFrameworkCore",
                 "Npgsql",
                 "RabbitMQ.Client",
-                // Domain may use NorthernLink.Shared.Kernel only.
+                // Domain may use NorthernLink.Shared.Kernel, and NorthernLink.Shared.HoursOfService —
+                // the pure HOS rule engine, System-only by HoursOfServicePurityTests, which Drivers
+                // and Trips both need inside their domain layers. Nothing else from Shared.
                 "NorthernLink.Shared.Messaging",
                 "NorthernLink.Shared.Events",
                 "NorthernLink.Shared.EventBus",

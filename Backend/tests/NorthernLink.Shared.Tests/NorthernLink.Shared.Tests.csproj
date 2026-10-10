@@ -2,7 +2,9 @@
 
   <!-- Unit tests for the shared kernel and audit/event infrastructure —
        serialization, naming, versioning, subscription registry. No EF/Postgres/RabbitMQ;
-       the persistence pipeline is exercised end-to-end in the integration tests. -->
+       the persistence pipeline is exercised end-to-end in the integration tests.
+       HoursOfService/ holds the HOS rule engine's fixture suite: hos-fixtures.json is the
+       contract shared byte-for-byte with the TypeScript mirror. -->
 
   <PropertyGroup>
     <IsPackable>false</IsPackable>
@@ -16,6 +18,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Shared\NorthernLink.Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="HoursOfService\hos-fixtures.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

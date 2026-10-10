@@ -131,7 +131,7 @@ burden becomes a real problem at scale.
 
 | Tenant | Roles |
 |---|---|
-| Internal (Admin) | Owner, Dispatcher, Supervisor/Manager, Accountant, Board Member (future) |
+| Internal (Admin) | Owner, Dispatcher, Supervisor/Manager, Accountant, Board Member (future), **Compliance Officer** *(hours-of-service compliance — approves off-duty deferrals, records out-of-service, resolves ELD malfunctions; the Owner may act as one, so `ComplianceAccess = [Owner, ComplianceOfficer]`; added 2026-10, see Section 13.15)* |
 | Client | Client Admin, Client Viewer, **Logistics Coordinator (new — see 5.1, logs crew movements + roster)** |
 | Vendor/Partner | Partner Admin, Partner Driver |
 | Internal (Admin) | Driver *(Northern Link's own drivers — distinct from Partner Driver)* |
@@ -690,6 +690,25 @@ the roadmap locks them in:
     (c) answerable — `GET /api/drivers/me` resolves the `sub` claim against it, with no Identity
     claim and no cross-module replica. A `DriverSurfaceMetadataTests` walk of the endpoint data
     source is what stops the hole reopening.
+
+15. **Hours-of-service rule engine lives in `NorthernLink.Shared.HoursOfService`** — **Decided
+    (2026-10-09, owner's safety policy adopting NSC Standard 9 / M.R. 72/2007)**. A pure,
+    deterministic, System-only rule engine (integer seconds, Unix instants, tenths of a
+    kilometre; no clock, no I/O, no other NorthernLink namespace) sits in Shared rather than in a
+    domain library. This is a **deliberate exception to "no business logic in Shared"**: the
+    Drivers module (display, violations, audit) and the Trips module (assignment / start gate on
+    its event-fed replica) must agree bit-for-bit on every boundary, and `Project` needs the
+    whole algorithm, so neither a copy nor an integration event would do. The exception is held
+    to its terms by `HoursOfServicePurityTests` (a NetArchTest dependency rule plus a source scan
+    for `UtcNow`, `TimeZoneInfo.Local`, `Random`, `Environment`, `System.IO`, `Task`, `async`),
+    and the engine's behaviour is pinned by `hos-fixtures.json` (boundary matrix with hand-written
+    expectations and canonical snapshots) that a TypeScript mirror in the Dispatcher and the
+    Driver Field App asserts against byte-for-byte. Companion decisions from the same policy:
+    the new **ComplianceOfficer** role (Section 4.3) with `ComplianceAccess`, `HosAccess` and
+    `DriverRosterAccess` policies; on-duty-not-driving beyond 14h is **not** a violation; an
+    unknown day **blocks** driving rather than counting as zero; the 36h cycle reset (s.28) is
+    modelled, Cycle 2 / sleeper berth / 160 km exemption are not; the platform is the **planning
+    ledger and ELD mirror, never a second RODS**, and every figure it shows says so.
 
 ---
 

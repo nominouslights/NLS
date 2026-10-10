@@ -57,5 +57,25 @@ public static class AuthorizationPolicyRegistration
         options.AddPolicy(
             AuthorizationPolicies.DriverAccess,
             policy => policy.RequireRole(Roles.DriverAccess));
+
+        // Hours-of-service (NSC 9 / M.R. 72/2007). Three policies, none attached to an endpoint
+        // yet — the Drivers ledger and compliance endpoints that carry them land in later PRs.
+        // None accepts LegacyAdmin: the role model predates all of them.
+        //
+        // ComplianceAccess is deliberately narrow (Owner + ComplianceOfficer): it guards the only
+        // overrides past the hours gate. HosAccess and DriverRosterAccess are the existing
+        // DriverAccess / DispatchAccess lists widened with ComplianceOfficer — new policies rather
+        // than edits to those lists, so no existing group's membership changes here.
+        options.AddPolicy(
+            AuthorizationPolicies.ComplianceAccess,
+            policy => policy.RequireRole(Roles.ComplianceAccess));
+
+        options.AddPolicy(
+            AuthorizationPolicies.HosAccess,
+            policy => policy.RequireRole(Roles.HosAccess));
+
+        options.AddPolicy(
+            AuthorizationPolicies.DriverRosterAccess,
+            policy => policy.RequireRole(Roles.DriverRosterAccess));
     }
 }

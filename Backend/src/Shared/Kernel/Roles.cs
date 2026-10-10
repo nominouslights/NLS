@@ -33,6 +33,14 @@ public static class Roles
     public const string Driver = "Driver";
 
     /// <summary>
+    /// Hours-of-service compliance (NSC Standard 9 / M.R. 72/2007): approves off-duty deferrals,
+    /// records out-of-service declarations, resolves ELD malfunction reports, works findings.
+    /// The Owner may act as compliance officer, which is why <see cref="ComplianceAccess"/>
+    /// contains both. Owner's decision, 2026-10-09.
+    /// </summary>
+    public const string ComplianceOfficer = "ComplianceOfficer";
+
+    /// <summary>
     /// The role literal every user created before this role model carries. Both creation paths
     /// hardcoded it, so it always meant "Owner" in practice. The RenameAdminRoleToOwner migration
     /// rewrites stored rows; this constant exists only so the AdminOnly policy keeps honouring
@@ -43,7 +51,7 @@ public static class Roles
     public const string LegacyAdmin = "Admin";
 
     public static readonly string[] Internal =
-        [Owner, Dispatcher, Supervisor, Accountant, BoardMember, Driver];
+        [Owner, Dispatcher, Supervisor, Accountant, BoardMember, Driver, ComplianceOfficer];
 
     /// <summary>
     /// Financial oversight — architecture Sections 5.3 and 6.1. Superseded by Section 6.1's
@@ -80,6 +88,35 @@ public static class Roles
     /// </para>
     /// </summary>
     public static readonly string[] DriverAccess = [Owner, Dispatcher, Supervisor, Driver];
+
+    /// <summary>
+    /// Hours-of-service compliance decisions: deferral approval, out-of-service, ELD malfunction
+    /// resolution, findings. Owner plus <see cref="ComplianceOfficer"/> — nobody else, so a
+    /// Dispatcher can never approve the override that lets a driver past the hours gate.
+    /// </summary>
+    public static readonly string[] ComplianceAccess = [Owner, ComplianceOfficer];
+
+    /// <summary>
+    /// Who may read and record duty status: <see cref="DriverAccess"/> widened with
+    /// <see cref="ComplianceOfficer"/>. Like <see cref="DriverAccess"/> it contains
+    /// <see cref="Driver"/>, so it is route-level only; a Driver-role caller still has to pass the
+    /// caller-owns-this-row check. <see cref="HosRecordOverride"/> is the subset exempt from it.
+    /// </summary>
+    public static readonly string[] HosAccess = [Owner, Dispatcher, Supervisor, ComplianceOfficer, Driver];
+
+    /// <summary>
+    /// The roles inside <see cref="HosAccess"/> that may act on any driver's record (transcribe
+    /// an ELD or paper log, amend an event) rather than only their own. Not a policy — the
+    /// own-record check consults it.
+    /// </summary>
+    public static readonly string[] HosRecordOverride = [Owner, Dispatcher, Supervisor, ComplianceOfficer];
+
+    /// <summary>
+    /// The driver roster's read routes: <see cref="DispatchAccess"/> plus
+    /// <see cref="ComplianceOfficer"/>, so the console's Drivers screen works for a compliance
+    /// officer without widening <see cref="DispatchAccess"/> itself.
+    /// </summary>
+    public static readonly string[] DriverRosterAccess = [Owner, Dispatcher, Supervisor, ComplianceOfficer];
 
     public static bool IsKnown(string role) => Array.IndexOf(Internal, role) >= 0;
 }
