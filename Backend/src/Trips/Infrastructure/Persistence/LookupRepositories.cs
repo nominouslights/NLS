@@ -19,6 +19,10 @@ internal sealed class DriverLookupRepository(TripsDbContext context) : IDriverLo
         context.DriverLookups.AsNoTracking()
             .FirstOrDefaultAsync(d => d.DriverId == driverId, cancellationToken);
 
+    public Task<DriverLookup?> GetByUserIdAsync(Guid userId, CancellationToken cancellationToken = default) =>
+        context.DriverLookups.AsNoTracking()
+            .FirstOrDefaultAsync(d => d.UserId == userId, cancellationToken);
+
     public async Task UpsertAsync(DriverLookup driver, CancellationToken cancellationToken = default)
     {
         var existing = await context.DriverLookups
@@ -36,6 +40,9 @@ internal sealed class DriverLookupRepository(TripsDbContext context) : IDriverLo
             existing.Name = driver.Name;
             existing.LicenceClass = driver.LicenceClass;
             existing.Status = driver.Status;
+            // Written through even when null: an unlink event carries null, and it must clear
+            // the row or the revoked account keeps acting on that driver's trips.
+            existing.UserId = driver.UserId;
             existing.UpdatedAtUtc = driver.UpdatedAtUtc;
         }
 

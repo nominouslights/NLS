@@ -88,14 +88,12 @@ internal static class TripPlanningEndpoints
 
         // The driver-facing half: reading the board and advancing a trip's status from the cab.
         //
-        // KNOWN GAP, deliberate: unlike /api/drivers these routes carry no {driverId}, and Trips
-        // cannot resolve a caller to a driver — Driver.UserId lives in the Drivers module and the
-        // driver_lookup replica here does not carry it. So a Driver-role caller can read any
-        // trip and change any trip's status, not only the trips assigned to them. That is a
-        // narrower hole than the bare authorize this replaces (no writes to routes, stops,
-        // templates, shipments or the client book), but it IS still a hole. Closing it means
-        // carrying UserId on drivers.driver-changed into driver_lookup and applying
-        // OwnRecordAccess against Trip.DriverId here.
+        // The policy admits every Driver, and these routes carry no {driverId}, so the policy
+        // alone is not an ownership boundary. Each handler below runs TripOperatorAccess: a
+        // dispatch role sees and acts on everything; a Driver-role caller is resolved to their
+        // own driver row through driver_lookup.user_id (replicated from drivers.driver-changed,
+        // link and unlink included) and gets only trips assigned to that driver — the list is
+        // narrowed, the detail/activity/status routes answer 403 Trips.Trip.NotYourTrip.
         var tripsOperating = app.MapGroup("/api/trips")
             .RequireAuthorization(AuthorizationPolicies.DriverAccess);
         tripsOperating.MapGet("", GetTrips);

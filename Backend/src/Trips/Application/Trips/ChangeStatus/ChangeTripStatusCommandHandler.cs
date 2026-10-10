@@ -8,7 +8,8 @@ namespace NorthernLink.Trips.Application.Trips.ChangeStatus;
 public sealed class ChangeTripStatusCommandHandler(
     ITripRepository tripRepository,
     ITripManifestRepository manifestRepository,
-    IShipmentRepository shipmentRepository)
+    IShipmentRepository shipmentRepository,
+    TripOperatorAccess operatorAccess)
     : ICommandHandler<ChangeTripStatusCommand>
 {
     public async Task<Result> Handle(ChangeTripStatusCommand command, CancellationToken cancellationToken)
@@ -17,6 +18,14 @@ public sealed class ChangeTripStatusCommandHandler(
         if (trip is null)
         {
             return Result.Failure(TripErrors.NotFound);
+        }
+
+        // The identity gate. This command is reachable from the DriverAccess group, which admits
+        // every driver; only the trip's own driver (or dispatch) may advance it. Checked before
+        // any other rule so a stranger learns nothing about the trip's manifest or cargo.
+        if (!await operatorAccess.MayOperateAsync(trip.DriverId, cancellationToken))
+        {
+            return Result.Failure(TripErrors.NotYourTrip);
         }
 
         // En-route guard. Passenger services cannot go InProgress without a manifest carrying

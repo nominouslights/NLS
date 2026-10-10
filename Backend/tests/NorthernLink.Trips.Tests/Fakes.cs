@@ -1,6 +1,9 @@
+using NorthernLink.Shared.Kernel;
+using NorthernLink.Shared.Tenancy;
 using NorthernLink.Trips.Application.Abstractions;
 using NorthernLink.Trips.Application.Integration;
 using NorthernLink.Trips.Application.Schedules;
+using NorthernLink.Trips.Application.Trips;
 using NorthernLink.Trips.Domain.Manifests;
 using NorthernLink.Trips.Domain.Riders;
 using NorthernLink.Trips.Domain.Routes;
@@ -206,8 +209,17 @@ internal sealed class FakeDriverLookupRepository : IDriverLookupRepository
 {
     public List<DriverLookup> Drivers { get; } = [];
 
+    /// <summary>How many times a caller was resolved to a driver — the dispatch short-circuit must keep this at 0.</summary>
+    public int UserLookups { get; private set; }
+
     public Task<DriverLookup?> GetAsync(Guid driverId, CancellationToken cancellationToken = default) =>
         Task.FromResult(Drivers.FirstOrDefault(d => d.DriverId == driverId));
+
+    public Task<DriverLookup?> GetByUserIdAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        UserLookups++;
+        return Task.FromResult(Drivers.FirstOrDefault(d => d.UserId == userId));
+    }
 
     public Task UpsertAsync(DriverLookup driver, CancellationToken cancellationToken = default)
     {
@@ -215,6 +227,47 @@ internal sealed class FakeDriverLookupRepository : IDriverLookupRepository
         Drivers.Add(driver);
         return Task.CompletedTask;
     }
+}
+
+/// <summary>
+/// The signed-in caller as a domain library sees it. <see cref="Dispatcher"/> is the default
+/// for handler tests that are not about the identity gate — a dispatch role short-circuits
+/// the caller-owns-this-trip check, so those tests exercise exactly what they did before.
+/// </summary>
+internal sealed class FakeCurrentActor(Guid? userId, params string[] roles) : ICurrentActor
+{
+    public static readonly Guid DispatcherUserId = Guid.Parse("00000000-0000-0000-0000-00000000aa01");
+
+    public static FakeCurrentActor Dispatcher => new(DispatcherUserId, Shared.Kernel.Roles.Dispatcher);
+
+    public static FakeCurrentActor Driver(Guid userId) => new(userId, Shared.Kernel.Roles.Driver);
+
+    public Guid? UserId => userId;
+
+    public string? Email => null;
+
+    public IReadOnlyCollection<string> Roles => roles;
+}
+
+/// <summary>Trip read side that records the filter it was handed and returns a canned page.</summary>
+internal sealed class FakeTripReadService : ITripReadService
+{
+    public List<TripResponse> Trips { get; } = [];
+
+    public TripFilter? LastFilter { get; private set; }
+
+    public Task<(IReadOnlyList<TripResponse> Items, int TotalCount)> GetTripsAsync(
+        TripFilter filter, CancellationToken cancellationToken = default)
+    {
+        LastFilter = filter;
+        IReadOnlyList<TripResponse> items = Trips
+            .Where(t => filter.DriverId is null || t.DriverId == filter.DriverId)
+            .ToList();
+        return Task.FromResult((items, items.Count));
+    }
+
+    public Task<TripResponse?> GetTripAsync(Guid tripId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Trips.FirstOrDefault(t => t.Id == tripId));
 }
 
 internal sealed class FakeVehicleLookupRepository : IVehicleLookupRepository
