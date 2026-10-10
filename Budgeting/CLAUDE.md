@@ -1,8 +1,8 @@
 # Budgeting — Zero-Based Budgeting Console
 
 Next.js 16 app on port **3003**, consuming the shared API. Scaffolded by US-6.0.1 (Track 6,
-Stage 6.0). Budget **periods**, **codes** and **budget items** are real — including the period
-lifecycle and the period dashboard; actuals and variance are still mock — see
+Stage 6.0). Budget **periods**, **codes**, **budget items** and the **vendor register** are real —
+including the period lifecycle and the period dashboard; actuals and variance are still mock — see
 [Data](#data-periods-codes-and-budget-items-are-real-actuals-and-variance-are-still-mock).
 
 ## Commands
@@ -255,8 +255,8 @@ storage tests, which need `sessionStorage`):
   good load, **not** lost after a failed load or while loading), the storage key differing by
   tenant and by user and `null` without claims, the `sessionStorage` round trip, `null` removing
   the entry, a throwing store degrading quietly, **never touching `localStorage`**, and
-  `isPeriodScoped` being false for `settings` alone (Budget Codes became scoped when codes moved
-  under the period).
+  `isPeriodScoped` being false for `settings` and `costCentres` only (Budget Codes became scoped
+  when codes moved under the period; the cost-centre register is tenant-wide).
 - `components/screens/periods/PeriodChooser.test.tsx` — `vi.fn()` props, as `ProfileForm` does:
   a row click enters that row's id, each row writes its state out, the suggested row carries
   its tag and focus, the eyebrow names the destination screen, the empty state's create button,
@@ -269,6 +269,24 @@ storage tests, which need `sessionStorage`):
   PERIOD is `aria-disabled`, does not call `onSwitch`, and the reason is written beside it; the
   "isn't tied to a period" sentence on Settings, with no "every period" wording left anywhere;
   CHOOSE A PERIOD with nothing entered.
+
+- `lib/costCentres.test.ts` — every `lib/costCentres.ts` mirror against the C# it names: the
+  limits and every `CostCentreErrors` message, trim-only + case-sensitive matching,
+  `costCentreError` in the create and the (different) update order, `parentCandidates` against
+  `CostCentreParentRule` (self, top-level, retired-current-parent kept, children → none),
+  `budgetCodeCostCentreError` against `BudgetCodeCostCentreRule` (unchanged always accepted), that
+  `costCentreOptions` never offers a value the server would refuse, and `groupRollup` /
+  `rollupSum`.
+- `lib/api/costCentres.requests.test.ts` — every cost-centre route/method/body (PUT never carries
+  `code`; activate/deactivate both directions; `includeInactive` written out), each of the 17
+  `Budgeting.CostCentre.*` refusals and the two new `Budgeting.Code.CostCentre*` refusals
+  verbatim, and the rollup route. A separate file from `budgeting.requests.test.ts` on purpose.
+- `components/BudgetCodeFormModal.test.tsx` — the cost-centre picker: active entries only, a
+  retired / unregistered current value kept and marked and saved unchanged, Revenue hides it and
+  sends `null`, inline create selects the new entry (case kept), an inline refusal verbatim.
+- `components/screens/periods/CostCentreBreakdown.test.tsx` — grouping under a parent, an absent
+  parent named, retired / unregistered chips, owners, "No cost centre" at $0, the server's total,
+  and no actual column.
 
 `lib/api/transport.ts` is a **copied** file. Tests against it belong here (a test file is not on
 the copy manifest), but anything they reveal is a change to *Dispatcher's* source first, then a
@@ -294,8 +312,8 @@ a copy, a report — is under the period the banner names, and nothing changes t
 silently.
 
 - **Enter, then switch.** A period-scoped screen — Period Dashboard, Budget Codes, Actuals vs
-  Budget, Variance, Reports (`PERIOD_SCOPED` / `isPeriodScoped` in `lib/nav.ts`; Settings is
-  the only screen outside it) — shows
+  Budget, Variance, Reports (`PERIOD_SCOPED` / `isPeriodScoped` in `lib/nav.ts`; Settings and
+  the two tenant-wide registers, Vendors and Cost Centres, are the only screens outside it) — shows
   `screens/periods/PeriodChooser.tsx` until a period is entered. Once one is, a strip at the top
   of the main column (`components/PeriodBanner.tsx`) always shows WORKING IN, the label, dates,
   the state chip and "Plan editable / read-only"; leaving takes its explicit **SWITCH PERIOD**.
@@ -341,9 +359,9 @@ silently.
   button labels are unchanged — tests pin them.
 - **Budget codes belong to the period** (they used to be tenant-wide; the owner reversed that).
   Budget Codes is scoped like the dashboard, shows the entered period's chart, and is read-only
-  outside Draft/Open. RETIRE and DELETE are both two-click. Only Settings renders with or without
-  an entered period; there the banner says "This screen isn't tied to a period." or offers
-  CHOOSE A PERIOD.
+  outside Draft/Open. RETIRE and DELETE are both two-click. Only Settings, Vendors and Cost Centres render
+  with or without an entered period; there the banner says "This screen isn't tied to a period." or
+  offers CHOOSE A PERIOD.
 
 ## Data: periods, codes and budget items are real; actuals and variance are still mock
 
@@ -541,6 +559,28 @@ guessable from the form:
 on the string Trips and Billing already emit. `budgeting.test.ts` pins those six spellings; do not
 "tidy" `Nihb` into `NIHB`.
 
+**The vendor register is real, and tenant-wide — NOT period-scoped.** A vendor is the same
+counterparty in every period, so `screens/Vendors.tsx` (rail item Vendors, code `VN`, in
+PLANNING) is deliberately left out of `PERIOD_SCOPED`, names no period and takes no period hold.
+Routes (same `BudgetAccess` group): `GET vendors?includeInactive=` (ordered by name), `GET
+vendors/{id}`, `POST vendors` → 201 `{ id }`, `PUT vendors/{id}` (**full replace** — an omitted
+optional field is cleared, so `draftToVendorInput` always sends all nine keys, null when blank),
+`POST vendors/{id}/activate|deactivate` → 204, `DELETE vendors/{id}` → 204 / 409
+`Budgeting.Vendor.InUse`. The screen fetches the whole register (`includeInactive=true`) and its
+"Show retired" toggle filters client-side, because the duplicate-name check must see retired
+vendors: names are unique per tenant **ignoring case, retired included** (`VendorNameRule`), so
+the modal warns live in the server's own words (`duplicateVendorMessage` ↔
+`VendorErrors.DuplicateName`) and links to the existing vendor — or arms a restore when it is
+retired. Delete is offered blind (usage is not knowable client-side); its 409 shows verbatim with
+RETIRE … INSTEAD. Retire, restore and delete are each two-click. The GST registration number is
+reference data only (its hint says the platform never calculates tax); the QuickBooks display
+name is the future import's match key. `lib/vendors.ts` mirrors `Vendor.Normalize` rule for rule
+(`vendorError`, server order and messages), `Vendor.NormalizeName`, `VendorNameRule`
+(`findDuplicateVendor`, with `exceptId`), and the default code's `BudgetCode.NormalizeCode` /
+`HasValidCodeFormat` (`hasValidCodeFormat` in `lib/api/budgeting.ts`, shared with the code
+form). Tests: `lib/vendors.test.ts`, the vendor block in `budgeting.requests.test.ts`, and
+`components/screens/Vendors.test.tsx` (screen and modal, `api` prop injected).
+
 `lib/data.ts` holds the not-yet-real remainder: actuals and variance. Its `budgetCodes` array
 survives **only** as the name-and-category lookup those two still need — the Budget Codes screen
 no longer reads it, and the array is typed `Pick<BudgetCode, "id" | "code" | "name" | "category">`
@@ -558,6 +598,46 @@ Variance thresholds (`varianceKind`) live in `lib/data.ts`, not in the Variance 
 future report agrees with the screen by construction. The signed formatters
 (`formatDeltaCad` / `formatDeltaPct`) live in `lib/money.ts`, **not** in `lib/data.ts`, so a
 screen on real data (the dashboard's Net tile) never imports the mock module.
+
+## Cost centres: a tenant-wide register
+
+A cost centre is an organisational unit or base (owner decision — never a vehicle). The register
+is **tenant-wide, not per period** — the opposite of budget codes — so it is its own rail item,
+**Cost Centres** (`CC`, id `costCentres`, PLANNING group), **not** a tab on Budget Codes and
+**not** in `PERIOD_SCOPED`: Budget Codes is one period's chart and remounts on every switch, and
+an edit under a period banner would read as "this period only". It renders with or without an
+entered period, like Settings.
+
+| Route | |
+|---|---|
+| `GET /api/budgeting/cost-centres?includeInactive=` | ordered by code; the app always sends the flag and always asks for `true` (the parent and children rules need retired entries) |
+| `GET /api/budgeting/cost-centres/{id}` | 404 `NotFound` |
+| `POST /api/budgeting/cost-centres` | `{ code, name, description, ownerUserId, parentId }` → 201 `{ id }` |
+| `PUT /api/budgeting/cost-centres/{id}` | same body **without `code`** (immutable; a different code is 400 `CodeImmutable`) → 204 |
+| `POST /api/budgeting/cost-centres/{id}/activate\|deactivate` | 204; deactivate is 409 `HasActiveChildren` for a parent with active children (never cascaded) |
+| `DELETE /api/budgeting/cost-centres/{id}` | 204; 409 `HasChildren`, then 409 `InUse` (any budget code in any period carries it) — the screen then offers RETIRE INSTEAD |
+| `GET /api/budgeting/periods/{id}/rollups/cost-centres` | the period's **planned** expense per cost centre + `noCostCentre` + `totalPlannedExpenseCad` (= the period's planned-expense tile). No actual field — the panel shows no actual column |
+
+- **The code is trimmed only — case preserved — and every match is ordinal.** Never route a
+  cost-centre string through `normalizeBudgetCode` (which upper-cases). `lib/costCentres.ts`
+  mirrors `CostCentre.NormalizeCode`, `CostCentre.Create`/`Validate` + the update handler's order
+  (`costCentreError`), `CostCentreParentRule` (`parentCandidates`: active top-level only, the
+  current parent kept even if retired since, nothing for an entry that has children), and
+  `BudgetCodeCostCentreRule` (`budgetCodeCostCentreError`); messages verbatim in
+  `COST_CENTRE_MESSAGES` / `BUDGET_CODE_COST_CENTRE_MESSAGES`.
+- **The budget-code form's cost centre is a picker of ACTIVE entries** (still absent for Revenue).
+  A code whose current value is retired or not in the register keeps it, selectable and marked
+  with a chip — the server accepts an **unchanged** value unconditionally (`costCentreOptions`).
+  "+ New cost centre…" opens `CostCentreFormModal` as a sibling overlay (not a child — the
+  shell's `backdrop-filter` would trap a nested fixed overlay) and selects what it creates.
+- **The dashboard's "Expense by cost centre" panel** (`screens/periods/CostCentreBreakdown.tsx`)
+  sits beside "Expense by priority". It is the server's rollup, refetched whenever the items list
+  lands (retried until its total agrees with the loaded expense items); children nest under a
+  parent present in the rollup (`groupRollup`), "No cost centre" is always listed, and the total
+  shown is the server's `totalPlannedExpenseCad`.
+- Writes refetch with `refetchUntil` (`costCentreReflects` after a save; `isActive` / absence
+  after retire, restore, delete). The register writes take **no period hold** — they belong to no
+  period.
 
 ## Accessibility
 
@@ -588,6 +668,8 @@ Known hazards documented in `theme.ts`: `colors.amber` is a fill/border/icon col
 | 2026-09-29 | Code audit after the period workspace | **Pass** — the one new `statusMeta` call (`PeriodChooser`'s accent stripe) sits beside the row's state `StatusChip`; the banner and chooser carry state only via `StatusChip`; no new protected hex |
 | 2026-09-29 | Code audit after budget items | **Pass** — no new `statusMeta` call and no new protected hex; the priority chip is a `StatusChip` with a per-priority glyph (M / S / N) + written label, because Must and Should share the `info` colour; the modal's segmented choices use `aria-pressed` plus a ✓ and bold on the selected option |
 | 2026-09-29 | Code audit after per-period codes | **Pass** — no new `statusMeta` call and no new protected hex; the "Applies to every period" chip is gone; the Copy codes outcome is a `StatusChip` (Copied / Nothing copied) beside the written summary, as on the items copy |
+| 2026-10-08 | Code audit after the vendor register | **Pass** — no new `statusMeta` call and no new protected hex; Active/Retired is a `StatusChip` (glyph + label) on every row and in the detail pane; the duplicate-name note carries a "Name taken" `StatusChip` beside the written message |
+| 2026-10-08 | Code audit after the cost-centre register | **Pass** — no new `statusMeta` call and no new protected hex; status on the register rows/detail, the code form's kept value and the rollup's retired/unregistered rows is always a `StatusChip` (glyph + written label) |
 | — | Grayscale (DevTools → Rendering → Achromatopsia) | **Not yet run** |
 | — | Deuteranopia / Protanopia / Tritanopia | **Not yet run** |
 | — | Side-by-side against Dispatcher at equal width | **Not yet run** |

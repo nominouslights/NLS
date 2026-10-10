@@ -27,11 +27,26 @@ using NorthernLink.Budgeting.Application.Codes.GetOwnerCandidates;
 using NorthernLink.Budgeting.Application.Codes.SeedStarterSet;
 using NorthernLink.Budgeting.Application.Codes.SetActive;
 using NorthernLink.Budgeting.Application.Codes.Update;
+using NorthernLink.Budgeting.Application.CostCentres;
+using NorthernLink.Budgeting.Application.CostCentres.Create;
+using NorthernLink.Budgeting.Application.CostCentres.Delete;
+using NorthernLink.Budgeting.Application.CostCentres.GetCostCentreById;
+using NorthernLink.Budgeting.Application.CostCentres.GetCostCentres;
+using NorthernLink.Budgeting.Application.CostCentres.GetPlannedRollup;
+using NorthernLink.Budgeting.Application.CostCentres.SetActive;
+using NorthernLink.Budgeting.Application.CostCentres.Update;
 using NorthernLink.Budgeting.Application.Periods;
 using NorthernLink.Budgeting.Application.Periods.Create;
 using NorthernLink.Budgeting.Application.Periods.GetPeriodById;
 using NorthernLink.Budgeting.Application.Periods.GetPeriods;
 using NorthernLink.Budgeting.Application.Periods.Transition;
+using NorthernLink.Budgeting.Application.Vendors;
+using NorthernLink.Budgeting.Application.Vendors.Create;
+using NorthernLink.Budgeting.Application.Vendors.Delete;
+using NorthernLink.Budgeting.Application.Vendors.GetVendorById;
+using NorthernLink.Budgeting.Application.Vendors.GetVendors;
+using NorthernLink.Budgeting.Application.Vendors.SetActive;
+using NorthernLink.Budgeting.Application.Vendors.Update;
 using NorthernLink.Budgeting.Infrastructure.Persistence;
 using NorthernLink.Budgeting.Infrastructure.Persistence.Projections;
 
@@ -76,12 +91,24 @@ public static class BudgetingServiceCollectionExtensions
         services.AddScoped<IBudgetAllocationRepository, BudgetAllocationRepository>();
         services.AddScoped<IBudgetAllocationReadService, BudgetAllocationReadService>();
         services.AddScoped<IUserLookupRepository, UserLookupRepository>();
+        services.AddScoped<IVendorRepository, VendorRepository>();
+        services.AddScoped<IVendorReadService, VendorReadService>();
+        services.AddScoped<ICostCentreRepository, CostCentreRepository>();
+        services.AddScoped<ICostCentreReadService, CostCentreReadService>();
 
         // Allocation lines reference codes by id and by string, so "is this code in use" is now
         // a real question with a real answer — the delete-code path refuses with 409 InUse the
         // moment any item of the code's own period has planned against it. Actual transactions plug into the same
         // probe when they arrive (see the class comment).
         services.AddScoped<IBudgetCodeUsageProbe, AllocationBudgetCodeUsageProbe>();
+
+        // Nothing stores a vendor id yet (budget items still carry a free-text vendor), so no
+        // vendor can be in use and this probe always says so. The slice that links items to
+        // vendors replaces this registration with a probe that checks them.
+        services.AddScoped<IVendorUsageProbe, UnreferencedVendorUsageProbe>();
+        // A cost centre is "in use" while any budget code in any period carries its code string;
+        // the register's delete path refuses with 409 Budgeting.CostCentre.InUse then.
+        services.AddScoped<ICostCentreUsageProbe, BudgetCodeCostCentreUsageProbe>();
 
         // 3. Command/query handlers — registered explicitly, one line per handler.
         services.AddScoped<ICommandHandler<CreateBudgetPeriodCommand, Guid>, CreateBudgetPeriodCommandHandler>();
@@ -101,6 +128,19 @@ public static class BudgetingServiceCollectionExtensions
         services.AddScoped<ICommandHandler<RemoveBudgetAllocationCommand>, RemoveBudgetAllocationCommandHandler>();
         services.AddScoped<ICommandHandler<CopyBudgetAllocationsCommand, BudgetAllocationCopyResult>, CopyBudgetAllocationsCommandHandler>();
         services.AddScoped<IQueryHandler<GetBudgetAllocationsQuery, IReadOnlyList<BudgetAllocationResponse>>, GetBudgetAllocationsQueryHandler>();
+        services.AddScoped<ICommandHandler<CreateVendorCommand, Guid>, CreateVendorCommandHandler>();
+        services.AddScoped<ICommandHandler<UpdateVendorCommand>, UpdateVendorCommandHandler>();
+        services.AddScoped<ICommandHandler<SetVendorActiveCommand>, SetVendorActiveCommandHandler>();
+        services.AddScoped<ICommandHandler<DeleteVendorCommand>, DeleteVendorCommandHandler>();
+        services.AddScoped<IQueryHandler<GetVendorsQuery, IReadOnlyList<VendorResponse>>, GetVendorsQueryHandler>();
+        services.AddScoped<IQueryHandler<GetVendorByIdQuery, VendorResponse>, GetVendorByIdQueryHandler>();
+        services.AddScoped<ICommandHandler<CreateCostCentreCommand, Guid>, CreateCostCentreCommandHandler>();
+        services.AddScoped<ICommandHandler<UpdateCostCentreCommand>, UpdateCostCentreCommandHandler>();
+        services.AddScoped<ICommandHandler<SetCostCentreActiveCommand>, SetCostCentreActiveCommandHandler>();
+        services.AddScoped<ICommandHandler<DeleteCostCentreCommand>, DeleteCostCentreCommandHandler>();
+        services.AddScoped<IQueryHandler<GetCostCentresQuery, IReadOnlyList<CostCentreResponse>>, GetCostCentresQueryHandler>();
+        services.AddScoped<IQueryHandler<GetCostCentreByIdQuery, CostCentreResponse>, GetCostCentreByIdQueryHandler>();
+        services.AddScoped<IQueryHandler<GetCostCentreRollupQuery, CostCentreRollupResponse>, GetCostCentreRollupQueryHandler>();
 
         // 4. Integration event consumers — the Identity replica that keeps user_lookup current,
         //    so a budget code can name an accountable owner and its created_by/modified_by
@@ -120,7 +160,9 @@ public static class BudgetingServiceCollectionExtensions
         services.AddProjections<BudgetingDbContext>(SchemaName, registry => registry
             .Project(new BudgetPeriodProjection())
             .Project(new BudgetCodeProjection())
-            .Project(new BudgetAllocationProjection()));
+            .Project(new BudgetAllocationProjection())
+            .Project(new VendorProjection())
+            .Project(new CostCentreProjection()));
 
         return services;
     }

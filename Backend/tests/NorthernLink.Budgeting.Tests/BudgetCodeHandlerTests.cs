@@ -14,6 +14,7 @@ public class BudgetCodeHandlerTests
 {
     private readonly InMemoryBudgetCodeRepository _repository = new();
     private readonly InMemoryUserLookupRepository _users = new();
+    private readonly InMemoryCostCentreRepository _costCentres = new();
     private readonly InMemoryBudgetPeriodRepository _periods = new();
 
     /// <summary>The Draft period every code in this class lives in (codes belong to a period).</summary>
@@ -28,8 +29,8 @@ public class BudgetCodeHandlerTests
     public BudgetCodeHandlerTests()
     {
         _periods.Add(_period);
-        _create = new CreateBudgetCodeCommandHandler(_repository, _periods, _users);
-        _update = new UpdateBudgetCodeCommandHandler(_repository, _periods, _users);
+        _create = new CreateBudgetCodeCommandHandler(_repository, _periods, _users, _costCentres);
+        _update = new UpdateBudgetCodeCommandHandler(_repository, _periods, _users, _costCentres);
         _setActive = new SetBudgetCodeActiveCommandHandler(_repository, _periods);
     }
 

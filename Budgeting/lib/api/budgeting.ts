@@ -1543,10 +1543,21 @@ export function budgetCodeFormatError(code: string): string | null {
   if (normalized.length > BUDGET_CODE_MAX_LENGTH) {
     return `The code must be ${BUDGET_CODE_MAX_LENGTH} characters or fewer.`;
   }
-  if (!/^[A-Z0-9]([A-Z0-9-]*[A-Z0-9])?$/.test(normalized)) {
+  if (!hasValidCodeFormat(normalized)) {
     return "Use letters, digits and hyphens only, starting and ending with a letter or digit.";
   }
   return null;
+}
+
+/**
+ * Mirrors BudgetCode.HasValidCodeFormat, which takes an ALREADY-NORMALIZED code: non-empty, ASCII
+ * letters/digits/hyphens only (char.IsAsciiLetterOrDigit — "É" is refused), and no leading or
+ * trailing hyphen. Upper-case letters only, because the input is normalized first. Shared by the
+ * code form and the vendor form's default budget code, which the server checks with the same
+ * method.
+ */
+export function hasValidCodeFormat(normalizedCode: string): boolean {
+  return /^[A-Z0-9]([A-Z0-9-]*[A-Z0-9])?$/.test(normalizedCode);
 }
 
 /**
@@ -1637,4 +1648,263 @@ export function toBudgetCode(r: BudgetCodeRecord): BudgetCode {
     modifiedByName: r.modifiedByName,
     modifiedByEmail: r.modifiedByEmail,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Vendors — the tenant's vendor register. TENANT-WIDE, NOT PER PERIOD: a vendor is the same
+// counterparty in every period (unlike a budget code), so these routes sit directly under
+// /api/budgeting, never under periods/{id}. Same BudgetAccess group as every other route here.
+// Shapes mirror VendorRequest / VendorResponse in BudgetingEndpoints.cs and
+// Application/Vendors/VendorResponse.cs. The pure mirrors of Vendor's rules live in
+// lib/vendors.ts.
+// ---------------------------------------------------------------------------
+
+/** Mirrors VendorResponse. Optional text is null when blank, never "". */
+export interface VendorRecord {
+  id: string;
+  name: string;
+  contactName: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  notes: string | null;
+  /** Reference data only — the platform never computes tax from it. */
+  gstRegistrationNumber: string | null;
+  /** The vendor's DisplayName in QuickBooks, reserved as the match key for a future import. */
+  qboDisplayName: string | null;
+  /** A budget code STRING (normalized), not an id — not required to exist in any period. */
+  defaultBudgetCode: string | null;
+  isActive: boolean;
+  /** User ids only — the response resolves no names; the screen looks them up in codes/owners. */
+  createdBy: string | null;
+  modifiedBy: string | null;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+}
+
+/**
+ * VendorRequest — the body of both POST vendors and PUT vendors/{id}. PUT is a FULL REPLACE: an
+ * omitted optional field is cleared server-side, so every key is always sent, null when blank.
+ */
+export interface VendorInput {
+  name: string;
+  contactName: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  notes: string | null;
+  gstRegistrationNumber: string | null;
+  qboDisplayName: string | null;
+  defaultBudgetCode: string | null;
+}
+
+/**
+ * GET vendors?includeInactive= — ordered by name (case-insensitively) server-side. The server
+ * lists active vendors only unless asked; the screen asks for everything, because the duplicate-
+ * name check has to see retired vendors too (a retired name still blocks a new one).
+ */
+export function listVendors(includeInactive = false): Promise<VendorRecord[]> {
+  return request<VendorRecord[]>(`/api/budgeting/vendors?includeInactive=${includeInactive}`);
+}
+
+/** GET vendors/{id} → 200, or 404 Budgeting.Vendor.NotFound. The 201 Location target. */
+export function getVendor(id: string): Promise<VendorRecord> {
+  return request<VendorRecord>(`/api/budgeting/vendors/${id}`);
+}
+
+/**
+ * POST vendors → 201 { id } (the row lands on the next projection read). 400 for a field rule
+ * (lib/vendors.ts VENDOR_MESSAGES), 409 Budgeting.Vendor.DuplicateName naming the vendor that
+ * already holds the name — surface it verbatim.
+ */
+export async function createVendor(input: VendorInput): Promise<string> {
+  const res = await request<{ id: string }>("/api/budgeting/vendors", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return res.id;
+}
+
+/** PUT vendors/{id} → 204. Full replace — see VendorInput. 400 / 404 / 409 DuplicateName. */
+export function updateVendor(id: string, input: VendorInput): Promise<void> {
+  return request<void>(`/api/budgeting/vendors/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+/**
+ * POST vendors/{id}/activate|deactivate → 204. A route built from a boolean, like
+ * setBudgetCodeActive: an inverted ternary would answer 204 either way and silently retire the
+ * vendor the planner asked to restore — the request test pins both directions.
+ */
+export function setVendorActive(id: string, active: boolean): Promise<void> {
+  return request<void>(`/api/budgeting/vendors/${id}/${active ? "activate" : "deactivate"}`, {
+    method: "POST",
+  });
+}
+
+/**
+ * DELETE vendors/{id} → 204, or 409 Budgeting.Vendor.InUse once anything references the vendor.
+ * The console cannot know usage client-side, so it offers Delete and shows that 409 verbatim —
+ * its message names retirement as the alternative.
+ */
+export function deleteVendor(id: string): Promise<void> {
+  return request<void>(`/api/budgeting/vendors/${id}`, { method: "DELETE" });
+}
+
+// ---------------------------------------------------------------------------
+// Cost centres — the tenant's register of organisational units and bases that
+// cost is attributed to. TENANT-WIDE, not under a period: a cost centre
+// outlives every period's chart. A budget code still carries its cost centre as
+// the register entry's CODE STRING (BudgetCode.CostCentre), validated against
+// this register on create/edit (BudgetCodeCostCentreRule). Mirrors
+// CostCentreResponse, CostCentreRequest and CostCentreRollupResponse
+// (BudgetingEndpoints.cs, Application/CostCentres/). The pure client-side
+// mirrors of the register's rules live in lib/costCentres.ts.
+// ---------------------------------------------------------------------------
+
+/** Mirrors CostCentreResponse. The `…Code`/`…Name`/`…Email` companions are resolved server-side on every read. */
+export interface CostCentreRecord {
+  id: string;
+  /** Trimmed, case PRESERVED (never upper-cased); set once at creation. */
+  code: string;
+  name: string;
+  description: string | null;
+  ownerUserId: string | null;
+  /** Null until that user sets a name — render the email instead (userDisplay). */
+  ownerName: string | null;
+  ownerEmail: string | null;
+  parentId: string | null;
+  parentCode: string | null;
+  parentName: string | null;
+  isActive: boolean;
+  createdBy: string | null;
+  createdByName: string | null;
+  createdByEmail: string | null;
+  modifiedBy: string | null;
+  modifiedByName: string | null;
+  modifiedByEmail: string | null;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+}
+
+/**
+ * POST /api/budgeting/cost-centres body (CostCentreRequest). Optional fields go as explicit
+ * nulls, the BudgetCodeInput convention.
+ */
+export interface CostCentreInput {
+  code: string;
+  name: string;
+  description: string | null;
+  ownerUserId: string | null;
+  parentId: string | null;
+}
+
+/**
+ * PUT /api/budgeting/cost-centres/{id} body. No `code`: the server accepts it omitted (and refuses
+ * any DIFFERENT code with 400 Budgeting.CostCentre.CodeImmutable), so this app never sends it —
+ * there is nothing to round-trip wrongly.
+ */
+export type CostCentreUpdateInput = Omit<CostCentreInput, "code">;
+
+/**
+ * GET cost-centres?includeInactive= — ordered by code. Retired entries are left out unless
+ * `includeInactive` is true. The query is always written out, so the wire never relies on the
+ * server's default.
+ */
+export function listCostCentres(options: { includeInactive: boolean }): Promise<CostCentreRecord[]> {
+  return request<CostCentreRecord[]>(
+    `/api/budgeting/cost-centres?includeInactive=${options.includeInactive ? "true" : "false"}`,
+  );
+}
+
+/** GET cost-centres/{id} → 200, or 404 Budgeting.CostCentre.NotFound. The 201 Location target. */
+export function getCostCentre(id: string): Promise<CostCentreRecord> {
+  return request<CostCentreRecord>(`/api/budgeting/cost-centres/${id}`);
+}
+
+/**
+ * POST cost-centres → 201 { id }. 400 CodeRequired / CodeTooLong / NameRequired / NameTooLong /
+ * DescriptionTooLong / ParentIsNotTopLevel, 404 OwnerNotFound / ParentNotFound, 409 DuplicateCode /
+ * ParentRetired — every message shown verbatim.
+ */
+export async function createCostCentre(input: CostCentreInput): Promise<string> {
+  const res = await request<{ id: string }>("/api/budgeting/cost-centres", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return res.id;
+}
+
+/**
+ * PUT cost-centres/{id} → 204. Beyond create's refusals: 404 NotFound, 400 ParentIsSelf,
+ * 409 HasChildrenCannotHaveParent. Keeping a parent that has since been retired is accepted.
+ */
+export function updateCostCentre(id: string, input: CostCentreUpdateInput): Promise<void> {
+  return request<void>(`/api/budgeting/cost-centres/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+/**
+ * POST cost-centres/{id}/activate|deactivate → 204. Built from a boolean like setBudgetCodeActive,
+ * so the request test pins both directions. Deactivating a parent with active children is 409
+ * Budgeting.CostCentre.HasActiveChildren (refused, never cascaded).
+ */
+export function setCostCentreActive(id: string, active: boolean): Promise<void> {
+  return request<void>(`/api/budgeting/cost-centres/${id}/${active ? "activate" : "deactivate"}`, {
+    method: "POST",
+  });
+}
+
+/**
+ * DELETE cost-centres/{id} → 204; 409 HasChildren (checked first), then 409 InUse when any budget
+ * code in any period carries the code string. Retiring is the normal end of life; the server's
+ * InUse message says so.
+ */
+export function deleteCostCentre(id: string): Promise<void> {
+  return request<void>(`/api/budgeting/cost-centres/${id}`, { method: "DELETE" });
+}
+
+/** Mirrors CostCentreRollupRow. `costCentreId` is null only for a string no register entry matches. */
+export interface CostCentreRollupRow {
+  costCentreId: string | null;
+  code: string;
+  name: string;
+  isActive: boolean;
+  parentId: string | null;
+  parentCode: string | null;
+  ownerUserId: string | null;
+  ownerName: string | null;
+  ownerEmail: string | null;
+  budgetCodeCount: number;
+  itemCount: number;
+  plannedCad: number;
+}
+
+/** Mirrors NoCostCentreRollup — expense planned on codes with no cost centre. */
+export interface NoCostCentreRollup {
+  budgetCodeCount: number;
+  itemCount: number;
+  plannedCad: number;
+}
+
+/**
+ * Mirrors CostCentreRollupResponse. PLANNED ONLY — there is deliberately no actual field until
+ * the actuals slice lands. `totalPlannedExpenseCad` is every row plus `noCostCentre`, and equals
+ * the period's own `plannedExpenseCad`.
+ */
+export interface CostCentreRollup {
+  periodId: string;
+  /** Ordered by code (ordinal). Every active entry, plus retired ones this period still carries. */
+  costCentres: CostCentreRollupRow[];
+  noCostCentre: NoCostCentreRollup;
+  totalPlannedExpenseCad: number;
+}
+
+/** GET periods/{periodId}/rollups/cost-centres → 200; 404 Budgeting.Period.NotFound. */
+export function getCostCentreRollup(periodId: string): Promise<CostCentreRollup> {
+  return request<CostCentreRollup>(`/api/budgeting/periods/${periodId}/rollups/cost-centres`);
 }

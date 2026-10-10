@@ -34,6 +34,10 @@ internal sealed class BudgetCodeRepository(BudgetingDbContext context) : IBudget
         Guid periodId, CancellationToken cancellationToken = default) =>
         await context.BudgetCodes.Where(c => c.PeriodId == periodId).ToListAsync(cancellationToken);
 
+    // Every period, on purpose — see the interface. Served by the (tenant_id, cost_centre) index.
+    public Task<bool> AnyWithCostCentreAsync(string costCentreCode, CancellationToken cancellationToken = default) =>
+        context.BudgetCodes.AnyAsync(c => c.CostCentre == costCentreCode, cancellationToken);
+
     public void Add(BudgetCode budgetCode) => context.BudgetCodes.Add(budgetCode);
 
     public void Remove(BudgetCode budgetCode) => context.BudgetCodes.Remove(budgetCode);

@@ -14,9 +14,9 @@ import { canEditAllocations, PERIOD_STATE_LABELS } from "@/lib/api/budgeting";
 // Three shapes:
 //   - a period-scoped screen, period entered: WORKING IN · label · dates · state · editability,
 //     and SWITCH PERIOD — the only way out of a period;
-//   - Settings (the one screen not tied to a period — budget codes belong to a period now),
-//     period entered: the same identity plus a sentence saying this screen is not tied to it;
-//   - Settings, nothing entered: "No period entered" and CHOOSE A PERIOD.
+//   - a screen not tied to a period (Settings, and Vendors — the register is tenant-wide), period
+//     entered: the same identity plus a sentence saying this screen is not tied to it;
+//   - the same screens, nothing entered: "No period entered" and CHOOSE A PERIOD.
 // A period-scoped screen with nothing entered renders the chooser in place of the screen, so
 // the banner has nothing to add there and renders nothing.
 //
@@ -37,7 +37,7 @@ export default function PeriodBanner({
   /** True while a request against the entered period is in flight. */
   held: boolean;
   onSwitch: () => void;
-  /** Settings with nothing entered: go to the chooser. */
+  /** An unscoped screen (Settings, Vendors) with nothing entered: go to the chooser. */
   onChoose: () => void;
 }) {
   if (!period && scoped) return null;
