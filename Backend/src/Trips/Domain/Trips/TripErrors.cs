@@ -8,6 +8,14 @@ public static class TripErrors
     public static readonly Error NotFound = Error.NotFound(
         "Trips.Trip.NotFound", "The trip was not found.");
 
+    /// <summary>
+    /// The caller may use the driver-facing routes but is not the driver assigned to this trip
+    /// (or their account is linked to no driver at all). 403, deliberately not 404: the trip
+    /// exists, the caller simply is not its driver.
+    /// </summary>
+    public static readonly Error NotYourTrip = Error.Forbidden(
+        "Trips.Trip.NotYourTrip", "You may only act on trips assigned to you.");
+
     public static readonly Error TripNumberRequired = Error.Validation(
         "Trips.Trip.TripNumberRequired", "A trip number is required.");
 

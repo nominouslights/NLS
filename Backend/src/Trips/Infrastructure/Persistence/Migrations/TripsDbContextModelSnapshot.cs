@@ -334,9 +334,17 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at_utc");
 
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
                     b.HasKey("DriverId");
 
                     b.HasIndex("TenantId", "Status");
+
+                    b.HasIndex("TenantId", "UserId")
+                        .IsUnique()
+                        .HasFilter("user_id IS NOT NULL");
 
                     b.ToTable("driver_lookup", "trips");
                 });

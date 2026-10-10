@@ -1,4 +1,5 @@
 using NorthernLink.Shared.Kernel;
+using NorthernLink.Trips.Application.Trips;
 using NorthernLink.Trips.Application.Trips.ChangeStatus;
 using NorthernLink.Trips.Domain.Manifests;
 using NorthernLink.Trips.Domain.Trips;
@@ -247,12 +248,16 @@ public class TripConvertToDeadheadTests
         Assert.True(trip.IsEmptyLeg);
     }
 
+    /// <summary>A dispatch caller, so the status handler's identity gate stays out of these gate tests.</summary>
+    private static TripOperatorAccess DispatchAccess() =>
+        new(FakeCurrentActor.Dispatcher, new FakeDriverLookupRepository());
+
     [Fact]
     public async Task After_converting_back_the_start_gate_and_the_post_trip_inspection_gate_apply_again()
     {
         var trips = new FakeTripRepository();
         var manifests = new FakeTripManifestRepository();
-        var statusHandler = new ChangeTripStatusCommandHandler(trips, manifests, new FakeShipmentRepository());
+        var statusHandler = new ChangeTripStatusCommandHandler(trips, manifests, new FakeShipmentRepository(), DispatchAccess());
         var trip = ScheduledTrip();
         trips.Add(trip);
         Assert.True(Convert(trip).IsSuccess);
@@ -271,7 +276,8 @@ public class TripConvertToDeadheadTests
     public async Task While_a_deadhead_the_start_gate_does_not_apply()
     {
         var trips = new FakeTripRepository();
-        var statusHandler = new ChangeTripStatusCommandHandler(trips, new FakeTripManifestRepository(), new FakeShipmentRepository());
+        var statusHandler = new ChangeTripStatusCommandHandler(
+            trips, new FakeTripManifestRepository(), new FakeShipmentRepository(), DispatchAccess());
         var trip = ScheduledTrip();
         trips.Add(trip);
         Assert.True(Convert(trip).IsSuccess);

@@ -1,5 +1,6 @@
 using NorthernLink.Shared.Persistence.Auditing;
 using NorthernLink.Trips.Application.Abstractions;
+using NorthernLink.Trips.Application.Trips;
 using NorthernLink.Trips.Application.Trips.ChangeRoute;
 using NorthernLink.Trips.Application.Trips.GetActivity;
 using NorthernLink.Trips.Domain.Manifests;
@@ -537,7 +538,8 @@ public class TripChangeRouteHandlerTests
             DateTimeOffset.UtcNow, "trip", AuditNames.ForEvent(typeof(TripRouteChangedDomainEvent)),
             $$"""{"tripId":"{{trip.Id}}","newRouteName":"{{_replacement.Name}}"}"""));
 
-        var timeline = await new GetTripActivityQueryHandler(_trips, activity)
+        var timeline = await new GetTripActivityQueryHandler(
+                _trips, activity, new TripOperatorAccess(FakeCurrentActor.Dispatcher, new FakeDriverLookupRepository()))
             .Handle(new GetTripActivityQuery(trip.Id, TestPlanning.TenantId), CancellationToken.None);
 
         var entry = Assert.Single(timeline.Value);

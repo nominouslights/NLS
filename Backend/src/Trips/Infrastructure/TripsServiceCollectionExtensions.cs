@@ -160,6 +160,10 @@ public static class TripsServiceCollectionExtensions
         // dialog can never promise something the command then refuses.
         services.AddScoped<TripRouteChangeImpactCalculator>();
 
+        // The caller-owns-this-trip check behind the driver-facing /api/trips routes (list,
+        // detail, activity, status). Resolves the token's user to a driver_lookup row.
+        services.AddScoped<TripOperatorAccess>();
+
         // 3. Command/query handlers — registered explicitly, one line per handler.
         services.AddScoped<ICommandHandler<CreateTripManifestCommand, Guid>, CreateTripManifestCommandHandler>();
         services.AddScoped<ICommandHandler<UpdateTripManifestCommand>, UpdateTripManifestCommandHandler>();

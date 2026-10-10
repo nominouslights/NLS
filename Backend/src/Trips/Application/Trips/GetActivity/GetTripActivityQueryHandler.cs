@@ -15,7 +15,8 @@ namespace NorthernLink.Trips.Application.Trips.GetActivity;
 /// </summary>
 public sealed class GetTripActivityQueryHandler(
     ITripRepository trips,
-    ITripActivityReadService activity)
+    ITripActivityReadService activity,
+    TripOperatorAccess operatorAccess)
     : IQueryHandler<GetTripActivityQuery, IReadOnlyList<TripActivityEntryResponse>>
 {
     /// <summary>
@@ -31,6 +32,13 @@ public sealed class GetTripActivityQueryHandler(
         if (trip is null)
         {
             return Result.Failure<IReadOnlyList<TripActivityEntryResponse>>(TripErrors.NotFound);
+        }
+
+        // The identity gate: the activity route is on the DriverAccess group, and a journal
+        // names the dispatchers and manifests behind a run — only its own driver may read it.
+        if (!await operatorAccess.MayOperateAsync(trip.DriverId, cancellationToken))
+        {
+            return Result.Failure<IReadOnlyList<TripActivityEntryResponse>>(TripErrors.NotYourTrip);
         }
 
         var entries = await activity.GetJournalEntriesAsync(query.TripId, trip.ManifestId, cancellationToken);

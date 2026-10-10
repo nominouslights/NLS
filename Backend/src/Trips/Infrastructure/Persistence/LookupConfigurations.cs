@@ -20,11 +20,19 @@ public sealed class DriverLookupConfiguration : IEntityTypeConfiguration<DriverL
         builder.Property(d => d.Name).HasColumnName("name").HasMaxLength(128);
         builder.Property(d => d.LicenceClass).HasColumnName("licence_class").HasMaxLength(16);
         builder.Property(d => d.Status).HasColumnName("status").HasMaxLength(16);
+        builder.Property(d => d.UserId).HasColumnName("user_id");
         builder.Property(d => d.UpdatedAtUtc).HasColumnName("updated_at_utc");
 
         builder.Ignore(d => d.IsActive);
 
         builder.HasIndex(d => new { d.TenantId, d.Status });
+
+        // One driver per account per tenant — the same partial unique index drivers.drivers
+        // carries, mirrored so the replica can never answer "which driver is this caller?"
+        // with two rows. Partial so the many unlinked drivers don't collide on null.
+        builder.HasIndex(d => new { d.TenantId, d.UserId })
+            .IsUnique()
+            .HasFilter("user_id IS NOT NULL");
     }
 }
 
