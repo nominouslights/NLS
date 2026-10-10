@@ -155,8 +155,10 @@ Collision protocol for parallel batches:
   `Properties/launchSettings.json` — this hits the same DigitalOcean Postgres as everything else
   (no local instance)
 - Secrets — `ConnectionStrings__Postgres`, `Identity__JwtSigningKey`, `RabbitMq__UserName`,
-  `RabbitMq__Password` (plus optional `ObjectStorage__AccessKey`/`ObjectStorage__SecretKey` and
-  `Notifications__PostmarkApiKey`, which fail lazily on first use) — are read directly via
+  `RabbitMq__Password` (plus optional `ObjectStorage__AccessKey`/`ObjectStorage__SecretKey`,
+  `Notifications__PostmarkApiKey`, and the QuickBooks Online trio `Budgeting__QboClientId`/
+  `Budgeting__QboClientSecret`/`Budgeting__QboTokenKey` with rotation-only
+  `Budgeting__QboTokenKeyPrevious`, which fail lazily on first use) — are read directly via
   `Environment.GetEnvironmentVariable` (`NorthernLink.Shared.Kernel.RequiredEnvironmentVariable`),
   never through `IConfiguration`/`appsettings.json`, so they can never end up in a committed
   config file. **In every mode they come from the shell environment** — export them in `~/.zshrc`

@@ -62,6 +62,40 @@ namespace NorthernLink.Budgeting.Infrastructure.Persistence.Migrations
                     b.ToTable("user_lookup", "budgeting");
                 });
 
+            modelBuilder.Entity("NorthernLink.Budgeting.Application.Qbo.QboOAuthState", b =>
+                {
+                    b.Property<string>("StateHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("state_hash");
+
+                    b.Property<DateTimeOffset?>("ConsumedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("consumed_at_utc");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<DateTimeOffset>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at_utc");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("StateHash");
+
+                    b.HasIndex("TenantId", "ExpiresAtUtc");
+
+                    b.ToTable("qbo_oauth_states", "budgeting");
+                });
+
             modelBuilder.Entity("NorthernLink.Budgeting.Domain.Allocations.BudgetAllocation", b =>
                 {
                     b.Property<Guid>("Id")
@@ -361,6 +395,178 @@ namespace NorthernLink.Budgeting.Infrastructure.Persistence.Migrations
                     b.ToTable("budget_periods", "budgeting");
                 });
 
+            modelBuilder.Entity("NorthernLink.Budgeting.Domain.Qbo.QboConnection", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("CompanyName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("company_name");
+
+                    b.Property<DateTimeOffset>("ConnectedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("connected_at_utc");
+
+                    b.Property<Guid>("ConnectedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("connected_by");
+
+                    b.Property<string>("Environment")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("environment");
+
+                    b.Property<string>("LastErrorCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("last_error_code");
+
+                    b.Property<DateTimeOffset?>("LastSuccessfulSyncAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_successful_sync_at_utc");
+
+                    b.Property<DateTimeOffset?>("LastSyncCursorUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_sync_cursor_utc");
+
+                    b.Property<string>("RealmId")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("realm_id");
+
+                    b.Property<DateTimeOffset>("RefreshTokenExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("refresh_token_expires_at_utc");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_qbo_connections_one_live_per_tenant")
+                        .HasFilter("status <> 'Disconnected'");
+
+                    b.HasIndex("TenantId", "RealmId")
+                        .IsUnique();
+
+                    b.ToTable("qbo_connections", "budgeting");
+                });
+
+            modelBuilder.Entity("NorthernLink.Budgeting.Infrastructure.Persistence.QboSyncRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("CursorFromUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("cursor_from_utc");
+
+                    b.Property<DateTimeOffset?>("CursorToUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("cursor_to_utc");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("error_code");
+
+                    b.Property<DateTimeOffset?>("FinishedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("finished_at_utc");
+
+                    b.Property<bool>("IsFullSync")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_full_sync");
+
+                    b.Property<DateTimeOffset>("LeaseExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lease_expires_at_utc");
+
+                    b.Property<string>("LeaseOwner")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("lease_owner");
+
+                    b.Property<int>("LinesFetched")
+                        .HasColumnType("integer")
+                        .HasColumnName("lines_fetched");
+
+                    b.Property<int>("LinesRemoved")
+                        .HasColumnType("integer")
+                        .HasColumnName("lines_removed");
+
+                    b.Property<int>("LinesUpserted")
+                        .HasColumnType("integer")
+                        .HasColumnName("lines_upserted");
+
+                    b.Property<string>("RealmId")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("realm_id");
+
+                    b.Property<Guid?>("RequestedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("requested_by");
+
+                    b.Property<DateTimeOffset>("StartedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("started_at_utc");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("Trigger")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("trigger");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_qbo_sync_runs_one_running_per_tenant")
+                        .HasFilter("status = 'Running'");
+
+                    b.HasIndex("TenantId", "StartedAtUtc");
+
+                    b.ToTable("qbo_sync_runs", "budgeting");
+                });
+
             modelBuilder.Entity("NorthernLink.Budgeting.Infrastructure.Persistence.ReadModels.BudgetAllocationReadModel", b =>
                 {
                     b.Property<Guid>("Id")
@@ -646,6 +852,121 @@ namespace NorthernLink.Budgeting.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("rm_budget_periods", "budgeting");
+                });
+
+            modelBuilder.Entity("NorthernLink.Budgeting.Infrastructure.Persistence.ReadModels.QboConnectionReadModel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("CompanyName")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("company_name");
+
+                    b.Property<DateTimeOffset>("ConnectedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("connected_at_utc");
+
+                    b.Property<Guid>("ConnectedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("connected_by");
+
+                    b.Property<string>("Environment")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("environment");
+
+                    b.Property<string>("LastErrorCode")
+                        .HasColumnType("text")
+                        .HasColumnName("last_error_code");
+
+                    b.Property<DateTimeOffset?>("LastSuccessfulSyncAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_successful_sync_at_utc");
+
+                    b.Property<DateTimeOffset?>("LastSyncCursorUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_sync_cursor_utc");
+
+                    b.Property<string>("RealmId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("realm_id");
+
+                    b.Property<DateTimeOffset>("RefreshTokenExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("refresh_token_expires_at_utc");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("rm_qbo_connections", "budgeting");
+                });
+
+            modelBuilder.Entity("NorthernLink.Budgeting.Infrastructure.Qbo.QboTokenVaultEntry", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("AccessTokenCipher")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("access_token_cipher");
+
+                    b.Property<DateTimeOffset>("AccessTokenExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("access_token_expires_at_utc");
+
+                    b.Property<string>("KeyId")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("key_id");
+
+                    b.Property<string>("RealmId")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("realm_id");
+
+                    b.Property<string>("RefreshTokenCipher")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("refresh_token_cipher");
+
+                    b.Property<DateTimeOffset>("RefreshTokenExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("refresh_token_expires_at_utc");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.HasKey("TenantId");
+
+                    b.ToTable("qbo_token_vault", "budgeting");
                 });
 
             modelBuilder.Entity("NorthernLink.Shared.Persistence.Auditing.AggregateSnapshot", b =>

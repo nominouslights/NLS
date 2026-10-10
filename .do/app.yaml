@@ -134,6 +134,33 @@ services:
       # - key: ObjectStorage__SecretKey
       # - key: Notifications__PostmarkApiKey
 
+      # QuickBooks Online (read-only OAuth connection, Budgeting module). The three secrets
+      # fail lazily on first use, like ObjectStorage/Postmark above. QboTokenKey is base64 of
+      # 32 random bytes; QboTokenKeyPrevious is set only while rotating that key.
+      - key: Budgeting__QboClientId
+        scope: RUN_TIME
+        type: SECRET
+        value: "REPLACE"
+      - key: Budgeting__QboClientSecret
+        scope: RUN_TIME
+        type: SECRET
+        value: "REPLACE"
+      - key: Budgeting__QboTokenKey
+        scope: RUN_TIME
+        type: SECRET
+        value: "REPLACE"
+      # - key: Budgeting__QboTokenKeyPrevious   # rotation only
+      # Sandbox until the owner switches to Production in the Intuit developer portal.
+      - key: Budgeting__Qbo__Environment
+        scope: RUN_TIME
+        value: Sandbox
+      # MUST CHANGE TOGETHER: this value, the redirect URI registered in the Intuit developer
+      # portal, and the Budgeting hostname (budget.northernlinkshuttleandcargo.com, its
+      # `authority` ingress rule below). Any mismatch fails the OAuth callback.
+      - key: Budgeting__Qbo__RedirectUri
+        scope: RUN_TIME
+        value: https://budget.northernlinkshuttleandcargo.com/qbo/callback
+
   # -------------------------------------------------------------------------------------
   # Broker — internal only. Routing /rabbitmq publicly (as the app once did) puts the
   # management UI on the open internet.

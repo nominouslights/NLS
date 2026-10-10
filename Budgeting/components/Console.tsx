@@ -27,6 +27,8 @@ import ActualsVsBudget from "@/components/screens/ActualsVsBudget";
 import Variance from "@/components/screens/Variance";
 import Reports from "@/components/screens/Reports";
 import Settings from "@/components/screens/Settings";
+import QuickBooks from "@/components/screens/QuickBooks";
+import { clearLandingScreen, readLandingScreen } from "@/lib/landing";
 
 // The app shell, mirroring Dispatcher/components/Console.tsx: a 56px TopBar, a collapsible
 // NavRail, and one screen rendered by plain && switching on a ScreenId. No routing — matching
@@ -41,8 +43,9 @@ import Settings from "@/components/screens/Settings";
 //
 // Period-scoped screens (lib/nav.ts PERIOD_SCOPED) render the chooser until a period is entered,
 // and render inside a Fragment keyed by the period id, so every switch resets their state. Budget
-// Codes is one of them — each period has its own chart. Settings is the one screen not tied to a
-// period and renders regardless; the banner says which case applies.
+// Codes is one of them — each period has its own chart. Settings and QuickBooks (one connection
+// per tenant) are the screens not tied to a period and render regardless; the banner says which
+// case applies.
 //
 // A request against the entered period takes a hold (lib/periodHold.ts). While any hold is
 // taken, SWITCH PERIOD and + NEW PERIOD refuse, so a result can never land on a period the
@@ -59,7 +62,13 @@ import Settings from "@/components/screens/Settings";
 // profile is not auth state and gates nothing. Ordinary props from here, as periods already do.
 
 export default function Console() {
-  const [screen, setScreen] = useState<ScreenId>("periods");
+  // Usually the Period Dashboard. The one exception is a landing hint (lib/landing.ts) left by
+  // a page outside the console — the QuickBooks callback — so a finished connection opens on
+  // the QuickBooks screen. Read here (pure), cleared in the effect below.
+  const [screen, setScreen] = useState<ScreenId>(() => readLandingScreen() ?? "periods");
+  useEffect(() => {
+    clearLandingScreen();
+  }, []);
   const [railCollapsed, setRailCollapsed] = useState(false);
 
   // null = still loading.
@@ -283,6 +292,7 @@ export default function Console() {
                     <Variance period={period} onOpenCode={openCode} />
                   )}
                   {screen === "reports" && period && <Reports period={period} />}
+                  {screen === "qbo" && <QuickBooks />}
                   {screen === "settings" && (
                     <Settings
                       profile={profile}

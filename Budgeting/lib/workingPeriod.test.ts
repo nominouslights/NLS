@@ -163,9 +163,10 @@ describe("entered period storage", () => {
 });
 
 describe("isPeriodScoped", () => {
-  it("is false for Settings alone — Budget Codes is scoped since codes moved under the period", () => {
+  it("is false for Settings and QuickBooks alone — Budget Codes is scoped since codes moved under the period", () => {
+    // QuickBooks is one connection per tenant (qbo/connection), never under a period.
     const all: ScreenId[] = NAV_GROUPS.flatMap((g) => g.items.map((i) => i.id));
-    expect(all.filter((id) => !isPeriodScoped(id)).sort()).toEqual(["settings"]);
+    expect(all.filter((id) => !isPeriodScoped(id)).sort()).toEqual(["qbo", "settings"]);
     expect(all.filter(isPeriodScoped).sort()).toEqual([
       "actuals",
       "codes",

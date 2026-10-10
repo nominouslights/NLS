@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { colors, fonts } from "@/lib/theme";
 import Console from "@/components/Console";
 import LoginScreen from "@/components/LoginScreen";
@@ -17,10 +17,13 @@ import { checkSetupRequired, hasStoredSession, onAuthChange, restoreSession } fr
 //
 // Signed in is not the same as allowed in: the Console is wrapped in RoleGate, which turns a
 // Dispatcher or Driver session into the access-denied screen.
+//
+// `children` replaces the Console for the one page outside it — the QuickBooks OAuth callback
+// (app/qbo/callback) — so that page gets exactly the same session restore, login and role gate.
 
 type Phase = "restoring" | "setupRequired" | "signedOut" | "signedIn";
 
-export default function AuthGate() {
+export default function AuthGate({ children }: { children?: ReactNode } = {}) {
   const [phase, setPhase] = useState<Phase>("restoring");
 
   useEffect(() => {
@@ -87,8 +90,6 @@ export default function AuthGate() {
   if (phase === "signedOut") return <LoginScreen />;
 
   return (
-    <RoleGate>
-      <Console />
-    </RoleGate>
+    <RoleGate>{children ?? <Console />}</RoleGate>
   );
 }

@@ -21,6 +21,10 @@ using NorthernLink.Budgeting.Application.Periods.Create;
 using NorthernLink.Budgeting.Application.Periods.GetPeriodById;
 using NorthernLink.Budgeting.Application.Periods.GetPeriods;
 using NorthernLink.Budgeting.Application.Periods.Transition;
+using NorthernLink.Budgeting.Application.Qbo.Authorize;
+using NorthernLink.Budgeting.Application.Qbo.Complete;
+using NorthernLink.Budgeting.Application.Qbo.Disconnect;
+using NorthernLink.Budgeting.Application.Qbo.GetConnection;
 using NorthernLink.Budgeting.Domain.Allocations;
 using NorthernLink.Budgeting.Domain.Codes;
 using NorthernLink.Budgeting.Domain.Periods;
@@ -100,6 +104,15 @@ public static class BudgetingEndpoints
 
         // Tenant-wide by design: it lists the people who can own a code, not codes.
         budgeting.MapGet("codes/owners", GetOwnerCandidates);
+
+        // QuickBooks Online — the read-only connection (one per tenant). The OAuth redirect lands on
+        // the Budgeting console's own /qbo/callback page, never here: the API is not public. That
+        // page, signed in and role-gated, posts the callback's code/state/realmId to complete. So
+        // every route stays inside this BudgetAccess group and nothing here is anonymous.
+        budgeting.MapGet("qbo/connection", GetQboConnection);
+        budgeting.MapPost("qbo/connection/authorize", AuthorizeQbo);
+        budgeting.MapPost("qbo/connection/complete", CompleteQboConnection);
+        budgeting.MapDelete("qbo/connection", DisconnectQbo);
 
         return app;
     }
@@ -421,6 +434,72 @@ public static class BudgetingEndpoints
     }
 
     /// <summary>
+    /// The tenant's QuickBooks connection: always 200, <c>status: "NotConnected"</c> when there has
+    /// never been one. See <see cref="QboConnectionResponse"/>.
+    /// </summary>
+    private static async Task<IResult> GetQboConnection(
+        ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(new GetQboConnectionQuery(tenantId), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>
+    /// Starts connecting: 200 with <c>{ authorizeUrl }</c> for the browser to visit. 503
+    /// <c>Budgeting.Qbo.NotConfigured</c> when the server lacks its Intuit credentials or vault key.
+    /// </summary>
+    private static async Task<IResult> AuthorizeQbo(
+        ITenantContext tenantContext, ICurrentActor currentActor, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(
+            new StartQboAuthorizationCommand(tenantId, currentActor.UserId), cancellationToken);
+        return result.IsSuccess
+            ? Results.Ok(new QboAuthorizeResponse(result.Value))
+            : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>
+    /// Finishes connecting with the callback's values: 204. 400 StateInvalid / StateExpired /
+    /// CallbackIncomplete / RealmIdInvalid, 409 DifferentCompany / HomeCurrencyNotCad, 502
+    /// TokenExchangeFailed / CompanyLookupFailed, 503 NotConfigured.
+    /// </summary>
+    private static Task<IResult> CompleteQboConnection(
+        CompleteQboConnectionRequest request,
+        ITenantContext tenantContext,
+        ICurrentActor currentActor,
+        ISender sender,
+        CancellationToken cancellationToken) =>
+        SendCommand(
+            tenantContext,
+            sender,
+            tenantId => new CompleteQboConnectionCommand(
+                tenantId, currentActor.UserId, request.Code, request.State, request.RealmId),
+            cancellationToken);
+
+    /// <summary>
+    /// Disconnects: 204. Revokes at Intuit (best effort), deletes the stored tokens, keeps the
+    /// connection row as Disconnected history. 404 <c>Budgeting.Qbo.NotConnected</c> when there is
+    /// no live connection.
+    /// </summary>
+    private static Task<IResult> DisconnectQbo(
+        ITenantContext tenantContext, ICurrentActor currentActor, ISender sender, CancellationToken cancellationToken) =>
+        SendCommand(
+            tenantContext,
+            sender,
+            tenantId => new DisconnectQboCommand(tenantId, currentActor.UserId),
+            cancellationToken);
+
+    /// <summary>
     /// Resolve tenant → build command → dispatch → 204, for every bodiless write (code edits,
     /// period transitions, allocation removal). The command is built by a callback rather than
     /// passed in, so it can carry the tenant id the guard just proved exists.
@@ -443,6 +522,16 @@ public static class BudgetingEndpoints
 
 /// <summary>Body of a successful create (201, with Location header).</summary>
 public sealed record EntityCreatedResponse(Guid Id);
+
+/// <summary>Body of POST /api/budgeting/qbo/connection/authorize: the Intuit URL to send the browser to.</summary>
+public sealed record QboAuthorizeResponse(string AuthorizeUrl);
+
+/// <summary>
+/// Body of POST /api/budgeting/qbo/connection/complete — the three query-string values Intuit
+/// put on the console's callback URL, passed through unchanged. All nullable so a missing one is
+/// a 400 <c>Budgeting.Qbo.CallbackIncomplete</c> rather than a binding failure.
+/// </summary>
+public sealed record CompleteQboConnectionRequest(string? Code, string? State, string? RealmId);
 
 /// <summary>
 /// Body of POST /api/budgeting/periods/{id}/codes/starter-set. <paramref name="Created"/> counts

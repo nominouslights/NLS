@@ -6,9 +6,10 @@ namespace NorthernLink.Budgeting.Domain.Codes;
 /// deliberately not stated anywhere in the platform — QuickBooks owns it.
 /// <para>
 /// This is a planning annotation, not a tax engine: nothing here computes or remits anything.
-/// The authoritative tax treatment of an actual dollar is whatever QuickBooks recorded — the
-/// platform never calls the QBO API (see <c>Invoice</c>). Nothing downstream reads this to
-/// compute tax, and nothing may: invoicing carries no tax fields at all, by design.
+/// The authoritative tax treatment of an actual dollar is whatever QuickBooks recorded. The
+/// platform's QuickBooks connection is read-only and never reads, computes or shows tax: an
+/// imported expense line is QuickBooks' own line amount, unadjusted. Nothing downstream reads
+/// this to compute tax, and nothing may: invoicing carries no tax fields at all, by design.
 /// </para>
 /// </summary>
 public enum BudgetTaxTreatment

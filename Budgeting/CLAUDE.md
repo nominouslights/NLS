@@ -2,7 +2,8 @@
 
 Next.js 16 app on port **3003**, consuming the shared API. Scaffolded by US-6.0.1 (Track 6,
 Stage 6.0). Budget **periods**, **codes** and **budget items** are real — including the period
-lifecycle and the period dashboard; actuals and variance are still mock — see
+lifecycle and the period dashboard — and so is the read-only **QuickBooks Online connection**;
+actuals and variance are still mock — see
 [Data](#data-periods-codes-and-budget-items-are-real-actuals-and-variance-are-still-mock).
 
 ## Commands
@@ -63,8 +64,9 @@ Run it before touching anything on the list, and whenever a Dispatcher UI story 
 | `app/layout.tsx` | `Dispatcher/app/layout.tsx` | **no** — title/description only; the four Google Fonts `<link>` tags are byte-identical and must stay that way |
 | `lib/auth.ts` | `Dispatcher/lib/auth.ts` | **no** — see below |
 | `components/TopBar.tsx`, `AuthGate.tsx`, `LoginScreen.tsx`, `Console.tsx` | same paths | **no** — adapted |
-| `lib/nav.ts`, `lib/data.ts`, `lib/money.ts`, `lib/types.ts`, `lib/claims.ts`, `lib/roles.ts`, `lib/workingPeriod.ts`, `lib/periodHold.ts`, `lib/api/budgeting.ts`, `lib/api/identity.ts` | — | new |
-| `components/Brandmark.tsx`, `ErrorNotice.tsx`, `RoleGate.tsx`, `AccessDeniedScreen.tsx`, `SetupPendingScreen.tsx`, `PeriodBanner.tsx`, `BudgetPeriodFormModal.tsx`, `BudgetCodeFormModal.tsx`, `BudgetItemFormModal.tsx`, `ProfileForm.tsx`, `screens/*`, `screens/periods/*` (incl. `PeriodChooser.tsx`, `PriorityBreakdown.tsx`), `screens/codes/*` (`CopyCodesPanel.tsx`) | — | new |
+| `lib/nav.ts`, `lib/data.ts`, `lib/money.ts`, `lib/types.ts`, `lib/claims.ts`, `lib/roles.ts`, `lib/workingPeriod.ts`, `lib/periodHold.ts`, `lib/landing.ts`, `lib/api/budgeting.ts`, `lib/api/identity.ts`, `lib/api/qbo.ts` | — | new |
+| `app/qbo/callback/page.tsx` | — | new — the QuickBooks OAuth callback, the one page outside the console |
+| `components/Brandmark.tsx`, `ErrorNotice.tsx`, `RoleGate.tsx`, `QboCallback.tsx`, `AccessDeniedScreen.tsx`, `SetupPendingScreen.tsx`, `PeriodBanner.tsx`, `BudgetPeriodFormModal.tsx`, `BudgetCodeFormModal.tsx`, `BudgetItemFormModal.tsx`, `ProfileForm.tsx`, `screens/*`, `screens/periods/*` (incl. `PeriodChooser.tsx`, `PriorityBreakdown.tsx`), `screens/codes/*` (`CopyCodesPanel.tsx`) | — | new |
 
 `theme.ts` and the 12 `ui/` files are copied **unpruned**, including parts this app never uses
 (`ServiceType`, `DutyStatus`, `CorridorStepper`, the two upload fields). Pruning them would break
@@ -122,7 +124,7 @@ it. Config is `vitest.config.mts` — the `.mts` extension is load-bearing (Vite
 `.ts` config as CommonJS and warns), and it must therefore use `import.meta.dirname` for the
 `@` alias, never `__dirname`. `@types/node` declares `__dirname` globally, so TypeScript and
 `next build` both stay green while every `@/lib/...` import in the suite fails to resolve at
-run time. Fifteen files; seven need a DOM (the six component tests, plus `workingPeriod`'s
+run time. Nineteen files; nine need a DOM (the eight component tests, plus `workingPeriod`'s
 storage tests, which need `sessionStorage`):
 
 - `lib/roles.test.ts` — US-6.0.1's acceptance criterion: a Dispatcher account is rejected.
@@ -219,6 +221,25 @@ storage tests, which need `sessionStorage`):
   one) is pre-selected, the first click only asks to confirm, the confirm note names both
   periods, the second click copies from the chosen source and shows the outcome summary, a
   refused copy shows no outcome, and a lone period gets "nothing to copy from".
+- `lib/api/qbo.requests.test.ts` — the four `qbo/connection` routes on the wire: GET (tenant-wide,
+  never under a period, NotConnected passed through as a 200), `authorize` (POST, no body, returns
+  `authorizeUrl`), `complete` (POST `{ code, state, realmId }`, a missing value sent as an explicit
+  `null`), `DELETE`; the refresh-and-retry-once path; and every `Budgeting.Qbo.*` refusal
+  (400/409/502/503/404) surfacing with the message copied from `QboConnectionErrors.cs` verbatim.
+- `lib/api/qbo.test.ts` — `QBO_STATUS_DISPLAY` (teal ✓ Connected / gold ! Reconnect needed / gray
+  Not connected, covering all four wire statuses), `isLiveQboConnection` against
+  `QboConnection.IsLive`, `reconnectWarningDue` on both sides of the 14-day line (strictly less
+  than; a passed expiry warns; null never does) and `parseQboCallback` (`?error=` never posts).
+- `components/QboCallback.test.tsx` — the callback page through the real request layer (fetch and
+  `lib/auth` stubbed, `AuthGate` a pass-through): the query is stripped before the POST settles,
+  the three values are POSTed to `complete`, success leaves the landing hint and replaces to `/`;
+  `access_denied` shows a message and posts nothing; a refusal shows the server's message and code
+  verbatim with a link back; a bare callback still posts (nulls) so the server names what is missing.
+- `components/screens/QuickBooks.test.tsx` — `vi.fn()` `api` prop: the chip's glyph + label per
+  status, Sandbox clearly tagged, the email fallback for the connecting person, no `MOCK` tag, the
+  "Reconnect by" warning at 13 days and not at exactly 14, CONNECT/RECONNECT navigating to the
+  authorize URL, 503 `NotConfigured` shown verbatim with no navigation, DISCONNECT needing two
+  clicks (then a refetch), CANCEL, and a failed load with RETRY.
 - `lib/money.test.ts` — `formatDeltaCad` / `formatDeltaPct` always write the sign out, so a
   signed figure never rests on colour; `formatCadPrecise` prints cents only when there are cents
   (the copied `formatCad` is whole-dollar and would print a `$3.03` item as `$3`).
@@ -264,8 +285,8 @@ a copy, a report — is under the period the banner names, and nothing changes t
 silently.
 
 - **Enter, then switch.** A period-scoped screen — Period Dashboard, Budget Codes, Actuals vs
-  Budget, Variance, Reports (`PERIOD_SCOPED` / `isPeriodScoped` in `lib/nav.ts`; Settings is
-  the only screen outside it) — shows
+  Budget, Variance, Reports (`PERIOD_SCOPED` / `isPeriodScoped` in `lib/nav.ts`; Settings and
+  QuickBooks are the screens outside it) — shows
   `screens/periods/PeriodChooser.tsx` until a period is entered. Once one is, a strip at the top
   of the main column (`components/PeriodBanner.tsx`) always shows WORKING IN, the label, dates,
   the state chip and "Plan editable / read-only"; leaving takes its explicit **SWITCH PERIOD**.
@@ -311,7 +332,7 @@ silently.
   button labels are unchanged — tests pin them.
 - **Budget codes belong to the period** (they used to be tenant-wide; the owner reversed that).
   Budget Codes is scoped like the dashboard, shows the entered period's chart, and is read-only
-  outside Draft/Open. RETIRE and DELETE are both two-click. Only Settings renders with or without
+  outside Draft/Open. RETIRE and DELETE are both two-click. Only Settings and QuickBooks render with or without
   an entered period; there the banner says "This screen isn't tied to a period." or offers
   CHOOSE A PERIOD.
 
@@ -497,10 +518,11 @@ guessable from the form:
   modal's picker is fed only the entered period's chart). `parentCandidates` in
   `lib/api/budgeting.ts` mirrors this so the picker never offers an option the server will
   reject. Retiring a parent does **not** cascade to its children.
-- **`glAccountCode` is free text and always will be, for now.** QuickBooks work on this platform
-  is manual by decision — `Invoice.EnteredInQbo` is a flag a bookkeeper ticks, and the platform
-  never calls the QBO API. There is no synced chart of accounts to validate against and no
-  validator abstraction pretending otherwise. The field's hint says so to the user.
+- **`glAccountCode` is free text, for now.** Billing's QuickBooks work is still manual
+  (`Invoice.EnteredInQbo` is a flag a bookkeeper ticks). Budgeting's own QuickBooks connection
+  (below) is read-only and reads **expenses**, not the chart of accounts, so there is still no
+  synced chart to validate against and no validator abstraction pretending otherwise. The
+  field's hint says so to the user.
 - **A revenue code has no cost centre.** A cost centre attributes cost; revenue is not attributed
   to one. `BudgetCode.Validate` rejects the combination outright, the form hides the field when
   the category is Revenue, and the detail panel hides the row. `costCentreApplies` in
@@ -523,6 +545,66 @@ states rather than fake figures — those screens keep their `MockTag`.
 
 No screen invents an API shape. Each remaining array is replaced by additions to
 `lib/api/budgeting.ts` as its Stage 6.1 slice lands, and the screens keep their props.
+
+### QuickBooks Online connection (live: backend, QuickBooks screen and callback page)
+
+**Owner decision, 2026-10-08:** the Budgeting module owns a **read-only** QuickBooks Online
+connection — one QBO company per tenant, Intuit OAuth 2.0, scope
+`com.intuit.quickbooks.accounting` only. It replaces the old "all QBO work is manual" rule *for
+Budgeting*; Billing's QBO prep worksheet is unchanged. The platform never writes to QuickBooks,
+and never reads, computes or shows tax. The expense import, the assignment workspace, the close
+gate and the report follow in later slices (plan: `as-a-budget-planner-deep-allen.md`).
+
+Live endpoints, all inside the `BudgetAccess` group (nothing anonymous):
+
+| Route | Answer |
+|---|---|
+| `GET qbo/connection` | 200 `{ status, realmId, companyName, environment, connectedBy, connectedByName, connectedByEmail, connectedAtUtc, refreshTokenExpiresAtUtc, lastSyncAtUtc, lastErrorCode }`. `status` is `NotConnected` (every other field null), `Active`, `NeedsReconnect` or `Disconnected`. `lastSyncAtUtc` is null until the import ships |
+| `POST qbo/connection/authorize` | 200 `{ authorizeUrl }` — send the browser there. 503 `Budgeting.Qbo.NotConfigured` when the server has no Intuit credentials or vault key |
+| `POST qbo/connection/complete` | body `{ code, state, realmId }` → 204. 400 `StateInvalid` / `StateExpired` / `CallbackIncomplete` / `RealmIdInvalid`; 409 `DifferentCompany` / `HomeCurrencyNotCad`; 502 `TokenExchangeFailed` / `CompanyLookupFailed` (all `Budgeting.Qbo.*`) |
+| `DELETE qbo/connection` | 204 — revokes at Intuit (best effort), deletes the stored tokens, keeps the row as `Disconnected`. 404 `Budgeting.Qbo.NotConnected` |
+
+- **Intuit redirects to this console, never to the API** (the API is not public). The callback
+  page is `app/qbo/callback/page.tsx`: inside `AuthGate`/`RoleGate`, it strips the query string
+  and posts `{ code, state, realmId }` to `complete`. Redirect URIs to register on the Intuit
+  app: `http://localhost:3003/qbo/callback` (dev) and `https://budget.<domain>/qbo/callback`.
+- The `state` is single use, valid for 10 minutes, and bound to the tenant **and the user** who
+  pressed CONNECT — a callback finished by anyone else is `StateInvalid`.
+- A tenant can reconnect only the company it first connected (`DifferentCompany` otherwise,
+  even after a disconnect) and only a company whose home currency is CAD.
+- Tokens never reach the browser and never sit on the `QboConnection` aggregate (aggregates are
+  snapshotted into the audit trail): they live AES-256-GCM encrypted in
+  `budgeting.qbo_token_vault`, whose RLS policy has no `app.is_system` bypass.
+
+**The console side.** `lib/api/qbo.ts` holds the four request functions and the wire types (no
+invented fields; `lastSyncAtUtc` is shown nowhere yet). `components/screens/QuickBooks.tsx` is the
+**QuickBooks** rail item (PERFORMANCE, above Settings, code `QB`, **not** period-scoped — one
+connection per tenant): a connection card with the status chip (Active teal ✓ "Connected",
+NeedsReconnect gold ! "Reconnect needed", Disconnected/NotConnected gray "Not connected"), company,
+environment (a Sandbox company is tagged `SANDBOX` — "Test company — not real books"), connected
+by/on, a gold "Reconnect by {date}" chip when the refresh token expires in under 14 days,
+CONNECT / RECONNECT (POST `authorize`, then `window.location.assign(authorizeUrl)`) and a two-click
+DISCONNECT. A plain note says expense sync arrives next — no `MockTag`, no fake rows. Every refusal,
+including 503 `NotConfigured`, is shown verbatim.
+
+The callback (`app/qbo/callback/page.tsx` → `components/QboCallback.tsx`) captures and strips the
+query on mount (`history.replaceState`), then — inside `AuthGate` (which now takes optional
+`children` in place of the Console) and so inside `RoleGate` — posts the three values once (the
+promise is held in a ref, so React's dev double effects cannot post twice; a second post would
+be `StateInvalid`). `?error=` (e.g. `access_denied`) posts nothing. The page's metadata sets
+`referrer: no-referrer` and `noindex`. Every outcome writes a one-shot **landing hint**
+(`lib/landing.ts`, `sessionStorage` key `nl.budgeting.landingScreen`), which `Console` reads into
+its initial screen and clears, so the console opens on QuickBooks (there is no URL routing).
+Success `router.replace("/")`s; a refusal shows the server's message with a `next/link` back —
+both add `basePath` themselves. The page is outside `/api`, so the rewrite never sees it.
+
+**Environment variables** (secrets — read lazily via `RequiredEnvironmentVariable`, never in a
+config file): `Budgeting__QboClientId`, `Budgeting__QboClientSecret`, `Budgeting__QboTokenKey`
+(base64 of 32 random bytes — `openssl rand -base64 32`), and optionally
+`Budgeting__QboTokenKeyPrevious` (the old key during a rotation; decrypt only). Non-secret
+settings are `appsettings.json` `Budgeting:Qbo` (`Environment` Sandbox|Production — which picks
+the API host — the Intuit URLs, `RedirectUri`, `MinorVersion` 75, `BackfillMonths`,
+`PollInterval`). The owner registers the Intuit app and supplies the client id and secret.
 
 Variance thresholds (`varianceKind`) live in `lib/data.ts`, not in the Variance screen, so any
 future report agrees with the screen by construction. The signed formatters
@@ -558,13 +640,14 @@ Known hazards documented in `theme.ts`: `colors.amber` is a fill/border/icon col
 | 2026-09-29 | Code audit after the period workspace | **Pass** — the one new `statusMeta` call (`PeriodChooser`'s accent stripe) sits beside the row's state `StatusChip`; the banner and chooser carry state only via `StatusChip`; no new protected hex |
 | 2026-09-29 | Code audit after budget items | **Pass** — no new `statusMeta` call and no new protected hex; the priority chip is a `StatusChip` with a per-priority glyph (M / S / N) + written label, because Must and Should share the `info` colour; the modal's segmented choices use `aria-pressed` plus a ✓ and bold on the selected option |
 | 2026-09-29 | Code audit after per-period codes | **Pass** — no new `statusMeta` call and no new protected hex; the "Applies to every period" chip is gone; the Copy codes outcome is a `StatusChip` (Copied / Nothing copied) beside the written summary, as on the items copy |
+| 2026-10-08 | Code audit after the QuickBooks screen and callback | **Pass** — no new `statusMeta` call and no new protected hex; the connection status and the "Reconnect by" warning are `StatusChip`s with a glyph (✓ / ! / —) and a written label; the callback's refusals use `ErrorNotice` |
 | — | Grayscale (DevTools → Rendering → Achromatopsia) | **Not yet run** |
 | — | Deuteranopia / Protanopia / Tritanopia | **Not yet run** |
 | — | Side-by-side against Dispatcher at equal width | **Not yet run** |
 
 To complete the outstanding rows: run Dispatcher on 3001 and this app on 3003, then in Chrome
 DevTools → ⋮ → More tools → **Rendering** → **Emulate vision deficiencies**, walk all seven
-screens plus login and access-denied under Achromatopsia, then each CVD mode. Pass condition:
+screens plus login, access-denied and the QuickBooks callback under Achromatopsia, then each CVD mode. Pass condition:
 every status is identifiable from glyph and label alone, and `ontime` vs `over` stay
 distinguishable. `soon` (`#E1B000`) and `ontime` (`#009E73`) sit at similar luminance — that is
 precisely why the glyphs are non-negotiable, and grayscale is what proves it.
@@ -603,9 +686,12 @@ Not used here on purpose: axe-core / pa11y / Lighthouse. They catch the automata
   `Budgeting.Code.InUse` for a code with items in its period (codes are per period now, so the
   probe is too). Still open: the
   `ActualTransaction` table and its RLS policies; QuickBooks actuals reconciliation.
-- **Any QuickBooks automation.** All QBO work is manual for now, by decision. Automating GL
-  validation means an Intuit OAuth flow, per-tenant token storage (there is no tenants table),
-  a QBO client and a chart-of-accounts sync — a slice of its own, not a gap in this one.
+- ~~Any QuickBooks automation~~ — **reversed by the owner on 2026-10-08**: Budgeting now owns a
+  read-only QuickBooks Online connection (see "QuickBooks Online connection" above). Still out
+  of scope: **writing anything to QuickBooks** (never — the platform reads QBO and nothing
+  else), a chart-of-accounts sync (so `glAccountCode` stays free text), and importing
+  JournalEntry or BillPayment transactions (out of v1 — a journal entry needs the chart of
+  accounts, and a bill payment would double-count the bill it pays).
 - Writing `event_journal.actor_id`. The column exists in every module schema and nothing fills
   it; this slice threads the actor onto the *domain events* instead, so `payload->>'actorId'`
   answers "who did this" today. Wiring the column properly touches nine DbContexts and nine
