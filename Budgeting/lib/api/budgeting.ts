@@ -1846,7 +1846,8 @@ export function updateCostCentre(id: string, input: CostCentreUpdateInput): Prom
 /**
  * POST cost-centres/{id}/activate|deactivate → 204. Built from a boolean like setBudgetCodeActive,
  * so the request test pins both directions. Deactivating a parent with active children is 409
- * Budgeting.CostCentre.HasActiveChildren (refused, never cascaded).
+ * Budgeting.CostCentre.HasActiveChildren (refused, never cascaded); activating a child whose
+ * parent is retired is 409 Budgeting.CostCentre.ParentRetired (restore the parent first).
  */
 export function setCostCentreActive(id: string, active: boolean): Promise<void> {
   return request<void>(`/api/budgeting/cost-centres/${id}/${active ? "activate" : "deactivate"}`, {

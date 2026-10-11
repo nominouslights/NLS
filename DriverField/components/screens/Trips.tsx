@@ -7,7 +7,9 @@ import { TouchButton } from "@/components/ui-tablet/TouchButton";
 import { StatusBanner } from "@/components/ui-tablet/StatusBanner";
 import { Screen, MockTag, CardRow, FieldLine, TabletChip, EmptyNote } from "./shared";
 import { enqueue } from "@/lib/sync/queue";
-import { assignedTrips, eligibility, formatClock, formatDurationH, openTrips } from "@/lib/data";
+import { assignedTrips, formatClock, formatDurationH, openTrips } from "@/lib/data";
+import { eligibility } from "@/lib/eligibility";
+import { useHosLedger } from "@/lib/hos/useHosLedger";
 import type { Trip } from "@/lib/types";
 
 // Assigned | Open, the two trip modes from architecture §5.4. Assigned trips were handed to
@@ -23,16 +25,22 @@ import type { Trip } from "@/lib/types";
 //
 //  2. CLAIM here changes local state and nothing else. §5.4 requires claiming to be an atomic,
 //     server-validated operation with eligibility re-checked at the moment of the claim — two
-//     drivers must never be able to claim the same trip. The backend has no claim endpoint and
-//     no eligibility engine at all today, only a dispatcher-shaped POST /api/trips/{id}/assign
-//     with no concurrency guard. So the banner below says so out loud, because this screen will
-//     otherwise look authoritative in a demo.
+//     drivers must never be able to claim the same trip. The backend's claim endpoint and
+//     DriverFitnessGate are in flight; until they ship this app has only a dispatcher-shaped
+//     POST /api/trips/{id}/assign with no concurrency guard. So the banner below says so out
+//     loud, because this screen will otherwise look authoritative in a demo. The hours-of-
+//     service rule, though, is now the real engine (lib/eligibility.ts → lib/hos/engine.ts
+//     `project`) on the planning ledger — the same arithmetic the server's gate will run.
 
 type Tab = "assigned" | "open";
 
 export default function Trips({ onOpenManifest }: { onOpenManifest: (tripId: string) => void }) {
   const [tab, setTab] = useState<Tab>("assigned");
   const [claimed, setClaimed] = useState<string[]>([]);
+
+  // The hours-of-service rule projects each trip onto the live ledger, so a duty change on
+  // another screen re-greys this list the moment it happens.
+  const ledger = useHosLedger();
 
   const rows = tab === "assigned" ? assignedTrips : openTrips;
 
@@ -59,7 +67,7 @@ export default function Trips({ onOpenManifest }: { onOpenManifest: (tripId: str
         <EmptyNote>No trips in this list.</EmptyNote>
       ) : (
         rows.map((trip) => {
-          const verdict = tab === "open" ? eligibility(trip) : null;
+          const verdict = tab === "open" ? eligibility(trip, ledger) : null;
           const isClaimed = claimed.includes(trip.id);
           const blocked = verdict !== null && !verdict.eligible;
 

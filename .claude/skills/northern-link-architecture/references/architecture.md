@@ -333,9 +333,10 @@ for *governing* it.
 - `BudgetPeriod` — a month or quarter
 - `BudgetAllocation` — a Budget Code × Period × planned amount, entered fresh each period
   (the "zero-based" part — no auto-carry-forward)
-- `ActualTransaction` — synced from QuickBooks Online via the existing Billing & Accounting
-  Integration (read-only, same pattern already established for the NLBC concept), tagged to a
-  Budget Code
+- `ActualTransaction` — synced from QuickBooks Online, read-only, tagged to a Budget Code.
+  *Superseded in mechanism (2026-10-08, Section 13 item 15):* the Budgeting module itself owns
+  the QBO connection and imports expense lines (`QboExpenseLine`), each assigned to a budget
+  item — not via Billing & Accounting Integration
 
 **Rider Express lens applied directly here**: a natural starter set of Budget Codes maps onto the
 same revenue categories Rider Express's model tracks — Passenger, Parcel/Freight, Charter,
@@ -387,6 +388,64 @@ the following hold:
 not just a client-side filter — two drivers must never be able to claim the same trip in a race
 condition, and eligibility (especially HOS and clearance status) must be re-checked at the moment
 of claiming, not just when the list was last loaded.
+
+### 5.5 Driver & Compliance — the Hours-of-Service ledger
+
+**What it is.** The platform's hours-of-service record is a **planning ledger and ELD mirror,
+never a second record of duty status** — the RODS lives on the bus's ELD, and keeping two is
+itself a violation under NSC Standard 9 / M.R. 72/2007. Every figure the API shows therefore
+carries the label *"Planning figures from the app ledger — not the record of duty status (the ELD
+is the RODS)"* (`HosDisplay.PlanningLabel`), and the frontends render it.
+
+**Shape.** One `DutyDay` aggregate per (tenant, driver, America/Winnipeg calendar day) in the
+Drivers library (`Domain/Hos/DutyDay.cs`), holding an **append-only jsonb array of
+`DutyEvent`s** — timestamped duty changes (`Off Duty / On Duty / Driving / Personal Conveyance`)
+with their source (`Driver App`, `ELD transcription`, `Manual (paper backup)`,
+`Other carrier (declared)`, `System`), the recording actor from the token, and the odometer
+readings personal conveyance requires. A unique index on (tenant, driver, local_date) makes "two
+records for a day" impossible to store; certification, amendments and the personal-conveyance
+figure are all day-scoped. The day boundaries come from the rule engine's `HosCalendar`, so DST
+days are 23 or 25 hours long here exactly as they are in the engine.
+
+**Rules the aggregate enforces** are the ones that make a timeline well-formed — inside the local
+day, not more than five minutes in the future, a real status change, personal conveyance opened
+with a start odometer plus the three attestations (no passengers or cargo, no trailer, no work)
+and closed with an end odometer that did not go backwards. Whether the hours are *lawful* is the
+engine's job (Section 13.15); an over-limit day is recorded, never refused. The one engine-adjacent
+rule kept in the aggregate is the 75.0 km personal-conveyance limit: when a closing odometer takes
+the day past it, a `System`-source on-duty event is appended at the linearly interpolated instant
+the allowance ran out, carrying the interpolated odometer, so the stored timeline, the engine and
+every replica agree — the same thing a compliant ELD does.
+
+**Idempotency is the offline contract.** `Append` is idempotent on the client-minted `EventId`
+(the `Idempotency-Key` header is its alias on `POST …/hos/duty-events`): a replayed Field App
+queue item changes nothing and raises nothing, which is what keeps it clear of the eventless-write
+guard. A transcription (`POST …/hos/days/{date}/transcribe`, ELD or paper, all-or-nothing)
+derives each entry's id from the transcription id and line index, so a retry appends nothing.
+Amendments never edit in place: the original is voided and kept, the replacement appended with a
+reason, and a certified day flips to "recertification required". Certification
+(`POST …/hos/days/{date}/certify`) is the driver's own act — the route is marked
+`OwnDriverOnlyMetadata` and the own-record check runs with **no** override, while every other HOS
+route lets `Roles.HosRecordOverride` (Owner, Dispatcher, Supervisor, ComplianceOfficer) act on any
+driver's record.
+
+**Reads go through the engine, from the write side.** `GET …/hos/status`, `GET …/hos/days` and
+the roster batch `GET /api/drivers/hos/status` load the last 21 days plus today through
+`IDutyDayRepository`, assemble the engine's `DutyLedger` (`DutyLedgerAssembler`; `KnownFrom` = the
+driver's earliest day on file until the prior-records attestation lands) and return the engine's
+`HosEvaluation` / `DayTotals` verbatim. Write-side on purpose: the figure a driver acts on must
+include the event they appended a second ago. `rm_duty_days` (engine totals in minutes, PC km,
+certification, violation count, the effective timeline as jsonb) and the `rm_drivers` rollup —
+which now prefers a driver's ledger over the legacy `HosLogEntry` totals — are the roster's and
+the audit's copies, one projection poll behind. Every change publishes
+`drivers.duty-day-changed` (`DutyDayChangedIntegrationEvent`: the whole effective timeline,
+certified flag, PC km, version) for the Trips hours-gate replica to upsert.
+
+**Routes** live on their own sibling group under `/api/drivers` carrying `HosAccess`; the
+roster's read routes (`GET /api/drivers`, `GET /api/drivers/{id}`, the HOS roster batch) moved to a
+`DriverRosterAccess` group so a Compliance Officer can use the console's Drivers screen without
+the write routes ever admitting one. `HosLogEntry` and `GET/POST …/hos` remain as the legacy
+daily-totals path.
 
 ---
 
@@ -506,7 +565,7 @@ Lynn Lake, and the Alamos mine site is patchy by design of geography, not a corn
 
 | Service | Purpose | Notes |
 |---|---|---|
-| **QuickBooks Online** | Invoicing, payment sync | OAuth tokens held centrally in API, never on client devices |
+| **QuickBooks Online** | Read-only expense import for Budgeting (owner decision 2026-10-08, Section 13 item 15); invoicing stays manual | OAuth tokens held centrally in API, encrypted, never on client devices |
 | **Square** *(superseded Stripe — Community Booking & Dispatch spec, 2026-08)* | Community booking payments, online + in-person tap-to-pay | PCI scope stays on Square's side; **Interac e-Transfer** also accepted, reconciled manually (dispatcher marks received) |
 | **SendGrid** | Transactional email | Trip confirmations, invoices, endorsements |
 | **Twilio** | SMS notifications | Departure reminders, driver contact reveal |
@@ -731,6 +790,31 @@ the roadmap locks them in:
     refusal message ends "— this request must be declined or referred to a partner carrier." so
     the wizard can show it verbatim. Widening the area is a code change and a decision-register
     entry, by design.
+16. **QuickBooks Online API access** — **Decided (2026-10-08, owner)**, reversing "all QBO work
+    is manual" *for Budgeting only* (Billing's QBO prep worksheet stays manual). The **Budgeting
+    module owns a read-only QuickBooks Online connection**: Intuit OAuth 2.0, scope
+    `com.intuit.quickbooks.accounting` only, one QBO company per tenant, CAD home currency
+    required. It exists to import expense lines as actuals against budget items. Rules that
+    make it safe to build on:
+    (a) **Read-only, always.** The platform never writes to QuickBooks, and never reads,
+    computes or shows tax — an imported line is QuickBooks' own line amount (Non-Negotiable 8).
+    (b) **Behind ports.** All Intuit code lives in `Backend/src/Budgeting/Infrastructure/Qbo/`
+    behind `IQboAuthClient`, `IQboAccountingClient`, `IQboTokenStore` and `IQboTokenProtector`,
+    which carry no domain types — a future Accounting module copies it out. Not in Billing (no
+    QBO code to reuse there, and its routes are `DispatchAccess`), and not an outbox replica
+    (the period close gate must read actuals consistently, not eventually).
+    (c) **Tokens never touch the audit pipeline.** `ModuleDbContext` snapshots every saved
+    aggregate into `aggregate_snapshots`, so the `QboConnection` aggregate holds no token.
+    Tokens live AES-256-GCM encrypted (key from `Budgeting__QboTokenKey`, associated data
+    `tenant|realm`) in the plain, non-audited `budgeting.qbo_token_vault`, whose RLS policy has
+    **no `app.is_system` bypass**. Refreshes lock the row and persist a rotated refresh token
+    before the access token is used; `invalid_grant` flips the connection to NeedsReconnect.
+    (d) **The OAuth redirect lands on the Budgeting console**, never the API (which is not
+    public), and the console posts the callback values to an authenticated endpoint — so no
+    API route is anonymous. The state is hashed, single use, 10 minutes, bound to tenant + user.
+    (e) **JournalEntry and BillPayment are out of v1.** Sources are Purchase, Bill and
+    VendorCredit: a journal entry needs a chart-of-accounts sync, and a bill payment would
+    double-count the bill it pays.
 
 ---
 

@@ -1,12 +1,14 @@
 "use client";
 
-import { colors, fonts, statusMeta } from "@/lib/theme";
+import { colors, fonts } from "@/lib/theme";
 import { bar, radius, touch } from "@/lib/tablet";
 import { SyncPill } from "@/components/ui-tablet/SyncPill";
+import { DutyChip } from "@/components/ui-tablet/DutyChip";
 import HeaderClock from "@/components/HeaderClock";
 import { logout } from "@/lib/auth";
 import { currentDriver, activeTrip } from "@/lib/data";
-import type { DutyState } from "@/lib/types";
+import { dutyStateOf } from "@/lib/hos/display";
+import { useHosLedger } from "@/lib/hos/useHosLedger";
 
 // ADAPTED FROM Budgeting/components/TopBar.tsx, but the right-hand side is rebuilt from
 // scratch. What changed and why:
@@ -18,11 +20,14 @@ import type { DutyState } from "@/lib/types";
 //     visible at all times without navigating: what duty state they are in, whether their work
 //     has reached the server, and which trip they are on.
 //
-// The sync pill is not optional chrome — architecture §8 requires sync state to be visible at
-// all times, and this is the only place in the app that is always on screen.
+// The duty chip reads the ledger's current status (lib/hos/ledger.ts) through dutyMeta() — the
+// same source as the DutyControl and the Hours screen, so the bar can never disagree with the
+// figures. The sync pill is not optional chrome — architecture §8 requires sync state to be
+// visible at all times, and this is the only place in the app that is always on screen.
 
-export default function TopBar({ duty }: { duty: DutyState }) {
-  const dutyMeta = statusMeta(duty === "Driving" ? "ontime" : duty === "On Duty" ? "soon" : "off");
+export default function TopBar() {
+  const { evaluation } = useHosLedger();
+  const duty = dutyStateOf(evaluation.currentStatus);
 
   return (
     <div
@@ -97,29 +102,8 @@ export default function TopBar({ duty }: { duty: DutyState }) {
 
       <div style={{ flex: 1 }} />
 
-      {/* Duty state: colour + glyph + the word. Never the tint alone. */}
-      <div
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 8,
-          minHeight: touch.min,
-          padding: "0 14px",
-          borderRadius: radius.control,
-          background: dutyMeta.bg,
-          border: `1px solid ${dutyMeta.bd}`,
-          color: dutyMeta.t,
-          fontFamily: fonts.semiCondensed,
-          fontSize: 14,
-          fontWeight: 600,
-          letterSpacing: ".08em",
-          textTransform: "uppercase",
-          whiteSpace: "nowrap",
-        }}
-      >
-        <span aria-hidden>{dutyMeta.g}</span>
-        {duty}
-      </div>
+      {/* Duty state: colour + glyph + the word, from dutyMeta(). Never the tint alone. */}
+      <DutyChip state={duty} size="bar" />
 
       <SyncPill />
 

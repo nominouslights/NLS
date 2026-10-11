@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // The DVIR wizard's step model. PURE and React-free, so Vitest exercises it without jsdom —
-// the same reason eligibility() and hosRemaining() live in lib/ rather than in a screen.
+// the same reason eligibility() and the HOS ledger store live in lib/ rather than in a screen.
 //
 // WHY A STEP MODEL AT ALL: the inspection screen used to render every checklist item as one
 // continuous scroll, with the legal attestation at the very bottom — the part a driver sees

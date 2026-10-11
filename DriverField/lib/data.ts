@@ -1,9 +1,11 @@
 // ---------------------------------------------------------------------------
 // Mock data for the Driver Field App.
 //
-// EVERY value on every screen comes from this file. Nothing in this app talks to a domain
-// endpoint — auth is the only live thing here. Conventions copied from Dispatcher/lib/data.ts
-// and Budgeting/lib/data.ts, and they are load-bearing, not style:
+// Every value on every screen EXCEPT the hours of service comes from this file. Hours are live
+// (lib/hos/ledger.ts against /api/drivers/{id}/hos/*); trips, manifests, vehicles, defects,
+// incidents, credentials and the driver's own profile are still mock, and the screens that
+// show them still carry a MockTag. Conventions copied from Dispatcher/lib/data.ts and
+// Budgeting/lib/data.ts, and they are load-bearing, not style:
 //
 //   • flat exported const arrays of plain objects — no factories, no classes, no generators
 //   • string ids with a domain prefix (TRP-, HOS-, DVR-)
@@ -33,10 +35,7 @@ import type {
   CrewBadge,
   DriverProfile,
   DvirSubmission,
-  EligibilityVerdict,
   FuelEntry,
-  HosEntry,
-  HosRemaining,
   Incident,
   ManifestRow,
   Trip,
@@ -407,88 +406,12 @@ export const openTrips: Trip[] = trips.filter((t) => t.mode === "Open");
 /** The trip whose manifest and status the top bar and Today screen are about. */
 export const activeTrip: Trip = assignedTrips[0];
 
-// --- the §5.4 eligibility engine (client-side MIRROR, never the enforcement point) ---
-
-/**
- * The five rules from architecture §5.4, each with the reason a driver reads.
- *
- * THIS IS A MIRROR OF A RULE THE SERVER MUST OWN. §5.4 is explicit that claiming an Open trip
- * must be an atomic, server-validated operation, and that eligibility — especially hours of
- * service and clearance status — is re-checked at the moment of claiming, not when the list was
- * last loaded. Two drivers must never be able to claim the same trip. None of that exists in
- * the backend yet: there is no claim endpoint and no eligibility engine, only a
- * dispatcher-shaped POST /api/trips/{id}/assign with no concurrency guard. Client-side
- * filtering is a UX convenience; it is never the enforcement point.
- *
- * Same class of thing as Budgeting's previewPeriod() mirroring BudgetPeriod.Create.
- *
- * §5.4 also says an ineligible driver should never SEE an Open trip. This scaffold greys them
- * with the failing rule named instead, because a screen that hides rows cannot demonstrate the
- * engine it exists to prove. The real implementation filters server-side — see
- * DriverField/CLAUDE.md.
- */
-export function eligibility(trip: Trip, asOf: string = today): EligibilityVerdict {
-  const hos = hosRemaining();
-  const vehicle = vehicles.find((v) => v.id === trip.vehicleId);
-  const claimed = assignedTrips;
-
-  const rules = [
-    {
-      rule: "Hours of service",
-      pass: hos.drivingRemainingH >= trip.estimatedHours,
-      reason:
-        hos.drivingRemainingH >= trip.estimatedHours
-          ? `${formatDurationH(hos.drivingRemainingH)} driving left, trip needs ${formatDurationH(trip.estimatedHours)}`
-          : `Only ${formatDurationH(hos.drivingRemainingH)} driving left — trip needs ${formatDurationH(trip.estimatedHours)}`,
-    },
-    {
-      rule: "Licence class",
-      pass: currentDriver.licenceClass === trip.requiredLicenceClass,
-      reason:
-        currentDriver.licenceClass === trip.requiredLicenceClass
-          ? `Class ${currentDriver.licenceClass} covers this vehicle`
-          : `Needs Class ${trip.requiredLicenceClass}; you hold Class ${currentDriver.licenceClass}`,
-    },
-    {
-      rule: "Vehicle status",
-      pass: vehicle !== undefined && vehicle.status === "Active" && !vehicle.hasFailedDvir,
-      reason:
-        vehicle === undefined
-          ? "Vehicle not found"
-          : vehicle.hasFailedDvir
-            ? `${vehicle.unit} has an outstanding failed inspection`
-            : vehicle.status === "Active"
-              ? `${vehicle.unit} is active with no open failures`
-              : `${vehicle.unit} is ${vehicle.status}`,
-    },
-    {
-      rule: "Schedule conflict",
-      pass: !claimed.some((c) => overlaps(c, trip)),
-      reason: claimed.some((c) => overlaps(c, trip))
-        ? `Overlaps ${claimed.find((c) => overlaps(c, trip))?.tripNumber ?? "a claimed trip"}`
-        : "No overlap with your claimed trips",
-    },
-    {
-      rule: "Client clearance",
-      pass:
-        trip.requiresClearance === null ||
-        activeClearanceClients.includes(trip.requiresClearance),
-      reason:
-        trip.requiresClearance === null
-          ? "No clearance required"
-          : activeClearanceClients.includes(trip.requiresClearance)
-            ? `${trip.requiresClearance} clearance active`
-            : `No active ${trip.requiresClearance} clearance`,
-    },
-  ];
-
-  void asOf;
-  return { eligible: rules.every((r) => r.pass), rules };
-}
-
-function overlaps(a: Trip, b: Trip): boolean {
-  return a.startsAt < b.endsAt && b.startsAt < a.endsAt;
-}
+// --- the §5.4 eligibility engine: see lib/eligibility.ts ---------------------
+//
+// `eligibility()` used to live here. It moved when its hours-of-service rule went onto the
+// real engine (lib/hos/engine.ts) through the ledger store (lib/hos/ledger.ts): the store is
+// live against the API and this file is read-only mock data, and a mock file that imports the
+// live ledger would be the wrong direction. The other four rules still read the arrays below.
 
 // --- manifest --------------------------------------------------------------
 
@@ -581,113 +504,11 @@ export function manifestProgress(tripId: string): { boarded: number; total: numb
 
 // --- hours of service ------------------------------------------------------
 
-// CVDHS daily and cycle limits, named rather than inlined so a screen cannot quietly disagree
-// with a report about what "remaining" means.
-export const MAX_DRIVING_H_PER_DAY = 13;
-export const MAX_ON_DUTY_H_PER_DAY = 14;
-export const MAX_CYCLE_H_PER_7_DAYS = 70;
-
-export const hosEntries: HosEntry[] = [
-  {
-    id: "HOS-9101",
-    date: "2026-09-12",
-    duty: "Driving",
-    onDutyH: 3.5,
-    drivingH: 2.75,
-    offDutyH: 0,
-    source: "Driver App",
-    enteredBy: null,
-    note: "Thompson → Alamos, morning run",
-  },
-  {
-    id: "HOS-9102",
-    date: "2026-09-11",
-    duty: "Driving",
-    onDutyH: 9.5,
-    drivingH: 7.25,
-    offDutyH: 14.5,
-    source: "Driver App",
-    enteredBy: null,
-    note: "",
-  },
-  {
-    id: "HOS-9103",
-    date: "2026-09-10",
-    duty: "Driving",
-    onDutyH: 8,
-    drivingH: 6,
-    offDutyH: 16,
-    source: "Manual (paper backup)",
-    enteredBy: "M. Sinclair",
-    note: "Tablet offline at Leaf Rapids — logged on return",
-  },
-  {
-    id: "HOS-9104",
-    date: "2026-09-09",
-    duty: "On Duty",
-    onDutyH: 4,
-    drivingH: 0,
-    offDutyH: 20,
-    source: "Driver App",
-    enteredBy: null,
-    note: "Yard work, no driving",
-  },
-  {
-    id: "HOS-9105",
-    date: "2026-09-08",
-    duty: "Driving",
-    onDutyH: 10,
-    drivingH: 8.5,
-    offDutyH: 14,
-    source: "Driver App",
-    enteredBy: null,
-    note: "",
-  },
-  {
-    id: "HOS-9106",
-    date: "2026-09-07",
-    duty: "Off Duty",
-    onDutyH: 0,
-    drivingH: 0,
-    offDutyH: 24,
-    source: "Driver App",
-    enteredBy: null,
-    note: "",
-  },
-  {
-    id: "HOS-9107",
-    date: "2026-09-06",
-    duty: "Driving",
-    onDutyH: 7,
-    drivingH: 5.5,
-    offDutyH: 17,
-    source: "Driver App",
-    enteredBy: null,
-    note: "",
-  },
-];
-
-export const currentDuty: HosEntry = hosEntries[0];
-
-/**
- * Remaining hours against the CVDHS limits. Banding: under an hour left is `over` (the driver
- * is about to be out of compliance, not merely close), under three is `soon`.
- */
-export function hosRemaining(entries: HosEntry[] = hosEntries): HosRemaining {
-  const todayEntry = entries.find((e) => e.date === today);
-  const drivingToday = todayEntry?.drivingH ?? 0;
-  const onDutyToday = todayEntry?.onDutyH ?? 0;
-  const cycle = entries.slice(0, 7).reduce((sum, e) => sum + e.onDutyH, 0);
-
-  const drivingRemainingH = round2(MAX_DRIVING_H_PER_DAY - drivingToday);
-  const onDutyRemainingH = round2(MAX_ON_DUTY_H_PER_DAY - onDutyToday);
-  const cycleRemainingH = round2(MAX_CYCLE_H_PER_7_DAYS - cycle);
-
-  const tightest = Math.min(drivingRemainingH, onDutyRemainingH, cycleRemainingH);
-  const hk: StatusKind = tightest < 1 ? "over" : tightest < 3 ? "soon" : "ontime";
-
-  return { drivingRemainingH, onDutyRemainingH, cycleRemainingH, hk };
-}
+// NOTHING HERE. Hours are live: the ledger store (lib/hos/ledger.ts) holds the server's last
+// 14 duty days from GET /api/drivers/{id}/hos/days and the engine (lib/hos/engine.ts, the
+// byte-identical mirror of Backend/src/Shared/HoursOfService) evaluates them. The per-day mock
+// rows that used to sit here, and the adapter that laid them out, are gone — including the
+// driver's current duty status, which is `evaluation().currentStatus` and nothing else.
 
 // --- inspections (DVIR, NSC Standard 11) -----------------------------------
 
@@ -867,6 +688,3 @@ function daysBetween(from: string, to: string): number {
   return Math.round(ms / 86_400_000);
 }
 
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}

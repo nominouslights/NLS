@@ -40,6 +40,11 @@ using NorthernLink.Budgeting.Application.Periods.Create;
 using NorthernLink.Budgeting.Application.Periods.GetPeriodById;
 using NorthernLink.Budgeting.Application.Periods.GetPeriods;
 using NorthernLink.Budgeting.Application.Periods.Transition;
+using NorthernLink.Budgeting.Application.Qbo;
+using NorthernLink.Budgeting.Application.Qbo.Authorize;
+using NorthernLink.Budgeting.Application.Qbo.Complete;
+using NorthernLink.Budgeting.Application.Qbo.Disconnect;
+using NorthernLink.Budgeting.Application.Qbo.GetConnection;
 using NorthernLink.Budgeting.Application.Vendors;
 using NorthernLink.Budgeting.Application.Vendors.Create;
 using NorthernLink.Budgeting.Application.Vendors.Delete;
@@ -49,6 +54,7 @@ using NorthernLink.Budgeting.Application.Vendors.SetActive;
 using NorthernLink.Budgeting.Application.Vendors.Update;
 using NorthernLink.Budgeting.Infrastructure.Persistence;
 using NorthernLink.Budgeting.Infrastructure.Persistence.Projections;
+using NorthernLink.Budgeting.Infrastructure.Qbo;
 
 namespace NorthernLink.Budgeting.Infrastructure;
 
@@ -110,6 +116,25 @@ public static class BudgetingServiceCollectionExtensions
         // the register's delete path refuses with 409 Budgeting.CostCentre.InUse then.
         services.AddScoped<ICostCentreUsageProbe, BudgetCodeCostCentreUsageProbe>();
 
+        // QuickBooks Online — a read-only connection this module owns (owner decision 2026-10-08).
+        // Options are non-secret and config-bound, with working defaults when the section is absent.
+        // The client id, client secret and vault key are environment variables read at the moment
+        // of use (QboSecrets), never here: registration must need no environment.
+        var qboOptions = configuration.GetSection(QboOptions.SectionName).Get<QboOptions>() ?? new QboOptions();
+        services.AddSingleton(qboOptions);
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddSingleton<IQboTokenProtector>(_ => new AesGcmQboTokenProtector());
+        services.AddHttpClient<IQboAuthClient, IntuitOAuthClient>(client => client.Timeout = TimeSpan.FromSeconds(30));
+        services.AddHttpClient<IQboAccountingClient, QboAccountingClient>(client =>
+        {
+            client.BaseAddress = new Uri(qboOptions.ApiBaseUrl);
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+        services.AddScoped<IQboConnectionRepository, QboConnectionRepository>();
+        services.AddScoped<IQboOAuthStateStore, QboOAuthStateStore>();
+        services.AddScoped<IQboTokenVault, PostgresQboTokenVault>();
+        services.AddScoped<IQboTokenStore, QboTokenStore>();
+
         // 3. Command/query handlers — registered explicitly, one line per handler.
         services.AddScoped<ICommandHandler<CreateBudgetPeriodCommand, Guid>, CreateBudgetPeriodCommandHandler>();
         services.AddScoped<ICommandHandler<TransitionBudgetPeriodCommand>, TransitionBudgetPeriodCommandHandler>();
@@ -141,6 +166,10 @@ public static class BudgetingServiceCollectionExtensions
         services.AddScoped<IQueryHandler<GetCostCentresQuery, IReadOnlyList<CostCentreResponse>>, GetCostCentresQueryHandler>();
         services.AddScoped<IQueryHandler<GetCostCentreByIdQuery, CostCentreResponse>, GetCostCentreByIdQueryHandler>();
         services.AddScoped<IQueryHandler<GetCostCentreRollupQuery, CostCentreRollupResponse>, GetCostCentreRollupQueryHandler>();
+        services.AddScoped<IQueryHandler<GetQboConnectionQuery, QboConnectionResponse>, GetQboConnectionQueryHandler>();
+        services.AddScoped<ICommandHandler<StartQboAuthorizationCommand, string>, StartQboAuthorizationCommandHandler>();
+        services.AddScoped<ICommandHandler<CompleteQboConnectionCommand>, CompleteQboConnectionCommandHandler>();
+        services.AddScoped<ICommandHandler<DisconnectQboCommand>, DisconnectQboCommandHandler>();
 
         // 4. Integration event consumers — the Identity replica that keeps user_lookup current,
         //    so a budget code can name an accountable owner and its created_by/modified_by
@@ -162,7 +191,8 @@ public static class BudgetingServiceCollectionExtensions
             .Project(new BudgetCodeProjection())
             .Project(new BudgetAllocationProjection())
             .Project(new VendorProjection())
-            .Project(new CostCentreProjection()));
+            .Project(new CostCentreProjection())
+            .Project(new QboConnectionProjection()));
 
         return services;
     }

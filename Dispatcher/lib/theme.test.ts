@@ -79,7 +79,8 @@ describe("statusMeta fallback", () => {
 });
 
 describe("DUTY_META", () => {
-  const ALL_DUTY: DutyStatus[] = ["Off Duty", "On Duty", "Driving"];
+  /** Every member of the DutyStatus union — the four HosWire duty strings. */
+  const ALL_DUTY: DutyStatus[] = ["Off Duty", "On Duty", "Driving", "Personal Conveyance"];
   const STATUS_SOLIDS = new Set(ALL_STATUS_KINDS.map((kind) => statusMeta(kind).c));
 
   it("reuses only the protected status hexes — no ad hoc duty colours", () => {
@@ -92,14 +93,27 @@ describe("DUTY_META", () => {
     expect(dutyMeta("Off Duty").color).toBe(PROTECTED.gray);
     expect(dutyMeta("On Duty").color).toBe(PROTECTED.blue);
     expect(dutyMeta("Driving").color).toBe(PROTECTED.teal);
+    expect(dutyMeta("Personal Conveyance").color).toBe(PROTECTED.gray);
   });
 
-  it.each(["Off Duty", "On Duty", "Driving"] as DutyStatus[])(
-    "gives duty status %s a non-empty glyph",
-    (status) => {
-      expect(dutyMeta(status).glyph.trim().length).toBeGreaterThan(0);
-    },
-  );
+  it.each(ALL_DUTY)("gives duty status %s a non-empty glyph", (status) => {
+    expect(dutyMeta(status).glyph.trim().length).toBeGreaterThan(0);
+  });
+
+  it("gives every duty status a distinct glyph", () => {
+    // Personal Conveyance deliberately shares Off Duty's grey (it is off-duty time under
+    // s.1), so the glyph is the only non-text differentiator and must not be shared too —
+    // the same reasoning as DriverField's Major / Out of Service pair.
+    const glyphs = ALL_DUTY.map((status) => dutyMeta(status).glyph);
+    expect(new Set(glyphs).size).toBe(ALL_DUTY.length);
+  });
+
+  it("styles Personal Conveyance like Off Duty apart from the glyph", () => {
+    const { glyph: pcGlyph, ...pc } = dutyMeta("Personal Conveyance");
+    const { glyph: offGlyph, ...off } = dutyMeta("Off Duty");
+    expect(pc).toEqual(off);
+    expect(pcGlyph).not.toBe(offGlyph);
+  });
 
   it("falls back to Off Duty for an unknown duty status", () => {
     expect(dutyMeta("Sleeping" as DutyStatus)).toEqual(dutyMeta("Off Duty"));

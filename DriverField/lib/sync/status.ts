@@ -1,25 +1,26 @@
 // ---------------------------------------------------------------------------
-// The offline seam — sync status. NO-OP IMPLEMENTATION.
+// The offline seam — sync status.
 //
-// components/ui-tablet/SyncPill.tsx reads ONLY this module, so the pill ships in this scaffold
-// and never has to change again: the offline batch replaces the counts behind getSyncState()
-// and the same component starts telling the truth.
+// components/ui-tablet/SyncPill.tsx reads ONLY this module. The queue (lib/sync/queue.ts)
+// writes the counts after every mutation and drain, and the senders it has registered; the
+// network events write `online`. Nothing else writes here.
 //
-// `enabled` is false for the whole of this scaffold, and the pill says so out loud. A scaffold
-// that renders a green "Synced" check while syncing nothing is exactly how a hard requirement
-// quietly dies.
+// `enabled` stays false until EVERY command kind has a sender, which is not this build: only
+// the two hos.* kinds are live. The pill renders that partial truth from `enabledKinds` and
+// never shows a green check while anything is held — a scaffold that renders a reassuring
+// "Synced" while syncing nothing is exactly how a hard requirement quietly dies.
 //
 // The snapshot is CACHED and only replaced when something actually changes. That is not a
 // micro-optimisation: SyncPill reads it through useSyncExternalStore, which compares snapshots
 // by identity and re-renders forever if every call returns a fresh object.
 // ---------------------------------------------------------------------------
 
-import type { SyncState } from "./types";
+import type { CommandKind, SyncState } from "./types";
 
 type SyncListener = (state: SyncState) => void;
 const listeners = new Set<SyncListener>();
 
-let snapshot: SyncState = {
+const INITIAL: SyncState = {
   // Optimistic until the browser tells us otherwise. This value is also the server snapshot,
   // so it must not read `navigator` — it is evaluated during SSR.
   online: true,
@@ -27,10 +28,13 @@ let snapshot: SyncState = {
   failed: 0,
   lastSyncedAt: null,
   enabled: false,
+  enabledKinds: [],
 };
 
+let snapshot: SyncState = INITIAL;
+
 /** The stable server-render snapshot. Never varies, so hydration cannot mismatch. */
-const serverSnapshot: SyncState = snapshot;
+const serverSnapshot: SyncState = INITIAL;
 
 function publish(next: SyncState): void {
   const changed =
@@ -38,16 +42,29 @@ function publish(next: SyncState): void {
     next.pending !== snapshot.pending ||
     next.failed !== snapshot.failed ||
     next.lastSyncedAt !== snapshot.lastSyncedAt ||
-    next.enabled !== snapshot.enabled;
+    next.enabled !== snapshot.enabled ||
+    next.enabledKinds.join("|") !== snapshot.enabledKinds.join("|");
   if (!changed) return;
 
   snapshot = next;
   for (const listener of [...listeners]) listener(snapshot);
 }
 
-/** Called by queue.enqueue so the pill's count moves even while sync is disabled. */
-export function bumpPending(count: number): void {
-  publish({ ...snapshot, pending: count });
+/** Called by the queue after every mutation and every drain. */
+export function setCounts(counts: { pending: number; failed: number; lastSyncedAt?: string | null }): void {
+  publish({
+    ...snapshot,
+    pending: counts.pending,
+    failed: counts.failed,
+    lastSyncedAt: counts.lastSyncedAt === undefined ? snapshot.lastSyncedAt : counts.lastSyncedAt,
+  });
+}
+
+/** Called by the queue when a sender is registered or removed. `enabled` is derived, never set. */
+export function setEnabledKinds(kinds: CommandKind[], allKinds: readonly CommandKind[]): void {
+  const sorted = [...kinds].sort();
+  const enabled = sorted.length > 0 && allKinds.every((k) => sorted.includes(k));
+  publish({ ...snapshot, enabledKinds: sorted, enabled });
 }
 
 /** Re-reads whatever the platform can tell us. Safe to call repeatedly. */
@@ -85,4 +102,9 @@ export function subscribe(listener: SyncListener): () => void {
       window.removeEventListener("offline", onNetworkChange);
     }
   };
+}
+
+/** Test seam: back to the initial snapshot. */
+export function resetSyncStateForTests(): void {
+  publish(INITIAL);
 }

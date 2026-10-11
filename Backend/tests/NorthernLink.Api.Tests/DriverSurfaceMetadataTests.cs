@@ -70,6 +70,7 @@ public class DriverSurfaceMetadataTests : IAsyncLifetime
         builder.Services.AddScoped<IDriverSelfAccess>(_ => null!);
         builder.Services.AddScoped<IObjectStorage>(_ => null!);
         builder.Services.AddScoped<NorthernLink.Drivers.Application.Abstractions.IDriverCredentialRepository>(_ => null!);
+        builder.Services.AddSingleton(TimeProvider.System);
 
         _app = builder.Build();
         _app.MapTripsEndpoints();
@@ -144,15 +145,19 @@ public class DriverSurfaceMetadataTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Every_policy_named_on_these_prefixes_is_one_of_the_two_expected_ones()
+    public void Every_policy_named_on_these_prefixes_is_one_of_the_expected_ones()
     {
         // Catches a typo'd or invented policy name, which fails only on the first real request
-        // to that endpoint — in production, not at startup.
+        // to that endpoint — in production, not at startup. HosAccess and DriverRosterAccess are
+        // the two the hours-of-service surface added; both contain roles DispatchAccess does
+        // not, and each lives on its own sibling group under /api/drivers.
         var unexpected = Guarded()
             .Select(endpoint => endpoint.Metadata.GetMetadata<IAuthorizeData>()?.Policy)
             .Where(policy => policy is not null
                 && policy != AuthorizationPolicies.DispatchAccess
-                && policy != AuthorizationPolicies.DriverAccess)
+                && policy != AuthorizationPolicies.DriverAccess
+                && policy != AuthorizationPolicies.HosAccess
+                && policy != AuthorizationPolicies.DriverRosterAccess)
             .Distinct()
             .ToList();
 
@@ -188,6 +193,8 @@ public class DriverSurfaceMetadataTests : IAsyncLifetime
     [InlineData("GET", "/api/billing/invoices")]
     [InlineData("GET", "/api/billing/billable-trips")]
     [InlineData("POST", "/api/drivers")]
+    [InlineData("PUT", "/api/drivers/{id:guid}")]
+    [InlineData("POST", "/api/drivers/{id:guid}/status")]
     [InlineData("POST", "/api/drivers/{driverId:guid}/credentials")]
     [InlineData("POST", "/api/drivers/{driverId:guid}/clearances")]
     [InlineData("POST", "/api/drivers/{id:guid}/user")]
@@ -211,8 +218,6 @@ public class DriverSurfaceMetadataTests : IAsyncLifetime
     [InlineData("POST", "/api/trips/{id:guid}/status")]
     [InlineData("GET", "/api/trips/manifests")]
     [InlineData("POST", "/api/fleet/inspections")]
-    [InlineData("GET", "/api/drivers/{driverId:guid}/hos")]
-    [InlineData("POST", "/api/drivers/{driverId:guid}/hos")]
     [InlineData("GET", "/api/drivers/{driverId:guid}/credentials")]
     [InlineData("GET", "/api/drivers/{driverId:guid}/clearances")]
     [InlineData("GET", "/api/drivers/me")]
@@ -223,6 +228,98 @@ public class DriverSurfaceMetadataTests : IAsyncLifetime
         var policy = endpoint.Metadata.GetMetadata<IAuthorizeData>()?.Policy;
 
         Assert.Equal(AuthorizationPolicies.DriverAccess, policy);
+    }
+
+    /// <summary>
+    /// The hours-of-service surface, route by route, on HosAccess — DriverAccess widened with
+    /// ComplianceOfficer. A route here reverting to DriverAccess locks a compliance officer out
+    /// of the ledger; one reverting to DispatchAccess 403s the tablet in the field. Both the
+    /// legacy totals routes and the new ledger routes are listed.
+    /// </summary>
+    [Theory]
+    [InlineData("GET", "/api/drivers/{driverId:guid}/hos")]
+    [InlineData("POST", "/api/drivers/{driverId:guid}/hos")]
+    [InlineData("POST", "/api/drivers/{driverId:guid}/hos/duty-events")]
+    [InlineData("POST", "/api/drivers/{driverId:guid}/hos/duty-events/{eventId:guid}/amend")]
+    [InlineData("POST", "/api/drivers/{driverId:guid}/hos/days/{date}/transcribe")]
+    [InlineData("POST", "/api/drivers/{driverId:guid}/hos/days/{date}/certify")]
+    [InlineData("GET", "/api/drivers/{driverId:guid}/hos/days")]
+    [InlineData("GET", "/api/drivers/{driverId:guid}/hos/days/{date}")]
+    [InlineData("GET", "/api/drivers/{driverId:guid}/hos/status")]
+    public void Hours_of_service_routes_carry_HosAccess(string method, string pattern)
+    {
+        var endpoint = Endpoint(method, pattern);
+
+        var policy = endpoint.Metadata.GetMetadata<IAuthorizeData>()?.Policy;
+
+        Assert.Equal(AuthorizationPolicies.HosAccess, policy);
+    }
+
+    /// <summary>
+    /// Pinned as a whole list, like the Fleet surface: the failure this guards against is an
+    /// ADDITION — a route mapped onto the HosAccess group by habit that a Driver token then
+    /// reaches. Every route on this group names a {driverId} and runs the own-record check,
+    /// so anything else here is a hole.
+    /// </summary>
+    [Fact]
+    public void The_HosAccess_surface_is_exactly_the_hours_of_service_routes()
+    {
+        var hos = _endpoints
+            .Where(endpoint => endpoint.Metadata.GetMetadata<IAuthorizeData>()?.Policy == AuthorizationPolicies.HosAccess)
+            .Select(Describe)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Equal(
+        [
+            "GET /api/drivers/{driverId:guid}/hos",
+            "GET /api/drivers/{driverId:guid}/hos/days",
+            "GET /api/drivers/{driverId:guid}/hos/days/{date}",
+            "GET /api/drivers/{driverId:guid}/hos/status",
+            "POST /api/drivers/{driverId:guid}/hos",
+            "POST /api/drivers/{driverId:guid}/hos/days/{date}/certify",
+            "POST /api/drivers/{driverId:guid}/hos/days/{date}/transcribe",
+            "POST /api/drivers/{driverId:guid}/hos/duty-events",
+            "POST /api/drivers/{driverId:guid}/hos/duty-events/{eventId:guid}/amend",
+        ], hos);
+    }
+
+    /// <summary>
+    /// The roster's read routes admit a compliance officer (DriverRosterAccess), and nothing
+    /// else does: the write routes stay on DispatchAccess (pinned above) and the Driver role is
+    /// not in this list, so a tablet still cannot list the roster.
+    /// </summary>
+    [Fact]
+    public void The_DriverRosterAccess_surface_is_exactly_the_roster_reads()
+    {
+        var roster = _endpoints
+            .Where(endpoint => endpoint.Metadata.GetMetadata<IAuthorizeData>()?.Policy == AuthorizationPolicies.DriverRosterAccess)
+            .Select(Describe)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Equal(
+        [
+            "GET /api/drivers",
+            "GET /api/drivers/hos/status",
+            "GET /api/drivers/{id:guid}",
+        ], roster);
+    }
+
+    /// <summary>
+    /// Certification is the driver's own act: the route carries the own-driver-only marker the
+    /// handler enforces with no dispatch or compliance override, and no other HOS route does —
+    /// dispatch must still be able to transcribe and amend.
+    /// </summary>
+    [Fact]
+    public void Only_certification_is_marked_own_driver_only()
+    {
+        var marked = _endpoints
+            .Where(endpoint => endpoint.Metadata.GetMetadata<OwnDriverOnlyMetadata>() is not null)
+            .Select(Describe)
+            .ToList();
+
+        Assert.Equal(["POST /api/drivers/{driverId:guid}/hos/days/{date}/certify"], marked);
     }
 
     /// <summary>

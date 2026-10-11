@@ -216,14 +216,14 @@ describe("BudgetCodeFormModal — cost-centre picker", () => {
     expect(screen.queryByTestId("cost-centre-kept")).toBeNull();
   });
 
-  it("keeps an entry created inline when the caller's register arrives without it", async () => {
+  it("keeps an entry created inline when a caller that never takes the register up hands one down without it", async () => {
     const created = cc("cc-snow", "Snow Lake", "Snow Lake base");
     const costCentreApi = {
       create: vi.fn().mockResolvedValue("cc-snow"),
       update: vi.fn(),
       list: vi.fn().mockResolvedValue([...REGISTER, created]),
     } satisfies CostCentreApi;
-    const { update } = renderModal({ costCentreApi, costCentres: null });
+    const { update } = renderModal({ costCentreApi, costCentres: null, onCostCentresChanged: undefined });
 
     fireEvent.change(ccSelect()!, { target: { value: "__new_cost_centre__" } });
     fireEvent.change(screen.getByPlaceholderText("THOMPSON"), { target: { value: "Snow Lake" } });
@@ -231,8 +231,8 @@ describe("BudgetCodeFormModal — cost-centre picker", () => {
     fireEvent.click(screen.getByText("CREATE COST CENTRE"));
     await waitFor(() => expect(ccSelect()!.value).toBe("Snow Lake"));
 
-    // A caller that hands back a register without the new entry (Budget Codes itself drops its
-    // stale pre-create load — see BudgetCodes.test.tsx — but the modal does not rely on that).
+    // A caller with no onCostCentresChanged has nothing newer than the create to offer, so its
+    // late-arriving register (without the new entry) cannot drop it.
     update({ costCentres: REGISTER });
     expect(optionTexts(ccSelect()!)).toEqual([
       "— No cost centre —",
@@ -266,6 +266,46 @@ describe("BudgetCodeFormModal — cost-centre picker", () => {
       "Snow Lake · Snow Lake base",
       "+ New cost centre…",
     ]);
+  });
+
+  it("keeps an inline entry while the caller's register predates the create", async () => {
+    const created = cc("cc-snow", "Snow Lake", "Snow Lake base");
+    const costCentreApi = {
+      create: vi.fn().mockResolvedValue("cc-snow"),
+      update: vi.fn(),
+      list: vi.fn().mockResolvedValue([...REGISTER, created]),
+    } satisfies CostCentreApi;
+    // The caller takes the push but has not re-rendered with it: its prop is still the
+    // pre-create array, so the new entry is bridged from here.
+    renderModal({ costCentreApi });
+
+    fireEvent.change(ccSelect()!, { target: { value: "__new_cost_centre__" } });
+    fireEvent.change(screen.getByPlaceholderText("THOMPSON"), { target: { value: "Snow Lake" } });
+    fireEvent.change(screen.getByPlaceholderText("Thompson base"), { target: { value: "Snow Lake base" } });
+    fireEvent.click(screen.getByText("CREATE COST CENTRE"));
+    await waitFor(() => expect(ccSelect()!.value).toBe("Snow Lake"));
+    expect(optionTexts(ccSelect()!)).toContain("Snow Lake · Snow Lake base");
+  });
+
+  it("does not re-add an inline entry deleted since, once the caller's register is newer than the create", async () => {
+    const created = cc("cc-snow", "Snow Lake", "Snow Lake base");
+    const costCentreApi = {
+      create: vi.fn().mockResolvedValue("cc-snow"),
+      update: vi.fn(),
+      list: vi.fn().mockResolvedValue([...REGISTER, created]),
+    } satisfies CostCentreApi;
+    const { update } = renderModal({ costCentreApi });
+
+    fireEvent.change(ccSelect()!, { target: { value: "__new_cost_centre__" } });
+    fireEvent.change(screen.getByPlaceholderText("THOMPSON"), { target: { value: "Snow Lake" } });
+    fireEvent.change(screen.getByPlaceholderText("Thompson base"), { target: { value: "Snow Lake base" } });
+    fireEvent.click(screen.getByText("CREATE COST CENTRE"));
+    await waitFor(() => expect(ccSelect()!.value).toBe("Snow Lake"));
+
+    // Snow Lake is deleted elsewhere; the caller loads a register after the create without it.
+    update({ costCentres: [...REGISTER] });
+    expect(optionTexts(ccSelect()!)).not.toContain("Snow Lake · Snow Lake base");
+    expect(optionTexts(ccSelect()!)).toEqual(["— No cost centre —", "Thompson · Thompson base", "+ New cost centre…"]);
   });
 
   it("refuses, before the round trip, a chosen entry retired since it was picked (CostCentreRetired)", () => {

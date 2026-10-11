@@ -32,6 +32,8 @@ public sealed class DriversDbContext(
 
     public DbSet<HosLogEntry> HosLogEntries => Set<HosLogEntry>();
 
+    public DbSet<DutyDay> DutyDays => Set<DutyDay>();
+
     // Read-side projections — ordinary rm_* tables the projection worker upserts into,
     // secured by the same native RLS policy as every other table.
     public DbSet<DriverReadModel> DriverReadModels => Set<DriverReadModel>();
@@ -42,28 +44,34 @@ public sealed class DriversDbContext(
 
     public DbSet<HosLogEntryReadModel> HosLogEntryReadModels => Set<HosLogEntryReadModel>();
 
+    public DbSet<DutyDayReadModel> DutyDayReadModels => Set<DutyDayReadModel>();
+
     protected override void ConfigureModule(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfiguration(new DriverConfiguration());
         modelBuilder.ApplyConfiguration(new DriverCredentialConfiguration());
         modelBuilder.ApplyConfiguration(new DriverClearanceConfiguration());
         modelBuilder.ApplyConfiguration(new HosLogEntryConfiguration());
+        modelBuilder.ApplyConfiguration(new DutyDayConfiguration());
 
         modelBuilder.ApplyConfiguration(new DriverReadModelConfiguration());
         modelBuilder.ApplyConfiguration(new DriverCredentialReadModelConfiguration());
         modelBuilder.ApplyConfiguration(new DriverClearanceReadModelConfiguration());
         modelBuilder.ApplyConfiguration(new HosLogEntryReadModelConfiguration());
+        modelBuilder.ApplyConfiguration(new DutyDayReadModelConfiguration());
 
         // Tenant isolation, API half. Never remove: RLS is the backstop, not the substitute.
         modelBuilder.Entity<Driver>().HasQueryFilter(d => d.TenantId == TenantId);
         modelBuilder.Entity<DriverCredential>().HasQueryFilter(c => c.TenantId == TenantId);
         modelBuilder.Entity<DriverClearance>().HasQueryFilter(c => c.TenantId == TenantId);
         modelBuilder.Entity<HosLogEntry>().HasQueryFilter(e => e.TenantId == TenantId);
+        modelBuilder.Entity<DutyDay>().HasQueryFilter(d => d.TenantId == TenantId);
 
         // Same tenant filter on the read models — the retained API half of dual enforcement.
         modelBuilder.Entity<DriverReadModel>().HasQueryFilter(d => d.TenantId == TenantId);
         modelBuilder.Entity<DriverCredentialReadModel>().HasQueryFilter(c => c.TenantId == TenantId);
         modelBuilder.Entity<DriverClearanceReadModel>().HasQueryFilter(c => c.TenantId == TenantId);
         modelBuilder.Entity<HosLogEntryReadModel>().HasQueryFilter(e => e.TenantId == TenantId);
+        modelBuilder.Entity<DutyDayReadModel>().HasQueryFilter(d => d.TenantId == TenantId);
     }
 }

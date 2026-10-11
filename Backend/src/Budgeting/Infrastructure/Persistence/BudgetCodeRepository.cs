@@ -38,6 +38,11 @@ internal sealed class BudgetCodeRepository(BudgetingDbContext context) : IBudget
     public Task<bool> AnyWithCostCentreAsync(string costCentreCode, CancellationToken cancellationToken = default) =>
         context.BudgetCodes.AnyAsync(c => c.CostCentre == costCentreCode, cancellationToken);
 
+    // A scalar EXISTS — nothing is materialized, so nothing is tracked. AsNoTracking states it.
+    public Task<bool> AnyWithCostCentreInPeriodAsync(Guid periodId, CancellationToken cancellationToken = default) =>
+        context.BudgetCodes.AsNoTracking()
+            .AnyAsync(c => c.PeriodId == periodId && c.CostCentre != null, cancellationToken);
+
     public void Add(BudgetCode budgetCode) => context.BudgetCodes.Add(budgetCode);
 
     public void Remove(BudgetCode budgetCode) => context.BudgetCodes.Remove(budgetCode);

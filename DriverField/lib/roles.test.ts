@@ -3,8 +3,9 @@ import { DRIVER_ROLES, hasDriverAccess } from "./roles";
 
 // Mirrors Roles.DriverAccess in Backend/src/Shared/Kernel/Roles.cs. Its server-side counterpart
 // is the "DriverAccess" policy, tested in
-// Backend/tests/NorthernLink.Api.Tests/AuthorizationPolicyTests.cs. Both lists exist because
-// this app calls no domain endpoint yet, so this list is the gate a user actually meets.
+// Backend/tests/NorthernLink.Api.Tests/AuthorizationPolicyTests.cs. This list is the gate a user
+// meets at sign-in; the policy (and, on every {driverId} route, the own-record check) is the
+// boundary the hours endpoints actually enforce.
 
 describe("hasDriverAccess", () => {
   it.each([...DRIVER_ROLES])("admits %s", (role) => {

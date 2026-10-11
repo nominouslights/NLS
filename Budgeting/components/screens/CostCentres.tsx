@@ -152,8 +152,9 @@ export default function CostCentres({ api = DEFAULT_API }: { api?: CostCentresAp
   function select(id: string) {
     setSelId(id);
     setConfirm(null); // a pending confirm never survives a selection change
-    // Nor does an action's refusal: it was about the entry that was selected.
-    setError((prev) => (prev?.entryId !== undefined ? null : prev));
+    // Nor does an action's refusal: it was about the entry that was selected. Re-clicking that
+    // same entry is not a change, so the refusal (and its RETIRE INSTEAD) stays.
+    setError((prev) => (prev?.entryId !== undefined && prev.entryId !== id ? null : prev));
   }
 
   async function run(

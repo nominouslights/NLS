@@ -131,7 +131,11 @@ export default function BudgetCodeFormModal({
    * load — the picker then offers only the code's current value.
    */
   costCentres: CostCentreRecord[] | null;
-  /** The fresh register after an inline create, so the caller's copy follows. */
+  /**
+   * The fresh register after an inline create, so the caller's copy follows. Passing it is a
+   * promise to hand that (or a newer) register back down: from then on the caller's register is
+   * trusted over anything created here (mergeRegister).
+   */
   onCostCentresChanged?: (records: CostCentreRecord[]) => void;
   onClose: () => void;
   /** Fresh list (already reflecting the change) plus the affected code's id. */
@@ -159,15 +163,13 @@ export default function BudgetCodeFormModal({
   const [error, setError] = useState<string | null>(null);
   /**
    * ONLY the entries created inline in this modal — never the register snapshot that came back
-   * with them. A snapshot would be merged against every later prop, so an entry deleted since
-   * would come back. These are kept so a new entry is offered even when the caller does not take
-   * the register via onCostCentresChanged (the caller that does, Budget Codes, ignores its own
-   * stale initial load, so its copy never regresses below what was pushed up).
+   * with them — each paired with the caller's register as it stood at the create. They bridge
+   * the gap until the caller's register catches up; see mergeRegister for when they stop counting.
    */
-  const [createdHere, setCreatedHere] = useState<CostCentreRecord[]>([]);
+  const [createdHere, setCreatedHere] = useState<InlineCreated[]>([]);
   // Derived, never copied once at mount: the caller's listCostCentres runs in parallel with the
   // modal opening and may resolve AFTER it, and the picker must follow when it does.
-  const register = mergeRegister(costCentres, createdHere);
+  const register = mergeRegister(costCentres, createdHere, onCostCentresChanged !== undefined);
   const [creatingCostCentre, setCreatingCostCentre] = useState(false);
   usePeriodHold(busy);
   /** Inert while saving, so a result can never land on a modal that is gone. */
@@ -208,7 +210,10 @@ export default function BudgetCodeFormModal({
     onCostCentresChanged?.(records);
     const created = records.find((r) => r.id === id);
     if (created) {
-      setCreatedHere((prev) => [...prev.filter((c) => c.id !== created.id), created]);
+      setCreatedHere((prev) => [
+        ...prev.filter((c) => c.record.id !== created.id),
+        { record: created, against: costCentres },
+      ]);
       setCostCentre(created.code);
     }
   }
@@ -489,20 +494,33 @@ export default function BudgetCodeFormModal({
   );
 }
 
+/** An entry created inline here, with the caller's register (by identity) at the moment of the create. */
+type InlineCreated = { record: CostCentreRecord; against: CostCentreRecord[] | null };
+
 /**
- * The caller's register plus any entry created inline here that the caller's copy does not have
- * (matched by id; the caller's copy wins otherwise), in register (code, ordinal) order. Only the
- * inline-created entries are ever added, so nothing the caller's register has dropped returns.
- * null only when the register has not loaded and nothing was created here.
+ * The caller's register plus the inline-created entries it does not have yet (matched by id; the
+ * caller's copy wins otherwise), in register (code, ordinal) order.
+ *
+ * When the caller takes registers up (`callerTracks` — it passed onCostCentresChanged), an inline
+ * entry counts only while the caller's register is still the very array it held at the create.
+ * Any other array is newer than the create — the pushed-up register itself, or a load or refresh
+ * that followed it — and is trusted fully, so an entry created here and since deleted elsewhere
+ * is NOT re-added. A caller that never takes the register up has nothing newer to offer, so its
+ * inline entries are kept for the modal's life. null only when the register has not loaded and
+ * nothing counts from here.
  */
 function mergeRegister(
   fromProp: CostCentreRecord[] | null,
-  createdHere: CostCentreRecord[],
+  createdHere: InlineCreated[],
+  callerTracks: boolean,
 ): CostCentreRecord[] | null {
-  if (createdHere.length === 0) return fromProp;
-  if (fromProp === null) return createdHere;
+  const pending = createdHere
+    .filter((c) => !callerTracks || c.against === fromProp)
+    .map((c) => c.record);
+  if (pending.length === 0) return fromProp;
+  if (fromProp === null) return pending;
   const known = new Set(fromProp.map((c) => c.id));
-  const extra = createdHere.filter((c) => !known.has(c.id));
+  const extra = pending.filter((c) => !known.has(c.id));
   if (extra.length === 0) return fromProp;
   return [...fromProp, ...extra].sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
 }

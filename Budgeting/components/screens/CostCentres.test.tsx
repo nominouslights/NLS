@@ -88,6 +88,41 @@ describe("CostCentres screen", () => {
     expect(api.setActive).not.toHaveBeenCalled();
   });
 
+  it("re-clicking the already-selected entry keeps its refusal and RETIRE INSTEAD", async () => {
+    const api = makeApi();
+    api.remove.mockRejectedValueOnce(new ApiError("Budgeting.CostCentre.InUse", COST_CENTRE_MESSAGES.InUse, 409));
+    await renderScreen(api);
+
+    fireEvent.click(row("North-A"));
+    fireEvent.click(screen.getByText("DELETE"));
+    fireEvent.click(screen.getByText("CONFIRM DELETE"));
+    expect(await screen.findByText(COST_CENTRE_MESSAGES.InUse)).toBeTruthy();
+
+    // Same row again: not a selection change, so nothing the refusal offered goes away.
+    fireEvent.click(row("North-A"));
+    expect(screen.getByText(COST_CENTRE_MESSAGES.InUse)).toBeTruthy();
+    expect(screen.getByText("RETIRE INSTEAD")).toBeTruthy();
+  });
+
+  it("a refused restore (409 ParentRetired) shows the server's message verbatim and leaves the entry retired", async () => {
+    const message = "That parent cost centre is retired. Choose an active one, or restore it first.";
+    const api = makeApi();
+    const retiredParent = { ...NORTH, isActive: false };
+    const retiredChild = { ...NORTH_A, isActive: false };
+    api.list.mockResolvedValue([retiredParent, retiredChild, OLD]);
+    api.setActive.mockRejectedValueOnce(new ApiError("Budgeting.CostCentre.ParentRetired", message, 409));
+    render(<CostCentres api={api} />);
+    fireEvent.click(await screen.findByText("SHOW RETIRED (3)"));
+    fireEvent.click(row("North-A"));
+
+    fireEvent.click(screen.getByText("RESTORE"));
+
+    expect(await screen.findByText(message)).toBeTruthy();
+    expect(api.setActive).toHaveBeenCalledWith("cc-north-a", true);
+    expect(row("North-A").textContent).not.toContain("Active");
+    expect(screen.queryByText("RETRY")).toBeNull();
+  });
+
   it("RETIRE INSTEAD retires the entry the InUse was for, on the second click", async () => {
     const api = makeApi();
     api.remove.mockRejectedValueOnce(new ApiError("Budgeting.CostCentre.InUse", COST_CENTRE_MESSAGES.InUse, 409));

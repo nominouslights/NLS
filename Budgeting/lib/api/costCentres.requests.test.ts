@@ -164,6 +164,7 @@ describe("cost-centre refusals reach the caller verbatim", () => {
     [400, "CodeImmutable", () => updateCostCentre(CC_ID, input)],
     [404, "NotFound", () => updateCostCentre(CC_ID, input)],
     [409, "HasActiveChildren", () => setCostCentreActive(CC_ID, false)],
+    [409, "ParentRetired", () => setCostCentreActive(CC_ID, true)],
     [409, "HasChildren", () => deleteCostCentre(CC_ID)],
     [409, "InUse", () => deleteCostCentre(CC_ID)],
   ];
@@ -174,6 +175,18 @@ describe("cost-centre refusals reach the caller verbatim", () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(status, { code, message }));
 
     await expect(call()).rejects.toMatchObject({ code, message, status });
+  });
+
+  it("activate's 409 ParentRetired (restoring a child under a retired parent) reaches the caller verbatim", async () => {
+    // Pinned as a literal, not via COST_CENTRE_MESSAGES: CostCentreErrors.ParentRetired, returned
+    // by SetCostCentreActiveCommandHandler when the entry being restored rolls up into a retired parent.
+    const code = "Budgeting.CostCentre.ParentRetired";
+    const message = "That parent cost centre is retired. Choose an active one, or restore it first.";
+    expect(COST_CENTRE_MESSAGES.ParentRetired).toBe(message);
+    fetchMock.mockResolvedValueOnce(jsonResponse(409, { code, message }));
+
+    await expect(setCostCentreActive(CC_ID, true)).rejects.toMatchObject({ code, message, status: 409 });
+    expect(callPath()).toBe(`/api/budgeting/cost-centres/${CC_ID}/activate`);
   });
 
   it("the InUse message names retiring as the alternative", () => {
