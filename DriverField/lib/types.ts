@@ -5,12 +5,15 @@
 // promised by a real endpoint, and when a screen goes real its rows come from a
 // lib/api/<domain>.ts written against the actual response. See DriverField/CLAUDE.md.
 
-import type { StatusKind } from "./theme";
+import type { DutyStatus, StatusKind } from "./theme";
 
-export type DutyState = "Off Duty" | "On Duty" | "Driving";
-
-/** Matches HosLogEntrySource's wire strings — see lib/wire.test.ts. */
-export type HosSource = "Driver App" | "Manual (paper backup)";
+/**
+ * The four duty states as the design system and the wire spell them — `DutyStatus` in the
+ * copied lib/theme.ts (which `dutyMeta()` keys on) and `HosWire.status()` in lib/hos/engine.ts
+ * agree byte for byte; lib/wire.test.ts pins both. The engine's own enum members ("OffDuty",
+ * …) are a different thing: cross between the two through lib/hos/display.ts, never by hand.
+ */
+export type DutyState = DutyStatus;
 
 export type TripMode = "Open" | "Assigned";
 
@@ -144,17 +147,8 @@ export interface CrewBadge {
   passenger: string;
 }
 
-export interface HosEntry {
-  id: string;
-  date: string;
-  duty: DutyState;
-  onDutyH: number;
-  drivingH: number;
-  offDutyH: number;
-  source: HosSource;
-  enteredBy: string | null;
-  note: string;
-}
+// `HosEntry` and `HosSource` are gone with the mock hours: a duty day's shape is the API's
+// `DutyDaySummary` (lib/api/hos.ts) and an event's is the engine's `DutyEvent`.
 
 // `ChecklistItem` / `ChecklistGroup` used to live here, describing a locally-invented 22-item
 // DVIR list in lib/data.ts. Both are gone: the checklist is now form NL-PTI-01, whose shapes
@@ -256,9 +250,5 @@ export interface EligibilityVerdict {
   rules: EligibilityRule[];
 }
 
-export interface HosRemaining {
-  drivingRemainingH: number;
-  onDutyRemainingH: number;
-  cycleRemainingH: number;
-  hk: StatusKind;
-}
+// `HosRemaining` is gone with `hosRemaining()`: remaining figures are the engine's
+// `HosEvaluation` (lib/hos/engine.ts), read through lib/hos/ledger.ts.

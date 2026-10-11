@@ -44,13 +44,14 @@ export function Screen({
 }
 
 /**
- * The "this is mock data" tag. EVERY screen in this app carries one.
+ * The "this is mock data" tag. Every screen whose values are invented carries one — all of
+ * them except Hours, whose figures are the driver's own (lib/hos/ledger.ts).
  *
  * Budgeting keys its mock rows to ids no real record can match, so a screen already wired to
  * the API shows its empty state instead of a fiction. That trick needs real data to work
- * against, and this app has none — every value on every screen is invented. So the tag is the
- * mechanism: nothing here should be demonstrable as working software, and the moment sync and
- * the API land, these tags come off screen by screen.
+ * against, and most of this app has none — so the tag is the mechanism: nothing tagged should
+ * be demonstrable as working software, and the tags come off screen by screen as each slice
+ * lands. Hours was the first.
  */
 export function MockTag() {
   return (
@@ -65,7 +66,7 @@ export function MockTag() {
         letterSpacing: ".04em",
         whiteSpace: "nowrap",
       }}
-      title="Mock data. This app calls no domain endpoint — only auth is live."
+      title="Mock data. Only authentication and the hours of service are live; this screen's values are invented."
     >
       MOCK
     </span>

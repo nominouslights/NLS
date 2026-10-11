@@ -12,7 +12,8 @@ import {
   severityKind,
 } from "./inspectionGate";
 import { recordCertification, setAnswer } from "./inspectionStore";
-import { dvirSubmissions, eligibility, today } from "./data";
+import { dvirSubmissions, today } from "./data";
+import { eligibility } from "./eligibility";
 import { statusMeta } from "./theme";
 import type { DefectSeverity, Trip } from "./types";
 

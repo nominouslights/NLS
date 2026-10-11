@@ -8,25 +8,24 @@ import {
   credentialKindFor,
   listDriverCredentials,
   listDriverClearances,
-  listDriverHosEntries,
   listDrivers,
   refetchUntil,
   removeDriverCredential,
   revokeDriverClearance,
   sortClearances,
   sortCredentials,
-  sortHosEntries,
   type DriverClearanceRecord,
   type DriverCredentialRecord,
   type DriverRecord,
-  type HosEntryRecord,
 } from "@/lib/api/drivers";
+import { getHosStatus, listDutyDays, listHosStatusBatch, type DutyDaySummary, type HosRosterStatus, type HosStatus } from "@/lib/api/hos";
 import { leaveOnDate } from "@/lib/driverCompliance";
 import { corridorLabel, listTrips, sortTrips, tripChip, tripWindowLabel, type TripRecord } from "@/lib/api/trips";
-import { hosRemainingFor, hosViolationsFor } from "@/lib/hosRules";
+import { BAND_KIND, blockingShort, blockingText, dutyStateFromWire, formatRemaining } from "@/lib/hos/display";
 import { useDriverStore } from "@/lib/driverStore";
+import { useTodayIso } from "@/lib/useTodayIso";
 import { initials } from "@/lib/format";
-import type { DutyStatus, LeaveType } from "@/lib/types";
+import type { LeaveType } from "@/lib/types";
 import { PageHeader, Panel, SectionLabel } from "@/components/ui/Panel";
 import { StatusChip } from "@/components/ui/Chip";
 import { ActionButton } from "@/components/ui/Button";
@@ -34,19 +33,19 @@ import { MonthGrid } from "@/components/ui/MonthGrid";
 import { DutyChip, ExpiryFlag, PermitTag } from "./drivers/chips";
 import { CredentialRow } from "./drivers/CredentialRow";
 import { ClearanceRow } from "./drivers/ClearanceRow";
-import { HosLogRow } from "./drivers/HosLogRow";
+import { HoursOfServiceTab } from "./drivers/HoursOfServiceTab";
+import { HosStatusGauge } from "./drivers/hos/HosStatusGauge";
 import CredentialFormModal from "@/components/CredentialFormModal";
 import CredentialImageLightbox from "@/components/CredentialImageLightbox";
 import CredentialPhotoModal from "@/components/CredentialPhotoModal";
 import DriverFormModal from "@/components/DriverFormModal";
-import HosLogEntryModal from "@/components/HosLogEntryModal";
 import ClearanceFormModal from "@/components/ClearanceFormModal";
 import LeaveFormModal from "@/components/LeaveFormModal";
 
 // Drivers & Compliance — driver records, credentials, client clearances, and
-// hours-of-service now come from the real Drivers API (lib/api/drivers.ts), and
-// the Calendar tab's trip history comes from the real Trips API
-// (GET /api/trips?driverId=). Only leave stays on the frontend mock
+// hours of service (the duty-event ledger: lib/api/hos.ts) come from the real
+// Drivers API, and the Calendar tab's trip history comes from the real Trips
+// API (GET /api/trips?driverId=). Only leave stays on the frontend mock
 // (lib/data.ts): leave is explicitly outside the backend Drivers module's
 // scope and is still keyed by a numeric prototype id — joined here by roster
 // position (row index + 1, `mockId`).
@@ -56,12 +55,12 @@ const TABS = ["Profile", "Licence & certs", "Hours of Service", "Clearances", "C
 const EYEBROW = "Operations · Roster & compliance engine source";
 const TITLE = "Drivers & Compliance";
 
-// "Today" anchor for the Calendar tab's default month/day — matches the
-// "Today ≈ 2026-07-17" convention already used by the hosLogs seed comment
-// in lib/data.ts (HOS-2020 is dated 2026-07-17).
-const TODAY_ISO = "2026-07-17";
-const TODAY_YEAR = 2026;
-const TODAY_MONTH = 6; // July, 0-based
+/** First and last day of a month as DateOnly strings (month is 0-based). */
+function monthRange(year: number, month: number): { from: string; to: string } {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const last = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  return { from: `${year}-${pad(month + 1)}-01`, to: `${year}-${pad(month + 1)}-${pad(last)}` };
+}
 
 // Leave type → StatusKind, reusing the app's established color+icon+label
 // system instead of inventing new colours for leave.
@@ -150,25 +149,41 @@ export default function Drivers({
   driverSel: number;
   setDriverSel: (i: number) => void;
 }) {
-  useDriverStore(); // re-render when the mock HOS/leave store mutates
+  useDriverStore(); // re-render when the mock leave store mutates
+  // Today's date (yyyy-MM-dd) anchors the calendar's default month/day and the
+  // HOS tab; empty until hydrated, so the calendar state below is nullable and
+  // falls back to it.
+  const todayIso = useTodayIso();
+  const todayYear = todayIso ? Number(todayIso.slice(0, 4)) : new Date().getFullYear();
+  const todayMonth = todayIso ? Number(todayIso.slice(5, 7)) - 1 : new Date().getMonth();
 
   const [roster, setRoster] = useState<DriverRecord[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [tab, setTab] = useState(0);
-  const [modal, setModal] = useState<null | "credential" | "hos" | "clearance" | "leave" | "register" | "edit">(null);
-  const [calYear, setCalYear] = useState(TODAY_YEAR);
-  const [calMonth, setCalMonth] = useState(TODAY_MONTH);
-  const [selectedDay, setSelectedDay] = useState(TODAY_ISO);
+  const [modal, setModal] = useState<null | "credential" | "clearance" | "leave" | "register" | "edit">(null);
+  const [calState, setCalState] = useState<{ year: number; month: number } | null>(null);
+  const [selectedDayState, setSelectedDay] = useState<string | null>(null);
+  const calYear = calState?.year ?? todayYear;
+  const calMonth = calState?.month ?? todayMonth;
+  const selectedDay = selectedDayState ?? todayIso;
 
   // Per-selected-driver detail data (real API). Keyed by driverId so switching
   // drivers naturally reads as "loading" until this driver's fetch lands — no
   // synchronous state resets needed inside the effect.
   const [credsState, setCredsState] = useState<{ driverId: string; rows: DriverCredentialRecord[] } | null>(null);
   const [clearState, setClearState] = useState<{ driverId: string; rows: DriverClearanceRecord[] } | null>(null);
-  const [hosState, setHosState] = useState<{ driverId: string; rows: HosEntryRecord[] } | null>(null);
   const [tripState, setTripState] = useState<{ driverId: string; rows: TripRecord[] } | null>(null);
   const [detailError, setDetailError] = useState<{ driverId: string; message: string } | null>(null);
+
+  // Hours of service — the ledger's evaluation per driver (gauge on Profile + HOS
+  // tabs), the roster batch (one call for every row's band), and the calendar
+  // month's duty days (violation / uncertified markers). `hosVersion` bumps after
+  // every ledger write so all three reload.
+  const [hosVersion, setHosVersion] = useState(0);
+  const [hosStatusState, setHosStatusState] = useState<{ driverId: string; status: HosStatus | null; error: string | null } | null>(null);
+  const [hosBatch, setHosBatch] = useState<Map<string, HosRosterStatus> | null>(null);
+  const [calDaysState, setCalDaysState] = useState<{ driverId: string; year: number; month: number; rows: DutyDaySummary[] } | null>(null);
 
   const [busy, setBusy] = useState(false);
   const [actionErrorState, setActionErrorState] = useState<{ driverId: string; message: string } | null>(null);
@@ -231,16 +246,6 @@ export default function Drivers({
         if (active) setTripState({ driverId, rows: [] });
       },
     );
-    // HOS entries — best-effort like trips; an unreachable fetch leaves the log
-    // empty rather than blanking the compliance records.
-    listDriverHosEntries(driverId).then(
-      (rows) => {
-        if (active) setHosState({ driverId, rows: sortHosEntries(rows) });
-      },
-      () => {
-        if (active) setHosState({ driverId, rows: [] });
-      },
-    );
     Promise.all([listDriverCredentials(driverId), listDriverClearances(driverId)]).then(
       ([c, cl]) => {
         if (active) {
@@ -262,6 +267,65 @@ export default function Drivers({
       active = false;
     };
   }, [d?.id]);
+
+  // HOS standing for the selected driver — keyed by driverId like the rest, and
+  // re-fetched after every ledger write. The error is kept per driver so the
+  // tab can say why the gauge is missing without blanking the other records.
+  useEffect(() => {
+    if (!d?.id) return;
+    let active = true;
+    const driverId = d.id;
+    getHosStatus(driverId).then(
+      (status) => {
+        if (active) setHosStatusState({ driverId, status, error: null });
+      },
+      (e) => {
+        if (active) setHosStatusState({ driverId, status: null, error: e instanceof ApiError ? e.message : "Failed to load hours of service." });
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [d?.id, hosVersion]);
+
+  // The roster batch: every driver's band in one call. Best-effort — an
+  // unreachable batch leaves the "HOS left" column as an em dash, never a figure.
+  useEffect(() => {
+    if (roster === null) return;
+    let active = true;
+    listHosStatusBatch().then(
+      (rows) => {
+        if (active) setHosBatch(new Map(rows.map((r) => [r.driverId, r])));
+      },
+      () => {
+        if (active) setHosBatch(new Map());
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [roster, hosVersion]);
+
+  // The calendar month's duty days — the server's evaluation per day drives the
+  // ▲ (violation) and ◷ (uncertified) markers. Best-effort like trips.
+  useEffect(() => {
+    if (!d?.id || tab !== 4) return;
+    let active = true;
+    const driverId = d.id;
+    const year = calYear;
+    const month = calMonth;
+    listDutyDays(driverId, monthRange(year, month)).then(
+      (rows) => {
+        if (active) setCalDaysState({ driverId, year, month, rows });
+      },
+      () => {
+        if (active) setCalDaysState({ driverId, year, month, rows: [] });
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [d?.id, tab, calYear, calMonth, hosVersion]);
 
   // -------------------------------------------------------------------------
   // Mutations — reads are eventually consistent projections, so refetch with
@@ -307,15 +371,12 @@ export default function Drivers({
     });
   }
 
-  async function onHosAdded(driverId: string, newId: string) {
-    await runAction(driverId, async () => {
-      const rows = await refetchUntil(
-        () => listDriverHosEntries(driverId),
-        (r) => r.some((e) => e.id === newId),
-      );
-      setHosState({ driverId, rows: sortHosEntries(rows) });
-      loadRoster(); // latestDutyStatus / latestDrivingHours rollups changed
-    });
+  // A ledger write (transcription / amendment) landed: the status, the roster
+  // batch and the calendar all re-read. The ledger is written synchronously by
+  // the command, so a plain re-fetch is enough — no refetchUntil needed.
+  function onLedgerChanged() {
+    setHosVersion((v) => v + 1);
+    loadRoster(); // the driver read model's duty rollup follows the ledger
   }
 
   async function onClearanceAdded(driverId: string, newId: string) {
@@ -395,23 +456,11 @@ export default function Drivers({
   );
 
   function prevMonth() {
-    setCalMonth((m) => {
-      if (m === 0) {
-        setCalYear((y) => y - 1);
-        return 11;
-      }
-      return m - 1;
-    });
+    setCalState(calMonth === 0 ? { year: calYear - 1, month: 11 } : { year: calYear, month: calMonth - 1 });
   }
 
   function nextMonth() {
-    setCalMonth((m) => {
-      if (m === 11) {
-        setCalYear((y) => y + 1);
-        return 0;
-      }
-      return m + 1;
-    });
+    setCalState(calMonth === 11 ? { year: calYear + 1, month: 0 } : { year: calYear, month: calMonth + 1 });
   }
 
   // -------------------------------------------------------------------------
@@ -467,54 +516,47 @@ export default function Drivers({
   const clearances = clearState?.driverId === d.id ? clearState.rows : null;
   const detailErrorMessage = detailError?.driverId === d.id ? detailError.message : null;
   const actionError = actionErrorState?.driverId === d.id ? actionErrorState.message : null;
-  const hosEntries = hosState?.driverId === d.id ? hosState.rows : null;
-  const logs = hosEntries ?? [];
-  const hosRemaining = hosRemainingFor(hosEntries?.[0]?.drivingH ?? null);
-  const hos = statusMeta(hosRemaining.kind);
+  const hosStatus = hosStatusState?.driverId === d.id ? hosStatusState.status : null;
+  const hosStatusError = hosStatusState?.driverId === d.id ? hosStatusState.error : null;
   const expiring = (creds ?? []).filter((c) => {
     const k = credentialKindFor(c.expiry);
     return k === "soon" || k === "over";
   });
   const worstExpiring: StatusKind = expiring.some((c) => credentialKindFor(c.expiry) === "over") ? "over" : "soon";
   const calTrips = tripState?.driverId === d.id ? tripState.rows : [];
-  const calViolations = hosViolationsFor(logs);
+  // The month's server-evaluated days: a day with an unsuppressed violation gets ▲, a past
+  // day with records the driver has not certified gets ◷.
+  const calDays = calDaysState?.driverId === d.id && calDaysState.year === calYear && calDaysState.month === calMonth ? calDaysState.rows : [];
+  const calViolations = calDays.flatMap((day) => day.violations.filter((v) => !v.suppressed).map((v) => ({ date: day.date, message: v.message })));
+  const calUncertified = new Set(calDays.filter((day) => day.hasRecords && !day.certified && !!todayIso && day.date < todayIso).map((day) => day.date));
   const selectedTrips = calTrips.filter((t) => t.serviceDate === selectedDay);
-  const selectedLeave = leaveOnDate(mockId, selectedDay);
+  const selectedLeave = selectedDay ? leaveOnDate(mockId, selectedDay) : undefined;
   const selectedViolations = calViolations.filter((v) => v.date === selectedDay);
+  const selectedDutyDay = calDays.find((day) => day.date === selectedDay) ?? null;
 
   function statusOrDutyChip(row: DriverRecord) {
     if (row.status === "Deactivated") return <StatusChip kind="over" label="Deactivated" />;
     if (row.status === "Inactive") return <StatusChip kind="off" label="Inactive" />;
-    return <DutyChip status={(row.latestDutyStatus ?? "Off Duty") as DutyStatus} />;
+    // The batch's current duty is the ledger's; the read-model rollup is the fallback.
+    const duty = hosBatch?.get(row.id)?.currentDuty ?? row.latestDutyStatus;
+    return <DutyChip status={dutyStateFromWire(duty)} />;
   }
 
-  const hosGauge = (
-    <Panel style={{ marginBottom: 12, padding: "16px 18px", borderRadius: 11 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-        <div
-          style={{
-            fontFamily: fonts.semiCondensed,
-            fontSize: 9.5,
-            letterSpacing: ".14em",
-            textTransform: "uppercase",
-            color: colors.textLabel,
-          }}
-        >
-          Hours of Service · CVDHS cycle · latest duty day
-        </div>
-        <div style={{ fontFamily: fonts.mono, fontSize: 13, fontWeight: 500, color: hos.t }}>
-          {hosRemaining.label} remaining
-        </div>
-      </div>
-      <div style={{ height: 10, borderRadius: 6, background: colors.inputBg, overflow: "hidden", border: `1px solid ${colors.borderSubtle}` }}>
-        <div style={{ height: "100%", width: `${hosRemaining.pct}%`, background: hos.c, borderRadius: 6 }} />
-      </div>
-      <div style={{ display: "flex", justifyContent: "space-between", fontFamily: fonts.body, fontSize: 11, color: colors.textDim, marginTop: 7 }}>
-        <span>13h drive · 14h on-duty · 10h off-duty</span>
-        <span>220 km corridor — no short-haul exemption</span>
-      </div>
-    </Panel>
-  );
+  // The roster's "HOS left" cell: the batch band as colour + glyph + label; a driver
+  // who may not drive shows ▲ with the first blocking reason. Em dash until loaded.
+  function hosLeftChip(row: DriverRecord) {
+    const s = hosBatch?.get(row.id);
+    if (!s) return <StatusChip kind="off" label="—" />;
+    if (!s.canDriveNow) {
+      const first = s.blockingReasons[0];
+      return (
+        <span title={first ? blockingText(first) : "Cannot drive now"}>
+          <StatusChip kind="over" label={first ? blockingShort(first) : "Cannot drive"} />
+        </span>
+      );
+    }
+    return <StatusChip kind={BAND_KIND[s.band]} label={formatRemaining(s.tightestRemainingSeconds)} />;
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }} className="detailfade">
@@ -526,7 +568,7 @@ export default function Drivers({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "34px 1fr 96px 110px",
+              gridTemplateColumns: "34px 1fr 120px 110px",
               gap: 11,
               padding: "0 13px 9px",
               fontFamily: fonts.semiCondensed,
@@ -543,8 +585,6 @@ export default function Drivers({
           </div>
           {roster.map((row, i) => {
             const active = i === selIndex;
-            const rowHosRemaining = hosRemainingFor(row.latestDrivingHours);
-            const rowHos = statusMeta(rowHosRemaining.kind);
             const rowDeactivated = row.status === "Deactivated";
             return (
               <div
@@ -552,7 +592,7 @@ export default function Drivers({
                 onClick={() => setDriverSel(i)}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "34px 1fr 96px 110px",
+                  gridTemplateColumns: "34px 1fr 120px 110px",
                   gap: 11,
                   alignItems: "center",
                   padding: "10px 13px",
@@ -610,9 +650,7 @@ export default function Drivers({
                     </div>
                   )}
                 </div>
-                <div style={{ fontFamily: fonts.mono, fontSize: 12, fontWeight: 500, color: rowHos.t }}>
-                  {rowHosRemaining.label}
-                </div>
+                <div>{hosLeftChip(row)}</div>
                 <div>{statusOrDutyChip(row)}</div>
               </div>
             );
@@ -734,7 +772,17 @@ export default function Drivers({
                     Registered {formatUtcDate(d.registeredAtUtc)}
                   </div>
                 </Panel>
-                {hosGauge}
+                {hosStatus ? (
+                  <HosStatusGauge status={hosStatus} compact />
+                ) : (
+                  <Panel style={{ marginBottom: 12 }}>
+                    {hosStatusError ? (
+                      <StatusChip kind="over" label={`Hours of service unavailable — ${hosStatusError}`} />
+                    ) : (
+                      <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textDim }}>Loading hours of service…</div>
+                    )}
+                  </Panel>
+                )}
               </>
             )}
 
@@ -768,34 +816,17 @@ export default function Drivers({
               </Panel>
             )}
 
-            {/* ---- Hours of Service (real — GET/POST /api/drivers/{id}/hos) ---- */}
+            {/* ---- Hours of Service (real — the duty-event ledger, lib/api/hos.ts) ---- */}
             {tab === 2 && (
-              <>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-                  <span style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textMuted }}>Current duty status</span>
-                  {statusOrDutyChip(d)}
-                </div>
-                {hosGauge}
-                <Panel>
-                  <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
-                    <SectionLabel>Duty log · driver app + paper backup</SectionLabel>
-                    <ActionButton variant="primary" style={{ marginLeft: "auto" }} onClick={() => setModal("hos")}>
-                      + LOG HOS ENTRY
-                    </ActionButton>
-                  </div>
-                  {hosEntries === null ? (
-                    <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textDim }}>Loading hours of service…</div>
-                  ) : logs.length === 0 ? (
-                    <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textDim }}>No hours-of-service entries recorded.</div>
-                  ) : (
-                    <div style={{ marginTop: -2 }}>
-                      {logs.map((entry) => (
-                        <HosLogRow key={entry.id} entry={entry} />
-                      ))}
-                    </div>
-                  )}
-                </Panel>
-              </>
+              <HoursOfServiceTab
+                driverId={d.id}
+                driverName={d.name}
+                today={todayIso}
+                status={hosStatus}
+                statusError={hosStatusError}
+                version={hosVersion}
+                onLedgerChanged={onLedgerChanged}
+              />
             )}
 
             {/* ---- Clearances ---- */}
@@ -840,6 +871,7 @@ export default function Drivers({
                       const dayTrips = calTrips.filter((t) => t.serviceDate === dateIso);
                       const leave = leaveOnDate(mockId, dateIso);
                       const violation = calViolations.some((v) => v.date === dateIso);
+                      const uncertified = calUncertified.has(dateIso);
                       const selected = dateIso === selectedDay;
                       const dayNum = Number(dateIso.slice(-2));
                       const leaveMeta = leave ? statusMeta(LEAVE_KIND[leave.type]) : null;
@@ -860,9 +892,15 @@ export default function Drivers({
                             <span style={{ fontFamily: fonts.mono, fontSize: 11, color: inMonth ? colors.textSecondary : colors.textFaint }}>
                               {dayNum}
                             </span>
-                            {violation && (
-                              <span style={{ fontSize: 10, color: statusMeta("over").t }}>{statusMeta("over").g}</span>
-                            )}
+                            {violation ? (
+                              <span style={{ fontSize: 10, color: statusMeta("over").t }} title="HOS violation">
+                                {statusMeta("over").g}
+                              </span>
+                            ) : uncertified ? (
+                              <span style={{ fontSize: 10, color: statusMeta("soon").t }} title="Not certified">
+                                ◷
+                              </span>
+                            ) : null}
                           </div>
                           <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 5 }}>
                             {dayTrips.length > 0 && (
@@ -896,16 +934,24 @@ export default function Drivers({
                       )}
                     </div>
                   )}
-                  {selectedViolations.length > 0 && (
+                  {(selectedViolations.length > 0 || (selectedDay && calUncertified.has(selectedDay))) && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
                       {selectedViolations.map((v, i) => (
                         <StatusChip key={i} kind="over" label={v.message} />
                       ))}
+                      {selectedDay && calUncertified.has(selectedDay) && selectedDutyDay && (
+                        <StatusChip
+                          kind={selectedDutyDay.recertificationRequired ? "over" : "soon"}
+                          glyph={selectedDutyDay.recertificationRequired ? undefined : "◷"}
+                          label={selectedDutyDay.recertificationRequired ? "Recertification required" : "Day not certified by the driver"}
+                        />
+                      )}
                     </div>
                   )}
                   {selectedTrips.length === 0 ? (
                     !selectedLeave &&
-                    selectedViolations.length === 0 && (
+                    selectedViolations.length === 0 &&
+                    !(selectedDay && calUncertified.has(selectedDay)) && (
                       <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textDim }}>Nothing scheduled.</div>
                     )
                   ) : (
@@ -977,14 +1023,6 @@ export default function Drivers({
                 driverName={d.name}
                 onClose={() => setModal(null)}
                 onSaved={(newId) => onCredentialAdded(d.id, newId)}
-              />
-            )}
-            {modal === "hos" && (
-              <HosLogEntryModal
-                driverId={d.id}
-                driverName={d.name}
-                onClose={() => setModal(null)}
-                onSaved={(newId) => onHosAdded(d.id, newId)}
               />
             )}
             {modal === "clearance" && (

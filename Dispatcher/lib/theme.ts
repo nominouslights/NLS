@@ -173,7 +173,7 @@ export function svcMeta(svc: ServiceType): ServiceMeta {
   return SERVICE_META[svc] ?? SERVICE_META.community;
 }
 
-export type DutyStatus = "Off Duty" | "On Duty" | "Driving";
+export type DutyStatus = "Off Duty" | "On Duty" | "Driving" | "Personal Conveyance";
 
 export interface DutyMeta {
   glyph: string;
@@ -185,7 +185,9 @@ export interface DutyMeta {
 
 // Duty status is color + icon + label (accessible-status-colors rule): the
 // colour never stands alone. Reuses the protected status hexes — Off Duty grey,
-// On Duty blue, Driving teal (an active/"go" semantic).
+// On Duty blue, Driving teal (an active/"go" semantic). Personal Conveyance is
+// off-duty time under the regulation (s.1), so it shares Off Duty's grey and is
+// told apart by its own glyph and the label — never by colour.
 const DUTY_META: Record<DutyStatus, DutyMeta> = {
   "Off Duty": {
     glyph: "—",
@@ -207,6 +209,13 @@ const DUTY_META: Record<DutyStatus, DutyMeta> = {
     text: "#007A59",
     bg: "rgba(0,158,115,.10)",
     bd: "rgba(0,158,115,.38)",
+  },
+  "Personal Conveyance": {
+    glyph: "◇",
+    color: "#7A8899",
+    text: "#5A6B7D",
+    bg: "rgba(122,136,153,.10)",
+    bd: "rgba(122,136,153,.38)",
   },
 };
 

@@ -3,9 +3,16 @@
 Next.js 16 + React 19 on port **3004**, against the shared API. An installable **PWA** for a
 company-issued 10-inch landscape Android tablet.
 
-**What is real:** authentication and the Driver role gate.
-**What is not:** everything else. This app calls **no domain endpoint**. Every value on every
-screen comes from `lib/data.ts`, and every screen carries a `MockTag` saying so.
+**What is real:** authentication, the Driver role gate, and the **hours of service** — the
+duty ledger (`GET /api/drivers/me`, `GET …/{id}/hos/days`, `GET …/{id}/hos/status`), a duty
+change (`hos.duty` → `POST …/hos/duty-events`) and a day's certification (`hos.certify` →
+`POST …/hos/days/{date}/certify`), through a durable IndexedDB command queue that drains on
+reconnect and on a timer. The Hours screen carries no `MockTag`; the alerts at 60/30/0
+minutes run on the same figures on every screen.
+**What is not:** everything else. Trips, manifests, the DVIR's vehicles and defects, incidents,
+credentials and the driver's own profile come from `lib/data.ts`, and every screen showing
+them carries a `MockTag` saying so. The other `hos.*` commands (personal conveyance,
+exceptions, ELD malfunction, other-carrier hours, out-of-service) are the next slice.
 
 This app is a Next.js PWA rather than Flutter by the owner's decision (2026-09), reversing the
 framework choice recorded in the architecture skill. The device policy, the landscape-only
@@ -25,8 +32,8 @@ constraint and the offline-first requirement are **unchanged** — only the fram
 
 Same decision as `Budgeting/`, and for the same reason: extracting a shared package was the
 alternative and was rejected — there is no npm workspace at the root and every app has its own
-lockfile. So **23 files here are byte-identical copies of Dispatcher's**, each carrying a fixed
-two-line header:
+lockfile. So **24 files here are byte-identical copies of Dispatcher's** (plus one of the
+backend's — see `lib/hos/`), each carrying a fixed two-line header:
 
 ```
 // COPIED FROM Dispatcher/<path> — keep identical below this header.
@@ -40,6 +47,7 @@ a copied file in place.** Drift here is a visible product bug, not a style nit.
 |---|---|
 | `lib/` | `theme.ts` `format.ts` `period.ts` `useToday.ts` `clipboard.ts` `inspectionForm.ts` |
 | `lib/api/` | `transport.ts` `format.ts` `shared.ts` |
+| `lib/hos/` | `engine.ts` — and `hos-fixtures.json`, whose source is **`Backend/tests/NorthernLink.Shared.Tests/HoursOfService/hos-fixtures.json`**, not Dispatcher, copied whole with no header (JSON has no comment to carry one) |
 | `app/` | `globals.css` |
 | `components/` | `HeaderClock.tsx` |
 | `components/ui/` | `Button` `Chip` `CorridorStepper` `Field` `FileField` `ImageUploadField` `MetricTile` `ModalShell` `MonthGrid` `Pager` `Panel` `PeriodNav` |
@@ -49,7 +57,7 @@ The one-command drift check, from the repo root — prints nothing when in step:
 ```sh
 for f in \
   lib/theme.ts lib/format.ts lib/period.ts lib/useToday.ts lib/clipboard.ts \
-  lib/inspectionForm.ts \
+  lib/inspectionForm.ts lib/hos/engine.ts \
   lib/api/transport.ts lib/api/format.ts lib/api/shared.ts app/globals.css \
   components/HeaderClock.tsx \
   components/ui/Button.tsx components/ui/Chip.tsx components/ui/CorridorStepper.tsx \
@@ -59,12 +67,30 @@ for f in \
 do
   diff -q <(tail -n +3 "DriverField/$f") "Dispatcher/$f" >/dev/null 2>&1 || echo "DRIFT: $f"
 done
+diff -q DriverField/lib/hos/hos-fixtures.json \
+  Backend/tests/NorthernLink.Shared.Tests/HoursOfService/hos-fixtures.json >/dev/null 2>&1 \
+  || echo "DRIFT: lib/hos/hos-fixtures.json"
 ```
 
 `tail -n +3` skips the two-line header. Copies stay **unpruned** — `CorridorStepper`, `MonthGrid`,
-`PeriodNav`, `ImageUploadField`, `theme.ts`'s `ServiceType`/`DutyStatus` and `inspectionForm.ts`'s
-`NL_PTI_01`/`PRE_TRIP_VALIDITY_HOURS` all ship unused or only partly used. Dead exports cost
-nothing; a broken byte-diff costs the premise.
+`PeriodNav`, `ImageUploadField`, `theme.ts`'s `ServiceType` and `inspectionForm.ts`'s
+`NL_PTI_01`/`PRE_TRIP_VALIDITY_HOURS` all ship unused or only partly used, and `lib/hos/engine.ts`
+exports far more than this app renders (other-carrier days, deferrals, PC reclassification, the
+projection's counterfactual rest). Dead exports cost nothing; a broken byte-diff costs the premise.
+
+**`lib/hos/engine.ts` is a copy for the same hard reason as `inspectionForm.ts`.** It is the
+TypeScript mirror of `Backend/src/Shared/HoursOfService` — the one rule engine that decides
+whether a driver may drive — and the fixture file beside it is the contract between that C# and
+this TypeScript: 72 cases, one minute each side of every limit, each carrying hand-written
+expectations and the C# engine's committed snapshot. `lib/hos/engine.copy.test.ts` diffs the
+engine against Dispatcher's from disk, `lib/hos/hos-fixtures.copy.test.ts` diffs the fixtures
+against the **backend's** (the repo root resolved from the test file — not against Dispatcher's
+copy, which could drift in step), and `lib/hos/engine.fixtures.test.ts` holds this app's engine to
+every snapshot. Drift here does not make the tablet look different from the console; it makes the
+tablet tell a driver they have hours the server will refuse. The fixtures are regenerated on the
+backend (`HOS_FIXTURES_UPDATE=1`) and re-copied into Dispatcher AND here; the engine is
+re-transliterated in Dispatcher and re-copied. `tsconfig.json` has `resolveJsonModule` on so the
+theory can import the JSON directly.
 
 **`lib/inspectionForm.ts` is a copy for a harder reason than style.** It is the NL-PTI-01
 catalogue — the legal form itself, and the `key` field on every row is a **wire value** stored as
@@ -101,7 +127,7 @@ first.
 > No hex literal ever enters `tablet.ts`; no number in `theme.ts` is ever changed to suit this
 > app.**
 
-That split is what lets 23 files stay byte-identical while this app renders at roughly twice the
+That split is what lets 24 files stay byte-identical while this app renders at roughly twice the
 physical size of a desktop console. `lib/tablet.ts` exports geometry only: `touch` (44 floor / 56
 primary / 64 rail), `bar.height` 72, `rail` 200-88 with 44px tiles, a type scale, `gap`, `radius`,
 `wizard` (the DVIR flow's one-question-per-screen geometry — 168px answer tiles, a 40px question,
@@ -111,7 +137,9 @@ an 88px footer, a 6px bar), and `viewport` 1280×800.
 where a copied primitive works at size (`Chip`, `Panel`, `ModalShell`, `MetricTile`) use the copy.
 Add here only when the desktop one is geometrically unusable — `TouchButton` (the copy is ~34px),
 `AnswerButton` (a 300×168 answer tile with a 34px glyph — not a prop on `StatusButton`, which is
-56px and padded to sit two in a card row), `DutyControl`, `TouchTile`, `StatusBanner`, `SyncPill`.
+56px and padded to sit two in a card row), `DutyControl`, `DutyChip` (the four duty states
+through the copied `dutyMeta()` — `TabletChip` keys on `StatusKind` and cannot render On Duty's
+blue), `TouchTile`, `StatusBanner`, `SyncPill`.
 
 `ThreeStateControl` was **deleted** with the DVIR questionnaire: its only consumer was the
 scrolling checklist it replaced, and a compact three-button row has no place in a one-question
@@ -179,24 +207,129 @@ to match the backend's ordinal `RequireRole`.
 
 ## The offline seam
 
-Offline-first is a hard requirement (architecture non-negotiable #7) and is **staged, not
-dropped**. Coverage between Thompson, Lynn Lake and the Alamos site is patchy by geography, not as
-a corner case.
+Offline-first is a hard requirement (architecture non-negotiable #7) and is **partly real,
+partly staged**. Coverage between Thompson, Lynn Lake and the Alamos site is patchy by
+geography, not as a corner case.
 
-`lib/sync/` ships now with real types and no-op bodies: `types.ts` (`QueuedCommand`, `CommandKind`,
-`SyncState`), `queue.ts` (`enqueue`/`drain`/`pending`/`retry`), `status.ts` (cached snapshot +
-subscribe), `store.ts` (local-first reads, proxying `lib/data.ts` today).
+`lib/sync/` is: `types.ts` (`QueuedCommand`, `CommandKind`, `SyncState`), `db.ts` (the one
+IndexedDB, `nl-driverfield`, two stores: `commands` keyed by id and `ledger`), `queue.ts`
+(`enqueue`/`drain`/`pending`/`retry`/`discard`, a `registerSender` registry, `startSync`),
+`status.ts` (cached snapshot + subscribe, written only by the queue and the network events),
+`useSyncState.ts` (the React binding), and `store.ts` (local-first reads — still proxying
+`lib/data.ts`).
 
 > **Every screen mutation goes through `lib/sync/queue.enqueue()`. Never a direct `lib/api/*`
 > call, never an in-place mutation of a `lib/data.ts` array.**
 
-Hold that and the offline batch changes four files under `lib/sync/` and **zero screens**. Break it
-in one screen and it is a rewrite.
+That rule is what let the hours go live by changing files under `lib/sync/` and `lib/hos/` and
+**no screen's write path**. It keeps holding: the next `hos.*` kinds are a sender each.
 
-`SyncPill` reads only `lib/sync/status.ts`, so it ships today and never changes again. It says
-**"Sync off"** in neutral gray, never a green check — a scaffold that renders a reassuring
-"Synced" while syncing nothing is exactly how a hard requirement dies between a demo and a
-deployment.
+**What the queue does now.** `enqueue()` resolves once the command is committed to IndexedDB —
+"held on this device" means durable, and it REJECTS rather than pretend when the device cannot
+hold it (the DVIR flow is written so a throwing enqueue leaves the walk-around intact; the
+`DutyControl` says "Not recorded" under the control). `navigator.storage.persist()` is requested
+on the first write. `drain()` walks pending commands in capture order (`seq`, not the clock —
+two taps in one millisecond must still send in order, and a day's duty changes must precede its
+certification) and hands each to the sender registered for its kind, with the command id as the
+`Idempotency-Key` the sender puts on the wire. The response contract:
+
+| Response | Command becomes | Why |
+|---|---|---|
+| 2xx — 201 first time, 200 replay | `sent` | a replay is a success, not a duplicate |
+| 4xx | `failed`, parked with the server's `message` + `code` | the server said no; sending it again gets the same no. Listed on Hours with RETRY / DISCARD, never retried on its own |
+| status 0 (unreachable) / 5xx | stays `pending`; the round stops | a dead zone is not a refusal; the rest waits for the next drain rather than timing out one by one |
+| no sender for the kind | stays `pending`, counted as held | captured, never sent, and the pill says so |
+
+Triggers: the window's `online` event, an enqueue while online, and every 60 s — installed by
+`startSync()` from `Console.tsx` on mount, never before sign-in. Senders are registered by the
+module that owns the endpoint (`lib/hos/ledger.ts` for `hos.duty` and `hos.certify`); the queue
+knows no URL. Everything else (`dvir.submit`, `manifest.board`, `trip.claim`, `incident.report`,
+`vehicle.fault`) is held.
+
+**The `hos.duty` command (renamed from `hos.record`) is the first whose payload is built by one
+function and pinned.** `lib/hos/dutyCommand.ts` always writes `source: "Driver App"` and
+`clientEventId` = the command's own id — the fix for the mislabel bug where every tablet entry
+reached the API as a dispatcher's paper backup. The id is minted inside `enqueue()`, so the
+payload is passed as a **factory** (`enqueue("hos.duty", (id) => …)`). The same file's
+`dutyEventInputFrom` is the crossing onto `DutyEventRequest` at send time: `duty` → `status`,
+the command id → `eventId`, and the source written **again** rather than trusted from the stored
+payload. `lib/wire.test.ts` pins both shapes. The same id goes onto the optimistic event in the
+ledger store, which is what the next hydrate reconciles on.
+
+**`SyncPill` wording is pinned** (`components/ui-tablet/SyncPill.test.tsx`), because the pill's
+honesty is the offline requirement's: `N failed — see Hours` (vermillion ▲, ahead of everything
+else), `Sync off · N held` (gray —, no sender registered — before sign-in), `Offline · N held`
+and `Sync · hours only · N held` (gold ◐). `SyncState.enabled` is derived — true only when EVERY
+kind has a sender — so the green `Synced` cannot appear while a single DVIR is parked on the
+device. `enabledKinds` is what carries the partial truth.
+
+### The hours-of-service ledger (`lib/hos/`) — live
+
+`lib/hos/ledger.ts` is a `useSyncExternalStore` store (the `lib/inspectionStore.ts` pattern,
+bound by `lib/hos/useHosLedger.ts`) and `evaluation()` is the copied engine's
+`evaluate(ledger, asOf, calendar)`. TopBar's duty chip, Today's tile, every figure on Hours, the
+`DutyControl`'s disabled reasons, the alerts and the Trips screen's hours rule
+(`lib/eligibility.ts`, through `project`) all read that one evaluation on the one band set in
+`lib/hos/display.ts` — gold inside the engine's soon window (≤ 2h), vermillion whenever
+`canDriveNow` is false, teal otherwise. There is no local threshold and no `MAX_*` constant
+anywhere in this app.
+
+**Where the events come from.** On sign-in (`startLedger()` from `Console.tsx`) the store
+resolves the driver from `GET /api/drivers/me` (cached for the session; a 404
+`Drivers.NotLinked` is shown on Hours as "nothing from the server yet — …"), then fetches
+`GET …/hos/days?from=<today − 21>` and `GET …/hos/status`, and again after every drain that sent
+something. 21 days, not 14, because that is the server's own `DutyLedgerAssembler.LookbackDays`
+— the 14-day rules plus a week so the 7-day cycle and the 36h reset have what they need at the
+edge; `knownFromUnix` is the server's (the driver's earliest day on file), and the engine
+synthesises the gap before the first fetched event exactly as the server does. Server events are
+mapped through `HosWire.statusFrom/sourceFrom`, voided ones excluded, odometers to tenths of a km
+as `DutyLedgerAssembler.ToDecikm` does. The Hours history lists the last 14.
+
+A duty change appends an **optimistic** event (status, now, "Driver App", the queued command's
+id as `clientEventId`) so the figures move the moment the driver taps. The server wins on every
+reconcile: an optimistic event whose id the server now holds is dropped for the server's copy;
+one whose command the server **refused** (parked on Hours) is dropped too, and the figures go
+back to the record. Pending ones are rebuilt from the queue on reload, so a restart in a dead
+zone keeps them. The last server copy is cached in IndexedDB keyed to the signed-in account
+(`lib/sync/db.ts`, `ledger` store) so a reload offline still shows figures — and the Hours
+banner says **which** copy the figures are built on (live / device copy / none) and the last
+fetch error verbatim, because a dead zone must be visible, not silent. The clock is the
+device's; the alerts tick it every 30 s.
+
+The banner on Hours is not optional: the record of duty status lives on the bus's ELD and
+keeping two records is a severe violation, so every figure here is a **planning figure** and
+says so.
+
+**Certification** (`hos.certify`) is the driver's own act under s.84 — the endpoint carries
+`OwnDriverOnlyMetadata`, no dispatch override — so the attestation sheet says what is being
+signed. `certifyState()` in `Hours.tsx` mirrors `DutyDay.Certify`'s refusals (open PC segment,
+nothing to certify, day in the future) and adds the two this device knows (a certification
+already queued, one the server refused), so the reason reads on screen before a parked command
+would have said it. A certification queued offline drains **after** the day's duty changes, by
+capture order.
+
+**Alerts** (`lib/hos/useHosAlerts.ts`, rendered by `components/HosAlerts.tsx` from `Console.tsx`
+on every screen) are a module-level store driven from the ledger, not an effect, for the same
+lint and testability reasons as every other store here. The thresholds are
+`ALERT_THRESHOLDS_SECONDS` in `lib/hos/display.ts` (60/30/0 min, the owner's policy default,
+pinned). 60/30 → a dismissible `ModalShell` with the dispatch number on a `tel:` button; 0 while
+Driving → an app-local non-dismissible panel (not `ModalShell`: its ✕ would close) cleared only
+when duty leaves Driving, then a persistent out-of-hours `StatusBanner`; once per
+(limit, threshold) per duty period (the engine's shift — it resets after ≥ 8h off); re-remind
+10 min after a dismissal if still Driving; nothing fires Off Duty or in PC, but the last figures
+are kept so a crossing during a break fires on return. The dispatch number is
+`lib/company.ts`, **app-local for now** — Dispatcher's `company.ts` has no `dispatchPhone` yet;
+once it does, this file becomes a header-copied file on the manifest.
+
+`lib/api/hos.ts` is likewise **app-local for now**: the same type and function names as
+`Dispatcher/lib/api/hos.ts` (`listDutyDays` / `getHosStatus` / `recordDutyEvent` identical),
+plus `getMyDriver` and `certifyDay` which are this app's alone. It becomes a copy once the
+console's settles. Never invent a field in it: the shapes are `HosResponses.cs`.
+
+`eligibility()` moved from `lib/data.ts` to `lib/eligibility.ts` when its hours rule went onto
+the engine — the store is live and `data.ts` is the read-only mock layer, so the rule could not
+live in `data.ts` without the mock file importing the live ledger. The other four §5.4 rules are
+unchanged and still mock.
 
 **`lib/inspectionStore.ts` is deliberately NOT under `lib/sync/`, and the distinction is the
 point.** An in-progress DVIR **draft** is uncertified, private to the device, and costs a driver the
@@ -242,15 +375,17 @@ states is one function, and the order is not negotiable: **`enqueue()` → `reco
 certification is the offline batch's hook: `drain()` can mark one server-accepted by that id and
 the "Held on this device" banner starts telling a different truth with no API change.
 
-Three things the offline batch must not miss:
-- **`Idempotency-Key`.** Every `QueuedCommand` already carries a client-generated GUID. No backend
-  endpoint honours an idempotency key today — none. The client sends it from day one so the server
-  can start honouring it with no client change; the server side needs a per-module
+Three things the rest of the offline batch must keep:
+- **`Idempotency-Key`.** Every `QueuedCommand` carries a client-generated GUID and the drain sends
+  it. `POST …/hos/duty-events` is the one endpoint that honours it today (as the `eventId`
+  alias, 200 on replay); the others do not yet, so the client sending it from day one is what
+  lets each start honouring it with no client change — the server side needs a per-module
   `processed_commands` table.
 - **IndexedDB, not SQLite.** §8 of the architecture reference says SQLite because it was written
-  for Flutter. Everything else in §8 survives verbatim.
+  for Flutter. Everything else in §8 survives verbatim. Done: `lib/sync/db.ts`.
 - **`navigator.storage.persist()`.** IndexedDB is evictable unless persistence is granted. A queued
   DVIR vanishing because the browser reclaimed space is a **compliance** failure, not a lost draft.
+  Done: requested on the first durable write.
 
 ## PWA
 
@@ -283,11 +418,14 @@ Three things the offline batch must not miss:
 
 ## Testing
 
-Vitest. `vitest.config.mts` is copied from Budgeting **exactly**, and two things about it are
-load-bearing: the **`.mts` extension** (Vite loads a plain `.ts` config as CJS and warns) and
-**`import.meta.dirname`, never `__dirname`** — `@types/node` declares `__dirname` globally, so a
-"fix" to it leaves TypeScript and `next build` green while every `@/lib/...` import in the suite
-fails to resolve at run time.
+Vitest. `vitest.config.mts` is Budgeting's plus one line — `setupFiles: ["./vitest.setup.ts"]`,
+which imports `fake-indexeddb/auto` so the real durable queue runs in every test — and two
+things about it are load-bearing: the **`.mts` extension** (Vite loads a plain `.ts` config as
+CJS and warns) and **`import.meta.dirname`, never `__dirname`** — `@types/node` declares
+`__dirname` globally, so a "fix" to it leaves TypeScript and `next build` green while every
+`@/lib/...` import in the suite fails to resolve at run time. A test that fakes timers must leave
+`setTimeout`/`setImmediate` real (`vi.useFakeTimers({ toFake: ["Date", …] })`) or the fake
+IndexedDB never completes a transaction.
 
 | File | Why it exists |
 |---|---|
@@ -295,10 +433,18 @@ fails to resolve at run time.
 | `lib/claims.test.ts` | Claim names pinned to `JwtAccessTokenIssuer`; non-ASCII round trip |
 | `lib/accessSeam.test.ts` | The **chain**, unmocked: token → claims → role → gate. A rename on either side of that seam leaves the other three files green and locks every driver out |
 | `components/RoleGate.test.tsx` | The gate applies the rule. Every denial asserts the denial screen **renders**, not just that children are absent |
-| `lib/eligibility.test.ts` | Each of the five §5.4 rules failing in isolation, and the verdict being conjunctive |
-| `lib/hos.test.ts` | CVDHS thresholds on **both sides** of every boundary. An off-by-one in a compliance figure is not cosmetic |
-| `lib/wire.test.ts` | Exact spelling of the duty and source strings against `HosDisplay`'s constants, and of the three inspection enums (`InspectionDefectSeverity`, `InspectionType`, `InspectionSource`) — including `"Out of Service"` → `"OutOfService"` |
-| `lib/sync/queue.test.ts` | Distinct client-generated id per `enqueue`; the no-op still satisfies the `SyncState` contract |
+| `lib/eligibility.test.ts` | Each of the five §5.4 rules failing in isolation, and the verdict being conjunctive. The hours rule is `HosEngine.Project` with the default margin: a trip that fits only without the margin fails, the breach is the server's sentence, and the s.13 shift reset after 8h off is demonstrated rather than assumed |
+| `lib/hos/engine.copy.test.ts` | The engine copy is byte-identical to `Dispatcher/lib/hos/engine.ts` below its two-line header, read from disk |
+| `lib/hos/hos-fixtures.copy.test.ts` | The fixture copy is byte-identical to the **backend's** `hos-fixtures.json`, read from disk with the repo root resolved from the test file |
+| `lib/hos/engine.fixtures.test.ts` | **The mirror guarantee**: all 72 fixture cases meet their `expect` block and reproduce the C# engine's committed `snapshot` exactly (`HosFixtureTests.cs`), plus event-order independence and "a larger margin never turns infeasible into feasible" |
+| `lib/hos/ledger.test.ts` | The live store against a mocked `lib/api/hos`: `/me` → days (the server's 21-day lookback) + status, events mapped through `HosWire` with voided ones excluded and odometers as `DutyLedgerAssembler.ToDecikm`; the device clock and `tick()`; an optimistic append moving the status and figures at once with the command id on the event; Driving re-greyed with its reason when the window is used up; reconciliation (the server's copy replaces the optimistic one; a **refused** command's event is dropped and the figures follow; a sent one triggers a re-fetch; held ones are rebuilt from the queue on start); the cache serving a dead-zone reload for the same account and never another; retention at a day boundary; the subscribe contract |
+| `lib/hos/useHosAlerts.test.ts` | The alert rules on a real ledger and the real engine with a controlled clock: 61→59 fires 60, 31→29 fires 30, 1→0 fires the non-dismissible stop alert cleared only by leaving Driving with the banner staying; once per (limit, threshold) per period; one modal naming the most specific limit when several cross together; nothing fires Off Duty or in PC and the crossing fires on return; the banner alone when 0 arrives On Duty; the 10-minute reminder while still Driving and not otherwise; the period reset after 8h off; the 30 s tick starting and stopping |
+| `lib/hos/display.test.ts` | The one band set: every engine band renders as colour + glyph + label, the 7-day bar's per-day banding on **both sides** of the engine's soon window, the alert thresholds pinned at 60/30/0 with `alertThresholdCrossed` on both sides of each (and the tightest on a jump), `limitRemaining` watching the window alone rather than `mustStopDrivingBy`, and the local-time helpers agreeing with `HosCalendar` on the DST days |
+| `lib/wire.test.ts` | Exact spelling of the four duty strings, the five source strings, the exception kinds and the `HosRule` / `BlockingReason` / `HosBand` member names against `HosWire.cs` (which `HosDisplay` delegates to); the `hos.duty` payload carrying `source: "Driver App"` and `clientEventId`, and `dutyEventInputFrom` mapping it onto `DutyEventRequest` with the source written again; and the three inspection enums (`InspectionDefectSeverity`, `InspectionType`, `InspectionSource`) — including `"Out of Service"` → `"OutOfService"` |
+| `lib/api/hos.requests.test.ts` | What goes on the wire, fetch-mocked through the real transport: `/api/drivers/me` with no id in the path and its 404 `Drivers.NotLinked`; the days route with and without `from`/`to`; the status route; `recordDutyEvent` repeating the `eventId` as `Idempotency-Key` and a 200 replay resolving; `certifyDay` as a bodiless POST resolving on 204; and the server's sentences verbatim for `EventOutsideDay`, `PcSegmentOpen`, `DayNotFound`, `CertifyDriverOnly` and `NotYourRecord` |
+| `lib/sync/queue.test.ts` | The durable queue on the fake IndexedDB: distinct ids, the payload factory, resolving on the local write with nothing fetched, **surviving a simulated reload in capture order**; the drain handing each command to its sender with its id in order, the id reaching the wire as `Idempotency-Key` through the real transport, a 200 replay counted as sent, a **4xx parked with the server's message and never retried on its own**, **status 0 and 5xx left pending with the round stopped**, a kind with no sender held, retry and a durable discard, single-flight; the triggers (start, enqueue while online, the `online` event, the interval — and none before `startSync`); `enabled` never true while any kind has no sender |
+| `components/ui-tablet/SyncPill.test.tsx` | The pill's wording, word for word: `Sync off`, `Sync · hours only · N held`, `N failed — see Hours` (ahead of everything), `Offline · N held`, and **never the green check while any kind is parked**; the rendered pill once the hos.* senders exist |
+| `components/screens/Hours.test.tsx` | The screen as a driver meets it: no `MockTag`; a refused change listed with the server's message and code, and DISCARD removing it; Certify today opening the attestation sheet and queuing `hos.certify` with the date; the button disabled **with the reason on screen** while a PC segment is open and when nothing is recorded today |
 | `lib/inspectionForm.copy.test.ts` | The NL-PTI-01 copy is byte-identical to `Dispatcher/lib/inspectionForm.ts` below its two-line header, read from disk. Drift means the tablet and the console collect **different legal forms** |
 | `lib/defects.test.ts` | The mock defect model: open means NOT RESOLVED — a defect with a work order stays open until it is Repaired or No fault found; resolved ones never count toward open; the Today tile counts only the assigned vehicle's open defects; the 14-day "Recently resolved" window (14 in, 15 out) and its wording |
 | `lib/newDefects.test.ts` | The rev 4 post-trip's new-defects rules: items offered are the unit's pre-trip rows minus what today's pre-trip already reported and what this report already picked, the wire shape (real item key, never a checklist row), and what blocks Certify (unanswered No/Yes, Yes with no defect, a defect missing item, grade or note) |
@@ -310,7 +456,7 @@ fails to resolve at run time.
 The governing rule, same as Budgeting's: **anything in this app that re-derives a server rule
 client-side belongs here, with the C# method it mirrors named in the test's comment.**
 
-## Data: everything is mock
+## Data: everything except hours is mock
 
 `lib/data.ts` follows the documented conventions — flat exported `const` arrays, prefixed string
 ids, ISO date strings never `Date` objects, every status-bearing row carrying its own `StatusKind`,
@@ -322,12 +468,14 @@ additions to a `lib/api/<domain>.ts` written against the real response as its sl
 screens keep their props.
 
 Budgeting keys its mock rows to ids no real record can match, so screens already on real data show
-empty states. That needs real data to work against and this app has none — so instead **every
-screen carries a `MockTag`.** Nothing here should be demonstrable as working software.
+empty states. That needs real data to work against and most of this app has none — so instead
+**every screen showing mock values carries a `MockTag`.** Hours is the one that does not: its
+figures are the driver's own. Nothing tagged should be demonstrable as working software.
 
-The highest-value function in the file is **`eligibility()`** — the five §5.4 rules. It is a
-client-side mirror of a rule the server must own, in the same way Budgeting's `previewPeriod`
-mirrors `BudgetPeriod.Create`.
+The highest-value function in this layer is **`eligibility()`** (`lib/eligibility.ts`, moved out of
+`data.ts` — see "The hours-of-service ledger") — the five §5.4 rules. It is a client-side mirror
+of a rule the server must own, in the same way Budgeting's `previewPeriod` mirrors
+`BudgetPeriod.Create`; its hours rule is now the real engine's `project`.
 
 ## Accessibility
 
@@ -360,9 +508,15 @@ automatable subset and none of the colour-alone failures that actually matter he
 
 ## Out of scope
 
-- **The offline queue itself.** The seam ships; the IndexedDB store, the drain loop and
-  `navigator.storage.persist()` do not.
-- **Every live domain API call.** Auth only.
+- **The rest of the offline batch.** The queue, its drain loop, `navigator.storage.persist()`
+  and the ledger cache are real; the local-first **read** store (`lib/sync/store.ts`) still
+  proxies `lib/data.ts`, and every kind but `hos.duty` / `hos.certify` is held with no sender.
+- **Every live domain API call except hours.** Auth and `/api/drivers/me` + `…/hos/*` only.
+- **The next hours slice:** the personal-conveyance modal (start/end odometer, three
+  attestations — the `DutyControl` greys PC with that reason), adverse/emergency exceptions,
+  the ELD malfunction report, other-carrier hours, and the out-of-service screen (`hos/status`
+  already types `outOfService` and `eldMalfunctionOpen`; both are null/false today). Amendments
+  stay the console's.
 - **Badge scanning hardware.** The scan field is a text input, which is exactly right for a
   hardware HID/Bluetooth scanner (they present as a keyboard). **If the badges are NFC rather than
   barcode this is the wrong mechanism** — Web NFC (`NDEFReader`) is Chrome-on-Android only, HTTPS

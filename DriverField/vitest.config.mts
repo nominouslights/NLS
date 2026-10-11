@@ -14,5 +14,8 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     include: ["**/*.test.ts", "**/*.test.tsx"],
+    // The one addition over Budgeting's config: an in-memory IndexedDB for the durable queue.
+    // See vitest.setup.ts.
+    setupFiles: ["./vitest.setup.ts"],
   },
 });
