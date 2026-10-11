@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { colors, fonts, statusMeta } from "@/lib/theme";
 import type { BudgetCode, BudgetCodeCategory, BudgetPeriod } from "@/lib/types";
 import { StatusChip } from "@/components/ui/Chip";
@@ -21,8 +21,12 @@ import {
   listBudgetAllocations,
   listBudgetCodes,
   getCostCentreRollup,
+  getVendorRollup,
+  listVendors,
   sumCad,
   type CostCentreRollup,
+  type VendorRecord,
+  type VendorRollup,
   listBudgetPeriods,
   nextTransition,
   planBalanced,
@@ -48,6 +52,7 @@ import { ErrorNotice } from "@/components/ErrorNotice";
 import BudgetItemFormModal from "@/components/BudgetItemFormModal";
 import PriorityBreakdown from "@/components/screens/periods/PriorityBreakdown";
 import CostCentreBreakdown from "@/components/screens/periods/CostCentreBreakdown";
+import VendorBreakdown from "@/components/screens/periods/VendorBreakdown";
 import { EmptyNote } from "@/components/screens/shared";
 import { usePeriodHold } from "@/lib/periodHold";
 import LifecycleStepper from "@/components/screens/periods/LifecycleStepper";
@@ -134,6 +139,23 @@ export default function PeriodDashboard({
   /** The server's planned-expense rollup by cost centre; null while loading. */
   const [rollup, setRollup] = useState<CostCentreRollup | null>(null);
   const [rollupError, setRollupError] = useState<string | null>(null);
+  /** The server's planned-expense rollup by vendor; null while loading. */
+  const [vendorRollup, setVendorRollup] = useState<VendorRollup | null>(null);
+  const [vendorRollupError, setVendorRollupError] = useState<string | null>(null);
+  /**
+   * The tenant's vendor register, retired included, for the item modal's vendor picker. null
+   * while loading or after a failed load — the modal then offers only an item's own vendors, and
+   * a failure never blocks the plan.
+   */
+  const [vendors, setVendors] = useState<VendorRecord[] | null>(null);
+  /**
+   * Bumped by every register request and every register pushed up from the item modal; a load
+   * whose number is no longer current is stale and is dropped, so `vendors` never regresses (the
+   * cost-centre pattern on Budget Codes).
+   */
+  const vendorsSeq = useRef(0);
+  /** Cleared on unmount, so a register read still in flight never sets state afterwards. */
+  const mounted = useRef(true);
   const [error, setError] = useState<{ message: string; code: string } | null>(null);
   const [busy, setBusy] = useState(false);
   /** Two-click confirms — transition, remove and copy — exactly one of which can be pending. */
@@ -197,6 +219,40 @@ export default function PeriodDashboard({
     };
   }, [load]);
 
+  // The vendor register is tenant-wide and edited on its own screen, so a copy loaded with the
+  // dashboard goes stale: a vendor retired, deleted or restored meanwhile would still be offered
+  // (or withheld) by the picker and misjudged by the pre-submit register check. So it is read on
+  // mount AND again every time the item modal opens; an inline create in the modal pushes its own
+  // fresh read up (acceptVendors). Sequenced, so a slower older read never lands on a newer one.
+  // Until the refresh lands the modal shows the previous copy — the server's check is the one
+  // that counts either way.
+  const loadVendors = useCallback(() => {
+    const request = ++vendorsSeq.current;
+    listVendors(true).then(
+      (records) => {
+        if (mounted.current && request === vendorsSeq.current) setVendors(records);
+      },
+      () => {
+        // Not the plan's error: the picker keeps the copy it has (or, with none, degrades to the
+        // item's own vendors and says so).
+      },
+    );
+  }, []);
+
+  useEffect(() => {
+    mounted.current = true;
+    loadVendors();
+    return () => {
+      mounted.current = false;
+    };
+  }, [loadVendors]);
+
+  /** The register the item modal read after an inline create — newer than any load in flight. */
+  const acceptVendors = useCallback((records: VendorRecord[]) => {
+    vendorsSeq.current += 1;
+    setVendors(records);
+  }, []);
+
   // The by-cost-centre rollup follows the items: it is refetched whenever a fresh items list lands
   // (initial load, and after every save, remove and copy — each of which already waited for its
   // own change to be visible). The rollup is a separate read, so it is retried until its total
@@ -220,6 +276,36 @@ export default function PeriodDashboard({
         if (active) {
           setRollupError(
             e instanceof ApiError ? e.message : "The cost-centre rollup could not be loaded.",
+          );
+        }
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [periodId, lines]);
+
+  // The by-vendor rollup, on exactly the cost-centre rollup's terms: refetched whenever a fresh
+  // items list lands, retried until its total agrees with the loaded expense items, and a failure
+  // stays inside its own panel.
+  useEffect(() => {
+    if (lines === null) return;
+    let active = true;
+    const expected = sumCad(lines.filter((l) => l.category === "Expense").map((l) => l.amountCad));
+    refetchUntil(
+      () => getVendorRollup(periodId),
+      (r) => r.totalPlannedExpenseCad === expected,
+    ).then(
+      (r) => {
+        if (active) {
+          setVendorRollup(r);
+          setVendorRollupError(null);
+        }
+      },
+      (e) => {
+        if (active) {
+          setVendorRollupError(
+            e instanceof ApiError ? e.message : "The vendor rollup could not be loaded.",
           );
         }
       },
@@ -368,6 +454,7 @@ export default function PeriodDashboard({
   ) {
     setConfirm(null);
     setModal({ category, item, presetCodeId });
+    loadVendors();
   }
 
   function handleSaved(rows: BudgetAllocationRecord[]) {
@@ -552,6 +639,7 @@ export default function PeriodDashboard({
         >
           <PriorityBreakdown title="Expense by priority" buckets={expenseByPriority} />
           <CostCentreBreakdown rollup={rollup} error={rollupError} />
+          <VendorBreakdown rollup={vendorRollup} error={vendorRollupError} />
         </div>
       )}
 
@@ -625,6 +713,8 @@ export default function PeriodDashboard({
           onOpenCodes={onOpenCodes}
           onClose={() => setModal(null)}
           onSaved={handleSaved}
+          vendors={vendors}
+          onVendorsChanged={acceptVendors}
         />
       )}
     </div>

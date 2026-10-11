@@ -20,6 +20,12 @@ namespace NorthernLink.Budgeting.Application.Allocations;
 /// product rounded to cents. <paramref name="Justification"/> is empty (never null) on a copied
 /// item still waiting to be argued. <paramref name="Tags"/> is never null.
 /// </para>
+/// <para>
+/// <paramref name="Vendor"/> is free text and, on a revenue item, <b>the payer</b> (the field
+/// keeps its original name). An expense item's vendors are <paramref name="VendorShares"/> — never
+/// null, empty for "No vendor", and when not empty summing to exactly <paramref name="AmountCad"/>.
+/// Each share's vendor name and active flag are resolved from <c>rm_vendors</c> at read time.
+/// </para>
 /// </summary>
 public sealed record BudgetAllocationResponse(
     Guid Id,
@@ -39,6 +45,7 @@ public sealed record BudgetAllocationResponse(
     string SpendType,
     string Recurrence,
     string? Vendor,
+    IReadOnlyList<BudgetItemVendorShareResponse> VendorShares,
     IReadOnlyList<string> Tags,
     string Priority,
     string? Assumptions,
@@ -49,3 +56,14 @@ public sealed record BudgetAllocationResponse(
     string? ModifiedByEmail,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc);
+
+/// <summary>
+/// One vendor share of a budget item. <paramref name="VendorName"/> is null, and
+/// <paramref name="IsActive"/> false, only while the vendor's read row cannot be found — a vendor
+/// created a moment ago whose projection is still a poll behind.
+/// </summary>
+public sealed record BudgetItemVendorShareResponse(
+    Guid VendorId,
+    string? VendorName,
+    bool IsActive,
+    decimal AmountCad);

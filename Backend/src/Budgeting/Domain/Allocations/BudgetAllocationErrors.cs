@@ -102,6 +102,57 @@ public static class BudgetAllocationErrors
         "Budgeting.Allocation.ConsequenceTooLong",
         $"The consequence if unfunded must be {BudgetAllocation.ConsequenceMaxLength} characters or fewer.");
 
+    // --- Vendor shares (expense items) and the payer (revenue items). Validation unless noted. ---
+
+    public static readonly Error VendorShareVendorRequired = Error.Validation(
+        "Budgeting.Allocation.VendorShareVendorRequired",
+        "Every vendor share must name a vendor from the vendor register.");
+
+    public static readonly Error VendorShareAmountInvalid = Error.Validation(
+        "Budgeting.Allocation.VendorShareAmountInvalid",
+        "Each vendor share must be more than zero, in dollars and cents (at most two decimal places), and 999,999,999.99 or less.");
+
+    public static readonly Error DuplicateVendorShare = Error.Validation(
+        "Budgeting.Allocation.DuplicateVendorShare",
+        "A vendor can appear only once on a budget item. Combine its shares into one amount.");
+
+    public static readonly Error TooManyVendorShares = Error.Validation(
+        "Budgeting.Allocation.TooManyVendorShares",
+        $"A budget item can be split across at most {BudgetAllocation.MaxVendorShares} vendors.");
+
+    /// <summary>
+    /// Built per request: the message names both totals, so the planner sees how far off the split
+    /// is without doing the arithmetic. Formatted invariantly for the AmountTooLarge culture reason.
+    /// </summary>
+    public static Error VendorSharesMustSumToAmount(decimal sharesTotal, decimal amount) => Error.Validation(
+        "Budgeting.Allocation.VendorSharesMustSumToAmount",
+        $"The vendor shares add up to {Money(sharesTotal)}, but the item's amount is {Money(amount)}. "
+        + "The shares must cover the whole amount exactly — adjust them, or remove every share to leave the item with no vendor.");
+
+    public static readonly Error VendorSharesNotAllowedForRevenue = Error.Validation(
+        "Budgeting.Allocation.VendorSharesNotAllowedForRevenue",
+        "A revenue item has no vendor shares — vendors are who the business pays. Name the payer in the vendor (payer) field instead, and send no vendor shares.");
+
+    public static readonly Error PayerNotAllowedForExpense = Error.Validation(
+        "Budgeting.Allocation.PayerNotAllowedForExpense",
+        "The free-text vendor is the payer on a revenue item. On an expense item, choose vendors from the vendor register as vendor shares instead, and leave the free-text vendor blank.");
+
+    /// <summary>A newly added share names no vendor in this tenant's register (400, the <c>CostCentreNotFound</c> precedent).</summary>
+    public static readonly Error VendorNotFound = Error.Validation(
+        "Budgeting.Allocation.VendorNotFound",
+        "That vendor is not in the vendor register. Add it to the register first, or choose an existing vendor.");
+
+    /// <summary>
+    /// A retired vendor newly added to an item (409, the <c>CostCentreRetired</c> precedent). Only on
+    /// add: a share the item already had keeps working after its vendor is retired.
+    /// </summary>
+    public static Error VendorInactive(string vendorName) => Error.Conflict(
+        "Budgeting.Allocation.VendorInactive",
+        $"\"{vendorName}\" is a retired vendor and cannot be added to a budget item. Choose an active vendor, or restore it in the vendor register first.");
+
+    private static string Money(decimal value) =>
+        value.ToString("#,0.00", System.Globalization.CultureInfo.InvariantCulture);
+
     // --- Cross-aggregate guards the create/update/remove handlers apply. Both are Conflicts: the request
     // was well-formed, the world is not in a state to accept it. ---
 
@@ -129,4 +180,14 @@ public static class BudgetAllocationErrors
     public static readonly Error CopySourceNotFound = Error.NotFound(
         "Budgeting.Allocation.CopySourceNotFound",
         "The period to copy from was not found.");
+
+    /// <summary>
+    /// The source plan changed under a running copy so that a vendor share it would carry now names
+    /// a vendor deleted from the register (409). Rare by construction — it needs a share to be
+    /// added, removed and its vendor deleted between the copy's two reads — and nothing was
+    /// written, so running the copy again simply works.
+    /// </summary>
+    public static readonly Error CopySourceChanged = Error.Conflict(
+        "Budgeting.Allocation.CopySourceChanged",
+        "The plan being copied changed while the copy ran. Nothing was copied — run the copy again.");
 }

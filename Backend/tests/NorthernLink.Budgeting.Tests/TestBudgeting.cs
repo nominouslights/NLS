@@ -2,6 +2,7 @@ using NorthernLink.Budgeting.Domain.Allocations;
 using NorthernLink.Budgeting.Domain.Codes;
 using NorthernLink.Budgeting.Domain.CostCentres;
 using NorthernLink.Budgeting.Domain.Periods;
+using NorthernLink.Budgeting.Domain.Vendors;
 
 namespace NorthernLink.Budgeting.Tests;
 
@@ -100,6 +101,28 @@ internal static class TestBudgeting
         return costCentre;
     }
 
+    /// <summary>A register vendor, active unless <paramref name="active"/> is false. Events are cleared.</summary>
+    public static Vendor CreateVendor(string name = "Kal Tire Thompson", bool active = true, Guid? tenantId = null)
+    {
+        var result = Vendor.Create(tenantId ?? TenantId, new VendorDetails { Name = name }, ActorId);
+        if (result.IsFailure)
+        {
+            throw new InvalidOperationException($"Test vendor invalid: {result.Error.Code}");
+        }
+
+        var vendor = result.Value;
+        if (!active)
+        {
+            vendor.SetActive(false, ActorId);
+        }
+
+        vendor.ClearDomainEvents();
+        return vendor;
+    }
+
+    /// <summary>One raw vendor share, as a planner sends it.</summary>
+    public static BudgetItemVendorShareDetails Share(Guid? vendorId, decimal? amount) => new(vendorId, amount);
+
     public static BudgetPeriod CreatePeriod(
         PeriodGranularity granularity = PeriodGranularity.Quarter,
         int year = 2026,
@@ -183,8 +206,10 @@ internal static class TestBudgeting
         IReadOnlyList<string>? tags = null,
         BudgetItemPriority priority = BudgetItemPriority.ShouldHave,
         string? assumptions = null,
-        string? consequence = null) => new()
+        string? consequence = null,
+        IReadOnlyList<BudgetItemVendorShareDetails>? vendorShares = null) => new()
         {
+            VendorShares = vendorShares,
             Title = title,
             AmountCad = amount,
             Justification = justification,
@@ -215,13 +240,15 @@ internal static class TestBudgeting
         string? justification = "Two crew rotations a week under the Alamos master agreement.",
         Guid? actorId = null,
         BudgetItemDetails? details = null,
-        Guid? tenantId = null)
+        Guid? tenantId = null,
+        BudgetCodeCategory category = BudgetCodeCategory.Revenue)
     {
         var result = BudgetAllocation.Create(
             tenantId ?? TenantId,
             periodId ?? Guid.NewGuid(),
             budgetCodeId ?? Guid.NewGuid(),
             code,
+            category,
             details ?? Item(amount: amount, justification: justification),
             actorId);
         if (result.IsFailure)

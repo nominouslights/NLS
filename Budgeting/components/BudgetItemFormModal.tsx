@@ -27,25 +27,42 @@ import {
   type BudgetRecurrence,
   type BudgetSpendType,
   type CostMode,
+  type VendorRecord,
+  type VendorShareDraft,
 } from "@/lib/api/budgeting";
+import { PENDING_VENDOR_NAME, vendorInactiveMessage, vendorRegisterError } from "@/lib/vendorShares";
 import { formatCadPrecise } from "@/lib/money";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { NumberField, SelectField, TextAreaField, TextField } from "@/components/ui/Field";
 import { ActionButton } from "@/components/ui/Button";
+import { StatusChip } from "@/components/ui/Chip";
 import { usePeriodHold } from "@/lib/periodHold";
+import VendorSharesEditor from "@/components/VendorSharesEditor";
+import VendorFormModal, { type VendorFormApi } from "@/components/VendorFormModal";
 
 // Add-or-edit modal for one BUDGET ITEM, opened from the Period Dashboard's two item sections —
 // the one place a period is planned. A code's budget in a period is the sum of its items, so
 // there is nothing here to "set": each save adds or rewrites one item, and the code's figure
 // follows.
 //
-// Four groups, in the order a planner argues an item from zero:
+// The groups, in the order a planner argues an item from zero:
 //
-//   What           — the code it is planned against, a title, the vendor, tags.
+//   What           — the code it is planned against, a title, tags — and on a REVENUE item the
+//                    payer (free text; the wire field is still called `vendor`).
 //   Cost           — a lump sum, OR quantity × unit cost (with a unit). The built-up total is
 //                    computed live with the server's own rounding (computeItemAmount mirrors
 //                    BudgetAllocation.Round), and the server computes it again and ignores any
 //                    amount sent — so the modal sends amountCad: null for a built-up item.
+//   Vendors        — EXPENSE items only (VendorSharesEditor): register vendors with dollar shares
+//                    that cover the amount exactly, or none at all ("No vendor"). Below Cost, so
+//                    the amount the split must meet is right above it; a changed amount only moves
+//                    the live Remaining / Over line — it never rebalances the shares. Every save
+//                    sends `vendorShares` explicitly: the whole list, or [] (also on revenue), and
+//                    an expense item always sends `vendor: null` (the server refuses new free text
+//                    there). "+ New vendor…" opens VendorFormModal inline and picks what it creates.
+//                    A REVENUE item that still carries shares from before its code was reclassified
+//                    shows them read-only ("Kept shares") and sends `vendorShares: null` — keep —
+//                    until REMOVE SHARES, after which it sends [].
 //   Why            — the justification (required: zero-based means argued from nothing, each
 //                    period), the priority (what gets cut first), assumptions, and what happens
 //                    if the item goes unfunded.
@@ -91,6 +108,7 @@ function blankDraft(budgetCodeId: string): BudgetItemDraft {
     spendType: "Operating",
     recurrence: "OneTime",
     vendor: "",
+    vendorShares: [],
     tags: "",
     priority: "ShouldHave",
     assumptions: "",
@@ -108,7 +126,10 @@ export default function BudgetItemFormModal({
   onOpenCodes,
   onClose,
   onSaved,
+  vendors = null,
+  onVendorsChanged,
   api = DEFAULT_API,
+  vendorApi,
 }: {
   periodId: string;
   periodLabel: string;
@@ -127,7 +148,18 @@ export default function BudgetItemFormModal({
   onClose: () => void;
   /** Fresh items, already reflecting the change. */
   onSaved: (items: BudgetAllocationRecord[]) => void;
+  /**
+   * The tenant's vendor register, retired included — a PROP, derived each render, because the
+   * dashboard loads it in parallel and it may land after the modal opened. null while loading or
+   * after a failed load: the picker then offers only the item's own vendors, and the register
+   * check before submit is skipped (the server decides).
+   */
+  vendors?: VendorRecord[] | null;
+  /** The fresh register after an inline create, so the caller's copy follows. */
+  onVendorsChanged?: (records: VendorRecord[]) => void;
   api?: BudgetItemApi;
+  /** Passed to the inline vendor modal; a test seam. */
+  vendorApi?: VendorFormApi;
 }) {
   const editing = item !== null;
   const revenue = category === "Revenue";
@@ -156,10 +188,53 @@ export default function BudgetItemFormModal({
     if (!busy) onClose();
   };
 
+  /** ONLY vendors created inline here — merged into the register prop by id (the cost-centre precedent). */
+  const [createdHere, setCreatedHere] = useState<VendorRecord[]>([]);
+  const register = mergeVendors(vendors, createdHere);
+  /** The row an inline-created vendor goes into; "append" for a new row; null when closed. */
+  const [creatingVendorFor, setCreatingVendorFor] = useState<number | "append" | null>(null);
+
   const set = <K extends keyof BudgetItemDraft>(key: K) => (value: BudgetItemDraft[K]) =>
     setDraft((d) => ({ ...d, [key]: value }));
 
-  const parsed = draftToBudgetItemInput(draft);
+  /** Puts a vendor into the row the inline modal was opened for (or a new row). */
+  function placeVendor(vendorId: string) {
+    const target = creatingVendorFor;
+    setDraft((d) => {
+      const rows: VendorShareDraft[] =
+        typeof target === "number" && target < d.vendorShares.length
+          ? d.vendorShares.map((r, i) => (i === target ? { ...r, vendorId } : r))
+          : [...d.vendorShares, { vendorId, amount: "" }];
+      return { ...d, vendorShares: rows };
+    });
+  }
+
+  function handleVendorCreated(records: VendorRecord[] | null, id: string) {
+    const created = records?.find((r) => r.id === id);
+    if (!records || !created) {
+      // The vendor exists, but the register could not be re-read, so there is no name to offer
+      // and nothing for the pre-submit register check to find it in.
+      setError(
+        "The vendor was created, but the vendor list could not be reloaded. Close this item and open it again to choose it.",
+      );
+      return;
+    }
+    onVendorsChanged?.(records);
+    setCreatedHere((prev) => [...prev.filter((v) => v.id !== created.id), created]);
+    placeVendor(created.id);
+  }
+
+  /** The inline modal's duplicate link: pick the existing vendor — or say why a retired one cannot be. */
+  function handleExistingVendor(existing: VendorRecord) {
+    setCreatingVendorFor(null);
+    if (existing.isActive) {
+      placeVendor(existing.id);
+    } else {
+      setError(vendorInactiveMessage(existing.name));
+    }
+  }
+
+  const parsed = draftToBudgetItemInput(draft, category);
   const liveAmount = parsed.ok ? itemAmount(parsed.input) : null;
   const buildUp =
     parsed.ok && draft.costMode === "builtUp"
@@ -180,8 +255,19 @@ export default function BudgetItemFormModal({
     if (!parsed.ok) return setError(parsed.error);
     const input = parsed.input;
     // The server's own rules and messages, in the server's order. It re-checks all of it.
-    const problem = budgetItemError(input);
+    const problem = budgetItemError(input, category, item);
     if (problem) return setError(problem);
+    // BudgetItemVendorRule: a vendor this save ADDS must be in the register and active — checked
+    // against the loaded register (skipped while it is null), so a vendor retired since the
+    // picker opened is refused in the server's words before the round trip. Kept shares (null)
+    // add nothing.
+    const registerProblem = vendorRegisterError(
+      input.vendorShares ?? [],
+      item?.vendorShares ?? [],
+      register,
+      category,
+    );
+    if (registerProblem) return setError(registerProblem);
 
     setBusy(true);
     setError(null);
@@ -212,8 +298,16 @@ export default function BudgetItemFormModal({
   }
 
   const retiredOnEdit = item !== null && !item.isCodeActive;
+  /**
+   * A revenue item still carrying the shares it was split into while its code was an expense
+   * code. Shown read-only and KEPT on save (vendorShares: null) until the planner removes them —
+   * an unrelated edit must never wipe them silently.
+   */
+  const keptRevenueShares =
+    revenue && item !== null && draft.vendorShares.length > 0 ? item.vendorShares : [];
 
   return (
+    <>
     <ModalShell
       eyebrow={`Planning · ${periodLabel}`}
       title={editing ? `Edit budget item · ${item.code}` : `New ${category.toLowerCase()} item`}
@@ -284,13 +378,17 @@ export default function BudgetItemFormModal({
           />
         </Row>
         <Grid>
-          <TextField
-            label="Vendor"
-            value={draft.vendor}
-            onChange={set("vendor")}
-            placeholder={revenue ? "e.g. Alamos Gold" : "e.g. Kal Tire, Thompson"}
-            hint="Optional — payer or supplier"
-          />
+          {/* The payer is free text and belongs to revenue only; an expense item's vendors are
+              register entries with dollar shares, in the Vendors group below Cost. */}
+          {revenue && (
+            <TextField
+              label="Payer"
+              value={draft.vendor}
+              onChange={set("vendor")}
+              placeholder="e.g. Alamos Gold"
+              hint="Optional — who pays this revenue"
+            />
+          )}
           <TextField
             label="Tags"
             value={draft.tags}
@@ -392,6 +490,93 @@ export default function BudgetItemFormModal({
         )}
       </Group>
 
+      {/* ---------------- Vendors (expense only) ---------------- */}
+      {!revenue && (
+        <Group title="Vendors">
+          <VendorSharesEditor
+            rows={draft.vendorShares}
+            onChange={set("vendorShares")}
+            amountCad={liveAmount}
+            register={register}
+            original={item?.vendorShares ?? []}
+            onNewVendor={(rowIndex) => {
+              if (!busy) setCreatingVendorFor(rowIndex ?? "append");
+            }}
+            disabled={busy}
+          />
+          {editing && item.vendor && (
+            <Note>
+              This item still carries the old free-text vendor &ldquo;{item.vendor}&rdquo;. Saving
+              clears it — an expense item&apos;s vendors come from the vendor register, so choose
+              it above instead.
+            </Note>
+          )}
+        </Group>
+      )}
+
+      {/* ------- Vendor shares left from an expense code (revenue, read-only) ------- */}
+      {keptRevenueShares.length > 0 && (
+        <Group title="Vendor shares">
+          <div data-testid="kept-revenue-shares">
+            <div
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 8,
+                fontFamily: fonts.body,
+                fontSize: 11.5,
+                color: colors.textSecondary,
+                lineHeight: 1.5,
+              }}
+            >
+              <StatusChip kind="soon" label="Kept shares" />
+              <span>
+                Shares from when this code was an expense code — kept unless you remove them. A
+                revenue item cannot take new shares, and moving it to another code needs them
+                removed first.
+              </span>
+            </div>
+            <ul
+              style={{
+                margin: "8px 0 0",
+                paddingLeft: 18,
+                fontFamily: fonts.body,
+                fontSize: 12,
+                color: colors.textPrimary,
+                lineHeight: 1.6,
+              }}
+            >
+              {keptRevenueShares.map((s) => (
+                <li key={s.vendorId}>
+                  {s.vendorName ?? PENDING_VENDOR_NAME}
+                  {s.vendorName !== null && !s.isActive ? " — retired" : ""} ·{" "}
+                  <span style={{ fontFamily: fonts.mono, fontVariantNumeric: "tabular-nums" }}>
+                    {formatCadPrecise(s.amountCad)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <div style={{ marginTop: 8 }}>
+              <ActionButton
+                variant="destructive"
+                onClick={() => set("vendorShares")([])}
+                disabled={busy}
+                style={{ padding: "5px 11px", fontSize: 12 }}
+              >
+                REMOVE SHARES
+              </ActionButton>
+            </div>
+          </div>
+        </Group>
+      )}
+
+      {revenue && item !== null && item.vendorShares.length > 0 && keptRevenueShares.length === 0 && (
+        <Note>
+          The vendor shares left from the expense code will be removed when you save. Cancel to
+          keep them.
+        </Note>
+      )}
+
       {/* ---------------- Why ---------------- */}
       <Group title="Why">
         <TextAreaField
@@ -468,6 +653,35 @@ export default function BudgetItemFormModal({
         </Note>
       </Group>
     </ModalShell>
+    {/* A sibling, not a child: the shell's backdrop-filter would otherwise contain the nested
+        fixed overlay inside this card. Rendered later, so it stacks on top. */}
+    {creatingVendorFor !== null && (
+      <VendorFormModal
+        vendor={null}
+        vendors={register ?? []}
+        onClose={() => setCreatingVendorFor(null)}
+        onSaved={handleVendorCreated}
+        onOpenExisting={handleExistingVendor}
+        api={vendorApi}
+      />
+    )}
+    </>
+  );
+}
+
+/**
+ * The caller's register plus any vendor created inline here that the caller's copy does not have
+ * yet (matched by id; the caller's copy wins otherwise), in name order. null only when the
+ * register has not loaded and nothing was created here.
+ */
+function mergeVendors(fromProp: VendorRecord[] | null, createdHere: VendorRecord[]): VendorRecord[] | null {
+  if (createdHere.length === 0) return fromProp;
+  if (fromProp === null) return createdHere;
+  const known = new Set(fromProp.map((v) => v.id));
+  const extra = createdHere.filter((v) => !known.has(v.id));
+  if (extra.length === 0) return fromProp;
+  return [...fromProp, ...extra].sort((a, b) =>
+    a.name.toUpperCase() < b.name.toUpperCase() ? -1 : a.name.toUpperCase() > b.name.toUpperCase() ? 1 : 0,
   );
 }
 

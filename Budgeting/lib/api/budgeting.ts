@@ -11,7 +11,8 @@ import type {
 import type { StatusKind } from "@/lib/theme";
 // The checklist's balance row writes its own signed figure, so the sign is text in the tested
 // derivation rather than something a component might forget to add.
-import { formatCadPrecise, formatDeltaCad } from "@/lib/money";
+import { formatCadPrecise, formatDeltaCad, toHundredths } from "@/lib/money";
+import { vendorSharesCategoryError, vendorSharesShapeError } from "@/lib/vendorShares";
 
 // ---------------------------------------------------------------------------
 // Budgeting API client — contract owned by Backend/ (Budgeting module,
@@ -264,7 +265,18 @@ export interface BudgetAllocationRecord {
   justification: string;
   spendType: BudgetSpendType;
   recurrence: BudgetRecurrence;
+  /**
+   * Free text — on a REVENUE item, the payer (the wire keeps the field's original name). An
+   * expense item names its vendors in `vendorShares`; it can still carry legacy text here (a $0
+   * item the vendor-shares backfill could not split) until somebody saves it.
+   */
   vendor: string | null;
+  /**
+   * An expense item's vendors with their dollar shares, in the planner's order. Never null; empty
+   * is "No vendor"; when not empty the amounts sum to exactly `amountCad`. Empty on revenue — except
+   * on an item split while its code was an expense code and reclassified since, which keeps them.
+   */
+  vendorShares: BudgetItemVendorShareRecord[];
   /** Never null. */
   tags: string[];
   priority: BudgetItemPriority;
@@ -276,6 +288,26 @@ export interface BudgetAllocationRecord {
   modifiedByEmail: string | null;
   createdAtUtc: string;
   updatedAtUtc: string;
+}
+
+/**
+ * Mirrors BudgetItemVendorShareResponse. `vendorName` is null (and `isActive` false) only while
+ * the vendor's read row is still a projection poll behind — a vendor created a moment ago.
+ */
+export interface BudgetItemVendorShareRecord {
+  vendorId: string;
+  vendorName: string | null;
+  isActive: boolean;
+  amountCad: number;
+}
+
+/**
+ * Mirrors BudgetItemVendorShareRequest. Nullable on the wire so a missing vendor or amount fails
+ * as VendorShareVendorRequired / VendorShareAmountInvalid rather than a bare model-binding 400.
+ */
+export interface BudgetItemVendorShareInput {
+  vendorId: string | null;
+  amountCad: number | null;
 }
 
 /**
@@ -298,11 +330,22 @@ export interface BudgetItemInput {
   justification: string;
   spendType: BudgetSpendType;
   recurrence: BudgetRecurrence;
+  /** The PAYER on a revenue item; always null from this app on an expense item (PayerNotAllowedForExpense). */
   vendor: string | null;
   tags: string[];
   priority: BudgetItemPriority;
   assumptions: string | null;
   consequenceIfUnfunded: string | null;
+  /**
+   * ALWAYS sent by this app as a key, so intent is explicit on the wire: the full list on an
+   * expense item, `[]` to clear it, and `[]` on a revenue item with no shares. The server reads a
+   * null list on PUT as "keep the current shares" (re-checked against the new amount) — this app
+   * sends null in exactly one case: a REVENUE item that still carries shares from before its code
+   * was reclassified Expense → Revenue, which the planner has not removed. The server accepts that
+   * item unchanged (its category rule applies only on change), so sending [] would silently wipe
+   * the split on an unrelated edit.
+   */
+  vendorShares: BudgetItemVendorShareInput[] | null;
 }
 
 /**
@@ -411,25 +454,6 @@ export const BUDGET_ITEM_MESSAGES = {
 } as const;
 
 /**
- * A number as an integer count of hundredths, rounded half AWAY FROM ZERO — the integer half of
- * BudgetAllocation.Round (`Math.Round(value, 2, MidpointRounding.AwayFromZero)`).
- *
- * Never `Math.round(value * 100)`: `1.005 * 100` is 100.49999999999999 in binary floating point
- * and rounds the wrong way. Instead the decimal point is shifted in the number's own shortest
- * decimal spelling (`String(1.005)` is "1.005", so "1.005e2" parses to exactly 100.5). That
- * spelling is also exactly what JSON.stringify puts on the wire and what the server parses into a
- * C# decimal, so this rounds the same digits the server rounds. Math.round is half-UP, which is
- * half-away-from-zero only for non-negative values — hence the rounding on the absolute value.
- */
-function toHundredths(value: number): number {
-  const abs = Math.abs(value);
-  const [mantissa, exponent] = String(abs).split("e");
-  const shifted = Number(`${mantissa}e${Number(exponent ?? 0) + 2}`);
-  const rounded = Math.round(shifted);
-  return value < 0 && rounded !== 0 ? -rounded : rounded;
-}
-
-/**
  * Mirrors BudgetAllocation.Round: two decimal places, half away from zero. 1.005 → 1.01,
  * 0.005 → 0.01, 0.004 → 0.
  */
@@ -518,13 +542,25 @@ const RECURRENCES: readonly BudgetRecurrence[] = ["OneTime", "Recurring"];
  *
  *   code → title → cost (quantity/unit cost both-or-neither, quantity, unit cost, computed
  *   amount — or the lump sum) → justification → spend type → recurrence → priority → unit →
- *   vendor → tags (each, then the count after de-duplication) → assumptions → consequence.
+ *   vendor → vendor shares (count, each share, duplicates, then the sum against the amount —
+ *   vendorSharesShapeError) → tags (each, then the count after de-duplication) → assumptions →
+ *   consequence → and, when `category` is given, the category rule BudgetAllocation.Create applies
+ *   after Parse (no shares on revenue, no payer on expense — vendorSharesCategoryError).
  *
  * The quantity is rounded BEFORE it is checked (0.004 is refused as not positive, 0.005 is 0.01
  * and fine); the lump sum is checked BEFORE it is rounded (999,999,999.994 is too large even
  * though it would round to the ceiling). Both asymmetries are the server's.
+ *
+ * `current` is the item being edited (null on create). It matters only when `input.vendorShares`
+ * is null ("keep"): BudgetAllocation.Update then parses the item's CURRENT shares, so they are
+ * re-checked against the new amount here too, and the category rule applies to them only when
+ * the code changes (CheckCategory's sharesChanged: codeChanged || shares differ).
  */
-export function budgetItemError(input: BudgetItemInput): string | null {
+export function budgetItemError(
+  input: BudgetItemInput,
+  category: BudgetCodeCategory | null = null,
+  current: Pick<BudgetAllocationRecord, "budgetCodeId" | "vendorShares"> | null = null,
+): string | null {
   const m = BUDGET_ITEM_MESSAGES;
   const L = BUDGET_ITEM_LIMITS;
 
@@ -561,6 +597,14 @@ export function budgetItemError(input: BudgetItemInput): string | null {
   if ((normalizeOptional(input.unit)?.length ?? 0) > L.unitMaxLength) return m.UnitTooLong;
   if ((normalizeOptional(input.vendor)?.length ?? 0) > L.vendorMaxLength) return m.VendorTooLong;
 
+  // Every cost rule passed above, so the amount the server will store is known.
+  const kept = input.vendorShares === null;
+  const effectiveShares: BudgetItemVendorShareInput[] =
+    input.vendorShares ??
+    (current?.vendorShares ?? []).map((s) => ({ vendorId: s.vendorId, amountCad: s.amountCad }));
+  const shares = vendorSharesShapeError(effectiveShares, itemAmount(input) ?? 0);
+  if (shares) return shares;
+
   const tags = normalizeTags(input.tags);
   if (tags === null) return m.TagInvalid;
   if (tags.length > L.maxTags) return m.TooManyTags;
@@ -571,7 +615,15 @@ export function budgetItemError(input: BudgetItemInput): string | null {
   if ((normalizeOptional(input.consequenceIfUnfunded)?.length ?? 0) > L.consequenceMaxLength) {
     return m.ConsequenceTooLong;
   }
-  return null;
+  if (category === null) return null;
+  if (kept && category === "Revenue") {
+    // Kept shares on a revenue item: refused only when the write moves it to another code.
+    const codeChanged = current !== null && current.budgetCodeId !== input.budgetCodeId;
+    return codeChanged && effectiveShares.length > 0
+      ? vendorSharesCategoryError(effectiveShares, null, category)
+      : null;
+  }
+  return vendorSharesCategoryError(effectiveShares, normalizeOptional(input.vendor), category);
 }
 
 /** How the item modal's cost is entered. Client-only — the wire has no mode, only which fields are null. */
@@ -589,12 +641,21 @@ export interface BudgetItemDraft {
   justification: string;
   spendType: BudgetSpendType;
   recurrence: BudgetRecurrence;
+  /** The payer — used on a revenue item only. */
   vendor: string;
+  /** The vendor-share rows — used on an expense item only. */
+  vendorShares: VendorShareDraft[];
   /** Comma-separated. */
   tags: string;
   priority: BudgetItemPriority;
   assumptions: string;
   consequenceIfUnfunded: string;
+}
+
+/** One vendor-share row of the item modal: the picked vendor id ("" for none yet) and the amount text. */
+export interface VendorShareDraft {
+  vendorId: string;
+  amount: string;
 }
 
 /**
@@ -613,9 +674,18 @@ function parseNumberText(text: string): number | null {
  * amountCad as null (the server would ignore it anyway). Text is trimmed and blank optionals are
  * null, matching what the server stores. The only messages of this app's own are for text that is
  * not a number at all; everything else is left to budgetItemError, in the server's words.
+ *
+ * The category decides the vendor fields: a REVENUE item sends its payer text and
+ * `vendorShares: []` — or `null` ("keep the current shares") while the draft still holds rows,
+ * which on revenue happens only for an item whose code was reclassified Expense → Revenue after it
+ * was split (recordToDraft loads them; the modal's "Remove shares" empties them, and then [] goes).
+ * An EXPENSE item sends `vendor: null` (clearing any legacy free text — the server refuses new
+ * text there) and every share row, a blank vendor as null and a blank amount as null so the
+ * server's own VendorShareVendorRequired / VendorShareAmountInvalid apply.
  */
 export function draftToBudgetItemInput(
   draft: BudgetItemDraft,
+  category: BudgetCodeCategory,
 ): { ok: true; input: BudgetItemInput } | { ok: false; error: string } {
   const builtUp = draft.costMode === "builtUp";
   const amount = builtUp ? null : parseNumberText(draft.amount);
@@ -624,6 +694,22 @@ export function draftToBudgetItemInput(
   if (Number.isNaN(amount)) return { ok: false, error: "Enter the amount as a number." };
   if (Number.isNaN(quantity)) return { ok: false, error: "Enter the quantity as a number." };
   if (Number.isNaN(unitCost)) return { ok: false, error: "Enter the unit cost as a number." };
+
+  const revenue = category === "Revenue";
+  let vendorShares: BudgetItemVendorShareInput[] | null = [];
+  if (revenue) {
+    // Shares a revenue item still carries from before a reclassification are kept, never
+    // silently cleared by an unrelated edit — the server accepts the item as it stands.
+    if (draft.vendorShares.length > 0) vendorShares = null;
+  } else {
+    for (const row of draft.vendorShares) {
+      const amountCad = parseNumberText(row.amount);
+      if (Number.isNaN(amountCad)) {
+        return { ok: false, error: "Enter each vendor's share as a number." };
+      }
+      vendorShares.push({ vendorId: row.vendorId || null, amountCad });
+    }
+  }
 
   return {
     ok: true,
@@ -637,11 +723,12 @@ export function draftToBudgetItemInput(
       justification: draft.justification.trim(),
       spendType: draft.spendType,
       recurrence: draft.recurrence,
-      vendor: normalizeOptional(draft.vendor),
+      vendor: revenue ? normalizeOptional(draft.vendor) : null,
       tags: parseTagText(draft.tags),
       priority: draft.priority,
       assumptions: normalizeOptional(draft.assumptions),
       consequenceIfUnfunded: normalizeOptional(draft.consequenceIfUnfunded),
+      vendorShares,
     },
   };
 }
@@ -661,6 +748,7 @@ export function recordToDraft(item: BudgetAllocationRecord): BudgetItemDraft {
     spendType: item.spendType,
     recurrence: item.recurrence,
     vendor: item.vendor ?? "",
+    vendorShares: item.vendorShares.map((s) => ({ vendorId: s.vendorId, amount: String(s.amountCad) })),
     tags: item.tags.join(", "),
     priority: item.priority,
     assumptions: item.assumptions ?? "",
@@ -672,7 +760,9 @@ export function recordToDraft(item: BudgetAllocationRecord): BudgetItemDraft {
  * The refetch predicate after a save: the projection row for THIS item id already carries the
  * values just sent. Values, not existence — on edit the row was always there, so "the id is in the
  * list" is satisfied by the stale read. The amount is compared within half a cent, because it is
- * the server's computation and a float that prints the same must not hang the retry loop.
+ * the server's computation and a float that prints the same must not hang the retry loop. The
+ * payer and the vendor shares are compared too (same vendors, same amounts, any order), so an
+ * edit that changed only the split does not hand back the old one.
  */
 export function itemReflects(
   record: BudgetAllocationRecord,
@@ -686,7 +776,24 @@ export function itemReflects(
     record.title === input.title &&
     record.justification === input.justification &&
     record.priority === input.priority &&
-    (expected === null || Math.abs(record.amountCad - expected) < 0.005)
+    (expected === null || Math.abs(record.amountCad - expected) < 0.005) &&
+    (record.vendor ?? null) === normalizeOptional(input.vendor) &&
+    // null kept the current shares — nothing new to wait for.
+    (input.vendorShares === null || sameShares(record.vendorShares, input.vendorShares))
+  );
+}
+
+/** Same vendors with the same amounts (within half a cent), in any order — each vendor appears once. */
+function sameShares(
+  stored: readonly BudgetItemVendorShareRecord[],
+  sent: readonly BudgetItemVendorShareInput[],
+): boolean {
+  if (stored.length !== sent.length) return false;
+  return sent.every((s) =>
+    stored.some(
+      (r) =>
+        r.vendorId === s.vendorId && s.amountCad !== null && Math.abs(r.amountCad - s.amountCad) < 0.005,
+    ),
   );
 }
 
@@ -1745,9 +1852,10 @@ export function setVendorActive(id: string, active: boolean): Promise<void> {
 }
 
 /**
- * DELETE vendors/{id} → 204, or 409 Budgeting.Vendor.InUse once anything references the vendor.
- * The console cannot know usage client-side, so it offers Delete and shows that 409 verbatim —
- * its message names retirement as the alternative.
+ * DELETE vendors/{id} → 204, or 409 Budgeting.Vendor.InUse once any budget item, in any period,
+ * carries a vendor share on it (AllocationVendorUsageProbe). The register screen does not load
+ * every period's items, so it offers Delete and shows that 409 verbatim — its message names
+ * retirement as the alternative.
  */
 export function deleteVendor(id: string): Promise<void> {
   return request<void>(`/api/budgeting/vendors/${id}`, { method: "DELETE" });
@@ -1903,4 +2011,46 @@ export interface CostCentreRollup {
 /** GET periods/{periodId}/rollups/cost-centres → 200; 404 Budgeting.Period.NotFound. */
 export function getCostCentreRollup(periodId: string): Promise<CostCentreRollup> {
   return request<CostCentreRollup>(`/api/budgeting/periods/${periodId}/rollups/cost-centres`);
+}
+
+// ---------------------------------------------------------------------------
+// Budget by vendor — GET periods/{id}/rollups/vendors (VendorPlannedRollup). PLANNED ONLY, like
+// the cost-centre rollup: there is deliberately no actual field until the actuals slice lands.
+// ---------------------------------------------------------------------------
+
+/**
+ * Mirrors VendorRollupRow: one vendor's planned expense — the sum of its shares — over `itemCount`
+ * expense items (an item split across three vendors counts once for each). `name` is null (and
+ * `isActive` false) only while the vendor's read row is still a projection poll behind.
+ */
+export interface VendorRollupRow {
+  vendorId: string;
+  name: string | null;
+  isActive: boolean;
+  itemCount: number;
+  plannedCad: number;
+}
+
+/** Mirrors NoVendorRollup — expense planned on items with no vendor shares. */
+export interface NoVendorRollup {
+  itemCount: number;
+  plannedCad: number;
+}
+
+/**
+ * Mirrors VendorRollupResponse. Lists ONLY vendors with a share this period (not the whole
+ * register), retired ones flagged; ordered by name, case-insensitively, unresolved names last.
+ * The rows plus `noVendor` sum to `totalPlannedExpenseCad`, which equals the period's own
+ * `plannedExpenseCad`.
+ */
+export interface VendorRollup {
+  periodId: string;
+  vendors: VendorRollupRow[];
+  noVendor: NoVendorRollup;
+  totalPlannedExpenseCad: number;
+}
+
+/** GET periods/{periodId}/rollups/vendors → 200; 404 Budgeting.Period.NotFound. */
+export function getVendorRollup(periodId: string): Promise<VendorRollup> {
+  return request<VendorRollup>(`/api/budgeting/periods/${periodId}/rollups/vendors`);
 }

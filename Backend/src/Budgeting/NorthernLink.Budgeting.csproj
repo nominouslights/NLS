@@ -7,6 +7,12 @@
        library (endpoints included) plus Shared. -->
 
   <ItemGroup>
+    <!-- The integration tests drive the internal repositories, read services and projections
+         directly against a real Postgres (the Drivers/Fleet precedent). -->
+    <InternalsVisibleTo Include="NorthernLink.Budgeting.IntegrationTests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Shared\NorthernLink.Shared.csproj" />
   </ItemGroup>
 

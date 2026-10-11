@@ -18,6 +18,7 @@ public class UpdateBudgetAllocationCommandHandlerTests
     private readonly InMemoryBudgetAllocationRepository _allocations = new();
     private readonly InMemoryBudgetPeriodRepository _periods = new();
     private readonly InMemoryBudgetCodeRepository _codes = new();
+    private readonly InMemoryVendorRepository _vendors = new();
     private readonly UpdateBudgetAllocationCommandHandler _handler;
 
     private readonly BudgetPeriod _draft = TestBudgeting.CreatePeriod();
@@ -26,7 +27,7 @@ public class UpdateBudgetAllocationCommandHandlerTests
 
     public UpdateBudgetAllocationCommandHandlerTests()
     {
-        _handler = new UpdateBudgetAllocationCommandHandler(_allocations, _periods, _codes);
+        _handler = new UpdateBudgetAllocationCommandHandler(_allocations, _periods, _codes, _vendors);
         _periods.Add(_draft);
         _code = AddCode(_draft, "ZBB-CREW-01");
         _item = TestBudgeting.CreateAllocation(
@@ -287,7 +288,7 @@ public class UpdateBudgetAllocationCommandHandlerTests
     [Fact]
     public async Task A_copied_item_saves_only_once_it_is_argued()
     {
-        var copy = _item.CopyInto(_draft.Id, _code.Id, null);
+        var copy = _item.CopyInto(_draft.Id, _code.Id, _code.Category, null);
         _allocations.Add(copy);
 
         var unargued = await UpdateAsync(allocationId: copy.Id, details: TestBudgeting.Item(justification: "  "));

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 using NorthernLink.Budgeting.Application.Abstractions;
 using NorthernLink.Budgeting.Domain.Vendors;
@@ -13,6 +14,20 @@ internal sealed class VendorRepository(BudgetingDbContext context) : IVendorRepo
 
     public Task<Vendor?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         context.Vendors.FirstOrDefaultAsync(v => v.Id == id, cancellationToken);
+
+    // Npgsql translates Contains over a parameter array to `id = ANY(@ids)` — one round trip
+    // however many ids, tenant-filtered like every read here.
+    public async Task<IReadOnlyList<Vendor>> GetByIdsAsync(
+        IReadOnlyCollection<Guid> ids, CancellationToken cancellationToken = default)
+    {
+        if (ids.Count == 0)
+        {
+            return [];
+        }
+
+        var idArray = ids.ToArray();
+        return await context.Vendors.Where(v => idArray.Contains(v.Id)).ToListAsync(cancellationToken);
+    }
 
     // Ordinal equality on an already-normalized string — a seek on the unique
     // (tenant_id, normalized_name) index rather than a case-insensitive scan.
@@ -48,5 +63,45 @@ internal sealed class VendorRepository(BudgetingDbContext context) : IVendorRepo
             context.ChangeTracker.Clear();
             return false;
         }
+    }
+
+    public async Task<IVendorRegisterLock> LockRegisterAsync(Guid tenantId, CancellationToken cancellationToken = default)
+    {
+        // The CostCentreRepository.LockRegisterAsync primitive with its own key namespace, so the
+        // two registers never wait on each other. Own the transaction only when the caller has not
+        // already opened one; a nested caller's commit is then a no-op and the outer one decides.
+        var transaction = context.Database.CurrentTransaction is null
+            ? await context.Database.BeginTransactionAsync(cancellationToken)
+            : null;
+
+        try
+        {
+            // Transaction-scoped advisory lock, released by Postgres at commit or rollback, so a
+            // crashed request can never leak it. A hash collision only makes two unrelated keys
+            // wait for each other briefly; it can never let a race through.
+            var key = $"budgeting.vendor-register:{tenantId:D}";
+            await context.Database.ExecuteSqlAsync(
+                $"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", cancellationToken);
+        }
+        catch
+        {
+            if (transaction is not null)
+            {
+                await transaction.DisposeAsync();
+            }
+
+            throw;
+        }
+
+        return new RegisterLock(transaction);
+    }
+
+    private sealed class RegisterLock(IDbContextTransaction? transaction) : IVendorRegisterLock
+    {
+        public Task CommitAsync(CancellationToken cancellationToken = default) =>
+            transaction?.CommitAsync(cancellationToken) ?? Task.CompletedTask;
+
+        // Disposing an uncommitted EF transaction rolls it back, releasing the lock.
+        public ValueTask DisposeAsync() => transaction?.DisposeAsync() ?? ValueTask.CompletedTask;
     }
 }

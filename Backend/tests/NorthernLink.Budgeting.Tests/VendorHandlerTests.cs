@@ -316,12 +316,4 @@ public class VendorHandlerTests
 
         Assert.Equal("Budgeting.Vendor.NotFound", result.Error.Code);
     }
-
-    [Fact]
-    public async Task The_shipped_usage_probe_reports_no_vendor_in_use_until_items_reference_vendors()
-    {
-        var probe = new UnreferencedVendorUsageProbe();
-
-        Assert.False(await probe.IsReferencedAsync(Guid.NewGuid()));
-    }
 }

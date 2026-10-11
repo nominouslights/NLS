@@ -1,6 +1,7 @@
 using System.Globalization;
 using NorthernLink.Budgeting.Domain.Allocations;
 using NorthernLink.Budgeting.Domain.Allocations.Events;
+using NorthernLink.Budgeting.Domain.Codes;
 using NorthernLink.Shared.Kernel;
 using Xunit;
 
@@ -22,7 +23,7 @@ public class BudgetAllocationTests
     private static decimal Money(string amount) => decimal.Parse(amount, CultureInfo.InvariantCulture);
 
     private static Result<BudgetAllocation> Create(BudgetItemDetails details, Guid? actorId = null) =>
-        BudgetAllocation.Create(TestBudgeting.TenantId, PeriodId, CodeId, "ZBB-CREW-01", details, actorId);
+        BudgetAllocation.Create(TestBudgeting.TenantId, PeriodId, CodeId, "ZBB-CREW-01", BudgetCodeCategory.Revenue, details, actorId);
 
     private static Error ErrorOf(BudgetItemDetails details)
     {
@@ -493,7 +494,7 @@ public class BudgetAllocationTests
         var updatedBefore = line.UpdatedAtUtc;
         var id = line.Id;
 
-        var result = line.Update(CodeId, "ZBB-CREW-01", TestBudgeting.Item(
+        var result = line.Update(CodeId, "ZBB-CREW-01", BudgetCodeCategory.Revenue, TestBudgeting.Item(
             title: "Crew rotations, revised",
             amount: null,
             quantity: 26m,
@@ -535,7 +536,7 @@ public class BudgetAllocationTests
         var line = TestBudgeting.CreateAllocation(PeriodId, CodeId, "ZBB-CREW-01");
         var fuelId = Guid.NewGuid();
 
-        Assert.True(line.Update(fuelId, "ZBB-FUEL-01", TestBudgeting.Item(), null).IsSuccess);
+        Assert.True(line.Update(fuelId, "ZBB-FUEL-01", BudgetCodeCategory.Revenue, TestBudgeting.Item(), null).IsSuccess);
 
         Assert.Equal(fuelId, line.BudgetCodeId);
         Assert.Equal("ZBB-FUEL-01", line.Code);
@@ -547,7 +548,7 @@ public class BudgetAllocationTests
         var line = TestBudgeting.CreateAllocation(
             details: TestBudgeting.Item(amount: null, quantity: 2m, unitCost: 5m, unit: "trip"));
 
-        Assert.True(line.Update(CodeId, "ZBB-CREW-01", TestBudgeting.Item(amount: 75m, unit: "trip"), null).IsSuccess);
+        Assert.True(line.Update(CodeId, "ZBB-CREW-01", BudgetCodeCategory.Revenue, TestBudgeting.Item(amount: 75m, unit: "trip"), null).IsSuccess);
 
         Assert.Equal(75m, line.AmountCad);
         Assert.Null(line.Quantity);
@@ -562,7 +563,7 @@ public class BudgetAllocationTests
         line.ClearDomainEvents();
         var fuelId = Guid.NewGuid();
 
-        line.Update(fuelId, "ZBB-FUEL-01", TestBudgeting.Item(title: "Diesel", amount: 10.005m), TestBudgeting.ActorId);
+        line.Update(fuelId, "ZBB-FUEL-01", BudgetCodeCategory.Revenue, TestBudgeting.Item(title: "Diesel", amount: 10.005m), TestBudgeting.ActorId);
 
         var updated = Assert.Single(line.DomainEvents.OfType<BudgetAllocationUpdatedDomainEvent>());
         Assert.Equal(line.Id, updated.AllocationId);
@@ -582,7 +583,7 @@ public class BudgetAllocationTests
         var line = TestBudgeting.CreateAllocation(PeriodId, CodeId, details: TestBudgeting.Item());
         line.ClearDomainEvents();
 
-        var result = line.Update(CodeId, "ZBB-CREW-01", TestBudgeting.Item(), null);
+        var result = line.Update(CodeId, "ZBB-CREW-01", BudgetCodeCategory.Revenue, TestBudgeting.Item(), null);
 
         Assert.True(result.IsSuccess);
         Assert.Single(line.DomainEvents.OfType<BudgetAllocationUpdatedDomainEvent>());
@@ -604,7 +605,7 @@ public class BudgetAllocationTests
             TestBudgeting.Item(tags: Enumerable.Range(0, 11).Select(i => $"t{i}").ToList()),
         })
         {
-            Assert.True(line.Update(Guid.NewGuid(), "ZBB-OTHER-01", bad, TestBudgeting.ActorId).IsFailure);
+            Assert.True(line.Update(Guid.NewGuid(), "ZBB-OTHER-01", BudgetCodeCategory.Revenue, bad, TestBudgeting.ActorId).IsFailure);
         }
 
         Assert.Equal(1250m, line.AmountCad);
@@ -645,7 +646,7 @@ public class BudgetAllocationTests
 
         var targetCode = Guid.Parse("77777777-7777-7777-7777-777777777777");
 
-        var copy = source.CopyInto(targetPeriod, targetCode, TestBudgeting.ActorId);
+        var copy = source.CopyInto(targetPeriod, targetCode, BudgetCodeCategory.Revenue, TestBudgeting.ActorId);
 
         Assert.Equal(TestBudgeting.TenantId, copy.TenantId);
         Assert.Equal(targetPeriod, copy.PeriodId);
@@ -673,7 +674,7 @@ public class BudgetAllocationTests
     {
         var source = TestBudgeting.CreateAllocation(details: TestBudgeting.Item(tags: ["fuel"]));
 
-        var copy = source.CopyInto(Guid.NewGuid(), Guid.NewGuid(), null);
+        var copy = source.CopyInto(Guid.NewGuid(), Guid.NewGuid(), BudgetCodeCategory.Revenue, null);
         copy.Tags.Add("mutated");
 
         Assert.Equal(["fuel"], source.Tags);
@@ -685,7 +686,7 @@ public class BudgetAllocationTests
         var source = TestBudgeting.CreateAllocation(
             PeriodId, CodeId, justification: "Original reasoning.", actorId: TestBudgeting.ActorId);
 
-        source.CopyInto(Guid.NewGuid(), Guid.NewGuid(), null);
+        source.CopyInto(Guid.NewGuid(), Guid.NewGuid(), BudgetCodeCategory.Revenue, null);
 
         Assert.Equal("Original reasoning.", source.Justification);
         Assert.Equal(PeriodId, source.PeriodId);
@@ -699,7 +700,7 @@ public class BudgetAllocationTests
         var copier = Guid.Parse("55555555-5555-5555-5555-555555555555");
         var source = TestBudgeting.CreateAllocation(actorId: TestBudgeting.ActorId);
 
-        var copy = source.CopyInto(Guid.NewGuid(), Guid.NewGuid(), copier);
+        var copy = source.CopyInto(Guid.NewGuid(), Guid.NewGuid(), BudgetCodeCategory.Revenue, copier);
 
         Assert.NotEqual(source.Id, copy.Id);
         // Whoever ran the copy is who put those numbers in the new period.
@@ -717,7 +718,7 @@ public class BudgetAllocationTests
 
         var targetCode = Guid.Parse("77777777-7777-7777-7777-777777777777");
 
-        var copy = source.CopyInto(targetPeriod, targetCode, TestBudgeting.ActorId);
+        var copy = source.CopyInto(targetPeriod, targetCode, BudgetCodeCategory.Revenue, TestBudgeting.ActorId);
 
         var created = Assert.Single(copy.DomainEvents.OfType<BudgetAllocationCreatedDomainEvent>());
         Assert.Equal(copy.Id, created.AllocationId);
@@ -734,7 +735,7 @@ public class BudgetAllocationTests
     [Fact]
     public void CopyInto_without_an_actor_leaves_CreatedBy_null()
     {
-        var copy = TestBudgeting.CreateAllocation().CopyInto(Guid.NewGuid(), Guid.NewGuid(), null);
+        var copy = TestBudgeting.CreateAllocation().CopyInto(Guid.NewGuid(), Guid.NewGuid(), BudgetCodeCategory.Revenue, null);
 
         Assert.Null(copy.CreatedBy);
         Assert.Null(Assert.Single(copy.DomainEvents.OfType<BudgetAllocationCreatedDomainEvent>()).ActorId);
@@ -743,7 +744,7 @@ public class BudgetAllocationTests
     [Fact]
     public void CopyInto_carries_a_zero_amount_as_is()
     {
-        var copy = TestBudgeting.CreateAllocation(amount: 0m).CopyInto(Guid.NewGuid(), Guid.NewGuid(), null);
+        var copy = TestBudgeting.CreateAllocation(amount: 0m).CopyInto(Guid.NewGuid(), Guid.NewGuid(), BudgetCodeCategory.Revenue, null);
 
         Assert.Equal(0m, copy.AmountCad);
         Assert.True(copy.NeedsJustification);
@@ -754,18 +755,18 @@ public class BudgetAllocationTests
     {
         // The whole point of the feature, at the aggregate level: Update runs the same Validate
         // that Create does, so a copied item is refused until somebody writes the argument.
-        var copy = TestBudgeting.CreateAllocation(PeriodId, CodeId).CopyInto(Guid.NewGuid(), Guid.NewGuid(), null);
+        var copy = TestBudgeting.CreateAllocation(PeriodId, CodeId).CopyInto(Guid.NewGuid(), Guid.NewGuid(), BudgetCodeCategory.Revenue, null);
 
         Assert.Equal(
             BudgetAllocationErrors.JustificationRequired,
-            copy.Update(CodeId, "ZBB-CREW-01", TestBudgeting.Item(justification: ""), null).Error);
+            copy.Update(CodeId, "ZBB-CREW-01", BudgetCodeCategory.Revenue, TestBudgeting.Item(justification: ""), null).Error);
         Assert.Equal(
             BudgetAllocationErrors.JustificationRequired,
-            copy.Update(CodeId, "ZBB-CREW-01", TestBudgeting.Item(justification: "   "), null).Error);
+            copy.Update(CodeId, "ZBB-CREW-01", BudgetCodeCategory.Revenue, TestBudgeting.Item(justification: "   "), null).Error);
         Assert.True(copy.NeedsJustification);
 
         Assert.True(copy.Update(
-            CodeId, "ZBB-CREW-01", TestBudgeting.Item(justification: "Argued fresh for this period."), null).IsSuccess);
+            CodeId, "ZBB-CREW-01", BudgetCodeCategory.Revenue, TestBudgeting.Item(justification: "Argued fresh for this period."), null).IsSuccess);
         Assert.False(copy.NeedsJustification);
     }
 
@@ -779,9 +780,9 @@ public class BudgetAllocationTests
     [Fact]
     public void Copying_a_copy_keeps_the_justification_empty()
     {
-        var copy = TestBudgeting.CreateAllocation(amount: 900m).CopyInto(Guid.NewGuid(), Guid.NewGuid(), null);
+        var copy = TestBudgeting.CreateAllocation(amount: 900m).CopyInto(Guid.NewGuid(), Guid.NewGuid(), BudgetCodeCategory.Revenue, null);
 
-        var second = copy.CopyInto(Guid.NewGuid(), Guid.NewGuid(), null);
+        var second = copy.CopyInto(Guid.NewGuid(), Guid.NewGuid(), BudgetCodeCategory.Revenue, null);
 
         Assert.Equal(900m, second.AmountCad);
         Assert.True(second.NeedsJustification);

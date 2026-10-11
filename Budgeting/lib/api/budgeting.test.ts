@@ -64,6 +64,7 @@ import {
   type LifecycleStep,
   type PeriodTransitionAction,
 } from "./budgeting";
+import { VENDOR_SHARE_MESSAGES, vendorSharesMustSumMessage } from "@/lib/vendorShares";
 import type { BudgetCode, BudgetCodeCategory, BudgetPeriod, PeriodState } from "@/lib/types";
 
 // Shared fixtures for the period and allocation helpers below.
@@ -147,6 +148,7 @@ const makeLine = (
   spendType: "Operating",
   recurrence: "OneTime",
   vendor: null,
+  vendorShares: [],
   tags: [],
   priority: "ShouldHave",
   assumptions: null,
@@ -718,6 +720,7 @@ describe("budgetItemError (BudgetAllocation.Validate)", () => {
     priority: "ShouldHave",
     assumptions: null,
     consequenceIfUnfunded: null,
+    vendorShares: [],
   };
   const m = BUDGET_ITEM_MESSAGES;
   const err = (over: Partial<BudgetItemInput>) => budgetItemError({ ...valid, ...over });
@@ -895,6 +898,7 @@ describe("draftToBudgetItemInput", () => {
     spendType: "Operating",
     recurrence: "Recurring",
     vendor: "  ",
+    vendorShares: [],
     tags: "fuel, ops",
     priority: "MustHave",
     assumptions: "",
@@ -902,7 +906,7 @@ describe("draftToBudgetItemInput", () => {
   };
 
   it("sends only the lump sum for a lump-sum draft — quantity, unit cost and unit go as null", () => {
-    const r = draftToBudgetItemInput(draft);
+    const r = draftToBudgetItemInput(draft, "Expense");
     expect(r).toEqual({
       ok: true,
       input: {
@@ -920,12 +924,13 @@ describe("draftToBudgetItemInput", () => {
         priority: "MustHave",
         assumptions: null,
         consequenceIfUnfunded: "Trips cancelled",
+        vendorShares: [],
       },
     });
   });
 
   it("sends quantity, unit cost and unit — and amountCad null — for a built-up draft", () => {
-    const r = draftToBudgetItemInput({ ...draft, costMode: "builtUp" });
+    const r = draftToBudgetItemInput({ ...draft, costMode: "builtUp" }, "Expense");
     expect(r.ok && r.input).toMatchObject({
       amountCad: null,
       quantity: 14,
@@ -935,12 +940,12 @@ describe("draftToBudgetItemInput", () => {
   });
 
   it("leaves blanks as null for budgetItemError to report in the server's words", () => {
-    const r = draftToBudgetItemInput({ ...draft, costMode: "builtUp", unitCost: "" });
+    const r = draftToBudgetItemInput({ ...draft, costMode: "builtUp", unitCost: "" }, "Expense");
     expect(r.ok && budgetItemError(r.input)).toBe(BUDGET_ITEM_MESSAGES.QuantityWithoutUnitCost);
   });
 
   it("refuses text that is not a number", () => {
-    expect(draftToBudgetItemInput({ ...draft, amount: "abc" })).toEqual({
+    expect(draftToBudgetItemInput({ ...draft, amount: "abc" }, "Expense")).toEqual({
       ok: false,
       error: "Enter the amount as a number.",
     });
@@ -982,6 +987,7 @@ describe("itemReflects (the post-save refetch predicate)", () => {
     priority: "MustHave",
     assumptions: null,
     consequenceIfUnfunded: null,
+    vendorShares: [],
   };
   const row = makeLine("exp-a", "Expense", true, 3.03, {
     id: "item-1",
@@ -1603,5 +1609,148 @@ describe("userDisplay", () => {
     // Both null is what an unassigned budget owner looks like, and what a user id that is no
     // longer in the replica looks like. The caller decides the word.
     expect(userDisplay(null, null, "Unassigned")).toBe("Unassigned");
+  });
+});
+
+// Vendor shares through the draft → request → refetch seam. The category decides the vendor
+// fields (BudgetAllocation.CheckCategory): revenue sends its payer and [] shares; expense sends
+// vendor: null and every share row — always the key, so a PUT never falls back to the server's
+// "omitted keeps the current shares".
+describe("vendor shares in the item draft and the refetch predicate", () => {
+  const draft: BudgetItemDraft = {
+    budgetCodeId: "exp-a",
+    title: "Tires",
+    costMode: "lump",
+    amount: "2450",
+    quantity: "",
+    unitCost: "",
+    unit: "",
+    justification: "Quote.",
+    spendType: "Operating",
+    recurrence: "OneTime",
+    vendor: "  Kal Tire (old text) ",
+    vendorShares: [
+      { vendorId: "v-a", amount: "2000" },
+      { vendorId: "", amount: "" },
+    ],
+    tags: "",
+    priority: "ShouldHave",
+    assumptions: "",
+    consequenceIfUnfunded: "",
+  };
+
+  it("expense: sends every share row (blank vendor and amount as null) and clears the free text", () => {
+    const r = draftToBudgetItemInput(draft, "Expense");
+    expect(r.ok && r.input.vendor).toBeNull();
+    expect(r.ok && r.input.vendorShares).toEqual([
+      { vendorId: "v-a", amountCad: 2000 },
+      { vendorId: null, amountCad: null },
+    ]);
+  });
+
+  it("expense with no rows sends [] — No vendor, explicitly", () => {
+    const r = draftToBudgetItemInput({ ...draft, vendorShares: [] }, "Expense");
+    expect(r.ok && r.input.vendorShares).toEqual([]);
+  });
+
+  it("revenue with no share rows: sends the trimmed payer and [] shares", () => {
+    const r = draftToBudgetItemInput({ ...draft, vendorShares: [] }, "Revenue");
+    expect(r.ok && r.input.vendor).toBe("Kal Tire (old text)");
+    expect(r.ok && r.input.vendorShares).toEqual([]);
+  });
+
+  // BudgetAllocation.Update: null shares keep the current ones, and CheckCategory applies to them
+  // only on change — so a revenue item reclassified after it was split saves unchanged. Sending []
+  // there would silently wipe the split on, say, a title edit.
+  it("revenue still holding rows (reclassified from expense): sends null — keep — not []", () => {
+    const r = draftToBudgetItemInput(draft, "Revenue");
+    expect(r.ok && r.input.vendor).toBe("Kal Tire (old text)");
+    expect(r.ok && r.input.vendorShares).toBeNull();
+  });
+
+  it("budgetItemError on kept shares mirrors BudgetAllocation.Update: re-summed, category only on a code change", () => {
+    const current = {
+      budgetCodeId: "rev-a",
+      vendorShares: [{ vendorId: "v-a", vendorName: "Kal Tire", isActive: true, amountCad: 2450 }],
+    };
+    const r = draftToBudgetItemInput({ ...draft, budgetCodeId: "rev-a" }, "Revenue");
+    if (!r.ok) throw new Error(r.error);
+    expect(budgetItemError(r.input, "Revenue", current)).toBeNull();
+    // Kept shares are re-checked against a changed amount (Parse with the current shares).
+    expect(budgetItemError({ ...r.input, amountCad: 2500 }, "Revenue", current)).toBe(
+      vendorSharesMustSumMessage(2450, 2500),
+    );
+    // Moving the item to another code makes the shares "changed" — refused on revenue.
+    expect(budgetItemError({ ...r.input, budgetCodeId: "rev-b" }, "Revenue", current)).toBe(
+      VENDOR_SHARE_MESSAGES.VendorSharesNotAllowedForRevenue,
+    );
+    // Explicitly cleared: [] is always fine on revenue.
+    expect(budgetItemError({ ...r.input, budgetCodeId: "rev-b", vendorShares: [] }, "Revenue", current)).toBeNull();
+  });
+
+  it("refuses a share that is not a number", () => {
+    expect(
+      draftToBudgetItemInput({ ...draft, vendorShares: [{ vendorId: "v-a", amount: "abc" }] }, "Expense"),
+    ).toEqual({ ok: false, error: "Enter each vendor's share as a number." });
+  });
+
+  it("recordToDraft opens the item's shares as rows, in the server's order", () => {
+    const d = recordToDraft(
+      makeLine("exp-a", "Expense", true, 2450, {
+        vendorShares: [
+          { vendorId: "v-b", vendorName: "Esso", isActive: false, amountCad: 450 },
+          { vendorId: "v-a", vendorName: "Kal Tire", isActive: true, amountCad: 2000 },
+        ],
+      }),
+    );
+    expect(d.vendorShares).toEqual([
+      { vendorId: "v-b", amount: "450" },
+      { vendorId: "v-a", amount: "2000" },
+    ]);
+  });
+
+  it("itemReflects waits for the new split, in any order, and for the payer", () => {
+    const input: BudgetItemInput = {
+      budgetCodeId: "exp-a",
+      title: "Tires",
+      amountCad: 2450,
+      quantity: null,
+      unitCostCad: null,
+      unit: null,
+      justification: "Quote.",
+      spendType: "Operating",
+      recurrence: "OneTime",
+      vendor: null,
+      tags: [],
+      priority: "ShouldHave",
+      assumptions: null,
+      consequenceIfUnfunded: null,
+      vendorShares: [
+        { vendorId: "v-a", amountCad: 2000 },
+        { vendorId: "v-b", amountCad: 450 },
+      ],
+    };
+    const row = makeLine("exp-a", "Expense", true, 2450, {
+      id: "item-1",
+      title: "Tires",
+      justification: "Quote.",
+      vendorShares: [
+        { vendorId: "v-b", vendorName: "Esso", isActive: true, amountCad: 450 },
+        { vendorId: "v-a", vendorName: "Kal Tire", isActive: true, amountCad: 2000 },
+      ],
+    });
+    expect(itemReflects(row, "item-1", input)).toBe(true);
+    // The stale read: the old single-vendor split, or no split yet.
+    expect(
+      itemReflects({ ...row, vendorShares: [{ vendorId: "v-a", vendorName: "Kal Tire", isActive: true, amountCad: 2450 }] }, "item-1", input),
+    ).toBe(false);
+    expect(itemReflects({ ...row, vendorShares: [] }, "item-1", input)).toBe(false);
+    // Cleared: the row must show no shares.
+    expect(itemReflects(row, "item-1", { ...input, vendorShares: [] })).toBe(false);
+    // The payer is compared too (trimmed, as stored).
+    expect(itemReflects({ ...row, vendorShares: [], vendor: "Alamos" }, "item-1", { ...input, vendorShares: [], vendor: " Alamos " })).toBe(true);
+    expect(itemReflects({ ...row, vendorShares: [], vendor: null }, "item-1", { ...input, vendorShares: [], vendor: "Alamos" })).toBe(false);
+    // Kept (null): whatever shares the row carries are the ones kept — nothing to wait for.
+    expect(itemReflects(row, "item-1", { ...input, vendorShares: null })).toBe(true);
   });
 });

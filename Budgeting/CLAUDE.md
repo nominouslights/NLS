@@ -1,9 +1,10 @@
 # Budgeting — Zero-Based Budgeting Console
 
 Next.js 16 app on port **3003**, consuming the shared API. Scaffolded by US-6.0.1 (Track 6,
-Stage 6.0). Budget **periods**, **codes**, **budget items** and the **vendor register** are real —
-including the period lifecycle and the period dashboard — and so is the read-only **QuickBooks
-Online connection**; actuals and variance are still mock — see
+Stage 6.0). Budget **periods**, **codes**, **budget items** (with **vendor shares** on expense
+items and budget by vendor) and the **vendor register** are real — including the period lifecycle
+and the period dashboard — and so is the read-only **QuickBooks Online connection**; actuals and
+variance are still mock — see
 [Data](#data-periods-codes-and-budget-items-are-real-actuals-and-variance-are-still-mock).
 
 ## Commands
@@ -66,7 +67,7 @@ Run it before touching anything on the list, and whenever a Dispatcher UI story 
 | `components/TopBar.tsx`, `AuthGate.tsx`, `LoginScreen.tsx`, `Console.tsx` | same paths | **no** — adapted |
 | `lib/nav.ts`, `lib/data.ts`, `lib/money.ts`, `lib/types.ts`, `lib/claims.ts`, `lib/roles.ts`, `lib/workingPeriod.ts`, `lib/periodHold.ts`, `lib/legal.ts`, `lib/landing.ts`, `lib/api/budgeting.ts`, `lib/api/identity.ts`, `lib/api/qbo.ts` | — | new |
 | `app/qbo/callback/page.tsx` | — | new — the QuickBooks OAuth callback, the one page outside the console |
-| `components/Brandmark.tsx`, `ErrorNotice.tsx`, `LegalLinks.tsx`, `RoleGate.tsx`, `QboCallback.tsx`, `AccessDeniedScreen.tsx`, `SetupPendingScreen.tsx`, `PeriodBanner.tsx`, `BudgetPeriodFormModal.tsx`, `BudgetCodeFormModal.tsx`, `BudgetItemFormModal.tsx`, `ProfileForm.tsx`, `screens/*`, `screens/periods/*` (incl. `PeriodChooser.tsx`, `PriorityBreakdown.tsx`), `screens/codes/*` (`CopyCodesPanel.tsx`) | — | new |
+| `components/Brandmark.tsx`, `ErrorNotice.tsx`, `LegalLinks.tsx`, `RoleGate.tsx`, `QboCallback.tsx`, `AccessDeniedScreen.tsx`, `SetupPendingScreen.tsx`, `PeriodBanner.tsx`, `BudgetPeriodFormModal.tsx`, `BudgetCodeFormModal.tsx`, `BudgetItemFormModal.tsx`, `VendorSharesEditor.tsx`, `ProfileForm.tsx`, `screens/*`, `screens/periods/*` (incl. `PeriodChooser.tsx`, `PriorityBreakdown.tsx`), `screens/codes/*` (`CopyCodesPanel.tsx`) | — | new |
 
 `theme.ts` and the 12 `ui/` files are copied **unpruned**, including parts this app never uses
 (`ServiceType`, `DutyStatus`, `CorridorStepper`, the two upload fields). Pruning them would break
@@ -150,7 +151,7 @@ it. Config is `vitest.config.mts` — the `.mts` extension is load-bearing (Vite
 `.ts` config as CommonJS and warns), and it must therefore use `import.meta.dirname` for the
 `@` alias, never `__dirname`. `@types/node` declares `__dirname` globally, so TypeScript and
 `next build` both stay green while every `@/lib/...` import in the suite fails to resolve at
-run time. Twenty-eight files; fifteen need a DOM (the fourteen component tests, plus `workingPeriod`'s
+run time. Thirty-one files; seventeen need a DOM (the sixteen component tests, plus `workingPeriod`'s
 storage tests, which need `sessionStorage`):
 
 - `lib/roles.test.ts` — US-6.0.1's acceptance criterion: a Dispatcher account is rejected.
@@ -317,6 +318,28 @@ storage tests, which need `sessionStorage`):
 - `components/screens/periods/CostCentreBreakdown.test.tsx` — grouping under a parent, an absent
   parent named, retired / unregistered chips, owners, "No cost centre" at $0, the server's total,
   and no actual column.
+- `lib/vendorShares.test.ts` — every `lib/vendorShares.ts` mirror against the C# it names:
+  `MaxVendorShares` / `AmountMax`, every vendor-share message of `BudgetAllocationErrors` verbatim
+  (the sum message in the invariant `#,0.00` format), exact cents (`0.1 + 0.2` sums to `0.3`;
+  `10.005` is refused, not rounded), the shares block of `BudgetAllocation.Parse` rule for rule in
+  its order (count first, then vendor-then-amount per share, a duplicate as soon as it repeats,
+  the sum last against the stored — rounded or computed — amount), `CheckCategory` both ways,
+  `budgetItemError` placing the shares after `VendorTooLong` and before tags, `BudgetItemVendorRule`
+  (added vendors only, request order, revenue and an unloaded register skipped), `remainingCad`,
+  `splitEvenly` (odd cents to the first rows; parts always sum back), `assignRemaining` (never
+  takes from an over-split) and `itemVendorText`.
+- `components/screens/periods/VendorBreakdown.test.tsx` — rows in the server's order, a retired
+  chip, a loading name not called retired, "No vendor" at $0, the server's total, no actual column.
+
+  `budgeting.requests.test.ts` pins that `vendorShares` is **always** on the wire (`[]` to clear,
+  `[]` with the payer on revenue, an explicit `null` key for a reclassified item's kept shares), each share as exactly `{ vendorId, amountCad }`, the nine new
+  `Budgeting.Allocation.*` refusals verbatim on create and update, and the vendor rollup route.
+  `BudgetItemFormModal.test.tsx` covers a two-vendor split with ASSIGN REMAINING, Over by and the
+  pre-submit refusal, an amount change moving the line without rebalancing, removing every vendor
+  (sends `[]`, clears legacy text), a since-retired current vendor kept and saved, a vendor retired
+  after it was picked refused in the server's 409 words, inline create (new row, and into the
+  row whose picker asked), the inline duplicate link on a retired name, and revenue's Payer with
+  `vendorShares: []`.
 
 `lib/api/transport.ts` is a **copied** file. Tests against it belong here (a test file is not on
 the copy manifest), but anything they reveal is a change to *Dispatcher's* source first, then a
@@ -419,8 +442,10 @@ backend keeps the aggregate name `BudgetAllocation`, the `allocations` route seg
 `BudgetAllocationRecord` wire type; the console calls them **budget items**. Each item is a small
 zero-based decision package:
 
-- **What** — the budget code, a `title` (required, ≤ 120), `vendor`, `tags` (≤ 10, each 1–32
-  after trimming, de-duplicated case-insensitively).
+- **What** — the budget code, a `title` (required, ≤ 120), `tags` (≤ 10, each 1–32 after
+  trimming, de-duplicated case-insensitively), and **who is paid or who pays** — see
+  [Vendor shares](#vendor-shares-and-budget-by-vendor): register vendors with dollar shares on an
+  expense item, a free-text payer (the wire's `vendor`) on a revenue item.
 - **Cost** — a lump sum (`amountCad`), **or** `quantity` × `unitCostCad` with an optional
   `unit`. Built up, the **server computes the amount** — each factor rounded to 2 dp, then the
   product, all half away from zero (`BudgetAllocation.Round`) — and ignores any amount sent, so
@@ -464,8 +489,70 @@ The period and budget-item routes (`BudgetAccess` group, `BudgetingEndpoints.cs`
 
 `BudgetItemRequest` is `{ budgetCodeId, title, amountCad, quantity, unitCostCad, unit,
 justification, spendType, recurrence, vendor, tags, priority, assumptions,
-consequenceIfUnfunded }`, enums as PascalCase strings. The server accepts nulls for most of it
-(defaults Operating / OneTime / ShouldHave); this app always sends every key, explicitly.
+consequenceIfUnfunded, vendorShares }`, enums as PascalCase strings. The server accepts nulls for
+most of it (defaults Operating / OneTime / ShouldHave); this app always sends every key,
+explicitly — `vendorShares` included, because the server reads an omitted/null list on PUT as
+"keep the current shares". The one deliberate null: a **revenue** item that still carries shares
+from before its code was reclassified Expense → Revenue. The server saves it unchanged (its
+category rule applies only on change), so sending `[]` would wipe the split on an unrelated edit.
+The modal shows those shares read-only under a "Kept shares" chip with REMOVE SHARES, and sends
+`null` until that is clicked, after which it sends `[]`. `budgetItemError(input, category, item)` then checks the
+kept shares the way `BudgetAllocation.Update` does: re-summed against the new amount, and refused
+on revenue only when the code changes.
+
+### Vendor shares and budget by vendor
+
+**An expense item's vendors are dollar shares of register vendors** —
+`vendorShares: [{ vendorId, amountCad }]`, each vendor at most once, at most 20, each amount
+positive with at most two decimals and ≤ 999,999,999.99, and — when there are any — summing to
+**exactly** the item's amount (the computed one for a built-up item). No shares at all is legal:
+the item is "No vendor". A partial split is refused, and so is an amount change the old shares no
+longer add up to (`VendorSharesMustSumToAmount`, whose message names both totals) — the server
+**never rebalances**, and neither does the console: the modal's "Remaining $X / Over by $X /
+Fully assigned" line moves, and the two shortcuts (ASSIGN REMAINING on a row, SPLIT EVENLY) run
+only when clicked. The response's `vendorShares: [{ vendorId, vendorName, isActive, amountCad }]`
+is never null; `vendorName` is null only while a just-created vendor's read row catches up.
+
+**`vendor` is now the revenue PAYER only.** A revenue item refuses shares
+(`VendorSharesNotAllowedForRevenue`); an expense item refuses new free text
+(`PayerNotAllowedForExpense`). The modal shows a **Payer** text field on revenue and sends
+`vendorShares: []`; on expense it shows the **Vendors** group (`components/VendorSharesEditor.tsx`,
+below Cost so the amount the split must meet sits above it) and always sends `vendor: null` — an
+old item still carrying legacy text gets a note that saving clears it. Every save sends the whole
+list, or `[]` to clear.
+
+The picker offers **active** vendors, each once across the rows; a vendor the item already had
+that has been retired since stays selectable and marked (the server looks up only **added**
+vendors — `BudgetItemVendorRule` — so retiring a vendor never freezes items planned against it).
+"+ NEW VENDOR…" (and "+ New vendor…" in a row's picker) opens `VendorFormModal` as a sibling
+overlay and puts the new vendor in that row; its duplicate link picks an existing active vendor,
+or says in the server's words why a retired one cannot be added. The register is a prop from
+`PeriodDashboard` (`listVendors(true)`, loaded once; null while loading — the picker then offers
+the item's own vendors only). Before submit `budgetItemError(input, category)` runs the shares
+rules **in the server's place in the order** (after `VendorTooLong`, before tags) and the category
+rule last, then `vendorRegisterError` runs `BudgetItemVendorRule` against the loaded register
+(`VendorNotFound` 400 / `VendorInactive` 409, request order).
+
+`lib/vendorShares.ts` is the mirror (`VENDOR_SHARE_MESSAGES` verbatim, `vendorSharesShapeError`,
+`vendorSharesCategoryError`, `vendorSharesError`, `vendorRegisterError`, `remainingCad`,
+`splitEvenly`, `assignRemaining`, `itemVendorText`), all in **integer cents** — never a float sum
+(`0.1 + 0.2` is not `0.3`; the server compares decimals to the cent). It imports only types from
+`lib/api/budgeting.ts`, which imports it: a value import back would be a cycle.
+
+On the dashboard each expense item row names its first two vendors with their amounts, a retired
+one written out, then "+N more" (`itemVendorText`); a revenue row says "Payer: …". The
+**"Expense by vendor"** panel (`screens/periods/VendorBreakdown.tsx`) sits beside the priority and
+cost-centre panels: the server's `GET periods/{id}/rollups/vendors` →
+`{ periodId, vendors: [{ vendorId, name, isActive, itemCount, plannedCad }], noVendor: { itemCount,
+plannedCad }, totalPlannedExpenseCad }`, **planned only**. It lists only vendors with a share this
+period (not the whole register), a split item counting once per vendor; retired rows carry a
+chip, a still-loading name is written out and not called retired, "No vendor" is always listed,
+and rows + No vendor = the total = the period's planned-expense tile. Refetched with the items,
+retried until its total agrees with them, exactly like the cost-centre rollup.
+
+The copy carries shares onto an expense code (and drops them onto a revenue one). Deleting a
+vendor any item shares is 409 `Budgeting.Vendor.InUse`, shown verbatim on Vendors with RETIRE …
+INSTEAD.
 
 **The copy brings every field but the justification.** `BudgetAllocation.CopyInto` carries the
 title, amount, build-up, classification, vendor, tags, priority, assumptions and consequence, and
@@ -598,7 +685,7 @@ Routes (same `BudgetAccess` group): `GET vendors?includeInactive=` (ordered by n
 vendors/{id}`, `POST vendors` → 201 `{ id }`, `PUT vendors/{id}` (**full replace** — an omitted
 optional field is cleared, so `draftToVendorInput` always sends all nine keys, null when blank),
 `POST vendors/{id}/activate|deactivate` → 204, `DELETE vendors/{id}` → 204 / 409
-`Budgeting.Vendor.InUse`. The screen fetches the whole register (`includeInactive=true`) and its
+`Budgeting.Vendor.InUse` (once any budget item in any period carries a share on it). The screen fetches the whole register (`includeInactive=true`) and its
 "Show retired" toggle filters client-side, because the duplicate-name check must see retired
 vendors: names are unique per tenant **ignoring case, retired included** (`VendorNameRule`), so
 the modal warns live in the server's own words (`duplicateVendorMessage` ↔
@@ -767,6 +854,7 @@ Known hazards documented in `theme.ts`: `colors.amber` is a fill/border/icon col
 | 2026-10-08 | Code audit after the vendor register | **Pass** — no new `statusMeta` call and no new protected hex; Active/Retired is a `StatusChip` (glyph + label) on every row and in the detail pane; the duplicate-name note carries a "Name taken" `StatusChip` beside the written message |
 | 2026-10-08 | Code audit after the cost-centre register | **Pass** — no new `statusMeta` call and no new protected hex; status on the register rows/detail, the code form's kept value and the rollup's retired/unregistered rows is always a `StatusChip` (glyph + written label) |
 | 2026-10-08 | Code audit after the QuickBooks screen and callback | **Pass** — no new `statusMeta` call and no new protected hex; the connection status and the "Reconnect by" warning are `StatusChip`s with a glyph (✓ / ! / —) and a written label; the callback's refusals use `ErrorNotice` |
+| 2026-10-11 | Code audit after vendor shares | **Pass** — no new `statusMeta` call and no new protected hex; the split's Remaining / Over by / Fully assigned line is a `StatusChip` (glyph + written label, the figure in the label) beside a sentence; a kept retired vendor and the rollup's retired rows carry a `StatusChip`; an item row writes "(retired)" in text |
 | — | Grayscale (DevTools → Rendering → Achromatopsia) | **Not yet run** |
 | — | Deuteranopia / Protanopia / Tritanopia | **Not yet run** |
 | — | Side-by-side against Dispatcher at equal width | **Not yet run** |

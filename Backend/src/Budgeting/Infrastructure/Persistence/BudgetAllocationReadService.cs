@@ -10,7 +10,8 @@ namespace NorthernLink.Budgeting.Infrastructure.Persistence;
 /// <summary>
 /// Read side — queries budgeting.rm_budget_allocations for one period and maps to the public
 /// contract, resolving each line's code to its current name, category, service line and active
-/// flag, and each actor id to an email.
+/// flag, each vendor share's vendor to its current name and active flag (rm_vendors), and each
+/// actor id to an email.
 /// <para>
 /// Three queries and two dictionaries, not a join — the <see cref="BudgetCodeReadService"/>
 /// reasoning: the period's lines, the period's chart and the tenant's users are all small sets
@@ -52,6 +53,10 @@ internal sealed class BudgetAllocationReadService(BudgetingDbContext context) : 
             .AsNoTracking()
             .ToDictionaryAsync(u => u.UserId, u => u.Email, cancellationToken);
 
+        // Only the vendors these items name (VendorResolution). No shares, no query.
+        var vendorsById = await context.ResolveVendorsAsync(
+            lines.SelectMany(line => line.VendorShares).Select(share => share.VendorId), cancellationToken);
+
         // Ordered in memory, not in SQL: priority is stored as its name, and "MustHave",
         // "NiceToHave", "ShouldHave" sort alphabetically out of rank. The rank is the enum's
         // declaration order. Code is compared ordinally so the order does not depend on the
@@ -62,7 +67,7 @@ internal sealed class BudgetAllocationReadService(BudgetingDbContext context) : 
             .ThenBy(line => PriorityRank(line.Priority))
             .ThenBy(line => line.CreatedAtUtc)
             .ThenBy(line => line.Id)
-            .Select(line => ToResponse(line, codesById, emailByUserId))
+            .Select(line => ToResponse(line, codesById, emailByUserId, vendorsById))
             .ToList();
     }
 
@@ -78,9 +83,18 @@ internal sealed class BudgetAllocationReadService(BudgetingDbContext context) : 
     private static BudgetAllocationResponse ToResponse(
         BudgetAllocationReadModel line,
         IReadOnlyDictionary<Guid, BudgetCodeReadModel> codesById,
-        IReadOnlyDictionary<Guid, string> emailByUserId)
+        IReadOnlyDictionary<Guid, string> emailByUserId,
+        IReadOnlyDictionary<Guid, ResolvedVendor> vendorsById)
     {
         var code = codesById.GetValueOrDefault(line.BudgetCodeId);
+        var shares = line.VendorShares
+            .Select(share =>
+            {
+                var found = vendorsById.TryGetValue(share.VendorId, out var vendor);
+                return new BudgetItemVendorShareResponse(
+                    share.VendorId, found ? vendor.Name : null, found && vendor.IsActive, share.AmountCad);
+            })
+            .ToList();
 
         return new BudgetAllocationResponse(
             line.Id,
@@ -100,6 +114,7 @@ internal sealed class BudgetAllocationReadService(BudgetingDbContext context) : 
             line.SpendType,
             line.Recurrence,
             line.Vendor,
+            shares,
             line.Tags,
             line.Priority,
             line.Assumptions,

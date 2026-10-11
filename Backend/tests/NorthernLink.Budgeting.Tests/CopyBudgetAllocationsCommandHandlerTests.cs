@@ -31,6 +31,7 @@ public class CopyBudgetAllocationsCommandHandlerTests
     private readonly InMemoryBudgetAllocationRepository _allocations = new();
     private readonly InMemoryBudgetPeriodRepository _periods = new();
     private readonly InMemoryBudgetCodeRepository _codes = new();
+    private readonly InMemoryVendorRepository _vendors = new();
     private readonly CopyBudgetAllocationsCommandHandler _handler;
 
     private readonly BudgetPeriod _target = TestBudgeting.CreatePeriod(PeriodGranularity.Quarter, 2026, 4);
@@ -44,7 +45,7 @@ public class CopyBudgetAllocationsCommandHandlerTests
 
     public CopyBudgetAllocationsCommandHandlerTests()
     {
-        _handler = new CopyBudgetAllocationsCommandHandler(_allocations, _periods, _codes);
+        _handler = new CopyBudgetAllocationsCommandHandler(_allocations, _periods, _codes, _vendors);
         _periods.Add(_target);
         _periods.Add(_source);
         _crewSource = AddCode(_source, "ZBB-CREW-01");
@@ -612,7 +613,7 @@ public class CopyBudgetAllocationsCommandHandlerTests
         // …and re-saving one with nothing but whitespace is still refused, by the same Validate
         // the very first line in a period goes through.
         var crewCopy = Assert.Single(TargetLines(), a => a.BudgetCodeId == _crew.Id);
-        var updateHandler = new UpdateBudgetAllocationCommandHandler(_allocations, _periods, _codes);
+        var updateHandler = new UpdateBudgetAllocationCommandHandler(_allocations, _periods, _codes, _vendors);
         var resave = await updateHandler.Handle(
             new UpdateBudgetAllocationCommand(
                 TestBudgeting.TenantId, _target.Id, crewCopy.Id, _crew.Id,

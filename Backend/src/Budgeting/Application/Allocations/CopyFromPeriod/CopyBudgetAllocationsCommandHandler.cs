@@ -54,11 +54,33 @@ namespace NorthernLink.Budgeting.Application.Allocations.CopyFromPeriod;
 /// A zero-amount source line is copied as-is — zero is a valid plan — and an empty source period
 /// is a success with all four counts zero, not an error.
 /// </para>
+/// <para>
+/// <b>Vendor shares come across as-is</b> onto a target code that is an expense code (vendors are
+/// tenant-wide, so the same ids are valid in every period; a share on a since-retired vendor is
+/// carried too), and are dropped onto a revenue code — <c>BudgetAllocation.CopyInto</c> decides
+/// by the <em>target</em> code's category. Because a copy can make a vendor referenced by one
+/// more item, a copy that carries shares runs its save under the tenant's vendor register lock.
+/// </para>
+/// <para>
+/// <b>The lock is decided by the plan, not by the source.</b> It is taken only when at least one
+/// <em>planned</em> copy carries a share — so a source whose share-bearing items are all skipped
+/// (already planned, code not on offer) or land on a revenue code (shares dropped) never
+/// serializes with the vendor register, nor does a plan with no shares at all. (The chart copy
+/// cannot do this cheaply and locks always; see <c>CopyBudgetCodesCommandHandler</c>.)
+/// Because the source is read <em>before</em> the lock, a carried vendor may have been deleted in
+/// between (its share removed from the source elsewhere, so the delete's probe passed).
+/// Re-reading after locking would hand back EF's already-tracked instances, so instead the handler
+/// confirms under the lock, in one query, that every carried vendor still exists. Under the lock
+/// that answer holds until the commit — a vendor delete waits and then sees the copies; a vendor
+/// deleted in the gap fails the whole copy with <see cref="BudgetAllocationErrors.CopySourceChanged"/>
+/// (409, nothing written — run it again). Retired vendors still exist, so they are carried.
+/// </para>
 /// </summary>
 public sealed class CopyBudgetAllocationsCommandHandler(
     IBudgetAllocationRepository allocations,
     IBudgetPeriodRepository periods,
-    IBudgetCodeRepository codes)
+    IBudgetCodeRepository codes,
+    IVendorRepository vendors)
     : ICommandHandler<CopyBudgetAllocationsCommand, BudgetAllocationCopyResult>
 {
     public async Task<Result<BudgetAllocationCopyResult>> Handle(
@@ -101,6 +123,69 @@ public sealed class CopyBudgetAllocationsCommandHandler(
             return Result.Success(new BudgetAllocationCopyResult(0, 0, 0, 0));
         }
 
+        var plan = await PlanAsync(command, sourceLines, cancellationToken);
+        if (plan.Copies.Count == 0)
+        {
+            // A copy that skips everything writes nothing at all.
+            return Result.Success(plan.ToResult(sourceLines.Count));
+        }
+
+        // Released (rolled back) on every early return, committed with the save. Taken only when
+        // a planned copy actually carries a share — see the class comment.
+        IVendorRegisterLock? vendorLock = null;
+        try
+        {
+            var carried = plan.Copies
+                .SelectMany(copy => copy.VendorShares)
+                .Select(share => share.VendorId)
+                .Distinct()
+                .ToList();
+            if (carried.Count > 0)
+            {
+                vendorLock = await vendors.LockRegisterAsync(command.TenantId, cancellationToken);
+
+                // The source was read before the lock, so a carried vendor may have been deleted
+                // since (its share removed elsewhere first, letting the delete's probe pass).
+                // Confirm under the lock, in one query, that every carried vendor still exists —
+                // from here a vendor delete waits for this commit and then sees the copies.
+                var existing = await vendors.GetByIdsAsync(carried, cancellationToken);
+                if (existing.Count != carried.Count)
+                {
+                    return Result.Failure<BudgetAllocationCopyResult>(BudgetAllocationErrors.CopySourceChanged);
+                }
+            }
+
+            foreach (var copy in plan.Copies)
+            {
+                allocations.Add(copy);
+            }
+
+            await allocations.SaveChangesAsync(cancellationToken);
+            if (vendorLock is not null)
+            {
+                await vendorLock.CommitAsync(cancellationToken);
+            }
+
+            return Result.Success(plan.ToResult(sourceLines.Count));
+        }
+        finally
+        {
+            if (vendorLock is not null)
+            {
+                await vendorLock.DisposeAsync();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Decides every source line — copy or which skip — without adding anything, so the handler
+    /// can still refuse the whole copy before the unit of work holds a single new item.
+    /// </summary>
+    private async Task<CopyPlan> PlanAsync(
+        CopyBudgetAllocationsCommand command,
+        IReadOnlyList<BudgetAllocation> sourceLines,
+        CancellationToken cancellationToken)
+    {
         // Snapshotted BEFORE the loop and never updated inside it: "already planned" means planned
         // in the target before this copy ran. Adding each copied item's code to the set would skip
         // the second and later source items of a code whose first item was just copied — many
@@ -115,36 +200,38 @@ public sealed class CopyBudgetAllocationsCommandHandler(
         var targetChart = await codes.ListForPeriodAsync(command.PeriodId, cancellationToken);
         var targetByCode = targetChart.ToDictionary(code => code.Code, StringComparer.Ordinal);
 
-        var copied = 0;
-        var skippedAlreadyPlanned = 0;
-        var skippedRetiredCode = 0;
-
+        var plan = new CopyPlan();
         foreach (var line in sourceLines)
         {
             var targetCode = targetByCode.GetValueOrDefault(line.Code);
 
             if (targetCode is not null && alreadyPlanned.Contains(targetCode.Id))
             {
-                skippedAlreadyPlanned++;
+                plan.SkippedAlreadyPlanned++;
                 continue;
             }
 
             if (targetCode is not { IsActive: true })
             {
-                skippedRetiredCode++;
+                plan.SkippedRetiredCode++;
                 continue;
             }
 
-            allocations.Add(line.CopyInto(command.PeriodId, targetCode.Id, command.ActorId));
-            copied++;
+            plan.Copies.Add(line.CopyInto(command.PeriodId, targetCode.Id, targetCode.Category, command.ActorId));
         }
 
-        if (copied > 0)
-        {
-            await allocations.SaveChangesAsync(cancellationToken);
-        }
+        return plan;
+    }
 
-        return Result.Success(new BudgetAllocationCopyResult(
-            copied, skippedAlreadyPlanned, skippedRetiredCode, sourceLines.Count));
+    private sealed class CopyPlan
+    {
+        public List<BudgetAllocation> Copies { get; } = [];
+
+        public int SkippedAlreadyPlanned { get; set; }
+
+        public int SkippedRetiredCode { get; set; }
+
+        public BudgetAllocationCopyResult ToResult(int sourceLineCount) =>
+            new(Copies.Count, SkippedAlreadyPlanned, SkippedRetiredCode, sourceLineCount);
     }
 }
