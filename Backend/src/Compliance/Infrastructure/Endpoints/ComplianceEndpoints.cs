@@ -306,7 +306,7 @@ public static class ComplianceEndpoints
 
         if (request.Date is not { } date)
         {
-            return EndpointResults.Problem(ComplianceRecordErrors.UnknownAnchorKind);
+            return EndpointResults.Problem(ComplianceRecordErrors.AnchorDateRequired);
         }
 
         var result = await sender.Send(new SetAnchorDateCommand(tenantId, id, anchor, date, currentActor.UserId), cancellationToken);
@@ -367,7 +367,11 @@ public static class ComplianceEndpoints
         return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
     }
 
-    /// <summary>Runs the nightly sweep now for this tenant: 200 with <c>{ queued }</c>.</summary>
+    /// <summary>
+    /// Runs the nightly sweep now for this tenant: 200 with <c>{ queued }</c>. <c>asOf</c> may only
+    /// look back — a future date would put not-yet-due records in review, and review is what
+    /// disposal trusts (400 <c>Compliance.Record.SweepDateInFuture</c>).
+    /// </summary>
     private static async Task<IResult> SweepDisposalReview(
         DateOnly? asOf, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
     {
@@ -376,7 +380,13 @@ public static class ComplianceEndpoints
             return Results.Unauthorized();
         }
 
-        var result = await sender.Send(new QueueForDisposalReviewCommand(tenantId, asOf ?? Today()), cancellationToken);
+        var today = Today();
+        if (asOf > today)
+        {
+            return EndpointResults.Problem(ComplianceRecordErrors.SweepDateInFuture);
+        }
+
+        var result = await sender.Send(new QueueForDisposalReviewCommand(tenantId, asOf ?? today), cancellationToken);
         return result.IsSuccess ? Results.Ok(new SweepResponse(result.Value)) : EndpointResults.Problem(result.Error);
     }
 

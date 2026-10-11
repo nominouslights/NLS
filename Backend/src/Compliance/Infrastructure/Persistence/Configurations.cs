@@ -63,6 +63,12 @@ public sealed class ComplianceRecordConfiguration : IEntityTypeConfiguration<Com
 /// <summary>Maps DocumentSeries to compliance.document_series — one row per (tenant, series, year).</summary>
 public sealed class DocumentSeriesConfiguration : IEntityTypeConfiguration<DocumentSeries>
 {
+    /// <summary>
+    /// The unique (tenant_id, series, year) index — EF's default name, spelled out so the
+    /// repository can recognise two first registrations of a year racing to open the same row.
+    /// </summary>
+    public const string SeriesYearIndex = "IX_document_series_tenant_id_series_year";
+
     public void Configure(EntityTypeBuilder<DocumentSeries> builder)
     {
         builder.ToTable("document_series");
@@ -82,6 +88,9 @@ public sealed class DocumentSeriesConfiguration : IEntityTypeConfiguration<Docum
 /// <summary>Maps TenantComplianceSettings to compliance.tenant_compliance_settings — one row per tenant.</summary>
 public sealed class TenantComplianceSettingsConfiguration : IEntityTypeConfiguration<TenantComplianceSettings>
 {
+    /// <summary>The unique tenant_id index — one settings row per tenant (EF's default name, spelled out for the repository).</summary>
+    public const string TenantIndex = "IX_tenant_compliance_settings_tenant_id";
+
     public void Configure(EntityTypeBuilder<TenantComplianceSettings> builder)
     {
         builder.ToTable("tenant_compliance_settings");

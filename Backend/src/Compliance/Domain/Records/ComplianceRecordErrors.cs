@@ -86,6 +86,14 @@ public static class ComplianceRecordErrors
         "Compliance.Record.UnknownSubjectKind", "The subject kind must be Carrier, Driver, Vehicle, Trip or Incident.",
         BasisKeys.Plan11);
 
+    public static readonly Error AnchorDateRequired = ComplianceError.Validation(
+        "Compliance.Record.AnchorDateRequired", "An anchor needs a date.",
+        BasisKeys.Plan11);
+
+    public static readonly Error SweepDateInFuture = ComplianceError.Validation(
+        "Compliance.Record.SweepDateInFuture", "A disposal-review sweep judges retention as of today or earlier — a future date would queue records whose retention has not ended. Use the due-for-disposal list to look ahead.",
+        BasisKeys.Plan11);
+
     public static readonly Error UnknownAnchorKind = ComplianceError.Validation(
         "Compliance.Record.UnknownAnchorKind", "An anchor date must be keyed by a known anchor kind (RecordDate, ReceivedDate, MonthEnd, …).",
         BasisKeys.Plan11);

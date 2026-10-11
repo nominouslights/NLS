@@ -10,7 +10,11 @@ public enum ComplianceSaveOutcome
 {
     Saved,
 
-    /// <summary>An optimistic-concurrency token (a DocumentSeries version) was stale; nothing persisted, tracker cleared.</summary>
+    /// <summary>
+    /// Another registration got there first: a DocumentSeries version token was stale, or a
+    /// concurrent first registration already inserted the (series, year) row or the tenant's
+    /// default settings. Nothing persisted, tracker cleared — retry and load the winner's row.
+    /// </summary>
     ConcurrencyConflict,
 
     /// <summary>The unique (tenant, source_module, source_record_id) index rejected a duplicate registration; nothing persisted.</summary>

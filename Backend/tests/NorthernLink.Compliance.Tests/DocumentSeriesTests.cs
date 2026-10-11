@@ -102,6 +102,30 @@ public class DocumentSeriesTests
     }
 
     [Fact]
+    public async Task Two_concurrent_first_registrations_of_a_year_both_succeed_with_consecutive_numbers()
+    {
+        // Neither request finds a VM/year row or tenant settings, so both insert one. B commits
+        // first; A's insert then hits the unique (tenant, series, year) and settings indexes —
+        // which the repository must turn into a retry, not a 500 or a parked event.
+        Result<RegisterRecordResult>? bResult = null;
+        var requestB = new InMemoryComplianceStore(_store.State);
+        var registerB = new RegisterRecordCommandHandler(new RecordRegistrar(requestB, requestB, requestB));
+        _store.BeforeNextSave = async () => bResult = await registerB.Handle(
+            new RegisterRecordCommand(TestCompliance.TenantId, ComplianceRecordType.R9, TestCompliance.Registration(sourceRecordId: "inspection:b"), TestCompliance.ActorId),
+            CancellationToken.None);
+
+        var aResult = await RegisterAsync("inspection:a");
+
+        Assert.True(aResult.IsSuccess, aResult.IsFailure ? aResult.Error.Code : null);
+        Assert.True(bResult!.IsSuccess);
+        Assert.Equal($"NL-VM-03-{_year}-0001", bResult.Value.DocumentNumber);
+        Assert.Equal($"NL-VM-03-{_year}-0002", aResult.Value.DocumentNumber);
+        Assert.Equal(1, _store.ConcurrencyConflicts);
+        Assert.Single(_store.Settings);
+        Assert.Equal(2, _store.CommittedLastSequence(DocumentSeriesCode.VM, _year));
+    }
+
+    [Fact]
     public async Task A_registration_refused_by_validation_consumes_no_number()
     {
         var refused = await _register.Handle(

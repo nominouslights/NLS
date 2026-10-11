@@ -148,6 +148,15 @@ public sealed class ComplianceRecord : AggregateRoot, ITenantScoped
         Touch(actorId);
         Raise(new AnchorDateSetDomainEvent(Id, anchor, date, actorId));
         RecomputeRetention(rule);
+
+        // The review was decided on the old retain-until. A corrected anchor can push it into the
+        // future, and Dispose trusts the review status — so the record leaves review and the next
+        // sweep re-queues it only if it is still due.
+        if (Status == ComplianceRecordStatus.ReviewForDisposal)
+        {
+            Status = StatusBeforeReview;
+        }
+
         return Result.Success();
     }
 
@@ -186,10 +195,11 @@ public sealed class ComplianceRecord : AggregateRoot, ITenantScoped
         var hold = new RecordHold(Guid.NewGuid(), trimmedReason, placedBy, now);
         Holds = [.. Holds, hold];
 
-        // A hold pulls a record back out of review: it must not be disposable while held.
+        // A hold pulls a record back out of review: it must not be disposable while held. A
+        // superseded version goes back to Superseded, never to Active — it is not the current one.
         if (Status == ComplianceRecordStatus.ReviewForDisposal)
         {
-            Status = ComplianceRecordStatus.Active;
+            Status = StatusBeforeReview;
         }
 
         Touch(placedBy);
@@ -346,6 +356,15 @@ public sealed class ComplianceRecord : AggregateRoot, ITenantScoped
             record.Id, tenantId, definition.Type, documentNumber, details.SourceModule, details.SourceRecordId, actorId));
         return record;
     }
+
+    /// <summary>
+    /// Where a record in ReviewForDisposal returns to. Review does not store its origin, but only
+    /// Active and Superseded records are ever queued, and a replaced document carries the
+    /// <see cref="AnchorKind.Superseded"/> anchor (set by <see cref="Supersede"/>, or by its
+    /// producer when it reports the replacement) — so the anchor says which one it was.
+    /// </summary>
+    private ComplianceRecordStatus StatusBeforeReview =>
+        AnchorDates.ContainsKey(AnchorKind.Superseded) ? ComplianceRecordStatus.Superseded : ComplianceRecordStatus.Active;
 
     private void Touch(Guid? actorId)
     {

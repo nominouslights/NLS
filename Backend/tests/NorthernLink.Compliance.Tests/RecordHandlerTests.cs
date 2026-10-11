@@ -221,6 +221,48 @@ public class RecordHandlerTests
         Assert.Equal(ComplianceRecordStatus.Active, record.Status);
     }
 
+    [Fact]
+    public async Task A_hold_on_a_superseded_version_in_review_returns_it_to_superseded_not_active()
+    {
+        var packet = await RegisterAsync(ComplianceRecordType.R6, TestCompliance.Registration(
+            title: "ELD information packet v1", sourceModule: "compliance", sourceRecordId: "eld-packet:v1",
+            subject: new RecordSubject(RecordSubjectKind.Carrier, null, "Northern Link Shuttle & Cargo"),
+            anchors: TestCompliance.Anchors((AnchorKind.RecordDate, new DateOnly(2026, 1, 1)))));
+        await _supersede.Handle(new SupersedeRecordCommand(
+            TestCompliance.TenantId, packet.Id,
+            TestCompliance.Registration(title: "ELD information packet v2", sourceModule: "compliance", sourceRecordId: "eld-packet:v2",
+                subject: new RecordSubject(RecordSubjectKind.Carrier, null, "Northern Link Shuttle & Cargo")),
+            TestCompliance.ActorId), CancellationToken.None);
+        await QueueAsync(new DateOnly(2030, 1, 1));
+        Assert.Equal(ComplianceRecordStatus.ReviewForDisposal, packet.Status);
+
+        await _placeHold.Handle(new PlaceHoldCommand(TestCompliance.TenantId, packet.Id, "Roadside audit", null), CancellationToken.None);
+
+        // Active would make the replaced packet current again — supersedable a second time.
+        Assert.Equal(ComplianceRecordStatus.Superseded, packet.Status);
+    }
+
+    [Fact]
+    public async Task A_corrected_anchor_takes_a_record_out_of_review_so_it_cannot_be_disposed_early()
+    {
+        var training = await RegisterAsync(ComplianceRecordType.R16, TestCompliance.Registration(
+            sourceModule: "drivers", sourceRecordId: "training:1",
+            anchors: TestCompliance.Anchors((AnchorKind.EmploymentEnd, new DateOnly(2024, 1, 1))))); // retain until 2026-01-01
+        await QueueAsync(new DateOnly(2026, 2, 1));
+        Assert.Equal(ComplianceRecordStatus.ReviewForDisposal, training.Status);
+
+        // The employment end was keyed wrong: the driver left in June 2026 → retain until 2028-06-01.
+        var corrected = await _setAnchor.Handle(
+            new SetAnchorDateCommand(TestCompliance.TenantId, training.Id, AnchorKind.EmploymentEnd, new DateOnly(2026, 6, 1), TestCompliance.ActorId),
+            CancellationToken.None);
+
+        Assert.True(corrected.IsSuccess);
+        Assert.Equal(new DateOnly(2028, 6, 1), training.RetainUntil);
+        Assert.Equal(ComplianceRecordStatus.Active, training.Status);
+        Assert.Equal("Compliance.Record.NotReviewable", Assert.Single((await DisposeAsync(training.Id)).Value.Refused).Code);
+        Assert.Equal(0, (await QueueAsync(new DateOnly(2026, 2, 1))).Value);
+    }
+
     // --- Queue and dispose -----------------------------------------------------------------------
 
     [Fact]

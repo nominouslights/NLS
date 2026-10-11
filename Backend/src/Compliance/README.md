@@ -60,7 +60,11 @@ is known.
 
 `Active` → (`RetentionWorker`, nightly 02:00 America/Winnipeg, or `POST records/disposal-review/sweep`)
 → `ReviewForDisposal` → (`POST records/dispose`, a person, batch, logged to `destruction_log`) →
-`Disposed`. A hold (`POST records/{id}/holds`) keeps a record Active until released. A new version
+`Disposed`. A hold (`POST records/{id}/holds`) keeps a record Active until released. A hold or an
+anchor correction on a record already in review takes it back out (to Superseded if it carries a
+`Superseded` anchor, else Active); the next sweep re-queues it only if it is still due — disposal
+trusts review status, so review must never outlive the date it was decided on. For the same
+reason the manual sweep refuses a future `asOf`. A new version
 (`POST records/{id}/supersede`) registers a successor (`DocumentVersion + 1`) and moves the old one
 to `Superseded` with its `Superseded` anchor set to today.
 

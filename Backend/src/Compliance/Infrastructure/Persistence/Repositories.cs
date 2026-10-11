@@ -11,8 +11,9 @@ namespace NorthernLink.Compliance.Infrastructure.Persistence;
 
 /// <summary>
 /// Write-side repository over <see cref="ComplianceDbContext"/> (tenant-filtered) and the
-/// module's unit of work. <see cref="TrySaveChangesAsync"/> turns the two races the registrar
-/// expects into outcomes rather than exceptions, clearing the whole tracker on either — the
+/// module's unit of work. <see cref="TrySaveChangesAsync"/> turns the races the registrar
+/// expects (stale series version, concurrent series/settings insert, duplicate source) into
+/// outcomes rather than exceptions, clearing the whole tracker on either — the
 /// audit pipeline staged snapshot/journal/outbox rows for the write too, and left tracked they
 /// would commit an audit trail for a write that never happened (the Vendor repository's rule).
 /// </summary>
@@ -48,6 +49,18 @@ internal sealed class ComplianceRecordRepository(ComplianceDbContext context) : 
         catch (DbUpdateConcurrencyException)
         {
             // A DocumentSeries version token was stale: another registration took the number first.
+            context.ChangeTracker.Clear();
+            return ComplianceSaveOutcome.ConcurrencyConflict;
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException
+        {
+            SqlState: PostgresErrorCodes.UniqueViolation,
+            ConstraintName: DocumentSeriesConfiguration.SeriesYearIndex or TenantComplianceSettingsConfiguration.TenantIndex,
+        })
+        {
+            // The same race one step earlier: two registrations both found no (series, year) row —
+            // the first of a year, or an unseeded tenant's first record — and both inserted one (or
+            // both inserted default settings). The loser retries and loads the winner's row.
             context.ChangeTracker.Clear();
             return ComplianceSaveOutcome.ConcurrencyConflict;
         }

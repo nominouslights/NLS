@@ -126,6 +126,17 @@ internal sealed class InMemoryComplianceStore :
             }
         }
 
+        // Unique (tenant, series, year) and unique settings tenant_id: a concurrent first
+        // registration already inserted the row this unit of work also tried to insert. The EF
+        // repository maps both unique violations to ConcurrencyConflict.
+        if (_pendingSeries.Any(s => _state.Series.ContainsKey((s.TenantId, s.Series, s.Year)))
+            || _pendingSettings.Any(p => Settings.Any(s => s.TenantId == p.TenantId)))
+        {
+            _state.ConcurrencyConflicts++;
+            Discard();
+            return ComplianceSaveOutcome.ConcurrencyConflict;
+        }
+
         // Unique (tenant, source_module, source_record_id).
         foreach (var pending in _pendingRecords)
         {
