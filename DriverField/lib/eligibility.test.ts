@@ -1,14 +1,73 @@
-import { describe, expect, it } from "vitest";
-import { eligibility, trips } from "./data";
+import { beforeEach, describe, expect, it } from "vitest";
+import { trips } from "./data";
+import { eligibility } from "./eligibility";
+import { addDays, type DateOnly, type DutyEvent } from "./hos/engine";
+import { CALENDAR, installLedgerForTests, resetLedgerForTests } from "./hos/ledger";
 import type { Trip } from "./types";
 
 // The five §5.4 eligibility rules. This is a CLIENT-SIDE MIRROR of a rule the server must own,
 // so the test's job is not to prove the rule is enforced — it isn't, anywhere, yet — but to
 // prove each rule can fail independently and that the verdict is conjunctive.
 //
-// When the backend grows a real eligibility engine and an atomic claim endpoint, this file
-// becomes the pin that catches the two drifting apart, exactly as Budgeting's previewPeriod
-// tests name the C# method they mirror.
+// The hours-of-service rule is now the engine's `project` (HosEngine.Project in
+// Backend/src/Shared/HoursOfService — the gate Trips' DriverFitnessGate will run) on the
+// planning ledger, with the default margin (1h + 10%). The ledger is live in the app, so the
+// test installs a known week on the pinned mock day (the mock trips are dated 2026-09-12): the
+// driver has 2h45m driving and 3h30m on duty logged from the day start, evaluated as they went
+// off duty at 03:30, so the open shift's 16h window closes at 16:00.
+//
+// When the backend's claim endpoint and fitness preview ship, this file becomes the pin that
+// catches the two drifting apart, exactly as Budgeting's previewPeriod tests name the C# method
+// they mirror.
+
+const H = 3600;
+
+/** The week on the pinned day, as per-day totals: [date, on-duty hours, driving hours]. */
+const WEEK: [DateOnly, number, number][] = [
+  ["2026-09-06", 7, 5.5],
+  ["2026-09-07", 0, 0],
+  ["2026-09-08", 10, 8.5],
+  ["2026-09-09", 4, 0],
+  ["2026-09-10", 8, 6],
+  ["2026-09-11", 9.5, 7.25],
+  ["2026-09-12", 3.5, 2.75],
+];
+
+/**
+ * Lays the totals onto a ledger the conservative way (driving first, then the rest of the
+ * on-duty time, then off), with twenty certified days off before the first — the same layout
+ * the server's assembler gives a declared other-carrier day. Evaluated as the driver went off
+ * duty on the last day.
+ */
+function installWeek(): void {
+  const firstDate = addDays(WEEK[0][0], -20);
+  const lastDate = WEEK[WEEK.length - 1][0];
+  const byDate = new Map(WEEK.map(([date, on, drv]) => [date, { on, drv }]));
+  const events: DutyEvent[] = [];
+  const certifiedDays: DateOnly[] = [];
+  let sequence = 1;
+  let asOfUnix = 0;
+  const push = (atUnix: number, status: DutyEvent["status"]) => {
+    events.push({ atUnix, status, source: "PaperLog", sequence: sequence++, odometerDecikm: null, note: null });
+  };
+  for (let date = firstDate; date <= lastDate; date = addDays(date, 1)) {
+    const dayStart = CALENDAR.dayStartUnix(date);
+    const row = byDate.get(date) ?? { on: 0, drv: 0 };
+    const onDuty = row.on * H;
+    const driving = row.drv * H;
+    if (driving > 0) push(dayStart, "Driving");
+    if (onDuty > driving) push(dayStart + driving, "OnDuty");
+    push(dayStart + onDuty, "OffDuty");
+    certifiedDays.push(date);
+    asOfUnix = dayStart + onDuty;
+  }
+  installLedgerForTests({ knownFromUnix: CALENDAR.dayStartUnix(firstDate), events, certifiedDays, asOfUnix });
+}
+
+beforeEach(() => {
+  resetLedgerForTests();
+  installWeek();
+});
 
 const base: Trip = {
   id: "TRP-TEST",
@@ -64,6 +123,46 @@ describe("eligibility", () => {
     expect(eligibility(trip).eligible).toBe(false);
   });
 
+  it("names the engine's breach, in the server's sentence, when hours fail", () => {
+    // HosMessages.For — identical prose on the server, the console and here. A 13h trip at
+    // 11:00 is 7h30m after the seeded as-of, so it is still the shift that began at the day
+    // start; the earliest breach in time is the 16h window closing at 16:00 (s.13(3)), ahead
+    // of the daily driving limit — and the engine reports the earliest, as the server does.
+    const reason = ruleFor({ ...base, estimatedHours: 13 }, "Hours of service").reason;
+    expect(reason).toMatch(/after the shift began; the window is 16h 0m \(s\.13\(3\)\)\.$/);
+  });
+
+  it("projects the trip WITH the default margin, both sides of the fit", () => {
+    // Starting right after the seeded as-of (03:30), 8h of driving scaled by the default
+    // margin (×1.10 + 1h = 9h48m) lands at 12h33m driving today — inside 13h. Half an hour
+    // more (8.5h → 10h21m) lands at 13h06m: it fails ONLY because the margin is counted, since
+    // 8.5h raw is well under the 10h15m raw remaining. A gate that ignored the margin would
+    // pass it; the server's gate will not.
+    const early = { ...base, startsAt: "2026-09-12T04:00:00", endsAt: "2026-09-12T12:00:00" };
+    const fits = ruleFor({ ...early, estimatedHours: 8 }, "Hours of service");
+    expect(fits.pass).toBe(true);
+    expect(fits.reason).toContain("margin");
+
+    const overByMargin = ruleFor({ ...early, estimatedHours: 8.5 }, "Hours of service");
+    expect(overByMargin.pass).toBe(false);
+    expect(overByMargin.reason).toContain("s.12(1)");
+  });
+
+  it("closes the shift window on a trip that would run past 16h after the shift began — and reopens it after 8h off", () => {
+    // The seeded shift began at the day start. A 6h trip at 10:00 (7h36m with margin) ends at
+    // 17:36 — 17h36m into a 16h window (s.13(3)) — even though the daily driving total fits.
+    const sameShift = { ...base, startsAt: "2026-09-12T10:00:00", endsAt: "2026-09-12T16:00:00", estimatedHours: 6 };
+    const closed = ruleFor(sameShift, "Hours of service");
+    expect(closed.pass).toBe(false);
+    expect(closed.reason).toContain("s.13(3)");
+
+    // The same trip two hours later: 03:30 → 12:00 is 8h30m off, the mandatory 8h consecutive
+    // off-duty period, so a NEW shift begins at 12:00 and its window runs to 04:00. The engine
+    // projects the rest from the assumed off-duty time — this is s.13's reset, not a loophole.
+    const newShift = { ...sameShift, startsAt: "2026-09-12T12:00:00", endsAt: "2026-09-12T18:00:00" };
+    expect(ruleFor(newShift, "Hours of service").pass).toBe(true);
+  });
+
   it("fails on licence class alone", () => {
     // Rule 2 reads the requirement off the trip/vehicle, never a hardcoded class — a future
     // vehicle needing Class 2 must be caught without changing this rule.
@@ -108,8 +207,8 @@ describe("eligibility", () => {
 
   it("gives every rule a reason, passing or failing", () => {
     // The scaffold greys ineligible trips and names the failing rule rather than hiding them
-    // (a deliberate deviation from §5.4 — see lib/data.ts). That only works if every rule can
-    // say why, so an empty reason is a bug, not a cosmetic gap.
+    // (a deliberate deviation from §5.4 — see lib/eligibility.ts). That only works if every
+    // rule can say why, so an empty reason is a bug, not a cosmetic gap.
     for (const trip of trips) {
       for (const rule of eligibility(trip).rules) {
         expect(rule.reason.trim().length).toBeGreaterThan(0);

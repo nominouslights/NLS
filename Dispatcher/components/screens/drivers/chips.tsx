@@ -1,8 +1,7 @@
 "use client";
 
-import { chipStyle, colors, dutyMeta, fonts, statusMeta, type StatusKind } from "@/lib/theme";
+import { chipStyle, colors, dutyMeta, fonts, statusMeta, type DutyStatus, type StatusKind } from "@/lib/theme";
 import { credentialKindFor } from "@/lib/api/drivers";
-import type { DutyStatus } from "@/lib/types";
 
 // Small chips/labels shared by the Drivers & Compliance screen and its row
 // components (screens/drivers/*) — extracted verbatim from Drivers.tsx.

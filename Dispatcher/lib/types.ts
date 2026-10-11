@@ -3,11 +3,10 @@ import type { StatusKind } from "./theme";
 // Trip and Driver records now come from the real APIs (lib/api/trips.ts,
 // lib/api/drivers.ts) — the old mock interfaces are gone.
 
-export type DutyStatus = "Off Duty" | "On Duty" | "Driving";
-
-// Driver compliance mocks — HOS and leave only. Driver records, credentials,
-// and clearances moved to the real Drivers API (lib/api/drivers.ts); HOS/leave
-// has no backend domain and stays keyed by the numeric mock `driverId`.
+// Driver compliance mocks — leave only. Driver records, credentials, clearances
+// and hours of service all come from the real Drivers API (lib/api/drivers.ts,
+// lib/api/hos.ts); leave has no backend domain and stays keyed by the numeric
+// mock `driverId`. The duty-status union lives in lib/theme.ts (DutyStatus).
 
 export type LeaveType = "Vacation" | "Sick" | "Leave Without Pay";
 
@@ -18,21 +17,6 @@ export interface DriverLeave {
   startDate: string; // ISO date, inclusive
   endDate: string; // ISO date, inclusive
   hours?: number;
-  note?: string;
-}
-
-export type HosLogSource = "Driver App" | "Manual (paper backup)";
-
-export interface HosLogEntry {
-  id: string;
-  driverId: number;
-  date: string; // ISO date
-  duty: DutyStatus; // status recorded for this span
-  onDutyH: number;
-  drivingH: number;
-  offDutyH: number;
-  source: HosLogSource;
-  enteredBy?: string; // dispatcher name when a Manual (paper backup) entry
   note?: string;
 }
 

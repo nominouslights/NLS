@@ -22,6 +22,7 @@
     "@vitejs/plugin-react": "^5.0.4",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
+    "fake-indexeddb": "^6.2.5",
     "jsdom": "^28.0.0",
     "typescript": "^5",
     "vitest": "^4.0.18"

@@ -12,10 +12,10 @@
 // need, never the whole database. A field tablet that has cached every trip in the fleet is a
 // data-residency problem, not a performance win.
 //
-// One thing the offline batch must not forget: IndexedDB is evictable unless
-// navigator.storage.persist() has been granted. A queued DVIR vanishing because the browser
-// reclaimed space is a COMPLIANCE failure, not a lost draft. Call persist(), and handle refusal
-// visibly.
+// The queue beside this file is already on IndexedDB (lib/sync/db.ts, which asks for
+// navigator.storage.persist() on the first write, because an evicted queued DVIR is a
+// COMPLIANCE failure, not a lost draft). The read store is the half still to do; the ledger
+// (lib/hos/ledger.ts) keeps its own cached server copy in the same database meanwhile.
 // ---------------------------------------------------------------------------
 
 import * as data from "../data";
