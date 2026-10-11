@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Unit tests for the Compliance library's Domain and Application layers — in-memory
+       fakes, no EF/Postgres, no HTTP. The retention calculator is proven per s. 11 row, the
+       document series' gap-free numbering under a lost race, every rule key's resolution, the
+       regulatory-basis coverage of every error and record type, the endpoint auth metadata,
+       the print frame's PDF output and the retention worker's sweep. -->
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Compliance\NorthernLink.Compliance.csproj" />
+  </ItemGroup>
+
+</Project>
