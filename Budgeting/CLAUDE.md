@@ -151,7 +151,8 @@ it. Config is `vitest.config.mts` — the `.mts` extension is load-bearing (Vite
 `.ts` config as CommonJS and warns), and it must therefore use `import.meta.dirname` for the
 `@` alias, never `__dirname`. `@types/node` declares `__dirname` globally, so TypeScript and
 `next build` both stay green while every `@/lib/...` import in the suite fails to resolve at
-run time. COUNT_PLACEHOLDER
+run time. Thirty-one files; seventeen need a DOM (the sixteen component tests, plus `workingPeriod`'s
+storage tests, which need `sessionStorage`):
 
 - `lib/roles.test.ts` — US-6.0.1's acceptance criterion: a Dispatcher account is rejected.
 - `lib/claims.test.ts` — JWT decoding, including the non-ASCII round trip (`atob` yields a binary
