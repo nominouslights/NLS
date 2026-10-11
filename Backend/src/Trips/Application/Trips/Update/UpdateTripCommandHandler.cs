@@ -26,7 +26,9 @@ public sealed class UpdateTripCommandHandler(ITripRepository tripRepository)
 
         var routeName = command.RouteName ?? string.Empty;
         var origin = command.Origin ?? string.Empty;
+        var originProvince = command.OriginProvince;
         var destination = command.Destination ?? string.Empty;
+        var destinationProvince = command.DestinationProvince;
         var stops = command.Stops;
         var distanceKm = command.DistanceKm;
 
@@ -38,7 +40,9 @@ public sealed class UpdateTripCommandHandler(ITripRepository tripRepository)
             // unrelated change (a PO number, a time).
             routeName = trip.RouteName;
             origin = trip.Origin;
+            originProvince = trip.OriginProvince;
             destination = trip.Destination;
+            destinationProvince = trip.DestinationProvince;
             stops = trip.Stops;
             distanceKm = trip.DistanceKm;
         }
@@ -58,7 +62,9 @@ public sealed class UpdateTripCommandHandler(ITripRepository tripRepository)
             command.ClientName,
             command.PoNumber,
             command.SeatsCapacity,
-            command.SeatsMinimum);
+            command.SeatsMinimum,
+            originProvince,
+            destinationProvince);
 
         if (result.IsFailure)
         {

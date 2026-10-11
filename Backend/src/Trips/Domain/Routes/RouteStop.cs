@@ -6,8 +6,9 @@ namespace NorthernLink.Trips.Domain.Routes;
 /// One ordered stop on a route, from origin (lowest <see cref="Order"/>) to destination
 /// (highest). Persisted as jsonb on the owning aggregate — stops are pure values with no
 /// identity of their own. When built from the catalog it snapshots the referencing
-/// <see cref="Stop"/>'s id and coordinates; legacy free-text stops leave those null and
-/// degrade gracefully (no pin on the map).
+/// <see cref="Stop"/>'s id, coordinates and province; legacy free-text stops leave the id and
+/// coordinates null and degrade gracefully (no pin on the map), and a null province reads as
+/// Manitoba.
 /// </summary>
 public sealed record RouteStop
 {
@@ -23,6 +24,19 @@ public sealed record RouteStop
     public double? Latitude { get; init; }
 
     public double? Longitude { get; init; }
+
+    /// <summary>
+    /// The stop's province/territory as a <see cref="Stops.CanadianProvince"/> code, copied
+    /// from the catalog stop's address by the route-stop resolver, or supplied per stop on a
+    /// free-form trip. Null on jsonb rows written before the Manitoba-only rule and means
+    /// Manitoba (<see cref="EffectiveProvince"/>); every write since stamps the code explicitly.
+    /// The operating-area gate (<c>OperatingArea</c>) refuses any route or trip whose stop
+    /// lies outside Manitoba.
+    /// </summary>
+    public string? Province { get; init; }
+
+    /// <summary>The province this stop counts as: <see cref="Province"/>, or Manitoba when none was recorded.</summary>
+    public string EffectiveProvince => Province ?? Stops.CanadianProvince.Manitoba;
 
     /// <summary>
     /// Timetable: minutes after the OUTBOUND leg's departure that the vehicle reaches this

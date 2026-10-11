@@ -36,6 +36,8 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         RouteName = null!;
         Origin = null!;
         Destination = null!;
+        OriginProvince = null!;
+        DestinationProvince = null!;
     }
 
     public Guid TenantId { get; private set; }
@@ -52,6 +54,17 @@ public sealed class Trip : AggregateRoot, ITenantScoped
     public string RouteName { get; private set; }
     public string Origin { get; private set; }
     public string Destination { get; private set; }
+
+    /// <summary>
+    /// Province code of <see cref="Origin"/> — "MB" unless a free-form corridor said otherwise,
+    /// in which case the trip was refused (<see cref="Planning.OperatingArea"/>). On a route
+    /// snapshot it is the first stop's province. Stored NOT NULL DEFAULT 'MB'.
+    /// </summary>
+    public string OriginProvince { get; private set; }
+
+    /// <summary>Province code of <see cref="Destination"/>; see <see cref="OriginProvince"/>.</summary>
+    public string DestinationProvince { get; private set; }
+
     public List<RouteStop> Stops { get; private set; } = [];
     public int DistanceKm { get; private set; }
 
@@ -185,6 +198,13 @@ public sealed class Trip : AggregateRoot, ITenantScoped
     /// — callers validate both against the lookup replicas before calling. Reassignment
     /// and unassignment after creation still move through
     /// <see cref="AssignDriver"/>/<see cref="UnassignDriver"/>/<see cref="AssignVehicle"/>.
+    /// <para>
+    /// Manitoba-only (<see cref="Planning.OperatingArea"/>): <paramref name="originProvince"/> and
+    /// <paramref name="destinationProvince"/> are the free-form corridor's endpoint provinces
+    /// (any spelling <see cref="Stops.CanadianProvince"/> recognises; null = the first/last
+    /// stop's province, or Manitoba when there are no stops). They and every stop must lie
+    /// inside the area or the trip is refused with <c>Trips.Trip.OutsideOperatingArea</c>.
+    /// </para>
     /// </summary>
     public static Result<Trip> Schedule(
         Guid tenantId,
@@ -211,7 +231,9 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         Guid vehicleId,
         string vehicleUnit,
         int? seatsCapacity,
-        int? seatsMinimum)
+        int? seatsMinimum,
+        string? originProvince = null,
+        string? destinationProvince = null)
     {
         if (string.IsNullOrWhiteSpace(tripNumber))
         {
@@ -222,6 +244,12 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         if (validation.IsFailure)
         {
             return Result.Failure<Trip>(validation.Error);
+        }
+
+        var corridor = ValidateCorridor(origin, originProvince, destination, destinationProvince, stops);
+        if (corridor.IsFailure)
+        {
+            return Result.Failure<Trip>(corridor.Error);
         }
 
         if (driverId == Guid.Empty)
@@ -256,8 +284,10 @@ public sealed class Trip : AggregateRoot, ITenantScoped
             RouteId = routeId,
             RouteName = routeName.Trim(),
             Origin = origin.Trim(),
+            OriginProvince = corridor.Value.OriginProvince,
             Destination = destination.Trim(),
-            Stops = [.. stops],
+            DestinationProvince = corridor.Value.DestinationProvince,
+            Stops = [.. corridor.Value.Stops],
             DistanceKm = distanceKm,
             ScheduleTemplateId = scheduleTemplateId,
             RoundTripKey = Normalize(roundTripKey),
@@ -330,6 +360,13 @@ public sealed class Trip : AggregateRoot, ITenantScoped
             return Result.Failure<Trip>(validation.Error);
         }
 
+        // Endpoint provinces come from the route's own stops — a booking corridor is a route.
+        var corridor = ValidateCorridor(origin, null, destination, null, stops);
+        if (corridor.IsFailure)
+        {
+            return Result.Failure<Trip>(corridor.Error);
+        }
+
         if (seatsConfirmed < 0)
         {
             return Result.Failure<Trip>(TripErrors.InvalidSeats);
@@ -347,8 +384,10 @@ public sealed class Trip : AggregateRoot, ITenantScoped
             RouteId = routeId,
             RouteName = routeName.Trim(),
             Origin = origin.Trim(),
+            OriginProvince = corridor.Value.OriginProvince,
             Destination = destination.Trim(),
-            Stops = [.. stops],
+            DestinationProvince = corridor.Value.DestinationProvince,
+            Stops = [.. corridor.Value.Stops],
             DistanceKm = distanceKm,
             BookingDayId = bookingDayId,
             SeatsCapacity = seatsCapacity,
@@ -413,6 +452,13 @@ public sealed class Trip : AggregateRoot, ITenantScoped
             return Result.Failure<Trip>(validation.Error);
         }
 
+        // Endpoint provinces come from the oriented route stops the caller passed.
+        var corridor = ValidateCorridor(origin, null, destination, null, stops);
+        if (corridor.IsFailure)
+        {
+            return Result.Failure<Trip>(corridor.Error);
+        }
+
         if (seatsConfirmed < 0)
         {
             return Result.Failure<Trip>(TripErrors.InvalidSeats);
@@ -448,8 +494,10 @@ public sealed class Trip : AggregateRoot, ITenantScoped
             RouteId = routeId,
             RouteName = routeName.Trim(),
             Origin = origin.Trim(),
+            OriginProvince = corridor.Value.OriginProvince,
             Destination = destination.Trim(),
-            Stops = [.. stops],
+            DestinationProvince = corridor.Value.DestinationProvince,
+            Stops = [.. corridor.Value.Stops],
             DistanceKm = distanceKm,
             ImportSource = BookeoImportSource,
             Direction = direction,
@@ -484,6 +532,11 @@ public sealed class Trip : AggregateRoot, ITenantScoped
     /// through <see cref="ConvertToDeadhead"/> (which proves nobody is booked on it) and back
     /// through <see cref="ConvertToPassengerTrip"/>.
     /// </para>
+    /// <para>
+    /// The Manitoba-only check runs again on every edit (<see cref="Planning.OperatingArea"/>):
+    /// a free-form corridor's <paramref name="originProvince"/>/<paramref name="destinationProvince"/>
+    /// (null = first/last stop's province, else Manitoba) and every stop must be inside the area.
+    /// </para>
     /// </summary>
     public Result Update(
         DateOnly serviceDate,
@@ -500,7 +553,9 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         string? clientName,
         string? poNumber,
         int? seatsCapacity,
-        int? seatsMinimum)
+        int? seatsMinimum,
+        string? originProvince = null,
+        string? destinationProvince = null)
     {
         if (Status != TripStatus.Scheduled)
         {
@@ -518,6 +573,12 @@ public sealed class Trip : AggregateRoot, ITenantScoped
             return validation;
         }
 
+        var corridor = ValidateCorridor(origin, originProvince, destination, destinationProvince, stops);
+        if (corridor.IsFailure)
+        {
+            return Result.Failure(corridor.Error);
+        }
+
         ServiceDate = serviceDate;
         WindowStart = windowStart;
         WindowEnd = windowEnd;
@@ -525,8 +586,10 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         RouteId = routeId;
         RouteName = routeName.Trim();
         Origin = origin.Trim();
+        OriginProvince = corridor.Value.OriginProvince;
         Destination = destination.Trim();
-        Stops = [.. stops];
+        DestinationProvince = corridor.Value.DestinationProvince;
+        Stops = [.. corridor.Value.Stops];
         DistanceKm = distanceKm;
         ClientId = clientId;
         ClientName = Normalize(clientName);
@@ -589,7 +652,9 @@ public sealed class Trip : AggregateRoot, ITenantScoped
             route.Id,
             route.Name,
             inbound ? route.Destination : route.Origin,
+            inbound ? route.DestinationProvince : route.OriginProvince,
             inbound ? route.Origin : route.Destination,
+            inbound ? route.OriginProvince : route.DestinationProvince,
             RouteStop.OrientedFor(route.Stops, Direction),
             route.DistanceKm,
             WindowEnd is null ? null : WindowStart.Add(route.EstimatedDuration));
@@ -603,6 +668,11 @@ public sealed class Trip : AggregateRoot, ITenantScoped
     /// passengers (whose stop picks may now be off-route; the dispatcher re-picks them).
     /// Pairing is the caller's concern: the application layer changes both legs of a round trip
     /// in one save, each oriented for its own direction.
+    /// <para>
+    /// The Manitoba-only gate is re-run on the new snapshot — <see cref="Route.Create"/> already
+    /// refuses an out-of-area stop, but a route written before the rule may still carry one, and
+    /// a trip must never inherit it (<c>Trips.Trip.OutsideOperatingArea</c>).
+    /// </para>
     /// </summary>
     public Result ChangeRoute(Route route)
     {
@@ -613,14 +683,23 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         }
 
         var snapshot = RouteSnapshotFor(route);
+        var corridor = ValidateCorridor(
+            snapshot.Origin, snapshot.OriginProvince, snapshot.Destination, snapshot.DestinationProvince, snapshot.Stops);
+        if (corridor.IsFailure)
+        {
+            return Result.Failure(corridor.Error);
+        }
+
         var previousRouteId = RouteId;
         var previousRouteName = RouteName;
 
         RouteId = snapshot.RouteId;
         RouteName = snapshot.RouteName.Trim();
         Origin = snapshot.Origin.Trim();
+        OriginProvince = corridor.Value.OriginProvince;
         Destination = snapshot.Destination.Trim();
-        Stops = [.. snapshot.Stops];
+        DestinationProvince = corridor.Value.DestinationProvince;
+        Stops = [.. corridor.Value.Stops];
         DistanceKm = snapshot.DistanceKm;
         WindowEnd = snapshot.WindowEnd;
         UpdatedAtUtc = DateTimeOffset.UtcNow;
@@ -1082,7 +1161,9 @@ public sealed class Trip : AggregateRoot, ITenantScoped
             vehicleId,
             vehicleUnit,
             seatsCapacity: null,
-            seatsMinimum: null);
+            seatsMinimum: null,
+            originProvince: DestinationProvince,
+            destinationProvince: OriginProvince);
 
         if (returnTrip.IsFailure)
         {
@@ -1373,6 +1454,28 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         }
 
         return Result.Success();
+    }
+
+    /// <summary>
+    /// The Manitoba-only gate for a corridor about to be written. An endpoint province left null
+    /// follows its end's stop (the first stop for the origin, the last for the destination —
+    /// the stops are already oriented for the leg), and Manitoba when there are no stops. The
+    /// result's provinces and stops are the normalised codes the trip stores.
+    /// </summary>
+    private static Result<Planning.TripCorridor> ValidateCorridor(
+        string origin,
+        string? originProvince,
+        string destination,
+        string? destinationProvince,
+        IReadOnlyList<RouteStop> stops)
+    {
+        var ordered = stops.OrderBy(stop => stop.Order).ToList();
+        return Planning.OperatingArea.ValidateTripCorridor(
+            origin,
+            originProvince ?? ordered.FirstOrDefault()?.Province,
+            destination,
+            destinationProvince ?? ordered.LastOrDefault()?.Province,
+            stops);
     }
 
     /// <summary>Mirrored corridors: a.Origin==b.Destination and a.Destination==b.Origin, trimmed, case-insensitive.</summary>

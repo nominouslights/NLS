@@ -207,7 +207,7 @@ public class TripOperatorAccessTests
 
     private static TripResponse Response(Guid id, Guid? driverId) => new(
         id, "TR-1001", new DateOnly(2026, 7, 21), new TimeOnly(6, 30), new TimeOnly(8, 15), "ContractCrew",
-        null, "Thompson ↔ Lynn Lake", "Thompson", "Lynn Lake", [], 320, null, null, null, false,
+        null, "Thompson ↔ Lynn Lake", "Thompson", "MB", "Lynn Lake", "MB", [], 320, null, null, null, false,
         null, "Alamos Gold", "PO-2026-118", driverId, TestPlanning.DriverName, TestPlanning.VehicleId,
         TestPlanning.VehicleUnit, 12, 0, null, false, "Scheduled", null, false, null, null, null, null,
         DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, null);

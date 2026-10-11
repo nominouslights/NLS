@@ -8,8 +8,11 @@ namespace NorthernLink.Trips.Application.Trips.Create;
 /// <summary>
 /// Creates an ad-hoc trip (CreateTripWizard). The trip number is issued by the
 /// per-tenant sequence, never supplied. When <see cref="RouteId"/> is set the route's
-/// name/stops/origin/destination/distance are snapshotted from the route and the
-/// free-form fields are ignored; otherwise the free-form fields describe the corridor.
+/// name/stops/origin/destination/distance (provinces included) are snapshotted from the route
+/// and the free-form fields are ignored; otherwise the free-form fields describe the corridor,
+/// with <see cref="OriginProvince"/>/<see cref="DestinationProvince"/> and each stop's
+/// <c>Province</c> defaulting to Manitoba when absent — anything outside the operating area is
+/// refused by the aggregate (<c>Trips.Trip.OutsideOperatingArea</c>).
 /// A trip is never created unassigned: <see cref="DriverId"/> and <see cref="VehicleId"/>
 /// are required (nullable only so the handler can refuse with a domain error instead of a
 /// binding failure). The driver is validated against driver_lookup and the name
@@ -35,4 +38,6 @@ public sealed record CreateTripCommand(
     string? PoNumber,
     Guid? DriverId,
     Guid? VehicleId,
-    int? SeatsMinimum) : ICommand<Guid>;
+    int? SeatsMinimum,
+    string? OriginProvince = null,
+    string? DestinationProvince = null) : ICommand<Guid>;

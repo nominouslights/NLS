@@ -769,6 +769,27 @@ the roadmap locks them in:
     modelled, Cycle 2 / sleeper berth / 160 km exemption are not; the platform is the **planning
     ledger and ELD mirror, never a second RODS**, and every figure it shows says so.
 
+16. *(Reserved — QuickBooks actuals integration, recorded on its own branch.)*
+
+17. **Manitoba-only operating area, hard-coded** — **Decided (2026-10-09, owner's safety policy;
+    built 2026-10-11)**. Northern Link operates solely within Manitoba: no regulated vehicle
+    crosses a provincial, territorial or international border, and a request that would need one
+    is **declined or referred to a partner carrier**. The area is a constant, not configuration:
+    `OperatingArea.Provinces = ["MB"]` in `Backend/src/Trips/Domain/Planning/OperatingArea.cs` —
+    one company, a written policy, no UI toggle, no per-tenant row. Enforcement is a required
+    province on every stop and corridor endpoint, compared as two-letter codes
+    (`CanadianProvince.Normalize` turns "Manitoba"/"mb"/"Man." into "MB" on every write; an
+    unrecognised spelling is refused, never guessed): a catalog `Stop` outside Manitoba **may
+    exist** but can never be placed on a route (`Route.Create`/`Update` →
+    `Trips.Route.StopOutsideOperatingArea`); every trip creation path, `Trip.Update` and
+    `Trip.ChangeRoute` re-check the free-form endpoints and every snapshot stop
+    (`Trips.Trip.OutsideOperatingArea`); schedule generation inherits both. Each stop snapshot
+    carries its province in the existing `stops` jsonb (`RouteStop.Province`, null on rows written
+    before the rule = Manitoba, since no vehicle ever crossed the border), and a trip's free-form
+    corridor stores `origin_province`/`destination_province` (`NOT NULL DEFAULT 'MB'`). Every
+    refusal message ends "— this request must be declined or referred to a partner carrier." so
+    the wizard can show it verbatim. Widening the area is a code change and a decision-register
+    entry, by design.
 16. **QuickBooks Online API access** — **Decided (2026-10-08, owner)**, reversing "all QBO work
     is manual" *for Budgeting only* (Billing's QBO prep worksheet stays manual). The **Budgeting
     module owns a read-only QuickBooks Online connection**: Intuit OAuth 2.0, scope

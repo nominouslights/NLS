@@ -263,7 +263,9 @@ internal static class TripPlanningEndpoints
             request.PoNumber,
             request.DriverId,
             request.VehicleId,
-            request.SeatsMinimum);
+            request.SeatsMinimum,
+            request.OriginProvince,
+            request.DestinationProvince);
 
         var result = await sender.Send(command, cancellationToken);
         return result.IsSuccess
@@ -295,7 +297,9 @@ internal static class TripPlanningEndpoints
             request.ClientName,
             request.PoNumber,
             request.SeatsCapacity,
-            request.SeatsMinimum);
+            request.SeatsMinimum,
+            request.OriginProvince,
+            request.DestinationProvince);
 
         var result = await sender.Send(command, cancellationToken);
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
@@ -921,8 +925,11 @@ public sealed record CreateDeadheadReturnRequest(Guid? DriverId, Guid? VehicleId
 
 /// <summary>
 /// Request body for POST and PUT /api/trips/stops. <c>StopType</c> takes an enum name
-/// ("Hub", "Community", …) or null. <c>Active</c> is only honoured on PUT (a create is
-/// always active); toggle it afterwards via /activate and /deactivate.
+/// ("Hub", "Community", …) or null. <c>Province</c> accepts a two-letter code or a full
+/// name ("MB", "Manitoba", "Man.") and is stored as the code; anything that is not a Canadian
+/// province or territory is a 400 <c>Trips.Stop.UnknownProvince</c>. A stop outside Manitoba
+/// may be catalogued, but can never be placed on a route. <c>Active</c> is only honoured on
+/// PUT (a create is always active); toggle it afterwards via /activate and /deactivate.
 /// </summary>
 public sealed record StopRequest(
     string? Name,
@@ -945,6 +952,14 @@ public sealed record StopRequest(
 /// unassigned, and the vehicle must be a real fleet vehicle: its unit number and seating
 /// capacity are snapshotted from vehicle_lookup (there is no free-form vehicle unit or
 /// manual capacity on creation).
+/// <para>
+/// Manitoba-only: on a free-form corridor <c>originProvince</c>/<c>destinationProvince</c> and
+/// each stop's <c>province</c> take a two-letter code or a full name and default to "MB" when
+/// omitted; anything outside Manitoba is a 400 <c>Trips.Trip.OutsideOperatingArea</c> whose
+/// message ends "this request must be declined or referred to a partner carrier", and an
+/// unrecognised spelling is a 400 <c>Trips.Trip.UnknownProvince</c>. With <c>routeId</c> the
+/// provinces come from the route and these fields are ignored.
+/// </para>
 /// </summary>
 public sealed record CreateTripRequest(
     DateOnly ServiceDate,
@@ -954,7 +969,9 @@ public sealed record CreateTripRequest(
     Guid? RouteId,
     string? RouteName,
     string? Origin,
+    string? OriginProvince,
     string? Destination,
+    string? DestinationProvince,
     IReadOnlyList<RouteStop>? Stops,
     int DistanceKm,
     TripDirection? Direction,
@@ -973,6 +990,8 @@ public sealed record CreateTripRequest(
 /// only through POST /api/trips/{id}/convert-to-deadhead (and back through
 /// .../convert-to-passenger-trip). A client still sending the old member is ignored — unknown
 /// JSON members are skipped by the default serializer settings.
+/// <c>originProvince</c>/<c>destinationProvince</c> and per-stop <c>province</c> follow the
+/// create body's rules and apply to free-form trips only (a catalogue trip keeps its snapshot).
 /// </summary>
 public sealed record UpdateTripRequest(
     DateOnly ServiceDate,
@@ -982,7 +1001,9 @@ public sealed record UpdateTripRequest(
     Guid? RouteId,
     string? RouteName,
     string? Origin,
+    string? OriginProvince,
     string? Destination,
+    string? DestinationProvince,
     IReadOnlyList<RouteStop>? Stops,
     int DistanceKm,
     Guid? ClientId,
@@ -1029,7 +1050,11 @@ public sealed record RecordTripDemandRequest(int SeatsConfirmed, bool DemandGuar
 /// </summary>
 public sealed record MergeRoundTripRequest(Guid OtherTripId, bool AllowMismatch = false);
 
-/// <summary>Request body for POST /api/trips/routes. Stops are chosen from the catalog by id (ordered).</summary>
+/// <summary>
+/// Request body for POST /api/trips/routes. Stops are chosen from the catalog by id (ordered).
+/// Every stop must be in Manitoba: a catalog stop elsewhere is a 400
+/// <c>Trips.Route.StopOutsideOperatingArea</c> (same on PUT).
+/// </summary>
 public sealed record CreateRouteRequest(
     string? Name,
     IReadOnlyList<RouteStopRequest>? Stops,

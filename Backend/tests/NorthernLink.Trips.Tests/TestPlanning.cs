@@ -161,7 +161,10 @@ internal static class TestPlanning
         string origin = "Thompson",
         string destination = "Lynn Lake",
         bool isEmptyLeg = false,
-        TripServiceType serviceType = TripServiceType.ContractCrew) =>
+        TripServiceType serviceType = TripServiceType.ContractCrew,
+        string? originProvince = null,
+        string? destinationProvince = null,
+        IReadOnlyList<RouteStop>? stops = null) =>
         Trip.Schedule(
             tenantId ?? TenantId,
             tripNumber,
@@ -173,7 +176,7 @@ internal static class TestPlanning
             routeName: "Thompson ↔ Lynn Lake",
             origin: origin,
             destination: destination,
-            stops: Stops(),
+            stops: stops ?? Stops(),
             distanceKm: 320,
             scheduleTemplateId: scheduleTemplateId,
             roundTripKey: roundTripKey,
@@ -187,7 +190,9 @@ internal static class TestPlanning
             vehicleId: vehicleId ?? VehicleId,
             vehicleUnit: vehicleUnit ?? VehicleUnit,
             seatsCapacity: seatsCapacity,
-            seatsMinimum: null);
+            seatsMinimum: null,
+            originProvince: originProvince,
+            destinationProvince: destinationProvince);
 
     /// <summary>Deadhead return with the baseline assignment driving the unit back.</summary>
     public static Result<Trip> DeadheadReturn(this Trip source, string tripNumber) =>

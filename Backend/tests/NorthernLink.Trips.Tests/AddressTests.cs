@@ -15,9 +15,39 @@ public class AddressTests
         var address = result.Value;
         Assert.Equal("123 Mystery Lake Rd", address.Street);
         Assert.Equal("Thompson", address.City);
-        Assert.Equal("Manitoba", address.Province);
+        // Stored as the code, whatever was typed — see Create_normalises_the_province_to_its_code.
+        Assert.Equal("MB", address.Province);
         Assert.Equal("R8N 0M4", address.PostalCode);
         Assert.Equal("Canada", address.Country);
+    }
+
+    [Theory]
+    [InlineData("Manitoba", "MB")]
+    [InlineData("MB", "MB")]
+    [InlineData("mb", "MB")]
+    [InlineData("Man.", "MB")]
+    [InlineData("Saskatchewan", "SK")]
+    [InlineData("Ontario", "ON")]
+    public void Create_normalises_the_province_to_its_code(string typed, string code)
+    {
+        var result = Address.Create(null, "Flin Flon", typed, null, "Canada");
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(code, result.Value.Province);
+    }
+
+    [Theory]
+    [InlineData("Minnesota")]
+    [InlineData("XX")]
+    [InlineData("Manitoba, Canada")]
+    public void Create_refuses_a_province_that_is_not_a_Canadian_province_or_territory(string typed)
+    {
+        var result = Address.Create(null, "Thompson", typed, null, "Canada");
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("Trips.Stop.UnknownProvince", result.Error.Code);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+        Assert.Contains(typed, result.Error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -79,7 +109,7 @@ public class AddressTests
         var address = result.Value;
         Assert.Equal("123 Main St", address.Street);
         Assert.Equal("Thompson", address.City);
-        Assert.Equal("Manitoba", address.Province);
+        Assert.Equal("MB", address.Province);
         Assert.Equal("R8N 0M4", address.PostalCode);
         Assert.Equal("Canada", address.Country);
     }
