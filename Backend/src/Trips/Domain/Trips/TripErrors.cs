@@ -28,6 +28,23 @@ public static class TripErrors
     public static readonly Error InvalidDistance = Error.Validation(
         "Trips.Trip.InvalidDistance", "The trip distance cannot be negative.");
 
+    /// <summary>
+    /// A corridor endpoint or stop names a province that is not one of the thirteen
+    /// codes/names. <paramref name="which"/> reads like <c>origin "Flin Flon"</c>.
+    /// </summary>
+    public static Error UnknownProvince(string which, string value) => Error.Validation(
+        "Trips.Trip.UnknownProvince",
+        $"The trip's {which} has an unrecognised province \"{value.Trim()}\" — use the two-letter code (MB) or the full name (Manitoba).");
+
+    /// <summary>
+    /// The Manitoba-only rule (OperatingArea): the trip's origin, destination, or a stop lies
+    /// outside the operating area. <paramref name="which"/> reads like <c>destination "Flin Flon"</c>;
+    /// <paramref name="province"/> is the code.
+    /// </summary>
+    public static Error OutsideOperatingArea(string which, string province) => Error.Validation(
+        "Trips.Trip.OutsideOperatingArea",
+        $"The trip's {which} is in {Stops.CanadianProvince.NameOf(province)} ({province}), outside the {Planning.OperatingArea.Description} operating area — this request must be declined or referred to a partner carrier.");
+
     public static readonly Error InvalidSeats = Error.Validation(
         "Trips.Trip.InvalidSeats", "Seat counts cannot be negative.");
 

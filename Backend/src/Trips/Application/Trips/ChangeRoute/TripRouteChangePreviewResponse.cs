@@ -59,7 +59,7 @@ public sealed record TripRouteChangePartnerResponse(
 
 /// <summary>
 /// One leg as it is now and as it would be. The <c>new*</c> corridor fields are null when the
-/// target route does not exist. <see cref="WillChange"/> is false for a paired leg already on
+/// target route does not exist (the <c>new*Province</c> fields are two-letter codes). <see cref="WillChange"/> is false for a paired leg already on
 /// the target route or no longer Scheduled — its <c>new*</c> fields then describe what it would
 /// have become, so a client must not present them as the outcome. <see cref="NewWindowEnd"/> is departure + the route's estimated duration
 /// when the leg has a window end today, and null when its window is open-ended (it stays
@@ -77,7 +77,9 @@ public sealed record TripRouteChangeLegResponse(
     string CurrentDestination,
     int CurrentDistanceKm,
     string? NewOrigin,
+    string? NewOriginProvince,
     string? NewDestination,
+    string? NewDestinationProvince,
     int? NewDistanceKm,
     IReadOnlyList<TripStopResponse>? NewStops,
     TimeOnly WindowStart,
@@ -100,7 +102,9 @@ public sealed record TripRouteChangeLegResponse(
             trip.Destination,
             trip.DistanceKm,
             snapshot?.Origin,
+            snapshot?.OriginProvince,
             snapshot?.Destination,
+            snapshot?.DestinationProvince,
             snapshot?.DistanceKm,
             snapshot is null
                 ? null
@@ -110,6 +114,7 @@ public sealed record TripRouteChangeLegResponse(
                     stop.StopId,
                     stop.Latitude,
                     stop.Longitude,
+                    stop.EffectiveProvince,
                     stop.OutboundOffsetMinutes,
                     stop.ReturnOffsetMinutes))],
             trip.WindowStart,

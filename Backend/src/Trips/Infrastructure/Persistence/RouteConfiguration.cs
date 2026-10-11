@@ -29,9 +29,11 @@ public sealed class RouteConfiguration : IEntityTypeConfiguration<Route>
         builder.Property(r => r.CreatedAtUtc).HasColumnName("created_at_utc");
         builder.Property(r => r.UpdatedAtUtc).HasColumnName("updated_at_utc");
 
-        // Origin/Destination are derived from Stops — never mapped.
+        // Origin/Destination (and their provinces) are derived from Stops — never mapped.
         builder.Ignore(r => r.Origin);
         builder.Ignore(r => r.Destination);
+        builder.Ignore(r => r.OriginProvince);
+        builder.Ignore(r => r.DestinationProvince);
 
         builder.HasIndex(r => new { r.TenantId, r.Name });
     }

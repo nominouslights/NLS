@@ -34,6 +34,18 @@ public sealed class Route : AggregateRoot, ITenantScoped
     /// <summary>Last stop's name — the outbound leg's end point.</summary>
     public string Destination => Stops.OrderBy(stop => stop.Order).Last().Name;
 
+    /// <summary>First stop's province code (null on a legacy snapshot = Manitoba).</summary>
+    public string OriginProvince => Stops.OrderBy(stop => stop.Order).First().EffectiveProvince;
+
+    /// <summary>Last stop's province code (null on a legacy snapshot = Manitoba).</summary>
+    public string DestinationProvince => Stops.OrderBy(stop => stop.Order).Last().EffectiveProvince;
+
+    /// <summary>
+    /// Creates a route. Every stop must lie inside the operating area
+    /// (<see cref="Planning.OperatingArea"/> — Manitoba only): a catalog stop elsewhere may exist
+    /// but is refused here with <c>Trips.Route.StopOutsideOperatingArea</c>, and the same check
+    /// runs on <see cref="Update"/>, so no route can ever carry a stop outside the area.
+    /// </summary>
     public static Result<Route> Create(
         Guid tenantId,
         string name,
@@ -53,7 +65,7 @@ public sealed class Route : AggregateRoot, ITenantScoped
         {
             TenantId = tenantId,
             Name = name.Trim(),
-            Stops = NormalizeStops(stops),
+            Stops = NormalizeStops(validation.Value),
             DistanceKm = distanceKm,
             EstimatedDuration = estimatedDuration,
             RequiredLicenceClass = Normalize(requiredLicenceClass),
@@ -77,11 +89,11 @@ public sealed class Route : AggregateRoot, ITenantScoped
         var validation = Validate(name, stops, distanceKm, estimatedDuration);
         if (validation.IsFailure)
         {
-            return validation;
+            return Result.Failure(validation.Error);
         }
 
         Name = name.Trim();
-        Stops = NormalizeStops(stops);
+        Stops = NormalizeStops(validation.Value);
         DistanceKm = distanceKm;
         EstimatedDuration = estimatedDuration;
         RequiredLicenceClass = Normalize(requiredLicenceClass);
@@ -92,7 +104,12 @@ public sealed class Route : AggregateRoot, ITenantScoped
         return Result.Success();
     }
 
-    private static Result Validate(
+    /// <summary>
+    /// Validates the whole row and hands back the stops with their provinces normalised to codes
+    /// (the operating-area gate is the one check that rewrites its input), ready for
+    /// <see cref="NormalizeStops"/>.
+    /// </summary>
+    private static Result<List<RouteStop>> Validate(
         string name,
         IReadOnlyList<RouteStop> stops,
         int distanceKm,
@@ -100,27 +117,34 @@ public sealed class Route : AggregateRoot, ITenantScoped
     {
         if (string.IsNullOrWhiteSpace(name))
         {
-            return Result.Failure(RouteErrors.NameRequired);
+            return Result.Failure<List<RouteStop>>(RouteErrors.NameRequired);
         }
 
         if (stops.Count < 2)
         {
-            return Result.Failure(RouteErrors.AtLeastTwoStops);
+            return Result.Failure<List<RouteStop>>(RouteErrors.AtLeastTwoStops);
         }
 
         if (stops.Any(stop => string.IsNullOrWhiteSpace(stop.Name)))
         {
-            return Result.Failure(RouteErrors.StopNameRequired);
+            return Result.Failure<List<RouteStop>>(RouteErrors.StopNameRequired);
+        }
+
+        // Manitoba-only: a stop outside the operating area can never be placed on a route.
+        var area = Planning.OperatingArea.ValidateRouteStops(stops);
+        if (area.IsFailure)
+        {
+            return area;
         }
 
         if (distanceKm <= 0)
         {
-            return Result.Failure(RouteErrors.InvalidDistance);
+            return Result.Failure<List<RouteStop>>(RouteErrors.InvalidDistance);
         }
 
         if (estimatedDuration <= TimeSpan.Zero)
         {
-            return Result.Failure(RouteErrors.InvalidDuration);
+            return Result.Failure<List<RouteStop>>(RouteErrors.InvalidDuration);
         }
 
         // Each leg's timetable is validated in its own travel order: the outbound runs in
@@ -130,10 +154,13 @@ public sealed class Route : AggregateRoot, ITenantScoped
         var outbound = ValidateLeg([.. ordered.Select(stop => stop.OutboundOffsetMinutes)]);
         if (outbound.IsFailure)
         {
-            return outbound;
+            return Result.Failure<List<RouteStop>>(outbound.Error);
         }
 
-        return ValidateLeg([.. ordered.AsEnumerable().Reverse().Select(stop => stop.ReturnOffsetMinutes)]);
+        var inbound = ValidateLeg([.. ordered.AsEnumerable().Reverse().Select(stop => stop.ReturnOffsetMinutes)]);
+        return inbound.IsFailure
+            ? Result.Failure<List<RouteStop>>(inbound.Error)
+            : area;
     }
 
     /// <summary>
@@ -173,7 +200,8 @@ public sealed class Route : AggregateRoot, ITenantScoped
 
     /// <summary>
     /// Re-sequences stops 0..n-1 in their given order, trimming names and carrying the
-    /// catalog reference (StopId), coordinate snapshot and timetable offsets through.
+    /// catalog reference (StopId), coordinate snapshot, province code and timetable offsets
+    /// through.
     /// </summary>
     private static List<RouteStop> NormalizeStops(IReadOnlyList<RouteStop> stops) =>
         [.. stops
@@ -185,6 +213,7 @@ public sealed class Route : AggregateRoot, ITenantScoped
                 Order = index,
                 Latitude = stop.Latitude,
                 Longitude = stop.Longitude,
+                Province = stop.Province,
                 OutboundOffsetMinutes = stop.OutboundOffsetMinutes,
                 ReturnOffsetMinutes = stop.ReturnOffsetMinutes,
             })];

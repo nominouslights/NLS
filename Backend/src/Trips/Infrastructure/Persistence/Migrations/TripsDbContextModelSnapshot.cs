@@ -1490,6 +1490,14 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(200)")
                         .HasColumnName("destination");
 
+                    b.Property<string>("DestinationProvince")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(2)
+                        .HasColumnType("character varying(2)")
+                        .HasDefaultValue("MB")
+                        .HasColumnName("destination_province");
+
                     b.Property<string>("Direction")
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)")
@@ -1534,6 +1542,14 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)")
                         .HasColumnName("origin");
+
+                    b.Property<string>("OriginProvince")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(2)
+                        .HasColumnType("character varying(2)")
+                        .HasDefaultValue("MB")
+                        .HasColumnName("origin_province");
 
                     b.Property<string>("PoNumber")
                         .HasMaxLength(64)
@@ -2490,6 +2506,13 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("destination");
 
+                    b.Property<string>("DestinationProvince")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("MB")
+                        .HasColumnName("destination_province");
+
                     b.Property<string>("Direction")
                         .HasColumnType("text")
                         .HasColumnName("direction");
@@ -2526,6 +2549,13 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("origin");
+
+                    b.Property<string>("OriginProvince")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("MB")
+                        .HasColumnName("origin_province");
 
                     b.Property<string>("PoNumber")
                         .HasColumnType("text")
@@ -2787,6 +2817,8 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
 
                             b1.Property<int?>("OutboundOffsetMinutes");
 
+                            b1.Property<string>("Province");
+
                             b1.Property<int?>("ReturnOffsetMinutes");
 
                             b1.Property<Guid?>("StopId");
@@ -2913,6 +2945,8 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
 
                             b1.Property<int?>("OutboundOffsetMinutes");
 
+                            b1.Property<string>("Province");
+
                             b1.Property<int?>("ReturnOffsetMinutes");
 
                             b1.Property<Guid?>("StopId");
@@ -2949,6 +2983,8 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                             b1.Property<int>("Order");
 
                             b1.Property<int?>("OutboundOffsetMinutes");
+
+                            b1.Property<string>("Province");
 
                             b1.Property<int?>("ReturnOffsetMinutes");
 
@@ -3072,6 +3108,8 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
                             b1.Property<int>("Order");
 
                             b1.Property<int?>("OutboundOffsetMinutes");
+
+                            b1.Property<string>("Province");
 
                             b1.Property<int?>("ReturnOffsetMinutes");
 

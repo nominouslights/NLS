@@ -95,7 +95,9 @@ internal sealed class TripProjection : IProjection<TripsDbContext>
         row.RouteId = source.RouteId;
         row.RouteName = source.RouteName;
         row.Origin = source.Origin;
+        row.OriginProvince = source.OriginProvince;
         row.Destination = source.Destination;
+        row.DestinationProvince = source.DestinationProvince;
         row.Stops = [.. source.Stops];
         row.DistanceKm = source.DistanceKm;
 
