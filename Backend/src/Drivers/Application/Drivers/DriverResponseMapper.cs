@@ -31,5 +31,8 @@ public static class DriverResponseMapper
         latestDrivingHours,
         latestHosDate,
         driver.RegisteredAtUtc,
-        driver.UpdatedAtUtc);
+        driver.UpdatedAtUtc,
+        driver.PriorRecordsCoveredThroughDate,
+        driver.PriorRecordsAttestedAtUtc,
+        driver.WorksForOtherCarriers);
 }

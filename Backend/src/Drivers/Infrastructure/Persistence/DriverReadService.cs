@@ -53,5 +53,8 @@ internal sealed class DriverReadService(DriversDbContext context) : IDriverReadS
         d.LatestDrivingHours,
         d.LatestHosDate,
         d.RegisteredAtUtc,
-        d.UpdatedAtUtc);
+        d.UpdatedAtUtc,
+        d.PriorRecordsCoveredThroughDate,
+        d.PriorRecordsAttestedAtUtc,
+        d.WorksForOtherCarriers);
 }

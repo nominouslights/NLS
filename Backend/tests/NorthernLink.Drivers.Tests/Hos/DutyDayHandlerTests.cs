@@ -26,6 +26,9 @@ public class DutyDayHandlerTests
     private static readonly FixedClock Clock = new(Now);
     private static readonly FakeActor Driver = new(UserId, Roles.Driver);
 
+    /// <summary>Nothing on the compliance side — the reads see a known driver with no records.</summary>
+    private static FakeComplianceRecords NoCompliance() => new();
+
     private static RecordDutyEventCommand Record(
         string hhmm, DutyStatus status, Guid? eventId = null, string source = HosDisplay.DriverAppSource) =>
         new(
@@ -286,7 +289,7 @@ public class DutyDayHandlerTests
     {
         var repository = new FakeDutyDayRepository();
         repository.Days.Add(DayWith(Draft("06:00", DutyStatus.OnDuty), Draft("06:30", DutyStatus.Driving)));
-        var handler = new GetHosStatusQueryHandler(repository, Clock);
+        var handler = new GetHosStatusQueryHandler(repository, NoCompliance(), Clock);
 
         var result = await handler.Handle(new GetHosStatusQuery(TestDrivers.TenantId, DriverId), CancellationToken.None);
 
@@ -300,6 +303,7 @@ public class DutyDayHandlerTests
         Assert.Equal(8 * 3600 + 30 * 60, status.Evaluation.Today.DrivingSeconds);
         Assert.Null(status.OutOfService);
         Assert.False(status.EldMalfunctionOpen);
+        Assert.Null(status.PriorRecords);
 
         // One day on file: the ledger's known-from is that day's start, inside the 14-day
         // window, so the records are incomplete and nothing here is a free pass.
@@ -312,7 +316,7 @@ public class DutyDayHandlerTests
     [Fact]
     public async Task A_driver_with_no_ledger_has_no_records_and_nothing_known()
     {
-        var handler = new GetHosStatusQueryHandler(new FakeDutyDayRepository(), Clock);
+        var handler = new GetHosStatusQueryHandler(new FakeDutyDayRepository(), NoCompliance(), Clock);
 
         var result = await handler.Handle(new GetHosStatusQuery(TestDrivers.TenantId, DriverId), CancellationToken.None);
 
@@ -337,7 +341,7 @@ public class DutyDayHandlerTests
         }
 
         repository.Days.Add(DayWith(Draft("06:00", DutyStatus.OnDuty), Draft("06:30", DutyStatus.Driving)));
-        var handler = new GetHosStatusQueryHandler(repository, Clock);
+        var handler = new GetHosStatusQueryHandler(repository, NoCompliance(), Clock);
 
         var status = (await handler.Handle(new GetHosStatusQuery(TestDrivers.TenantId, DriverId), CancellationToken.None)).Value;
 
@@ -356,7 +360,7 @@ public class DutyDayHandlerTests
         var repository = new FakeDutyDayRepository();
         repository.Days.Add(DayWith(Draft("06:00", DutyStatus.OnDuty), Draft("06:30", DutyStatus.Driving)));
         var handler = new GetHosRosterStatusQueryHandler(
-            repository, new FakeDriverReadService(Roster(DriverId), Roster(other, "A. Bear")), Clock);
+            repository, NoCompliance(), new FakeDriverReadService(Roster(DriverId), Roster(other, "A. Bear")), Clock);
 
         var result = await handler.Handle(new GetHosRosterStatusQuery(TestDrivers.TenantId), CancellationToken.None);
 
@@ -386,7 +390,7 @@ public class DutyDayHandlerTests
             Draft("06:00", DutyStatus.OnDuty),
             Draft("06:30", DutyStatus.Driving),
             Draft("12:00", DutyStatus.OffDuty, eventId: closer)));
-        var handler = new GetDutyDaysQueryHandler(repository, Clock);
+        var handler = new GetDutyDaysQueryHandler(repository, NoCompliance(), Clock);
 
         var result = await handler.Handle(new GetDutyDaysQuery(TestDrivers.TenantId, DriverId, D.AddDays(-2), D.AddDays(3)), CancellationToken.None);
 
@@ -410,14 +414,16 @@ public class DutyDayHandlerTests
         Assert.Equal(Now, today.Segments[2].ToUtc);
         Assert.Equal(HosWire.DriverAppSource, today.Events[0].Source);
         Assert.False(today.Certified);
+        Assert.Empty(today.Exceptions);
+        Assert.Null(today.OutOfService);
     }
 
     [Fact]
     public async Task A_single_day_after_today_is_not_found_and_a_bad_range_is_refused()
     {
         var repository = new FakeDutyDayRepository();
-        var one = new GetDutyDayQueryHandler(repository, Clock);
-        var range = new GetDutyDaysQueryHandler(repository, Clock);
+        var one = new GetDutyDayQueryHandler(repository, NoCompliance(), Clock);
+        var range = new GetDutyDaysQueryHandler(repository, NoCompliance(), Clock);
 
         Assert.Equal(HosErrors.DayNotFound, (await one.Handle(new GetDutyDayQuery(TestDrivers.TenantId, DriverId, D.AddDays(1)), CancellationToken.None)).Error);
         Assert.Equal(GetDutyDaysQueryHandler.RangeInvalid, (await range.Handle(new GetDutyDaysQuery(TestDrivers.TenantId, DriverId, D, D.AddDays(-1)), CancellationToken.None)).Error);
@@ -438,7 +444,7 @@ public class DutyDayHandlerTests
         Assert.True(day.Append(Draft("06:30", DutyStatus.Driving, dayOffset: -20), Now).IsSuccess);
         Assert.True(day.Append(Draft("20:00", DutyStatus.OffDuty, dayOffset: -20), Now).IsSuccess);
         repository.Days.Add(day);
-        var handler = new GetDutyDayQueryHandler(repository, Clock);
+        var handler = new GetDutyDayQueryHandler(repository, NoCompliance(), Clock);
 
         var summary = (await handler.Handle(new GetDutyDayQuery(TestDrivers.TenantId, DriverId, D.AddDays(-20)), CancellationToken.None)).Value;
 

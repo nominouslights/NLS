@@ -1,6 +1,8 @@
 using NorthernLink.Drivers.Application.Abstractions;
 using NorthernLink.Drivers.Application.Drivers;
 using NorthernLink.Drivers.Application.Hos;
+using NorthernLink.Drivers.Application.Hos.Ledger;
+using NorthernLink.Drivers.Domain.Drivers;
 using NorthernLink.Drivers.Domain.Hos;
 using NorthernLink.Shared.Tenancy;
 
@@ -144,4 +146,121 @@ public static class HosTestSupport
     public static DriverResponse Roster(Guid id, string name = "J. Spence") => new(
         id, null, name, null, "Class 2", null, "Northern Link", false, "Active",
         0, null, null, null, null, Now, Now);
+
+    // ---- Compliance fakes ----
+
+    /// <summary>
+    /// A roster row for <see cref="DriverId"/> with its id forced, so handlers that look the
+    /// driver up by id (and the attestation that lives on it) can be exercised.
+    /// </summary>
+    public static Driver RosterDriver(Guid? id = null)
+    {
+        var driver = TestDrivers.Register().Value;
+        typeof(NorthernLink.Shared.Kernel.Entity).GetProperty("Id")!.SetValue(driver, id ?? DriverId);
+        driver.ClearDomainEvents();
+        return driver;
+    }
+
+    public sealed class FakeDriverRepository(params Driver[] drivers) : IDriverRepository
+    {
+        public List<Driver> Drivers { get; } = [.. drivers];
+
+        public int Saves { get; private set; }
+
+        public Task<Driver?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Drivers.FirstOrDefault(d => d.Id == id));
+
+        public Task<Driver?> GetByUserIdAsync(Guid userId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Drivers.FirstOrDefault(d => d.UserId == userId));
+
+        public void Add(Driver driver) => Drivers.Add(driver);
+
+        public Task SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            Saves++;
+            foreach (var driver in Drivers)
+            {
+                driver.ClearDomainEvents();
+            }
+
+            return Task.CompletedTask;
+        }
+    }
+
+    /// <summary>
+    /// The compliance records a test puts on file. Also serves as the reader the queries load
+    /// them through: <see cref="LoadAsync"/> answers from these lists (ignoring the window —
+    /// tests put only what they mean on file) and reads the attestation off
+    /// <see cref="Driver"/> when one is set.
+    /// </summary>
+    public sealed class FakeComplianceRecords : IComplianceRecordsReader,
+        IHosExceptionRepository, IDriverOutOfServiceRepository, IEldMalfunctionRepository, IComplianceFindingRepository
+    {
+        public List<HosException> Exceptions { get; } = [];
+
+        public List<DriverOutOfService> OutOfService { get; } = [];
+
+        public List<EldMalfunctionReport> Malfunctions { get; } = [];
+
+        public List<ComplianceFinding> Findings { get; } = [];
+
+        /// <summary>The roster row whose attestation the reader reports; null = the driver does not exist.</summary>
+        public Driver? Driver { get; set; } = RosterDriver();
+
+        public int Saves { get; private set; }
+
+        public ComplianceRecords Records(Guid driverId) => new(
+            Exceptions.Where(e => e.DriverId == driverId).ToList(),
+            OutOfService.Where(o => o.DriverId == driverId).ToList(),
+            Malfunctions.Where(m => m.DriverId == driverId).ToList(),
+            Findings.Where(f => f.DriverId == driverId).ToList(),
+            Driver?.PriorRecordsCoveredThroughDate,
+            Driver?.PriorRecordsAttestedAtUtc,
+            Driver?.PriorRecordsAttestedByUserId,
+            Driver?.PriorRecordsNote,
+            Driver?.WorksForOtherCarriers ?? false);
+
+        public Task<ComplianceRecords?> LoadAsync(Guid driverId, DateTimeOffset fromUtc, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Driver is null || Driver.Id != driverId ? null : Records(driverId));
+
+        public Task<IReadOnlyDictionary<Guid, ComplianceRecords>> LoadForTenantAsync(DateTimeOffset fromUtc, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyDictionary<Guid, ComplianceRecords>>(
+                Driver is null ? new Dictionary<Guid, ComplianceRecords>() : new Dictionary<Guid, ComplianceRecords> { [Driver.Id] = Records(Driver.Id) });
+
+        Task<HosException?> IHosExceptionRepository.GetAsync(Guid id, CancellationToken cancellationToken) =>
+            Task.FromResult(Exceptions.FirstOrDefault(e => e.Id == id));
+
+        public void Add(HosException exception) => Exceptions.Add(exception);
+
+        Task<DriverOutOfService?> IDriverOutOfServiceRepository.GetAsync(Guid id, CancellationToken cancellationToken) =>
+            Task.FromResult(OutOfService.FirstOrDefault(o => o.Id == id));
+
+        public Task<IReadOnlyList<DriverOutOfService>> ActiveForDriverAsync(Guid driverId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<DriverOutOfService>>(
+                OutOfService.Where(o => o.DriverId == driverId && o.Status == OutOfServiceStatus.Active).ToList());
+
+        public void Add(DriverOutOfService record) => OutOfService.Add(record);
+
+        Task<EldMalfunctionReport?> IEldMalfunctionRepository.GetAsync(Guid id, CancellationToken cancellationToken) =>
+            Task.FromResult(Malfunctions.FirstOrDefault(m => m.Id == id));
+
+        public void Add(EldMalfunctionReport report) => Malfunctions.Add(report);
+
+        Task<ComplianceFinding?> IComplianceFindingRepository.GetAsync(Guid id, CancellationToken cancellationToken) =>
+            Task.FromResult(Findings.FirstOrDefault(f => f.Id == id));
+
+        public void Add(ComplianceFinding finding) => Findings.Add(finding);
+
+        public Task SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            Saves++;
+            foreach (var aggregate in Exceptions.Cast<NorthernLink.Shared.Kernel.AggregateRoot>()
+                .Concat(OutOfService).Concat(Malfunctions).Concat(Findings))
+            {
+                aggregate.ClearDomainEvents();
+            }
+
+            return Task.CompletedTask;
+        }
+    }
 }

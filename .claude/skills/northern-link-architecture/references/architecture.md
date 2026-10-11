@@ -447,6 +447,61 @@ roster's read routes (`GET /api/drivers`, `GET /api/drivers/{id}`, the HOS roste
 the write routes ever admitting one. `HosLogEntry` and `GET/POST …/hos` remain as the legacy
 daily-totals path.
 
+**The compliance aggregates** (Drivers `Domain/Hos/`, 2026-10) are the records that override or
+stand behind the hours gate, each its own aggregate and table with the standard RLS policies:
+
+- `HosException` (`hos_exceptions`) — the only overrides the safety policy allows. Adverse
+  driving conditions and an emergency are **declared** by the driver (or dispatch for them)
+  within 24 hours of the conditions arising and apply at once; an off-duty deferral (s.16) is
+  **approved** by a compliance officer ahead of a named trip and is born `Approved`. Statuses
+  Declared → Acknowledged / Approved → Rejected / Withdrawn; only the first three *apply* — the
+  engine never sees a rejected or withdrawn one. The aggregate enforces the regulation's shape
+  (s.76 not-knowable-before-departure, a 1-minute-to-2-hour extension; a deferral's trip, future
+  start and 1-minute-to-2-hour amount); whether the exception rescues the hours is the engine's
+  call. The engine is handed the exception at `EffectiveFromUtc` (when the conditions arose),
+  which is what its "declared inside the shift" test means. The driver may withdraw only while
+  still Declared; dispatch or compliance acknowledges; compliance rejects or withdraws at any
+  applying status.
+- `DriverOutOfService` (`driver_out_of_service`) — enforcement's declaration (s.91), recorded by
+  a compliance officer only: 72 hours by default, an explicit end, or open-ended until lifted; at
+  most one active per driver; lifting early requires a reason. Recording one opens a Severe
+  `OutOfServiceDeclared` finding **in the same transaction** (the handler adds both aggregates to
+  one unit of work — Drivers has no journal-driven `OnEvent` reactions, and one transaction needs
+  no idempotency key). The engine blocks driving inside the span and reports any driving that
+  happened anyway as `DroveWhileOutOfService`.
+- `EldMalfunctionReport` (`eld_malfunction_reports`) — the driver or dispatch reports the ELD
+  stopped recording (s.78.2); a compliance officer resolves it. While open, `hos/status` says
+  `eldMalfunctionOpen` — paper-log mode, a warning that never blocks. It snapshots the driver's
+  name so the integration event can address the compliance alert without a lookup.
+- `ComplianceFinding` (`compliance_findings`) — a compliance officer's finding against one day:
+  an `HosRule` name or one of the four record-keeping offences the engine cannot see
+  (`Falsification`, `Tampering`, `TwoRecords`, `OutOfServiceDeclared`), a severity, and a
+  one-way workflow Open → Corrected → Closed. Never deleted; Closed is terminal. Internal to
+  Drivers — no integration event.
+- **The prior-records attestation** lives on `Driver` (`AttestPriorRecords`, ComplianceAccess):
+  the officer confirms the driver's previous 14 days of records (s.82(1)(f)) are on file through
+  a date, plus whether they drive for another carrier. `DutyLedgerAssembler` then sets the
+  ledger's known-from to the earlier of the first day on file and `coveredThrough − 13`, and
+  feeds each attested day before the driver's first own day as a zero-hour `OtherCarrierDay` —
+  the engine's own model of a pre-hire declaration, and the only input it has for "records on
+  file but not keyed". That is what clears `RecordsIncomplete` for a new hire. The engine reads
+  a zero-hour row as a declared day off, which the attestation does not actually establish; an
+  attested-range input on `DutyLedger` is the engine change that would close that gap.
+
+Every compliance read goes through `IComplianceRecordsReader` (write side, like the ledger) and
+the one `DutyLedgerAssembler.Build` overload, so `hos/status`, `hos/days`, the roster batch, the
+`rm_duty_days` projection and the new `GET …/hos/audit` (one row per Winnipeg day — events and
+sources, certification, engine totals and violations, every exception touching the day, the
+out-of-service overlap, open ELD malfunction, other-carrier rows, attested-window flag, findings)
+all evaluate the same ledger. Decisions sit on a fifth sibling group carrying `ComplianceAccess`
+(`ComplianceEndpoints.cs`: deferral approval and rejection, ELD resolution, out-of-service record
+and lift, findings, the attestation, the audit) with no own-record check — a compliance officer
+acts on any driver's record — while declaring, acknowledging and withdrawing an exception and
+reporting an ELD malfunction stay on the `HosAccess` group behind the own-record check; every
+handler re-proves the role underneath the policy. Changes publish `drivers.hos-exception-changed`,
+`drivers.driver-out-of-service-changed` and `drivers.eld-malfunction-changed`, and the attestation
+rides on `drivers.driver-changed` as two additive fields; nothing consumes them yet.
+
 ---
 
 ---

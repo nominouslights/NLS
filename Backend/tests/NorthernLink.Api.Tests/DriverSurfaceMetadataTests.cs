@@ -150,14 +150,16 @@ public class DriverSurfaceMetadataTests : IAsyncLifetime
         // Catches a typo'd or invented policy name, which fails only on the first real request
         // to that endpoint — in production, not at startup. HosAccess and DriverRosterAccess are
         // the two the hours-of-service surface added; both contain roles DispatchAccess does
-        // not, and each lives on its own sibling group under /api/drivers.
+        // not, and each lives on its own sibling group under /api/drivers. ComplianceAccess is
+        // the narrowest of all (Owner + ComplianceOfficer) and carries the compliance decisions.
         var unexpected = Guarded()
             .Select(endpoint => endpoint.Metadata.GetMetadata<IAuthorizeData>()?.Policy)
             .Where(policy => policy is not null
                 && policy != AuthorizationPolicies.DispatchAccess
                 && policy != AuthorizationPolicies.DriverAccess
                 && policy != AuthorizationPolicies.HosAccess
-                && policy != AuthorizationPolicies.DriverRosterAccess)
+                && policy != AuthorizationPolicies.DriverRosterAccess
+                && policy != AuthorizationPolicies.ComplianceAccess)
             .Distinct()
             .ToList();
 
@@ -275,13 +277,52 @@ public class DriverSurfaceMetadataTests : IAsyncLifetime
             "GET /api/drivers/{driverId:guid}/hos",
             "GET /api/drivers/{driverId:guid}/hos/days",
             "GET /api/drivers/{driverId:guid}/hos/days/{date}",
+            "GET /api/drivers/{driverId:guid}/hos/eld-malfunctions",
+            "GET /api/drivers/{driverId:guid}/hos/exceptions",
             "GET /api/drivers/{driverId:guid}/hos/status",
             "POST /api/drivers/{driverId:guid}/hos",
             "POST /api/drivers/{driverId:guid}/hos/days/{date}/certify",
             "POST /api/drivers/{driverId:guid}/hos/days/{date}/transcribe",
             "POST /api/drivers/{driverId:guid}/hos/duty-events",
             "POST /api/drivers/{driverId:guid}/hos/duty-events/{eventId:guid}/amend",
+            "POST /api/drivers/{driverId:guid}/hos/eld-malfunctions",
+            "POST /api/drivers/{driverId:guid}/hos/exceptions",
+            "POST /api/drivers/{driverId:guid}/hos/exceptions/{id:guid}/acknowledge",
+            "POST /api/drivers/{driverId:guid}/hos/exceptions/{id:guid}/withdraw",
         ], hos);
+    }
+
+    /// <summary>
+    /// The compliance decisions, pinned whole: the overrides past the hours gate (deferral
+    /// approval), the declarations that stand behind it (out of service), ELD resolution,
+    /// findings, the prior-records attestation and the audit. Every one carries
+    /// ComplianceAccess — Owner and ComplianceOfficer only. A route here reverting to HosAccess
+    /// would let a driver approve their own override; one missing from here would be a
+    /// compliance decision a dispatcher could make.
+    /// </summary>
+    [Fact]
+    public void The_ComplianceAccess_surface_is_exactly_the_compliance_decisions()
+    {
+        var compliance = _endpoints
+            .Where(endpoint => endpoint.Metadata.GetMetadata<IAuthorizeData>()?.Policy == AuthorizationPolicies.ComplianceAccess)
+            .Select(Describe)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Equal(
+        [
+            "GET /api/drivers/{driverId:guid}/findings",
+            "GET /api/drivers/{driverId:guid}/hos/audit",
+            "GET /api/drivers/{driverId:guid}/out-of-service",
+            "POST /api/drivers/{driverId:guid}/findings",
+            "POST /api/drivers/{driverId:guid}/hos/eld-malfunctions/{id:guid}/resolve",
+            "POST /api/drivers/{driverId:guid}/hos/exceptions/deferral",
+            "POST /api/drivers/{driverId:guid}/hos/exceptions/{id:guid}/reject",
+            "POST /api/drivers/{driverId:guid}/out-of-service",
+            "POST /api/drivers/{driverId:guid}/out-of-service/{id:guid}/lift",
+            "POST /api/drivers/{driverId:guid}/prior-records-attestation",
+            "PUT /api/drivers/{driverId:guid}/findings/{id:guid}",
+        ], compliance);
     }
 
     /// <summary>

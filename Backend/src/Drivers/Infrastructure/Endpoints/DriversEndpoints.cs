@@ -95,6 +95,11 @@ public static class DriversEndpoints
         // Hours of service — the fourth sibling group (HosAccess), mapped in HosEndpoints.
         HosEndpoints.Map(app);
 
+        // Compliance decisions — the fifth sibling group (ComplianceAccess), mapped in
+        // ComplianceEndpoints: deferral approval, out-of-service, ELD resolution, findings,
+        // the prior-records attestation, the audit.
+        ComplianceEndpoints.Map(app);
+
         return app;
     }
 

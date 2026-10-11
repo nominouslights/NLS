@@ -8,6 +8,7 @@ namespace NorthernLink.Drivers.Application.Hos.Status;
 
 public sealed class GetHosRosterStatusQueryHandler(
     IDutyDayRepository repository,
+    IComplianceRecordsReader compliance,
     IDriverReadService drivers,
     TimeProvider clock)
     : IQueryHandler<GetHosRosterStatusQuery, IReadOnlyList<HosRosterStatusResponse>>
@@ -16,11 +17,13 @@ public sealed class GetHosRosterStatusQueryHandler(
     {
         var nowUnix = clock.GetUtcNow().ToUnixTimeSeconds();
         var today = DutyLedgerAssembler.Calendar.DayOf(nowUnix);
+        var windowFrom = today.AddDays(-DutyLedgerAssembler.LookbackDays);
 
         var roster = await drivers.GetDriversAsync(cancellationToken);
-        var days = await repository.LoadRangeForAllDriversAsync(
-            today.AddDays(-DutyLedgerAssembler.LookbackDays), today, cancellationToken);
+        var days = await repository.LoadRangeForAllDriversAsync(windowFrom, today, cancellationToken);
         var knownFrom = await repository.EarliestLocalDatesAsync(cancellationToken);
+        var records = await compliance.LoadForTenantAsync(
+            DateTimeOffset.FromUnixTimeSeconds(DutyLedgerAssembler.Calendar.DayStartUnix(windowFrom)), cancellationToken);
 
         var daysByDriver = days.GroupBy(d => d.DriverId).ToDictionary(g => g.Key, g => g.ToList());
         var rows = new List<HosRosterStatusResponse>(roster.Count);
@@ -31,7 +34,8 @@ public sealed class GetHosRosterStatusQueryHandler(
                 driver.Id,
                 daysByDriver.GetValueOrDefault(driver.Id) ?? [],
                 knownFrom.TryGetValue(driver.Id, out var first) ? first : null,
-                nowUnix);
+                nowUnix,
+                records.GetValueOrDefault(driver.Id) ?? ComplianceRecords.None);
             var evaluation = DutyLedgerAssembler.Evaluate(ledger, nowUnix);
 
             rows.Add(new HosRosterStatusResponse(

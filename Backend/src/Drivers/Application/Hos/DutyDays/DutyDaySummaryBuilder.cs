@@ -1,3 +1,4 @@
+using NorthernLink.Drivers.Application.Hos.Compliance;
 using NorthernLink.Drivers.Application.Hos.Ledger;
 using NorthernLink.Drivers.Domain.Hos;
 using NorthernLink.Shared.HoursOfService;
@@ -10,7 +11,9 @@ namespace NorthernLink.Drivers.Application.Hos.DutyDays;
 /// The engine reports the 14 days ending at its as-of instant, so a day outside today's window
 /// is evaluated with as-of parked at that day's end (which makes it the "yesterday" of that
 /// evaluation — complete, with every prior day the cycle needs still in the ledger). One
-/// evaluation serves every requested day it covers, so a 14-day calendar costs one run.
+/// evaluation serves every requested day it covers, so a 14-day calendar costs one run. The
+/// compliance records ride along: each summary lists the exceptions the engine honoured on
+/// that day and any out-of-service declaration overlapping it.
 /// </summary>
 public static class DutyDaySummaryBuilder
 {
@@ -20,8 +23,10 @@ public static class DutyDaySummaryBuilder
         DateOnly? knownFromDate,
         DateOnly from,
         DateOnly to,
-        long nowUnix)
+        long nowUnix,
+        ComplianceRecords? compliance = null)
     {
+        compliance ??= ComplianceRecords.None;
         var calendar = DutyLedgerAssembler.Calendar;
         var byDate = ledgerDays.ToDictionary(d => d.LocalDate);
         var summaries = new List<DutyDaySummaryResponse>();
@@ -32,7 +37,7 @@ public static class DutyDaySummaryBuilder
             if (evaluation is null || evaluation.Days.All(d => d.Date != date))
             {
                 var asOf = Math.Min(nowUnix, calendar.DayEndUnix(date));
-                var ledger = DutyLedgerAssembler.Build(driverId, ledgerDays, knownFromDate, asOf);
+                var ledger = DutyLedgerAssembler.Build(driverId, ledgerDays, knownFromDate, asOf, compliance);
                 evaluation = DutyLedgerAssembler.Evaluate(ledger, asOf);
             }
 
@@ -41,6 +46,8 @@ public static class DutyDaySummaryBuilder
 
             byDate.TryGetValue(date, out var day);
             var dayAsOf = Math.Min(nowUnix, calendar.DayEndUnix(date));
+            var dayStart = calendar.DayStartUnix(date);
+            var dayEnd = calendar.DayEndUnix(date);
 
             summaries.Add(new DutyDaySummaryResponse(
                 driverId,
@@ -55,12 +62,33 @@ public static class DutyDaySummaryBuilder
                 day is null ? [] : Segments(day, dayAsOf),
                 day is null ? [] : day.Events.OrderBy(e => e.AtUtc).ThenBy(e => e.Sequence).Select(ToResponse).ToList(),
                 evaluation.Violations.Where(v => v.Date == date).ToList(),
+                ApplyingExceptionsOn(compliance, dayStart, dayEnd),
+                OutOfServiceOn(compliance, dayStart, dayEnd),
                 HosDisplay.PlanningLabel));
         }
 
         summaries.Reverse();
         return summaries;
     }
+
+    /// <summary>The exceptions the engine honoured whose span touches the day, oldest first.</summary>
+    public static IReadOnlyList<HosExceptionResponse> ApplyingExceptionsOn(ComplianceRecords compliance, long dayStartUnix, long dayEndUnix) =>
+        compliance.Exceptions
+            .Where(e => e.IsApplying && e.Overlaps(dayStartUnix, dayEndUnix))
+            .OrderBy(e => e.EffectiveFromUtc)
+            .Select(ComplianceResponseMapper.ToResponse)
+            .ToList();
+
+    /// <summary>The out-of-service declaration overlapping the day (the earliest, if several), or null.</summary>
+    public static OutOfServiceResponse? OutOfServiceOn(ComplianceRecords compliance, long dayStartUnix, long dayEndUnix) =>
+        compliance.OutOfService
+            .Where(o => o.Overlaps(dayStartUnix, dayEndUnix))
+            .OrderBy(o => o.DeclaredAtUtc)
+            .Select(ToResponse)
+            .FirstOrDefault();
+
+    public static OutOfServiceResponse ToResponse(DriverOutOfService record) => new(
+        record.Id, record.DeclaredAtUtc, record.EffectiveUntilUtc, record.Reason);
 
     public static DutyEventResponse ToResponse(DutyEvent e) => new(
         e.EventId,

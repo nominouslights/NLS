@@ -42,6 +42,34 @@ public class DriverChangedIntegrationEventWireCompatTests
         Assert.Equal(Guid.Parse("aa11bb22-cc33-4d44-8e55-ff6677889900"), deserialized.EventId);
     }
 
+    /// <summary>A verbatim payload from between userId and the attestation fields being added.</summary>
+    private const string PreAttestationPayload =
+        """
+        {
+          "driverId": "4b7a1d2e-9c3f-4a5b-8d6e-7f8091a2b3c4",
+          "tenantId": "1c9f4a2e-5b3d-4e71-8c62-9d0a1b2c3d4e",
+          "name": "R. Ballantyne",
+          "licenceClass": "Class 4",
+          "status": "Active",
+          "source": "Northern Link",
+          "userId": "9f8e7d6c-5b4a-4392-8170-6f5e4d3c2b1a",
+          "eventId": "aa11bb22-cc33-4d44-8e55-ff6677889900",
+          "occurredAtUtc": "2026-09-12T14:30:52+00:00"
+        }
+        """;
+
+    [Fact]
+    public void A_payload_written_before_the_attestation_fields_existed_still_deserializes_with_them_defaulted()
+    {
+        var deserialized = JsonSerializer.Deserialize<DriverChangedIntegrationEvent>(
+            PreAttestationPayload, IntegrationEventJson.Options);
+
+        Assert.NotNull(deserialized);
+        Assert.Equal(Guid.Parse("9f8e7d6c-5b4a-4392-8170-6f5e4d3c2b1a"), deserialized.UserId);
+        Assert.Null(deserialized.PriorRecordsCoveredThroughDate);
+        Assert.False(deserialized.WorksForOtherCarriers);
+    }
+
     [Fact]
     public void A_current_payload_round_trips_with_the_user_id_intact()
     {
@@ -52,5 +80,19 @@ public class DriverChangedIntegrationEventWireCompatTests
         var deserialized = JsonSerializer.Deserialize<DriverChangedIntegrationEvent>(json, IntegrationEventJson.Options);
 
         Assert.Equal(original, deserialized);
+    }
+
+    [Fact]
+    public void A_current_payload_round_trips_with_the_attestation_intact()
+    {
+        var original = new DriverChangedIntegrationEvent(
+            Guid.NewGuid(), Guid.NewGuid(), "R. Ballantyne", "Class 4", "Active", "Northern Link", Guid.NewGuid(),
+            new DateOnly(2026, 9, 13), WorksForOtherCarriers: true);
+
+        var json = IntegrationEventJson.Serialize(original);
+        var deserialized = JsonSerializer.Deserialize<DriverChangedIntegrationEvent>(json, IntegrationEventJson.Options);
+
+        Assert.Equal(original, deserialized);
+        Assert.Contains("\"priorRecordsCoveredThroughDate\":\"2026-09-13\"", json);
     }
 }
