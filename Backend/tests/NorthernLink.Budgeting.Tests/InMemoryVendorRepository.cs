@@ -20,7 +20,7 @@ internal sealed class InMemoryVendorRepository : IVendorRepository
     private IEnumerable<Vendor> Visible => Vendors.Where(v => v.TenantId == QueryFilterTenantId);
 
     /// <summary>
-    /// Every repository call in order — <c>Lock</c>, <c>GetById</c>, <c>Commit</c> (and the save
+    /// Every repository call in order — <c>Lock</c>, <c>GetById</c>, <c>GetByIds</c>, <c>Commit</c> (and the save
     /// calls) — so a test can pin that the register lock comes before the first register read.
     /// </summary>
     public List<string> Calls { get; } = [];
@@ -42,6 +42,27 @@ internal sealed class InMemoryVendorRepository : IVendorRepository
     {
         Calls.Add("GetById");
         return Task.FromResult(Visible.FirstOrDefault(v => v.Id == id));
+    }
+
+    /// <summary>The ids each <see cref="GetByIdsAsync"/> call asked for, in call order.</summary>
+    public List<Guid[]> BatchLookups { get; } = [];
+
+    // Like the real repository: one "round trip" (one Calls entry) however many ids, missing ids
+    // simply absent, and an empty set answered without a lookup. Returned in REVERSE register
+    // order on purpose — the real query promises no order, so a caller that relied on it would
+    // pass here only by luck if this fake happened to echo the request.
+    public Task<IReadOnlyList<Vendor>> GetByIdsAsync(
+        IReadOnlyCollection<Guid> ids, CancellationToken cancellationToken = default)
+    {
+        if (ids.Count == 0)
+        {
+            return Task.FromResult<IReadOnlyList<Vendor>>([]);
+        }
+
+        Calls.Add("GetByIds");
+        BatchLookups.Add([.. ids]);
+        return Task.FromResult<IReadOnlyList<Vendor>>(
+            Visible.Where(v => ids.Contains(v.Id)).Reverse().ToList());
     }
 
     public async Task<IVendorRegisterLock> LockRegisterAsync(Guid tenantId, CancellationToken cancellationToken = default)

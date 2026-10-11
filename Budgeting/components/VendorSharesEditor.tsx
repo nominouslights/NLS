@@ -12,10 +12,10 @@ import {
   PENDING_VENDOR_NAME,
   centsToFieldText,
   remainingCents,
-  roundedCents,
+  shareAmountTextError,
   splitEvenly,
 } from "@/lib/vendorShares";
-import { formatCadPrecise } from "@/lib/money";
+import { formatCadPrecise, toHundredths } from "@/lib/money";
 import { NumberField, SelectField } from "@/components/ui/Field";
 import { ActionButton } from "@/components/ui/Button";
 import { StatusChip } from "@/components/ui/Chip";
@@ -28,7 +28,11 @@ import { StatusChip } from "@/components/ui/Chip";
 // The rules it keeps visible (all the server's — lib/vendorShares.ts mirrors them):
 //   - Shares are DOLLARS, and when there are any they cover the item's amount exactly. The live
 //     line under the rows says "Remaining $X" / "Over by $X" / "Fully assigned" — a StatusChip,
-//     so glyph + written label, never colour alone.
+//     so glyph + written label, never colour alone. It judges each share by the submit check's
+//     own exact-cents rule (shareAmountTextError), never by rounding: a share with more than two
+//     decimals — or zero, negative, or over the ceiling — puts the server's message under its row
+//     and turns the line to "Invalid amount", so 50.005 + 49.995 on $100.00 is never shown as
+//     fully assigned only to be refused on save.
 //   - Nothing rebalances by itself. Changing the item's amount only moves the live line; the two
 //     shortcuts ("Assign remaining" on a row, "Split evenly") run only when clicked.
 //   - The picker offers ACTIVE vendors, each once across the rows. A vendor the item already had
@@ -123,7 +127,11 @@ export default function VendorSharesEditor({
 }) {
   const reg = register ?? [];
   const parsed = rows.map((r) => ({ amountCad: liveAmount(r.amount) }));
-  const left = amountCad === null ? null : remainingCents(amountCad, parsed);
+  const rowErrors = rows.map((r) => shareAmountTextError(r.amount));
+  const invalid = rowErrors.some((e) => e !== null);
+  // Only computed when every typed share is exact cents — so the rounding inside remainingCents
+  // never changes a share's value, and the figure is the one the submit check would reach.
+  const left = amountCad === null || invalid ? null : remainingCents(amountCad, parsed);
 
   const update = (index: number, patch: Partial<VendorShareDraft>) =>
     onChange(rows.map((r, i) => (i === index ? { ...r, ...patch } : r)));
@@ -139,13 +147,13 @@ export default function VendorSharesEditor({
   function assignRemainingTo(index: number) {
     if (left === null || left <= 0) return;
     const own = parsed[index].amountCad;
-    update(index, { amount: centsToFieldText((own === null ? 0 : roundedCents(own)) + left) });
+    update(index, { amount: centsToFieldText((own === null ? 0 : toHundredths(own)) + left) });
   }
 
   function splitAll() {
     if (amountCad === null || rows.length === 0) return;
     const parts = splitEvenly(amountCad, rows.length);
-    onChange(rows.map((r, i) => ({ ...r, amount: centsToFieldText(roundedCents(parts[i])) })));
+    onChange(rows.map((r, i) => ({ ...r, amount: centsToFieldText(toHundredths(parts[i])) })));
   }
 
   const canAdd = rows.length < MAX_VENDOR_SHARES;
@@ -218,6 +226,20 @@ export default function VendorSharesEditor({
                     </ActionButton>
                   </div>
                 </div>
+                {rowErrors[index] !== null && (
+                  <div
+                    data-testid="vendor-share-error"
+                    style={{
+                      marginTop: 6,
+                      fontFamily: fonts.body,
+                      fontSize: 11.5,
+                      color: colors.textSecondary,
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {rowErrors[index]}
+                  </div>
+                )}
                 {chosen?.kept === "retired" && (
                   <KeptNote chip="Retired">
                     Retired — kept on this item. Once you save without it, it can&apos;t be added
@@ -262,7 +284,7 @@ export default function VendorSharesEditor({
         {!canAdd && <Note>An item can be split across at most {MAX_VENDOR_SHARES} vendors.</Note>}
       </div>
 
-      {rows.length > 0 && <RemainingLine left={left} amountCad={amountCad} />}
+      {rows.length > 0 && <RemainingLine left={left} amountCad={amountCad} invalid={invalid} />}
     </div>
   );
 }
@@ -270,10 +292,26 @@ export default function VendorSharesEditor({
 /**
  * The live balance of the split. A StatusChip carries the state (glyph + written label, the
  * figure in the label itself), and a sentence beside it says what to do — never colour alone.
+ * An invalid share wins over every balance: no total built from it would be the one saved.
  */
-function RemainingLine({ left, amountCad }: { left: number | null; amountCad: number | null }) {
-  const body =
-    left === null || amountCad === null ? (
+function RemainingLine({
+  left,
+  amountCad,
+  invalid,
+}: {
+  left: number | null;
+  amountCad: number | null;
+  invalid: boolean;
+}) {
+  const body = invalid ? (
+    <>
+      <StatusChip kind="over" label="Invalid amount" />
+      <span>
+        A share above is not a valid amount — fix it (dollars and cents, more than zero) to check
+        the split.
+      </span>
+    </>
+  ) : left === null || amountCad === null ? (
       <span>Enter the item&apos;s amount above to check the split.</span>
     ) : left > 0 ? (
       <>

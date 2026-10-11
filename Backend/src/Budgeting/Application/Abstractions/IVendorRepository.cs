@@ -12,6 +12,14 @@ public interface IVendorRepository
     Task<Vendor?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// The tenant's vendors (active or retired) among these ids, in one round trip
+    /// (<c>WHERE id = ANY(@ids)</c>), in no particular order. An id with no vendor in this tenant is
+    /// simply absent from the result — the caller decides what a missing one means. No query at
+    /// all for an empty set.
+    /// </summary>
+    Task<IReadOnlyList<Vendor>> GetByIdsAsync(IReadOnlyCollection<Guid> ids, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// The tenant's vendor (active or retired) whose <see cref="Vendor.NormalizedName"/> equals
     /// this already-normalized string, or null. Retired vendors count: the unique index covers
     /// them too, and re-adding a retired vendor should be a reactivation, not a second row.
@@ -41,7 +49,7 @@ public interface IVendorRepository
     /// a budget item starts referencing that vendor, which would leave a share naming a vendor that
     /// no longer exists. Taken by vendor delete (around the probe and the remove) and by every item
     /// write that <b>adds</b> a vendor share — create, an update naming a vendor the item did not
-    /// have, and a copy-from-period whose source plan has shares — before its register lookup. Writes that only keep shares need
+    /// have, and a copy-from-period whose planned copies carry shares — before its register lookup. Writes that only keep shares need
     /// no lock: their references are already committed, so the delete's probe sees them.
     /// <para>
     /// Opens a transaction on this unit of work (unless one is already open — then the caller's

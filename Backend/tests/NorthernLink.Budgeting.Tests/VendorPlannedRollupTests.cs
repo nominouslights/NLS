@@ -120,8 +120,31 @@ public class VendorPlannedRollupTests
 
         Assert.Equal(100m, rollup.TotalPlannedExpenseCad);
         Assert.Equal(10m, rollup.NoVendor.PlannedCad);
-        Assert.Equal(0, rollup.NoVendor.ItemCount);
         Assert.Equal(100m, rollup.Vendors.Sum(r => r.PlannedCad) + rollup.NoVendor.PlannedCad);
+
+        // The item put money in both buckets, so it is counted in both.
+        Assert.Equal(1, rollup.NoVendor.ItemCount);
+        Assert.Equal(1, Assert.Single(rollup.Vendors).ItemCount);
+    }
+
+    [Fact]
+    public void An_item_contributing_to_no_vendor_is_counted_there_and_an_exact_split_is_not()
+    {
+        var rollup = Build(
+            [
+                ItemOn(Fleet, 100m, (KalTire, 60m), (Petro, 30m)), // short by 10 → No vendor +10, counted
+                ItemOn(Fuel, 50m, (Petro, 55m)),                   // over by 5 → No vendor −5, counted
+                ItemOn(Fleet, 40m, (KalTire, 40m)),                // exact → never in No vendor
+                ItemOn(Fuel, 20m),                                 // no shares → No vendor, counted
+            ],
+            Fleet, Fuel);
+
+        Assert.Equal(3, rollup.NoVendor.ItemCount);
+        Assert.Equal(10m - 5m + 20m, rollup.NoVendor.PlannedCad);
+        Assert.Equal(2, rollup.Vendors.Single(r => r.VendorId == KalTire.Id).ItemCount);
+        Assert.Equal(2, rollup.Vendors.Single(r => r.VendorId == Petro.Id).ItemCount);
+        Assert.Equal(210m, rollup.TotalPlannedExpenseCad);
+        Assert.Equal(210m, rollup.Vendors.Sum(r => r.PlannedCad) + rollup.NoVendor.PlannedCad);
     }
 
     [Fact]

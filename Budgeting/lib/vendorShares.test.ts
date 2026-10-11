@@ -10,7 +10,7 @@ import {
   itemVendorText,
   remainingCad,
   remainingCents,
-  roundedCents,
+  shareAmountTextError,
   shareSummary,
   splitEvenly,
   vendorInactiveMessage,
@@ -20,6 +20,7 @@ import {
   vendorSharesMustSumMessage,
   vendorSharesShapeError,
 } from "./vendorShares";
+import { toHundredths } from "./money";
 import {
   ALLOCATION_AMOUNT_MAX,
   budgetItemError,
@@ -93,16 +94,49 @@ describe("exact cents", () => {
     expect(exactCents(Number.NaN)).toBeNull();
   });
 
-  it("rounds half away from zero for display sums (BudgetAllocation.Round)", () => {
-    expect(roundedCents(1.005)).toBe(101);
-    expect(roundedCents(-1.005)).toBe(-101);
-    expect(roundedCents(0.004)).toBe(0);
+  it("rounds half away from zero for display sums — lib/money.ts's toHundredths (BudgetAllocation.Round)", () => {
+    expect(toHundredths(1.005)).toBe(101);
+    expect(toHundredths(-1.005)).toBe(-101);
+    expect(toHundredths(0.004)).toBe(0);
+  });
+
+  it("exact cents keeps two-decimal figures whatever their binary spelling, and refuses the rest", () => {
+    expect(exactCents(50.005)).toBeNull();
+    expect(exactCents(49.995)).toBeNull();
+    expect(exactCents(-1.01)).toBe(-101);
+    expect(exactCents(0)).toBe(0);
+    expect(exactCents(1e-7)).toBeNull();
+    expect(exactCents(Number.POSITIVE_INFINITY)).toBeNull();
   });
 
   it("writes cents back as two-decimal field text", () => {
     expect(centsToFieldText(123450)).toBe("1234.50");
     expect(centsToFieldText(5)).toBe("0.05");
     expect(centsToFieldText(0)).toBe("0.00");
+  });
+});
+
+describe("shareAmountTextError — one row's typed amount, by BudgetItemVendorShare.Create's amount rule", () => {
+  it("is quiet for a blank row (no amount yet) and a valid dollars-and-cents share", () => {
+    expect(shareAmountTextError("")).toBeNull();
+    expect(shareAmountTextError("   ")).toBeNull();
+    expect(shareAmountTextError("50")).toBeNull();
+    expect(shareAmountTextError("0.29")).toBeNull();
+    expect(shareAmountTextError("999999999.99")).toBeNull();
+  });
+
+  it("refuses more than two decimals with the server's message — exactly what the submit check refuses", () => {
+    expect(shareAmountTextError("50.005")).toBe(m.VendorShareAmountInvalid);
+    expect(shareAmountTextError("49.995")).toBe(m.VendorShareAmountInvalid);
+    // Same verdict as the shape rule the save runs.
+    expect(vendorSharesShapeError([share(A, 50.005), share(B, 49.995)], 100)).toBe(m.VendorShareAmountInvalid);
+  });
+
+  it("refuses zero, negative, over the ceiling, and text that is not a number", () => {
+    expect(shareAmountTextError("0")).toBe(m.VendorShareAmountInvalid);
+    expect(shareAmountTextError("-5")).toBe(m.VendorShareAmountInvalid);
+    expect(shareAmountTextError("1000000000")).toBe(m.VendorShareAmountInvalid);
+    expect(shareAmountTextError("1e")).toBe(m.VendorShareAmountInvalid);
   });
 });
 

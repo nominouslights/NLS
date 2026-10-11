@@ -11,7 +11,7 @@ import type {
 import type { StatusKind } from "@/lib/theme";
 // The checklist's balance row writes its own signed figure, so the sign is text in the tested
 // derivation rather than something a component might forget to add.
-import { formatCadPrecise, formatDeltaCad } from "@/lib/money";
+import { formatCadPrecise, formatDeltaCad, toHundredths } from "@/lib/money";
 import { vendorSharesCategoryError, vendorSharesShapeError } from "@/lib/vendorShares";
 
 // ---------------------------------------------------------------------------
@@ -452,25 +452,6 @@ export const BUDGET_ITEM_MESSAGES = {
   AssumptionsTooLong: "The assumptions must be 1000 characters or fewer.",
   ConsequenceTooLong: "The consequence if unfunded must be 1000 characters or fewer.",
 } as const;
-
-/**
- * A number as an integer count of hundredths, rounded half AWAY FROM ZERO — the integer half of
- * BudgetAllocation.Round (`Math.Round(value, 2, MidpointRounding.AwayFromZero)`).
- *
- * Never `Math.round(value * 100)`: `1.005 * 100` is 100.49999999999999 in binary floating point
- * and rounds the wrong way. Instead the decimal point is shifted in the number's own shortest
- * decimal spelling (`String(1.005)` is "1.005", so "1.005e2" parses to exactly 100.5). That
- * spelling is also exactly what JSON.stringify puts on the wire and what the server parses into a
- * C# decimal, so this rounds the same digits the server rounds. Math.round is half-UP, which is
- * half-away-from-zero only for non-negative values — hence the rounding on the absolute value.
- */
-function toHundredths(value: number): number {
-  const abs = Math.abs(value);
-  const [mantissa, exponent] = String(abs).split("e");
-  const shifted = Number(`${mantissa}e${Number(exponent ?? 0) + 2}`);
-  const rounded = Math.round(shifted);
-  return value < 0 && rounded !== 0 ? -rounded : rounded;
-}
 
 /**
  * Mirrors BudgetAllocation.Round: two decimal places, half away from zero. 1.005 → 1.01,

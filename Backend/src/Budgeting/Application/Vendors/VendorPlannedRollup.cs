@@ -25,6 +25,12 @@ namespace NorthernLink.Budgeting.Application.Vendors;
 /// amount, and the rows plus "No vendor" sum to it: the domain guarantees an item's shares sum to
 /// its amount, and should a stored row ever disagree (written by hand), the difference is carried in
 /// "No vendor"'s figure rather than silently breaking the equality.</item>
+/// <item><b>Counts follow money:</b> an item that contributes any amount to a bucket is counted in
+/// that bucket. So an item whose shares fall short of (or exceed) its amount is counted once for
+/// each of its vendors <em>and</em> once in "No vendor", whose figure carries the difference
+/// (negative when the shares exceed the amount). An item whose shares sum exactly is never counted
+/// in "No vendor". Item counts therefore do not sum to the number of expense items — they never
+/// did, since a split item counts once per vendor.</item>
 /// <item><b>No rounding step.</b> Every amount is stored at 2 dp, and a sum of 2-dp decimals is exact.</item>
 /// </list>
 /// Actuals are a later slice; there is deliberately no actual field to fill with zeroes.
@@ -81,8 +87,14 @@ public static class VendorPlannedRollup
                 itemCounts[share.VendorId] = itemCounts.GetValueOrDefault(share.VendorId) + 1;
             }
 
-            // Zero whenever the domain's sum rule held when the item was written.
-            noVendorPlanned += item.AmountCad - item.Shares.Sum(share => share.AmountCad);
+            // Zero whenever the domain's sum rule held when the item was written. When it is not,
+            // the item contributes to "No vendor" and is counted there too — see the class comment.
+            var unattributed = item.AmountCad - item.Shares.Sum(share => share.AmountCad);
+            if (unattributed != 0m)
+            {
+                noVendorPlanned += unattributed;
+                noVendorItems++;
+            }
         }
 
         var rows = planned
@@ -132,5 +144,8 @@ public sealed record VendorRollupRow(
     int ItemCount,
     decimal PlannedCad);
 
-/// <summary>Expense planned on items with no vendor shares.</summary>
+/// <summary>
+/// Expense planned on items with no vendor shares, plus any part of an item its shares do not
+/// cover; <see cref="ItemCount"/> counts every item contributing to <see cref="PlannedCad"/>.
+/// </summary>
 public sealed record NoVendorRollup(int ItemCount, decimal PlannedCad);

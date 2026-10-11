@@ -59,21 +59,21 @@ namespace NorthernLink.Budgeting.Application.Allocations.CopyFromPeriod;
 /// tenant-wide, so the same ids are valid in every period; a share on a since-retired vendor is
 /// carried too), and are dropped onto a revenue code — <c>BudgetAllocation.CopyInto</c> decides
 /// by the <em>target</em> code's category. Because a copy can make a vendor referenced by one
-/// more item, a copy that carries shares runs under the tenant's vendor register lock, taken before
-/// the source items are read: a vendor delete either commits first (and then no source item can
-/// still carry it — its probe would have refused) or waits and sees the copied shares.
+/// more item, a copy that carries shares runs its save under the tenant's vendor register lock.
 /// </para>
 /// <para>
-/// <b>The lock is taken only when the source plan has shares</b>, decided by a scalar, untracked
-/// <see cref="IBudgetAllocationRepository.AnyWithVendorSharesInPeriodAsync"/> <em>before</em> the
-/// tracked read — so a plan with no vendor shares never serializes with the vendor register. (The
-/// chart copy cannot do this cheaply and locks always; see <c>CopyBudgetCodesCommandHandler</c>.)
-/// The check can go stale: a planner may add shares to a source item between it and the tracked
-/// read. Re-reading after locking would hand back EF's already-tracked instances, so instead, when
-/// the copies turn out to carry shares and no lock was taken, the handler locks <em>then</em> and
-/// confirms every carried vendor still exists. Under the lock that answer holds until the commit;
-/// a vendor deleted in the gap fails the whole copy with
-/// <see cref="BudgetAllocationErrors.CopySourceChanged"/> (409, nothing written — run it again).
+/// <b>The lock is decided by the plan, not by the source.</b> It is taken only when at least one
+/// <em>planned</em> copy carries a share — so a source whose share-bearing items are all skipped
+/// (already planned, code not on offer) or land on a revenue code (shares dropped) never
+/// serializes with the vendor register, nor does a plan with no shares at all. (The chart copy
+/// cannot do this cheaply and locks always; see <c>CopyBudgetCodesCommandHandler</c>.)
+/// Because the source is read <em>before</em> the lock, a carried vendor may have been deleted in
+/// between (its share removed from the source elsewhere, so the delete's probe passed).
+/// Re-reading after locking would hand back EF's already-tracked instances, so instead the handler
+/// confirms under the lock, in one query, that every carried vendor still exists. Under the lock
+/// that answer holds until the commit — a vendor delete waits and then sees the copies; a vendor
+/// deleted in the gap fails the whole copy with <see cref="BudgetAllocationErrors.CopySourceChanged"/>
+/// (409, nothing written — run it again). Retired vendors still exist, so they are carried.
 /// </para>
 /// </summary>
 public sealed class CopyBudgetAllocationsCommandHandler(
@@ -115,47 +115,43 @@ public sealed class CopyBudgetAllocationsCommandHandler(
             return Result.Failure<BudgetAllocationCopyResult>(BudgetAllocationErrors.CopySourceNotFound);
         }
 
-        // Released (rolled back) on every early return, committed with the save. Not an
-        // `await using` because the stale-check path below may take it late.
+        var sourceLines = await allocations.ListForPeriodAsync(sourcePeriodId, cancellationToken);
+        if (sourceLines.Count == 0)
+        {
+            // Success with zeroes, so the console can say "nothing to copy" rather than raise an
+            // error for a button that worked. No further reads and no save.
+            return Result.Success(new BudgetAllocationCopyResult(0, 0, 0, 0));
+        }
+
+        var plan = await PlanAsync(command, sourceLines, cancellationToken);
+        if (plan.Copies.Count == 0)
+        {
+            // A copy that skips everything writes nothing at all.
+            return Result.Success(plan.ToResult(sourceLines.Count));
+        }
+
+        // Released (rolled back) on every early return, committed with the save. Taken only when
+        // a planned copy actually carries a share — see the class comment.
         IVendorRegisterLock? vendorLock = null;
         try
         {
-            // The cheap, untracked question first, and the lock only if it says yes — before the
-            // tracked read of the source items. See the class comment.
-            if (await allocations.AnyWithVendorSharesInPeriodAsync(sourcePeriodId, cancellationToken))
-            {
-                vendorLock = await vendors.LockRegisterAsync(command.TenantId, cancellationToken);
-            }
-
-            var sourceLines = await allocations.ListForPeriodAsync(sourcePeriodId, cancellationToken);
-            if (sourceLines.Count == 0)
-            {
-                // Success with zeroes, so the console can say "nothing to copy" rather than raise an
-                // error for a button that worked. No further reads and no save.
-                return Result.Success(new BudgetAllocationCopyResult(0, 0, 0, 0));
-            }
-
-            var plan = await PlanAsync(command, sourceLines, cancellationToken);
-            if (plan.Copies.Count == 0)
-            {
-                // A copy that skips everything writes nothing at all.
-                return Result.Success(plan.ToResult(sourceLines.Count));
-            }
-
-            // The check said "no shares", yet the copies carry some: a planner added them in
-            // between. Lock now, and confirm under the lock that every carried vendor still exists
-            // — from here a vendor delete waits for this commit and then sees the copies.
-            if (vendorLock is null && plan.Copies.Exists(copy => copy.VendorShares.Count > 0))
+            var carried = plan.Copies
+                .SelectMany(copy => copy.VendorShares)
+                .Select(share => share.VendorId)
+                .Distinct()
+                .ToList();
+            if (carried.Count > 0)
             {
                 vendorLock = await vendors.LockRegisterAsync(command.TenantId, cancellationToken);
 
-                var carried = plan.Copies.SelectMany(copy => copy.VendorShares).Select(share => share.VendorId).Distinct();
-                foreach (var vendorId in carried)
+                // The source was read before the lock, so a carried vendor may have been deleted
+                // since (its share removed elsewhere first, letting the delete's probe pass).
+                // Confirm under the lock, in one query, that every carried vendor still exists —
+                // from here a vendor delete waits for this commit and then sees the copies.
+                var existing = await vendors.GetByIdsAsync(carried, cancellationToken);
+                if (existing.Count != carried.Count)
                 {
-                    if (await vendors.GetByIdAsync(vendorId, cancellationToken) is null)
-                    {
-                        return Result.Failure<BudgetAllocationCopyResult>(BudgetAllocationErrors.CopySourceChanged);
-                    }
+                    return Result.Failure<BudgetAllocationCopyResult>(BudgetAllocationErrors.CopySourceChanged);
                 }
             }
 

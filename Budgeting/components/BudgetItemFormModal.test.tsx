@@ -447,6 +447,47 @@ describe("BudgetItemFormModal — expense vendor shares", () => {
     expect(api.create).not.toHaveBeenCalled();
   });
 
+  // The live line used to round each share to cents, so 50.005 + 49.995 read "Fully assigned" on
+  // $100.00 — and the save (exact cents, like the server) then refused it.
+  it("a share with more than two decimals is Invalid amount live, never Fully assigned, and the save agrees", () => {
+    const { api } = renderModal({ presetCodeId: "fleet-tires", vendors: REGISTER });
+    fillWhatAndWhy("100");
+    fireEvent.click(screen.getByText("+ ADD VENDOR"));
+    fireEvent.click(screen.getByText("+ ADD VENDOR"));
+    pickVendor(shareRows()[0], "v-kal");
+    pickVendor(shareRows()[1], "v-esso");
+    shareAmount(shareRows()[0], "50.005");
+    shareAmount(shareRows()[1], "49.995");
+
+    expect(remaining()).not.toContain("Fully assigned");
+    expect(remaining()).toContain("Invalid amount"); // StatusChip: glyph + written label
+    const message =
+      "Each vendor share must be more than zero, in dollars and cents (at most two decimal places), and 999,999,999.99 or less.";
+    expect(within(shareRows()[0]).getByTestId("vendor-share-error").textContent).toBe(message);
+    expect(within(shareRows()[1]).getByTestId("vendor-share-error").textContent).toBe(message);
+    // No shortcut builds on a figure that will not be saved.
+    expect(screen.queryByText("ASSIGN REMAINING")).toBeNull();
+
+    fireEvent.click(screen.getByText("ADD ITEM"));
+    expect(api.create).not.toHaveBeenCalled();
+
+    // Fixing one row clears only that row's error; fixing both restores the balance.
+    shareAmount(shareRows()[0], "50.01");
+    expect(within(shareRows()[0]).queryByTestId("vendor-share-error")).toBeNull();
+    expect(remaining()).toContain("Invalid amount");
+    shareAmount(shareRows()[1], "49.99");
+    expect(screen.queryAllByTestId("vendor-share-error")).toHaveLength(0);
+    expect(remaining()).toContain("Fully assigned");
+  });
+
+  it("a blank share is no amount yet, not an error — the line still says what is left", () => {
+    renderModal({ presetCodeId: "fleet-tires", vendors: REGISTER });
+    fillWhatAndWhy("100");
+    fireEvent.click(screen.getByText("+ ADD VENDOR"));
+    expect(screen.queryAllByTestId("vendor-share-error")).toHaveLength(0);
+    expect(remaining()).toContain("Remaining $100");
+  });
+
   it("a changed amount moves the Remaining line — the shares are never rebalanced", () => {
     renderModal({ presetCodeId: "fleet-tires", vendors: REGISTER });
     fillWhatAndWhy("2450");

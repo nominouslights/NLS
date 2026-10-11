@@ -39,13 +39,6 @@ public interface IBudgetAllocationRepository
     /// </summary>
     Task<bool> AnyWithVendorShareAsync(Guid vendorId, CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Whether any of the tenant's items <b>in that period</b> carries at least one vendor share —
-    /// a scalar query that tracks nothing. The copy handler asks it before its tracked read of the
-    /// source plan, to take the vendor register lock only when the copy might carry shares.
-    /// </summary>
-    Task<bool> AnyWithVendorSharesInPeriodAsync(Guid periodId, CancellationToken cancellationToken = default);
-
     void Add(BudgetAllocation allocation);
 
     /// <summary>Hard delete — the line is a plan entry, not history; the journal keeps its final snapshot.</summary>

@@ -21,10 +21,11 @@
 //
 // Money is handled in INTEGER CENTS throughout. A float sum of 0.1 + 0.2 is 0.30000000000000004,
 // and the server compares the shares' decimal sum to the amount to the cent — a client that summed
-// in floats would call a correct split wrong (or a wrong one right).
+// in floats would call a correct split wrong (or a wrong one right). The cent rounding itself is
+// lib/money.ts's toHundredths — the app's one mirror of BudgetAllocation.Round.
 
 import type { BudgetCodeCategory } from "./types";
-import { formatCadPrecise } from "./money";
+import { formatAmountInvariant, formatCadPrecise, toHundredths } from "./money";
 import type {
   BudgetItemVendorShareInput,
   BudgetItemVendorShareRecord,
@@ -56,7 +57,7 @@ export const VENDOR_SHARE_MESSAGES = {
 /** Mirrors BudgetAllocationErrors.VendorSharesMustSumToAmount — built per request, naming both totals. */
 export function vendorSharesMustSumMessage(sharesTotalCad: number, amountCad: number): string {
   return (
-    `The vendor shares add up to ${money(sharesTotalCad)}, but the item's amount is ${money(amountCad)}. ` +
+    `The vendor shares add up to ${formatAmountInvariant(sharesTotalCad)}, but the item's amount is ${formatAmountInvariant(amountCad)}. ` +
     "The shares must cover the whole amount exactly — adjust them, or remove every share to leave the item with no vendor."
   );
 }
@@ -71,34 +72,31 @@ export function vendorInactiveMessage(vendorName: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Shifts the decimal point two places in the number's own shortest decimal spelling — "10.005"
- * becomes "10.005e2", which parses to exactly 1000.5. Never `value * 100`: `1.005 * 100` is
- * 100.49999999999999. The same digits JSON.stringify puts on the wire, so the same digits the
- * server's decimal parses.
- */
-function shiftCents(value: number): number {
-  const abs = Math.abs(value);
-  const [mantissa, exponent] = String(abs).split("e");
-  const shifted = Number(`${mantissa}e${Number(exponent ?? 0) + 2}`);
-  return value < 0 ? -shifted : shifted;
-}
-
-/**
  * A figure as exact integer cents, or null when it has more than two decimal places. Mirrors the
  * share rule's `decimal.Round(amount, 2) != amount` check: 10.005 is not rounded, it is refused.
+ * Rounded and compared back: a figure with at most two decimals is the double nearest its cents
+ * over 100, so the round trip is exact for it and only for it.
  */
 export function exactCents(value: number): number | null {
   if (!Number.isFinite(value)) return null;
-  const cents = shiftCents(value);
-  return Number.isInteger(cents) ? cents : null;
+  const cents = toHundredths(value);
+  return cents / 100 === value ? cents : null;
 }
 
-/** A figure as integer cents, rounded half away from zero (BudgetAllocation.Round) — for display sums. */
-export function roundedCents(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  const shifted = shiftCents(value);
-  const rounded = Math.round(Math.abs(shifted));
-  return shifted < 0 && rounded !== 0 ? -rounded : rounded;
+/**
+ * The problem with one share row's amount TEXT as typed, in the server's words, or null when it is
+ * blank (no amount yet — the live line counts it as zero) or a valid share amount. Mirrors
+ * BudgetItemVendorShare.Create's amount rule — more than zero, at most two decimal places, at most
+ * AmountMax — on exactly the exact-cents test the submit check uses, so the live line can never
+ * call a split "Fully assigned" that the save would refuse (50.005 + 49.995 on $100.00).
+ */
+export function shareAmountTextError(text: string): string | null {
+  if (text.trim() === "") return null;
+  const value = Number(text);
+  const cents = exactCents(value);
+  return cents === null || cents <= 0 || value > VENDOR_SHARE_AMOUNT_MAX
+    ? VENDOR_SHARE_MESSAGES.VendorShareAmountInvalid
+    : null;
 }
 
 /** Cents → a plain dollars number (exact for every cents value this app can hold). */
@@ -112,17 +110,6 @@ export function centsToFieldText(cents: number): string {
   const abs = Math.abs(cents);
   const text = `${Math.trunc(abs / 100)}.${String(abs % 100).padStart(2, "0")}`;
   return negative ? `-${text}` : text;
-}
-
-/** Mirrors the C# "#,0.00" invariant format the server's sum message uses. */
-function money(value: number): string {
-  const cents = roundedCents(value);
-  const negative = cents < 0;
-  const abs = Math.abs(cents);
-  const whole = Math.trunc(abs / 100)
-    .toString()
-    .replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return `${negative ? "-" : ""}${whole}.${String(abs % 100).padStart(2, "0")}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -159,7 +146,7 @@ export function vendorSharesShapeError(
   }
 
   if (shares.length > 0) {
-    const amountCents = roundedCents(amountCad);
+    const amountCents = toHundredths(amountCad);
     if (totalCents !== amountCents) {
       return vendorSharesMustSumMessage(centsToCad(totalCents), centsToCad(amountCents));
     }
@@ -245,8 +232,8 @@ export function remainingCents(
   amountCad: number,
   shares: readonly { amountCad: number | null }[],
 ): number {
-  const assigned = shares.reduce((sum, s) => sum + (s.amountCad === null ? 0 : roundedCents(s.amountCad)), 0);
-  return roundedCents(amountCad) - assigned;
+  const assigned = shares.reduce((sum, s) => sum + (s.amountCad === null ? 0 : toHundredths(s.amountCad)), 0);
+  return toHundredths(amountCad) - assigned;
 }
 
 /**
@@ -255,7 +242,7 @@ export function remainingCents(
  */
 export function splitEvenly(amountCad: number, count: number): number[] {
   if (count < 1) return [];
-  const total = roundedCents(amountCad);
+  const total = toHundredths(amountCad);
   const base = Math.trunc(total / count);
   const extra = total - base * count;
   return Array.from({ length: count }, (_, i) => centsToCad(base + (i < extra ? 1 : 0)));
@@ -274,7 +261,7 @@ export function assignRemaining(
   const left = remainingCents(amountCad, shares);
   if (left <= 0 || index < 0 || index >= shares.length) return null;
   const own = shares[index].amountCad;
-  return centsToCad((own === null ? 0 : roundedCents(own)) + left);
+  return centsToCad((own === null ? 0 : toHundredths(own)) + left);
 }
 
 // ---------------------------------------------------------------------------

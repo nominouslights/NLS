@@ -10,7 +10,8 @@ namespace NorthernLink.Budgeting.Application.Allocations;
 /// and update for the <c>BudgetCodeCostCentreRule</c> reason, and living here rather than on the
 /// aggregate because it needs the register, which an aggregate cannot query.
 /// <list type="bullet">
-/// <item>Only vendors the write <b>adds</b> are looked up (<see cref="BudgetAllocation.AddedVendorIds"/>).
+/// <item>Only vendors the write <b>adds</b> are looked up — all of them in one query
+/// (<see cref="IVendorRepository.GetByIdsAsync"/>), checked in the request's share order (<see cref="BudgetAllocation.AddedVendorIds"/>).
 /// A share the item already had passes without a lookup, so retiring a vendor never freezes the
 /// items already planned against it — the "only on change" leniency.</item>
 /// <item>No vendor with that id in this tenant → <see cref="BudgetAllocationErrors.VendorNotFound"/> (400).</item>
@@ -40,9 +41,20 @@ public static class BudgetItemVendorRule
         BudgetCodeCategory codeCategory,
         CancellationToken cancellationToken)
     {
-        foreach (var vendorId in RegisterCheckFor(details, current, codeCategory))
+        var added = RegisterCheckFor(details, current, codeCategory);
+        if (added.Count == 0)
         {
-            var vendor = await vendors.GetByIdAsync(vendorId, cancellationToken);
+            return Result.Success();
+        }
+
+        // One query for every added vendor rather than one per share — this runs under the
+        // tenant's vendor register lock, so its cost is paid by every waiting vendor write too.
+        // The verdict is then walked in REQUEST order, so the first offending share is the one
+        // reported, exactly as a lookup-per-share would.
+        var found = (await vendors.GetByIdsAsync(added, cancellationToken)).ToDictionary(v => v.Id);
+        foreach (var vendorId in added)
+        {
+            var vendor = found.GetValueOrDefault(vendorId);
             if (vendor is null)
             {
                 return Result.Failure(BudgetAllocationErrors.VendorNotFound);

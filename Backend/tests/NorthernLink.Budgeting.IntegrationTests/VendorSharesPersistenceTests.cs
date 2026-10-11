@@ -198,19 +198,31 @@ public class VendorSharesPersistenceTests(PostgresFixture fixture)
     }
 
     [Fact]
-    public async Task The_untracked_shares_check_translates_and_answers_per_period()
+    public async Task The_batched_vendor_lookup_translates_and_returns_only_this_tenants_vendors()
     {
         var seeded = await SeedAsync();
+        var unknown = Guid.NewGuid();
 
-        await using var context = fixture.CreateContext(seeded.Tenant);
-        var repository = new BudgetAllocationRepository(context);
+        await using (var context = fixture.CreateContext(seeded.Tenant))
+        {
+            // Retire one, so "retired vendors are returned too" is pinned, not assumed.
+            var petro = await context.Vendors.SingleAsync(v => v.Id == seeded.Petro.Id);
+            petro.SetActive(false, actorId: null);
+            await context.SaveChangesAsync();
+        }
 
-        Assert.True(await repository.AnyWithVendorSharesInPeriodAsync(seeded.Source.Id));
-        Assert.False(await repository.AnyWithVendorSharesInPeriodAsync(seeded.Target.Id));
-        Assert.Empty(context.ChangeTracker.Entries());
+        await using (var context = fixture.CreateContext(seeded.Tenant))
+        {
+            var found = await new VendorRepository(context).GetByIdsAsync([seeded.Kal.Id, seeded.Petro.Id, unknown]);
+            Assert.Equal(
+                [(seeded.Kal.Id, true), (seeded.Petro.Id, false)],
+                found.OrderBy(v => v.Name).Select(v => (v.Id, v.IsActive)).ToArray());
 
-        // Another tenant's plan is invisible to it (query filter + RLS).
+            Assert.Empty(await new VendorRepository(context).GetByIdsAsync([]));
+        }
+
+        // Another tenant's vendors are invisible to it (query filter + RLS).
         await using var other = fixture.CreateContext(PostgresFixture.TenantB);
-        Assert.False(await new BudgetAllocationRepository(other).AnyWithVendorSharesInPeriodAsync(seeded.Source.Id));
+        Assert.Empty(await new VendorRepository(other).GetByIdsAsync([seeded.Kal.Id, seeded.Petro.Id]));
     }
 }

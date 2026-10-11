@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { colors, fonts, statusMeta } from "@/lib/theme";
 import type { BudgetCode, BudgetCodeCategory, BudgetPeriod } from "@/lib/types";
 import { StatusChip } from "@/components/ui/Chip";
@@ -148,6 +148,14 @@ export default function PeriodDashboard({
    * a failure never blocks the plan.
    */
   const [vendors, setVendors] = useState<VendorRecord[] | null>(null);
+  /**
+   * Bumped by every register request and every register pushed up from the item modal; a load
+   * whose number is no longer current is stale and is dropped, so `vendors` never regresses (the
+   * cost-centre pattern on Budget Codes).
+   */
+  const vendorsSeq = useRef(0);
+  /** Cleared on unmount, so a register read still in flight never sets state afterwards. */
+  const mounted = useRef(true);
   const [error, setError] = useState<{ message: string; code: string } | null>(null);
   const [busy, setBusy] = useState(false);
   /** Two-click confirms — transition, remove and copy — exactly one of which can be pending. */
@@ -211,21 +219,38 @@ export default function PeriodDashboard({
     };
   }, [load]);
 
-  // The vendor register is tenant-wide and changes rarely: loaded once per dashboard, refreshed
-  // only by an inline create in the item modal (onVendorsChanged).
-  useEffect(() => {
-    let active = true;
+  // The vendor register is tenant-wide and edited on its own screen, so a copy loaded with the
+  // dashboard goes stale: a vendor retired, deleted or restored meanwhile would still be offered
+  // (or withheld) by the picker and misjudged by the pre-submit register check. So it is read on
+  // mount AND again every time the item modal opens; an inline create in the modal pushes its own
+  // fresh read up (acceptVendors). Sequenced, so a slower older read never lands on a newer one.
+  // Until the refresh lands the modal shows the previous copy — the server's check is the one
+  // that counts either way.
+  const loadVendors = useCallback(() => {
+    const request = ++vendorsSeq.current;
     listVendors(true).then(
       (records) => {
-        if (active) setVendors(records);
+        if (mounted.current && request === vendorsSeq.current) setVendors(records);
       },
       () => {
-        // Not the plan's error: the picker degrades to the item's own vendors and says so.
+        // Not the plan's error: the picker keeps the copy it has (or, with none, degrades to the
+        // item's own vendors and says so).
       },
     );
+  }, []);
+
+  useEffect(() => {
+    mounted.current = true;
+    loadVendors();
     return () => {
-      active = false;
+      mounted.current = false;
     };
+  }, [loadVendors]);
+
+  /** The register the item modal read after an inline create — newer than any load in flight. */
+  const acceptVendors = useCallback((records: VendorRecord[]) => {
+    vendorsSeq.current += 1;
+    setVendors(records);
   }, []);
 
   // The by-cost-centre rollup follows the items: it is refetched whenever a fresh items list lands
@@ -429,6 +454,7 @@ export default function PeriodDashboard({
   ) {
     setConfirm(null);
     setModal({ category, item, presetCodeId });
+    loadVendors();
   }
 
   function handleSaved(rows: BudgetAllocationRecord[]) {
@@ -688,7 +714,7 @@ export default function PeriodDashboard({
           onClose={() => setModal(null)}
           onSaved={handleSaved}
           vendors={vendors}
-          onVendorsChanged={setVendors}
+          onVendorsChanged={acceptVendors}
         />
       )}
     </div>

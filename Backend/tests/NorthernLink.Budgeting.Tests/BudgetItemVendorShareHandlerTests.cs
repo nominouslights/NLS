@@ -96,9 +96,28 @@ public class BudgetItemVendorShareHandlerTests
         var item = Assert.Single(_allocations.Allocations);
         Assert.Equal([_kalTire.Id, _petro.Id], item.VendorShares.Select(s => s.VendorId).ToArray());
 
-        // Lock first, then the register reads, then the commit (after the item's save).
-        Assert.Equal(["Lock", "GetById", "GetById", "Commit"], _vendors.Calls);
+        // Lock first, then ONE register read for every added vendor, then the commit (after the
+        // item's save).
+        Assert.Equal(["Lock", "GetByIds", "Commit"], _vendors.Calls);
+        Assert.Equal([_kalTire.Id, _petro.Id], Assert.Single(_vendors.BatchLookups));
         Assert.Equal([TenantId], _vendors.CommittedLocks);
+    }
+
+    [Fact]
+    public async Task The_first_offending_share_in_request_order_is_the_one_reported()
+    {
+        var unknown = Guid.NewGuid();
+
+        // Unknown before retired → VendorNotFound; retired before unknown → VendorInactive naming
+        // it. One batched lookup each, whatever order the register answers in.
+        var notFound = await CreateAsync(Item(amount: 10m, vendorShares: [Share(unknown, 5m), Share(_retired.Id, 5m)]));
+        var inactive = await CreateAsync(Item(amount: 10m, vendorShares: [Share(_retired.Id, 5m), Share(unknown, 5m)]));
+
+        Assert.Equal(BudgetAllocationErrors.VendorNotFound, notFound.Error);
+        Assert.Equal("Budgeting.Allocation.VendorInactive", inactive.Error.Code);
+        Assert.Contains("Old Garage", inactive.Error.Message);
+        Assert.Equal(2, _vendors.BatchLookups.Count);
+        Assert.Empty(_allocations.Allocations);
     }
 
     [Fact]
@@ -199,7 +218,8 @@ public class BudgetItemVendorShareHandlerTests
             item.Id, Item(amount: 100m, vendorShares: [Share(_kalTire.Id, 70m), Share(_petro.Id, 30m)]));
 
         Assert.True(result.IsSuccess);
-        Assert.Equal(["Lock", "GetById", "Commit"], _vendors.Calls);
+        Assert.Equal(["Lock", "GetByIds", "Commit"], _vendors.Calls);
+        Assert.Equal([_petro.Id], Assert.Single(_vendors.BatchLookups));
         Assert.Equal([70m, 30m], item.VendorShares.Select(s => s.AmountCad).ToArray());
     }
 
@@ -246,7 +266,10 @@ public class BudgetItemVendorShareHandlerTests
             fleet.VendorShares.Select(s => (s.VendorId, s.AmountCad)).ToArray());
         Assert.Empty(Assert.Single(copies, a => a.Code == "CHARTER-FUEL").VendorShares);
 
-        Assert.Equal(["Lock", "Commit"], _vendors.Calls);
+        // Locked after planning, every carried vendor (retired included) confirmed in one query —
+        // Petro-Canada's share was dropped onto revenue, so it is not asked about.
+        Assert.Equal(["Lock", "GetByIds", "Commit"], _vendors.Calls);
+        Assert.Equal([_kalTire.Id, _retired.Id], Assert.Single(_vendors.BatchLookups));
     }
 
     private BudgetPeriod CopyTarget()
@@ -297,40 +320,60 @@ public class BudgetItemVendorShareHandlerTests
         Assert.Empty(_vendors.Calls);
     }
 
-    [Fact]
-    public async Task Shares_added_after_the_check_are_locked_late_and_verified_under_the_lock()
+    [Theory]
+    [InlineData("already-planned", 1)]
+    [InlineData("retired-code", 1)]
+    [InlineData("revenue-target", 2)]
+    public async Task A_source_whose_share_bearing_items_carry_no_share_into_the_plan_takes_no_vendor_lock(
+        string landing, int expectedCopied)
     {
+        // The source HAS shares — on TIRES — but the plan carries none of them: the lock is the
+        // plan's decision, not the source's. A plain FLEET-MAINT item still copies, so the handler
+        // reaches the lock decision rather than returning early on an empty plan.
         var target = CopyTarget();
-        var item = PlannedExpense(100m);
+        var tiresSource = AddCode(_draft, "TIRES", BudgetCodeCategory.Expense);
+        _allocations.Add(CreateAllocation(
+            _draft.Id, tiresSource.Id, tiresSource.Code,
+            details: Item(amount: 100m, vendorShares: [Share(_kalTire.Id, 100m)]),
+            category: BudgetCodeCategory.Expense));
+        PlannedExpense(50m);
 
-        // Between the untracked "any shares?" (no) and the tracked read, a planner adds one.
-        _allocations.AfterVendorSharesCheckAsync = async () =>
-            Assert.True((await UpdateAsync(item.Id, Item(amount: 100m, vendorShares: [Share(_kalTire.Id, 100m)]))).IsSuccess);
+        switch (landing)
+        {
+            case "already-planned":
+                var planned = AddCode(target, "TIRES", BudgetCodeCategory.Expense);
+                _allocations.Add(CreateAllocation(
+                    target.Id, planned.Id, planned.Code,
+                    details: Item(amount: 10m), category: BudgetCodeCategory.Expense));
+                break;
+            case "retired-code":
+                Assert.True(AddCode(target, "TIRES", BudgetCodeCategory.Expense).SetActive(false, ActorId).IsSuccess);
+                break;
+            case "revenue-target":
+                AddCode(target, "TIRES", BudgetCodeCategory.Revenue);
+                break;
+        }
 
         var result = await CopyAsync(target);
 
-        Assert.Equal(1, result.Value.Copied);
-        var copy = Assert.Single(_allocations.Allocations, a => a.PeriodId == target.Id);
-        Assert.Equal(_kalTire.Id, Assert.Single(copy.VendorShares).VendorId);
-
-        // The update's own lock/lookup/commit, then the copy's late lock, its check and its commit.
-        Assert.Equal(["Lock", "GetById", "Commit", "Lock", "GetById", "Commit"], _vendors.Calls);
+        Assert.True(result.IsSuccess);
+        Assert.Equal(expectedCopied, result.Value.Copied);
+        Assert.Empty(_vendors.Calls);
     }
 
     [Fact]
     public async Task A_carried_vendor_deleted_in_the_gap_fails_the_copy_with_CopySourceChanged_and_writes_nothing()
     {
         var target = CopyTarget();
-        var item = PlannedExpense(100m);
+        PlannedExpense(100m, Share(_petro.Id, 100m));
         var saves = _allocations.SaveChangesCallCount;
 
-        // The tracked read will see a share on Petro-Canada, but by the time the copy locks, that
-        // vendor is gone (its share was removed elsewhere and the vendor deleted — compressed here).
-        _allocations.AfterVendorSharesCheckAsync = () =>
+        // The read saw a share on Petro-Canada, but by the time the copy holds the lock that vendor
+        // is gone (its share was removed from the source elsewhere, letting the delete's probe
+        // pass, then the vendor deleted — compressed here into the lock wait).
+        _vendors.OnLockAcquiredAsync = () =>
         {
-            Assert.True(item.Update(
-                item.BudgetCodeId, item.Code, BudgetCodeCategory.Expense,
-                Item(amount: 100m, vendorShares: [Share(_petro.Id, 100m)]), ActorId).IsSuccess);
+            _vendors.OnLockAcquiredAsync = null;
             _vendors.Vendors.Remove(_petro);
             return Task.CompletedTask;
         };
@@ -341,7 +384,7 @@ public class BudgetItemVendorShareHandlerTests
         Assert.Equal(ErrorType.Conflict, result.Error.Type);
         Assert.DoesNotContain(_allocations.Allocations, a => a.PeriodId == target.Id);
         Assert.Equal(saves, _allocations.SaveChangesCallCount);
-        Assert.Equal(["Lock", "GetById"], _vendors.Calls);
+        Assert.Equal(["Lock", "GetByIds"], _vendors.Calls);
         Assert.Empty(_vendors.CommittedLocks);
     }
 

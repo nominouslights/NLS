@@ -15,6 +15,20 @@ internal sealed class VendorRepository(BudgetingDbContext context) : IVendorRepo
     public Task<Vendor?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
         context.Vendors.FirstOrDefaultAsync(v => v.Id == id, cancellationToken);
 
+    // Npgsql translates Contains over a parameter array to `id = ANY(@ids)` — one round trip
+    // however many ids, tenant-filtered like every read here.
+    public async Task<IReadOnlyList<Vendor>> GetByIdsAsync(
+        IReadOnlyCollection<Guid> ids, CancellationToken cancellationToken = default)
+    {
+        if (ids.Count == 0)
+        {
+            return [];
+        }
+
+        var idArray = ids.ToArray();
+        return await context.Vendors.Where(v => idArray.Contains(v.Id)).ToListAsync(cancellationToken);
+    }
+
     // Ordinal equality on an already-normalized string — a seek on the unique
     // (tenant_id, normalized_name) index rather than a case-insensitive scan.
     public Task<Vendor?> GetByNormalizedNameAsync(string normalizedName, CancellationToken cancellationToken = default) =>
