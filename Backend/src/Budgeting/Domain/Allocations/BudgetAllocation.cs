@@ -235,9 +235,21 @@ public sealed class BudgetAllocation : AggregateRoot, ITenantScoped
     /// <b>Vendors follow the target code's category</b> (<paramref name="targetCategory"/>), because
     /// the same code string can be classified differently in another period: onto an expense code
     /// the <see cref="VendorShares"/> come across as-is (vendors are tenant-wide, and the amount is
-    /// unchanged, so they still sum) and any free-text payer is dropped; onto a revenue code the
-    /// payer comes across and the shares are dropped. A share on a since-retired vendor is copied
-    /// too — it is the same planning decision carried forward, not a new pick of that vendor.
+    /// unchanged, so they still sum) — as <em>new</em> share instances, because EF tracks owned
+    /// entities by reference — and onto a revenue code the shares are dropped. A share on a
+    /// since-retired vendor is copied too — it is the same planning decision carried forward, not
+    /// a new pick of that vendor.
+    /// </para>
+    /// <para>
+    /// <b>The free text comes across whenever the shares do not</b>: always onto a revenue code
+    /// (it is the payer), and onto an expense code when the source item has no shares — the $0
+    /// legacy expense item the vendor-shares backfill deliberately left holding its text, or a
+    /// revenue item whose code string is an expense code in the target. Dropping it would silently
+    /// lose the only record of that vendor. This is not the planner adding free text to an expense
+    /// item, so <c>PayerNotAllowedForExpense</c> does not apply (that rule is "only on change", and
+    /// a copy changes nothing); the copied item saves as it stands, and the first edit that changes
+    /// the text meets the rule. Onto an expense code from an item that <em>has</em> shares, any
+    /// leftover text is dropped: the shares are that item's vendor record and supersede it.
     /// </para>
     /// <para>
     /// <b>This is the one place the aggregate's headline invariant is broken on purpose, and that
@@ -284,8 +296,13 @@ public sealed class BudgetAllocation : AggregateRoot, ITenantScoped
             Justification = string.Empty,
             SpendType = SpendType,
             Recurrence = Recurrence,
-            Vendor = isRevenue ? Vendor : null,
-            VendorShares = isRevenue ? [] : [.. VendorShares],
+            // Text crosses whenever no shares do (see the doc comment): dropping it would lose the
+            // only record of the vendor on a $0 legacy item the backfill could not split.
+            Vendor = isRevenue || VendorShares.Count == 0 ? Vendor : null,
+            // New instances, never the source's: EF tracks owned JSON entities by reference, and
+            // the source item is tracked in the same unit of work — sharing them would hand one
+            // dependent two owners and make the save throw.
+            VendorShares = isRevenue ? [] : [.. VendorShares.Select(share => share.CopyForNewOwner())],
             Tags = [.. Tags],
             Priority = Priority,
             Assumptions = Assumptions,

@@ -39,6 +39,14 @@ internal sealed class BudgetAllocationRepository(BudgetingDbContext context) : I
         context.BudgetAllocations.AnyAsync(
             a => a.VendorShares.Any(share => share.VendorId == vendorId), cancellationToken);
 
+    // A scalar EXISTS — nothing is materialized, so nothing is tracked, and the copy handler's
+    // tracked read that follows still loads fresh instances. Npgsql translates the owned-JSON Any()
+    // over the NOT NULL DEFAULT '[]' column (pinned against Postgres in Budgeting.IntegrationTests);
+    // the leading (tenant_id, period_id) index columns narrow to the period.
+    public Task<bool> AnyWithVendorSharesInPeriodAsync(Guid periodId, CancellationToken cancellationToken = default) =>
+        context.BudgetAllocations.AnyAsync(
+            a => a.PeriodId == periodId && a.VendorShares.Any(), cancellationToken);
+
     public void Add(BudgetAllocation allocation) => context.BudgetAllocations.Add(allocation);
 
     public void Remove(BudgetAllocation allocation) => context.BudgetAllocations.Remove(allocation);

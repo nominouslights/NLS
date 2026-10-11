@@ -25,8 +25,10 @@ internal sealed class BudgetAllocationProjection : BudgetingProjection<BudgetAll
         row.SpendType = source.SpendType.ToString();
         row.Recurrence = source.Recurrence.ToString();
         row.Vendor = source.Vendor;
-        // A fresh list (the shares are immutable records), so the read row never aliases write-side state.
-        row.VendorShares = [.. source.VendorShares];
+        // Fresh instances, not just a fresh list: the source is tracked in this same context, and EF
+        // tracks owned JSON entities by reference — one share instance under the aggregate AND the
+        // read row would be one dependent with two owners, and the poll's SaveChanges would throw.
+        row.VendorShares = [.. source.VendorShares.Select(share => share.CopyForNewOwner())];
         // A fresh list, never the aggregate's own: the read row must not alias write-side state.
         row.Tags = [.. source.Tags];
         row.Priority = source.Priority.ToString();

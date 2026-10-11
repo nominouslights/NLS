@@ -331,7 +331,7 @@ run time. COUNT_PLACEHOLDER
   chip, a loading name not called retired, "No vendor" at $0, the server's total, no actual column.
 
   `budgeting.requests.test.ts` pins that `vendorShares` is **always** on the wire (`[]` to clear,
-  `[]` with the payer on revenue), each share as exactly `{ vendorId, amountCad }`, the nine new
+  `[]` with the payer on revenue, an explicit `null` key for a reclassified item's kept shares), each share as exactly `{ vendorId, amountCad }`, the nine new
   `Budgeting.Allocation.*` refusals verbatim on create and update, and the vendor rollup route.
   `BudgetItemFormModal.test.tsx` covers a two-vendor split with ASSIGN REMAINING, Over by and the
   pre-submit refusal, an amount change moving the line without rebalancing, removing every vendor
@@ -491,7 +491,13 @@ justification, spendType, recurrence, vendor, tags, priority, assumptions,
 consequenceIfUnfunded, vendorShares }`, enums as PascalCase strings. The server accepts nulls for
 most of it (defaults Operating / OneTime / ShouldHave); this app always sends every key,
 explicitly — `vendorShares` included, because the server reads an omitted/null list on PUT as
-"keep the current shares".
+"keep the current shares". The one deliberate null: a **revenue** item that still carries shares
+from before its code was reclassified Expense → Revenue. The server saves it unchanged (its
+category rule applies only on change), so sending `[]` would wipe the split on an unrelated edit.
+The modal shows those shares read-only under a "Kept shares" chip with REMOVE SHARES, and sends
+`null` until that is clicked, after which it sends `[]`. `budgetItemError(input, category, item)` then checks the
+kept shares the way `BudgetAllocation.Update` does: re-summed against the new amount, and refused
+on revenue only when the code changes.
 
 ### Vendor shares and budget by vendor
 

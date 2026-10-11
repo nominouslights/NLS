@@ -171,7 +171,8 @@ export function vendorSharesShapeError(
  * The category rule, mirroring BudgetAllocation.CheckCategory as it applies on CREATE (every
  * field counts as changed): a revenue item may carry no shares; an expense item may carry no
  * free-text payer. On update the server applies it only to what the write changes — this app
- * never trips it either way, because it sends `[]` for revenue and a null payer for expense.
+ * sends a null payer for expense, and on revenue either `[]` or null ("keep" — shares left from
+ * before a reclassification), whose code-change case budgetItemError handles with `current`.
  */
 export function vendorSharesCategoryError(
   shares: readonly BudgetItemVendorShareInput[],

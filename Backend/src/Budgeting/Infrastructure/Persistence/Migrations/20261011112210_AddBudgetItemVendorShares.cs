@@ -52,8 +52,28 @@ namespace NorthernLink.Budgeting.Infrastructure.Persistence.Migrations
             // and the rollups read it. `category` is stored as the enum NAME (HasConversion<string>),
             // so the string literal is the right comparison.
             //
-            // Per (tenant, normalized name) — normalized exactly as Vendor.NormalizeName does it,
-            // upper(trim(name)), and compared against vendors.normalized_name, the unique key:
+            // Trimming matches .NET's string.Trim(), which strips every char.IsWhiteSpace character —
+            // not just the ASCII space btrim() strips. That set is exactly U+0009–U+000D, U+0020,
+            // U+0085, U+00A0, U+1680, U+2000–U+200A, U+2028, U+2029, U+202F, U+205F and U+3000
+            // (Unicode Zs/Zl/Zp plus the C0 controls and NEL; NOT U+200B or U+FEFF, which .NET
+            // Core's Trim keeps). It is spelled out as a bracket of \u escapes rather than \s,
+            // because \s follows the database's locale. A pasted non-breaking space must not
+            // survive into a vendor name the register would then refuse to match. The vendor
+            // `name` stores that trimmed original spelling; the blank test uses it too, matching
+            // string.IsNullOrWhiteSpace. (AddBudgetItemVendorSharesBackfillTests pins this class
+            // against char.IsWhiteSpace.)
+            //
+            // Per (tenant, normalized name) — normalized as Vendor.NormalizeName does it,
+            // Trim().ToUpperInvariant(), here upper(<that trim>) — and compared against
+            // vendors.normalized_name, the unique key. Residual caveat: Postgres upper() follows
+            // the database's collation/ctype while ToUpperInvariant follows .NET's invariant
+            // casing tables. They agree on ASCII and ordinary accented Latin letters; for exotic
+            // characters (titlecase digraphs, ligatures, scripts whose case tables differ between
+            // libc/ICU and .NET versions) they can disagree. The worst outcome is a backfilled
+            // vendor whose normalized_name is not what .NET would compute — so a later API create
+            // of the same name might not see it as a clash. Any edit of that vendor through the
+            // API recomputes normalized_name in .NET and heals it; nothing is lost.
+            // Per (tenant, normalized name):
             //   * no vendor holds that normalized name yet → one is created, active, with the FIRST
             //     spelling seen (earliest created item, then lowest id — deterministic), no contact
             //     fields, no actor (created_by NULL: the system did this, not a person), version 1;
@@ -101,17 +121,27 @@ namespace NorthernLink.Budgeting.Infrastructure.Persistence.Migrations
                 SET LOCAL app.is_system = 'true';
 
                 CREATE TEMP TABLE vendor_share_backfill ON COMMIT DROP AS
-                SELECT a.id,
-                       a.tenant_id,
-                       a.amount_cad,
-                       a.created_at_utc,
-                       btrim(a.vendor)        AS vendor_name,
-                       upper(btrim(a.vendor)) AS normalized_name
-                FROM budgeting.budget_allocations a
+                SELECT t.id,
+                       t.tenant_id,
+                       t.amount_cad,
+                       t.created_at_utc,
+                       t.vendor_name,
+                       upper(t.vendor_name) AS normalized_name
+                FROM (SELECT a.id,
+                             a.tenant_id,
+                             a.amount_cad,
+                             a.created_at_utc,
+                             a.budget_code_id,
+                             regexp_replace(
+                                 a.vendor,
+                                 '^[\u0009-\u000D\u0020\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+|[\u0009-\u000D\u0020\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+$',
+                                 '',
+                                 'g') AS vendor_name
+                      FROM budgeting.budget_allocations a
+                      WHERE a.vendor IS NOT NULL) AS t
                 LEFT JOIN budgeting.budget_codes c
-                       ON c.id = a.budget_code_id AND c.tenant_id = a.tenant_id
-                WHERE a.vendor IS NOT NULL
-                  AND btrim(a.vendor) <> ''
+                       ON c.id = t.budget_code_id AND c.tenant_id = t.tenant_id
+                WHERE t.vendor_name <> ''
                   AND (c.category IS NULL OR c.category <> 'Revenue');
 
                 ALTER TABLE budgeting.vendors NO FORCE ROW LEVEL SECURITY;

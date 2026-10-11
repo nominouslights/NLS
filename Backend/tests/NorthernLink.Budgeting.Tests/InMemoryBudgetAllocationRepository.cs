@@ -50,6 +50,25 @@ internal sealed class InMemoryBudgetAllocationRepository : IBudgetAllocationRepo
     public Task<bool> AnyWithVendorShareAsync(Guid vendorId, CancellationToken cancellationToken = default) =>
         Task.FromResult(Visible.Any(a => a.VendorShares.Any(share => share.VendorId == vendorId)));
 
+    /// <summary>
+    /// Runs right after <see cref="AnyWithVendorSharesInPeriodAsync"/> has computed its answer and
+    /// before it returns it: lets a test change the plan "between the copy handler's untracked check
+    /// and its tracked read", making the answer stale. One-shot — cleared before it runs.
+    /// </summary>
+    public Func<Task>? AfterVendorSharesCheckAsync { get; set; }
+
+    public async Task<bool> AnyWithVendorSharesInPeriodAsync(Guid periodId, CancellationToken cancellationToken = default)
+    {
+        var answer = Visible.Any(a => a.PeriodId == periodId && a.VendorShares.Count > 0);
+        if (AfterVendorSharesCheckAsync is { } between)
+        {
+            AfterVendorSharesCheckAsync = null;
+            await between();
+        }
+
+        return answer;
+    }
+
     public void Add(BudgetAllocation allocation) => Allocations.Add(allocation);
 
     public void Remove(BudgetAllocation allocation) => Allocations.Remove(allocation);

@@ -42,9 +42,13 @@ internal sealed class VendorReadService(BudgetingDbContext context) : IVendorRea
     {
         // The same projections the period totals read (rm_budget_allocations, rm_budget_codes),
         // classified by VendorPlannedRollup, so its total and plannedExpenseCad cannot disagree.
+        // Only the three columns the rollup uses — never the item's text fields; the owned-JSON
+        // shares project as the vendor_shares column (no-tracking, so EF allows the owned type
+        // without its owner).
         var rows = await context.BudgetAllocationReadModels
             .AsNoTracking()
             .Where(a => a.PeriodId == periodId)
+            .Select(a => new { a.BudgetCodeId, a.AmountCad, a.VendorShares })
             .ToListAsync(cancellationToken);
 
         var items = rows
@@ -61,14 +65,11 @@ internal sealed class VendorReadService(BudgetingDbContext context) : IVendorRea
             .ToListAsync(cancellationToken);
 
         // Only the vendors the period's shares name; the rollup lists no others.
-        var vendorIds = items.SelectMany(i => i.Shares).Select(s => s.VendorId).Distinct().ToList();
-        List<VendorPlannedRollup.RegisterEntry> register = vendorIds.Count == 0
-            ? []
-            : await context.VendorReadModels
-                .AsNoTracking()
-                .Where(v => vendorIds.Contains(v.Id))
-                .Select(v => new VendorPlannedRollup.RegisterEntry(v.Id, v.Name, v.IsActive))
-                .ToListAsync(cancellationToken);
+        var vendors = await context.ResolveVendorsAsync(
+            items.SelectMany(i => i.Shares).Select(s => s.VendorId), cancellationToken);
+        var register = vendors
+            .Select(v => new VendorPlannedRollup.RegisterEntry(v.Key, v.Value.Name, v.Value.IsActive))
+            .ToList();
 
         return VendorPlannedRollup.Build(periodId, items, codes, register);
     }

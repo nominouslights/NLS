@@ -53,15 +53,9 @@ internal sealed class BudgetAllocationReadService(BudgetingDbContext context) : 
             .AsNoTracking()
             .ToDictionaryAsync(u => u.UserId, u => u.Email, cancellationToken);
 
-        // Only the vendors these items name — resolved at read time, never snapshotted, so a
-        // renamed or retired vendor reads right on every item. No shares, no query.
-        var vendorIds = lines.SelectMany(line => line.VendorShares).Select(share => share.VendorId).Distinct().ToList();
-        var vendorsById = vendorIds.Count == 0
-            ? new Dictionary<Guid, VendorReadModel>()
-            : await context.VendorReadModels
-                .AsNoTracking()
-                .Where(v => vendorIds.Contains(v.Id))
-                .ToDictionaryAsync(v => v.Id, cancellationToken);
+        // Only the vendors these items name (VendorResolution). No shares, no query.
+        var vendorsById = await context.ResolveVendorsAsync(
+            lines.SelectMany(line => line.VendorShares).Select(share => share.VendorId), cancellationToken);
 
         // Ordered in memory, not in SQL: priority is stored as its name, and "MustHave",
         // "NiceToHave", "ShouldHave" sort alphabetically out of rank. The rank is the enum's
@@ -90,15 +84,15 @@ internal sealed class BudgetAllocationReadService(BudgetingDbContext context) : 
         BudgetAllocationReadModel line,
         IReadOnlyDictionary<Guid, BudgetCodeReadModel> codesById,
         IReadOnlyDictionary<Guid, string> emailByUserId,
-        IReadOnlyDictionary<Guid, VendorReadModel> vendorsById)
+        IReadOnlyDictionary<Guid, ResolvedVendor> vendorsById)
     {
         var code = codesById.GetValueOrDefault(line.BudgetCodeId);
         var shares = line.VendorShares
             .Select(share =>
             {
-                var vendor = vendorsById.GetValueOrDefault(share.VendorId);
+                var found = vendorsById.TryGetValue(share.VendorId, out var vendor);
                 return new BudgetItemVendorShareResponse(
-                    share.VendorId, vendor?.Name, vendor?.IsActive ?? false, share.AmountCad);
+                    share.VendorId, found ? vendor.Name : null, found && vendor.IsActive, share.AmountCad);
             })
             .ToList();
 

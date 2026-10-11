@@ -249,6 +249,102 @@ public class BudgetItemVendorShareHandlerTests
         Assert.Equal(["Lock", "Commit"], _vendors.Calls);
     }
 
+    private BudgetPeriod CopyTarget()
+    {
+        var target = CreatePeriod(PeriodGranularity.Quarter, 2027, 1);
+        _periods.Add(target);
+        AddCode(target, "FLEET-MAINT", BudgetCodeCategory.Expense);
+        return target;
+    }
+
+    private Task<Result<BudgetAllocationCopyResult>> CopyAsync(BudgetPeriod target) =>
+        _copy.Handle(new CopyBudgetAllocationsCommand(TenantId, target.Id, _draft.Id, ActorId), CancellationToken.None);
+
+    [Fact]
+    public async Task Copy_of_a_plan_with_no_shares_takes_no_vendor_lock()
+    {
+        var target = CopyTarget();
+        PlannedExpense(100m);
+        PlannedExpense(250m);
+
+        var result = await CopyAsync(target);
+
+        Assert.Equal(2, result.Value.Copied);
+        Assert.Empty(_vendors.Calls);
+    }
+
+    [Fact]
+    public async Task Copy_carries_a_zero_dollar_legacy_items_vendor_text_onto_an_expense_code()
+    {
+        var target = CopyTarget();
+        // The backfill's leftover is a $0 item holding free text and no share, landing on an
+        // expense code. The aggregate cannot be built in that state on an expense code (only the
+        // backfill's raw SQL makes one), so the same landing is reached through a re-classified
+        // code: a $0 payer item on GORD-01, which is Revenue in the source and Expense in the target.
+        var gordSource = AddCode(_draft, "GORD-01", BudgetCodeCategory.Revenue);
+        AddCode(target, "GORD-01", BudgetCodeCategory.Expense);
+        _allocations.Add(CreateAllocation(
+            _draft.Id, gordSource.Id, gordSource.Code,
+            details: Item(amount: 0m, vendor: "Gord's Garage"),
+            category: BudgetCodeCategory.Revenue));
+
+        var result = await CopyAsync(target);
+
+        Assert.Equal(1, result.Value.Copied);
+        var copy = Assert.Single(_allocations.Allocations, a => a.PeriodId == target.Id);
+        Assert.Equal("Gord's Garage", copy.Vendor);
+        Assert.Empty(copy.VendorShares);
+        Assert.Empty(_vendors.Calls);
+    }
+
+    [Fact]
+    public async Task Shares_added_after_the_check_are_locked_late_and_verified_under_the_lock()
+    {
+        var target = CopyTarget();
+        var item = PlannedExpense(100m);
+
+        // Between the untracked "any shares?" (no) and the tracked read, a planner adds one.
+        _allocations.AfterVendorSharesCheckAsync = async () =>
+            Assert.True((await UpdateAsync(item.Id, Item(amount: 100m, vendorShares: [Share(_kalTire.Id, 100m)]))).IsSuccess);
+
+        var result = await CopyAsync(target);
+
+        Assert.Equal(1, result.Value.Copied);
+        var copy = Assert.Single(_allocations.Allocations, a => a.PeriodId == target.Id);
+        Assert.Equal(_kalTire.Id, Assert.Single(copy.VendorShares).VendorId);
+
+        // The update's own lock/lookup/commit, then the copy's late lock, its check and its commit.
+        Assert.Equal(["Lock", "GetById", "Commit", "Lock", "GetById", "Commit"], _vendors.Calls);
+    }
+
+    [Fact]
+    public async Task A_carried_vendor_deleted_in_the_gap_fails_the_copy_with_CopySourceChanged_and_writes_nothing()
+    {
+        var target = CopyTarget();
+        var item = PlannedExpense(100m);
+        var saves = _allocations.SaveChangesCallCount;
+
+        // The tracked read will see a share on Petro-Canada, but by the time the copy locks, that
+        // vendor is gone (its share was removed elsewhere and the vendor deleted — compressed here).
+        _allocations.AfterVendorSharesCheckAsync = () =>
+        {
+            Assert.True(item.Update(
+                item.BudgetCodeId, item.Code, BudgetCodeCategory.Expense,
+                Item(amount: 100m, vendorShares: [Share(_petro.Id, 100m)]), ActorId).IsSuccess);
+            _vendors.Vendors.Remove(_petro);
+            return Task.CompletedTask;
+        };
+
+        var result = await CopyAsync(target);
+
+        Assert.Equal(BudgetAllocationErrors.CopySourceChanged, result.Error);
+        Assert.Equal(ErrorType.Conflict, result.Error.Type);
+        Assert.DoesNotContain(_allocations.Allocations, a => a.PeriodId == target.Id);
+        Assert.Equal(saves, _allocations.SaveChangesCallCount);
+        Assert.Equal(["Lock", "GetById"], _vendors.Calls);
+        Assert.Empty(_vendors.CommittedLocks);
+    }
+
     // --- The real usage probe and the vendor delete ---
 
     [Fact]

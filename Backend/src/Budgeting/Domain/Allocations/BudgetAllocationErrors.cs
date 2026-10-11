@@ -180,4 +180,14 @@ public static class BudgetAllocationErrors
     public static readonly Error CopySourceNotFound = Error.NotFound(
         "Budgeting.Allocation.CopySourceNotFound",
         "The period to copy from was not found.");
+
+    /// <summary>
+    /// The source plan changed under a running copy so that a vendor share it would carry now names
+    /// a vendor deleted from the register (409). Rare by construction — it needs a share to be
+    /// added, removed and its vendor deleted between the copy's two reads — and nothing was
+    /// written, so running the copy again simply works.
+    /// </summary>
+    public static readonly Error CopySourceChanged = Error.Conflict(
+        "Budgeting.Allocation.CopySourceChanged",
+        "The plan being copied changed while the copy ran. Nothing was copied — run the copy again.");
 }

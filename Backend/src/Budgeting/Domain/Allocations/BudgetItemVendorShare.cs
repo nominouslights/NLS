@@ -58,6 +58,15 @@ public sealed record BudgetItemVendorShare
 
         return Result.Success(new BudgetItemVendorShare { VendorId = id, AmountCad = amount });
     }
+
+    /// <summary>
+    /// A new instance with the same values, for handing a share to <b>another owner</b> — a copied
+    /// item, or a read-model row. Value equality makes the two indistinguishable in C#, but EF Core
+    /// tracks an owned JSON entity by <em>reference</em>: one instance under two owners is one
+    /// dependent whose owner key changes, and SaveChanges throws. So a share is never shared
+    /// between owners; it is copied with this.
+    /// </summary>
+    public BudgetItemVendorShare CopyForNewOwner() => this with { };
 }
 
 /// <summary>

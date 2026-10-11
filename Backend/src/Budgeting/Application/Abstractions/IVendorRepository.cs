@@ -41,7 +41,7 @@ public interface IVendorRepository
     /// a budget item starts referencing that vendor, which would leave a share naming a vendor that
     /// no longer exists. Taken by vendor delete (around the probe and the remove) and by every item
     /// write that <b>adds</b> a vendor share — create, an update naming a vendor the item did not
-    /// have, and copy-from-period — before its register lookup. Writes that only keep shares need
+    /// have, and a copy-from-period whose source plan has shares — before its register lookup. Writes that only keep shares need
     /// no lock: their references are already committed, so the delete's probe sees them.
     /// <para>
     /// Opens a transaction on this unit of work (unless one is already open — then the caller's

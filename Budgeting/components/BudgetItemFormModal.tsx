@@ -30,11 +30,12 @@ import {
   type VendorRecord,
   type VendorShareDraft,
 } from "@/lib/api/budgeting";
-import { vendorInactiveMessage, vendorRegisterError } from "@/lib/vendorShares";
+import { PENDING_VENDOR_NAME, vendorInactiveMessage, vendorRegisterError } from "@/lib/vendorShares";
 import { formatCadPrecise } from "@/lib/money";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { NumberField, SelectField, TextAreaField, TextField } from "@/components/ui/Field";
 import { ActionButton } from "@/components/ui/Button";
+import { StatusChip } from "@/components/ui/Chip";
 import { usePeriodHold } from "@/lib/periodHold";
 import VendorSharesEditor from "@/components/VendorSharesEditor";
 import VendorFormModal, { type VendorFormApi } from "@/components/VendorFormModal";
@@ -59,6 +60,9 @@ import VendorFormModal, { type VendorFormApi } from "@/components/VendorFormModa
 //                    sends `vendorShares` explicitly: the whole list, or [] (also on revenue), and
 //                    an expense item always sends `vendor: null` (the server refuses new free text
 //                    there). "+ New vendor…" opens VendorFormModal inline and picks what it creates.
+//                    A REVENUE item that still carries shares from before its code was reclassified
+//                    shows them read-only ("Kept shares") and sends `vendorShares: null` — keep —
+//                    until REMOVE SHARES, after which it sends [].
 //   Why            — the justification (required: zero-based means argued from nothing, each
 //                    period), the priority (what gets cut first), assumptions, and what happens
 //                    if the item goes unfunded.
@@ -251,13 +255,14 @@ export default function BudgetItemFormModal({
     if (!parsed.ok) return setError(parsed.error);
     const input = parsed.input;
     // The server's own rules and messages, in the server's order. It re-checks all of it.
-    const problem = budgetItemError(input, category);
+    const problem = budgetItemError(input, category, item);
     if (problem) return setError(problem);
     // BudgetItemVendorRule: a vendor this save ADDS must be in the register and active — checked
     // against the loaded register (skipped while it is null), so a vendor retired since the
-    // picker opened is refused in the server's words before the round trip.
+    // picker opened is refused in the server's words before the round trip. Kept shares (null)
+    // add nothing.
     const registerProblem = vendorRegisterError(
-      input.vendorShares,
+      input.vendorShares ?? [],
       item?.vendorShares ?? [],
       register,
       category,
@@ -293,6 +298,13 @@ export default function BudgetItemFormModal({
   }
 
   const retiredOnEdit = item !== null && !item.isCodeActive;
+  /**
+   * A revenue item still carrying the shares it was split into while its code was an expense
+   * code. Shown read-only and KEPT on save (vendorShares: null) until the planner removes them —
+   * an unrelated edit must never wipe them silently.
+   */
+  const keptRevenueShares =
+    revenue && item !== null && draft.vendorShares.length > 0 ? item.vendorShares : [];
 
   return (
     <>
@@ -500,6 +512,69 @@ export default function BudgetItemFormModal({
             </Note>
           )}
         </Group>
+      )}
+
+      {/* ------- Vendor shares left from an expense code (revenue, read-only) ------- */}
+      {keptRevenueShares.length > 0 && (
+        <Group title="Vendor shares">
+          <div data-testid="kept-revenue-shares">
+            <div
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 8,
+                fontFamily: fonts.body,
+                fontSize: 11.5,
+                color: colors.textSecondary,
+                lineHeight: 1.5,
+              }}
+            >
+              <StatusChip kind="soon" label="Kept shares" />
+              <span>
+                Shares from when this code was an expense code — kept unless you remove them. A
+                revenue item cannot take new shares, and moving it to another code needs them
+                removed first.
+              </span>
+            </div>
+            <ul
+              style={{
+                margin: "8px 0 0",
+                paddingLeft: 18,
+                fontFamily: fonts.body,
+                fontSize: 12,
+                color: colors.textPrimary,
+                lineHeight: 1.6,
+              }}
+            >
+              {keptRevenueShares.map((s) => (
+                <li key={s.vendorId}>
+                  {s.vendorName ?? PENDING_VENDOR_NAME}
+                  {s.vendorName !== null && !s.isActive ? " — retired" : ""} ·{" "}
+                  <span style={{ fontFamily: fonts.mono, fontVariantNumeric: "tabular-nums" }}>
+                    {formatCadPrecise(s.amountCad)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <div style={{ marginTop: 8 }}>
+              <ActionButton
+                variant="destructive"
+                onClick={() => set("vendorShares")([])}
+                disabled={busy}
+                style={{ padding: "5px 11px", fontSize: 12 }}
+              >
+                REMOVE SHARES
+              </ActionButton>
+            </div>
+          </div>
+        </Group>
+      )}
+
+      {revenue && item !== null && item.vendorShares.length > 0 && keptRevenueShares.length === 0 && (
+        <Note>
+          The vendor shares left from the expense code will be removed when you save. Cancel to
+          keep them.
+        </Note>
       )}
 
       {/* ---------------- Why ---------------- */}

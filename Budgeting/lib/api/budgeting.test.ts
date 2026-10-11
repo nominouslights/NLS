@@ -64,6 +64,7 @@ import {
   type LifecycleStep,
   type PeriodTransitionAction,
 } from "./budgeting";
+import { VENDOR_SHARE_MESSAGES, vendorSharesMustSumMessage } from "@/lib/vendorShares";
 import type { BudgetCode, BudgetCodeCategory, BudgetPeriod, PeriodState } from "@/lib/types";
 
 // Shared fixtures for the period and allocation helpers below.
@@ -1652,10 +1653,39 @@ describe("vendor shares in the item draft and the refetch predicate", () => {
     expect(r.ok && r.input.vendorShares).toEqual([]);
   });
 
-  it("revenue: sends the trimmed payer and [] shares, whatever rows the draft holds", () => {
-    const r = draftToBudgetItemInput(draft, "Revenue");
+  it("revenue with no share rows: sends the trimmed payer and [] shares", () => {
+    const r = draftToBudgetItemInput({ ...draft, vendorShares: [] }, "Revenue");
     expect(r.ok && r.input.vendor).toBe("Kal Tire (old text)");
     expect(r.ok && r.input.vendorShares).toEqual([]);
+  });
+
+  // BudgetAllocation.Update: null shares keep the current ones, and CheckCategory applies to them
+  // only on change — so a revenue item reclassified after it was split saves unchanged. Sending []
+  // there would silently wipe the split on, say, a title edit.
+  it("revenue still holding rows (reclassified from expense): sends null — keep — not []", () => {
+    const r = draftToBudgetItemInput(draft, "Revenue");
+    expect(r.ok && r.input.vendor).toBe("Kal Tire (old text)");
+    expect(r.ok && r.input.vendorShares).toBeNull();
+  });
+
+  it("budgetItemError on kept shares mirrors BudgetAllocation.Update: re-summed, category only on a code change", () => {
+    const current = {
+      budgetCodeId: "rev-a",
+      vendorShares: [{ vendorId: "v-a", vendorName: "Kal Tire", isActive: true, amountCad: 2450 }],
+    };
+    const r = draftToBudgetItemInput({ ...draft, budgetCodeId: "rev-a" }, "Revenue");
+    if (!r.ok) throw new Error(r.error);
+    expect(budgetItemError(r.input, "Revenue", current)).toBeNull();
+    // Kept shares are re-checked against a changed amount (Parse with the current shares).
+    expect(budgetItemError({ ...r.input, amountCad: 2500 }, "Revenue", current)).toBe(
+      vendorSharesMustSumMessage(2450, 2500),
+    );
+    // Moving the item to another code makes the shares "changed" — refused on revenue.
+    expect(budgetItemError({ ...r.input, budgetCodeId: "rev-b" }, "Revenue", current)).toBe(
+      VENDOR_SHARE_MESSAGES.VendorSharesNotAllowedForRevenue,
+    );
+    // Explicitly cleared: [] is always fine on revenue.
+    expect(budgetItemError({ ...r.input, budgetCodeId: "rev-b", vendorShares: [] }, "Revenue", current)).toBeNull();
   });
 
   it("refuses a share that is not a number", () => {
@@ -1720,5 +1750,7 @@ describe("vendor shares in the item draft and the refetch predicate", () => {
     // The payer is compared too (trimmed, as stored).
     expect(itemReflects({ ...row, vendorShares: [], vendor: "Alamos" }, "item-1", { ...input, vendorShares: [], vendor: " Alamos " })).toBe(true);
     expect(itemReflects({ ...row, vendorShares: [], vendor: null }, "item-1", { ...input, vendorShares: [], vendor: "Alamos" })).toBe(false);
+    // Kept (null): whatever shares the row carries are the ones kept — nothing to wait for.
+    expect(itemReflects(row, "item-1", { ...input, vendorShares: null })).toBe(true);
   });
 });

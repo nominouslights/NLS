@@ -502,6 +502,37 @@ describe("BudgetItemFormModal — expense vendor shares", () => {
     );
   });
 
+  // The note must match the real rule: "already carried" is the SAVED item (BudgetItemVendorRule
+  // looks up only vendors the write adds against the item's current shares), so removing the
+  // retired vendor's row and re-adding it within the same edit is still offered — and accepted.
+  it("a removed retired vendor is still offered within the same edit, and the note says when it is lost", async () => {
+    const existing = lumpItem({
+      vendorShares: [{ vendorId: "v-old", vendorName: "Old Fuel Co", isActive: false, amountCad: 2450 }],
+    });
+    const api = makeApi([existing]);
+    const { onSaved } = renderModal({ item: existing, vendors: REGISTER, api });
+
+    expect(
+      within(shareRows()[0]).getByText("Retired — kept on this item. Once you save without it, it can't be added back."),
+    ).toBeTruthy();
+    expect(screen.queryByText(/once removed a retired vendor cannot be added back/)).toBeNull();
+
+    fireEvent.click(within(shareRows()[0]).getByText("REMOVE"));
+    fireEvent.click(screen.getByText("+ ADD VENDOR"));
+    expect(optionLabels(shareRows()[0])).toContain("Old Fuel Co — retired");
+    expect(optionLabels(shareRows()[0]).some((l) => l?.includes("Gone Garage"))).toBe(false);
+
+    pickVendor(shareRows()[0], "v-old");
+    shareAmount(shareRows()[0], "2450");
+    fireEvent.click(screen.getByText("SAVE CHANGES"));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(api.update).toHaveBeenCalledWith(
+      PERIOD,
+      "item-1",
+      expect.objectContaining({ vendorShares: [{ vendorId: "v-old", amountCad: 2450 }] }),
+    );
+  });
+
   it("refuses a newly added vendor the register says was retired since it was picked (BudgetItemVendorRule)", () => {
     // The pick happens, then the dashboard's register copy is replaced by a fresher one in which
     // Kal Tire is retired: the save is refused in the server's 409 words, with no round trip.
@@ -610,5 +641,60 @@ describe("BudgetItemFormModal — revenue payer", () => {
       PERIOD,
       expect.objectContaining({ budgetCodeId: "rev-a", vendor: "Alamos Gold", vendorShares: [] }),
     );
+  });
+
+  // An item split while its code was an expense code, the code reclassified Revenue since. The
+  // server saves it unchanged (BudgetAllocation.Update: null keeps the shares, CheckCategory only
+  // on change) — so an unrelated edit must send null, never [] that would wipe the split.
+  const reclassified = () =>
+    lumpItem({
+      budgetCodeId: "rev-a",
+      code: "REV-A",
+      category: "Revenue",
+      title: "Crew rotations",
+      vendorShares: [
+        { vendorId: "v-kal", vendorName: "Kal Tire", isActive: true, amountCad: 2000 },
+        { vendorId: "v-old", vendorName: "Old Fuel Co", isActive: false, amountCad: 450 },
+      ],
+    });
+
+  it("a reclassified item's title edit keeps its shares — shown read-only, sent as null", async () => {
+    const existing = reclassified();
+    const api = makeApi([{ ...existing, title: "Crew rotations, October" }]);
+    const { onSaved } = renderModal({ category: "Revenue", item: existing, vendors: REGISTER, api });
+
+    const kept = screen.getByTestId("kept-revenue-shares");
+    expect(within(kept).getByText("Kept shares")).toBeTruthy(); // StatusChip: glyph + label
+    expect(
+      within(kept).getByText(/Shares from when this code was an expense code — kept unless you remove them/),
+    ).toBeTruthy();
+    expect(within(kept).getByText(/Kal Tire/)).toBeTruthy();
+    expect(within(kept).getByText(/Old Fuel Co — retired/)).toBeTruthy();
+    expect(screen.queryByTestId("vendor-shares")).toBeNull(); // no editor on revenue
+    expect(screen.queryByText("+ ADD VENDOR")).toBeNull();
+
+    type("e.g. Alamos crew rotations, October", "Crew rotations, October");
+    fireEvent.click(screen.getByText("SAVE CHANGES"));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(api.update).toHaveBeenCalledWith(
+      PERIOD,
+      "item-1",
+      expect.objectContaining({ title: "Crew rotations, October", vendorShares: null }),
+    );
+  });
+
+  it("REMOVE SHARES on a reclassified item sends [] explicitly", async () => {
+    const existing = reclassified();
+    const api = makeApi([{ ...existing, vendorShares: [] }]);
+    const { onSaved } = renderModal({ category: "Revenue", item: existing, vendors: REGISTER, api });
+
+    fireEvent.click(screen.getByText("REMOVE SHARES"));
+    expect(screen.queryByTestId("kept-revenue-shares")).toBeNull();
+    expect(screen.getByText(/will be removed when you save/)).toBeTruthy();
+    fireEvent.click(screen.getByText("SAVE CHANGES"));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(api.update).toHaveBeenCalledWith(PERIOD, "item-1", expect.objectContaining({ vendorShares: [] }));
   });
 });

@@ -655,7 +655,19 @@ describe("budget item requests", () => {
   // vendorShares: the server reads an OMITTED or null list on PUT as "keep the current shares",
   // so a body that dropped the key would silently keep a split the planner just removed. This app
   // always sends it — the full list, or [] to clear (and [] on a revenue item).
-  it("always puts vendorShares on the wire — [] to clear, never omitted or null", async () => {
+  // The one null this app sends: a revenue item keeping shares from before a reclassification.
+  // The key is still on the wire — null by intent, never dropped by accident.
+  it("sends a deliberate null (keep) as an explicit key, not an omitted one", async () => {
+    fetchMock.mockResolvedValueOnce(noContent());
+
+    await updateBudgetItem(PERIOD, ITEM, { ...input, vendorShares: null });
+
+    const put = JSON.parse(String(callInit(0).body));
+    expect(Object.keys(put)).toContain("vendorShares");
+    expect(put.vendorShares).toBeNull();
+  });
+
+  it("always puts vendorShares on the wire — [] to clear, never omitted", async () => {
     fetchMock.mockResolvedValueOnce(noContent());
     fetchMock.mockResolvedValueOnce(jsonResponse(201, { id: ITEM }));
 

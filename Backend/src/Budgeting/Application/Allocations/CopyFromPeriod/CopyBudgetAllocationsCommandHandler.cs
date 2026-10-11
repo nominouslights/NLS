@@ -59,9 +59,21 @@ namespace NorthernLink.Budgeting.Application.Allocations.CopyFromPeriod;
 /// tenant-wide, so the same ids are valid in every period; a share on a since-retired vendor is
 /// carried too), and are dropped onto a revenue code — <c>BudgetAllocation.CopyInto</c> decides
 /// by the <em>target</em> code's category. Because a copy can make a vendor referenced by one
-/// more item, the whole copy runs under the tenant's vendor register lock, taken before the source
-/// items are read: a vendor delete either commits first (and then no source item can still carry
-/// it — its probe would have refused) or waits and sees the copied shares.
+/// more item, a copy that carries shares runs under the tenant's vendor register lock, taken before
+/// the source items are read: a vendor delete either commits first (and then no source item can
+/// still carry it — its probe would have refused) or waits and sees the copied shares.
+/// </para>
+/// <para>
+/// <b>The lock is taken only when the source plan has shares</b>, decided by a scalar, untracked
+/// <see cref="IBudgetAllocationRepository.AnyWithVendorSharesInPeriodAsync"/> <em>before</em> the
+/// tracked read — so a plan with no vendor shares never serializes with the vendor register. (The
+/// chart copy cannot do this cheaply and locks always; see <c>CopyBudgetCodesCommandHandler</c>.)
+/// The check can go stale: a planner may add shares to a source item between it and the tracked
+/// read. Re-reading after locking would hand back EF's already-tracked instances, so instead, when
+/// the copies turn out to carry shares and no lock was taken, the handler locks <em>then</em> and
+/// confirms every carried vendor still exists. Under the lock that answer holds until the commit;
+/// a vendor deleted in the gap fails the whole copy with
+/// <see cref="BudgetAllocationErrors.CopySourceChanged"/> (409, nothing written — run it again).
 /// </para>
 /// </summary>
 public sealed class CopyBudgetAllocationsCommandHandler(
@@ -103,18 +115,81 @@ public sealed class CopyBudgetAllocationsCommandHandler(
             return Result.Failure<BudgetAllocationCopyResult>(BudgetAllocationErrors.CopySourceNotFound);
         }
 
-        // Before the first read of the source items — see the class comment. Released (rolled
-        // back) on every early return, committed with the save.
-        await using var vendorLock = await vendors.LockRegisterAsync(command.TenantId, cancellationToken);
-
-        var sourceLines = await allocations.ListForPeriodAsync(sourcePeriodId, cancellationToken);
-        if (sourceLines.Count == 0)
+        // Released (rolled back) on every early return, committed with the save. Not an
+        // `await using` because the stale-check path below may take it late.
+        IVendorRegisterLock? vendorLock = null;
+        try
         {
-            // Success with zeroes, so the console can say "nothing to copy" rather than raise an
-            // error for a button that worked. No further reads and no save.
-            return Result.Success(new BudgetAllocationCopyResult(0, 0, 0, 0));
-        }
+            // The cheap, untracked question first, and the lock only if it says yes — before the
+            // tracked read of the source items. See the class comment.
+            if (await allocations.AnyWithVendorSharesInPeriodAsync(sourcePeriodId, cancellationToken))
+            {
+                vendorLock = await vendors.LockRegisterAsync(command.TenantId, cancellationToken);
+            }
 
+            var sourceLines = await allocations.ListForPeriodAsync(sourcePeriodId, cancellationToken);
+            if (sourceLines.Count == 0)
+            {
+                // Success with zeroes, so the console can say "nothing to copy" rather than raise an
+                // error for a button that worked. No further reads and no save.
+                return Result.Success(new BudgetAllocationCopyResult(0, 0, 0, 0));
+            }
+
+            var plan = await PlanAsync(command, sourceLines, cancellationToken);
+            if (plan.Copies.Count == 0)
+            {
+                // A copy that skips everything writes nothing at all.
+                return Result.Success(plan.ToResult(sourceLines.Count));
+            }
+
+            // The check said "no shares", yet the copies carry some: a planner added them in
+            // between. Lock now, and confirm under the lock that every carried vendor still exists
+            // — from here a vendor delete waits for this commit and then sees the copies.
+            if (vendorLock is null && plan.Copies.Exists(copy => copy.VendorShares.Count > 0))
+            {
+                vendorLock = await vendors.LockRegisterAsync(command.TenantId, cancellationToken);
+
+                var carried = plan.Copies.SelectMany(copy => copy.VendorShares).Select(share => share.VendorId).Distinct();
+                foreach (var vendorId in carried)
+                {
+                    if (await vendors.GetByIdAsync(vendorId, cancellationToken) is null)
+                    {
+                        return Result.Failure<BudgetAllocationCopyResult>(BudgetAllocationErrors.CopySourceChanged);
+                    }
+                }
+            }
+
+            foreach (var copy in plan.Copies)
+            {
+                allocations.Add(copy);
+            }
+
+            await allocations.SaveChangesAsync(cancellationToken);
+            if (vendorLock is not null)
+            {
+                await vendorLock.CommitAsync(cancellationToken);
+            }
+
+            return Result.Success(plan.ToResult(sourceLines.Count));
+        }
+        finally
+        {
+            if (vendorLock is not null)
+            {
+                await vendorLock.DisposeAsync();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Decides every source line — copy or which skip — without adding anything, so the handler
+    /// can still refuse the whole copy before the unit of work holds a single new item.
+    /// </summary>
+    private async Task<CopyPlan> PlanAsync(
+        CopyBudgetAllocationsCommand command,
+        IReadOnlyList<BudgetAllocation> sourceLines,
+        CancellationToken cancellationToken)
+    {
         // Snapshotted BEFORE the loop and never updated inside it: "already planned" means planned
         // in the target before this copy ran. Adding each copied item's code to the set would skip
         // the second and later source items of a code whose first item was just copied — many
@@ -129,37 +204,38 @@ public sealed class CopyBudgetAllocationsCommandHandler(
         var targetChart = await codes.ListForPeriodAsync(command.PeriodId, cancellationToken);
         var targetByCode = targetChart.ToDictionary(code => code.Code, StringComparer.Ordinal);
 
-        var copied = 0;
-        var skippedAlreadyPlanned = 0;
-        var skippedRetiredCode = 0;
-
+        var plan = new CopyPlan();
         foreach (var line in sourceLines)
         {
             var targetCode = targetByCode.GetValueOrDefault(line.Code);
 
             if (targetCode is not null && alreadyPlanned.Contains(targetCode.Id))
             {
-                skippedAlreadyPlanned++;
+                plan.SkippedAlreadyPlanned++;
                 continue;
             }
 
             if (targetCode is not { IsActive: true })
             {
-                skippedRetiredCode++;
+                plan.SkippedRetiredCode++;
                 continue;
             }
 
-            allocations.Add(line.CopyInto(command.PeriodId, targetCode.Id, targetCode.Category, command.ActorId));
-            copied++;
+            plan.Copies.Add(line.CopyInto(command.PeriodId, targetCode.Id, targetCode.Category, command.ActorId));
         }
 
-        if (copied > 0)
-        {
-            await allocations.SaveChangesAsync(cancellationToken);
-            await vendorLock.CommitAsync(cancellationToken);
-        }
+        return plan;
+    }
 
-        return Result.Success(new BudgetAllocationCopyResult(
-            copied, skippedAlreadyPlanned, skippedRetiredCode, sourceLines.Count));
+    private sealed class CopyPlan
+    {
+        public List<BudgetAllocation> Copies { get; } = [];
+
+        public int SkippedAlreadyPlanned { get; set; }
+
+        public int SkippedRetiredCode { get; set; }
+
+        public BudgetAllocationCopyResult ToResult(int sourceLineCount) =>
+            new(Copies.Count, SkippedAlreadyPlanned, SkippedRetiredCode, sourceLineCount);
     }
 }

@@ -326,6 +326,37 @@ public class BudgetAllocationVendorShareTests
     }
 
     [Fact]
+    public void A_copys_shares_are_new_instances_never_the_sources()
+    {
+        // Equal by value, but EF Core tracks owned JSON entities by REFERENCE: a share instance
+        // shared between the tracked source and the added copy is one dependent with two owners,
+        // and SaveChanges throws (pinned against real EF in Budgeting.IntegrationTests).
+        var source = ValidExpense(1000.10m, Share(Fuel, 600.05m), Share(Tires, 400.05m));
+
+        var copy = source.CopyInto(Guid.NewGuid(), Guid.NewGuid(), BudgetCodeCategory.Expense, ActorId);
+
+        Assert.Equal(source.VendorShares.Count, copy.VendorShares.Count);
+        Assert.All(
+            source.VendorShares.Zip(copy.VendorShares),
+            pair =>
+            {
+                Assert.Equal(pair.First, pair.Second);
+                Assert.NotSame(pair.First, pair.Second);
+            });
+    }
+
+    [Fact]
+    public void Copy_for_new_owner_is_an_equal_but_distinct_share()
+    {
+        var share = BudgetItemVendorShare.Create(Fuel, 12.34m).Value;
+
+        var copy = share.CopyForNewOwner();
+
+        Assert.Equal(share, copy);
+        Assert.NotSame(share, copy);
+    }
+
+    [Fact]
     public void A_copy_follows_the_target_codes_category()
     {
         var expense = ValidExpense(100m, Share(Fuel, 100m));
@@ -334,6 +365,53 @@ public class BudgetAllocationVendorShareTests
 
         var revenue = CreateAllocation(details: Item(amount: 100m, vendor: "Alamos Gold"));
         Assert.Equal("Alamos Gold", revenue.CopyInto(Guid.NewGuid(), Guid.NewGuid(), BudgetCodeCategory.Revenue, ActorId).Vendor);
-        Assert.Null(revenue.CopyInto(Guid.NewGuid(), Guid.NewGuid(), BudgetCodeCategory.Expense, ActorId).Vendor);
+
+        // Onto an expense code with no shares to carry, the text still crosses rather than being
+        // silently lost — the copy is not the planner adding a payer.
+        var ontoExpense = revenue.CopyInto(Guid.NewGuid(), Guid.NewGuid(), BudgetCodeCategory.Expense, ActorId);
+        Assert.Equal("Alamos Gold", ontoExpense.Vendor);
+        Assert.Empty(ontoExpense.VendorShares);
+    }
+
+    [Fact]
+    public void A_zero_dollar_legacy_expense_item_keeps_its_vendor_text_through_a_copy_and_stays_saveable()
+    {
+        // The backfill's leftover: a $0 expense item still holding free text, which it could not
+        // turn into a share. Only raw SQL builds that state on an expense code, so the source is a
+        // $0 payer item (text allowed) — CopyInto sees the same thing: no shares, some text.
+        var legacy = CreateAllocation(details: Item(amount: 0m, vendor: "Gord's Garage"));
+
+        var copy = legacy.CopyInto(Guid.NewGuid(), Guid.NewGuid(), BudgetCodeCategory.Expense, ActorId);
+
+        Assert.Equal("Gord's Garage", copy.Vendor);
+        Assert.True(copy.NeedsJustification);
+
+        // Arguing the copy without touching the text is not a change to the payer, so it saves.
+        var argued = copy.Update(
+            copy.BudgetCodeId, copy.Code, BudgetCodeCategory.Expense,
+            Item(amount: 0m, vendor: "Gord's Garage", justification: "Still needed this year."), ActorId);
+        Assert.True(argued.IsSuccess);
+        Assert.Equal("Gord's Garage", copy.Vendor);
+
+        // Changing the text is a change, and meets the rule.
+        var changed = copy.Update(
+            copy.BudgetCodeId, copy.Code, BudgetCodeCategory.Expense,
+            Item(amount: 0m, vendor: "Gord's Garage Ltd", justification: "Still needed this year."), ActorId);
+        Assert.Equal(BudgetAllocationErrors.PayerNotAllowedForExpense, changed.Error);
+    }
+
+    [Fact]
+    public void Leftover_text_beside_shares_is_dropped_onto_an_expense_code()
+    {
+        // Text the item kept (unchanged) while shares were added: the shares supersede it.
+        var item = CreateAllocation(details: Item(amount: 0m, vendor: "Old text"));
+        Assert.True(item.Update(
+            item.BudgetCodeId, item.Code, BudgetCodeCategory.Expense,
+            Item(amount: 50m, vendor: "Old text", vendorShares: [Share(Fuel, 50m)]), ActorId).IsSuccess);
+
+        var copy = item.CopyInto(Guid.NewGuid(), Guid.NewGuid(), BudgetCodeCategory.Expense, ActorId);
+
+        Assert.Null(copy.Vendor);
+        Assert.Equal(Fuel, Assert.Single(copy.VendorShares).VendorId);
     }
 }

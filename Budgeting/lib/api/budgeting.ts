@@ -273,7 +273,8 @@ export interface BudgetAllocationRecord {
   vendor: string | null;
   /**
    * An expense item's vendors with their dollar shares, in the planner's order. Never null; empty
-   * is "No vendor"; when not empty the amounts sum to exactly `amountCad`. Always empty on revenue.
+   * is "No vendor"; when not empty the amounts sum to exactly `amountCad`. Empty on revenue — except
+   * on an item split while its code was an expense code and reclassified since, which keeps them.
    */
   vendorShares: BudgetItemVendorShareRecord[];
   /** Never null. */
@@ -336,11 +337,15 @@ export interface BudgetItemInput {
   assumptions: string | null;
   consequenceIfUnfunded: string | null;
   /**
-   * ALWAYS sent by this app, so intent is explicit on the wire: the full list on an expense item,
-   * `[]` to clear it, and `[]` on a revenue item. The server reads an OMITTED/null list on PUT as
-   * "keep the current shares" (re-checked against the new amount) — this app never relies on that.
+   * ALWAYS sent by this app as a key, so intent is explicit on the wire: the full list on an
+   * expense item, `[]` to clear it, and `[]` on a revenue item with no shares. The server reads a
+   * null list on PUT as "keep the current shares" (re-checked against the new amount) — this app
+   * sends null in exactly one case: a REVENUE item that still carries shares from before its code
+   * was reclassified Expense → Revenue, which the planner has not removed. The server accepts that
+   * item unchanged (its category rule applies only on change), so sending [] would silently wipe
+   * the split on an unrelated edit.
    */
-  vendorShares: BudgetItemVendorShareInput[];
+  vendorShares: BudgetItemVendorShareInput[] | null;
 }
 
 /**
@@ -564,10 +569,16 @@ const RECURRENCES: readonly BudgetRecurrence[] = ["OneTime", "Recurring"];
  * The quantity is rounded BEFORE it is checked (0.004 is refused as not positive, 0.005 is 0.01
  * and fine); the lump sum is checked BEFORE it is rounded (999,999,999.994 is too large even
  * though it would round to the ceiling). Both asymmetries are the server's.
+ *
+ * `current` is the item being edited (null on create). It matters only when `input.vendorShares`
+ * is null ("keep"): BudgetAllocation.Update then parses the item's CURRENT shares, so they are
+ * re-checked against the new amount here too, and the category rule applies to them only when
+ * the code changes (CheckCategory's sharesChanged: codeChanged || shares differ).
  */
 export function budgetItemError(
   input: BudgetItemInput,
   category: BudgetCodeCategory | null = null,
+  current: Pick<BudgetAllocationRecord, "budgetCodeId" | "vendorShares"> | null = null,
 ): string | null {
   const m = BUDGET_ITEM_MESSAGES;
   const L = BUDGET_ITEM_LIMITS;
@@ -606,7 +617,11 @@ export function budgetItemError(
   if ((normalizeOptional(input.vendor)?.length ?? 0) > L.vendorMaxLength) return m.VendorTooLong;
 
   // Every cost rule passed above, so the amount the server will store is known.
-  const shares = vendorSharesShapeError(input.vendorShares, itemAmount(input) ?? 0);
+  const kept = input.vendorShares === null;
+  const effectiveShares: BudgetItemVendorShareInput[] =
+    input.vendorShares ??
+    (current?.vendorShares ?? []).map((s) => ({ vendorId: s.vendorId, amountCad: s.amountCad }));
+  const shares = vendorSharesShapeError(effectiveShares, itemAmount(input) ?? 0);
   if (shares) return shares;
 
   const tags = normalizeTags(input.tags);
@@ -619,9 +634,15 @@ export function budgetItemError(
   if ((normalizeOptional(input.consequenceIfUnfunded)?.length ?? 0) > L.consequenceMaxLength) {
     return m.ConsequenceTooLong;
   }
-  return category === null
-    ? null
-    : vendorSharesCategoryError(input.vendorShares, normalizeOptional(input.vendor), category);
+  if (category === null) return null;
+  if (kept && category === "Revenue") {
+    // Kept shares on a revenue item: refused only when the write moves it to another code.
+    const codeChanged = current !== null && current.budgetCodeId !== input.budgetCodeId;
+    return codeChanged && effectiveShares.length > 0
+      ? vendorSharesCategoryError(effectiveShares, null, category)
+      : null;
+  }
+  return vendorSharesCategoryError(effectiveShares, normalizeOptional(input.vendor), category);
 }
 
 /** How the item modal's cost is entered. Client-only — the wire has no mode, only which fields are null. */
@@ -674,9 +695,12 @@ function parseNumberText(text: string): number | null {
  * not a number at all; everything else is left to budgetItemError, in the server's words.
  *
  * The category decides the vendor fields: a REVENUE item sends its payer text and
- * `vendorShares: []`; an EXPENSE item sends `vendor: null` (clearing any legacy free text — the
- * server refuses new text there) and every share row, a blank vendor as null and a blank amount
- * as null so the server's own VendorShareVendorRequired / VendorShareAmountInvalid apply.
+ * `vendorShares: []` — or `null` ("keep the current shares") while the draft still holds rows,
+ * which on revenue happens only for an item whose code was reclassified Expense → Revenue after it
+ * was split (recordToDraft loads them; the modal's "Remove shares" empties them, and then [] goes).
+ * An EXPENSE item sends `vendor: null` (clearing any legacy free text — the server refuses new
+ * text there) and every share row, a blank vendor as null and a blank amount as null so the
+ * server's own VendorShareVendorRequired / VendorShareAmountInvalid apply.
  */
 export function draftToBudgetItemInput(
   draft: BudgetItemDraft,
@@ -691,8 +715,12 @@ export function draftToBudgetItemInput(
   if (Number.isNaN(unitCost)) return { ok: false, error: "Enter the unit cost as a number." };
 
   const revenue = category === "Revenue";
-  const vendorShares: BudgetItemVendorShareInput[] = [];
-  if (!revenue) {
+  let vendorShares: BudgetItemVendorShareInput[] | null = [];
+  if (revenue) {
+    // Shares a revenue item still carries from before a reclassification are kept, never
+    // silently cleared by an unrelated edit — the server accepts the item as it stands.
+    if (draft.vendorShares.length > 0) vendorShares = null;
+  } else {
     for (const row of draft.vendorShares) {
       const amountCad = parseNumberText(row.amount);
       if (Number.isNaN(amountCad)) {
@@ -769,7 +797,8 @@ export function itemReflects(
     record.priority === input.priority &&
     (expected === null || Math.abs(record.amountCad - expected) < 0.005) &&
     (record.vendor ?? null) === normalizeOptional(input.vendor) &&
-    sameShares(record.vendorShares, input.vendorShares)
+    // null kept the current shares — nothing new to wait for.
+    (input.vendorShares === null || sameShares(record.vendorShares, input.vendorShares))
   );
 }
 

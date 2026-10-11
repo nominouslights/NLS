@@ -33,7 +33,9 @@ import { StatusChip } from "@/components/ui/Chip";
 //     shortcuts ("Assign remaining" on a row, "Split evenly") run only when clicked.
 //   - The picker offers ACTIVE vendors, each once across the rows. A vendor the item already had
 //     that has been retired since is kept, selectable and marked: the server accepts a share the
-//     item already carried (BudgetItemVendorRule only looks up ADDED vendors).
+//     item already carried (BudgetItemVendorRule only looks up ADDED vendors). "Already carried"
+//     means the SAVED item: removing its row and re-adding it within the same edit is still
+//     offered and accepted; only once a save goes through without it is it gone for good.
 //   - No rows at all is "No vendor" — legal, and how the item lands in that bucket.
 
 /** The picker option that opens the inline vendor modal instead of selecting anything. */
@@ -218,8 +220,8 @@ export default function VendorSharesEditor({
                 </div>
                 {chosen?.kept === "retired" && (
                   <KeptNote chip="Retired">
-                    Kept because it is already on this item — saving it is allowed, but once removed
-                    a retired vendor cannot be added back.
+                    Retired — kept on this item. Once you save without it, it can&apos;t be added
+                    back.
                   </KeptNote>
                 )}
                 {chosen?.kept === "pending" && (
