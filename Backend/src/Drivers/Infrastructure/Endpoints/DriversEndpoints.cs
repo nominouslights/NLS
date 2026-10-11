@@ -18,9 +18,6 @@ using NorthernLink.Drivers.Application.Drivers.Register;
 using NorthernLink.Drivers.Application.Drivers.SelfAccess;
 using NorthernLink.Drivers.Application.Drivers.UnlinkUser;
 using NorthernLink.Drivers.Application.Drivers.Update;
-using NorthernLink.Drivers.Application.Hos;
-using NorthernLink.Drivers.Application.Hos.GetForDriver;
-using NorthernLink.Drivers.Application.Hos.Record;
 using NorthernLink.Drivers.Domain.Drivers;
 using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
@@ -38,18 +35,16 @@ public static class DriversEndpoints
 {
     public static IEndpointRouteBuilder MapDriversEndpoints(this IEndpointRouteBuilder app)
     {
-        // TWO groups on the same "/api/drivers" prefix, not one. ASP.NET group policies are
+        // FOUR groups on the same "/api/drivers" prefix, not one. ASP.NET group policies are
         // ADDITIVE — a nested group's policy ANDs with its parent's — so there is no way to
-        // widen access from inside a narrowed group. Two MapGroup calls on one prefix is legal;
-        // routes stay unambiguous because they are distinguished by template and method.
+        // widen access from inside a narrowed group. Several MapGroup calls on one prefix is
+        // legal; routes stay unambiguous because they are distinguished by template and method.
         //
         // Roster administration: registering drivers, editing them, granting and revoking
         // credentials and clearances, and linking a driver to a login account.
         var driverAdmin = app.MapGroup("/api/drivers")
             .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
 
-        driverAdmin.MapGet("", GetDrivers);
-        driverAdmin.MapGet("{id:guid}", GetDriverById);
         driverAdmin.MapPost("", RegisterDriver);
         driverAdmin.MapPut("{id:guid}", UpdateDriver);
         driverAdmin.MapPost("{id:guid}/status", ChangeStatus);
@@ -71,10 +66,21 @@ public static class DriversEndpoints
         driverAdmin.MapPost("{driverId:guid}/clearances", GrantDriverClearance);
         driverAdmin.MapDelete("{driverId:guid}/clearances/{clearanceId:guid}", RevokeDriverClearance);
 
+        // The roster's READ routes: DispatchAccess widened with ComplianceOfficer, so the
+        // console's Drivers screen (and the roster HOS batch) work for a compliance officer
+        // without the write routes above ever admitting one. "hos/status" cannot collide with
+        // "{id:guid}": "hos" is not a Guid.
+        var roster = app.MapGroup("/api/drivers")
+            .RequireAuthorization(AuthorizationPolicies.DriverRosterAccess);
+
+        roster.MapGet("", GetDrivers);
+        roster.MapGet("{id:guid}", GetDriverById);
+        roster.MapGet("hos/status", HosEndpoints.GetRosterHosStatus);
+
         // The Driver Field App's own surface. DriverAccess admits every Driver, so it is a
         // route-level gate ONLY: each {driverId} route below additionally runs the
         // caller-owns-this-row check (IDriverSelfAccess) before it does anything, or driver A
-        // could read driver B's credentials and post duty logs in B's name.
+        // could read driver B's credentials.
         var driverSelf = app.MapGroup("/api/drivers")
             .RequireAuthorization(AuthorizationPolicies.DriverAccess);
 
@@ -86,9 +92,8 @@ public static class DriversEndpoints
         driverSelf.MapGet("{driverId:guid}/credentials", GetDriverCredentials);
         driverSelf.MapGet("{driverId:guid}/clearances", GetDriverClearances);
 
-        // Hours of Service duty logs — nested under their driver.
-        driverSelf.MapGet("{driverId:guid}/hos", GetDriverHosEntries);
-        driverSelf.MapPost("{driverId:guid}/hos", RecordDriverHosEntry);
+        // Hours of service — the fourth sibling group (HosAccess), mapped in HosEndpoints.
+        HosEndpoints.Map(app);
 
         return app;
     }
@@ -99,7 +104,7 @@ public static class DriversEndpoints
     /// otherwise would mislead whoever reads the logs. The body matches
     /// <see cref="EndpointResults"/>' <c>{ code, message }</c> shape so clients parse one thing.
     /// </summary>
-    private static IResult NotYourDriverRecord() => Results.Json(
+    internal static IResult NotYourDriverRecord() => Results.Json(
         new { code = "Drivers.NotYourRecord", message = "You may only access your own driver record." },
         statusCode: StatusCodes.Status403Forbidden);
 
@@ -335,23 +340,6 @@ public static class DriversEndpoints
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
-    private static async Task<IResult> GetDriverHosEntries(
-        Guid driverId, ITenantContext tenantContext, IDriverSelfAccess selfAccess, ISender sender, CancellationToken cancellationToken)
-    {
-        if (tenantContext.TenantId is not { } tenantId)
-        {
-            return Results.Unauthorized();
-        }
-
-        if (!await selfAccess.MayActOnDriverAsync(driverId, cancellationToken))
-        {
-            return NotYourDriverRecord();
-        }
-
-        var result = await sender.Query(new GetHosEntriesQuery(tenantId, driverId), cancellationToken);
-        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
-    }
-
     private static async Task<IResult> SetCredentialImage(
         Guid driverId, Guid credentialId, IFormFile image, ITenantContext tenantContext, ISender sender, IDriverCredentialRepository credentialRepo, IObjectStorage objectStorage, CancellationToken cancellationToken)
     {
@@ -440,57 +428,6 @@ public static class DriversEndpoints
         }
     }
 
-    private static async Task<IResult> RecordDriverHosEntry(
-        Guid driverId, HosEntryRequest request, ITenantContext tenantContext, IDriverSelfAccess selfAccess, ISender sender, CancellationToken cancellationToken)
-    {
-        if (tenantContext.TenantId is not { } tenantId)
-        {
-            return Results.Unauthorized();
-        }
-
-        // The one that matters most on this whole surface: a duty log is legally binding
-        // compliance data, and DriverAccess admits every driver. Without this, driver A files
-        // hours under driver B's name.
-        if (!await selfAccess.MayActOnDriverAsync(driverId, cancellationToken))
-        {
-            return NotYourDriverRecord();
-        }
-
-        // The friendly duty string ("Off Duty"/"On Duty"/"Driving") maps to the domain enum here;
-        // an unrecognized value is a validation problem, not a 500.
-        var dutyResult = HosDisplay.DutyFromWire(request.Duty);
-        if (dutyResult.IsFailure)
-        {
-            return EndpointResults.Problem(dutyResult.Error);
-        }
-
-        // Source defaults to ManualPaperBackup when the body omits it. The Dispatch Console sends
-        // no source field and must keep meaning "a dispatcher typed this" — flipping the default
-        // would silently relabel every console entry as a driver submission and corrupt the HOS
-        // record. The Driver Field App sends "Driver App" explicitly.
-        var sourceResult = HosDisplay.SourceFromWire(request.Source);
-        if (sourceResult.IsFailure)
-        {
-            return EndpointResults.Problem(sourceResult.Error);
-        }
-
-        var command = new RecordHosEntryCommand(
-            tenantId,
-            driverId,
-            request.Date ?? DateOnly.FromDateTime(DateTime.UtcNow),
-            dutyResult.Value,
-            request.OnDutyH,
-            request.DrivingH,
-            request.OffDutyH,
-            sourceResult.Value,
-            request.EnteredBy,
-            request.Note);
-
-        var result = await sender.Send(command, cancellationToken);
-        return result.IsSuccess
-            ? Results.Created($"/api/drivers/{driverId}/hos/{result.Value}", new EntityCreatedResponse(result.Value))
-            : EndpointResults.Problem(result.Error);
-    }
 }
 
 /// <summary>Body of a successful create (201, with Location header).</summary>
@@ -534,30 +471,3 @@ public sealed record DriverClearanceRequest(
 
 /// <summary>Request body for POST /api/drivers/{id}/user — the account's <c>sub</c>.</summary>
 public sealed record LinkDriverUserRequest(Guid UserId);
-
-/// <summary>
-/// Request body for POST /api/drivers/{driverId}/hos. <see cref="Duty"/> is the friendly
-/// string ("Off Duty"/"On Duty"/"Driving"). <see cref="Date"/> defaults to today (UTC).
-/// <para>
-/// <see cref="Source"/> is the friendly source string — <c>"Driver App"</c> or
-/// <c>"Manual (paper backup)"</c>, the same two values the responses emit and the Dispatch
-/// Console's chip already keys on. <b>Omitting it means Manual (paper backup)</b>, which is what
-/// the console sends today; anything else is a 400, never a 500.
-/// </para>
-/// <para>
-/// <see cref="EnteredBy"/> is the dispatcher's name and is <b>required for a Manual entry and
-/// ignored for a Driver App one</b>. A Driver App submission has no dispatcher: the "who" is the
-/// authenticated driver, already recorded as the driver id plus the source. A free-text name
-/// there would be forgeable and redundant, so the domain forces it to null — which keeps
-/// EnteredBy meaningful as "a human dispatcher typed this entry" rather than decorative.
-/// </para>
-/// </summary>
-public sealed record HosEntryRequest(
-    DateOnly? Date,
-    string? Duty,
-    decimal OnDutyH,
-    decimal DrivingH,
-    decimal OffDutyH,
-    string? EnteredBy,
-    string? Note,
-    string? Source = null);

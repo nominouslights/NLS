@@ -9,7 +9,9 @@ namespace NorthernLink.Drivers.Domain.Drivers;
 /// <c>drivers.driver-changed</c> integration event; credentials and client clearances
 /// are separate aggregates keyed on <see cref="AggregateRoot.Id"/>. Credential expiry
 /// chips (valid / expiring / expired) are derived by the frontend from the dates, so
-/// nothing like that is stored here. HOS stays display-only mock — out of scope.
+/// nothing like that is stored here. Hours of service are their own aggregates keyed on
+/// <see cref="AggregateRoot.Id"/> too: <c>DutyDay</c> (the duty-event ledger the rule engine
+/// evaluates) and the legacy <c>HosLogEntry</c> daily totals.
 /// </summary>
 public sealed class Driver : AggregateRoot, ITenantScoped
 {

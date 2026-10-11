@@ -213,6 +213,66 @@ namespace NorthernLink.Drivers.Infrastructure.Persistence.Migrations
                     b.ToTable("drivers", "drivers");
                 });
 
+            modelBuilder.Entity("NorthernLink.Drivers.Domain.Hos.DutyDay", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("CertifiedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("certified_at_utc");
+
+                    b.Property<Guid?>("CertifiedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("certified_by_user_id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<Guid>("DriverId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("driver_id");
+
+                    b.Property<int>("LastSequence")
+                        .HasColumnType("integer")
+                        .HasColumnName("last_sequence");
+
+                    b.Property<DateOnly>("LocalDate")
+                        .HasColumnType("date")
+                        .HasColumnName("local_date");
+
+                    b.Property<decimal>("PersonalConveyanceKm")
+                        .HasPrecision(9, 1)
+                        .HasColumnType("numeric(9,1)")
+                        .HasColumnName("personal_conveyance_km");
+
+                    b.Property<bool>("RecertificationRequired")
+                        .HasColumnType("boolean")
+                        .HasColumnName("recertification_required");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "DriverId", "LocalDate")
+                        .IsUnique();
+
+                    b.ToTable("duty_days", "drivers");
+                });
+
             modelBuilder.Entity("NorthernLink.Drivers.Domain.Hos.HosLogEntry", b =>
                 {
                     b.Property<Guid>("Id")
@@ -471,6 +531,88 @@ namespace NorthernLink.Drivers.Infrastructure.Persistence.Migrations
                         .HasFilter("user_id IS NOT NULL");
 
                     b.ToTable("rm_drivers", "drivers");
+                });
+
+            modelBuilder.Entity("NorthernLink.Drivers.Infrastructure.Persistence.ReadModels.DutyDayReadModel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Certified")
+                        .HasColumnType("boolean")
+                        .HasColumnName("certified");
+
+                    b.Property<DateTimeOffset?>("CertifiedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("certified_at_utc");
+
+                    b.Property<Guid>("DriverId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("driver_id");
+
+                    b.Property<int>("DrivingMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("driving_minutes");
+
+                    b.Property<int>("EventCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("event_count");
+
+                    b.Property<string>("EventsJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("events");
+
+                    b.Property<string>("LastStatus")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("last_status");
+
+                    b.Property<DateOnly>("LocalDate")
+                        .HasColumnType("date")
+                        .HasColumnName("local_date");
+
+                    b.Property<int>("OffDutyMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("off_duty_minutes");
+
+                    b.Property<int>("OnDutyMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("on_duty_minutes");
+
+                    b.Property<decimal>("PersonalConveyanceKm")
+                        .HasPrecision(9, 1)
+                        .HasColumnType("numeric(9,1)")
+                        .HasColumnName("pc_km");
+
+                    b.Property<bool>("RecertificationRequired")
+                        .HasColumnType("boolean")
+                        .HasColumnName("recertification_required");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.Property<int>("ViolationCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("violation_count");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "DriverId", "LocalDate")
+                        .IsUnique();
+
+                    b.ToTable("rm_duty_days", "drivers");
                 });
 
             modelBuilder.Entity("NorthernLink.Drivers.Infrastructure.Persistence.ReadModels.HosLogEntryReadModel", b =>
@@ -771,6 +913,68 @@ namespace NorthernLink.Drivers.Infrastructure.Persistence.Migrations
                     b.HasKey("ProjectionName");
 
                     b.ToTable("projection_checkpoints", "drivers");
+                });
+
+            modelBuilder.Entity("NorthernLink.Drivers.Domain.Hos.DutyDay", b =>
+                {
+                    b.OwnsMany("NorthernLink.Drivers.Domain.Hos.DutyEvent", "Events", b1 =>
+                        {
+                            b1.Property<Guid>("DutyDayId");
+
+                            b1.Property<int>("__synthesizedOrdinal")
+                                .ValueGeneratedOnAdd();
+
+                            b1.Property<string>("AmendmentReason");
+
+                            b1.Property<Guid?>("AmendsEventId");
+
+                            b1.Property<DateTimeOffset>("AtUtc");
+
+                            b1.Property<string>("CarrierName");
+
+                            b1.Property<string>("EnteredBy");
+
+                            b1.Property<Guid>("EventId");
+
+                            b1.Property<bool>("IsVoided");
+
+                            b1.Property<string>("Note");
+
+                            b1.Property<decimal?>("OdometerEndKm")
+                                .HasPrecision(9, 1);
+
+                            b1.Property<decimal?>("OdometerStartKm")
+                                .HasPrecision(9, 1);
+
+                            b1.Property<bool>("PcNoPassengersOrCargo");
+
+                            b1.Property<bool>("PcNoTrailer");
+
+                            b1.Property<bool>("PcNoWork");
+
+                            b1.Property<DateTimeOffset>("RecordedAtUtc");
+
+                            b1.Property<Guid?>("RecordedByUserId");
+
+                            b1.Property<int>("Sequence");
+
+                            b1.Property<string>("Source")
+                                .IsRequired();
+
+                            b1.Property<string>("Status")
+                                .IsRequired();
+
+                            b1.HasKey("DutyDayId", "__synthesizedOrdinal");
+
+                            b1.ToTable("duty_days", "drivers");
+
+                            b1.ToJson("events");
+
+                            b1.WithOwner()
+                                .HasForeignKey("DutyDayId");
+                        });
+
+                    b.Navigation("Events");
                 });
 #pragma warning restore 612, 618
         }
