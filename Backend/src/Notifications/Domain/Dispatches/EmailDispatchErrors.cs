@@ -27,6 +27,11 @@ public static class EmailDispatchErrors
         "Notifications.Dispatch.BookingRequired",
         "A booking passes dispatch requires the booking's id and reference.");
 
+    /// <summary>A compliance-alert dispatch with no built-in template name — the row would say nothing about what went out.</summary>
+    public static readonly Error TemplateNameRequired = Error.Validation(
+        "Notifications.Dispatch.TemplateNameRequired",
+        "A compliance alert dispatch requires the name of the built-in body it sent.");
+
     /// <summary>A booking-passes send whose pass sheet lists no travellers — nothing to issue.</summary>
     public static readonly Error NoTravellers = Error.Validation(
         "Notifications.Dispatch.NoTravellers",

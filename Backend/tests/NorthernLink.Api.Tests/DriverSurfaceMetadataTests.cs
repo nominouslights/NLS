@@ -328,7 +328,9 @@ public class DriverSurfaceMetadataTests : IAsyncLifetime
     /// <summary>
     /// The roster's read routes admit a compliance officer (DriverRosterAccess), and nothing
     /// else does: the write routes stay on DispatchAccess (pinned above) and the Driver role is
-    /// not in this list, so a tablet still cannot list the roster.
+    /// not in this list, so a tablet still cannot list the roster. The two tenant-wide HOS
+    /// reads (the roster batch and today's compliance alerts) sit here rather than on HosAccess
+    /// because HosAccess contains Driver and neither route names a {driverId} to own-check.
     /// </summary>
     [Fact]
     public void The_DriverRosterAccess_surface_is_exactly_the_roster_reads()
@@ -342,6 +344,7 @@ public class DriverSurfaceMetadataTests : IAsyncLifetime
         Assert.Equal(
         [
             "GET /api/drivers",
+            "GET /api/drivers/hos/alerts/today",
             "GET /api/drivers/hos/status",
             "GET /api/drivers/{id:guid}",
         ], roster);

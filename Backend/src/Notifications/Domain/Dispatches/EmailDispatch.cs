@@ -10,8 +10,11 @@ namespace NorthernLink.Notifications.Domain.Dispatches;
 /// everyone twice. Three shapes share the row: a trip pickup send (<see cref="Record"/> — trip
 /// id/number + template id/name set, from the manifest dialog), a client accruals send
 /// (<see cref="RecordClientAccruals"/> — no trip and no template, client id/name required),
-/// and a community booking-passes send (<see cref="RecordBookingPasses"/> — anchored on the
-/// booking id + reference only; trip, template and client all null). All context fields are
+/// a community booking-passes send (<see cref="RecordBookingPasses"/> — anchored on the
+/// booking id + reference only; trip, template and client all null), and an internal
+/// compliance alert (<see cref="RecordComplianceAlert"/> — no anchor at all: the row is the
+/// replay marker and the audit trail for an event-driven staff email, named only by its
+/// built-in template name). All context fields are
 /// opaque snapshots from the caller — Notifications never queries Trips, Clients or Booking.
 /// Per-recipient outcomes are embedded as jsonb via
 /// <see cref="DispatchRecipient"/>; <see cref="Status"/> is derived from them, never stored
@@ -167,6 +170,45 @@ public sealed class EmailDispatch : AggregateRoot, ITenantScoped
             ServiceType = NotificationServiceType.CommunityBookingPasses,
             BookingId = bookingId,
             BookingReference = bookingReference.Trim(),
+            Status = DeriveStatus(recipients),
+            SentAtUtc = DateTimeOffset.UtcNow,
+        };
+        dispatch._recipients.AddRange(recipients);
+
+        dispatch.Raise(new EmailDispatchRecordedDomainEvent(dispatchId, tenantId));
+        return Result.Success(dispatch);
+    }
+
+    /// <summary>
+    /// Records a completed compliance-alert send to internal staff (the hours-of-service
+    /// alerts raised from Drivers' integration events). No trip, no client, no booking and no
+    /// stored template: <paramref name="templateName"/> names the built-in body that went out
+    /// and is the only thing the row says about its content, which is enough — the
+    /// <see cref="DispatchRecipient"/> outcomes are the audit, and the row's existence under
+    /// <paramref name="dispatchId"/> (derived from the integration event's id by the handler)
+    /// is what makes a redelivered event send nothing twice.
+    /// </summary>
+    public static Result<EmailDispatch> RecordComplianceAlert(
+        Guid dispatchId,
+        Guid tenantId,
+        string templateName,
+        IReadOnlyList<DispatchRecipient> recipients)
+    {
+        if (string.IsNullOrWhiteSpace(templateName))
+        {
+            return Result.Failure<EmailDispatch>(EmailDispatchErrors.TemplateNameRequired);
+        }
+
+        if (ValidateRecipients(recipients) is { } recipientError)
+        {
+            return Result.Failure<EmailDispatch>(recipientError);
+        }
+
+        var dispatch = new EmailDispatch(dispatchId)
+        {
+            TenantId = tenantId,
+            ServiceType = NotificationServiceType.ComplianceAlert,
+            TemplateName = templateName.Trim(),
             Status = DeriveStatus(recipients),
             SentAtUtc = DateTimeOffset.UtcNow,
         };

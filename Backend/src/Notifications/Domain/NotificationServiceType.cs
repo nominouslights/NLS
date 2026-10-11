@@ -9,7 +9,11 @@ namespace NorthernLink.Notifications.Domain;
 /// when a booking day reverts, and an active template of this type overrides their
 /// built-in body. <see cref="CommunityBookingPasses"/> is likewise Notifications-only: it
 /// tags the booking-pass emails a dispatcher sends to a community booking's customer (no
-/// template — the body is composed in code). Never add either to TripServiceType — that
+/// template — the body is composed in code). <see cref="ComplianceAlert"/> is the third
+/// Notifications-only member: it tags the automated hours-of-service compliance emails (ELD
+/// malfunction reported / resolved, driver placed out of service) sent to the internal
+/// compliance and dispatch roles from the Drivers module's integration events — built-in
+/// bodies, no template, no passenger. Never add any of the three to TripServiceType — that
 /// enum's spellings are mirrored by Budgeting frontend tests.
 /// </summary>
 public enum NotificationServiceType
@@ -22,4 +26,5 @@ public enum NotificationServiceType
     Grocery,
     CommunityBookingAtRisk,
     CommunityBookingPasses,
+    ComplianceAlert,
 }

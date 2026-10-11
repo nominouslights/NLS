@@ -67,15 +67,16 @@ public static class DriversEndpoints
         driverAdmin.MapDelete("{driverId:guid}/clearances/{clearanceId:guid}", RevokeDriverClearance);
 
         // The roster's READ routes: DispatchAccess widened with ComplianceOfficer, so the
-        // console's Drivers screen (and the roster HOS batch) work for a compliance officer
-        // without the write routes above ever admitting one. "hos/status" cannot collide with
-        // "{id:guid}": "hos" is not a Guid.
+        // console's Drivers screen (and the roster HOS batch and today's compliance alerts)
+        // work for a compliance officer without the write routes above ever admitting one.
+        // "hos/…" cannot collide with "{id:guid}": "hos" is not a Guid.
         var roster = app.MapGroup("/api/drivers")
             .RequireAuthorization(AuthorizationPolicies.DriverRosterAccess);
 
         roster.MapGet("", GetDrivers);
         roster.MapGet("{id:guid}", GetDriverById);
         roster.MapGet("hos/status", HosEndpoints.GetRosterHosStatus);
+        roster.MapGet("hos/alerts/today", HosEndpoints.GetTodayAlerts);
 
         // The Driver Field App's own surface. DriverAccess admits every Driver, so it is a
         // route-level gate ONLY: each {driverId} route below additionally runs the

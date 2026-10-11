@@ -49,6 +49,7 @@ using NorthernLink.Drivers.Application.Hos.OutOfService.Get;
 using NorthernLink.Drivers.Application.Hos.OutOfService.Lift;
 using NorthernLink.Drivers.Application.Hos.OutOfService.Record;
 using NorthernLink.Drivers.Application.Hos.Record;
+using NorthernLink.Drivers.Application.Hos.Alerts;
 using NorthernLink.Drivers.Application.Hos.Status;
 using NorthernLink.Drivers.Infrastructure.Persistence;
 using NorthernLink.Drivers.Infrastructure.Persistence.Projections;
@@ -145,6 +146,7 @@ public static class DriversServiceCollectionExtensions
         services.AddScoped<IQueryHandler<GetDutyDayQuery, DutyDaySummaryResponse>, GetDutyDayQueryHandler>();
         services.AddScoped<IQueryHandler<GetHosStatusQuery, HosStatusResponse>, GetHosStatusQueryHandler>();
         services.AddScoped<IQueryHandler<GetHosRosterStatusQuery, IReadOnlyList<HosRosterStatusResponse>>, GetHosRosterStatusQueryHandler>();
+        services.AddScoped<IQueryHandler<GetHosAlertsQuery, HosAlertsResponse>, GetHosAlertsQueryHandler>();
 
         // The compliance aggregates: exceptions, out-of-service, ELD malfunctions, findings,
         // the prior-records attestation, and the audit.
