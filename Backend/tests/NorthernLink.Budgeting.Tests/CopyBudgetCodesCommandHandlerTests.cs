@@ -440,6 +440,36 @@ public class CopyBudgetCodesCommandHandlerTests
     }
 
     [Fact]
+    public async Task A_copy_with_no_cost_centres_takes_no_lock()
+    {
+        AddCode(_source, "FUEL");
+        AddCode(_source, "TIRES");
+
+        var result = await CopyAsync();
+
+        Assert.Equal(new BudgetCodeCopyResult(2, 0, 0, 2), result.Value);
+        Assert.Empty(_costCentres.Locks);
+        Assert.Empty(_costCentres.CommittedLocks);
+        Assert.Equal(1, _codes.SaveChangesCallCount);
+    }
+
+    [Fact]
+    public async Task A_copy_with_a_cost_centre_probes_untracked_then_locks_before_the_tracked_read()
+    {
+        AddCode(_source, "FUEL");
+        AddCode(_source, "TIRES", details: WithCostCentre("THOMPSON"));
+        List<string>? callsWhenLocked = null;
+        _costCentres.OnLockAcquired = () => callsWhenLocked = [.. _codes.Calls];
+
+        var result = await CopyAsync();
+
+        Assert.Equal(2, result.Value.Copied);
+        Assert.Equal(["AnyWithCostCentreInPeriod"], callsWhenLocked);
+        Assert.Equal(["AnyWithCostCentreInPeriod", "ListForPeriod", "ListForPeriod"], _codes.Calls);
+        Assert.Equal([TestBudgeting.TenantId], _costCentres.CommittedLocks);
+    }
+
+    [Fact]
     public async Task A_refused_copy_takes_no_lock_and_one_that_copies_nothing_commits_nothing()
     {
         Assert.Equal(BudgetCodeErrors.CopySourceNotFound, (await CopyAsync(sourcePeriodId: Guid.NewGuid())).Error);

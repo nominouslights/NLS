@@ -39,16 +39,28 @@ namespace NorthernLink.Budgeting.Application.Codes.CopyFromPeriod;
 /// delete it (<c>Budgeting.CostCentre.InUse</c>). The <c>AddCostCentres</c> migration backfilled an
 /// entry for every value that predates the register. What keeps that true across the copy is the
 /// tenant's register lock (<see cref="ICostCentreRepository.LockRegisterAsync"/>), taken
-/// <em>before</em> the source chart is read and committed with the copies. A cost-centre delete
-/// probes usage under the same lock, so it either committed before this read (and then no source
-/// code still carried the string, because its probe saw none) or waits and then sees the copies.
-/// <para>
-/// The lock is taken whenever the guards pass, not only when the source turns out to carry a cost
-/// centre. Deciding that needs the source chart, and the read that decides must itself be under
-/// the lock: a re-read after locking would hand back EF's already-tracked, possibly stale
-/// instances. A chart copy is a once-a-period action, so serializing it with register writes
-/// costs nothing.
+/// <em>before</em> the tracked read of the source chart and committed with the copies. A
+/// cost-centre delete probes usage under the same lock, so it either committed before this read
+/// (and then no source code still carried the string, because its probe saw none) or waits and
+/// then sees the copies.
 /// </para>
+/// <para>
+/// <b>The lock is taken only when the source chart carries a cost centre</b>, decided by an
+/// untracked existence query (<see cref="IBudgetCodeRepository.AnyWithCostCentreInPeriodAsync"/>)
+/// before the lock and before the tracked read. A scalar <c>Any</c> materializes no entity, so the
+/// tracked read that follows still loads fresh instances under the lock rather than handing back
+/// ones tracked before it. A chart with no cost centres copies without serializing behind
+/// register writes.
+/// </para>
+/// <para>
+/// <b>Residual:</b> when the probe says "none", a source code can still gain a cost centre before
+/// the tracked read, and the copy then carries it without the lock. That edit took the register
+/// lock itself and validated the string against the register, so the string is registered when
+/// the copy reads it. Becoming unregistered before the copy commits would take two more commits
+/// inside that window — an edit moving every code off the string (so a delete's usage probe sees
+/// none), then the delete — which this handler accepts rather than locking every copy.
+/// </para>
+/// <para>
 /// A <em>retired</em> entry is still carried:
 /// it is the same value moving forward, the "unchanged is allowed" leniency the edit path gives
 /// (<see cref="BudgetCodeCostCentreRule"/>), and refusing it would make one stale cost centre
@@ -88,9 +100,12 @@ public sealed class CopyBudgetCodesCommandHandler(
             return Result.Failure<BudgetCodeCopyResult>(BudgetCodeErrors.CopySourceNotFound);
         }
 
-        // Before the source read, so every cost-centre string the copy carries is read under the
-        // lock that a cost-centre delete probes usage under — see the class comment.
-        await using var registerLock = await costCentres.LockRegisterAsync(command.TenantId, cancellationToken);
+        // Only when the source carries a cost centre, and before the tracked source read, so every
+        // cost-centre string the copy carries is read under the lock a cost-centre delete probes
+        // usage under. The probe is untracked; see the class comment for the residual window.
+        await using var registerLock = await codes.AnyWithCostCentreInPeriodAsync(sourcePeriodId, cancellationToken)
+            ? await costCentres.LockRegisterAsync(command.TenantId, cancellationToken)
+            : null;
 
         var sourceCodes = await codes.ListForPeriodAsync(sourcePeriodId, cancellationToken);
         if (sourceCodes.Count == 0)
@@ -143,7 +158,10 @@ public sealed class CopyBudgetCodesCommandHandler(
         if (copied > 0)
         {
             await codes.SaveChangesAsync(cancellationToken);
-            await registerLock.CommitAsync(cancellationToken);
+            if (registerLock is not null)
+            {
+                await registerLock.CommitAsync(cancellationToken);
+            }
         }
 
         return Result.Success(new BudgetCodeCopyResult(

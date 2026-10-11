@@ -304,13 +304,16 @@ storage tests, which need `sessionStorage`):
 - `components/BudgetCodeFormModal.test.tsx` — the cost-centre picker: active entries only, a
   retired / unregistered current value kept and marked and saved unchanged, Revenue hides it and
   sends `null`, inline create selects the new entry (case kept), an inline refusal verbatim; the
-  picker follows a register that arrives **after** the modal opened (and keeps an inline-created
-  entry the late copy lacks), and a pick retired since is refused before the round trip.
+  picker follows a register that arrives **after** the modal opened; an inline-created entry is
+  bridged only while the caller's register predates the create (or for a caller with no
+  `onCostCentresChanged`) — a newer caller register without it is trusted, so an entry deleted
+  since is never re-added; and a pick retired since is refused before the round trip.
 - `components/screens/CostCentres.test.tsx` — an action's refusal is bound to its entry: a
   delete's InUse 409 on one entry never offers RETIRE INSTEAD on another (a selection change
-  clears it), RETIRE INSTEAD retires the entry it was for, and "Show retired" switches on only
-  after the server accepts a retire (a 409 `HasActiveChildren` leaves it, and the entry, as they
-  were).
+  clears it; re-clicking the same entry does not), RETIRE INSTEAD retires the entry it was for,
+  "Show retired" switches on only after the server accepts a retire (a 409 `HasActiveChildren`
+  leaves it, and the entry, as they were), and a refused restore's 409 `ParentRetired` is shown
+  verbatim with the entry left retired.
 - `components/screens/periods/CostCentreBreakdown.test.tsx` — grouping under a parent, an absent
   parent named, retired / unregistered chips, owners, "No cost centre" at $0, the server's total,
   and no actual column.
@@ -703,7 +706,7 @@ entered period, like Settings.
 | `GET /api/budgeting/cost-centres/{id}` | 404 `NotFound` — the 201's `Location` target; the app never calls it (it refetches the list) |
 | `POST /api/budgeting/cost-centres` | `{ code, name, description, ownerUserId, parentId }` → 201 `{ id }` |
 | `PUT /api/budgeting/cost-centres/{id}` | same body **without `code`** (immutable; a different code is 400 `CodeImmutable`) → 204 |
-| `POST /api/budgeting/cost-centres/{id}/activate\|deactivate` | 204; deactivate is 409 `HasActiveChildren` for a parent with active children (never cascaded) |
+| `POST /api/budgeting/cost-centres/{id}/activate\|deactivate` | 204; deactivate is 409 `HasActiveChildren` for a parent with active children (never cascaded); activate is 409 `ParentRetired` when restoring a child whose parent is retired (restore the parent first) — both shown verbatim on the Cost Centres screen |
 | `DELETE /api/budgeting/cost-centres/{id}` | 204; 409 `HasChildren`, then 409 `InUse` (any budget code in any period carries it) — the screen then offers RETIRE INSTEAD **for that entry only**: the refusal carries the entry's id, and selecting another clears it |
 | `GET /api/budgeting/periods/{id}/rollups/cost-centres` | the period's **planned** expense per cost centre + `noCostCentre` + `totalPlannedExpenseCad` (= the period's planned-expense tile). No actual field — the panel shows no actual column |
 
