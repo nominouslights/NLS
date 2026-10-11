@@ -1,4 +1,4 @@
-import type { DutyDaySummary, DutyEventRecord, HosStatus } from "@/lib/api/hos";
+import type { DutyDaySummary, DutyEventRecord, EldMalfunctionRecord, HosExceptionRecord, HosStatus, OutOfServiceRecord } from "@/lib/api/hos";
 import type { DayTotals, HosEvaluation } from "@/lib/hos/engine";
 
 // Test fixtures for the HOS tab components: a compliant evaluation shaped exactly like the
@@ -96,7 +96,70 @@ export function hosStatus(overrides: Partial<HosStatus> = {}, evaluationOverride
     knownFromUtc: "2026-09-01T05:00:00+00:00",
     outOfService: null,
     eldMalfunctionOpen: false,
+    priorRecords: null,
     evaluation: evaluation(evaluationOverrides),
+    ...overrides,
+  };
+}
+
+/** An out-of-service declaration in force: declared 06:00 on the fixture day, 72h. */
+export function outOfService(overrides: Partial<OutOfServiceRecord> = {}): OutOfServiceRecord {
+  return {
+    id: "oos-1",
+    fromUtc: new Date((FIXTURE_DAY_START + 6 * 3600) * 1000).toISOString(),
+    untilUtc: new Date((FIXTURE_DAY_START + 78 * 3600) * 1000).toISOString(),
+    reason: "Roadside inspection — hours exceeded",
+    ...overrides,
+  };
+}
+
+/** A declared adverse-conditions exception from 10:00 on the fixture day, +60 min. */
+export function hosException(overrides: Partial<HosExceptionRecord> = {}): HosExceptionRecord {
+  const at = new Date((FIXTURE_DAY_START + 10 * 3600) * 1000).toISOString();
+  return {
+    id: "ex-1",
+    driverId: "driver-1",
+    kind: "Adverse driving conditions",
+    status: "Declared",
+    applying: true,
+    tripId: null,
+    declaredAtUtc: at,
+    declaredByUserId: "user-1",
+    effectiveFromUtc: at,
+    effectiveToUtc: null,
+    reason: "Whiteout on PTH 6",
+    location: "North of Grand Rapids",
+    notKnownBeforeDeparture: true,
+    extraDrivingMinutes: 60,
+    deferredOffDutyMinutes: null,
+    eldRemarkRecorded: true,
+    dispatchAcknowledgedAtUtc: null,
+    dispatchAcknowledgedByUserId: null,
+    approvedAtUtc: null,
+    approvedByUserId: null,
+    closedAtUtc: null,
+    closedByUserId: null,
+    closureNote: null,
+    ...overrides,
+  };
+}
+
+/** An open ELD malfunction noticed 07:00 on the fixture day. */
+export function eldMalfunction(overrides: Partial<EldMalfunctionRecord> = {}): EldMalfunctionRecord {
+  const at = new Date((FIXTURE_DAY_START + 7 * 3600) * 1000).toISOString();
+  return {
+    id: "eld-1",
+    driverId: "driver-1",
+    vehicleId: null,
+    code: "P-01",
+    status: "Open",
+    noticedAtUtc: at,
+    reportedAtUtc: at,
+    reportedByUserId: "user-1",
+    description: "Display frozen; no duty changes recorded since 07:00.",
+    resolvedAtUtc: null,
+    resolvedByUserId: null,
+    resolutionNote: null,
     ...overrides,
   };
 }
@@ -145,6 +208,8 @@ export function dutyDay(overrides: Partial<DutyDaySummary> = {}): DutyDaySummary
     ],
     events: [onDuty, driving, off],
     violations: [],
+    exceptions: [],
+    outOfService: null,
     label: "Planning figures, not the record of duty status — RODS is on the bus's ELD.",
     ...overrides,
   };

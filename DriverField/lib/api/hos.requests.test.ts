@@ -1,12 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   certifyDay,
+  declareHosException,
   getHosStatus,
   getMyDriver,
   listDutyDays,
+  listEldMalfunctions,
+  listHosExceptions,
   recordDutyEvent,
+  reportEldMalfunction,
+  withdrawHosException,
   type DutyStatusWire,
   type EventSourceWire,
+  type HosExceptionKindWire,
+  type HosExceptionStatus,
 } from "./hos";
 import { ApiError } from "./transport";
 import { DUTY_STATUSES, EVENT_SOURCES, HosWire } from "../hos/engine";
@@ -191,6 +198,104 @@ describe("certifyDay", () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(403, { code: "Drivers.Hos.CertifyDriverOnly", message }));
     const err = await certifyDay(DRIVER, "2026-10-09").catch((e) => e);
     expect((err as ApiError).status).toBe(403);
+    expect((err as ApiError).message).toBe(message);
+  });
+});
+
+describe("exceptions and ELD malfunctions — the compliance routes under HosAccess", () => {
+  it("pins the kind and status unions to HosWire.ExceptionKind and the HosExceptionStatus members", () => {
+    const kinds: HosExceptionKindWire[] = [HosWire.AdverseDrivingConditionsKind, HosWire.EmergencyKind, HosWire.OffDutyDeferralKind] as HosExceptionKindWire[];
+    expect(kinds).toEqual(["Adverse driving conditions", "Emergency", "Off-duty deferral (CO approved)"]);
+    const statuses: HosExceptionStatus[] = ["Declared", "Acknowledged", "Approved", "Rejected", "Withdrawn"];
+    expect(statuses).toHaveLength(5);
+  });
+
+  it("GETs …/hos/exceptions with the optional range", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, []));
+    await listHosExceptions(DRIVER);
+    expect(callPath(0)).toBe(`/api/drivers/${DRIVER}/hos/exceptions`);
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, []));
+    await listHosExceptions(DRIVER, { from: "2026-09-19", to: "2026-10-10" });
+    expect(callPath(1)).toBe(`/api/drivers/${DRIVER}/hos/exceptions?from=2026-09-19&to=2026-10-10`);
+  });
+
+  it("POSTs a declaration as DeclareHosExceptionRequest, with the command id as Idempotency-Key when given", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(201, { id: EVENT, status: "Declared" }));
+    const input = {
+      kind: "Adverse driving conditions" as const,
+      effectiveFromUtc: "2026-10-10T20:00:00.000Z",
+      reason: "Whiteout",
+      location: null,
+      tripId: null,
+      notKnownBeforeDeparture: true,
+      extraDrivingMinutes: 60,
+      eldRemarkRecorded: false,
+    };
+    const record = await declareHosException(DRIVER, input, { idempotencyKey: "cmd-1" });
+    expect(record.id).toBe(EVENT);
+    expect(callPath()).toBe(`/api/drivers/${DRIVER}/hos/exceptions`);
+    expect(callInit().method).toBe("POST");
+    expect(bodyOf()).toEqual(input);
+    expect(headersOf()["Idempotency-Key"]).toBe("cmd-1");
+
+    // Without a key, no header — the console's call shape.
+    fetchMock.mockResolvedValueOnce(jsonResponse(201, { id: EVENT, status: "Declared" }));
+    await declareHosException(DRIVER, input);
+    expect(headersOf(1)["Idempotency-Key"]).toBeUndefined();
+  });
+
+  it("surfaces the declaration's 400s verbatim — AdverseKnowabilityRequired, AdverseExtensionTooLong, ExceptionBackdated", async () => {
+    const cases: [string, string][] = [
+      ["Drivers.Hos.AdverseKnowabilityRequired", "Adverse driving conditions can only be declared when they could not reasonably have been known before departure (s.76)."],
+      ["Drivers.Hos.AdverseExtensionTooLong", "Adverse driving conditions extend the limits by at most two hours (s.76)."],
+      ["Drivers.Hos.ExceptionBackdated", "An adverse-conditions or emergency exception must be declared within 24 hours of the conditions arising."],
+    ];
+    for (const [code, message] of cases) {
+      fetchMock.mockResolvedValueOnce(jsonResponse(400, { code, message }));
+      const err = await declareHosException(DRIVER, { kind: "Emergency", effectiveFromUtc: "x", reason: "r" }).catch((e) => e);
+      expect((err as ApiError).status).toBe(400);
+      expect((err as ApiError).code).toBe(code);
+      expect((err as ApiError).message).toBe(message);
+    }
+  });
+
+  it("POSTs a withdrawal to …/exceptions/{id}/withdraw with the note body, and surfaces the 403 for one no longer Declared", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { id: EVENT, status: "Withdrawn" }));
+    await withdrawHosException(DRIVER, EVENT, "cleared", { idempotencyKey: "cmd-2" });
+    expect(callPath()).toBe(`/api/drivers/${DRIVER}/hos/exceptions/${EVENT}/withdraw`);
+    expect(callInit().method).toBe("POST");
+    expect(bodyOf()).toEqual({ note: "cleared" });
+    expect(headersOf()["Idempotency-Key"]).toBe("cmd-2");
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { id: EVENT, status: "Withdrawn" }));
+    await withdrawHosException(DRIVER, EVENT);
+    expect(bodyOf(1)).toEqual({ note: null });
+
+    const message = "Only a compliance officer may withdraw an exception that has already been acknowledged or approved.";
+    fetchMock.mockResolvedValueOnce(jsonResponse(403, { code: "Drivers.Hos.ExceptionWithdrawRequiresComplianceOfficer", message }));
+    const err = await withdrawHosException(DRIVER, EVENT).catch((e) => e);
+    expect((err as ApiError).status).toBe(403);
+    expect((err as ApiError).message).toBe(message);
+  });
+
+  it("GETs …/hos/eld-malfunctions and POSTs a report as ReportEldMalfunctionRequest", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, []));
+    await listEldMalfunctions(DRIVER);
+    expect(callPath()).toBe(`/api/drivers/${DRIVER}/hos/eld-malfunctions`);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(201, { id: EVENT, status: "Open", code: "P" }));
+    const input = { code: "P", noticedAtUtc: "2026-10-10T19:50:00.000Z", description: "Frozen", vehicleId: null };
+    const record = await reportEldMalfunction(DRIVER, input, { idempotencyKey: "cmd-3" });
+    expect(record.status).toBe("Open");
+    expect(callPath(1)).toBe(`/api/drivers/${DRIVER}/hos/eld-malfunctions`);
+    expect(callInit(1).method).toBe("POST");
+    expect(bodyOf(1)).toEqual(input);
+    expect(headersOf(1)["Idempotency-Key"]).toBe("cmd-3");
+
+    const message = "The malfunction code must be at most 32 characters.";
+    fetchMock.mockResolvedValueOnce(jsonResponse(400, { code: "Drivers.Hos.EldCodeTooLong", message }));
+    const err = await reportEldMalfunction(DRIVER, input).catch((e) => e);
+    expect((err as ApiError).code).toBe("Drivers.Hos.EldCodeTooLong");
     expect((err as ApiError).message).toBe(message);
   });
 });

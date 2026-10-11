@@ -10,9 +10,17 @@ import {
   clockLabel,
   dayBand,
   durationLabel,
+  exceptionKindShort,
+  exceptionStatusMeta,
+  kmLabel,
   limitRemaining,
   localIsoToUnix,
+  OUT_OF_SERVICE_GLYPH,
+  PAPER_LOG_GLYPH,
+  PC_WARN_DECIKM,
+  pcDayVerdict,
   ruleShort,
+  whenLabel,
 } from "./display";
 import { BLOCKING_REASONS, HOS_BANDS, HOS_RULES } from "./engine";
 
@@ -170,5 +178,69 @@ describe("local time (America/Winnipeg)", () => {
     // 02:30 on 2026-03-08 does not exist; the previous offset (CST) puts it at 08:30Z = 03:30 CDT.
     expect(localIsoToUnix("2026-03-08T02:30:00")).toBe(Date.UTC(2026, 2, 8, 8, 30, 0) / 1000);
     expect(clockLabel(localIsoToUnix("2026-03-08T02:30:00"))).toBe("03:30");
+  });
+
+  it("writes a far-off instant with its day, on the regulation's clock", () => {
+    // 2026-10-12T19:30Z is Mon Oct 12, 14:30 CDT.
+    expect(whenLabel(Date.UTC(2026, 9, 12, 19, 30) / 1000)).toMatch(/Mon.*Oct.*12.*14:30/);
+  });
+});
+
+describe("pcDayVerdict — today's personal conveyance against the 75 km allowance", () => {
+  it("bands at 60.0 km (gold ◐) and 75.0 km (vermillion ▲), one tenth of a km each side", () => {
+    expect(PC_WARN_DECIKM).toBe(600);
+    expect(HOS_LIMITS.pcDailyLimitDecikm).toBe(750);
+    expect(pcDayVerdict(599).kind).toBe("ontime");
+    expect(pcDayVerdict(600).kind).toBe("soon");
+    expect(pcDayVerdict(749).kind).toBe("soon");
+    expect(pcDayVerdict(750).kind).toBe("over");
+    expect(pcDayVerdict(751).kind).toBe("over");
+    expect(statusMeta(pcDayVerdict(600).kind).g).toBe("◐");
+    expect(statusMeta(pcDayVerdict(750).kind).g).toBe("▲");
+  });
+
+  it("says what is left, and at 75 km that today's personal conveyance is on-duty time", () => {
+    expect(pcDayVerdict(0)).toMatchObject({ usedDecikm: 0, leftDecikm: 750, overLimit: false, label: "75.0 km left before it counts as on-duty" });
+    expect(pcDayVerdict(599)).toMatchObject({ leftDecikm: 151, label: "15.1 km left before it counts as on-duty" });
+    expect(pcDayVerdict(600).label).toBe("Nearing the 75 km allowance — 15.0 km left");
+    expect(pcDayVerdict(749).label).toBe("Nearing the 75 km allowance — 0.1 km left");
+    expect(pcDayVerdict(750)).toMatchObject({ leftDecikm: 0, overLimit: true, label: "Over 75 km — today's personal conveyance is on-duty time" });
+    expect(pcDayVerdict(900)).toMatchObject({ usedDecikm: 900, leftDecikm: 0, overLimit: true });
+    expect(pcDayVerdict(-5).usedDecikm).toBe(0);
+  });
+
+  it("writes kilometres from tenths, never leaning on floating point", () => {
+    expect(kmLabel(0)).toBe("0.0 km");
+    expect(kmLabel(1234567)).toBe("123456.7 km");
+    expect(kmLabel(750)).toBe("75.0 km");
+    expect(kmLabel(-15)).toBe("−1.5 km");
+  });
+});
+
+describe("exceptions, out of service and paper-log mode read as colour + glyph + label", () => {
+  it("gives each of the five HosExceptionStatus members a band and a label", () => {
+    expect(exceptionStatusMeta("Declared")).toEqual({ kind: "soon", label: "Declared" });
+    expect(exceptionStatusMeta("Acknowledged")).toEqual({ kind: "info", label: "Acknowledged by dispatch" });
+    expect(exceptionStatusMeta("Approved")).toEqual({ kind: "ontime", label: "Approved" });
+    expect(exceptionStatusMeta("Rejected")).toEqual({ kind: "over", label: "Rejected" });
+    expect(exceptionStatusMeta("Withdrawn")).toEqual({ kind: "off", label: "Withdrawn" });
+    for (const s of ["Declared", "Acknowledged", "Approved", "Rejected", "Withdrawn"] as const) {
+      expect(statusMeta(exceptionStatusMeta(s).kind).g.trim().length).toBeGreaterThan(0);
+    }
+  });
+
+  it("shortens the wire kinds for a chip without changing what goes to the API", () => {
+    expect(exceptionKindShort("Adverse driving conditions")).toBe("Adverse conditions");
+    expect(exceptionKindShort("Emergency")).toBe("Emergency");
+    expect(exceptionKindShort("Off-duty deferral (CO approved)")).toBe("Off-duty deferral");
+  });
+
+  it("overrides the glyph, not the colour: out of service is `over` with ✕, paper-log mode is `soon` with ✎", () => {
+    // Two states on one colour each, told apart from their colour-mates (▲ breach, ◐ near
+    // limit) by glyph and label — never a fifth StatusKind, never a new hex.
+    expect(OUT_OF_SERVICE_GLYPH).toBe("✕");
+    expect(OUT_OF_SERVICE_GLYPH).not.toBe(statusMeta("over").g);
+    expect(PAPER_LOG_GLYPH).toBe("✎");
+    expect(PAPER_LOG_GLYPH).not.toBe(statusMeta("soon").g);
   });
 });

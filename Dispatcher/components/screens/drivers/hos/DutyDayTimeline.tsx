@@ -6,8 +6,11 @@ import type { DutyDaySummary, DutyEventRecord, DutySegmentRecord } from "@/lib/a
 import {
   DUTY_STATES,
   dutyStateFromWire,
+  exceptionKindLabel,
+  exceptionStatusChip,
   formatClockUtc,
   formatDateOnly,
+  formatDateTimeUtc,
   formatRemaining,
   HOS_CALENDAR,
   sourceGlyphFor,
@@ -20,7 +23,8 @@ import { StatusChip } from "@/components/ui/Chip";
 // status's glyph + label, so the strip is never colour alone), the engine's totals, the
 // certification state, the sources that fed the day, and the server's violation sentences.
 // A row expands into its events — voided ones struck through with the amendment reason —
-// each with an AMEND action.
+// each with an AMEND action. The exceptions in force on the day and an out-of-service
+// declaration overlapping it (both from the same response) sit under the strip.
 
 export function DutyDayTimeline({
   days,
@@ -107,8 +111,29 @@ function DayRow({
           )}
         </div>
         <Strip date={day.date} segments={day.segments} />
-        {(live.length > 0 || suppressed.length > 0) && (
+        {(live.length > 0 || suppressed.length > 0 || day.exceptions.length > 0 || day.outOfService !== null) && (
           <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 7 }}>
+            {day.outOfService !== null && (
+              <div>
+                <StatusChip
+                  kind="over"
+                  glyph="✕"
+                  label={`Out of service ${formatDateTimeUtc(day.outOfService.fromUtc)} – ${day.outOfService.untilUtc ? formatDateTimeUtc(day.outOfService.untilUtc) : "lifted"} — ${day.outOfService.reason}`}
+                />
+              </div>
+            )}
+            {day.exceptions.map((x) => {
+              const chip = exceptionStatusChip(x.status);
+              return (
+                <div key={x.id}>
+                  <StatusChip
+                    kind={chip.kind}
+                    glyph={chip.glyph}
+                    label={`${exceptionKindLabel(x.kind)} · ${chip.label}${x.extraDrivingMinutes !== null ? ` · +${x.extraDrivingMinutes} min` : ""}${x.deferredOffDutyMinutes !== null ? ` · ${x.deferredOffDutyMinutes} min deferred` : ""}`}
+                  />
+                </div>
+              );
+            })}
             {live.map((v, i) => (
               <StatusChip key={`${v.rule}-${i}`} kind="over" label={v.message} />
             ))}

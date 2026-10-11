@@ -11,12 +11,28 @@ import { TouchButton } from "@/components/ui-tablet/TouchButton";
 import { DutyControl } from "@/components/ui-tablet/DutyControl";
 import { DutyChip } from "@/components/ui-tablet/DutyChip";
 import { Screen, Heading, CardRow, FieldLine, Num, TabletChip, EmptyNote } from "./shared";
+import { EldMalfunctionSheet, ExceptionSheet, OtherCarrierSheet } from "./HoursSheets";
 import { formatDurationH } from "@/lib/data";
 import type { DutyDaySummary, EventSourceWire } from "@/lib/api/hos";
 import { HOS_LIMITS, HosWire, type DateOnly } from "@/lib/hos/engine";
-import { band, clockLabel, dayBand, dayLabel, durationLabel, dutyStateOf, ruleShort } from "@/lib/hos/display";
-import { isCertifyCommandPayload, isDutyCommandPayload } from "@/lib/hos/dutyCommand";
-import { CALENDAR, HISTORY_DAYS, type LedgerSnapshot } from "@/lib/hos/ledger";
+import {
+  band,
+  clockLabel,
+  dayBand,
+  dayLabel,
+  durationLabel,
+  dutyStateOf,
+  exceptionKindShort,
+  exceptionStatusMeta,
+  kmLabel,
+  OUT_OF_SERVICE_GLYPH,
+  PAPER_LOG_GLYPH,
+  PAPER_LOG_LINE,
+  ruleShort,
+} from "@/lib/hos/display";
+import { isEldMalfunctionCommandPayload, isExceptionCommandPayload, withdrawExceptionPayload, type OtherCarrierEvent } from "@/lib/hos/complianceCommand";
+import { dutyCommandPayload, isCertifyCommandPayload, isDutyCommandPayload } from "@/lib/hos/dutyCommand";
+import { appendDutyEvent, CALENDAR, HISTORY_DAYS, knownDriverName, type ExceptionLike, type LedgerSnapshot } from "@/lib/hos/ledger";
 import { useHosLedger } from "@/lib/hos/useHosLedger";
 import { allCommands, discard, enqueue, failedCommands, retry } from "@/lib/sync/queue";
 import { useSyncState } from "@/lib/sync/useSyncState";
@@ -34,11 +50,20 @@ import type { QueuedCommand } from "@/lib/sync/types";
 // says so on every figure. The line under it says WHICH copy the figures are built on (live,
 // cached on the device, or none yet) because a dead zone must be visible, not silent.
 //
-// Three things the driver can do here, and all three go through the queue:
-//   - change duty status (DutyControl → hos.duty)
+// What the driver can do here, and all of it goes through the queue:
+//   - change duty status (DutyControl → hos.duty), personal conveyance included
 //   - certify a day (the attestation sheet → hos.certify) — the driver's own act under s.84,
 //     which no dispatcher can do for them, so the sheet says what is being signed
+//   - record an adverse-conditions or emergency exception, and withdraw one still Declared
+//     (the sheet → hos.exception)
+//   - report an ELD malfunction (→ hos.eld-malfunction); while one is open the screen and the
+//     top bar say paper-log mode
+//   - declare hours worked for another carrier (→ three hos.duty events on that day)
 //   - deal with a change the server refused: RETRY or DISCARD, with the server's message
+//
+// `readOnly` is the out-of-service view (components/OutOfServiceScreen.tsx): the figures and
+// the history, the duty control (Off Duty / On Duty only, which it enforces itself), and none
+// of the actions above.
 //
 // The Source column is load-bearing and is why lib/wire.test.ts exists: "Driver App" and
 // "Manual (paper backup)" are the exact strings HosWire emits.
@@ -52,14 +77,17 @@ const SOURCE_BADGE: Record<EventSourceWire, { kind: StatusKind; glyph: string }>
   System: { kind: "off", glyph: "⚙" },
 };
 
-export default function Hours() {
+type ComplianceSheet = "exception" | "eld" | "other-carrier";
+
+export default function Hours({ readOnly = false }: { readOnly?: boolean }) {
   const snapshot = useHosLedger();
-  const { evaluation, days, hydration } = snapshot;
+  const { evaluation, days, hydration, status } = snapshot;
   // The parked list is read off the queue on every render; the sync state is what re-renders
   // this screen when its failed count moves (retry, discard, a drain that parked something).
   const sync = useSyncState();
   const parked = sync.failed > 0 ? failedCommands() : [];
   const [sheet, setSheet] = useState<DateOnly | null>(null);
+  const [compliance, setCompliance] = useState<ComplianceSheet | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const b = band(evaluation);
@@ -69,9 +97,14 @@ export default function Hours() {
   const next = evaluation.nextRequiredOffDuty;
   const today = CALENDAR.dayOf(evaluation.asOfUnix);
   const todayEvents = snapshot.events.filter((e) => CALENDAR.dayOf(e.atUnix) === today);
+  const todayExceptions = snapshot.exceptions.filter((e) => CALENDAR.dayOf(e.effectiveFromUnix) === today);
   // The ledger holds the server's 21-day lookback; the regulation's record window is 14.
   const history = days.slice(-HISTORY_DAYS);
   const todayCertify = certifyState(today, snapshot);
+  const driverName = knownDriverName();
+  // Not dispatchable until the 14-day window is covered — by the driver's own records or by
+  // the compliance officer's prior-records attestation (s.82(1)(f)), whichever the server has.
+  const priorRecordsMissing = status !== null && !status.recordsOnFile && status.priorRecords === null;
 
   async function act(run: () => Promise<unknown>) {
     try {
@@ -81,6 +114,38 @@ export default function Hours() {
       setActionError(err instanceof Error ? err.message : String(err));
     }
   }
+
+  /**
+   * An other-carrier day: one hos.duty command per event, each with its own id, in the
+   * order they are laid out (capture order is send order), each appended optimistically with
+   * that source so the day's totals move now.
+   */
+  async function declareOtherCarrier(events: OtherCarrierEvent[], carrierName: string) {
+    if (driverName === null) throw new Error("Your driver record has not been fetched yet.");
+    for (const e of events) {
+      const id = await enqueue("hos.duty", (commandId) => dutyCommandPayload(e.status, e.atUtc, commandId, { carrierName, enteredBy: driverName }));
+      appendDutyEvent({ status: e.status, clientEventId: id, atUnix: e.atUnix, source: "OtherCarrier" });
+    }
+  }
+
+  const actions = readOnly ? null : (
+    <div style={{ display: "flex", gap: gap.tight, flexWrap: "wrap", justifyContent: "flex-end" }}>
+      <TouchButton variant="secondary" onClick={() => setCompliance("exception")}>
+        Record exception
+      </TouchButton>
+      <TouchButton variant="secondary" onClick={() => setCompliance("eld")}>
+        Report ELD malfunction
+      </TouchButton>
+      <TouchButton
+        variant="secondary"
+        onClick={() => setCompliance("other-carrier")}
+        disabled={driverName === null}
+        disabledReason={driverName === null ? "Your driver record has not been fetched yet — the declaration carries your roster name" : undefined}
+      >
+        Other carrier hours
+      </TouchButton>
+    </div>
+  );
 
   return (
     <Screen eyebrow="Compliance" title="Hours of service" right={<HydrationChip hydration={hydration} />}>
@@ -103,6 +168,24 @@ export default function Hours() {
         <StatusBanner kind="over" title="That did not work on this device.">
           {actionError}
         </StatusBanner>
+      ) : null}
+
+      {snapshot.paperLogMode ? (
+        <Reason kind="soon" glyph={PAPER_LOG_GLYPH}>
+          <strong style={{ fontWeight: 600 }}>{PAPER_LOG_LINE}</strong>
+        </Reason>
+      ) : null}
+      {priorRecordsMissing ? (
+        <Reason kind="soon">
+          <strong style={{ fontWeight: 600 }}>Prior 14 days not on file — not dispatchable.</strong> A compliance officer records your
+          prior-records attestation from the console once your previous carrier&rsquo;s records are in hand.
+        </Reason>
+      ) : null}
+      {driverName === null && !readOnly && status !== null ? (
+        <Reason kind="off">
+          <strong style={{ fontWeight: 600 }}>Other carrier hours unavailable</strong> — your driver record has not been fetched yet; it
+          names you on the declaration.
+        </Reason>
       ) : null}
 
       <div style={{ display: "flex", gap: gap.row, marginBottom: gap.section }}>
@@ -129,7 +212,9 @@ export default function Hours() {
           footnote={
             evaluation.shift.startUnix === null
               ? "No shift open — the window starts with your next on-duty time."
-              : `Shift began ${clockLabel(evaluation.shift.startUnix)} · ${durationLabel(evaluation.shift.elapsedSeconds)} elapsed`
+              : `Shift began ${clockLabel(evaluation.shift.startUnix)} · ${durationLabel(evaluation.shift.elapsedSeconds)} elapsed${
+                  evaluation.shift.adverseExtensionSeconds > 0 ? ` · +${durationLabel(evaluation.shift.adverseExtensionSeconds)} adverse conditions` : ""
+                }`
           }
         />
         <TouchTile
@@ -157,9 +242,23 @@ export default function Hours() {
         <DutyControl />
       </Panel>
 
+      <Heading right={actions}>Exceptions today</Heading>
+      {todayExceptions.length === 0 ? (
+        <EmptyNote>No exception declared today. Adverse driving conditions and emergencies are the only ones you can declare; an off-duty deferral is a compliance officer&rsquo;s.</EmptyNote>
+      ) : (
+        todayExceptions.map((e) => (
+          <ExceptionRow
+            key={e.id}
+            exception={e}
+            readOnly={readOnly}
+            onWithdraw={() => void act(() => enqueue("hos.exception", withdrawExceptionPayload(e.id)))}
+          />
+        ))
+      )}
+
       <Heading
         right={
-          todayCertify.certified ? (
+          readOnly ? null : todayCertify.certified ? (
             <TabletChip kind="ontime" label="Certified" />
           ) : (
             <TouchButton
@@ -174,7 +273,7 @@ export default function Hours() {
       >
         Today · {today}
       </Heading>
-      {todayCertify.reason !== null && !todayCertify.certified ? (
+      {todayCertify.reason !== null && !todayCertify.certified && !readOnly ? (
         <Reason kind={todayCertify.kind}>
           <strong style={{ fontWeight: 600 }}>Certify today unavailable</strong> — {todayCertify.reason}
         </Reason>
@@ -196,7 +295,10 @@ export default function Hours() {
               <SourceBadge source={HosWire.source(e.source) as EventSourceWire} />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <FieldLine label="Note" value={e.note || "—"} />
+              <FieldLine
+                label={e.odometerDecikm !== null ? "Odometer · note" : "Note"}
+                value={`${e.odometerDecikm !== null ? `${kmLabel(e.odometerDecikm)}${e.note ? " · " : ""}` : ""}${e.note || (e.odometerDecikm !== null ? "" : "—")}`}
+              />
             </div>
             <div style={{ flex: "none" }}>
               {e.clientEventId !== null ? (
@@ -268,6 +370,7 @@ export default function Hours() {
         [...history].reverse().map((day) => {
           const certify = certifyState(day.date, snapshot);
           const sources = [...new Set(day.events.filter((e) => !e.isVoided).map((e) => e.source))];
+          const exceptions = day.exceptions ?? [];
           return (
             <div key={day.date} style={{ marginBottom: 10 }}>
               <CardRow>
@@ -291,8 +394,12 @@ export default function Hours() {
                   ) : (
                     sources.map((s) => <SourceBadge key={s} source={s} />)
                   )}
+                  {day.outOfService ? <TabletChip kind="over" glyph={OUT_OF_SERVICE_GLYPH} label={HosWire.OutOfServiceLabel} /> : null}
+                  {exceptions.map((e) => (
+                    <TabletChip key={e.id} kind={exceptionStatusMeta(e.status).kind} label={`${exceptionKindShort(e.kind)} · ${e.status}`} />
+                  ))}
                 </div>
-                {day.date !== today && !certify.certified && day.hasRecords ? (
+                {day.date !== today && !certify.certified && day.hasRecords && !readOnly ? (
                   <div style={{ flex: "none" }}>
                     <TouchButton
                       variant="secondary"
@@ -315,7 +422,7 @@ export default function Hours() {
                   ))}
                 </div>
               ) : null}
-              {certify.reason !== null && !certify.certified && day.hasRecords && day.date !== today ? (
+              {certify.reason !== null && !certify.certified && day.hasRecords && day.date !== today && !readOnly ? (
                 <div style={{ padding: "0 18px 8px" }}>
                   <Reason kind={certify.kind}>
                     <strong style={{ fontWeight: 600 }}>Certify unavailable</strong> — {certify.reason}
@@ -339,7 +446,79 @@ export default function Hours() {
           }}
         />
       ) : null}
+
+      {compliance === "exception" ? (
+        <ExceptionSheet
+          nowUnix={snapshot.asOfUnix}
+          onClose={() => setCompliance(null)}
+          onDeclare={(payload) => {
+            setCompliance(null);
+            void act(() => enqueue("hos.exception", payload));
+          }}
+        />
+      ) : null}
+      {compliance === "eld" ? (
+        <EldMalfunctionSheet
+          today={today}
+          nowUnix={snapshot.asOfUnix}
+          onClose={() => setCompliance(null)}
+          onReport={(payload) => {
+            setCompliance(null);
+            void act(() => enqueue("hos.eld-malfunction", payload));
+          }}
+        />
+      ) : null}
+      {compliance === "other-carrier" && driverName !== null ? (
+        <OtherCarrierSheet
+          today={today}
+          driverName={driverName}
+          onClose={() => setCompliance(null)}
+          onDeclare={(events, carrierName) => {
+            setCompliance(null);
+            void act(() => declareOtherCarrier(events, carrierName));
+          }}
+        />
+      ) : null}
     </Screen>
+  );
+}
+
+// --- exceptions ------------------------------------------------------------------
+
+/** One exception as the driver sees it: kind, status (colour + glyph + word), when, why, and what can still be done. */
+function ExceptionRow({ exception, readOnly, onWithdraw }: { exception: ExceptionLike; readOnly: boolean; onWithdraw: () => void }) {
+  const s = exceptionStatusMeta(exception.status);
+  const m = statusMeta(s.kind);
+  const canWithdraw = !readOnly && exception.commandId === null && !exception.withdrawalQueued && exception.status === "Declared";
+  return (
+    <CardRow accent={m.c}>
+      <div style={{ flex: "none", width: 90 }}>
+        <Num size={type.label} color={colors.headingBright}>
+          {clockLabel(exception.effectiveFromUnix)}
+        </Num>
+      </div>
+      <div style={{ flex: "none", width: 220 }}>
+        <TabletChip kind={exception.kind === HosWire.EmergencyKind ? "over" : "soon"} glyph="!" label={exceptionKindShort(exception.kind)} />
+      </div>
+      <div style={{ flex: "none" }}>
+        <TabletChip kind={s.kind} label={s.label} />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <FieldLine
+          label={exception.extraDrivingMinutes !== null ? `Reason · +${exception.extraDrivingMinutes} min` : "Reason"}
+          value={`${exception.reason}${exception.location ? ` — ${exception.location}` : ""}`}
+        />
+      </div>
+      <div style={{ flex: "none", display: "flex", gap: 10, alignItems: "center" }}>
+        {exception.commandId !== null ? <TabletChip kind="soon" label="Queued on this tablet" /> : null}
+        {exception.withdrawalQueued ? <TabletChip kind="soon" label="Withdrawal queued" /> : null}
+        {canWithdraw ? (
+          <TouchButton variant="secondary" onClick={onWithdraw}>
+            Withdraw
+          </TouchButton>
+        ) : null}
+      </div>
+    </CardRow>
   );
 }
 
@@ -445,13 +624,28 @@ function SourceBadge({ source }: { source: EventSourceWire }) {
 
 // --- the server's refusals ------------------------------------------------------
 
-function describeCommand(command: QueuedCommand): string {
+/** What a parked command was, in the driver's words — enough to know what the server refused. */
+export function describeCommand(command: QueuedCommand): string {
   if (command.kind === "hos.duty" && isDutyCommandPayload(command.payload)) {
-    const at = Date.parse(command.payload.atUtc);
-    return `Duty change to ${command.payload.duty}${Number.isFinite(at) ? ` at ${clockLabel(Math.floor(at / 1000))}` : ""}`;
+    const p = command.payload;
+    const at = Date.parse(p.atUtc);
+    const when = Number.isFinite(at) ? ` at ${clockLabel(Math.floor(at / 1000))}` : "";
+    if (typeof p.carrierName === "string" && p.carrierName.trim().length > 0) return `Other-carrier ${p.duty} for ${p.carrierName.trim()}${when}`;
+    if (typeof p.odometerStartKm === "number") return `Personal conveyance from ${kmLabel(Math.round(p.odometerStartKm * 10))}${when}`;
+    if (typeof p.odometerEndKm === "number") return `Duty change to ${p.duty}${when}, ending personal conveyance at ${kmLabel(Math.round(p.odometerEndKm * 10))}`;
+    return `Duty change to ${p.duty}${when}`;
   }
   if (command.kind === "hos.certify" && isCertifyCommandPayload(command.payload)) {
     return `Certification of ${command.payload.date}`;
+  }
+  if (command.kind === "hos.exception" && isExceptionCommandPayload(command.payload)) {
+    const p = command.payload;
+    if (p.action === "withdraw") return "Withdrawal of an exception";
+    const at = Date.parse(p.effectiveFromUtc);
+    return `Exception — ${p.kind}${Number.isFinite(at) ? ` from ${clockLabel(Math.floor(at / 1000))}` : ""}`;
+  }
+  if (command.kind === "hos.eld-malfunction" && isEldMalfunctionCommandPayload(command.payload)) {
+    return `ELD malfunction report (${command.payload.code})`;
   }
   return command.kind;
 }
@@ -523,8 +717,8 @@ function HydrationLine({ hydration }: { hydration: LedgerSnapshot["hydration"] }
 
 // --- small pieces ------------------------------------------------------------------
 
-/** One status line: glyph + words in the kind's colour. */
-function Reason({ kind, children }: { kind: StatusKind; children: React.ReactNode }) {
+/** One status line: glyph + words in the kind's colour. `glyph` overrides the icon only. */
+function Reason({ kind, glyph, children }: { kind: StatusKind; glyph?: string; children: React.ReactNode }) {
   const m = statusMeta(kind);
   return (
     <div
@@ -539,7 +733,7 @@ function Reason({ kind, children }: { kind: StatusKind; children: React.ReactNod
       }}
     >
       <span aria-hidden style={{ fontWeight: 800 }}>
-        {m.g}
+        {glyph ?? m.g}
       </span>
       <span>{children}</span>
     </div>

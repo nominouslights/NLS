@@ -25,19 +25,28 @@
  * once its slice lands; until then enqueue() holds it on the device and nothing sends it.
  *
  * LIVE TODAY (a sender is registered — lib/hos/ledger.ts):
- *   `hos.duty`     one duty-status change → POST /api/drivers/{driverId}/hos/duty-events, the
- *                  first endpoint to honour the Idempotency-Key. Payload built by
- *                  lib/hos/dutyCommand.ts; always `source: "Driver App"` and `clientEventId`
- *                  (= this command's id), pinned in lib/wire.test.ts.
- *   `hos.certify`  the driver certifies one day → POST …/hos/days/{date}/certify. Payload
- *                  `{ date }` (DateOnly, America/Winnipeg).
+ *   `hos.duty`             one duty-status change → POST /api/drivers/{driverId}/hos/duty-events,
+ *                          the first endpoint to honour the Idempotency-Key. Payload built by
+ *                          lib/hos/dutyCommand.ts; `source` is "Driver App" (or
+ *                          "Other carrier (declared)" with a carrier name — the only other
+ *                          source this app writes) and `clientEventId` (= this command's id),
+ *                          pinned in lib/wire.test.ts. Personal conveyance is the same kind
+ *                          with the odometer and attestation fields on the payload; the three
+ *                          events of an other-carrier day are three of these.
+ *   `hos.certify`          the driver certifies one day → POST …/hos/days/{date}/certify.
+ *                          Payload `{ date }` (DateOnly, America/Winnipeg).
+ *   `hos.exception`        an adverse-conditions / emergency declaration → POST
+ *                          …/hos/exceptions, or its withdrawal → POST …/exceptions/{id}/withdraw.
+ *                          Payload built by lib/hos/complianceCommand.ts.
+ *   `hos.eld-malfunction`  an ELD malfunction report → POST …/hos/eld-malfunctions.
  *
- * HELD ONLY: everything else. The remaining hos.* kinds (exception, eld-malfunction, pc,
- * other-carrier) arrive with the next slice.
+ * HELD ONLY: everything else.
  */
 export type CommandKind =
   | "hos.duty"
   | "hos.certify"
+  | "hos.exception"
+  | "hos.eld-malfunction"
   | "dvir.submit"
   | "manifest.board"
   | "trip.claim"
@@ -94,6 +103,6 @@ export interface SyncState {
    * hard requirement quietly dies. Partial reality is reported through `enabledKinds`.
    */
   enabled: boolean;
-  /** The kinds a sender is registered for — today `hos.duty` and `hos.certify` (lib/hos/ledger.ts). */
+  /** The kinds a sender is registered for — today the four `hos.*` kinds (lib/hos/ledger.ts). */
   enabledKinds: CommandKind[];
 }

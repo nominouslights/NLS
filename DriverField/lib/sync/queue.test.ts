@@ -3,6 +3,7 @@ import { ApiError } from "../api/transport";
 import { recordDutyEvent } from "../api/hos";
 import {
   allCommands,
+  COMMAND_KINDS,
   discard,
   drain,
   DRAIN_INTERVAL_MS,
@@ -286,6 +287,42 @@ describe("triggers", () => {
   });
 });
 
+describe("the two compliance kinds", () => {
+  it("are kinds the queue knows, and a 4xx from either sender parks the command with the server's message", async () => {
+    expect(COMMAND_KINDS).toContain("hos.exception");
+    expect(COMMAND_KINDS).toContain("hos.eld-malfunction");
+
+    registerSender("hos.exception", async () => {
+      throw rejected("Drivers.Hos.AdverseKnowabilityRequired", "Adverse driving conditions can only be declared when they could not reasonably have been known before departure (s.76).", 400);
+    });
+    registerSender("hos.eld-malfunction", async () => {
+      throw rejected("Drivers.Hos.EldCodeRequired", "The malfunction code the ELD displayed is required.", 400);
+    });
+    const exception = await enqueue("hos.exception", { action: "declare", kind: "Adverse driving conditions" });
+    const eld = await enqueue("hos.eld-malfunction", { code: "" });
+
+    const result = await drain();
+
+    expect(result).toMatchObject({ sent: 0, failed: 2, held: 0, unreachable: false });
+    expect(failedCommands().map((c) => [c.id, c.errorCode, c.error])).toEqual([
+      [exception, "Drivers.Hos.AdverseKnowabilityRequired", "Adverse driving conditions can only be declared when they could not reasonably have been known before departure (s.76)."],
+      [eld, "Drivers.Hos.EldCodeRequired", "The malfunction code the ELD displayed is required."],
+    ]);
+    // Parked is final for the payload: a second round sends neither again.
+    expect((await drain()).failed).toBe(0);
+    expect(getSyncState().failed).toBe(2);
+  });
+
+  it("holds them, counted, while only the first two hos.* senders exist — nothing is sent under a kind with no sender", async () => {
+    registerSender("hos.duty", async () => undefined);
+    registerSender("hos.certify", async () => undefined);
+    await enqueue("hos.exception", { action: "withdraw", exceptionId: "x" });
+    const result = await drain();
+    expect(result).toMatchObject({ sent: 0, failed: 0, held: 1 });
+    expect(getSyncState().enabledKinds).toEqual(["hos.certify", "hos.duty"]);
+  });
+});
+
 describe("sync state contract", () => {
   it("never reports itself enabled while any kind has no sender — the honest-pill rule", () => {
     // If this ever returns enabled:true while dvir.submit is still held, the pill starts
@@ -294,6 +331,10 @@ describe("sync state contract", () => {
     registerSender("hos.certify", async () => undefined);
     expect(getSyncState().enabled).toBe(false);
     expect(getSyncState().enabledKinds).toEqual(["hos.certify", "hos.duty"]);
+    registerSender("hos.exception", async () => undefined);
+    registerSender("hos.eld-malfunction", async () => undefined);
+    expect(getSyncState().enabled).toBe(false);
+    expect(getSyncState().enabledKinds).toEqual(["hos.certify", "hos.duty", "hos.eld-malfunction", "hos.exception"]);
   });
 
   it("satisfies the full SyncState shape the pill renders", () => {

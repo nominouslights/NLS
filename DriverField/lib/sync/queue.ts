@@ -20,7 +20,7 @@
 //
 // Triggers: the window's `online` event, an enqueue while online, and a 60-second interval —
 // all installed by startSync() (components/Console.tsx on mount) and nothing before sign-in.
-// Senders are registered by the module that owns the endpoint (lib/hos/ledger.ts for the two
+// Senders are registered by the module that owns the endpoint (lib/hos/ledger.ts for the four
 // hos.* kinds); this file knows no URL.
 // ---------------------------------------------------------------------------
 
@@ -33,6 +33,8 @@ import type { CommandKind, CommandStatus, QueuedCommand } from "./types";
 const KIND_SET: Record<CommandKind, true> = {
   "hos.duty": true,
   "hos.certify": true,
+  "hos.exception": true,
+  "hos.eld-malfunction": true,
   "dvir.submit": true,
   "manifest.board": true,
   "trip.claim": true,

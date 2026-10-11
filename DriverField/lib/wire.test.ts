@@ -186,6 +186,56 @@ describe("the hos.duty command payload", () => {
   });
 });
 
+describe("the hos.duty payload for personal conveyance and other-carrier hours", () => {
+  it("carries the start odometer and the three server attestations on the opening event, and the end odometer on the closing one", () => {
+    // DutyDay.Validate: PcOdometerRequired, PcAttestationRequired on the opener;
+    // PcOdometerEndRequired, PcOdometerDecreasing on the next event. The tablet's four tiles
+    // fold into the server's three flags; nothing invents a fourth field.
+    const open = dutyCommandPayload("PersonalConveyance", "2026-10-10T20:00:00.000Z", "cmd-1", {
+      odometerStartKm: 184920,
+      pcNoPassengersOrCargo: true,
+      pcNoTrailer: true,
+      pcNoWork: true,
+    });
+    expect(dutyEventInputFrom(open, "cmd-1")).toEqual({
+      eventId: "cmd-1",
+      atUtc: "2026-10-10T20:00:00.000Z",
+      status: "Personal Conveyance",
+      source: "Driver App",
+      odometerStartKm: 184920,
+      pcNoPassengersOrCargo: true,
+      pcNoTrailer: true,
+      pcNoWork: true,
+    });
+    const close = dutyCommandPayload("OffDuty", "2026-10-10T21:00:00.000Z", "cmd-2", { odometerEndKm: 184950.5 });
+    expect(dutyEventInputFrom(close, "cmd-2")).toEqual({ eventId: "cmd-2", atUtc: "2026-10-10T21:00:00.000Z", status: "Off Duty", source: "Driver App", odometerEndKm: 184950.5 });
+    // A plain duty change carries none of them — the body is exactly what it was before this slice.
+    expect(dutyEventInputFrom(dutyCommandPayload("Driving", "2026-10-10T20:00:00.000Z", "cmd-3"), "cmd-3")).toEqual({
+      eventId: "cmd-3",
+      atUtc: "2026-10-10T20:00:00.000Z",
+      status: "Driving",
+      source: "Driver App",
+    });
+  });
+
+  it("writes source 'Other carrier (declared)' with the carrier and the driver's name — and only for a complete declaration", () => {
+    const declared = dutyCommandPayload("OnDuty", "2026-10-09T05:00:00.000Z", "cmd-4", { carrierName: "Gardewine North", enteredBy: "R. Beardy" });
+    expect(declared.source).toBe(HosWire.OtherCarrierSource);
+    expect(dutyEventInputFrom(declared, "cmd-4")).toEqual({
+      eventId: "cmd-4",
+      atUtc: "2026-10-09T05:00:00.000Z",
+      status: "On Duty",
+      source: "Other carrier (declared)",
+      carrierName: "Gardewine North",
+      enteredBy: "R. Beardy",
+    });
+    // The source alone, with no carrier, is not trusted: the server would refuse it
+    // (CarrierNameRequired), and a half declaration must not go out under a foreign label.
+    expect(dutyEventInputFrom({ duty: "On Duty", atUtc: "x", source: "Other carrier (declared)", clientEventId: "c" }, "c").source).toBe("Driver App");
+    expect(dutyCommandPayload("OnDuty", "x", "c", { carrierName: "  " }).source).toBe("Driver App");
+  });
+});
+
 describe("exception kinds (HosWire.ExceptionKind)", () => {
   it("are exactly the three HosWire emits", () => {
     expect(HosWire.AdverseDrivingConditionsKind).toBe("Adverse driving conditions");

@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { DutyDaySummary, DutyEventRecord, HosStatus } from "../api/hos";
+import type { DutyDaySummary, DutyEventRecord, HosExceptionRecord, HosStatus } from "../api/hos";
 import { ApiError } from "../api/transport";
 import { drain, enqueue, resetQueueForTests } from "../sync/queue";
+import { declareExceptionPayload, eldMalfunctionPayload, withdrawExceptionPayload } from "./complianceCommand";
 import { dutyCommandPayload } from "./dutyCommand";
 import { addDays, HOS_LIMITS, HosWire, type DateOnly, type DayTotals, type HosEvaluation } from "./engine";
 import { band, cannotDriveBecause, dutyStateOf } from "./display";
@@ -13,11 +14,13 @@ import {
   getSnapshot,
   hydrate,
   installLedgerForTests,
+  knownDriverName,
   nowUnix,
   resetLedgerForTests,
   RETAINED_DAYS,
   startLedger,
   subscribe,
+  syncWithQueue,
   tick,
 } from "./ledger";
 
@@ -27,15 +30,30 @@ import {
 // (engine.fixtures.test.ts holds it to the server's snapshots); what is under test is that the
 // store feeds it the right ledger at the right instant and publishes the result.
 
-const { getMyDriver, listDutyDays, getHosStatus, recordDutyEvent, certifyDay } = vi.hoisted(() => ({
-  getMyDriver: vi.fn(),
-  listDutyDays: vi.fn(),
-  getHosStatus: vi.fn(),
-  recordDutyEvent: vi.fn(),
-  certifyDay: vi.fn(),
-}));
+const { getMyDriver, listDutyDays, getHosStatus, recordDutyEvent, certifyDay, listHosExceptions, declareHosException, withdrawHosException, reportEldMalfunction } =
+  vi.hoisted(() => ({
+    getMyDriver: vi.fn(),
+    listDutyDays: vi.fn(),
+    getHosStatus: vi.fn(),
+    recordDutyEvent: vi.fn(),
+    certifyDay: vi.fn(),
+    listHosExceptions: vi.fn(),
+    declareHosException: vi.fn(),
+    withdrawHosException: vi.fn(),
+    reportEldMalfunction: vi.fn(),
+  }));
 
-vi.mock("../api/hos", () => ({ getMyDriver, listDutyDays, getHosStatus, recordDutyEvent, certifyDay }));
+vi.mock("../api/hos", () => ({
+  getMyDriver,
+  listDutyDays,
+  getHosStatus,
+  recordDutyEvent,
+  certifyDay,
+  listHosExceptions,
+  declareHosException,
+  withdrawHosException,
+  reportEldMalfunction,
+}));
 
 const H = 3600;
 const DRIVER = "11111111-1111-1111-1111-111111111111";
@@ -100,6 +118,8 @@ function day(date: DateOnly, events: DutyEventRecord[], fields: Partial<DutyDayS
     segments: [],
     events,
     violations: [],
+    exceptions: [],
+    outOfService: null,
     label: "Planning figures",
     ...fields,
   };
@@ -128,6 +148,7 @@ function status(fields: Partial<HosStatus> = {}): HosStatus {
     knownFromUtc: new Date(CALENDAR.dayStartUnix(addDays(TODAY, -40)) * 1000).toISOString(),
     outOfService: null,
     eldMalfunctionOpen: false,
+    priorRecords: null,
     evaluation: {} as HosEvaluation,
     ...fields,
   };
@@ -152,6 +173,10 @@ beforeEach(async () => {
   getHosStatus.mockResolvedValue(status());
   recordDutyEvent.mockResolvedValue({ eventId: "x", dutyDayId: "d", localDate: TODAY, created: true });
   certifyDay.mockResolvedValue(undefined);
+  listHosExceptions.mockResolvedValue([]);
+  declareHosException.mockResolvedValue({ id: "exc-1", status: "Declared" });
+  withdrawHosException.mockResolvedValue({ id: "exc-1", status: "Withdrawn" });
+  reportEldMalfunction.mockResolvedValue({ id: "eld-1", status: "Open" });
 });
 
 afterEach(() => {
@@ -442,5 +467,145 @@ describe("retention", () => {
     expect(s.events.every((e) => e.atUnix >= cutoff)).toBe(true);
     expect(s.events[0].atUnix).toBe(cutoff);
     expect(s.ledger.knownFromUnix).toBe(knownFrom);
+  });
+});
+
+// --- the compliance slice -----------------------------------------------------------------
+
+function exceptionRecord(fields: Partial<HosExceptionRecord> & { id: string }): HosExceptionRecord {
+  return {
+    driverId: DRIVER,
+    kind: "Adverse driving conditions",
+    status: "Declared",
+    applying: true,
+    tripId: null,
+    declaredAtUtc: "2026-10-10T13:05:00Z",
+    declaredByUserId: "u",
+    effectiveFromUtc: "2026-10-10T13:00:00Z",
+    effectiveToUtc: null,
+    reason: "Whiteout",
+    location: null,
+    notKnownBeforeDeparture: true,
+    extraDrivingMinutes: 60,
+    deferredOffDutyMinutes: null,
+    eldRemarkRecorded: false,
+    dispatchAcknowledgedAtUtc: null,
+    dispatchAcknowledgedByUserId: null,
+    approvedAtUtc: null,
+    approvedByUserId: null,
+    closedAtUtc: null,
+    closedByUserId: null,
+    closureNote: null,
+    ...fields,
+  };
+}
+
+describe("hydrate — exceptions, out of service, paper-log mode and the driver's name", () => {
+  it("fetches the exceptions over the same lookback and keeps the roster name from /me", async () => {
+    await hydrate();
+    expect(listHosExceptions).toHaveBeenCalledWith(DRIVER, { from: addDays(TODAY, -RETAINED_DAYS) });
+    expect(knownDriverName()).toBe("R. Beardy");
+  });
+
+  it("hands the status's out-of-service span to the engine — Driving blocked with 'Out of service' — and exposes the record while it is in force", async () => {
+    getHosStatus.mockResolvedValue(status({ outOfService: { id: "oos-1", fromUtc: "2026-10-10T18:00:00Z", untilUtc: "2026-10-13T18:00:00Z", reason: "Roadside" } }));
+    await hydrate();
+    const s = getSnapshot();
+    expect(s.ledger.outOfService).toEqual([{ fromUnix: Date.parse("2026-10-10T18:00:00Z") / 1000, untilUnix: Date.parse("2026-10-13T18:00:00Z") / 1000, reason: "Roadside" }]);
+    expect(s.outOfService?.id).toBe("oos-1");
+    expect(s.evaluation.canDriveNow).toBe(false);
+    expect(s.evaluation.blockingReasons).toContain("OutOfService");
+    expect(cannotDriveBecause(s.evaluation)).toBe("Out of service");
+  });
+
+  it("treats a declaration that has run out as not in force, while a day's past one still reaches the engine", async () => {
+    getHosStatus.mockResolvedValue(status({ outOfService: null }));
+    listDutyDays.mockResolvedValue(
+      fourteenDays(TODAY_EVENTS).map((d) =>
+        d.date === addDays(TODAY, -3) ? { ...d, outOfService: { id: "oos-old", fromUtc: "2026-10-07T12:00:00Z", untilUtc: "2026-10-07T20:00:00Z", reason: "r" } } : d,
+      ),
+    );
+    await hydrate();
+    expect(getSnapshot().outOfService).toBeNull();
+    expect(getSnapshot().ledger.outOfService).toHaveLength(1);
+    expect(evaluation().blockingReasons).not.toContain("OutOfService");
+  });
+
+  it("maps an applying exception as DutyLedgerAssembler.ToEngineException does — from the instant the conditions arose — and an adverse one moves the shift ceiling", async () => {
+    listHosExceptions.mockResolvedValue([exceptionRecord({ id: "exc-1" })]);
+    await hydrate();
+    const s = getSnapshot();
+    expect(s.ledger.exceptions).toEqual([
+      { id: "exc-1", tripId: null, reason: "Whiteout", kind: "AdverseDrivingConditions", declaredAtUnix: Date.parse("2026-10-10T13:00:00Z") / 1000, extensionSeconds: 3600 },
+    ]);
+    expect(s.evaluation.shift.adverseExtensionSeconds).toBe(3600);
+    expect(s.exceptions.map((e) => [e.id, e.status, e.commandId, e.withdrawalQueued])).toEqual([["exc-1", "Declared", null, false]]);
+  });
+
+  it("lists a rejected or withdrawn exception but never applies it, and maps an emergency's end", async () => {
+    listHosExceptions.mockResolvedValue([
+      exceptionRecord({ id: "exc-rejected", status: "Rejected", applying: false }),
+      exceptionRecord({ id: "exc-withdrawn", status: "Withdrawn", applying: false }),
+      exceptionRecord({ id: "exc-em", kind: "Emergency", status: "Acknowledged", extraDrivingMinutes: null, effectiveToUtc: "2026-10-10T14:00:00Z" }),
+    ]);
+    await hydrate();
+    const s = getSnapshot();
+    expect(s.ledger.exceptions).toEqual([
+      { id: "exc-em", tripId: null, reason: "Whiteout", kind: "Emergency", declaredAtUnix: Date.parse("2026-10-10T13:00:00Z") / 1000, endedAtUnix: Date.parse("2026-10-10T14:00:00Z") / 1000 },
+    ]);
+    expect(s.evaluation.shift.adverseExtensionSeconds).toBe(0);
+    expect(s.exceptions.map((e) => e.status).sort()).toEqual(["Acknowledged", "Rejected", "Withdrawn"]);
+  });
+
+  it("applies a declaration queued on this tablet at once, and drops it from the figures when the server refuses it", async () => {
+    await hydrate();
+    expect(evaluation().shift.adverseExtensionSeconds).toBe(0);
+    const id = await enqueue("hos.exception", declareExceptionPayload({ kind: "Adverse driving conditions", effectiveFromUnix: NOW - 1800, reason: "Fog", location: "", notKnownBeforeDeparture: true, extraDrivingMinutes: "45", eldRemarkRecorded: false }, NOW));
+    syncWithQueue();
+    expect(evaluation().shift.adverseExtensionSeconds).toBe(45 * 60);
+    expect(getSnapshot().exceptions[0]).toMatchObject({ id, commandId: id, status: "Declared", kind: "Adverse driving conditions", extraDrivingMinutes: 45 });
+
+    declareHosException.mockRejectedValueOnce(new ApiError("Drivers.Hos.ExceptionBackdated", "too late", 400));
+    const stop = startLedger("user-1");
+    await drain();
+    await vi.waitFor(() => expect(evaluation().shift.adverseExtensionSeconds).toBe(0));
+    expect(getSnapshot().exceptions).toHaveLength(0);
+    stop();
+  });
+
+  it("stops applying a server exception the moment its withdrawal is queued, and says so on the record", async () => {
+    listHosExceptions.mockResolvedValue([exceptionRecord({ id: "exc-1" })]);
+    await hydrate();
+    expect(evaluation().shift.adverseExtensionSeconds).toBe(3600);
+    await enqueue("hos.exception", withdrawExceptionPayload("exc-1"));
+    syncWithQueue();
+    expect(evaluation().shift.adverseExtensionSeconds).toBe(0);
+    expect(getSnapshot().exceptions[0]).toMatchObject({ id: "exc-1", withdrawalQueued: true, status: "Declared" });
+  });
+
+  it("reports paper-log mode from the server's flag, and from a report queued here before the server has it", async () => {
+    await hydrate();
+    expect(getSnapshot().paperLogMode).toBe(false);
+    await enqueue("hos.eld-malfunction", eldMalfunctionPayload({ code: "P", noticedAtUnix: NOW - 60, description: "Frozen" }, NOW));
+    syncWithQueue();
+    expect(getSnapshot().paperLogMode).toBe(true);
+
+    await resetQueueForTests({ wipe: true });
+    getHosStatus.mockResolvedValue(status({ eldMalfunctionOpen: true }));
+    await hydrate();
+    expect(getSnapshot().paperLogMode).toBe(true);
+  });
+
+  it("rebuilds a held personal-conveyance event with its odometer, and an other-carrier event with its source, from the queue", async () => {
+    await hydrate();
+    await enqueue("hos.duty", (id) => dutyCommandPayload("PersonalConveyance", NOW_ISO, id, { odometerStartKm: 1234.5, pcNoPassengersOrCargo: true, pcNoTrailer: true, pcNoWork: true }));
+    const dayStart = CALENDAR.dayStartUnix(addDays(TODAY, -1));
+    await enqueue("hos.duty", (id) => dutyCommandPayload("OnDuty", new Date(dayStart * 1000).toISOString(), id, { carrierName: "Gardewine North", enteredBy: "R. Beardy" }));
+    syncWithQueue();
+
+    const events = getSnapshot().events;
+    expect(events.at(-1)).toMatchObject({ status: "PersonalConveyance", source: "DriverApp", odometerDecikm: 12345 });
+    expect(events.find((e) => e.atUnix === dayStart)).toMatchObject({ status: "OnDuty", source: "OtherCarrier", odometerDecikm: null });
+    expect(evaluation().currentStatus).toBe("PersonalConveyance");
   });
 });

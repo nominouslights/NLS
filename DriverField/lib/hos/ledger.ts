@@ -13,7 +13,10 @@
 //
 // WHERE THE EVENTS COME FROM:
 //   - The SERVER: GET /api/drivers/{id}/hos/days (the last 14 regulation days, every effective
-//     event, who recorded it) and GET …/hos/status (known-from, the server's own evaluation),
+//     event, who recorded it, the exceptions in force and any out-of-service span on each
+//     day), GET …/hos/status (known-from, the server's own evaluation, the out-of-service
+//     declaration in force now, whether an ELD malfunction is open, the prior-records
+//     attestation) and GET …/hos/exceptions (every status, so a rejected one still shows),
 //     fetched on sign-in and again after every drain that sent something. The driver id is
 //     GET /api/drivers/me, resolved once and cached. Server events win: nothing here edits one.
 //   - THIS TABLET: a duty change appends an OPTIMISTIC event (status, now, "Driver App", the
@@ -22,10 +25,22 @@
 //     same id as the eventId, and the next hydrate reconciles: an optimistic event whose id the
 //     server now holds is dropped in favour of the server's copy; one whose command the server
 //     REJECTED (parked "failed" on the Hours screen) is dropped too, because the server has
-//     said it is not on the record. Pending ones are rebuilt from the queue on reload.
+//     said it is not on the record. Pending ones are rebuilt from the queue on reload. A
+//     personal-conveyance event carries its odometer so the engine can count the kilometres;
+//     an other-carrier day's three events carry that source and the carrier's name. A queued
+//     exception declaration is applied to the engine the same optimistic way (an adverse
+//     extension moves the ceiling the moment it is declared), and a queued withdrawal removes
+//     one; both go back to the record on the next hydrate.
 //   - A CACHE: the last server copy is kept in IndexedDB (lib/sync/db.ts, `ledger` store) so a
 //     reload in a dead zone still shows figures. `hydration` on the snapshot says which of the
 //     three the screens are looking at, and when; the Hours screen prints it.
+//
+// THE OUT-OF-SERVICE SPAN and the exceptions reach the ENGINE as well as the screens, mapped
+// exactly as the server's DutyLedgerAssembler maps them (an exception applies from the instant
+// the conditions arose, EffectiveFromUtc, not from when it was written; an out-of-service span
+// runs from its declaration to its lift or its until). That is what makes the DutyControl grey
+// Driving with "Out of service" from the same evaluation as everything else, rather than from
+// a flag a screen checks on its own.
 //
 // Every figure is a PLANNING FIGURE. The record of duty status is on the bus's ELD, and keeping
 // two records is a severe violation; the banner on Hours is not optional.
@@ -45,18 +60,28 @@
 
 import {
   certifyDay,
+  declareHosException,
   getHosStatus,
   getMyDriver,
   listDutyDays,
+  listHosExceptions,
   recordDutyEvent,
+  reportEldMalfunction,
+  withdrawHosException,
   type DutyDaySummary,
   type DutyEventRecord,
+  type HosExceptionKindWire,
+  type HosExceptionRecord,
+  type HosExceptionStatus,
   type HosStatus,
+  type OutOfServiceRecord,
 } from "../api/hos";
 import { ApiError } from "../api/transport";
 import * as db from "../sync/db";
 import { allCommands, onDrained, ready as queueReady, registerSender, statusOf, subscribeQueue } from "../sync/queue";
-import { dutyEventInputFrom, isCertifyCommandPayload, isDutyCommandPayload } from "./dutyCommand";
+import type { QueuedCommand } from "../sync/types";
+import { eldMalfunctionInputFrom, exceptionInputFrom, isExceptionCommandPayload } from "./complianceCommand";
+import { dutyEventInputFrom, isCertifyCommandPayload, isDutyCommandPayload, isOtherCarrierPayload, kmOrNull } from "./dutyCommand";
 import {
   addDays,
   evaluate,
@@ -68,6 +93,8 @@ import {
   type DutyStatus,
   type EventSource,
   type HosEvaluation,
+  type HosException,
+  type OutOfService,
 } from "./engine";
 
 /** The regulation's calendar (s.1): America/Winnipeg, day starts at local midnight. */
@@ -94,6 +121,23 @@ export interface DutyEventLike extends DutyEvent {
   clientEventId: string | null;
 }
 
+/**
+ * An exception as the Hours screen lists it: a server record, or a declaration queued on this
+ * tablet (`commandId` set, `id` = the command's id, status Declared) that the server has not
+ * answered yet. `withdrawalQueued` is a withdrawal of a server record held on this tablet.
+ */
+export interface ExceptionLike {
+  id: string;
+  commandId: string | null;
+  kind: HosExceptionKindWire;
+  status: HosExceptionStatus;
+  effectiveFromUnix: number;
+  reason: string;
+  location: string | null;
+  extraDrivingMinutes: number | null;
+  withdrawalQueued: boolean;
+}
+
 export type HydrationSource = "none" | "cache" | "server";
 
 export interface HydrationState {
@@ -111,6 +155,12 @@ export interface LedgerSnapshot {
   /** The server's day summaries (live or cached), oldest first — what the Hours history renders. */
   readonly days: readonly DutyDaySummary[];
   readonly status: HosStatus | null;
+  /** Every exception in the window (server records at any status, plus declarations queued here), newest first. */
+  readonly exceptions: readonly ExceptionLike[];
+  /** The out-of-service declaration in force at as-of, or null. */
+  readonly outOfService: OutOfServiceRecord | null;
+  /** An ELD malfunction is open on the server, or a report is queued on this tablet: keep paper RODS. */
+  readonly paperLogMode: boolean;
   readonly hydration: HydrationState;
   readonly asOfUnix: number;
   readonly evaluation: HosEvaluation;
@@ -124,6 +174,7 @@ const listeners = new Set<Listener>();
 interface ServerCopy {
   days: DutyDaySummary[];
   status: HosStatus;
+  exceptions: HosExceptionRecord[];
   fetchedAtMs: number;
 }
 
@@ -132,9 +183,11 @@ interface LedgerCache extends ServerCopy {
   key: "ledger";
   userId: string | null;
   driverId: string;
+  /** The roster name from /me — what an other-carrier declaration carries as `enteredBy`. Absent on rows written before it was kept. */
+  driverName?: string | null;
 }
 
-/** Test seam: a raw ledger installed in place of a server copy. */
+/** Test seam: a raw ledger installed in place of a server copy's events. */
 interface SeedLedger {
   knownFromUnix: number;
   events: DutyEventLike[];
@@ -143,6 +196,7 @@ interface SeedLedger {
 
 let userId: string | null = null;
 let driverId: string | null = null;
+let driverName: string | null = null;
 let server: ServerCopy | null = null;
 let seed: SeedLedger | null = null;
 let optimistic: DutyEventLike[] = [];
@@ -154,6 +208,12 @@ const NO_HYDRATION: HydrationState = { source: "none", atUnix: null, error: null
 
 function unixOf(iso: string): number {
   return Math.floor(Date.parse(iso) / 1000);
+}
+
+function unixOrNull(iso: string | null | undefined): number | null {
+  if (typeof iso !== "string") return null;
+  const unix = unixOf(iso);
+  return Number.isFinite(unix) ? unix : null;
 }
 
 /** km with one decimal → tenths of a km, rounded half away from zero as DutyLedgerAssembler.ToDecikm does. */
@@ -192,6 +252,143 @@ function serverEvents(days: readonly DutyDaySummary[]): DutyEventLike[] {
   return events;
 }
 
+const APPLYING: readonly HosExceptionStatus[] = ["Declared", "Acknowledged", "Approved"];
+
+/**
+ * One server exception → the engine's record, or null when it no longer applies. Mirrors
+ * DutyLedgerAssembler.ToEngineException: adverse conditions and an emergency apply from the
+ * instant the conditions arose (effectiveFromUtc); a deferral's day one is the regulation day
+ * its effective-from falls in.
+ */
+function engineExceptionFrom(e: HosExceptionRecord): HosException | null {
+  if (!APPLYING.includes(e.status)) return null;
+  const from = unixOrNull(e.effectiveFromUtc);
+  if (from === null) return null;
+  const base = { id: e.id, tripId: e.tripId, reason: e.reason };
+  switch (e.kind) {
+    case HosWire.AdverseDrivingConditionsKind:
+      return { ...base, kind: "AdverseDrivingConditions", declaredAtUnix: from, extensionSeconds: (e.extraDrivingMinutes ?? 0) * 60 };
+    case HosWire.EmergencyKind:
+      return { ...base, kind: "Emergency", declaredAtUnix: from, endedAtUnix: unixOrNull(e.effectiveToUtc) };
+    case HosWire.OffDutyDeferralKind:
+      return {
+        ...base,
+        kind: "OffDutyDeferral",
+        declaredAtUnix: unixOrNull(e.declaredAtUtc) ?? from,
+        dayOne: CALENDAR.dayOf(from),
+        deferredSeconds: (e.deferredOffDutyMinutes ?? 0) * 60,
+        approvedByComplianceOfficer: e.approvedByUserId ?? "",
+      };
+    default:
+      return null;
+  }
+}
+
+/** The out-of-service record → the engine's span, as DutyLedgerAssembler.ToEngineSpan does. */
+function engineSpanFrom(r: OutOfServiceRecord): OutOfService | null {
+  const from = unixOrNull(r.fromUtc);
+  if (from === null) return null;
+  return { fromUnix: from, untilUnix: unixOrNull(r.untilUtc), reason: r.reason };
+}
+
+function isHeld(status: QueuedCommand["status"]): boolean {
+  return status === "pending" || status === "sending";
+}
+
+/** The exception commands held on this tablet, in capture order. */
+function heldExceptionCommands(): QueuedCommand[] {
+  return allCommands().filter((c) => c.kind === "hos.exception" && isHeld(c.status) && isExceptionCommandPayload(c.payload));
+}
+
+function exceptionLikeFrom(record: HosExceptionRecord, withdrawalQueued: boolean): ExceptionLike | null {
+  const from = unixOrNull(record.effectiveFromUtc);
+  if (from === null) return null;
+  return {
+    id: record.id,
+    commandId: null,
+    kind: record.kind,
+    status: record.status,
+    effectiveFromUnix: from,
+    reason: record.reason,
+    location: record.location,
+    extraDrivingMinutes: record.extraDrivingMinutes,
+    withdrawalQueued,
+  };
+}
+
+/** Server exceptions plus the declarations queued here; withdrawals queued here are marked. */
+function exceptionsNow(serverRecords: readonly HosExceptionRecord[]): { list: ExceptionLike[]; engine: HosException[] } {
+  const held = heldExceptionCommands();
+  const withdrawing = new Set<string>();
+  for (const c of held) {
+    const p = c.payload as { action: string; exceptionId?: string };
+    if (p.action === "withdraw" && p.exceptionId) withdrawing.add(p.exceptionId);
+  }
+
+  const list: ExceptionLike[] = [];
+  const engine: HosException[] = [];
+  for (const record of serverRecords) {
+    const like = exceptionLikeFrom(record, withdrawing.has(record.id));
+    if (like === null) continue;
+    list.push(like);
+    if (like.withdrawalQueued) continue;
+    const mapped = engineExceptionFrom(record);
+    if (mapped !== null) engine.push(mapped);
+  }
+
+  for (const c of held) {
+    const p = c.payload;
+    if (!isExceptionCommandPayload(p) || p.action !== "declare") continue;
+    const from = unixOrNull(p.effectiveFromUtc);
+    if (from === null) continue;
+    list.push({
+      id: c.id,
+      commandId: c.id,
+      kind: p.kind,
+      status: "Declared",
+      effectiveFromUnix: from,
+      reason: p.reason,
+      location: p.location ?? null,
+      extraDrivingMinutes: p.extraDrivingMinutes ?? null,
+      withdrawalQueued: false,
+    });
+    const base = { id: c.id, tripId: p.tripId ?? null, reason: p.reason };
+    if (p.kind === HosWire.AdverseDrivingConditionsKind) {
+      engine.push({ ...base, kind: "AdverseDrivingConditions", declaredAtUnix: from, extensionSeconds: (p.extraDrivingMinutes ?? 0) * 60 });
+    } else {
+      engine.push({ ...base, kind: "Emergency", declaredAtUnix: from, endedAtUnix: null });
+    }
+  }
+
+  list.sort((a, b) => b.effectiveFromUnix - a.effectiveFromUnix);
+  return { list, engine };
+}
+
+/** Every out-of-service record the server copy mentions — in force now (status) or overlapping a day — once each. */
+function outOfServiceRecords(copy: ServerCopy | null): OutOfServiceRecord[] {
+  if (copy === null) return [];
+  const byId = new Map<string, OutOfServiceRecord>();
+  if (copy.status.outOfService) byId.set(copy.status.outOfService.id, copy.status.outOfService);
+  for (const day of copy.days) {
+    if (day.outOfService) byId.set(day.outOfService.id, day.outOfService);
+  }
+  return [...byId.values()];
+}
+
+function activeOutOfService(records: readonly OutOfServiceRecord[], asOfUnix: number): OutOfServiceRecord | null {
+  for (const r of records) {
+    const from = unixOrNull(r.fromUtc);
+    const until = unixOrNull(r.untilUtc);
+    if (from !== null && asOfUnix >= from && (until === null || asOfUnix < until)) return r;
+  }
+  return null;
+}
+
+function paperLogModeNow(copy: ServerCopy | null): boolean {
+  if (copy?.status.eldMalfunctionOpen) return true;
+  return allCommands().some((c) => c.kind === "hos.eld-malfunction" && isHeld(c.status));
+}
+
 function retainFromUnix(asOfUnix: number): number {
   return CALENDAR.dayStartUnix(addDays(CALENDAR.dayOf(asOfUnix), -RETAINED_DAYS));
 }
@@ -217,14 +414,17 @@ function build(asOfUnix: number): LedgerSnapshot {
 
   const certifiedDays = seed ? seed.certifiedDays : server ? server.days.filter((d) => d.certified).map((d) => d.date) : [];
 
+  const exceptions = exceptionsNow(server?.exceptions ?? []);
+  const oosRecords = outOfServiceRecords(server);
+
   const ledger: DutyLedger = {
     driverId: driverId ?? "",
     knownFromUnix,
     events,
     otherCarrierDays: [],
-    exceptions: [],
+    exceptions: exceptions.engine,
     certifiedDays,
-    outOfService: [],
+    outOfService: oosRecords.map(engineSpanFrom).filter((s): s is OutOfService => s !== null),
     malfunctions: [],
   };
 
@@ -233,6 +433,9 @@ function build(asOfUnix: number): LedgerSnapshot {
     events,
     days: server?.days ?? [],
     status: server?.status ?? null,
+    exceptions: exceptions.list,
+    outOfService: activeOutOfService(oosRecords, asOfUnix),
+    paperLogMode: paperLogModeNow(server),
     hydration,
     asOfUnix,
     evaluation: evaluate(ledger, asOfUnix, CALENDAR),
@@ -255,7 +458,18 @@ const serverSnapshot: LedgerSnapshot = (() => {
     outOfService: [],
     malfunctions: [],
   };
-  return { ledger, events: [], days: [], status: null, hydration: NO_HYDRATION, asOfUnix: 0, evaluation: evaluate(ledger, 0, CALENDAR) };
+  return {
+    ledger,
+    events: [],
+    days: [],
+    status: null,
+    exceptions: [],
+    outOfService: null,
+    paperLogMode: false,
+    hydration: NO_HYDRATION,
+    asOfUnix: 0,
+    evaluation: evaluate(ledger, 0, CALENDAR),
+  };
 })();
 
 let snapshot: LedgerSnapshot = serverSnapshot;
@@ -290,6 +504,16 @@ export function knownDriverId(): string | null {
   return driverId;
 }
 
+/**
+ * The driver's roster name (from /me or the cache) — the `enteredBy` an other-carrier
+ * declaration carries. Null until the server has been reached once on this account; the Hours
+ * screen disables that action with the reason rather than fall back to a mock name, because
+ * `enteredBy` is a wire value on a compliance record.
+ */
+export function knownDriverName(): string | null {
+  return driverName;
+}
+
 export function subscribe(listener: Listener): () => void {
   listeners.add(listener);
   return () => {
@@ -315,6 +539,11 @@ function republish(): void {
  * server rejects it) without a screen knowing. A second append with the same id replaces the
  * first — the queue restore on reload goes through here too.
  *
+ * `odometerDecikm` is the start reading on an event that opens personal conveyance and the end
+ * reading on the event that closes it — the engine's convention, the same one engineEventFrom
+ * applies to the server's events. `source` defaults to "Driver App"; an other-carrier day's
+ * events pass "OtherCarrier".
+ *
  * `atUnix` defaults to the store's clock. The as-of moves forward to the event (never back), so
  * an event is never "in the future" of its own evaluation — the engine would ignore it.
  */
@@ -324,6 +553,7 @@ export function appendDutyEvent(input: {
   atUnix?: number;
   source?: EventSource;
   note?: string | null;
+  odometerDecikm?: number | null;
 }): DutyEventLike {
   const atUnix = input.atUnix ?? nowUnix();
   let sequence = 1;
@@ -336,7 +566,7 @@ export function appendDutyEvent(input: {
     status: input.status,
     source: input.source ?? "DriverApp",
     sequence,
-    odometerDecikm: null,
+    odometerDecikm: input.odometerDecikm ?? null,
     note: input.note ?? null,
     eventId: null,
     clientEventId: input.clientEventId,
@@ -351,6 +581,19 @@ export function tick(): void {
   const now = nowUnix();
   if (now <= snapshot.asOfUnix) return;
   publish(build(now));
+}
+
+/**
+ * Reconciles the snapshot with the queue: rebuilds the optimistic duty events from the held
+ * hos.duty commands, drops the ones the server refused or the driver discarded, and
+ * re-evaluates with the exception declarations, withdrawals and malfunction reports held now.
+ * startLedger() runs this on every queue change; a test that enqueues without starting the
+ * ledger calls it directly.
+ */
+export function syncWithQueue(): void {
+  restoreOptimisticFromQueue();
+  pruneOptimistic();
+  republish();
 }
 
 // --- the queue: optimistic events come from it and go with it ---------------
@@ -373,9 +616,20 @@ function restoreOptimisticFromQueue(): void {
     if (status === null) continue;
     const atUnix = unixOf(command.payload.atUtc);
     if (!Number.isFinite(atUnix)) continue;
+    const payload = command.payload;
+    const odometerDecikm = decikm(kmOrNull(status === "PersonalConveyance" ? payload.odometerStartKm : payload.odometerEndKm));
     optimistic = [
       ...optimistic,
-      { atUnix, status, source: "DriverApp", sequence: 0, odometerDecikm: null, note: null, eventId: null, clientEventId: command.id },
+      {
+        atUnix,
+        status,
+        source: isOtherCarrierPayload(payload) ? "OtherCarrier" : "DriverApp",
+        sequence: 0,
+        odometerDecikm,
+        note: typeof payload.note === "string" ? payload.note : null,
+        eventId: null,
+        clientEventId: command.id,
+      },
     ];
   }
 }
@@ -396,6 +650,7 @@ export function resolveDriverId(): Promise<string> {
     try {
       const me = await getMyDriver();
       driverId = me.id;
+      driverName = typeof me.name === "string" && me.name.trim().length > 0 ? me.name.trim() : null;
       return me.id;
     } catch (err) {
       if (driverId !== null && err instanceof ApiError && (err.status === 0 || err.status >= 500)) {
@@ -423,8 +678,13 @@ export function hydrate(): Promise<boolean> {
       const id = await resolveDriverId();
       // From RETAINED_DAYS ago to today (the server's default `to`), on the regulation's calendar.
       const from = addDays(CALENDAR.dayOf(nowUnix()), -RETAINED_DAYS);
-      const [days, status] = await Promise.all([listDutyDays(id, { from }), getHosStatus(id)]);
-      server = { days: [...days].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)), status, fetchedAtMs: Date.now() };
+      const [days, status, exceptions] = await Promise.all([listDutyDays(id, { from }), getHosStatus(id), listHosExceptions(id, { from })]);
+      server = {
+        days: [...days].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)),
+        status,
+        exceptions: Array.isArray(exceptions) ? exceptions : [],
+        fetchedAtMs: Date.now(),
+      };
       hydration = { source: "server", atUnix: Math.floor(server.fetchedAtMs / 1000), error: null };
       pruneOptimistic();
       republish();
@@ -447,7 +707,7 @@ export function hydrate(): Promise<boolean> {
 
 async function saveCache(id: string, copy: ServerCopy): Promise<void> {
   try {
-    const row: LedgerCache = { key: "ledger", userId, driverId: id, ...copy };
+    const row: LedgerCache = { key: "ledger", userId, driverId: id, driverName, ...copy };
     await db.put(db.LEDGER_STORE, row);
   } catch {
     // The live copy is on screen; only the next offline reload loses out.
@@ -459,14 +719,16 @@ async function loadCache(): Promise<void> {
     const row = await db.get<LedgerCache>(db.LEDGER_STORE, "ledger");
     if (!row || row.userId !== userId) return;
     driverId = row.driverId;
-    server = { days: row.days, status: row.status, fetchedAtMs: row.fetchedAtMs };
+    driverName = typeof row.driverName === "string" ? row.driverName : null;
+    // A row written before the exceptions were fetched has none; the next hydrate fills them.
+    server = { days: row.days, status: row.status, exceptions: Array.isArray(row.exceptions) ? row.exceptions : [], fetchedAtMs: row.fetchedAtMs };
     hydration = { source: "cache", atUnix: Math.floor(row.fetchedAtMs / 1000), error: null };
   } catch {
     // no cache — the first hydrate will fill it
   }
 }
 
-// --- senders: the two hos.* kinds the queue can deliver -----------------------
+// --- senders: the four hos.* kinds the queue can deliver -----------------------
 
 async function sendDuty(payload: unknown, commandId: string): Promise<void> {
   const input = dutyEventInputFrom(payload, commandId);
@@ -482,23 +744,42 @@ async function sendCertify(payload: unknown): Promise<void> {
   await certifyDay(id, payload.date);
 }
 
+/** A declaration or a withdrawal, by the payload's `action`; the command id rides as the Idempotency-Key either way. */
+async function sendException(payload: unknown, commandId: string): Promise<void> {
+  if (!isExceptionCommandPayload(payload)) {
+    throw new Error("Not an exception command payload.");
+  }
+  const id = await resolveDriverId();
+  if (payload.action === "withdraw") {
+    await withdrawHosException(id, payload.exceptionId, payload.note, { idempotencyKey: commandId });
+    return;
+  }
+  await declareHosException(id, exceptionInputFrom(payload), { idempotencyKey: commandId });
+}
+
+async function sendEldMalfunction(payload: unknown, commandId: string): Promise<void> {
+  const input = eldMalfunctionInputFrom(payload);
+  const id = await resolveDriverId();
+  await reportEldMalfunction(id, input, { idempotencyKey: commandId });
+}
+
 // --- lifecycle ---------------------------------------------------------------
 
 /**
- * Brings the ledger up for the signed-in account: registers the two senders, restores held
+ * Brings the ledger up for the signed-in account: registers the four senders, restores held
  * duty changes from the queue, loads the cached server copy, then fetches a fresh one. Hooks
  * every drain that sent something to a re-fetch, and every queue change to a reconcile.
  * Returns the stop function. Called by components/Console.tsx on mount, after sign-in.
  */
 export function startLedger(signedInUserId: string | null): () => void {
   userId = signedInUserId;
-  const unregisterDuty = registerSender("hos.duty", sendDuty);
-  const unregisterCertify = registerSender("hos.certify", sendCertify);
-  const unsubscribeQueue = subscribeQueue(() => {
-    restoreOptimisticFromQueue();
-    pruneOptimistic();
-    republish();
-  });
+  const unregister = [
+    registerSender("hos.duty", sendDuty),
+    registerSender("hos.certify", sendCertify),
+    registerSender("hos.exception", sendException),
+    registerSender("hos.eld-malfunction", sendEldMalfunction),
+  ];
+  const unsubscribeQueue = subscribeQueue(syncWithQueue);
   const unsubscribeDrained = onDrained((result) => {
     if (result.sent > 0) void hydrate();
   });
@@ -516,8 +797,7 @@ export function startLedger(signedInUserId: string | null): () => void {
   })();
 
   return () => {
-    unregisterDuty();
-    unregisterCertify();
+    for (const stop of unregister) stop();
     unsubscribeQueue();
     unsubscribeDrained();
   };
@@ -529,6 +809,7 @@ export function startLedger(signedInUserId: string | null): () => void {
 export function resetLedgerForTests(): void {
   userId = null;
   driverId = null;
+  driverName = null;
   server = null;
   seed = null;
   optimistic = [];
@@ -541,21 +822,46 @@ export function resetLedgerForTests(): void {
 /**
  * Installs a raw ledger in place of a server copy and evaluates it at `asOfUnix` — for tests
  * that need a known timeline without a mocked API. Events become server-side (eventId set,
- * no clientEventId); optimistic appends still layer on top.
+ * no clientEventId); optimistic appends still layer on top. `status`, `exceptions` and `days`
+ * stand in for the server copy's own (an out-of-service declaration on `status` reaches the
+ * engine exactly as a hydrated one would), defaulting to a quiet status with none of them.
  */
 export function installLedgerForTests(input: {
   driverId?: string;
+  driverName?: string | null;
   knownFromUnix: number;
   events: DutyEvent[];
   certifiedDays: DateOnly[];
   asOfUnix: number;
+  status?: Partial<HosStatus>;
+  exceptions?: HosExceptionRecord[];
+  days?: DutyDaySummary[];
 }): void {
   driverId = input.driverId ?? "driver-test";
+  driverName = input.driverName === undefined ? "Test Driver" : input.driverName;
   seed = {
     knownFromUnix: input.knownFromUnix,
     events: input.events.map((e, i) => ({ ...e, eventId: `seed-${i + 1}`, clientEventId: null })),
     certifiedDays: input.certifiedDays,
   };
   optimistic = [];
+  const quiet: HosStatus = {
+    driverId,
+    label: "Planning figures",
+    currentDuty: "Off Duty",
+    currentDutySinceUtc: new Date(input.knownFromUnix * 1000).toISOString(),
+    recordsOnFile: true,
+    knownFromUtc: new Date(input.knownFromUnix * 1000).toISOString(),
+    outOfService: null,
+    eldMalfunctionOpen: false,
+    priorRecords: null,
+    evaluation: serverSnapshot.evaluation,
+  };
+  server = {
+    days: input.days ?? [],
+    status: { ...quiet, ...input.status },
+    exceptions: input.exceptions ?? [],
+    fetchedAtMs: input.asOfUnix * 1000,
+  };
   publish(build(input.asOfUnix));
 }

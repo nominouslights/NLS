@@ -13,6 +13,7 @@
 // every helper that returns a kind returns a label with it.
 // ---------------------------------------------------------------------------
 
+import type { HosExceptionKindWire, HosExceptionStatus } from "../api/hos";
 import { formatDurationH } from "../data";
 import type { DutyStatus as DutyState, StatusKind } from "../theme";
 import {
@@ -161,6 +162,109 @@ const RULE_SHORT: Record<HosRule, string> = {
 
 export function ruleShort(rule: HosRule): string {
   return RULE_SHORT[rule];
+}
+
+// --- personal conveyance: today's kilometres against the 75 km allowance ---------
+
+/**
+ * Where the gold band begins on the day's personal-conveyance kilometres: 60.0 km, tenths of a
+ * km like every odometer figure in the engine. The limit itself is the engine's
+ * (HOS_LIMITS.pcDailyLimitDecikm = 75.0 km; DutyDay refuses to start PC at or past it —
+ * PcAllowanceExhausted — and reclassifies the remainder of a segment that crosses it as on-duty
+ * driving). The 60 is the owner's "warn at" figure and lives here as one constant; pinned in
+ * display.test.ts on both sides of each boundary.
+ */
+export const PC_WARN_DECIKM = 600;
+
+export interface PcVerdict extends Banded {
+  usedDecikm: number;
+  /** Tenths of a km left before the allowance is used up; never below zero. */
+  leftDecikm: number;
+  /** True at or past 75.0 km: no further PC today, and a segment that got here is on-duty time past it. */
+  overLimit: boolean;
+}
+
+/** "12.5 km" from tenths of a km. */
+export function kmLabel(decikm: number): string {
+  const abs = Math.abs(decikm);
+  return `${decikm < 0 ? "−" : ""}${Math.trunc(abs / 10)}.${abs % 10} km`;
+}
+
+/**
+ * The band and words for a day's personal-conveyance kilometres. Teal under 60.0 km, gold ◐
+ * from 60.0 km, vermillion ▲ from 75.0 km — the tablet tells the driver the allowance is gone
+ * at the figure the server refuses the next segment at.
+ */
+export function pcDayVerdict(usedDecikm: number): PcVerdict {
+  const used = Math.max(0, Math.trunc(usedDecikm));
+  const limit = HOS_LIMITS.pcDailyLimitDecikm;
+  const leftDecikm = Math.max(0, limit - used);
+  if (used >= limit) {
+    return { kind: "over", label: "Over 75 km — today's personal conveyance is on-duty time", usedDecikm: used, leftDecikm, overLimit: true };
+  }
+  if (used >= PC_WARN_DECIKM) {
+    return { kind: "soon", label: `Nearing the 75 km allowance — ${kmLabel(leftDecikm)} left`, usedDecikm: used, leftDecikm, overLimit: false };
+  }
+  return { kind: "ontime", label: `${kmLabel(leftDecikm)} left before it counts as on-duty`, usedDecikm: used, leftDecikm, overLimit: false };
+}
+
+/** Today's declared personal-conveyance kilometres (closed segments only), from the engine's day totals. */
+export function todayPcDecikm(evaluation: HosEvaluation): number {
+  const today = new HosCalendar().dayOf(evaluation.asOfUnix);
+  return evaluation.days.find((d) => d.date === today)?.pcDecikm ?? 0;
+}
+
+// --- exceptions, out of service, paper-log mode: colour + glyph + label ----------
+
+/** How an exception's status reads on a chip. Colour + glyph + the member name, never the tint alone. */
+const EXCEPTION_STATUS_META: Record<HosExceptionStatus, { kind: StatusKind; label: string }> = {
+  Declared: { kind: "soon", label: "Declared" },
+  Acknowledged: { kind: "info", label: "Acknowledged by dispatch" },
+  Approved: { kind: "ontime", label: "Approved" },
+  Rejected: { kind: "over", label: "Rejected" },
+  Withdrawn: { kind: "off", label: "Withdrawn" },
+};
+
+export function exceptionStatusMeta(status: HosExceptionStatus): { kind: StatusKind; label: string } {
+  return EXCEPTION_STATUS_META[status] ?? { kind: "off", label: status };
+}
+
+/** Short names for the wire kinds, for a chip; the wire string itself is what goes to the API. */
+const EXCEPTION_KIND_SHORT: Record<HosExceptionKindWire, string> = {
+  "Adverse driving conditions": "Adverse conditions",
+  Emergency: "Emergency",
+  "Off-duty deferral (CO approved)": "Off-duty deferral",
+};
+
+export function exceptionKindShort(kind: HosExceptionKindWire): string {
+  return EXCEPTION_KIND_SHORT[kind] ?? kind;
+}
+
+/**
+ * Out of service is `over` with its own ✕, and paper-log mode (an open ELD malfunction) is
+ * `soon` with ✎ — glyph overrides on the chips, never new colours: a fifth StatusKind or a
+ * new hex is not an option in a copied theme, and sharing a colour is fine so long as the
+ * glyph and the label still differ.
+ */
+export const OUT_OF_SERVICE_GLYPH = "✕";
+export const PAPER_LOG_GLYPH = "✎";
+
+export const PAPER_LOG_LABEL = "Paper-log mode";
+export const PAPER_LOG_LINE = "Paper-log mode — keep paper RODS until the ELD is fixed. Dispatch transcribes them into this ledger.";
+
+const WHEN = new Intl.DateTimeFormat("en-CA", {
+  timeZone: HosCalendar.defaultTimeZoneId,
+  hourCycle: "h23",
+  weekday: "short",
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+/** "Mon, Oct 12, 14:30" on the regulation's clock, for an instant that may be days away. */
+export function whenLabel(unix: number): string {
+  return WHEN.format(new Date(unix * 1000));
 }
 
 // --- the tablet's alert thresholds ------------------------------------------

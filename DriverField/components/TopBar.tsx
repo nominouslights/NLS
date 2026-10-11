@@ -7,8 +7,10 @@ import { DutyChip } from "@/components/ui-tablet/DutyChip";
 import HeaderClock from "@/components/HeaderClock";
 import { logout } from "@/lib/auth";
 import { currentDriver, activeTrip } from "@/lib/data";
-import { dutyStateOf } from "@/lib/hos/display";
+import { dutyStateOf, OUT_OF_SERVICE_GLYPH, PAPER_LOG_GLYPH, PAPER_LOG_LABEL } from "@/lib/hos/display";
+import { HosWire } from "@/lib/hos/engine";
 import { useHosLedger } from "@/lib/hos/useHosLedger";
+import { TabletChip } from "@/components/screens/shared";
 
 // ADAPTED FROM Budgeting/components/TopBar.tsx, but the right-hand side is rebuilt from
 // scratch. What changed and why:
@@ -22,11 +24,15 @@ import { useHosLedger } from "@/lib/hos/useHosLedger";
 //
 // The duty chip reads the ledger's current status (lib/hos/ledger.ts) through dutyMeta() — the
 // same source as the DutyControl and the Hours screen, so the bar can never disagree with the
-// figures. The sync pill is not optional chrome — architecture §8 requires sync state to be
-// visible at all times, and this is the only place in the app that is always on screen.
+// figures. Beside it, two compliance states that must be visible on every screen for as long
+// as they stand: OUT OF SERVICE (vermillion with its own ✕ — a glyph override on the `over`
+// colour, never a new hex) and PAPER-LOG MODE (gold ✎: an ELD malfunction is open, so the
+// driver keeps paper RODS until it is fixed). Both come from the same ledger snapshot. The sync
+// pill is not optional chrome — architecture §8 requires sync state to be visible at all times,
+// and this is the only place in the app that is always on screen.
 
 export default function TopBar() {
-  const { evaluation } = useHosLedger();
+  const { evaluation, outOfService, paperLogMode } = useHosLedger();
   const duty = dutyStateOf(evaluation.currentStatus);
 
   return (
@@ -104,6 +110,9 @@ export default function TopBar() {
 
       {/* Duty state: colour + glyph + the word, from dutyMeta(). Never the tint alone. */}
       <DutyChip state={duty} size="bar" />
+
+      {outOfService !== null ? <TabletChip kind="over" glyph={OUT_OF_SERVICE_GLYPH} label={HosWire.OutOfServiceLabel} /> : null}
+      {paperLogMode ? <TabletChip kind="soon" glyph={PAPER_LOG_GLYPH} label={PAPER_LOG_LABEL} /> : null}
 
       <SyncPill />
 

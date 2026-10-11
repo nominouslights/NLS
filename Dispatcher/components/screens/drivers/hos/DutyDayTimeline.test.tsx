@@ -4,7 +4,31 @@ import { statusMeta } from "@/lib/theme";
 import { HosMessages } from "@/lib/hos/engine";
 import { SOURCE_GLYPH } from "@/lib/hos/display";
 import { DutyDayTimeline } from "./DutyDayTimeline";
-import { dutyDay, dutyEvent, FIXTURE_DATE, FIXTURE_DAY_START } from "./hosFixtures";
+import { dutyDay, dutyEvent, FIXTURE_DATE, FIXTURE_DAY_START, hosException, outOfService } from "./hosFixtures";
+
+describe("DutyDayTimeline — exceptions and out of service on the day", () => {
+  it("shows the day's exceptions with their status glyph, and an overlapping out-of-service span with ✕", () => {
+    render(
+      <DutyDayTimeline
+        days={[
+          dutyDay({
+            exceptions: [hosException(), hosException({ id: "ex-2", kind: "Off-duty deferral (CO approved)", status: "Approved", extraDrivingMinutes: null, deferredOffDutyMinutes: 90 })],
+            outOfService: outOfService(),
+          }),
+        ]}
+        today={FIXTURE_DATE}
+        onAmend={vi.fn()}
+      />,
+    );
+
+    const adverse = screen.getByText("Adverse driving conditions · Declared · +60 min");
+    expect(adverse.parentElement?.textContent).toContain("◐");
+    const deferral = screen.getByText("Off-duty deferral · Approved · 90 min deferred");
+    expect(deferral.parentElement?.textContent).toContain(statusMeta("ontime").g);
+    const oos = screen.getByText("Out of service Oct 9, 06:00 – Oct 12, 06:00 — Roadside inspection — hours exceeded");
+    expect(oos.parentElement?.textContent).toContain("✕");
+  });
+});
 
 // The timeline is one row per server-evaluated day. These pin the three certification
 // states (each a different glyph, not just a colour), the per-source glyphs, that a voided

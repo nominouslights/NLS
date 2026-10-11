@@ -14,6 +14,20 @@ export const DISPATCH_ROLES = ["Owner", "Dispatcher", "Supervisor"] as const;
 export const BUDGET_ROLES = ["Owner", "Accountant"] as const;
 
 /**
+ * Roles.ComplianceAccess — the hours-of-service decisions that override or stand behind the
+ * gate: deferral approval, exception rejection, out-of-service declarations and lifts, ELD
+ * malfunction resolution, findings, the prior-records attestation. The Owner may act as
+ * compliance officer (owner decision, 2026-10-09). Dispatch is deliberately absent.
+ */
+export const COMPLIANCE_ROLES = ["Owner", "ComplianceOfficer"] as const;
+
+/**
+ * Roles.DriverRosterAccess — who may open the Drivers & Compliance app: dispatch plus the
+ * Compliance Officer, whose work is the driver record. Never widen DISPATCH_ROLES for this.
+ */
+export const DRIVERS_APP_ROLES = [...DISPATCH_ROLES, "ComplianceOfficer"] as const;
+
+/**
  * Roles.LegacyAdmin — the literal every user created before the role model carries. It always
  * meant Owner in practice, and the backend's AdminOnly policy still honours it for the tokens
  * minted before the rename migration ran, so the launcher treats it as Owner too.
