@@ -38,8 +38,20 @@ public sealed record BudgetItemDetails
 
     public BudgetRecurrence Recurrence { get; init; } = BudgetRecurrence.OneTime;
 
-    /// <summary>Free-text payee or supplier.</summary>
+    /// <summary>
+    /// Free text — on a <b>revenue</b> item, the payer. An expense item names its vendors through
+    /// <see cref="VendorShares"/> instead, and refuses new free text
+    /// (<c>Budgeting.Allocation.PayerNotAllowedForExpense</c>).
+    /// </summary>
     public string? Vendor { get; init; }
+
+    /// <summary>
+    /// The expense item's vendors, each with a dollar share; when any are given they must sum to
+    /// exactly the item's amount. <b>Null means "not stated"</b>: on create, no shares; on update,
+    /// keep the item's current shares (re-checked against the new amount) — so a client that does
+    /// not know this field cannot wipe shares by omitting it. An empty list clears them.
+    /// </summary>
+    public IReadOnlyList<BudgetItemVendorShareDetails>? VendorShares { get; init; }
 
     /// <summary>Free-form labels. Trimmed, de-duplicated case-insensitively, at most 10.</summary>
     public IReadOnlyList<string>? Tags { get; init; }

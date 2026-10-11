@@ -25,6 +25,8 @@ internal sealed class BudgetAllocationProjection : BudgetingProjection<BudgetAll
         row.SpendType = source.SpendType.ToString();
         row.Recurrence = source.Recurrence.ToString();
         row.Vendor = source.Vendor;
+        // A fresh list (the shares are immutable records), so the read row never aliases write-side state.
+        row.VendorShares = [.. source.VendorShares];
         // A fresh list, never the aggregate's own: the read row must not alias write-side state.
         row.Tags = [.. source.Tags];
         row.Priority = source.Priority.ToString();

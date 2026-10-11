@@ -19,8 +19,54 @@ internal sealed class InMemoryVendorRepository : IVendorRepository
 
     private IEnumerable<Vendor> Visible => Vendors.Where(v => v.TenantId == QueryFilterTenantId);
 
-    public Task<Vendor?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
-        Task.FromResult(Visible.FirstOrDefault(v => v.Id == id));
+    /// <summary>
+    /// Every repository call in order — <c>Lock</c>, <c>GetById</c>, <c>Commit</c> (and the save
+    /// calls) — so a test can pin that the register lock comes before the first register read.
+    /// </summary>
+    public List<string> Calls { get; } = [];
+
+    /// <summary>The tenant of every register lock taken, in order.</summary>
+    public List<Guid> Locks { get; } = [];
+
+    /// <summary>The tenant of every lock scope that was committed, in order.</summary>
+    public List<Guid> CommittedLocks { get; } = [];
+
+    /// <summary>
+    /// Runs as each lock is acquired: lets a test run a whole competing handler to completion
+    /// "while this request waited on the lock". Clear it inside the callback, or the competing
+    /// handler's own lock acquisition re-enters it.
+    /// </summary>
+    public Func<Task>? OnLockAcquiredAsync { get; set; }
+
+    public Task<Vendor?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        Calls.Add("GetById");
+        return Task.FromResult(Visible.FirstOrDefault(v => v.Id == id));
+    }
+
+    public async Task<IVendorRegisterLock> LockRegisterAsync(Guid tenantId, CancellationToken cancellationToken = default)
+    {
+        Calls.Add("Lock");
+        Locks.Add(tenantId);
+        if (OnLockAcquiredAsync is { } competing)
+        {
+            await competing();
+        }
+
+        return new RecordingLock(this, tenantId);
+    }
+
+    private sealed class RecordingLock(InMemoryVendorRepository owner, Guid tenantId) : IVendorRegisterLock
+    {
+        public Task CommitAsync(CancellationToken cancellationToken = default)
+        {
+            owner.Calls.Add("Commit");
+            owner.CommittedLocks.Add(tenantId);
+            return Task.CompletedTask;
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
 
     // Ordinal, matching the real repository: the handler normalizes before calling, so a
     // case-insensitive comparison here would hide a missing normalization.

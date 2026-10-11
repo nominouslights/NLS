@@ -36,6 +36,9 @@ public sealed class BudgetAllocationReadModel
     public string SpendType { get; set; } = null!;
     public string Recurrence { get; set; } = null!;
     public string? Vendor { get; set; }
+
+    /// <summary>The aggregate's jsonb verbatim, re-mapped with the same shape (<c>BudgetItemVendorShareMapping</c>).</summary>
+    public List<BudgetItemVendorShare> VendorShares { get; set; } = [];
     public List<string> Tags { get; set; } = [];
     public string Priority { get; set; } = null!;
     public string? Assumptions { get; set; }
@@ -71,6 +74,7 @@ public sealed class BudgetAllocationReadModelConfiguration : IEntityTypeConfigur
         builder.Property(a => a.SpendType).HasColumnName("spend_type").HasMaxLength(16);
         builder.Property(a => a.Recurrence).HasColumnName("recurrence").HasMaxLength(16);
         builder.Property(a => a.Vendor).HasColumnName("vendor").HasMaxLength(BudgetAllocation.VendorMaxLength);
+        BudgetItemVendorShareMapping.MapVendorShares(builder, a => a.VendorShares);
         builder.PrimitiveCollection(a => a.Tags).HasColumnName("tags");
         builder.Property(a => a.Priority).HasColumnName("priority").HasMaxLength(16);
         builder.Property(a => a.Assumptions)

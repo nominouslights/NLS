@@ -35,6 +35,7 @@ using NorthernLink.Budgeting.Application.Qbo.GetConnection;
 using NorthernLink.Budgeting.Application.Vendors.Create;
 using NorthernLink.Budgeting.Application.Vendors.Delete;
 using NorthernLink.Budgeting.Application.Vendors.GetVendorById;
+using NorthernLink.Budgeting.Application.Vendors.GetPlannedRollup;
 using NorthernLink.Budgeting.Application.Vendors.GetVendors;
 using NorthernLink.Budgeting.Application.Vendors.SetActive;
 using NorthernLink.Budgeting.Application.Vendors.Update;
@@ -124,7 +125,7 @@ public static class BudgetingEndpoints
         // every period. Names are unique per tenant ignoring case (409 Budgeting.Vendor.DuplicateName).
         // Retiring (activate/deactivate) is the normal end of a vendor's life; DELETE is for a
         // vendor created in error and answers 409 Budgeting.Vendor.InUse once anything references
-        // it (IVendorUsageProbe — nothing can yet). GET lists active vendors unless
+        // it (IVendorUsageProbe — any budget item's vendor share). GET lists active vendors unless
         // ?includeInactive=true.
         budgeting.MapGet("vendors", GetVendors);
         budgeting.MapGet("vendors/{vendorId:guid}", GetVendor);
@@ -159,6 +160,10 @@ public static class BudgetingEndpoints
         budgeting.MapPost("qbo/connection/authorize", AuthorizeQbo);
         budgeting.MapPost("qbo/connection/complete", CompleteQboConnection);
         budgeting.MapDelete("qbo/connection", DisconnectQbo);
+
+        // A period's planned expense per vendor (the sum of each vendor's shares on expense
+        // items), plus a "No vendor" bucket. Planned only, like the cost-centre rollup.
+        budgeting.MapGet("periods/{id:guid}/rollups/vendors", GetVendorRollup);
 
         return app;
     }
@@ -662,6 +667,18 @@ public static class BudgetingEndpoints
         return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
     }
 
+    private static async Task<IResult> GetVendorRollup(
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(new GetVendorRollupQuery(tenantId, id), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
     /// <summary>
     /// The tenant's QuickBooks connection: always 200, <c>status: "NotConnected"</c> when there has
     /// never been one. See <see cref="QboConnectionResponse"/>.
@@ -794,6 +811,15 @@ public sealed record CreateBudgetPeriodRequest(
 /// binds an omitted property to value 0, which for Priority is MustHave rather than the
 /// documented default ShouldHave.
 /// </para>
+/// <para>
+/// <see cref="Vendor"/> is free text — on a revenue item, <b>the payer</b> (the name is kept for
+/// the wire's sake); an expense item refuses new text (<c>PayerNotAllowedForExpense</c>).
+/// <see cref="VendorShares"/> are an expense item's vendors, <c>[{ vendorId, amountCad }]</c>, each
+/// vendor once, summing to exactly the item's amount (computed or lump sum). <b>Omitted or null
+/// keeps</b> the item's current shares on PUT (none on POST) — so a client that does not know the
+/// field cannot wipe them — and they are then re-checked against the new amount; <c>[]</c> clears
+/// them. A revenue item refuses shares (<c>VendorSharesNotAllowedForRevenue</c>).
+/// </para>
 /// </summary>
 public sealed record BudgetItemRequest(
     Guid? BudgetCodeId,
@@ -809,10 +835,14 @@ public sealed record BudgetItemRequest(
     IReadOnlyList<string>? Tags,
     BudgetItemPriority? Priority,
     string? Assumptions,
-    string? ConsequenceIfUnfunded)
+    string? ConsequenceIfUnfunded,
+    IReadOnlyList<BudgetItemVendorShareRequest?>? VendorShares = null)
 {
     public BudgetItemDetails ToDetails() => new()
     {
+        VendorShares = VendorShares?
+            .Select(share => new BudgetItemVendorShareDetails(share?.VendorId, share?.AmountCad))
+            .ToList(),
         Title = Title,
         AmountCad = AmountCad,
         Quantity = Quantity,
@@ -828,6 +858,12 @@ public sealed record BudgetItemRequest(
         ConsequenceIfUnfunded = ConsequenceIfUnfunded,
     };
 }
+
+/// <summary>
+/// One vendor share in a <see cref="BudgetItemRequest"/>. Nullable on the wire so a missing vendor
+/// or amount fails as <c>VendorShareVendorRequired</c> / <c>VendorShareAmountInvalid</c>.
+/// </summary>
+public sealed record BudgetItemVendorShareRequest(Guid? VendorId, decimal? AmountCad);
 
 /// <summary>
 /// Request body for POST /api/budgeting/periods/{id}/allocations/copy. The target period comes

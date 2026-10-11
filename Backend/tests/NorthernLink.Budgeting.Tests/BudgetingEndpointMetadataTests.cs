@@ -112,6 +112,7 @@ public class BudgetingEndpointMetadataTests : IAsyncLifetime
     [InlineData("POST", "/api/budgeting/qbo/connection/authorize")]
     [InlineData("POST", "/api/budgeting/qbo/connection/complete")]
     [InlineData("DELETE", "/api/budgeting/qbo/connection")]
+    [InlineData("GET", "/api/budgeting/periods/{id:guid}/rollups/vendors")]
     public void Every_budgeting_endpoint_carries_the_BudgetAccess_policy(string method, string pattern)
     {
         var endpoint = Endpoint(method, pattern);
@@ -145,7 +146,7 @@ public class BudgetingEndpointMetadataTests : IAsyncLifetime
     {
         // Guards the guard: without this, an endpoint added to the group would be silently
         // absent from the Theory above (which asserts only the routes it names).
-        Assert.Equal(40, _endpoints.Count);
+        Assert.Equal(41, _endpoints.Count);
     }
 
     [Theory]

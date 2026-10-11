@@ -32,6 +32,13 @@ internal sealed class BudgetAllocationRepository(BudgetingDbContext context) : I
             .Where(a => a.PeriodId == periodId)
             .ToListAsync(cancellationToken);
 
+    // Every period, tenant-filtered (query filter + RLS). Npgsql translates the owned-JSON Any into
+    // an EXISTS over jsonb_to_recordset(vendor_shares) — a scan of the tenant's items, which is
+    // fine for a rare, human-initiated vendor delete over a few hundred items per period.
+    public Task<bool> AnyWithVendorShareAsync(Guid vendorId, CancellationToken cancellationToken = default) =>
+        context.BudgetAllocations.AnyAsync(
+            a => a.VendorShares.Any(share => share.VendorId == vendorId), cancellationToken);
+
     public void Add(BudgetAllocation allocation) => context.BudgetAllocations.Add(allocation);
 
     public void Remove(BudgetAllocation allocation) => context.BudgetAllocations.Remove(allocation);

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 using NorthernLink.Budgeting.Application.Abstractions;
 using NorthernLink.Budgeting.Domain.Vendors;
@@ -48,5 +49,45 @@ internal sealed class VendorRepository(BudgetingDbContext context) : IVendorRepo
             context.ChangeTracker.Clear();
             return false;
         }
+    }
+
+    public async Task<IVendorRegisterLock> LockRegisterAsync(Guid tenantId, CancellationToken cancellationToken = default)
+    {
+        // The CostCentreRepository.LockRegisterAsync primitive with its own key namespace, so the
+        // two registers never wait on each other. Own the transaction only when the caller has not
+        // already opened one; a nested caller's commit is then a no-op and the outer one decides.
+        var transaction = context.Database.CurrentTransaction is null
+            ? await context.Database.BeginTransactionAsync(cancellationToken)
+            : null;
+
+        try
+        {
+            // Transaction-scoped advisory lock, released by Postgres at commit or rollback, so a
+            // crashed request can never leak it. A hash collision only makes two unrelated keys
+            // wait for each other briefly; it can never let a race through.
+            var key = $"budgeting.vendor-register:{tenantId:D}";
+            await context.Database.ExecuteSqlAsync(
+                $"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", cancellationToken);
+        }
+        catch
+        {
+            if (transaction is not null)
+            {
+                await transaction.DisposeAsync();
+            }
+
+            throw;
+        }
+
+        return new RegisterLock(transaction);
+    }
+
+    private sealed class RegisterLock(IDbContextTransaction? transaction) : IVendorRegisterLock
+    {
+        public Task CommitAsync(CancellationToken cancellationToken = default) =>
+            transaction?.CommitAsync(cancellationToken) ?? Task.CompletedTask;
+
+        // Disposing an uncommitted EF transaction rolls it back, releasing the lock.
+        public ValueTask DisposeAsync() => transaction?.DisposeAsync() ?? ValueTask.CompletedTask;
     }
 }

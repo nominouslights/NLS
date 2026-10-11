@@ -63,7 +63,9 @@ public sealed class BudgetAllocationConfiguration : IEntityTypeConfiguration<Bud
             .HasConversion<string>()
             .HasMaxLength(16);
 
+        // The free-text vendor — the payer, on a revenue item. Column name kept.
         builder.Property(a => a.Vendor).HasColumnName("vendor").HasMaxLength(BudgetAllocation.VendorMaxLength);
+        BudgetItemVendorShareMapping.MapVendorShares(builder, a => a.VendorShares);
         builder.PrimitiveCollection(a => a.Tags).HasColumnName("tags");
         builder.Property(a => a.Assumptions)
             .HasColumnName("assumptions")

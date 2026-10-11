@@ -54,11 +54,21 @@ namespace NorthernLink.Budgeting.Application.Allocations.CopyFromPeriod;
 /// A zero-amount source line is copied as-is — zero is a valid plan — and an empty source period
 /// is a success with all four counts zero, not an error.
 /// </para>
+/// <para>
+/// <b>Vendor shares come across as-is</b> onto a target code that is an expense code (vendors are
+/// tenant-wide, so the same ids are valid in every period; a share on a since-retired vendor is
+/// carried too), and are dropped onto a revenue code — <c>BudgetAllocation.CopyInto</c> decides
+/// by the <em>target</em> code's category. Because a copy can make a vendor referenced by one
+/// more item, the whole copy runs under the tenant's vendor register lock, taken before the source
+/// items are read: a vendor delete either commits first (and then no source item can still carry
+/// it — its probe would have refused) or waits and sees the copied shares.
+/// </para>
 /// </summary>
 public sealed class CopyBudgetAllocationsCommandHandler(
     IBudgetAllocationRepository allocations,
     IBudgetPeriodRepository periods,
-    IBudgetCodeRepository codes)
+    IBudgetCodeRepository codes,
+    IVendorRepository vendors)
     : ICommandHandler<CopyBudgetAllocationsCommand, BudgetAllocationCopyResult>
 {
     public async Task<Result<BudgetAllocationCopyResult>> Handle(
@@ -92,6 +102,10 @@ public sealed class CopyBudgetAllocationsCommandHandler(
         {
             return Result.Failure<BudgetAllocationCopyResult>(BudgetAllocationErrors.CopySourceNotFound);
         }
+
+        // Before the first read of the source items — see the class comment. Released (rolled
+        // back) on every early return, committed with the save.
+        await using var vendorLock = await vendors.LockRegisterAsync(command.TenantId, cancellationToken);
 
         var sourceLines = await allocations.ListForPeriodAsync(sourcePeriodId, cancellationToken);
         if (sourceLines.Count == 0)
@@ -135,13 +149,14 @@ public sealed class CopyBudgetAllocationsCommandHandler(
                 continue;
             }
 
-            allocations.Add(line.CopyInto(command.PeriodId, targetCode.Id, command.ActorId));
+            allocations.Add(line.CopyInto(command.PeriodId, targetCode.Id, targetCode.Category, command.ActorId));
             copied++;
         }
 
         if (copied > 0)
         {
             await allocations.SaveChangesAsync(cancellationToken);
+            await vendorLock.CommitAsync(cancellationToken);
         }
 
         return Result.Success(new BudgetAllocationCopyResult(

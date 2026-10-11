@@ -1531,6 +1531,60 @@ namespace NorthernLink.Budgeting.Infrastructure.Persistence.Migrations
 
                     b.ToTable("projection_checkpoints", "budgeting");
                 });
+
+            modelBuilder.Entity("NorthernLink.Budgeting.Domain.Allocations.BudgetAllocation", b =>
+                {
+                    b.OwnsMany("NorthernLink.Budgeting.Domain.Allocations.BudgetItemVendorShare", "VendorShares", b1 =>
+                        {
+                            b1.Property<Guid>("BudgetAllocationId");
+
+                            b1.Property<int>("__synthesizedOrdinal")
+                                .ValueGeneratedOnAdd();
+
+                            b1.Property<decimal>("AmountCad")
+                                .HasPrecision(12, 2);
+
+                            b1.Property<Guid>("VendorId");
+
+                            b1.HasKey("BudgetAllocationId", "__synthesizedOrdinal");
+
+                            b1.ToTable("budget_allocations", "budgeting");
+
+                            b1.ToJson("vendor_shares");
+
+                            b1.WithOwner()
+                                .HasForeignKey("BudgetAllocationId");
+                        });
+
+                    b.Navigation("VendorShares");
+                });
+
+            modelBuilder.Entity("NorthernLink.Budgeting.Infrastructure.Persistence.ReadModels.BudgetAllocationReadModel", b =>
+                {
+                    b.OwnsMany("NorthernLink.Budgeting.Domain.Allocations.BudgetItemVendorShare", "VendorShares", b1 =>
+                        {
+                            b1.Property<Guid>("BudgetAllocationReadModelId");
+
+                            b1.Property<int>("__synthesizedOrdinal")
+                                .ValueGeneratedOnAdd();
+
+                            b1.Property<decimal>("AmountCad")
+                                .HasPrecision(12, 2);
+
+                            b1.Property<Guid>("VendorId");
+
+                            b1.HasKey("BudgetAllocationReadModelId", "__synthesizedOrdinal");
+
+                            b1.ToTable("rm_budget_allocations", "budgeting");
+
+                            b1.ToJson("vendor_shares");
+
+                            b1.WithOwner()
+                                .HasForeignKey("BudgetAllocationReadModelId");
+                        });
+
+                    b.Navigation("VendorShares");
+                });
 #pragma warning restore 612, 618
         }
     }

@@ -22,14 +22,19 @@ namespace NorthernLink.Budgeting.Application.Allocations.Create;
 /// <see cref="BudgetCodeErrors.NotFound"/>. A retired code stays listed so old items keep
 /// resolving, but it takes no new item — <see cref="BudgetAllocationErrors.CodeRetired"/> names
 /// the way out (restore it or pick another).</item>
-/// <item><b>Create + Add, one save.</b> No "already planned" check: many items per code is the
-/// model, and nothing in the schema is unique on (period, code) any more.</item>
+/// <item><b>The vendors exist and are active</b> (<see cref="BudgetItemVendorRule"/>) — only
+/// for an expense item with shares; under the tenant's vendor register lock, so a concurrent vendor
+/// delete cannot pass its usage probe between this lookup and the commit.</item>
+/// <item><b>Create + Add, one save</b> — the aggregate applies the category rules (no shares on a
+/// revenue item, no free-text payer on an expense item). No "already planned" check: many items
+/// per code is the model, and nothing in the schema is unique on (period, code) any more.</item>
 /// </list>
 /// </summary>
 public sealed class CreateBudgetAllocationCommandHandler(
     IBudgetAllocationRepository allocations,
     IBudgetPeriodRepository periods,
-    IBudgetCodeRepository codes)
+    IBudgetCodeRepository codes,
+    IVendorRepository vendors)
     : ICommandHandler<CreateBudgetAllocationCommand, Guid>
 {
     public async Task<Result<Guid>> Handle(
@@ -69,11 +74,22 @@ public sealed class CreateBudgetAllocationCommandHandler(
             return Result.Failure<Guid>(BudgetAllocationErrors.CodeRetired);
         }
 
+        await using var vendorLock = await BudgetItemVendorRule.LockIfAddingAsync(
+            vendors, command.TenantId, command.Details, [], code.Category, cancellationToken);
+
+        var vendorCheck = await BudgetItemVendorRule.ValidateAsync(
+            vendors, command.Details, [], code.Category, cancellationToken);
+        if (vendorCheck.IsFailure)
+        {
+            return Result.Failure<Guid>(vendorCheck.Error);
+        }
+
         var created = BudgetAllocation.Create(
             command.TenantId,
             command.PeriodId,
             code.Id,
             code.Code,
+            code.Category,
             command.Details,
             command.ActorId);
 
@@ -84,6 +100,11 @@ public sealed class CreateBudgetAllocationCommandHandler(
 
         allocations.Add(created.Value);
         await allocations.SaveChangesAsync(cancellationToken);
+        if (vendorLock is not null)
+        {
+            await vendorLock.CommitAsync(cancellationToken);
+        }
+
         return Result.Success(created.Value.Id);
     }
 }

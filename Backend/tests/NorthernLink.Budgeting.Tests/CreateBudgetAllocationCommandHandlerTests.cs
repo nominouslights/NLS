@@ -18,6 +18,7 @@ public class CreateBudgetAllocationCommandHandlerTests
     private readonly InMemoryBudgetAllocationRepository _allocations = new();
     private readonly InMemoryBudgetPeriodRepository _periods = new();
     private readonly InMemoryBudgetCodeRepository _codes = new();
+    private readonly InMemoryVendorRepository _vendors = new();
     private readonly CreateBudgetAllocationCommandHandler _handler;
 
     private readonly BudgetPeriod _draft = TestBudgeting.CreatePeriod();
@@ -25,7 +26,7 @@ public class CreateBudgetAllocationCommandHandlerTests
 
     public CreateBudgetAllocationCommandHandlerTests()
     {
-        _handler = new CreateBudgetAllocationCommandHandler(_allocations, _periods, _codes);
+        _handler = new CreateBudgetAllocationCommandHandler(_allocations, _periods, _codes, _vendors);
         _periods.Add(_draft);
         _code = AddCode(_draft, "ZBB-CREW-01");
     }

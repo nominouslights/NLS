@@ -46,6 +46,10 @@ internal sealed class InMemoryBudgetAllocationRepository : IBudgetAllocationRepo
         Task.FromResult<IReadOnlyList<BudgetAllocation>>(
             Visible.Where(a => a.PeriodId == periodId).ToList());
 
+    // Every period, tenant-filtered — the real repository's jsonb EXISTS over vendor_shares.
+    public Task<bool> AnyWithVendorShareAsync(Guid vendorId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Visible.Any(a => a.VendorShares.Any(share => share.VendorId == vendorId)));
+
     public void Add(BudgetAllocation allocation) => Allocations.Add(allocation);
 
     public void Remove(BudgetAllocation allocation) => Allocations.Remove(allocation);

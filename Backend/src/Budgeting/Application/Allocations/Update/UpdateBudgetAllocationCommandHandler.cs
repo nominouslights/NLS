@@ -23,13 +23,19 @@ namespace NorthernLink.Budgeting.Application.Allocations.Update;
 /// The way out <see cref="BudgetAllocationErrors.CodeRetired"/> names is real: restore the code,
 /// or move the item to another code in this same update — or remove it, which is never gated on
 /// the code.</item>
-/// <item><b>Update in place, one save.</b></item>
+/// <item><b>Any vendor the update adds exists and is active</b> (<see cref="BudgetItemVendorRule"/>),
+/// under the vendor register lock. Shares the item already had are not looked up — a share on a
+/// vendor retired since stays valid — and omitted (null) shares keep the current ones.</item>
+/// <item><b>Update in place, one save</b> — the aggregate re-checks the shares against the new
+/// amount (an amount change the shares no longer sum to is refused, never rebalanced) and applies
+/// the category rules on change.</item>
 /// </list>
 /// </summary>
 public sealed class UpdateBudgetAllocationCommandHandler(
     IBudgetAllocationRepository allocations,
     IBudgetPeriodRepository periods,
-    IBudgetCodeRepository codes)
+    IBudgetCodeRepository codes,
+    IVendorRepository vendors)
     : ICommandHandler<UpdateBudgetAllocationCommand>
 {
     public async Task<Result> Handle(UpdateBudgetAllocationCommand command, CancellationToken cancellationToken)
@@ -73,13 +79,28 @@ public sealed class UpdateBudgetAllocationCommandHandler(
             return Result.Failure(BudgetAllocationErrors.CodeRetired);
         }
 
-        var update = allocation.Update(code.Id, code.Code, command.Details, command.ActorId);
+        await using var vendorLock = await BudgetItemVendorRule.LockIfAddingAsync(
+            vendors, command.TenantId, command.Details, allocation.VendorShares, code.Category, cancellationToken);
+
+        var vendorCheck = await BudgetItemVendorRule.ValidateAsync(
+            vendors, command.Details, allocation.VendorShares, code.Category, cancellationToken);
+        if (vendorCheck.IsFailure)
+        {
+            return vendorCheck;
+        }
+
+        var update = allocation.Update(code.Id, code.Code, code.Category, command.Details, command.ActorId);
         if (update.IsFailure)
         {
             return update;
         }
 
         await allocations.SaveChangesAsync(cancellationToken);
+        if (vendorLock is not null)
+        {
+            await vendorLock.CommitAsync(cancellationToken);
+        }
+
         return Result.Success();
     }
 }

@@ -30,6 +30,15 @@ public interface IBudgetAllocationRepository
     Task<IReadOnlyList<BudgetAllocation>> ListForPeriodAsync(
         Guid periodId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Whether any of the tenant's items, <b>in any period</b> (closed ones included — a closed
+    /// plan still explains its numbers), carries a vendor share for this vendor. Serves
+    /// <see cref="IVendorUsageProbe"/>. Over the write table, for the
+    /// <see cref="ExistsForCodeAsync"/> reason: the vendor delete asks in the same request that
+    /// would remove the vendor, and the projection may be a poll behind.
+    /// </summary>
+    Task<bool> AnyWithVendorShareAsync(Guid vendorId, CancellationToken cancellationToken = default);
+
     void Add(BudgetAllocation allocation);
 
     /// <summary>Hard delete — the line is a plan entry, not history; the journal keeps its final snapshot.</summary>

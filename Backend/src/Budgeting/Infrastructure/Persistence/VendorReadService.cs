@@ -37,6 +37,42 @@ internal sealed class VendorReadService(BudgetingDbContext context) : IVendorRea
         return row is null ? null : ToResponse(row);
     }
 
+    public async Task<VendorRollupResponse> GetPlannedRollupAsync(
+        Guid periodId, CancellationToken cancellationToken = default)
+    {
+        // The same projections the period totals read (rm_budget_allocations, rm_budget_codes),
+        // classified by VendorPlannedRollup, so its total and plannedExpenseCad cannot disagree.
+        var rows = await context.BudgetAllocationReadModels
+            .AsNoTracking()
+            .Where(a => a.PeriodId == periodId)
+            .ToListAsync(cancellationToken);
+
+        var items = rows
+            .Select(a => new VendorPlannedRollup.Item(
+                a.BudgetCodeId,
+                a.AmountCad,
+                a.VendorShares.Select(s => new VendorPlannedRollup.Share(s.VendorId, s.AmountCad)).ToList()))
+            .ToList();
+
+        var codes = await context.BudgetCodeReadModels
+            .AsNoTracking()
+            .Where(c => c.PeriodId == periodId)
+            .Select(c => new VendorPlannedRollup.PeriodCode(c.Id, c.Category))
+            .ToListAsync(cancellationToken);
+
+        // Only the vendors the period's shares name; the rollup lists no others.
+        var vendorIds = items.SelectMany(i => i.Shares).Select(s => s.VendorId).Distinct().ToList();
+        List<VendorPlannedRollup.RegisterEntry> register = vendorIds.Count == 0
+            ? []
+            : await context.VendorReadModels
+                .AsNoTracking()
+                .Where(v => vendorIds.Contains(v.Id))
+                .Select(v => new VendorPlannedRollup.RegisterEntry(v.Id, v.Name, v.IsActive))
+                .ToListAsync(cancellationToken);
+
+        return VendorPlannedRollup.Build(periodId, items, codes, register);
+    }
+
     private static VendorResponse ToResponse(VendorReadModel row) => new(
         row.Id,
         row.Name,

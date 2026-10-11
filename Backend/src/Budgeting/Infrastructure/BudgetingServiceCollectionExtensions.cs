@@ -49,6 +49,7 @@ using NorthernLink.Budgeting.Application.Vendors;
 using NorthernLink.Budgeting.Application.Vendors.Create;
 using NorthernLink.Budgeting.Application.Vendors.Delete;
 using NorthernLink.Budgeting.Application.Vendors.GetVendorById;
+using NorthernLink.Budgeting.Application.Vendors.GetPlannedRollup;
 using NorthernLink.Budgeting.Application.Vendors.GetVendors;
 using NorthernLink.Budgeting.Application.Vendors.SetActive;
 using NorthernLink.Budgeting.Application.Vendors.Update;
@@ -108,10 +109,9 @@ public static class BudgetingServiceCollectionExtensions
         // probe when they arrive (see the class comment).
         services.AddScoped<IBudgetCodeUsageProbe, AllocationBudgetCodeUsageProbe>();
 
-        // Nothing stores a vendor id yet (budget items still carry a free-text vendor), so no
-        // vendor can be in use and this probe always says so. The slice that links items to
-        // vendors replaces this registration with a probe that checks them.
-        services.AddScoped<IVendorUsageProbe, UnreferencedVendorUsageProbe>();
+        // A vendor is "in use" while any budget item in any period carries a vendor share for it;
+        // the register's delete path refuses with 409 Budgeting.Vendor.InUse then.
+        services.AddScoped<IVendorUsageProbe, AllocationVendorUsageProbe>();
         // A cost centre is "in use" while any budget code in any period carries its code string;
         // the register's delete path refuses with 409 Budgeting.CostCentre.InUse then.
         services.AddScoped<ICostCentreUsageProbe, BudgetCodeCostCentreUsageProbe>();
@@ -159,6 +159,7 @@ public static class BudgetingServiceCollectionExtensions
         services.AddScoped<ICommandHandler<DeleteVendorCommand>, DeleteVendorCommandHandler>();
         services.AddScoped<IQueryHandler<GetVendorsQuery, IReadOnlyList<VendorResponse>>, GetVendorsQueryHandler>();
         services.AddScoped<IQueryHandler<GetVendorByIdQuery, VendorResponse>, GetVendorByIdQueryHandler>();
+        services.AddScoped<IQueryHandler<GetVendorRollupQuery, VendorRollupResponse>, GetVendorRollupQueryHandler>();
         services.AddScoped<ICommandHandler<CreateCostCentreCommand, Guid>, CreateCostCentreCommandHandler>();
         services.AddScoped<ICommandHandler<UpdateCostCentreCommand>, UpdateCostCentreCommandHandler>();
         services.AddScoped<ICommandHandler<SetCostCentreActiveCommand>, SetCostCentreActiveCommandHandler>();
