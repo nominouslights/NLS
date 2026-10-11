@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using NorthernLink.Drivers.Application.Hos;
+using NorthernLink.Drivers.Application.Hos.Ledger;
 using NorthernLink.Drivers.Domain.Hos;
 using NorthernLink.Drivers.Infrastructure.Persistence.ReadModels;
 using NorthernLink.Shared.Persistence.Auditing;
@@ -112,7 +113,13 @@ internal sealed class HosLogEntryProjection : IProjection<DriversDbContext>
             .Where(e => e.DriverId == driverId)
             .ToListAsync(cancellationToken);
 
-        HosStats.Apply(driverRow, entries);
+        var dutyDays = await context.DutyDays
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(d => d.DriverId == driverId)
+            .ToListAsync(cancellationToken);
+
+        HosStats.Apply(driverRow, dutyDays, entries, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
     }
 
     private static void Map(HosLogEntry source, HosLogEntryReadModel row)
@@ -135,15 +142,34 @@ internal sealed class HosLogEntryProjection : IProjection<DriversDbContext>
 
 /// <summary>
 /// The single implementation of the rm_drivers denormalized HOS rollup fields, shared by
-/// <see cref="DriverProjection"/> and <see cref="HosLogEntryProjection"/> so the two writers
-/// can never disagree — mirrors <c>DriverCredentialStats</c>. The rollup reflects the
-/// driver's newest entry (latest <c>Date</c>, tie-broken by <c>RecordedAtUtc</c>); duty is
-/// stored as the friendly string the roster's duty chip keys on.
+/// <see cref="DriverProjection"/>, <see cref="DutyDayProjection"/> and
+/// <see cref="HosLogEntryProjection"/> so the writers can never disagree — mirrors
+/// <c>DriverCredentialStats</c>. <b>The ledger wins:</b> a driver with any <see cref="DutyDay"/>
+/// is rolled up from their newest day (the status it ends in, its driving time); only a driver
+/// with no ledger at all falls back to the legacy totals (newest <c>Date</c>, tie-broken by
+/// <c>RecordedAtUtc</c>). Duty is stored as the wire string the roster's duty chip keys on.
 /// </summary>
 internal static class HosStats
 {
-    public static void Apply(DriverReadModel row, IReadOnlyCollection<HosLogEntry> entries)
+    public static void Apply(
+        DriverReadModel row,
+        IReadOnlyCollection<DutyDay> dutyDays,
+        IReadOnlyCollection<HosLogEntry> entries,
+        long nowUnix)
     {
+        var latestDay = dutyDays
+            .OrderByDescending(d => d.LocalDate)
+            .FirstOrDefault();
+
+        if (latestDay is not null)
+        {
+            var lastStatus = DutyDayTimeline.LastStatus(latestDay);
+            row.LatestDutyStatus = lastStatus is { } status ? HosDisplay.DutyToWire(status) : null;
+            row.LatestDrivingHours = Math.Round(DutyDayTimeline.DrivingSeconds(latestDay, nowUnix) / 3600m, 2);
+            row.LatestHosDate = latestDay.LocalDate;
+            return;
+        }
+
         var latest = entries
             .OrderByDescending(e => e.Date)
             .ThenByDescending(e => e.RecordedAtUtc)

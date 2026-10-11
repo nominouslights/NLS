@@ -4,8 +4,15 @@ using NorthernLink.Shared.Kernel;
 namespace NorthernLink.Drivers.Domain.Hos;
 
 /// <summary>
-/// One day's Hours-of-Service duty log for a driver — its own aggregate (child of Driver,
-/// keyed on <see cref="DriverId"/>), added whole and never mutated. <see cref="Record"/> is the
+/// <b>Legacy daily-totals path.</b> One day's Hours-of-Service totals for a driver, typed in as
+/// three numbers. Superseded by the <see cref="DutyDay"/> ledger (timestamped duty events, the
+/// rule engine's input); kept untouched so the existing <c>GET/POST /api/drivers/{id}/hos</c>
+/// routes and the rows already recorded keep working. The <c>rm_drivers</c> HOS rollup prefers a
+/// driver's <see cref="DutyDay"/> figures and falls back to these only for drivers with no ledger.
+///
+/// <para>
+/// Its own aggregate (child of Driver, keyed on <see cref="DriverId"/>), added whole and never
+/// mutated. <see cref="Record"/> is the
 /// general factory; <see cref="RecordManualEntry"/> and <see cref="RecordFromDriverApp"/> are
 /// thin wrappers naming the two sources, mirroring Fleet's <c>VehicleInspection</c>.
 ///
@@ -25,9 +32,10 @@ namespace NorthernLink.Drivers.Domain.Hos;
 ///
 /// Invariants are deliberately light: a valid duty status and each hours value in [0, 24].
 /// A CVDHS-violating day (e.g. driving &gt; 13h) is NOT rejected — logging over-limit days
-/// is the whole point of compliance tracking; the violation rule engine runs client-side
-/// over the raw entries. Both factories raise <see cref="HosDutyEntryRecordedDomainEvent"/>
+/// is the whole point of compliance tracking; these totals feed no rule engine (the ledger's
+/// events do). Both factories raise <see cref="HosDutyEntryRecordedDomainEvent"/>
 /// so the read side projects incrementally (see the event's remarks).
+/// </para>
 /// </summary>
 public sealed class HosLogEntry : AggregateRoot, ITenantScoped
 {

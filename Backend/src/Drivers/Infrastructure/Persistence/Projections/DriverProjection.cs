@@ -59,7 +59,13 @@ internal sealed class DriverProjection : IProjection<DriversDbContext>
             .Where(e => e.DriverId == driverId)
             .ToListAsync(cancellationToken);
 
-        HosStats.Apply(row, hosEntries);
+        var dutyDays = await context.DutyDays
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(d => d.DriverId == driverId)
+            .ToListAsync(cancellationToken);
+
+        HosStats.Apply(row, dutyDays, hosEntries, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
     }
 
     public async Task RebuildAllAsync(DriversDbContext context, CancellationToken cancellationToken)
@@ -72,6 +78,10 @@ internal sealed class DriverProjection : IProjection<DriversDbContext>
         var hosByDriver = (await context.HosLogEntries.IgnoreQueryFilters().ToListAsync(cancellationToken))
             .GroupBy(e => e.DriverId)
             .ToDictionary(group => group.Key, group => group.ToList());
+        var dutyDaysByDriver = (await context.DutyDays.IgnoreQueryFilters().AsNoTracking().ToListAsync(cancellationToken))
+            .GroupBy(d => d.DriverId)
+            .ToDictionary(group => group.Key, group => group.ToList());
+        var nowUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
         var rowsById = rows.ToDictionary(row => row.Id);
         var seen = new HashSet<Guid>();
@@ -92,7 +102,9 @@ internal sealed class DriverProjection : IProjection<DriversDbContext>
                 credentialsByDriver.TryGetValue(source.Id, out var credentials) ? credentials : []);
             HosStats.Apply(
                 row,
-                hosByDriver.TryGetValue(source.Id, out var hosEntries) ? hosEntries : []);
+                dutyDaysByDriver.TryGetValue(source.Id, out var dutyDays) ? dutyDays : [],
+                hosByDriver.TryGetValue(source.Id, out var hosEntries) ? hosEntries : [],
+                nowUnix);
         }
 
         // Orphans: read rows whose source aggregate no longer exists.

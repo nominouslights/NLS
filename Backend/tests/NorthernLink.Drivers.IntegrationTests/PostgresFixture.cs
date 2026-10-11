@@ -104,6 +104,7 @@ public sealed class PostgresFixture : IAsyncLifetime
             .Project(new DriverCredentialProjection())
             .Project(new DriverClearanceProjection())
             .Project(new HosLogEntryProjection())
+            .Project(new DutyDayProjection())
             .Build();
 
     private ServiceProvider BuildProjectionServices()

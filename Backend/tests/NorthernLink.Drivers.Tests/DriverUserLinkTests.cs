@@ -310,6 +310,75 @@ public class DriverUserLinkTests
         Assert.False(await guard.MayActOnDriverAsync(theirs.Id));
     }
 
+    // ---- The HOS and certification flavours ----
+
+    /// <summary>
+    /// A compliance officer transcribes and amends other drivers' records; a dispatcher does
+    /// too. Both pass the HOS override; neither passes the Field App's dispatch-only one.
+    /// </summary>
+    [Theory]
+    [InlineData(Roles.Owner)]
+    [InlineData(Roles.Dispatcher)]
+    [InlineData(Roles.Supervisor)]
+    [InlineData(Roles.ComplianceOfficer)]
+    public async Task Hos_override_roles_may_act_on_any_drivers_hours(string role)
+    {
+        var theirs = NewDriver();
+        var repository = new FakeDriverRepository(theirs);
+        var guard = new DriverSelfAccess(new FakeActor(Guid.NewGuid(), role), repository);
+
+        Assert.True(await guard.MayActOnDriverHosAsync(theirs.Id));
+        Assert.Equal(0, repository.UserLookups);
+    }
+
+    [Fact]
+    public async Task A_compliance_officer_is_not_dispatch_on_the_field_app_surface()
+    {
+        var theirs = NewDriver();
+        var guard = new DriverSelfAccess(new FakeActor(Guid.NewGuid(), Roles.ComplianceOfficer), new FakeDriverRepository(theirs));
+
+        Assert.False(await guard.MayActOnDriverAsync(theirs.Id));
+    }
+
+    [Fact]
+    public async Task A_driver_may_act_on_their_own_hours_but_not_anothers()
+    {
+        var mine = NewDriver();
+        Assert.True(mine.LinkUser(UserId).IsSuccess);
+        var theirs = NewDriver();
+        var guard = new DriverSelfAccess(new FakeActor(UserId, Roles.Driver), new FakeDriverRepository(mine, theirs));
+
+        Assert.True(await guard.MayActOnDriverHosAsync(mine.Id));
+        Assert.False(await guard.MayActOnDriverHosAsync(theirs.Id));
+    }
+
+    /// <summary>Certification has no override: not Owner, not dispatch, not compliance.</summary>
+    [Theory]
+    [InlineData(Roles.Owner)]
+    [InlineData(Roles.Dispatcher)]
+    [InlineData(Roles.Supervisor)]
+    [InlineData(Roles.ComplianceOfficer)]
+    public async Task Nobody_is_this_driver_by_role(string role)
+    {
+        var theirs = NewDriver();
+        var guard = new DriverSelfAccess(new FakeActor(Guid.NewGuid(), role), new FakeDriverRepository(theirs));
+
+        Assert.False(await guard.IsThisDriverAsync(theirs.Id));
+    }
+
+    [Fact]
+    public async Task Only_the_linked_user_is_this_driver()
+    {
+        var mine = NewDriver();
+        Assert.True(mine.LinkUser(UserId).IsSuccess);
+        var theirs = NewDriver();
+        var guard = new DriverSelfAccess(new FakeActor(UserId, Roles.Driver), new FakeDriverRepository(mine, theirs));
+
+        Assert.True(await guard.IsThisDriverAsync(mine.Id));
+        Assert.False(await guard.IsThisDriverAsync(theirs.Id));
+        Assert.False(await new DriverSelfAccess(new FakeActor(null, Roles.Driver), new FakeDriverRepository(mine)).IsThisDriverAsync(mine.Id));
+    }
+
     private static DriverResponse Response(Guid id, Guid? userId) => new(
         id, userId, "J. Spence", null, "Class 2", null, "Northern Link", false, "Active",
         0, null, null, null, null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);

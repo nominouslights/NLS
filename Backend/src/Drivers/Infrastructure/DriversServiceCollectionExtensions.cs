@@ -23,8 +23,15 @@ using NorthernLink.Drivers.Application.Drivers.SelfAccess;
 using NorthernLink.Drivers.Application.Drivers.UnlinkUser;
 using NorthernLink.Drivers.Application.Drivers.Update;
 using NorthernLink.Drivers.Application.Hos;
+using NorthernLink.Drivers.Application.Hos.DutyDays.Certify;
+using NorthernLink.Drivers.Application.Hos.DutyDays.GetOne;
+using NorthernLink.Drivers.Application.Hos.DutyDays.GetRange;
+using NorthernLink.Drivers.Application.Hos.DutyDays.Transcribe;
+using NorthernLink.Drivers.Application.Hos.DutyEvents.Amend;
+using NorthernLink.Drivers.Application.Hos.DutyEvents.Record;
 using NorthernLink.Drivers.Application.Hos.GetForDriver;
 using NorthernLink.Drivers.Application.Hos.Record;
+using NorthernLink.Drivers.Application.Hos.Status;
 using NorthernLink.Drivers.Infrastructure.Persistence;
 using NorthernLink.Drivers.Infrastructure.Persistence.Projections;
 using NorthernLink.Shared.Kernel;
@@ -73,10 +80,15 @@ public static class DriversServiceCollectionExtensions
         services.AddScoped<IDriverClearanceReadService, DriverClearanceReadService>();
         services.AddScoped<IHosLogRepository, HosLogRepository>();
         services.AddScoped<IHosLogReadService, HosLogReadService>();
+        services.AddScoped<IDutyDayRepository, DutyDayRepository>();
 
-        // The caller-owns-this-row guard for the {driverId} routes on the DriverAccess group.
-        // Not a handler — endpoints call it BEFORE dispatching, so a denial never reaches a
-        // command handler at all.
+        // The clock the HOS handlers take "now" from (event-in-future, certify-not-before-day-
+        // starts, as-of for the rule engine). TryAdd: process-wide plumbing Trips also registers.
+        services.TryAddSingleton(TimeProvider.System);
+
+        // The caller-owns-this-row guard for the {driverId} routes on the DriverAccess and
+        // HosAccess groups. Not a handler — endpoints call it BEFORE dispatching, so a denial
+        // never reaches a command handler at all.
         services.AddScoped<IDriverSelfAccess, DriverSelfAccess>();
 
         // 3. Command/query handlers — registered explicitly, one line per handler.
@@ -98,6 +110,16 @@ public static class DriversServiceCollectionExtensions
         services.AddScoped<ICommandHandler<RecordHosEntryCommand, Guid>, RecordHosEntryCommandHandler>();
         services.AddScoped<IQueryHandler<GetHosEntriesQuery, IReadOnlyList<HosEntryResponse>>, GetHosEntriesQueryHandler>();
 
+        // The duty-event ledger (DutyDay) and the rule-engine reads over it.
+        services.AddScoped<ICommandHandler<RecordDutyEventCommand, DutyEventRecordedResponse>, RecordDutyEventCommandHandler>();
+        services.AddScoped<ICommandHandler<AmendDutyEventCommand, DutyEventAmendedResponse>, AmendDutyEventCommandHandler>();
+        services.AddScoped<ICommandHandler<TranscribeDutyDayCommand, TranscriptionRecordedResponse>, TranscribeDutyDayCommandHandler>();
+        services.AddScoped<ICommandHandler<CertifyDutyDayCommand>, CertifyDutyDayCommandHandler>();
+        services.AddScoped<IQueryHandler<GetDutyDaysQuery, IReadOnlyList<DutyDaySummaryResponse>>, GetDutyDaysQueryHandler>();
+        services.AddScoped<IQueryHandler<GetDutyDayQuery, DutyDaySummaryResponse>, GetDutyDayQueryHandler>();
+        services.AddScoped<IQueryHandler<GetHosStatusQuery, HosStatusResponse>, GetHosStatusQueryHandler>();
+        services.AddScoped<IQueryHandler<GetHosRosterStatusQuery, IReadOnlyList<HosRosterStatusResponse>>, GetHosRosterStatusQueryHandler>();
+
         // 4. No integration event consumers — Drivers only publishes (drivers.driver-changed);
         //    nothing upstream feeds it yet.
 
@@ -108,7 +130,8 @@ public static class DriversServiceCollectionExtensions
             .Project(new DriverProjection())
             .Project(new DriverCredentialProjection())
             .Project(new DriverClearanceProjection())
-            .Project(new HosLogEntryProjection()));
+            .Project(new HosLogEntryProjection())
+            .Project(new DutyDayProjection()));
 
         return services;
     }

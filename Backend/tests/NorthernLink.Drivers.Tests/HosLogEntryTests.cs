@@ -135,7 +135,7 @@ public class HosLogEntryTests
     [Fact]
     public void An_absent_source_still_means_manual_paper_backup()
     {
-        var result = HosDisplay.SourceFromWire(null);
+        var result = HosDisplay.LegacySourceFromWire(null);
 
         Assert.True(result.IsSuccess);
         Assert.Equal(HosLogEntrySource.ManualPaperBackup, result.Value);
@@ -146,7 +146,7 @@ public class HosLogEntryTests
     [InlineData("   ")]
     public void A_blank_source_is_treated_as_absent(string value)
     {
-        var result = HosDisplay.SourceFromWire(value);
+        var result = HosDisplay.LegacySourceFromWire(value);
 
         Assert.True(result.IsSuccess);
         Assert.Equal(HosLogEntrySource.ManualPaperBackup, result.Value);
@@ -157,7 +157,7 @@ public class HosLogEntryTests
     {
         // Symmetry with SourceToWire is the point: the strings the API emits are the strings it
         // accepts, so the console's chip labels and the Field App's payload are one vocabulary.
-        var result = HosDisplay.SourceFromWire(HosDisplay.SourceToWire(HosLogEntrySource.DriverApp));
+        var result = HosDisplay.LegacySourceFromWire(HosDisplay.SourceToWire(HosLogEntrySource.DriverApp));
 
         Assert.True(result.IsSuccess);
         Assert.Equal(HosLogEntrySource.DriverApp, result.Value);
@@ -166,7 +166,7 @@ public class HosLogEntryTests
     [Fact]
     public void The_manual_source_string_round_trips()
     {
-        var result = HosDisplay.SourceFromWire(
+        var result = HosDisplay.LegacySourceFromWire(
             HosDisplay.SourceToWire(HosLogEntrySource.ManualPaperBackup));
 
         Assert.True(result.IsSuccess);
@@ -184,11 +184,27 @@ public class HosLogEntryTests
     [InlineData("Telematics")]
     public void An_unrecognized_source_is_a_validation_error_not_an_exception(string value)
     {
-        var result = HosDisplay.SourceFromWire(value);
+        var result = HosDisplay.LegacySourceFromWire(value);
 
         Assert.True(result.IsFailure);
         Assert.Equal(HosErrors.InvalidSource, result.Error);
         Assert.Equal(ErrorType.Validation, result.Error.Type);
+    }
+
+    /// <summary>
+    /// The ledger's newer sources parse (they are real wire strings now), but the legacy totals
+    /// route cannot represent them: a 400 that says "not on this route", not "unknown".
+    /// </summary>
+    [Theory]
+    [InlineData(HosDisplay.EldTranscriptionSource)]
+    [InlineData(HosDisplay.OtherCarrierSource)]
+    [InlineData(HosDisplay.SystemSource)]
+    public void The_ledger_only_sources_are_refused_on_the_legacy_totals_route(string value)
+    {
+        var result = HosDisplay.LegacySourceFromWire(value);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(HosErrors.LegacySourceUnsupported, result.Error);
     }
 
     // ---- EnteredBy branches on source ----
