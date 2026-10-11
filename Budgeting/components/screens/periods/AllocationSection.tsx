@@ -20,12 +20,14 @@ import {
   type BudgetAllocationRecord,
   type ItemCodeGroup,
 } from "@/lib/api/budgeting";
+import { itemVendorText } from "@/lib/vendorShares";
 import { EmptyNote, Num } from "@/components/screens/shared";
 
 // One category's budget items on the period dashboard — rendered twice, Revenue then Expense.
 // A code's budget is the SUM of its items, so the section is grouped by code: a header row per
 // code (code tag, name, retired chip, the code's subtotal and item count, "+ ITEM"), with its
-// items beneath (title, priority chip, spend type, recurrence, vendor, the "q unit × $u"
+// items beneath (title, priority chip, spend type, recurrence, the payer on revenue or the vendor
+// shares on expense — itemVendorText, first two then "+N more" — the "q unit × $u"
 // build-up, tags, the justification, the amount). Groups and items keep the server's order —
 // by code, then priority (Must first), then creation.
 //
@@ -274,10 +276,11 @@ function ItemRow({
 }) {
   const unargued = needsJustification(item);
   const buildUp = costBuildUpLabel(item);
+  // Revenue names its payer; expense names its vendor shares ("Kal Tire $1,200 · +2 more").
   const facts = [
     SPEND_TYPE_LABELS[item.spendType],
     RECURRENCE_LABELS[item.recurrence],
-    item.vendor,
+    itemVendorText(item.category, item.vendor, item.vendorShares),
   ].filter((f): f is string => Boolean(f));
 
   return (

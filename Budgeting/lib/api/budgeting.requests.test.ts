@@ -18,6 +18,7 @@ import {
   createVendor,
   deleteVendor,
   getVendor,
+  getVendorRollup,
   listVendors,
   setVendorActive,
   updateVendor,
@@ -541,6 +542,8 @@ describe("budget item requests", () => {
   // an item is addressed by its OWN id, so a code id in that route segment would be a 404.
   const PERIOD = "5f2b1e1c-0000-4000-8000-0000000000a1";
   const ITEM = "5f2b1e1c-0000-4000-8000-0000000000b7";
+  const VENDOR_SHARE_A = "5f2b1e1c-0000-4000-8000-0000000000d1";
+  const VENDOR_SHARE_B = "5f2b1e1c-0000-4000-8000-0000000000d2";
 
   const input: BudgetItemInput = {
     budgetCodeId: CODE_ID,
@@ -552,11 +555,15 @@ describe("budget item requests", () => {
     justification: "Kal Tire quote in hand.",
     spendType: "Capital",
     recurrence: "OneTime",
-    vendor: "Kal Tire",
+    vendor: null,
     tags: ["winter", "safety"],
     priority: "MustHave",
     assumptions: null,
     consequenceIfUnfunded: "NL-04 runs summer tires into November.",
+    vendorShares: [
+      { vendorId: VENDOR_SHARE_A, amountCad: 2000 },
+      { vendorId: VENDOR_SHARE_B, amountCad: 450 },
+    ],
   };
 
   it("lists a period's items with a GET", async () => {
@@ -590,11 +597,15 @@ describe("budget item requests", () => {
       justification: "Kal Tire quote in hand.",
       spendType: "Capital",
       recurrence: "OneTime",
-      vendor: "Kal Tire",
+      vendor: null,
       tags: ["winter", "safety"],
       priority: "MustHave",
       assumptions: null,
       consequenceIfUnfunded: "NL-04 runs summer tires into November.",
+      vendorShares: [
+        { vendorId: VENDOR_SHARE_A, amountCad: 2000 },
+        { vendorId: VENDOR_SHARE_B, amountCad: 450 },
+      ],
     });
   });
 
@@ -639,6 +650,109 @@ describe("budget item requests", () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(status, { code, message }));
 
     await expect(updateBudgetItem(PERIOD, ITEM, input)).rejects.toMatchObject({ code, message, status });
+  });
+
+  // vendorShares: the server reads an OMITTED or null list on PUT as "keep the current shares",
+  // so a body that dropped the key would silently keep a split the planner just removed. This app
+  // always sends it — the full list, or [] to clear (and [] on a revenue item).
+  it("always puts vendorShares on the wire — [] to clear, never omitted or null", async () => {
+    fetchMock.mockResolvedValueOnce(noContent());
+    fetchMock.mockResolvedValueOnce(jsonResponse(201, { id: ITEM }));
+
+    await updateBudgetItem(PERIOD, ITEM, { ...input, vendorShares: [] });
+    await createBudgetItem(PERIOD, { ...input, vendor: "Alamos Gold", vendorShares: [] });
+
+    const put = JSON.parse(String(callInit(0).body));
+    expect(Object.keys(put)).toContain("vendorShares");
+    expect(put.vendorShares).toEqual([]);
+    const post = JSON.parse(String(callInit(1).body));
+    expect(post).toMatchObject({ vendor: "Alamos Gold", vendorShares: [] });
+  });
+
+  it("sends each share as { vendorId, amountCad } with no name or active flag", async () => {
+    fetchMock.mockResolvedValueOnce(noContent());
+
+    await updateBudgetItem(PERIOD, ITEM, input);
+
+    const body = JSON.parse(String(callInit().body));
+    for (const s of body.vendorShares) expect(Object.keys(s).sort()).toEqual(["amountCad", "vendorId"]);
+  });
+
+  // Every new Budgeting.Allocation.* refusal, verbatim (BudgetAllocationErrors). The console shows
+  // the server's message as-is; these pin that the transport hands it over untouched.
+  it.each<[number, string, string]>([
+    [400, "Budgeting.Allocation.VendorShareVendorRequired", "Every vendor share must name a vendor from the vendor register."],
+    [
+      400,
+      "Budgeting.Allocation.VendorShareAmountInvalid",
+      "Each vendor share must be more than zero, in dollars and cents (at most two decimal places), and 999,999,999.99 or less.",
+    ],
+    [
+      400,
+      "Budgeting.Allocation.DuplicateVendorShare",
+      "A vendor can appear only once on a budget item. Combine its shares into one amount.",
+    ],
+    [400, "Budgeting.Allocation.TooManyVendorShares", "A budget item can be split across at most 20 vendors."],
+    [
+      400,
+      "Budgeting.Allocation.VendorSharesMustSumToAmount",
+      "The vendor shares add up to 2,000.00, but the item's amount is 2,450.00. The shares must cover the whole amount exactly — adjust them, or remove every share to leave the item with no vendor.",
+    ],
+    [
+      400,
+      "Budgeting.Allocation.VendorSharesNotAllowedForRevenue",
+      "A revenue item has no vendor shares — vendors are who the business pays. Name the payer in the vendor (payer) field instead, and send no vendor shares.",
+    ],
+    [
+      400,
+      "Budgeting.Allocation.PayerNotAllowedForExpense",
+      "The free-text vendor is the payer on a revenue item. On an expense item, choose vendors from the vendor register as vendor shares instead, and leave the free-text vendor blank.",
+    ],
+    [
+      400,
+      "Budgeting.Allocation.VendorNotFound",
+      "That vendor is not in the vendor register. Add it to the register first, or choose an existing vendor.",
+    ],
+    [
+      409,
+      "Budgeting.Allocation.VendorInactive",
+      '"Esso Thompson" is a retired vendor and cannot be added to a budget item. Choose an active vendor, or restore it in the vendor register first.',
+    ],
+  ])("surfaces the %d %s vendor-share refusal verbatim on create and update", async (status, code, message) => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(status, { code, message }));
+    await expect(createBudgetItem(PERIOD, input)).rejects.toMatchObject({ code, message, status });
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(status, { code, message }));
+    await expect(updateBudgetItem(PERIOD, ITEM, input)).rejects.toMatchObject({ code, message, status });
+  });
+});
+
+describe("getVendorRollup", () => {
+  // GET periods/{id}/rollups/vendors (BudgetingEndpoints.cs, GetVendorRollup) — under the period,
+  // beside the cost-centre rollup, never tenant-wide.
+  it("GETs the period's vendor rollup and returns the body as-is", async () => {
+    const body = {
+      periodId: PERIOD_ID,
+      vendors: [{ vendorId: "v1", name: "Kal Tire", isActive: true, itemCount: 2, plannedCad: 2450 }],
+      noVendor: { itemCount: 1, plannedCad: 50 },
+      totalPlannedExpenseCad: 2500,
+    };
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, body));
+
+    await expect(getVendorRollup(PERIOD_ID)).resolves.toEqual(body);
+    expect(callPath()).toBe(`/api/budgeting/periods/${PERIOD_ID}/rollups/vendors`);
+    expect(callInit().method).toBeUndefined();
+  });
+
+  it("surfaces the period's 404 verbatim", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(404, { code: "Budgeting.Period.NotFound", message: "The budget period was not found." }),
+    );
+
+    await expect(getVendorRollup(PERIOD_ID)).rejects.toMatchObject({
+      code: "Budgeting.Period.NotFound",
+      status: 404,
+    });
   });
 });
 

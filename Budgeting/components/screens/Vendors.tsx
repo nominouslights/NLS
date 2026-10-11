@@ -34,9 +34,9 @@ import { EmptyNote, Screen } from "@/components/screens/shared";
 // modal's duplicate-name check see a retired vendor whose name is still taken.
 //
 // Retiring is the normal end of a vendor's life (it stays listed; its name stays taken). DELETE
-// is for a vendor added in error — the console cannot know whether anything references it, so it
-// offers Delete and shows the server's 409 Budgeting.Vendor.InUse verbatim, with a way to retire
-// instead. Retire, restore and delete are each two-click; one pending confirm at a time, and any
+// is for a vendor added in error. A vendor is in use once any budget item, in any period, carries
+// a vendor share on it — this screen does not load every period's items, so it offers Delete and
+// shows the server's 409 Budgeting.Vendor.InUse verbatim, with a way to retire instead. Retire, restore and delete are each two-click; one pending confirm at a time, and any
 // selection change cancels it.
 //
 // Reads trail writes by one projection poll, so every write refetches with refetchUntil and a
