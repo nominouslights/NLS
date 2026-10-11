@@ -1,4 +1,6 @@
 using NorthernLink.Drivers.Domain.Drivers.Events;
+using NorthernLink.Drivers.Domain.Hos;
+using NorthernLink.Shared.HoursOfService;
 using NorthernLink.Shared.Kernel;
 
 namespace NorthernLink.Drivers.Domain.Drivers;
@@ -53,6 +55,27 @@ public sealed class Driver : AggregateRoot, ITenantScoped
     public DriverStatus Status { get; private set; }
     public DateTimeOffset RegisteredAtUtc { get; private set; }
     public DateTimeOffset UpdatedAtUtc { get; private set; }
+
+    /// <summary>
+    /// The prior-records attestation (s.82(1)(f)): a compliance officer confirms the driver's
+    /// records from before their first day on this ledger are on file through
+    /// <see cref="PriorRecordsCoveredThroughDate"/>. The hours ledger's known-from moves back to
+    /// 13 days before that date, which is what clears <c>RecordsIncomplete</c> for a new hire
+    /// whose previous carrier's records have been obtained. Null until attested.
+    /// </summary>
+    public DateOnly? PriorRecordsCoveredThroughDate { get; private set; }
+
+    public DateTimeOffset? PriorRecordsAttestedAtUtc { get; private set; }
+    public Guid? PriorRecordsAttestedByUserId { get; private set; }
+    public string? PriorRecordsNote { get; private set; }
+
+    /// <summary>Declared at attestation: the driver also drives for another carrier, so their hours there count (s.82).</summary>
+    public bool WorksForOtherCarriers { get; private set; }
+
+    public const int PriorRecordsNoteMaxLength = 1000;
+
+    /// <summary>The regulation's day boundaries, America/Winnipeg — for "not after today".</summary>
+    private static readonly HosCalendar DefaultCalendar = new();
 
     /// <summary>
     /// The lifecycle transition matrix. Diagonal (same status) is not a transition.
@@ -201,6 +224,55 @@ public sealed class Driver : AggregateRoot, ITenantScoped
         UpdatedAtUtc = DateTimeOffset.UtcNow;
 
         Raise(new DriverUserUnlinkedDomainEvent(Id, previousUserId));
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// A compliance officer attests the driver's prior records are on file through
+    /// <paramref name="coveredThrough"/> (not after today, America/Winnipeg). The handler proves
+    /// the role. Re-attesting identical values is a no-op (no event, no write); any change —
+    /// a later date, a different note, the other-carriers flag — is a fresh attestation by
+    /// <paramref name="byUserId"/> at <paramref name="now"/>.
+    /// </summary>
+    public Result AttestPriorRecords(
+        DateOnly coveredThrough,
+        Guid byUserId,
+        string? note,
+        bool worksForOtherCarriers,
+        DateTimeOffset now,
+        HosCalendar? calendar = null)
+    {
+        if (byUserId == Guid.Empty)
+        {
+            return Result.Failure(DriverErrors.UserIdRequired);
+        }
+
+        if (coveredThrough > (calendar ?? DefaultCalendar).DayOf(now.ToUnixTimeSeconds()))
+        {
+            return Result.Failure(ComplianceErrors.PriorRecordsDateInFuture);
+        }
+
+        var cleanNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
+        if (cleanNote is { Length: > PriorRecordsNoteMaxLength })
+        {
+            return Result.Failure(ComplianceErrors.PriorRecordsNoteTooLong);
+        }
+
+        if (PriorRecordsCoveredThroughDate == coveredThrough
+            && WorksForOtherCarriers == worksForOtherCarriers
+            && string.Equals(PriorRecordsNote, cleanNote, StringComparison.Ordinal))
+        {
+            return Result.Success();
+        }
+
+        PriorRecordsCoveredThroughDate = coveredThrough;
+        PriorRecordsAttestedAtUtc = now;
+        PriorRecordsAttestedByUserId = byUserId;
+        PriorRecordsNote = cleanNote;
+        WorksForOtherCarriers = worksForOtherCarriers;
+        UpdatedAtUtc = now;
+
+        Raise(new DriverPriorRecordsAttestedDomainEvent(Id, coveredThrough, worksForOtherCarriers));
         return Result.Success();
     }
 

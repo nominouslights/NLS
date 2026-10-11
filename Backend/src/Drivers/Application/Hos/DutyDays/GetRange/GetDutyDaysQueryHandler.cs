@@ -6,7 +6,10 @@ using NorthernLink.Shared.Messaging;
 
 namespace NorthernLink.Drivers.Application.Hos.DutyDays.GetRange;
 
-public sealed class GetDutyDaysQueryHandler(IDutyDayRepository repository, TimeProvider clock)
+public sealed class GetDutyDaysQueryHandler(
+    IDutyDayRepository repository,
+    IComplianceRecordsReader compliance,
+    TimeProvider clock)
     : IQueryHandler<GetDutyDaysQuery, IReadOnlyList<DutyDaySummaryResponse>>
 {
     public const int MaxRangeDays = 92;
@@ -21,23 +24,26 @@ public sealed class GetDutyDaysQueryHandler(IDutyDayRepository repository, TimeP
             return Result.Failure<IReadOnlyList<DutyDaySummaryResponse>>(RangeInvalid);
         }
 
-        if (!await repository.DriverExistsAsync(query.DriverId, cancellationToken))
+        var nowUnix = clock.GetUtcNow().ToUnixTimeSeconds();
+        var today = DutyLedgerAssembler.Calendar.DayOf(nowUnix);
+        var to = query.To > today ? today : query.To;
+        var loadFrom = query.From.AddDays(-DutyLedgerAssembler.LookbackDays);
+
+        var records = await compliance.LoadAsync(
+            query.DriverId, DateTimeOffset.FromUnixTimeSeconds(DutyLedgerAssembler.Calendar.DayStartUnix(loadFrom)), cancellationToken);
+        if (records is null)
         {
             return Result.Failure<IReadOnlyList<DutyDaySummaryResponse>>(DriverErrors.NotFound);
         }
 
-        var nowUnix = clock.GetUtcNow().ToUnixTimeSeconds();
-        var today = DutyLedgerAssembler.Calendar.DayOf(nowUnix);
-        var to = query.To > today ? today : query.To;
         if (query.From > to)
         {
             return Result.Success<IReadOnlyList<DutyDaySummaryResponse>>([]);
         }
 
-        var days = await repository.LoadRangeAsync(
-            query.DriverId, query.From.AddDays(-DutyLedgerAssembler.LookbackDays), to, cancellationToken);
+        var days = await repository.LoadRangeAsync(query.DriverId, loadFrom, to, cancellationToken);
         var knownFrom = await repository.EarliestLocalDateAsync(query.DriverId, cancellationToken);
 
-        return Result.Success(DutyDaySummaryBuilder.Build(query.DriverId, days, knownFrom, query.From, to, nowUnix));
+        return Result.Success(DutyDaySummaryBuilder.Build(query.DriverId, days, knownFrom, query.From, to, nowUnix, records));
     }
 }

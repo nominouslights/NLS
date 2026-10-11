@@ -10,6 +10,12 @@ using NorthernLink.Drivers.Application.Hos.DutyDays.GetRange;
 using NorthernLink.Drivers.Application.Hos.DutyDays.Transcribe;
 using NorthernLink.Drivers.Application.Hos.DutyEvents.Amend;
 using NorthernLink.Drivers.Application.Hos.DutyEvents.Record;
+using NorthernLink.Drivers.Application.Hos.EldMalfunctions.Get;
+using NorthernLink.Drivers.Application.Hos.EldMalfunctions.Report;
+using NorthernLink.Drivers.Application.Hos.Exceptions.Acknowledge;
+using NorthernLink.Drivers.Application.Hos.Exceptions.Declare;
+using NorthernLink.Drivers.Application.Hos.Exceptions.Get;
+using NorthernLink.Drivers.Application.Hos.Exceptions.Withdraw;
 using NorthernLink.Drivers.Application.Hos.GetForDriver;
 using NorthernLink.Drivers.Application.Hos.Record;
 using NorthernLink.Drivers.Application.Hos.Status;
@@ -57,6 +63,194 @@ public static class HosEndpoints
         // back in through a refactor.
         hos.MapPost("{driverId:guid}/hos/days/{date}/certify", CertifyDutyDay)
             .WithMetadata(new OwnDriverOnlyMetadata());
+
+        // Exceptions the driver (or dispatch for them) declares, and ELD malfunctions they
+        // report. Acknowledging is dispatch's act and withdrawing an acknowledged one is
+        // compliance's — the handlers draw those lines; the own-record check draws the first.
+        // Deferral approval, rejection and resolution live on the ComplianceAccess group.
+        hos.MapGet("{driverId:guid}/hos/exceptions", GetExceptions);
+        hos.MapPost("{driverId:guid}/hos/exceptions", DeclareException);
+        hos.MapPost("{driverId:guid}/hos/exceptions/{id:guid}/acknowledge", AcknowledgeException);
+        hos.MapPost("{driverId:guid}/hos/exceptions/{id:guid}/withdraw", WithdrawException);
+        hos.MapGet("{driverId:guid}/hos/eld-malfunctions", GetEldMalfunctions);
+        hos.MapPost("{driverId:guid}/hos/eld-malfunctions", ReportEldMalfunction);
+    }
+
+    // ---- Exceptions and ELD malfunctions ----
+
+    private static async Task<IResult> GetExceptions(
+        Guid driverId,
+        [FromQuery] DateOnly? from,
+        [FromQuery] DateOnly? to,
+        ITenantContext tenantContext,
+        IDriverSelfAccess selfAccess,
+        ISender sender,
+        TimeProvider clock,
+        CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        if (!await selfAccess.MayActOnDriverHosAsync(driverId, cancellationToken))
+        {
+            return DriversEndpoints.NotYourDriverRecord();
+        }
+
+        // Default: the 14-day window ending today, like the days list.
+        var today = HosLocalTime.DateOf(clock.GetUtcNow());
+        var rangeTo = to ?? today;
+        var rangeFrom = from ?? rangeTo.AddDays(-13);
+
+        var result = await sender.Query(new GetHosExceptionsQuery(tenantId, driverId, rangeFrom, rangeTo), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> DeclareException(
+        Guid driverId,
+        DeclareHosExceptionRequest request,
+        ITenantContext tenantContext,
+        IDriverSelfAccess selfAccess,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        if (!await selfAccess.MayActOnDriverHosAsync(driverId, cancellationToken))
+        {
+            return DriversEndpoints.NotYourDriverRecord();
+        }
+
+        var kind = HosDisplay.ExceptionKindFromWire(request.Kind);
+        if (kind.IsFailure)
+        {
+            return EndpointResults.Problem(kind.Error);
+        }
+
+        if (request.EffectiveFromUtc is not { } effectiveFrom)
+        {
+            return EndpointResults.Problem(Error.Validation("Drivers.Hos.EffectiveFromRequired", "effectiveFromUtc is required."));
+        }
+
+        var command = new DeclareHosExceptionCommand(
+            tenantId,
+            driverId,
+            kind.Value,
+            effectiveFrom,
+            request.EffectiveToUtc,
+            request.Reason,
+            request.Location,
+            request.TripId,
+            request.NotKnownBeforeDeparture ?? false,
+            request.ExtraDrivingMinutes is { } minutes ? TimeSpan.FromMinutes(minutes) : null,
+            request.EldRemarkRecorded ?? false);
+
+        var result = await sender.Send(command, cancellationToken);
+        return result.IsSuccess
+            ? Results.Created($"/api/drivers/{driverId}/hos/exceptions/{result.Value.Id}", result.Value)
+            : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> AcknowledgeException(
+        Guid driverId,
+        Guid id,
+        ITenantContext tenantContext,
+        IDriverSelfAccess selfAccess,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        if (!await selfAccess.MayActOnDriverHosAsync(driverId, cancellationToken))
+        {
+            return DriversEndpoints.NotYourDriverRecord();
+        }
+
+        var result = await sender.Send(new AcknowledgeHosExceptionCommand(tenantId, driverId, id), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> WithdrawException(
+        Guid driverId,
+        Guid id,
+        ExceptionNoteRequest? request,
+        ITenantContext tenantContext,
+        IDriverSelfAccess selfAccess,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        if (!await selfAccess.MayActOnDriverHosAsync(driverId, cancellationToken))
+        {
+            return DriversEndpoints.NotYourDriverRecord();
+        }
+
+        var result = await sender.Send(new WithdrawHosExceptionCommand(tenantId, driverId, id, request?.Note), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> GetEldMalfunctions(
+        Guid driverId,
+        ITenantContext tenantContext,
+        IDriverSelfAccess selfAccess,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        if (!await selfAccess.MayActOnDriverHosAsync(driverId, cancellationToken))
+        {
+            return DriversEndpoints.NotYourDriverRecord();
+        }
+
+        var result = await sender.Query(new GetEldMalfunctionsQuery(tenantId, driverId), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> ReportEldMalfunction(
+        Guid driverId,
+        ReportEldMalfunctionRequest request,
+        ITenantContext tenantContext,
+        IDriverSelfAccess selfAccess,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        if (!await selfAccess.MayActOnDriverHosAsync(driverId, cancellationToken))
+        {
+            return DriversEndpoints.NotYourDriverRecord();
+        }
+
+        if (request.NoticedAtUtc is not { } noticedAt)
+        {
+            return EndpointResults.Problem(Error.Validation("Drivers.Hos.NoticedAtRequired", "noticedAtUtc is required."));
+        }
+
+        var command = new ReportEldMalfunctionCommand(
+            tenantId, driverId, request.VehicleId, request.Code, noticedAt, request.Description);
+
+        var result = await sender.Send(command, cancellationToken);
+        return result.IsSuccess
+            ? Results.Created($"/api/drivers/{driverId}/hos/eld-malfunctions/{result.Value.Id}", result.Value)
+            : EndpointResults.Problem(result.Error);
     }
 
     // ---- Ledger writes ----
@@ -520,6 +714,35 @@ public sealed record TranscribeDutyDayRequest(
 
 /// <summary>One transcribed line: <see cref="Time"/> is "HH:mm" local, <see cref="Status"/> the wire duty string.</summary>
 public sealed record TranscriptionEntryRequest(string? Time, string? Status, string? Note = null);
+
+/// <summary>
+/// Request body for <c>POST /api/drivers/{driverId}/hos/exceptions</c>. <see cref="Kind"/> is the
+/// wire kind string ("Adverse driving conditions" or "Emergency" — a deferral goes through the
+/// compliance route). <see cref="EffectiveFromUtc"/> is when the conditions arose (within the
+/// last 24 hours); <see cref="EffectiveToUtc"/> when they ended, if they have. For adverse
+/// conditions <see cref="NotKnownBeforeDeparture"/> must be true and
+/// <see cref="ExtraDrivingMinutes"/> is required (1–120).
+/// </summary>
+public sealed record DeclareHosExceptionRequest(
+    string? Kind,
+    DateTimeOffset? EffectiveFromUtc,
+    string? Reason,
+    DateTimeOffset? EffectiveToUtc = null,
+    string? Location = null,
+    Guid? TripId = null,
+    bool? NotKnownBeforeDeparture = null,
+    int? ExtraDrivingMinutes = null,
+    bool? EldRemarkRecorded = null);
+
+/// <summary>Optional body for the withdraw / reject / resolve / lift routes: a note for the record.</summary>
+public sealed record ExceptionNoteRequest(string? Note = null);
+
+/// <summary>Request body for <c>POST /api/drivers/{driverId}/hos/eld-malfunctions</c>. <see cref="Code"/> is what the device displayed (≤ 32 chars).</summary>
+public sealed record ReportEldMalfunctionRequest(
+    string? Code,
+    DateTimeOffset? NoticedAtUtc,
+    string? Description,
+    Guid? VehicleId = null);
 
 /// <summary>
 /// Request body for the legacy <c>POST /api/drivers/{driverId}/hos</c> daily totals.

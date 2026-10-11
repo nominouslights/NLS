@@ -1,3 +1,4 @@
+using NorthernLink.Drivers.Application.Hos.Compliance;
 using NorthernLink.Shared.HoursOfService;
 
 namespace NorthernLink.Drivers.Application.Hos;
@@ -43,7 +44,9 @@ public sealed record DutySegmentResponse(
 /// mirror's shape), <paramref name="Violations"/> the engine's breaches dated that day.
 /// <paramref name="HasRecords"/> is false for a day inside the requested range with no
 /// <c>DutyDay</c> on file — the totals then describe an unknown or empty day, which the engine
-/// treats as records incomplete, never as hours unused.
+/// treats as records incomplete, never as hours unused. <paramref name="Exceptions"/> are the
+/// exceptions in force on the day (the ones the engine honoured — Declared, Acknowledged or
+/// Approved); <paramref name="OutOfService"/> is an out-of-service declaration overlapping it.
 /// </summary>
 public sealed record DutyDaySummaryResponse(
     Guid DriverId,
@@ -58,10 +61,12 @@ public sealed record DutyDaySummaryResponse(
     IReadOnlyList<DutySegmentResponse> Segments,
     IReadOnlyList<DutyEventResponse> Events,
     IReadOnlyList<HosViolation> Violations,
+    IReadOnlyList<HosExceptionResponse> Exceptions,
+    OutOfServiceResponse? OutOfService,
     string Label);
 
-/// <summary>Reserved for the out-of-service declaration (next PR); always null today.</summary>
-public sealed record OutOfServiceResponse(DateTimeOffset FromUtc, DateTimeOffset? UntilUtc, string Reason);
+/// <summary>The out-of-service declaration in force (status) or overlapping a day (summaries): its id, span and reason.</summary>
+public sealed record OutOfServiceResponse(Guid Id, DateTimeOffset FromUtc, DateTimeOffset? UntilUtc, string Reason);
 
 /// <summary>
 /// A driver's hours-of-service standing right now. <paramref name="Evaluation"/> is the rule
@@ -69,9 +74,12 @@ public sealed record OutOfServiceResponse(DateTimeOffset FromUtc, DateTimeOffset
 /// seconds) — the same record the TypeScript mirror produces, so both frontends type it once.
 /// <paramref name="RecordsOnFile"/> is true when the ledger covers the 14-day window the
 /// regulation requires (the engine reports <c>RecordsIncomplete</c> otherwise);
-/// <paramref name="KnownFromUtc"/> is where that coverage starts. <paramref name="OutOfService"/>
-/// and <paramref name="EldMalfunctionOpen"/> are placeholders typed for the compliance
-/// aggregates that land next — null and false until then.
+/// <paramref name="KnownFromUtc"/> is where that coverage starts — the driver's first day on
+/// file or the start of the attested prior-records window, whichever is earlier.
+/// <paramref name="OutOfService"/> is the declaration in force right now (null when none);
+/// <paramref name="EldMalfunctionOpen"/> is true while any ELD malfunction report is open
+/// (paper-log mode — a warning, never a block); <paramref name="PriorRecords"/> is the
+/// compliance officer's attestation, null until one exists.
 /// </summary>
 public sealed record HosStatusResponse(
     Guid DriverId,
@@ -82,6 +90,7 @@ public sealed record HosStatusResponse(
     DateTimeOffset? KnownFromUtc,
     OutOfServiceResponse? OutOfService,
     bool EldMalfunctionOpen,
+    PriorRecordsResponse? PriorRecords,
     HosEvaluation Evaluation);
 
 /// <summary>One roster row of <c>GET /api/drivers/hos/status</c>.</summary>

@@ -13,6 +13,7 @@ using NorthernLink.Drivers.Application.Credentials.GetForDriver;
 using NorthernLink.Drivers.Application.Credentials.Remove;
 using NorthernLink.Drivers.Application.Credentials.SetImage;
 using NorthernLink.Drivers.Application.Drivers;
+using NorthernLink.Drivers.Application.Drivers.AttestPriorRecords;
 using NorthernLink.Drivers.Application.Drivers.ChangeStatus;
 using NorthernLink.Drivers.Application.Drivers.GetByUser;
 using NorthernLink.Drivers.Application.Drivers.GetDriverById;
@@ -23,13 +24,30 @@ using NorthernLink.Drivers.Application.Drivers.SelfAccess;
 using NorthernLink.Drivers.Application.Drivers.UnlinkUser;
 using NorthernLink.Drivers.Application.Drivers.Update;
 using NorthernLink.Drivers.Application.Hos;
+using NorthernLink.Drivers.Application.Hos.Audit;
+using NorthernLink.Drivers.Application.Hos.Compliance;
 using NorthernLink.Drivers.Application.Hos.DutyDays.Certify;
 using NorthernLink.Drivers.Application.Hos.DutyDays.GetOne;
 using NorthernLink.Drivers.Application.Hos.DutyDays.GetRange;
 using NorthernLink.Drivers.Application.Hos.DutyDays.Transcribe;
 using NorthernLink.Drivers.Application.Hos.DutyEvents.Amend;
 using NorthernLink.Drivers.Application.Hos.DutyEvents.Record;
+using NorthernLink.Drivers.Application.Hos.EldMalfunctions.Get;
+using NorthernLink.Drivers.Application.Hos.EldMalfunctions.Report;
+using NorthernLink.Drivers.Application.Hos.EldMalfunctions.Resolve;
+using NorthernLink.Drivers.Application.Hos.Exceptions.Acknowledge;
+using NorthernLink.Drivers.Application.Hos.Exceptions.ApproveDeferral;
+using NorthernLink.Drivers.Application.Hos.Exceptions.Declare;
+using NorthernLink.Drivers.Application.Hos.Exceptions.Get;
+using NorthernLink.Drivers.Application.Hos.Exceptions.Reject;
+using NorthernLink.Drivers.Application.Hos.Exceptions.Withdraw;
+using NorthernLink.Drivers.Application.Hos.Findings.Get;
+using NorthernLink.Drivers.Application.Hos.Findings.Open;
+using NorthernLink.Drivers.Application.Hos.Findings.Update;
 using NorthernLink.Drivers.Application.Hos.GetForDriver;
+using NorthernLink.Drivers.Application.Hos.OutOfService.Get;
+using NorthernLink.Drivers.Application.Hos.OutOfService.Lift;
+using NorthernLink.Drivers.Application.Hos.OutOfService.Record;
 using NorthernLink.Drivers.Application.Hos.Record;
 using NorthernLink.Drivers.Application.Hos.Status;
 using NorthernLink.Drivers.Infrastructure.Persistence;
@@ -82,6 +100,14 @@ public static class DriversServiceCollectionExtensions
         services.AddScoped<IHosLogReadService, HosLogReadService>();
         services.AddScoped<IDutyDayRepository, DutyDayRepository>();
 
+        // The compliance aggregates beside the ledger, and the one reader the engine-backed
+        // queries load them through.
+        services.AddScoped<IHosExceptionRepository, HosExceptionRepository>();
+        services.AddScoped<IDriverOutOfServiceRepository, DriverOutOfServiceRepository>();
+        services.AddScoped<IEldMalfunctionRepository, EldMalfunctionRepository>();
+        services.AddScoped<IComplianceFindingRepository, ComplianceFindingRepository>();
+        services.AddScoped<IComplianceRecordsReader, ComplianceRecordsReader>();
+
         // The clock the HOS handlers take "now" from (event-in-future, certify-not-before-day-
         // starts, as-of for the rule engine). TryAdd: process-wide plumbing Trips also registers.
         services.TryAddSingleton(TimeProvider.System);
@@ -120,6 +146,26 @@ public static class DriversServiceCollectionExtensions
         services.AddScoped<IQueryHandler<GetHosStatusQuery, HosStatusResponse>, GetHosStatusQueryHandler>();
         services.AddScoped<IQueryHandler<GetHosRosterStatusQuery, IReadOnlyList<HosRosterStatusResponse>>, GetHosRosterStatusQueryHandler>();
 
+        // The compliance aggregates: exceptions, out-of-service, ELD malfunctions, findings,
+        // the prior-records attestation, and the audit.
+        services.AddScoped<ICommandHandler<DeclareHosExceptionCommand, HosExceptionResponse>, DeclareHosExceptionCommandHandler>();
+        services.AddScoped<ICommandHandler<ApproveOffDutyDeferralCommand, HosExceptionResponse>, ApproveOffDutyDeferralCommandHandler>();
+        services.AddScoped<ICommandHandler<AcknowledgeHosExceptionCommand, HosExceptionResponse>, AcknowledgeHosExceptionCommandHandler>();
+        services.AddScoped<ICommandHandler<RejectHosExceptionCommand, HosExceptionResponse>, RejectHosExceptionCommandHandler>();
+        services.AddScoped<ICommandHandler<WithdrawHosExceptionCommand, HosExceptionResponse>, WithdrawHosExceptionCommandHandler>();
+        services.AddScoped<IQueryHandler<GetHosExceptionsQuery, IReadOnlyList<HosExceptionResponse>>, GetHosExceptionsQueryHandler>();
+        services.AddScoped<ICommandHandler<RecordOutOfServiceCommand, OutOfServiceRecordResponse>, RecordOutOfServiceCommandHandler>();
+        services.AddScoped<ICommandHandler<LiftOutOfServiceCommand, OutOfServiceRecordResponse>, LiftOutOfServiceCommandHandler>();
+        services.AddScoped<IQueryHandler<GetOutOfServiceRecordsQuery, IReadOnlyList<OutOfServiceRecordResponse>>, GetOutOfServiceRecordsQueryHandler>();
+        services.AddScoped<ICommandHandler<ReportEldMalfunctionCommand, EldMalfunctionResponse>, ReportEldMalfunctionCommandHandler>();
+        services.AddScoped<ICommandHandler<ResolveEldMalfunctionCommand, EldMalfunctionResponse>, ResolveEldMalfunctionCommandHandler>();
+        services.AddScoped<IQueryHandler<GetEldMalfunctionsQuery, IReadOnlyList<EldMalfunctionResponse>>, GetEldMalfunctionsQueryHandler>();
+        services.AddScoped<ICommandHandler<OpenComplianceFindingCommand, ComplianceFindingResponse>, OpenComplianceFindingCommandHandler>();
+        services.AddScoped<ICommandHandler<UpdateComplianceFindingCommand, ComplianceFindingResponse>, UpdateComplianceFindingCommandHandler>();
+        services.AddScoped<IQueryHandler<GetComplianceFindingsQuery, IReadOnlyList<ComplianceFindingResponse>>, GetComplianceFindingsQueryHandler>();
+        services.AddScoped<ICommandHandler<AttestPriorRecordsCommand, PriorRecordsResponse>, AttestPriorRecordsCommandHandler>();
+        services.AddScoped<IQueryHandler<GetHosAuditQuery, IReadOnlyList<HosAuditDayResponse>>, GetHosAuditQueryHandler>();
+
         // 4. No integration event consumers — Drivers only publishes (drivers.driver-changed);
         //    nothing upstream feeds it yet.
 
@@ -131,7 +177,11 @@ public static class DriversServiceCollectionExtensions
             .Project(new DriverCredentialProjection())
             .Project(new DriverClearanceProjection())
             .Project(new HosLogEntryProjection())
-            .Project(new DutyDayProjection()));
+            .Project(new DutyDayProjection())
+            .Project(new HosExceptionProjection())
+            .Project(new DriverOutOfServiceProjection())
+            .Project(new EldMalfunctionReportProjection())
+            .Project(new ComplianceFindingProjection()));
 
         return services;
     }

@@ -111,6 +111,29 @@ public static class HosDisplay
         _ => throw new ArgumentOutOfRangeException(nameof(source), source, "Unknown event source."),
     };
 
+    // ---- Exception kind ----
+
+    public const string AdverseDrivingConditionsKind = HosWire.AdverseDrivingConditionsKind;
+    public const string EmergencyKind = HosWire.EmergencyKind;
+    public const string OffDutyDeferralKind = HosWire.OffDutyDeferralKind;
+
+    public static string ExceptionKindToWire(HosExceptionKind kind) => kind switch
+    {
+        HosExceptionKind.AdverseDrivingConditions => AdverseDrivingConditionsKind,
+        HosExceptionKind.Emergency => EmergencyKind,
+        HosExceptionKind.OffDutyDeferral => OffDutyDeferralKind,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown exception kind."),
+    };
+
+    /// <summary>Parses the wire kind string; an unrecognised value is a validation error listing the valid ones.</summary>
+    public static Result<HosExceptionKind> ExceptionKindFromWire(string? value) => value?.Trim() switch
+    {
+        AdverseDrivingConditionsKind => Result.Success(HosExceptionKind.AdverseDrivingConditions),
+        EmergencyKind => Result.Success(HosExceptionKind.Emergency),
+        OffDutyDeferralKind => Result.Success(HosExceptionKind.OffDutyDeferral),
+        _ => Result.Failure<HosExceptionKind>(ComplianceErrors.ExceptionKindInvalid),
+    };
+
     // ---- Legacy daily-totals source ----
 
     public static string SourceToWire(HosLogEntrySource source) => source switch

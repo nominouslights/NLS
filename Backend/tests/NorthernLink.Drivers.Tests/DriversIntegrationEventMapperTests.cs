@@ -192,6 +192,117 @@ public class DriversIntegrationEventMapperTests
         Assert.Contains("\"localDate\":\"2026-09-14\"", json);
     }
 
+    // ---- Compliance aggregates ----
+
+    private static readonly Guid OfficerId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+
+    [Fact]
+    public void A_declared_exception_maps_to_hos_exception_changed_with_the_wire_kind_and_status()
+    {
+        var exception = HosException.Declare(
+            TestDrivers.TenantId, Hos.HosTestSupport.DriverId, HosExceptionKind.AdverseDrivingConditions, Hos.HosTestSupport.UserId,
+            Hos.HosTestSupport.Now, Hos.HosTestSupport.At("10:00"), null, "Whiteout", null, true, TimeSpan.FromMinutes(90), false, Guid.NewGuid()).Value;
+        var domainEvent = Assert.IsType<HosExceptionDeclaredDomainEvent>(Assert.Single(exception.DomainEvents));
+
+        var integrationEvent = Assert.IsType<HosExceptionChangedIntegrationEvent>(_mapper.Map(domainEvent, exception));
+
+        Assert.Equal(exception.Id, integrationEvent.ExceptionId);
+        Assert.Equal(TestDrivers.TenantId, integrationEvent.TenantId);
+        Assert.Equal(Hos.HosTestSupport.DriverId, integrationEvent.DriverId);
+        Assert.Equal("Adverse driving conditions", integrationEvent.Kind);
+        Assert.Equal("Declared", integrationEvent.Status);
+        Assert.Equal(Hos.HosTestSupport.At("10:00"), integrationEvent.EffectiveFromUtc);
+        Assert.Equal(exception.TripId, integrationEvent.TripId);
+        Assert.Equal(90, integrationEvent.ExtraDrivingMinutes);
+        Assert.Null(integrationEvent.DeferredOffDutyMinutes);
+        Assert.Equal("drivers.hos-exception-changed", EventRoutingKey.For(typeof(HosExceptionChangedIntegrationEvent)));
+    }
+
+    [Fact]
+    public void A_rejected_exception_maps_with_status_rejected_so_a_replica_stops_applying_it()
+    {
+        var exception = HosException.ApproveDeferral(
+            TestDrivers.TenantId, Hos.HosTestSupport.DriverId, OfficerId, Hos.HosTestSupport.Now, Guid.NewGuid(),
+            Hos.HosTestSupport.At("06:00", 1), TimeSpan.FromHours(1), "Late return", null, false).Value;
+        exception.ClearDomainEvents();
+        Assert.True(exception.Reject(OfficerId, Hos.HosTestSupport.Now, null).IsSuccess);
+        var domainEvent = Assert.IsType<HosExceptionStatusChangedDomainEvent>(Assert.Single(exception.DomainEvents));
+
+        var integrationEvent = Assert.IsType<HosExceptionChangedIntegrationEvent>(_mapper.Map(domainEvent, exception));
+
+        Assert.Equal("Off-duty deferral (CO approved)", integrationEvent.Kind);
+        Assert.Equal("Rejected", integrationEvent.Status);
+        Assert.Equal(60, integrationEvent.DeferredOffDutyMinutes);
+        Assert.Null(integrationEvent.ExtraDrivingMinutes);
+    }
+
+    [Fact]
+    public void Out_of_service_maps_to_its_event_on_record_and_on_lift()
+    {
+        var record = DriverOutOfService.Record(
+            TestDrivers.TenantId, Hos.HosTestSupport.DriverId, Hos.HosTestSupport.At("14:00"), OfficerId, Hos.HosTestSupport.Now,
+            null, false, "Inspection", null).Value;
+        var recorded = Assert.IsType<DriverOutOfServiceChangedIntegrationEvent>(_mapper.Map(record.DomainEvents.Single(), record));
+        Assert.Equal(record.Id, recorded.RecordId);
+        Assert.Equal("Active", recorded.Status);
+        Assert.Equal(Hos.HosTestSupport.At("14:00"), recorded.DeclaredAtUtc);
+        Assert.Equal(Hos.HosTestSupport.At("14:00").AddHours(72), recorded.UntilUtc);
+        Assert.Equal("Inspection", recorded.Reason);
+        Assert.Equal("drivers.driver-out-of-service-changed", EventRoutingKey.For(typeof(DriverOutOfServiceChangedIntegrationEvent)));
+
+        record.ClearDomainEvents();
+        Assert.True(record.Lift(OfficerId, Hos.HosTestSupport.Now, "cleared").IsSuccess);
+        var lifted = Assert.IsType<DriverOutOfServiceChangedIntegrationEvent>(_mapper.Map(record.DomainEvents.Single(), record));
+        Assert.Equal("Lifted", lifted.Status);
+        Assert.Equal(Hos.HosTestSupport.Now, lifted.UntilUtc);
+    }
+
+    [Fact]
+    public void An_eld_malfunction_maps_to_its_event_carrying_the_drivers_name()
+    {
+        var report = EldMalfunctionReport.Report(
+            TestDrivers.TenantId, Hos.HosTestSupport.DriverId, "J. Spence", null, "P", Hos.HosTestSupport.At("08:00"),
+            Hos.HosTestSupport.UserId, Hos.HosTestSupport.Now, "Light on").Value;
+
+        var integrationEvent = Assert.IsType<EldMalfunctionChangedIntegrationEvent>(_mapper.Map(report.DomainEvents.Single(), report));
+
+        Assert.Equal(report.Id, integrationEvent.ReportId);
+        Assert.Equal("J. Spence", integrationEvent.DriverName);
+        Assert.Equal("P", integrationEvent.Code);
+        Assert.Equal("Open", integrationEvent.Status);
+        Assert.Equal("drivers.eld-malfunction-changed", EventRoutingKey.For(typeof(EldMalfunctionChangedIntegrationEvent)));
+    }
+
+    [Fact]
+    public void The_prior_records_attestation_maps_to_driver_changed_with_the_attestation_fields()
+    {
+        var driver = TestDrivers.Register().Value;
+        driver.ClearDomainEvents();
+        Assert.True(driver.AttestPriorRecords(Hos.HosTestSupport.D.AddDays(-1), OfficerId, null, true, Hos.HosTestSupport.Now).IsSuccess);
+        var domainEvent = Assert.IsType<DriverPriorRecordsAttestedDomainEvent>(Assert.Single(driver.DomainEvents));
+
+        var integrationEvent = Assert.IsType<DriverChangedIntegrationEvent>(_mapper.Map(domainEvent, driver));
+
+        Assert.Equal(Hos.HosTestSupport.D.AddDays(-1), integrationEvent.PriorRecordsCoveredThroughDate);
+        Assert.True(integrationEvent.WorksForOtherCarriers);
+
+        // And every later driver-changed carries it too.
+        driver.ClearDomainEvents();
+        Assert.True(driver.ChangeStatus(DriverStatus.Inactive).IsSuccess);
+        var later = Assert.IsType<DriverChangedIntegrationEvent>(_mapper.Map(driver.DomainEvents.Single(), driver));
+        Assert.Equal(Hos.HosTestSupport.D.AddDays(-1), later.PriorRecordsCoveredThroughDate);
+    }
+
+    [Fact]
+    public void A_finding_stays_internal()
+    {
+        var finding = ComplianceFinding.Open(
+            TestDrivers.TenantId, Hos.HosTestSupport.DriverId, Hos.HosTestSupport.D, "Falsification", FindingSeverity.Severe,
+            "Two logbooks", FindingSource.Enforcement, OfficerId, Hos.HosTestSupport.Now).Value;
+
+        Assert.Null(_mapper.Map(finding.DomainEvents.Single(), finding));
+    }
+
     [Fact]
     public void Unrelated_domain_events_stay_internal()
     {

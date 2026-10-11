@@ -51,16 +51,18 @@ internal sealed class DutyDayProjection : IProjection<DriversDbContext>
                 context.DutyDayReadModels.Add(row);
             }
 
+            var loadFrom = source.LocalDate.AddDays(-DutyLedgerAssembler.LookbackDays);
             var surrounding = await context.DutyDays
                 .IgnoreQueryFilters()
                 .AsNoTracking()
                 .Where(d => d.DriverId == source.DriverId
-                    && d.LocalDate >= source.LocalDate.AddDays(-DutyLedgerAssembler.LookbackDays)
+                    && d.LocalDate >= loadFrom
                     && d.LocalDate <= source.LocalDate)
                 .ToListAsync(cancellationToken);
             var earliest = await EarliestAsync(context, source.DriverId, cancellationToken);
+            var compliance = await ComplianceAsync(context, source.DriverId, loadFrom, cancellationToken);
 
-            Map(source, surrounding, earliest, row, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            Map(source, surrounding, earliest, compliance, row, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
         }
 
         if (driverId is { } id)
@@ -82,6 +84,8 @@ internal sealed class DutyDayProjection : IProjection<DriversDbContext>
         {
             var days = byDriver.OrderBy(d => d.LocalDate).ToList();
             var earliest = days[0].LocalDate;
+            var compliance = await ComplianceAsync(
+                context, byDriver.Key, earliest.AddDays(-DutyLedgerAssembler.LookbackDays), cancellationToken);
 
             foreach (var source in days)
             {
@@ -96,7 +100,7 @@ internal sealed class DutyDayProjection : IProjection<DriversDbContext>
                 var surrounding = days
                     .Where(d => d.LocalDate >= source.LocalDate.AddDays(-DutyLedgerAssembler.LookbackDays) && d.LocalDate <= source.LocalDate)
                     .ToList();
-                Map(source, surrounding, earliest, row, nowUnix);
+                Map(source, surrounding, earliest, compliance, row, nowUnix);
             }
         }
 
@@ -110,6 +114,27 @@ internal sealed class DutyDayProjection : IProjection<DriversDbContext>
 
         // rm_drivers HOS rollup is rebuilt by DriverProjection.RebuildAllAsync from the same
         // write tables, so no extra pass is needed here.
+    }
+
+    /// <summary>
+    /// The driver's compliance records from the window's start, so the projected violation
+    /// count honours exceptions and reports driving while out of service, exactly as the live
+    /// reads do. Spans tenants on purpose (system session) — same as every query here.
+    /// </summary>
+    private static async Task<ComplianceRecords> ComplianceAsync(
+        DriversDbContext context, Guid driverId, DateOnly from, CancellationToken cancellationToken)
+    {
+        var driver = await context.Drivers
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(d => d.Id == driverId, cancellationToken);
+        if (driver is null)
+        {
+            return ComplianceRecords.None;
+        }
+
+        var fromUtc = DateTimeOffset.FromUnixTimeSeconds(DutyLedgerAssembler.Calendar.DayStartUnix(from));
+        return await ComplianceRecordsQueries.LoadAsync(context, driver, fromUtc, ignoreQueryFilters: true, cancellationToken);
     }
 
     private static async Task<DateOnly?> EarliestAsync(DriversDbContext context, Guid driverId, CancellationToken cancellationToken) =>
@@ -152,10 +177,16 @@ internal sealed class DutyDayProjection : IProjection<DriversDbContext>
     /// The engine runs with as-of parked at the end of the day (or now, for today), so a past
     /// day is evaluated complete and its figures stop moving once it is over.
     /// </summary>
-    private static void Map(DutyDay source, IReadOnlyList<DutyDay> surrounding, DateOnly? earliest, DutyDayReadModel row, long nowUnix)
+    private static void Map(
+        DutyDay source,
+        IReadOnlyList<DutyDay> surrounding,
+        DateOnly? earliest,
+        ComplianceRecords compliance,
+        DutyDayReadModel row,
+        long nowUnix)
     {
         var asOf = Math.Min(nowUnix, DutyLedgerAssembler.Calendar.DayEndUnix(source.LocalDate));
-        var ledger = DutyLedgerAssembler.Build(source.DriverId, surrounding, earliest, asOf);
+        var ledger = DutyLedgerAssembler.Build(source.DriverId, surrounding, earliest, asOf, compliance);
         var evaluation = DutyLedgerAssembler.Evaluate(ledger, asOf);
         var totals = evaluation.Days.FirstOrDefault(d => d.Date == source.LocalDate);
         var timeline = source.EffectiveTimeline();

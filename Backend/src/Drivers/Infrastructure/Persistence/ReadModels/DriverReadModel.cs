@@ -41,6 +41,13 @@ public sealed class DriverReadModel
     public string? LatestDutyStatus { get; set; }
     public decimal? LatestDrivingHours { get; set; }
     public DateOnly? LatestHosDate { get; set; }
+
+    // The prior-records attestation, copied from the aggregate.
+    public DateOnly? PriorRecordsCoveredThroughDate { get; set; }
+    public DateTimeOffset? PriorRecordsAttestedAtUtc { get; set; }
+    public Guid? PriorRecordsAttestedByUserId { get; set; }
+    public string? PriorRecordsNote { get; set; }
+    public bool WorksForOtherCarriers { get; set; }
 }
 
 /// <summary>
@@ -79,5 +86,10 @@ public sealed class DriverReadModelConfiguration : IEntityTypeConfiguration<Driv
         builder.Property(d => d.LatestDutyStatus).HasColumnName("latest_duty_status");
         builder.Property(d => d.LatestDrivingHours).HasColumnName("latest_driving_hours");
         builder.Property(d => d.LatestHosDate).HasColumnName("latest_hos_date");
+        builder.Property(d => d.PriorRecordsCoveredThroughDate).HasColumnName("prior_records_covered_through_date");
+        builder.Property(d => d.PriorRecordsAttestedAtUtc).HasColumnName("prior_records_attested_at_utc");
+        builder.Property(d => d.PriorRecordsAttestedByUserId).HasColumnName("prior_records_attested_by_user_id");
+        builder.Property(d => d.PriorRecordsNote).HasColumnName("prior_records_note");
+        builder.Property(d => d.WorksForOtherCarriers).HasColumnName("works_for_other_carriers");
     }
 }

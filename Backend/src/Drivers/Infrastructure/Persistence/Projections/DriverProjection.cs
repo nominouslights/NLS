@@ -132,6 +132,11 @@ internal sealed class DriverProjection : IProjection<DriversDbContext>
         row.RegisteredAtUtc = source.RegisteredAtUtc;
         row.UpdatedAtUtc = source.UpdatedAtUtc;
         row.Version = source.Version;
+        row.PriorRecordsCoveredThroughDate = source.PriorRecordsCoveredThroughDate;
+        row.PriorRecordsAttestedAtUtc = source.PriorRecordsAttestedAtUtc;
+        row.PriorRecordsAttestedByUserId = source.PriorRecordsAttestedByUserId;
+        row.PriorRecordsNote = source.PriorRecordsNote;
+        row.WorksForOtherCarriers = source.WorksForOtherCarriers;
     }
 }
 
