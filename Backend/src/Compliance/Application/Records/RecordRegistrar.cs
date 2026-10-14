@@ -36,6 +36,44 @@ public sealed class RecordRegistrar(
                 tenantId, definition, await attempt.IssueAsync(definition), registration, actorId, attempt.Now),
             cancellationToken);
 
+    /// <summary>
+    /// The intake path for a producer's record that replaces an earlier one
+    /// (<c>SupersedesSourceRecordId</c> on the produced event): when the predecessor is registered
+    /// under (same source module, <paramref name="supersedesSourceRecordId"/>), is still Active and
+    /// is of the same type, the new record is registered as its next version (the predecessor's
+    /// Superseded anchor starts today). Otherwise — no predecessor id, a predecessor never
+    /// registered, already superseded, or of another type — it registers fresh. A replay of the
+    /// successor is caught first and returns the record already held.
+    /// </summary>
+    public async Task<Result<RegisterRecordResult>> RegisterOrSupersedeAsync(
+        Guid tenantId,
+        RecordTypeDefinition definition,
+        RecordRegistration registration,
+        string? supersedesSourceRecordId,
+        Guid? actorId,
+        CancellationToken cancellationToken)
+    {
+        var sourceModule = registration.SourceModule?.Trim();
+        var sourceRecordId = registration.SourceRecordId?.Trim();
+        var predecessorSourceId = supersedesSourceRecordId?.Trim();
+        if (!string.IsNullOrEmpty(sourceModule) && !string.IsNullOrEmpty(sourceRecordId) && !string.IsNullOrEmpty(predecessorSourceId))
+        {
+            var existing = await records.GetBySourceAsync(sourceModule, sourceRecordId, cancellationToken);
+            if (existing is not null)
+            {
+                return Result.Success(new RegisterRecordResult(existing.Id, existing.DocumentNumber, Created: false));
+            }
+
+            var predecessor = await records.GetBySourceAsync(sourceModule, predecessorSourceId, cancellationToken);
+            if (predecessor is { Status: ComplianceRecordStatus.Active } && predecessor.RecordType == definition.Type)
+            {
+                return await SupersedeAsync(tenantId, predecessor.Id, registration, actorId, cancellationToken);
+            }
+        }
+
+        return await RegisterAsync(tenantId, definition, registration, actorId, cancellationToken);
+    }
+
     /// <summary>Registers a successor version of <paramref name="predecessorId"/> and retires the predecessor in the same save.</summary>
     public Task<Result<RegisterRecordResult>> SupersedeAsync(
         Guid tenantId,

@@ -280,3 +280,59 @@ public sealed record InsuranceRuleSection(
         yield return RuleValue.Of("insurance.changeNoticeDays", ChangeNoticeDays, "days");
     }
 }
+
+/// <summary>
+/// Carrier authority and safety-plan timing (NL-SP-02 ss. 1, 2, 12 and the Designations; HTA ss.
+/// 312.2, 318.5; MTI new-carrier page). Added in rule-set version 2; <see cref="RuleSet.Authority"/>
+/// is null on rows published before it existed, and <see cref="RuleSetDocument.EffectiveAuthority"/>
+/// answers with <see cref="Default"/> for them.
+/// </summary>
+/// <param name="WarningHorizonsDays">The buckets a renewal warning is reported in ("expires within 7/14/30/60/90 days").</param>
+/// <param name="SfcWarningDays">When an expiring SFC warns (60, 30, 14 and 7 days out).</param>
+/// <param name="InsuranceWarningDays">When an expiring insurance certificate warns.</param>
+/// <param name="NetCourseMaxDaysBeforeDesignation">The NET course must end no more than this many days before the designation (MTI new-carrier page).</param>
+/// <param name="NetRetrainingMonths">NET refresher interval; null = none modelled (warn only when the course is missing).</param>
+/// <param name="RegistrationTermMonths">The default registration term — Manitoba plates renew every 6 months for this class.</param>
+/// <param name="PlanReacknowledgeWithinDays">Days a driver has to acknowledge a newly signed plan version.</param>
+/// <param name="RegulatedMinSeatingCapacity">Seats, including the driver, at which a vehicle is a "bus" (HTA s. 1(1)) and so a regulated vehicle.</param>
+public sealed record AuthorityRuleSection(
+    IReadOnlyList<int> WarningHorizonsDays,
+    IReadOnlyList<int> SfcWarningDays,
+    IReadOnlyList<int> InsuranceWarningDays,
+    int NetCourseMaxDaysBeforeDesignation,
+    int? NetRetrainingMonths,
+    int RegistrationTermMonths,
+    int PlanReacknowledgeWithinDays,
+    int RegulatedMinSeatingCapacity)
+{
+    /// <summary>The values as first published in version 2 — also the fallback for version-1 rows.</summary>
+    public static AuthorityRuleSection Default { get; } = new(
+        WarningHorizonsDays: [7, 14, 30, 60, 90],
+        SfcWarningDays: [60, 30, 14, 7],
+        InsuranceWarningDays: [30, 14, 7],
+        NetCourseMaxDaysBeforeDesignation: 180,
+        // TODO(CONFIRM-Q2): no NET re-training interval is modelled until the owner names one.
+        NetRetrainingMonths: null,
+        RegistrationTermMonths: 6,
+        // TODO(CONFIRM-Q3): drivers re-acknowledge a new plan version within 30 days (owner to confirm).
+        PlanReacknowledgeWithinDays: 30,
+        // Owner question Q1 default: "bus" = designed for 11 or more persons including the driver.
+        RegulatedMinSeatingCapacity: 11);
+
+    /// <summary>The literal published for a null <see cref="NetRetrainingMonths"/>.</summary>
+    public const string NoInterval = "none";
+
+    public IEnumerable<RuleValue> Flatten()
+    {
+        yield return new RuleValue("authority.warningHorizonsDays", string.Join(",", WarningHorizonsDays), "days");
+        yield return new RuleValue("authority.sfcWarningDays", string.Join(",", SfcWarningDays), "days");
+        yield return new RuleValue("authority.insuranceWarningDays", string.Join(",", InsuranceWarningDays), "days");
+        yield return RuleValue.Of("authority.netCourseMaxDaysBeforeDesignation", NetCourseMaxDaysBeforeDesignation, "days");
+        yield return NetRetrainingMonths is { } months
+            ? RuleValue.Of("authority.netRetrainingMonths", months, "months")
+            : new RuleValue("authority.netRetrainingMonths", NoInterval, "months");
+        yield return RuleValue.Of("authority.registrationTermMonths", RegistrationTermMonths, "months");
+        yield return RuleValue.Of("authority.planReacknowledgeWithinDays", PlanReacknowledgeWithinDays, "days");
+        yield return RuleValue.Of("authority.regulatedMinSeatingCapacity", RegulatedMinSeatingCapacity, "count");
+    }
+}

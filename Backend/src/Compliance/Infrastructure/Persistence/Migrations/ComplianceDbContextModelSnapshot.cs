@@ -23,6 +23,327 @@ namespace NorthernLink.Compliance.Infrastructure.Persistence.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("NorthernLink.Compliance.Application.Integration.DriverLookup", b =>
+                {
+                    b.Property<Guid>("DriverId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("driver_id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("DriverId");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("UserId")
+                        .HasFilter("user_id IS NOT NULL");
+
+                    b.ToTable("driver_lookup", "compliance");
+                });
+
+            modelBuilder.Entity("NorthernLink.Compliance.Application.Integration.UserLookup", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("email");
+
+                    b.Property<string>("FullName")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("full_name");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("role");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.HasKey("UserId");
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("user_lookup", "compliance");
+                });
+
+            modelBuilder.Entity("NorthernLink.Compliance.Application.Integration.VehicleLookup", b =>
+                {
+                    b.Property<Guid>("VehicleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("vehicle_id");
+
+                    b.Property<bool?>("RegulatedOverride")
+                        .HasColumnType("boolean")
+                        .HasColumnName("regulated_override");
+
+                    b.Property<string>("RequiredLicenceClass")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("required_licence_class");
+
+                    b.Property<int>("SeatingCapacity")
+                        .HasColumnType("integer")
+                        .HasColumnName("seating_capacity");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("UnitNumber")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("unit_number");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.HasKey("VehicleId");
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("vehicle_lookup", "compliance");
+                });
+
+            modelBuilder.Entity("NorthernLink.Compliance.Domain.Authority.CarrierAuthority", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("CurrentSfc")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("current_sfc");
+
+                    b.Property<bool>("IntraProvincial")
+                        .HasColumnType("boolean")
+                        .HasColumnName("intra_provincial");
+
+                    b.Property<DateOnly?>("IntraProvincialDeclaredOn")
+                        .HasColumnType("date")
+                        .HasColumnName("intra_provincial_declared_on");
+
+                    b.Property<string>("IntraProvincialSignature")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("intra_provincial_signature");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("modified_by");
+
+                    b.Property<string>("NscNumber")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("nsc_number");
+
+                    b.Property<string>("OperatingRoutes")
+                        .HasMaxLength(20000)
+                        .HasColumnType("character varying(20000)")
+                        .HasColumnName("operating_routes");
+
+                    b.Property<string>("SafetyRating")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("safety_rating");
+
+                    b.Property<DateOnly?>("SafetyRatingAsOf")
+                        .HasColumnType("date")
+                        .HasColumnName("safety_rating_as_of");
+
+                    b.Property<string>("SfcHistory")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("sfc_history");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_carrier_authorities_tenant_id");
+
+                    b.ToTable("carrier_authorities", "compliance");
+                });
+
+            modelBuilder.Entity("NorthernLink.Compliance.Domain.Insurance.InsurancePolicy", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<decimal?>("CargoCoverageCad")
+                        .HasPrecision(14, 2)
+                        .HasColumnType("numeric(14,2)")
+                        .HasColumnName("cargo_coverage_cad");
+
+                    b.Property<string>("Certificate")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("certificate");
+
+                    b.Property<Guid?>("ComplianceRecordId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("compliance_record_id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("DocumentNumber")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("document_number");
+
+                    b.Property<DateOnly>("EffectiveOn")
+                        .HasColumnType("date")
+                        .HasColumnName("effective_on");
+
+                    b.Property<DateOnly>("ExpiresOn")
+                        .HasColumnType("date")
+                        .HasColumnName("expires_on");
+
+                    b.Property<string>("FilingConfirmation")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("filing_confirmation");
+
+                    b.Property<string>("Insurer")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("insurer");
+
+                    b.Property<decimal>("LiabilityLimitCad")
+                        .HasPrecision(14, 2)
+                        .HasColumnType("numeric(14,2)")
+                        .HasColumnName("liability_limit_cad");
+
+                    b.Property<decimal>("MinimumLiabilityCad")
+                        .HasPrecision(14, 2)
+                        .HasColumnType("numeric(14,2)")
+                        .HasColumnName("minimum_liability_cad");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("modified_by");
+
+                    b.Property<string>("PolicyNumber")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("policy_number");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid?>("SupersededById")
+                        .HasColumnType("uuid")
+                        .HasColumnName("superseded_by_id");
+
+                    b.Property<DateOnly?>("SupersededOn")
+                        .HasColumnType("date")
+                        .HasColumnName("superseded_on");
+
+                    b.Property<Guid?>("SupersedesId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("supersedes_id");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<Guid>("VehicleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("vehicle_id");
+
+                    b.Property<string>("VehicleUnitNumber")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("vehicle_unit_number");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "ExpiresOn");
+
+                    b.HasIndex("TenantId", "VehicleId", "Status")
+                        .IsUnique()
+                        .HasDatabaseName("IX_insurance_policies_one_current_per_vehicle")
+                        .HasFilter("status = 'Current'");
+
+                    b.ToTable("insurance_policies", "compliance");
+                });
+
             modelBuilder.Entity("NorthernLink.Compliance.Domain.Numbering.DocumentSeries", b =>
                 {
                     b.Property<Guid>("Id")
@@ -302,6 +623,110 @@ namespace NorthernLink.Compliance.Infrastructure.Persistence.Migrations
                     b.ToTable("destruction_log", "compliance");
                 });
 
+            modelBuilder.Entity("NorthernLink.Compliance.Domain.Registrations.VehicleRegistration", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid?>("ComplianceRecordId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("compliance_record_id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("Document")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("document");
+
+                    b.Property<string>("DocumentNumber")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("document_number");
+
+                    b.Property<DateOnly>("EffectiveOn")
+                        .HasColumnType("date")
+                        .HasColumnName("effective_on");
+
+                    b.Property<DateOnly>("ExpiresOn")
+                        .HasColumnType("date")
+                        .HasColumnName("expires_on");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("modified_by");
+
+                    b.Property<string>("Plate")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("plate");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid?>("SupersededById")
+                        .HasColumnType("uuid")
+                        .HasColumnName("superseded_by_id");
+
+                    b.Property<DateOnly?>("SupersededOn")
+                        .HasColumnType("date")
+                        .HasColumnName("superseded_on");
+
+                    b.Property<Guid?>("SupersedesId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("supersedes_id");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<int>("TermMonths")
+                        .HasColumnType("integer")
+                        .HasColumnName("term_months");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<string>("VehicleClass")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)")
+                        .HasColumnName("vehicle_class");
+
+                    b.Property<Guid>("VehicleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("vehicle_id");
+
+                    b.Property<string>("VehicleUnitNumber")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("vehicle_unit_number");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "ExpiresOn");
+
+                    b.HasIndex("TenantId", "VehicleId", "Status")
+                        .IsUnique()
+                        .HasDatabaseName("IX_vehicle_registrations_one_current_per_vehicle")
+                        .HasFilter("status = 'Current'");
+
+                    b.ToTable("vehicle_registrations", "compliance");
+                });
+
             modelBuilder.Entity("NorthernLink.Compliance.Domain.RegulatoryBasis.RegulatoryBasis", b =>
                 {
                     b.Property<Guid>("Id")
@@ -383,6 +808,10 @@ namespace NorthernLink.Compliance.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid")
                         .HasColumnName("id");
+
+                    b.Property<string>("Authority")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("authority");
 
                     b.Property<string>("DriverQualification")
                         .IsRequired()

@@ -84,6 +84,14 @@ public static class RuleKeyCatalogue
         "insurance.insurer", "insurance.minimumLiabilityCad", "insurance.changeNoticeDays",
     ];
 
+    public static readonly string[] Authority =
+    [
+        "authority.warningHorizonsDays", "authority.sfcWarningDays", "authority.insuranceWarningDays",
+        "authority.netCourseMaxDaysBeforeDesignation", "authority.netRetrainingMonths",
+        "authority.registrationTermMonths", "authority.planReacknowledgeWithinDays",
+        "authority.regulatedMinSeatingCapacity",
+    ];
+
     public static IReadOnlyList<string> All { get; } =
-        [.. Hos, .. Retention, .. Inspection, .. DriverQualification, .. Filing, .. Thresholds, .. Insurance];
+        [.. Hos, .. Retention, .. Inspection, .. DriverQualification, .. Filing, .. Thresholds, .. Insurance, .. Authority];
 }

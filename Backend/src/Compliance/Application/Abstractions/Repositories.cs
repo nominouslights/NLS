@@ -1,5 +1,9 @@
+using NorthernLink.Compliance.Application.Integration;
+using NorthernLink.Compliance.Domain.Authority;
+using NorthernLink.Compliance.Domain.Insurance;
 using NorthernLink.Compliance.Domain.Numbering;
 using NorthernLink.Compliance.Domain.Records;
+using NorthernLink.Compliance.Domain.Registrations;
 using NorthernLink.Compliance.Domain.RegulatoryBasis;
 using NorthernLink.Compliance.Domain.RuleSets;
 
@@ -117,4 +121,71 @@ public interface IRegulatoryBasisRepository
 
     /// <summary>Inserts missing keys and overwrites existing ones from the definitions; returns how many rows were inserted.</summary>
     Task<int> UpsertAsync(IReadOnlyList<RegulatoryBasisDefinition> definitions, CancellationToken cancellationToken = default);
+}
+
+/// <summary>Write side for the one-per-tenant carrier authority; saves go through the record repository's unit of work.</summary>
+public interface ICarrierAuthorityRepository
+{
+    Task<CarrierAuthority?> GetAsync(CancellationToken cancellationToken = default);
+
+    void Add(CarrierAuthority authority);
+}
+
+/// <summary>Write side (and, until a read model exists, read side) for insurance policies; tenant-scoped.</summary>
+public interface IInsurancePolicyRepository
+{
+    Task<InsurancePolicy?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
+
+    Task<InsurancePolicy?> GetCurrentForVehicleAsync(Guid vehicleId, CancellationToken cancellationToken = default);
+
+    /// <summary>Newest first; Current only unless <paramref name="includeSuperseded"/>.</summary>
+    Task<IReadOnlyList<InsurancePolicy>> ListAsync(Guid? vehicleId, bool includeSuperseded, CancellationToken cancellationToken = default);
+
+    void Add(InsurancePolicy policy);
+}
+
+/// <summary>Write side (and read side) for vehicle registrations; tenant-scoped.</summary>
+public interface IVehicleRegistrationRepository
+{
+    Task<VehicleRegistration?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
+
+    Task<VehicleRegistration?> GetCurrentForVehicleAsync(Guid vehicleId, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<VehicleRegistration>> ListAsync(Guid? vehicleId, bool includeSuperseded, CancellationToken cancellationToken = default);
+
+    void Add(VehicleRegistration registration);
+}
+
+/// <summary>
+/// The Fleet vehicle replica. <see cref="UpsertAsync"/> and <see cref="SetRegulatedOverrideAsync"/>
+/// save themselves (replica writes are not part of an aggregate's unit of work — the Budgeting
+/// user_lookup precedent).
+/// </summary>
+public interface IVehicleLookupRepository
+{
+    Task<VehicleLookup?> GetAsync(Guid vehicleId, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<VehicleLookup>> ListAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Inserts or overwrites every event-carried column; never touches <see cref="VehicleLookup.RegulatedOverride"/>.</summary>
+    Task UpsertAsync(VehicleLookup vehicle, CancellationToken cancellationToken = default);
+
+    /// <summary>Sets the Compliance-only override; false when the vehicle is not in the replica.</summary>
+    Task<bool> SetRegulatedOverrideAsync(Guid vehicleId, bool? regulatedOverride, CancellationToken cancellationToken = default);
+}
+
+/// <summary>The Drivers replica; the upsert saves itself and returns the row as it was before (null when new).</summary>
+public interface IDriverLookupRepository
+{
+    Task<DriverLookup?> GetAsync(Guid driverId, CancellationToken cancellationToken = default);
+
+    Task<DriverLookup?> UpsertAsync(DriverLookup driver, CancellationToken cancellationToken = default);
+}
+
+/// <summary>The Identity account replica; the upsert saves itself.</summary>
+public interface IUserLookupRepository
+{
+    Task<UserLookup?> GetAsync(Guid userId, CancellationToken cancellationToken = default);
+
+    Task UpsertAsync(UserLookup user, CancellationToken cancellationToken = default);
 }

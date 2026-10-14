@@ -33,6 +33,7 @@ public sealed class GetActiveRulesQueryHandler(ActiveRuleSetResolver resolver)
             d.Filing,
             d.Thresholds,
             d.Insurance,
+            d.EffectiveAuthority,
             d.Flatten()));
     }
 }

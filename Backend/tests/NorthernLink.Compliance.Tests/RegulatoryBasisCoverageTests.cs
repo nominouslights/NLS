@@ -95,10 +95,11 @@ public class RegulatoryBasisCoverageTests
     public void Seed_keys_are_unique_and_the_count_matches_the_verified_source_list()
     {
         // 86 keys from the verified regulatory-sources list + 35 per-section quotation entries
-        // (NSC 9/10/11/13 sections, M.R. subsections, SOR 85(3)) + 22 NL-SP-02 section entries.
+        // (NSC 9/10/11/13 sections, M.R. subsections, SOR 85(3)) + 22 NL-SP-02 section entries,
+        // then Epic 2: MTI.new-carrier + NL-SP-02 s. 1, the Declaration and the Designations.
         Assert.Equal(RegulatoryBasisSeed.All.Count, SeedKeys.Count);
-        Assert.Equal(143, RegulatoryBasisSeed.All.Count);
-        Assert.Equal(22, RegulatoryBasisSeed.All.Count(d => d.Instrument == RegulatoryInstrument.SafetyPlan));
+        Assert.Equal(147, RegulatoryBasisSeed.All.Count);
+        Assert.Equal(25, RegulatoryBasisSeed.All.Count(d => d.Instrument == RegulatoryInstrument.SafetyPlan));
     }
 
     [Fact]

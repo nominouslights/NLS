@@ -1,7 +1,11 @@
 using Microsoft.EntityFrameworkCore;
 using NorthernLink.Compliance.Application;
+using NorthernLink.Compliance.Application.Integration;
+using NorthernLink.Compliance.Domain.Authority;
+using NorthernLink.Compliance.Domain.Insurance;
 using NorthernLink.Compliance.Domain.Numbering;
 using NorthernLink.Compliance.Domain.Records;
+using NorthernLink.Compliance.Domain.Registrations;
 using NorthernLink.Compliance.Domain.RegulatoryBasis;
 using NorthernLink.Compliance.Domain.RuleSets;
 using NorthernLink.Compliance.Infrastructure.Persistence.ReadModels;
@@ -33,6 +37,14 @@ public sealed class ComplianceDbContext(
     public DbSet<TenantComplianceSettings> TenantComplianceSettings => Set<TenantComplianceSettings>();
     public DbSet<TenantRuleSetApplication> TenantRuleSetApplications => Set<TenantRuleSetApplication>();
     public DbSet<DestructionLogEntry> DestructionLog => Set<DestructionLogEntry>();
+    public DbSet<CarrierAuthority> CarrierAuthorities => Set<CarrierAuthority>();
+    public DbSet<InsurancePolicy> InsurancePolicies => Set<InsurancePolicy>();
+    public DbSet<VehicleRegistration> VehicleRegistrations => Set<VehicleRegistration>();
+
+    // Replicas of other modules' change streams — plain keyed rows, tenant-scoped.
+    public DbSet<VehicleLookup> VehicleLookups => Set<VehicleLookup>();
+    public DbSet<DriverLookup> DriverLookups => Set<DriverLookup>();
+    public DbSet<UserLookup> UserLookups => Set<UserLookup>();
 
     // Reference data — no tenant_id, no query filter.
     public DbSet<RuleSet> RuleSets => Set<RuleSet>();
@@ -51,6 +63,12 @@ public sealed class ComplianceDbContext(
         modelBuilder.ApplyConfiguration(new DestructionLogEntryConfiguration());
         modelBuilder.ApplyConfiguration(new RuleSetConfiguration());
         modelBuilder.ApplyConfiguration(new RegulatoryBasisConfiguration());
+        modelBuilder.ApplyConfiguration(new CarrierAuthorityConfiguration());
+        modelBuilder.ApplyConfiguration(new InsurancePolicyConfiguration());
+        modelBuilder.ApplyConfiguration(new VehicleRegistrationConfiguration());
+        modelBuilder.ApplyConfiguration(new VehicleLookupConfiguration());
+        modelBuilder.ApplyConfiguration(new DriverLookupConfiguration());
+        modelBuilder.ApplyConfiguration(new UserLookupConfiguration());
 
         // Tenant isolation, API half. Never remove: RLS is the backstop, not the substitute.
         // The filter must reference this context instance's TenantId property (not a captured
@@ -61,5 +79,14 @@ public sealed class ComplianceDbContext(
         modelBuilder.Entity<TenantRuleSetApplication>().HasQueryFilter(a => a.TenantId == TenantId);
         modelBuilder.Entity<DestructionLogEntry>().HasQueryFilter(d => d.TenantId == TenantId);
         modelBuilder.Entity<ComplianceRecordReadModel>().HasQueryFilter(r => r.TenantId == TenantId);
+        modelBuilder.Entity<CarrierAuthority>().HasQueryFilter(a => a.TenantId == TenantId);
+        modelBuilder.Entity<InsurancePolicy>().HasQueryFilter(p => p.TenantId == TenantId);
+        modelBuilder.Entity<VehicleRegistration>().HasQueryFilter(r => r.TenantId == TenantId);
+
+        // And on the replicas. The lookup repositories' upserts bypass these deliberately and
+        // match on (key, tenant) explicitly — see LookupRepositories.
+        modelBuilder.Entity<VehicleLookup>().HasQueryFilter(v => v.TenantId == TenantId);
+        modelBuilder.Entity<DriverLookup>().HasQueryFilter(d => d.TenantId == TenantId);
+        modelBuilder.Entity<UserLookup>().HasQueryFilter(u => u.TenantId == TenantId);
     }
 }

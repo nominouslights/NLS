@@ -10,7 +10,7 @@ public static class CaMbRuleSets
     public const string Jurisdiction = "CA-MB";
 
     /// <summary>Every rule set this build knows, newest last. <c>POST rule-sets/publish</c> publishes any not yet in the table.</summary>
-    public static IReadOnlyList<RuleSetDocument> All => [V2026_10_01()];
+    public static IReadOnlyList<RuleSetDocument> All => [V2026_10_01(), V2026_10_12()];
 
     /// <summary>The newest in-code set — the fallback <c>GetActiveRules</c> answers with when a tenant has applied nothing.</summary>
     public static RuleSetDocument Current => All[^1];
@@ -97,4 +97,16 @@ public static class CaMbRuleSets
             Insurer: "MPI",
             MinimumLiabilityCad: 2_000_000m,
             ChangeNoticeDays: 15));
+
+    /// <summary>
+    /// Version 2 (2026-10-12): every version-1 value unchanged, plus the carrier-authority section
+    /// (SFC / insurance / registration renewal warnings, the NET-course window, the regulated-vehicle
+    /// seating threshold, plan re-acknowledgement) — MTI new-carrier page; HTA ss. 1(1), 312.2, 318.5.
+    /// </summary>
+    public static RuleSetDocument V2026_10_12() => V2026_10_01() with
+    {
+        Version = 2,
+        EffectiveFrom = new DateOnly(2026, 10, 12),
+        Authority = AuthorityRuleSection.Default,
+    };
 }

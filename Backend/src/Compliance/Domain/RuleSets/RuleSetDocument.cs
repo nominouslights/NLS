@@ -16,8 +16,15 @@ public sealed record RuleSetDocument(
     DriverQualificationRuleSection DriverQualification,
     FilingRuleSection Filing,
     ThresholdsRuleSection Thresholds,
-    InsuranceRuleSection Insurance)
+    InsuranceRuleSection Insurance,
+    AuthorityRuleSection? Authority = null)
 {
+    /// <summary>
+    /// The authority section in force: the set's own, or <see cref="AuthorityRuleSection.Default"/>
+    /// for a version published before the section existed (version 1).
+    /// </summary>
+    public AuthorityRuleSection EffectiveAuthority => Authority ?? AuthorityRuleSection.Default;
+
     /// <summary>Every value in the set, each under its stable key.</summary>
     public IReadOnlyList<RuleValue> Flatten() =>
         Hos.Flatten()
@@ -27,6 +34,7 @@ public sealed record RuleSetDocument(
             .Concat(Filing.Flatten())
             .Concat(Thresholds.Flatten())
             .Concat(Insurance.Flatten())
+            .Concat(EffectiveAuthority.Flatten())
             .ToList();
 
     /// <summary>The value under <paramref name="key"/>, or null when no such key exists in this set.</summary>

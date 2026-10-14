@@ -1,9 +1,13 @@
 using NorthernLink.Compliance.Application.Abstractions;
 using NorthernLink.Compliance.Application.Records;
+using NorthernLink.Compliance.Domain.Authority;
+using NorthernLink.Compliance.Domain.Insurance;
 using NorthernLink.Compliance.Domain.Numbering;
 using NorthernLink.Compliance.Domain.Records;
+using NorthernLink.Compliance.Domain.Registrations;
 using NorthernLink.Compliance.Domain.RegulatoryBasis;
 using NorthernLink.Compliance.Domain.RuleSets;
+using NorthernLink.Shared.Kernel;
 
 namespace NorthernLink.Compliance.Tests;
 
@@ -25,7 +29,10 @@ internal sealed class InMemoryComplianceStore :
     IDiscardableUnitOfWork,
     IDocumentSeriesRepository,
     ITenantComplianceSettingsRepository,
-    IDestructionLogRepository
+    IDestructionLogRepository,
+    ICarrierAuthorityRepository,
+    IInsurancePolicyRepository,
+    IVehicleRegistrationRepository
 {
     internal sealed record CommittedSeries(Guid Id, int LastSequence, int Version);
 
@@ -39,6 +46,13 @@ internal sealed class InMemoryComplianceStore :
         public List<ComplianceRecord> Records { get; } = [];
         public List<TenantComplianceSettings> Settings { get; } = [];
         public List<DestructionLogEntry> DestructionLog { get; } = [];
+        public List<CarrierAuthority> Authorities { get; } = [];
+        public List<InsurancePolicy> Policies { get; } = [];
+        public List<VehicleRegistration> Registrations { get; } = [];
+
+        /// <summary>Every domain event a successful save committed, in order — what the mapper would have seen.</summary>
+        public List<IDomainEvent> SavedEvents { get; } = [];
+
         public int ConcurrencyConflicts { get; set; }
     }
 
@@ -48,6 +62,9 @@ internal sealed class InMemoryComplianceStore :
     private readonly List<ComplianceRecord> _pendingRecords = [];
     private readonly List<TenantComplianceSettings> _pendingSettings = [];
     private readonly List<DestructionLogEntry> _pendingLog = [];
+    private readonly List<CarrierAuthority> _pendingAuthorities = [];
+    private readonly List<InsurancePolicy> _pendingPolicies = [];
+    private readonly List<VehicleRegistration> _pendingRegistrations = [];
 
     public InMemoryComplianceStore() : this(new SharedState())
     {
@@ -62,6 +79,10 @@ internal sealed class InMemoryComplianceStore :
     public List<ComplianceRecord> Records => _state.Records;
     public List<TenantComplianceSettings> Settings => _state.Settings;
     public List<DestructionLogEntry> DestructionLog => _state.DestructionLog;
+    public List<CarrierAuthority> Authorities => _state.Authorities;
+    public List<InsurancePolicy> Policies => _state.Policies;
+    public List<VehicleRegistration> Registrations => _state.Registrations;
+    public List<IDomainEvent> SavedEvents => _state.SavedEvents;
 
     public int SaveAttempts { get; private set; }
     public int ConcurrencyConflicts => _state.ConcurrencyConflicts;
@@ -158,13 +179,40 @@ internal sealed class InMemoryComplianceStore :
             _state.Series[(opened.TenantId, opened.Series, opened.Year)] = new CommittedSeries(opened.Id, opened.LastSequence, 1);
         }
 
+        // One authority per tenant; one Current policy / registration per vehicle — the unique
+        // and partial unique indexes. EF would throw a DbUpdateException (a 500); so does this.
+        if (_pendingAuthorities.Any(p => Authorities.Any(a => a.TenantId == p.TenantId)))
+        {
+            Discard();
+            throw new InvalidOperationException("Unique violation: IX_carrier_authorities_tenant_id");
+        }
+
+        if (Policies.Concat(_pendingPolicies)
+                .Where(p => p.Status == AuthorityDocumentStatus.Current)
+                .GroupBy(p => (p.TenantId, p.VehicleId))
+                .Any(g => g.Count() > 1)
+            || Registrations.Concat(_pendingRegistrations)
+                .Where(r => r.Status == AuthorityDocumentStatus.Current)
+                .GroupBy(r => (r.TenantId, r.VehicleId))
+                .Any(g => g.Count() > 1))
+        {
+            Discard();
+            throw new InvalidOperationException("Unique violation: one Current per vehicle");
+        }
+
         Records.AddRange(_pendingRecords);
         Settings.AddRange(_pendingSettings);
         DestructionLog.AddRange(_pendingLog);
+        Authorities.AddRange(_pendingAuthorities);
+        Policies.AddRange(_pendingPolicies);
+        Registrations.AddRange(_pendingRegistrations);
 
-        foreach (var record in Records)
+        IEnumerable<AggregateRoot> committedAggregates =
+            [.. Records, .. Settings, .. Authorities, .. Policies, .. Registrations];
+        foreach (var aggregate in committedAggregates)
         {
-            record.ClearDomainEvents();
+            SavedEvents.AddRange(aggregate.DomainEvents);
+            aggregate.ClearDomainEvents();
         }
 
         ClearPending();
@@ -186,7 +234,49 @@ internal sealed class InMemoryComplianceStore :
         _pendingRecords.Clear();
         _pendingSettings.Clear();
         _pendingLog.Clear();
+        _pendingAuthorities.Clear();
+        _pendingPolicies.Clear();
+        _pendingRegistrations.Clear();
     }
+
+    // --- Epic 2 aggregates -------------------------------------------------------------------------
+
+    Task<CarrierAuthority?> ICarrierAuthorityRepository.GetAsync(CancellationToken cancellationToken) =>
+        Task.FromResult(Authorities.Concat(_pendingAuthorities).FirstOrDefault(a => a.TenantId == QueryFilterTenantId));
+
+    public void Add(CarrierAuthority authority) => _pendingAuthorities.Add(authority);
+
+    Task<InsurancePolicy?> IInsurancePolicyRepository.GetByIdAsync(Guid id, CancellationToken cancellationToken) =>
+        Task.FromResult(Policies.FirstOrDefault(p => p.TenantId == QueryFilterTenantId && p.Id == id));
+
+    Task<InsurancePolicy?> IInsurancePolicyRepository.GetCurrentForVehicleAsync(Guid vehicleId, CancellationToken cancellationToken) =>
+        Task.FromResult(Policies.FirstOrDefault(p =>
+            p.TenantId == QueryFilterTenantId && p.VehicleId == vehicleId && p.Status == AuthorityDocumentStatus.Current));
+
+    Task<IReadOnlyList<InsurancePolicy>> IInsurancePolicyRepository.ListAsync(Guid? vehicleId, bool includeSuperseded, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<InsurancePolicy>>(Policies
+            .Where(p => p.TenantId == QueryFilterTenantId
+                && (vehicleId is null || p.VehicleId == vehicleId)
+                && (includeSuperseded || p.Status == AuthorityDocumentStatus.Current))
+            .ToList());
+
+    public void Add(InsurancePolicy policy) => _pendingPolicies.Add(policy);
+
+    Task<VehicleRegistration?> IVehicleRegistrationRepository.GetByIdAsync(Guid id, CancellationToken cancellationToken) =>
+        Task.FromResult(Registrations.FirstOrDefault(r => r.TenantId == QueryFilterTenantId && r.Id == id));
+
+    Task<VehicleRegistration?> IVehicleRegistrationRepository.GetCurrentForVehicleAsync(Guid vehicleId, CancellationToken cancellationToken) =>
+        Task.FromResult(Registrations.FirstOrDefault(r =>
+            r.TenantId == QueryFilterTenantId && r.VehicleId == vehicleId && r.Status == AuthorityDocumentStatus.Current));
+
+    Task<IReadOnlyList<VehicleRegistration>> IVehicleRegistrationRepository.ListAsync(Guid? vehicleId, bool includeSuperseded, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<VehicleRegistration>>(Registrations
+            .Where(r => r.TenantId == QueryFilterTenantId
+                && (vehicleId is null || r.VehicleId == vehicleId)
+                && (includeSuperseded || r.Status == AuthorityDocumentStatus.Current))
+            .ToList());
+
+    public void Add(VehicleRegistration registration) => _pendingRegistrations.Add(registration);
 
     // --- IDocumentSeriesRepository -----------------------------------------------------------------
 

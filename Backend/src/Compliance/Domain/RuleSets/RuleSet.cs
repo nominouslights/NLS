@@ -38,6 +38,9 @@ public sealed class RuleSet : Entity
     public ThresholdsRuleSection Thresholds { get; private set; }
     public InsuranceRuleSection Insurance { get; private set; }
 
+    /// <summary>Null on rows published before version 2 — read through <see cref="RuleSetDocument.EffectiveAuthority"/>.</summary>
+    public AuthorityRuleSection? Authority { get; private set; }
+
     public static RuleSet Publish(RuleSetDocument document, DateTimeOffset now) =>
         new()
         {
@@ -52,8 +55,9 @@ public sealed class RuleSet : Entity
             Filing = document.Filing,
             Thresholds = document.Thresholds,
             Insurance = document.Insurance,
+            Authority = document.Authority,
         };
 
     public RuleSetDocument ToDocument() => new(
-        Jurisdiction, Version, EffectiveFrom, Hos, Retention, Inspection, DriverQualification, Filing, Thresholds, Insurance);
+        Jurisdiction, Version, EffectiveFrom, Hos, Retention, Inspection, DriverQualification, Filing, Thresholds, Insurance, Authority);
 }

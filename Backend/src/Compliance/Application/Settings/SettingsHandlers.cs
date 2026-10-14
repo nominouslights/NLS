@@ -24,14 +24,26 @@ public sealed class GetComplianceSettingsQueryHandler(ITenantComplianceSettingsR
 /// Handles <see cref="UpdateComplianceSettingsCommand"/> — HTA s. 314 / M.R. 132/2024 s. 9 (the
 /// carrier's name and NSC number identify every document) and s. 318.8(2) (principal place of
 /// business). The save goes through the record repository's unit of work.
+/// <para>
+/// Once the carrier authority holds an NSC number it owns it: a PUT whose NSC differs is refused
+/// (409 <c>Compliance.Settings.NscNumberManagedByAuthority</c>) — echo the number GET returned.
+/// Until the authority records one, the field is still edited here.
+/// </para>
 /// </summary>
 public sealed class UpdateComplianceSettingsCommandHandler(
     ITenantComplianceSettingsRepository settings,
-    IComplianceRecordRepository unitOfWork)
+    IComplianceRecordRepository unitOfWork,
+    ICarrierAuthorityRepository authorities)
     : ICommandHandler<UpdateComplianceSettingsCommand>
 {
     public async Task<Result> Handle(UpdateComplianceSettingsCommand command, CancellationToken cancellationToken)
     {
+        if (await authorities.GetAsync(cancellationToken) is { NscNumber: { } authorityNsc }
+            && TenantComplianceSettings.NormalizedNscNumber(command.Details) != authorityNsc)
+        {
+            return Result.Failure(ComplianceSettingsErrors.NscNumberManagedByAuthority);
+        }
+
         var row = await settings.GetAsync(cancellationToken);
         if (row is null)
         {

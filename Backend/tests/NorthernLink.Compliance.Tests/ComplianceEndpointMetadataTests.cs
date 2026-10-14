@@ -88,6 +88,29 @@ public class ComplianceEndpointMetadataTests : IAsyncLifetime
     [InlineData("GET", "/api/compliance/settings")]
     [InlineData("PUT", "/api/compliance/settings")]
     [InlineData("POST", "/api/compliance/seed-defaults")]
+    [InlineData("GET", "/api/compliance/authority")]
+    [InlineData("POST", "/api/compliance/authority/sfc")]
+    [InlineData("POST", "/api/compliance/authority/sfc/{certificateId:guid}/certificate")]
+    [InlineData("GET", "/api/compliance/authority/sfc/{certificateId:guid}/certificate")]
+    [InlineData("POST", "/api/compliance/authority/nsc-number")]
+    [InlineData("PUT", "/api/compliance/authority/safety-rating")]
+    [InlineData("PUT", "/api/compliance/authority/intra-provincial")]
+    [InlineData("PUT", "/api/compliance/authority/routes")]
+    [InlineData("GET", "/api/compliance/vehicles")]
+    [InlineData("PUT", "/api/compliance/vehicles/{vehicleId:guid}/regulated")]
+    [InlineData("GET", "/api/compliance/insurance-policies")]
+    [InlineData("POST", "/api/compliance/insurance-policies")]
+    [InlineData("GET", "/api/compliance/insurance-policies/{id:guid}")]
+    [InlineData("POST", "/api/compliance/insurance-policies/{id:guid}/renew")]
+    [InlineData("POST", "/api/compliance/insurance-policies/{id:guid}/certificate")]
+    [InlineData("POST", "/api/compliance/insurance-policies/{id:guid}/filing-confirmation")]
+    [InlineData("GET", "/api/compliance/insurance-policies/{id:guid}/attachments/{slot}")]
+    [InlineData("GET", "/api/compliance/vehicle-registrations")]
+    [InlineData("POST", "/api/compliance/vehicle-registrations")]
+    [InlineData("GET", "/api/compliance/vehicle-registrations/{id:guid}")]
+    [InlineData("POST", "/api/compliance/vehicle-registrations/{id:guid}/renew")]
+    [InlineData("POST", "/api/compliance/vehicle-registrations/{id:guid}/document")]
+    [InlineData("GET", "/api/compliance/vehicle-registrations/{id:guid}/attachments/{slot}")]
     public void Every_compliance_endpoint_carries_the_ComplianceAccess_policy(string method, string pattern)
     {
         var endpoint = Endpoint(method, pattern);
@@ -118,7 +141,23 @@ public class ComplianceEndpointMetadataTests : IAsyncLifetime
     {
         // Guards the guard: an endpoint added to the group would otherwise be silently absent
         // from the Theory above.
-        Assert.Equal(25, _endpoints.Count);
+        Assert.Equal(48, _endpoints.Count);
+    }
+
+    [Theory]
+    [InlineData("/api/compliance/authority/sfc/{certificateId:guid}/certificate")]
+    [InlineData("/api/compliance/insurance-policies/{id:guid}/certificate")]
+    [InlineData("/api/compliance/insurance-policies/{id:guid}/filing-confirmation")]
+    [InlineData("/api/compliance/vehicle-registrations/{id:guid}/document")]
+    public void Multipart_upload_routes_disable_antiforgery(string pattern)
+    {
+        // Minimal APIs demand an antiforgery token for form binding unless the route opts out; the
+        // API sits behind the frontends' server-side proxy with bearer auth (the Drivers precedent).
+        var endpoint = Endpoint("POST", pattern);
+
+        var antiforgery = endpoint.Metadata.GetMetadata<Microsoft.AspNetCore.Antiforgery.IAntiforgeryMetadata>();
+        Assert.NotNull(antiforgery);
+        Assert.False(antiforgery.RequiresValidation);
     }
 
     [Fact]

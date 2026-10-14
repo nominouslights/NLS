@@ -19,7 +19,7 @@ internal static class JsonColumns
     public static readonly JsonSerializerOptions Options = Create();
 
     public static PropertyBuilder<T> HasJsonb<T>(this PropertyBuilder<T> builder)
-        where T : class
+        where T : class?
     {
         var converter = new ValueConverter<T, string>(
             value => JsonSerializer.Serialize(value, Options),

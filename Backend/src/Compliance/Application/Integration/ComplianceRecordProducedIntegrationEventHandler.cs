@@ -70,7 +70,9 @@ public sealed class ComplianceRecordProducedIntegrationEventHandler(
         using (AmbientTenant.Push(integrationEvent.TenantId))
         {
             var result = await sender.Send(
-                new RegisterRecordCommand(integrationEvent.TenantId, recordType, registration, ActorId: null), cancellationToken);
+                new RegisterRecordCommand(
+                    integrationEvent.TenantId, recordType, registration, ActorId: null, integrationEvent.SupersedesSourceRecordId),
+                cancellationToken);
 
             if (result.IsFailure)
             {

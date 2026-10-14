@@ -97,6 +97,27 @@ public sealed class TenantComplianceSettings : AggregateRoot, ITenantScoped
         return Result.Success();
     }
 
+    /// <summary>
+    /// Copies the NSC number the carrier authority now holds into the print header. Only the
+    /// <c>RecordNscNumber</c> handler calls this, in the same save as the authority change — the
+    /// authority is the system of record (see <see cref="ComplianceSettingsErrors.NscNumberManagedByAuthority"/>).
+    /// </summary>
+    public void CopyNscNumberFromAuthority(string nscNumber, Guid? actorId)
+    {
+        if (NscNumber == nscNumber)
+        {
+            return;
+        }
+
+        NscNumber = nscNumber;
+        ModifiedBy = actorId;
+        UpdatedAtUtc = DateTimeOffset.UtcNow;
+        Raise(new ComplianceSettingsUpdatedDomainEvent(Id, actorId));
+    }
+
+    /// <summary>The NSC number <paramref name="details"/> would set, normalised the way <see cref="Update"/> stores it.</summary>
+    public static string? NormalizedNscNumber(ComplianceSettingsDetails details) => Trimmed(details.NscNumber);
+
     private sealed record Normalized(string CarrierLegalName, string? NscNumber, string DocumentPrefix, string PrincipalPlaceOfBusiness, string? FileLocationNote);
 
     private Normalized Current() => new(CarrierLegalName, NscNumber, DocumentPrefix, PrincipalPlaceOfBusiness, FileLocationNote);
@@ -174,6 +195,16 @@ public static class ComplianceSettingsErrors
         "Compliance.Settings.NscNumberTooLong",
         $"The NSC number must be {TenantComplianceSettings.NscNumberMaxLength} characters or fewer.",
         BasisKeys.Mr132_2024_9);
+
+    /// <summary>
+    /// The carrier authority owns the NSC number (NL-SP-02 s. 2); the settings row only carries a
+    /// copy for print headers. A settings write that would change it is refused — record the
+    /// number with <c>POST /api/compliance/authority/nsc-number</c>, which updates both.
+    /// </summary>
+    public static readonly Error NscNumberManagedByAuthority = ComplianceError.Conflict(
+        "Compliance.Settings.NscNumberManagedByAuthority",
+        "The NSC number is recorded on the carrier authority. Change it with POST /api/compliance/authority/nsc-number; settings carry the same number for print headers.",
+        BasisKeys.Mr132_2024_9, BasisKeys.Plan2);
 
     public static readonly Error DocumentPrefixInvalid = ComplianceError.Validation(
         "Compliance.Settings.DocumentPrefixInvalid",

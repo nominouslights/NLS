@@ -173,6 +173,9 @@ public sealed class RuleSetConfiguration : IEntityTypeConfiguration<RuleSet>
         builder.Property(r => r.Thresholds).HasColumnName("thresholds").HasJsonb();
         builder.Property(r => r.Insurance).HasColumnName("insurance").HasJsonb();
 
+        // Nullable: version-1 rows predate the section (RuleSetDocument.EffectiveAuthority falls back).
+        builder.Property(r => r.Authority).HasColumnName("authority").HasJsonb().IsRequired(false);
+
         builder.HasIndex(r => new { r.Jurisdiction, r.Version }).IsUnique();
     }
 }

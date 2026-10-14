@@ -20,6 +20,9 @@ public sealed class RegisterRecordCommandHandler(RecordRegistrar registrar)
         }
 
         var definition = ComplianceRecordCatalogue.For(command.RecordType);
-        return registrar.RegisterAsync(command.TenantId, definition, command.Registration, command.ActorId, cancellationToken);
+        return command.SupersedesSourceRecordId is null
+            ? registrar.RegisterAsync(command.TenantId, definition, command.Registration, command.ActorId, cancellationToken)
+            : registrar.RegisterOrSupersedeAsync(
+                command.TenantId, definition, command.Registration, command.SupersedesSourceRecordId, command.ActorId, cancellationToken);
     }
 }

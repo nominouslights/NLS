@@ -35,6 +35,7 @@ public sealed record ActiveRulesResponse(
     FilingRuleSection Filing,
     ThresholdsRuleSection Thresholds,
     InsuranceRuleSection Insurance,
+    AuthorityRuleSection Authority,
     IReadOnlyList<RuleValue> Values);
 
 /// <summary>One rule value with its provenance.</summary>

@@ -19,12 +19,20 @@ using NorthernLink.Compliance.Application.Records.Supersede;
 using NorthernLink.Compliance.Application.RegulatoryBasis;
 using NorthernLink.Compliance.Application.RuleSets;
 using NorthernLink.Compliance.Application.Settings;
+using NorthernLink.Compliance.Application.Authority;
+using NorthernLink.Compliance.Application.Insurance;
+using NorthernLink.Compliance.Application.Registrations;
+using NorthernLink.Compliance.Application.Vehicles;
+using NorthernLink.Compliance.Domain.Signatures;
 using NorthernLink.Compliance.Infrastructure.Persistence;
 using NorthernLink.Compliance.Infrastructure.Persistence.Projections;
 using NorthernLink.Compliance.Infrastructure.Printing;
 using NorthernLink.Compliance.Infrastructure.Retention;
 using NorthernLink.Shared.EventBus;
 using NorthernLink.Shared.IntegrationEvents.Compliance;
+using NorthernLink.Shared.IntegrationEvents.Drivers;
+using NorthernLink.Shared.IntegrationEvents.Fleet;
+using NorthernLink.Shared.IntegrationEvents.Identity;
 using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Shared.Persistence.Auditing;
@@ -48,9 +56,11 @@ public static class ComplianceServiceCollectionExtensions
     /// The producer schemas whose outboxes carry <see cref="ComplianceRecordProducedIntegrationEvent"/>.
     /// Only modules with a schema today — Incidents and Grocery are stubs without an
     /// <c>outbox_messages</c> table, and polling a missing table would fail every tick; add them
-    /// here the day they get a DbContext.
+    /// here the day they get a DbContext. <c>compliance</c> itself is one: this module registers
+    /// its own R20/R21 documents (SFC, insurance, registration, later the plan) through the same
+    /// event, written to its own outbox by <see cref="ComplianceIntegrationEventMapper"/>.
     /// </summary>
-    public static readonly string[] RecordProducerSchemas = ["drivers", "fleet", "trips"];
+    public static readonly string[] RecordProducerSchemas = ["compliance", "drivers", "fleet", "trips"];
 
     public static IServiceCollection AddCompliance(
         this IServiceCollection services,
@@ -85,6 +95,18 @@ public static class ComplianceServiceCollectionExtensions
         services.AddScoped<IRetentionSweepSource, RetentionSweepSource>();
         services.AddScoped<RecordRegistrar>();
         services.AddScoped<ActiveRuleSetResolver>();
+        services.AddScoped<ICarrierAuthorityRepository, CarrierAuthorityRepository>();
+        services.AddScoped<IInsurancePolicyRepository, InsurancePolicyRepository>();
+        services.AddScoped<IVehicleRegistrationRepository, VehicleRegistrationRepository>();
+        services.AddScoped<IVehicleLookupRepository, VehicleLookupRepository>();
+        services.AddScoped<IDriverLookupRepository, DriverLookupRepository>();
+        services.AddScoped<IUserLookupRepository, UserLookupRepository>();
+
+        // Where a registered-record answer for one of this module's own documents is stamped —
+        // one target per source-id prefix (see ComplianceRecordRegisteredIntegrationEventHandler).
+        services.AddScoped<IRecordStampTarget, SfcRecordStampTarget>();
+        services.AddScoped<IRecordStampTarget, InsurancePolicyRecordStampTarget>();
+        services.AddScoped<IRecordStampTarget, VehicleRegistrationRecordStampTarget>();
 
         // Record prints (QuestPDF). The Community license must be set once, process-wide, before
         // any document is generated — a static assignment here guarantees it runs before the
@@ -119,12 +141,44 @@ public static class ComplianceServiceCollectionExtensions
         services.AddScoped<ICommandHandler<UpdateComplianceSettingsCommand>, UpdateComplianceSettingsCommandHandler>();
         services.AddScoped<ICommandHandler<SeedComplianceDefaultsCommand, SeedDefaultsResult>, SeedComplianceDefaultsCommandHandler>();
 
+        // Carrier authority (NL-SP-02 ss. 1–2), vehicles, insurance and registration (s. 12.1, R20).
+        services.AddScoped<IQueryHandler<GetCarrierAuthorityQuery, CarrierAuthorityResponse>, GetCarrierAuthorityQueryHandler>();
+        services.AddScoped<ICommandHandler<RecordSfcCommand>, RecordSfcCommandHandler>();
+        services.AddScoped<ICommandHandler<RecordNscNumberCommand>, RecordNscNumberCommandHandler>();
+        services.AddScoped<ICommandHandler<SetSafetyRatingCommand>, SetSafetyRatingCommandHandler>();
+        services.AddScoped<ICommandHandler<DeclareIntraProvincialCommand>, DeclareIntraProvincialCommandHandler>();
+        services.AddScoped<ICommandHandler<SetOperatingRoutesCommand>, SetOperatingRoutesCommandHandler>();
+        services.AddScoped<ICommandHandler<AttachSfcCertificateCommand>, AttachSfcCertificateCommandHandler>();
+        services.AddScoped<IQueryHandler<GetSfcAttachmentQuery, AttachmentRef>, GetSfcAttachmentQueryHandler>();
+        services.AddScoped<ICommandHandler<SetVehicleRegulatedCommand>, SetVehicleRegulatedCommandHandler>();
+        services.AddScoped<IQueryHandler<ListComplianceVehiclesQuery, IReadOnlyList<ComplianceVehicleResponse>>, ListComplianceVehiclesQueryHandler>();
+        services.AddScoped<ICommandHandler<RecordInsurancePolicyCommand, Guid>, RecordInsurancePolicyCommandHandler>();
+        services.AddScoped<ICommandHandler<RenewInsurancePolicyCommand, Guid>, RenewInsurancePolicyCommandHandler>();
+        services.AddScoped<ICommandHandler<AttachInsuranceDocumentCommand>, AttachInsuranceDocumentCommandHandler>();
+        services.AddScoped<IQueryHandler<GetInsurancePolicyQuery, InsurancePolicyResponse>, GetInsurancePolicyQueryHandler>();
+        services.AddScoped<IQueryHandler<ListInsurancePoliciesQuery, IReadOnlyList<InsurancePolicyResponse>>, ListInsurancePoliciesQueryHandler>();
+        services.AddScoped<IQueryHandler<GetInsuranceAttachmentQuery, AttachmentRef>, GetInsuranceAttachmentQueryHandler>();
+        services.AddScoped<ICommandHandler<RecordVehicleRegistrationCommand, Guid>, RecordVehicleRegistrationCommandHandler>();
+        services.AddScoped<ICommandHandler<RenewVehicleRegistrationCommand, Guid>, RenewVehicleRegistrationCommandHandler>();
+        services.AddScoped<ICommandHandler<AttachRegistrationDocumentCommand>, AttachRegistrationDocumentCommandHandler>();
+        services.AddScoped<IQueryHandler<GetVehicleRegistrationQuery, VehicleRegistrationResponse>, GetVehicleRegistrationQueryHandler>();
+        services.AddScoped<IQueryHandler<ListVehicleRegistrationsQuery, IReadOnlyList<VehicleRegistrationResponse>>, ListVehicleRegistrationsQueryHandler>();
+        services.AddScoped<IQueryHandler<GetRegistrationAttachmentQuery, AttachmentRef>, GetRegistrationAttachmentQueryHandler>();
+
         // 4. Integration event consumer — the record registry's intake. The produced event lives
         //    in IntegrationEvents/Compliance (routing key compliance.compliance-record-produced),
         //    but it is written to the PRODUCER's outbox, so the poller is pointed at those schemas
         //    explicitly (OnProducedBy) rather than at the key's own "compliance" segment.
         services.AddOutboxPollingConsumer<ComplianceDbContext>(SchemaName, subscriptions => subscriptions
-            .OnProducedBy<ComplianceRecordProducedIntegrationEvent, ComplianceRecordProducedIntegrationEventHandler>(RecordProducerSchemas));
+            .OnProducedBy<ComplianceRecordProducedIntegrationEvent, ComplianceRecordProducedIntegrationEventHandler>(RecordProducerSchemas)
+            // Fan-out, not status-tracked: every outbox row has ONE processing_status, so a second
+            // status consumer of a key steals rows from the first. Trips already consumes the
+            // vehicle and driver streams and Budgeting the user stream; the registered answer is
+            // fan-out so a future producer module can consume it beside this self-consumer.
+            .OnFanOut<ComplianceRecordRegisteredIntegrationEvent, ComplianceRecordRegisteredIntegrationEventHandler>()
+            .OnFanOut<VehicleChangedIntegrationEvent, VehicleChangedIntegrationEventHandler>()
+            .OnFanOut<DriverChangedIntegrationEvent, DriverChangedIntegrationEventHandler>()
+            .OnFanOut<UserChangedIntegrationEvent, UserChangedIntegrationEventHandler>());
 
         // 5. Read-side projections — one worker polls compliance.event_journal and upserts
         //    the read-model rows for the aggregates the batch touched.

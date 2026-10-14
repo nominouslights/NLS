@@ -139,12 +139,16 @@ public static class BasisKeys
     public const string MtiDriverLicenceDisclosure = "MTI.driver-licence-disclosure";
     public const string MtiGuideAppendixE = "MTI.guide-appendix-e";
     public const string MtiGuideAppendixF = "MTI.guide-appendix-f";
+    public const string MtiNewCarrier = "MTI.new-carrier";
     public const string MpiDriverAbstractRequest = "MPI.driver-abstract-request";
     public const string TcEld = "TC.eld";
     public const string TcEldCertifiedList = "TC.eld-certified-list";
     public const string TcRecalls = "TC.recalls";
 
     // --- Safety Plan NL-SP-02 sections ----------------------------------------------------------
+    public const string Plan1 = "NLSP02.1";
+    public const string PlanDeclaration = "NLSP02.Declaration";
+    public const string PlanDesignations = "NLSP02.Designations";
     public const string Plan2 = "NLSP02.2";
     public const string Plan3_2 = "NLSP02.3.2";
     public const string Plan3_3 = "NLSP02.3.3";

@@ -31,6 +31,13 @@ public static class ComplianceError
     public static Error Validation(string code, string message, params string[] basisKeys) =>
         Register(Error.Validation(code, message), basisKeys);
 
+    /// <summary>
+    /// The caller is authenticated and inside <c>ComplianceAccess</c>, but the plan reserves this
+    /// act for a narrower signatory (the Owner signs the Safety Plan) — a 403, not a 401.
+    /// </summary>
+    public static Error Forbidden(string code, string message, params string[] basisKeys) =>
+        Register(Error.Forbidden(code, message), basisKeys);
+
     /// <summary>The basis keys registered for an error code; empty for a code this module never defined.</summary>
     public static IReadOnlyList<string> BasisKeysFor(string code) =>
         BasisByCode.TryGetValue(code, out var keys) ? keys : [];

@@ -22,12 +22,12 @@ public class RuleSetAndSeedHandlerTests
         var first = await handler.Handle(new PublishRuleSetsCommand(TestCompliance.ActorId), CancellationToken.None);
         var second = await handler.Handle(new PublishRuleSetsCommand(TestCompliance.ActorId), CancellationToken.None);
 
-        Assert.True(Assert.Single(first.Value.RuleSets).Created);
-        Assert.False(Assert.Single(second.Value.RuleSets).Created);
-        Assert.Equal(first.Value.RuleSets[0].Id, second.Value.RuleSets[0].Id);
-        var published = Assert.Single(_reference.RuleSets);
-        Assert.Equal("CA-MB", published.Jurisdiction);
-        Assert.Equal(1, published.Version);
+        Assert.Equal(CaMbRuleSets.All.Count, first.Value.RuleSets.Count);
+        Assert.All(first.Value.RuleSets, r => Assert.True(r.Created));
+        Assert.All(second.Value.RuleSets, r => Assert.False(r.Created));
+        Assert.Equal(first.Value.RuleSets.Select(r => r.Id), second.Value.RuleSets.Select(r => r.Id));
+        Assert.Equal([1, 2], _reference.RuleSets.Select(r => r.Version).Order());
+        Assert.All(_reference.RuleSets, r => Assert.Equal("CA-MB", r.Jurisdiction));
     }
 
     [Fact]
@@ -119,7 +119,7 @@ public class RuleSetAndSeedHandlerTests
     [Fact]
     public async Task Settings_update_creates_when_absent_and_validates_the_prefix()
     {
-        var handler = new UpdateComplianceSettingsCommandHandler(_store, _store);
+        var handler = new UpdateComplianceSettingsCommandHandler(_store, _store, _store);
 
         var bad = await handler.Handle(new UpdateComplianceSettingsCommand(TestCompliance.TenantId, new ComplianceSettingsDetails
         {

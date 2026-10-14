@@ -79,6 +79,9 @@ public static class ComplianceEndpoints
         compliance.MapPut("settings", UpdateSettings);
         compliance.MapPost("seed-defaults", SeedDefaults);
 
+        // Epic 2 — carrier authority, vehicles, insurance and registration (AuthorityEndpoints.cs).
+        compliance.MapAuthorityEndpoints();
+
         return app;
     }
 
