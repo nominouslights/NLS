@@ -184,7 +184,7 @@ validation failures. Example: `Backend/src/Fleet/Domain/Vehicles/Vin.cs`.
 | **NIHB Medical Transport** | Voucher-based bookings, Tier 1/2/3 pricing, no-minimum override |
 | **Grocery & Parcel Services** | Weekly grocery run, parcel service, pickup hub logistics |
 | **Billing & Accounting Integration** | QuickBooks Online sync, invoicing, payment reconciliation, client-facing accrual statement export |
-| **Notifications** | SendGrid (email), Twilio (SMS), push notifications |
+| **Notifications** | Transactional email (Postmark in the built system; SendGrid/Twilio/push were the original plan), templates and dispatch history; event-driven sends — community "trip at risk", and the hours-of-service **compliance alerts** (ELD malfunction reported/resolved → `ComplianceAccess`, driver placed out of service → compliance + dispatch) addressed from its own `user_lookup` replica of Identity users |
 | **Reporting & Analytics** | Cross-domain dashboards for Admin Web App and Owner Desktop App |
 | **Crew & Workforce Visibility** | Client-requested: real-time location/status of client crew across ALL transport modes and carriers, not just Northern Link service. See 5.1. |
 | **Budget & Financial Control (Zero-Based Budgeting)** | Every cost and revenue transaction tagged to a Budget Code; codes re-justified from zero each period rather than carried forward. See 5.3. |
@@ -870,6 +870,30 @@ the roadmap locks them in:
     (e) **JournalEntry and BillPayment are out of v1.** Sources are Purchase, Bill and
     VendorCredit: a journal entry needs a chart-of-accounts sync, and a bill payment would
     double-count the bill it pays.
+18. **Notifications keeps a `user_lookup` replica; compliance alerts go by email** — **Decided
+    (2026-10-11, HOS plan PR 7)**. The hours-of-service alerts (ELD malfunction reported and
+    resolved, driver placed out of service) are emails from the Notifications module, driven by
+    the Drivers module's `EldMalfunctionChanged` / `DriverOutOfServiceChanged` integration events
+    and addressed by **role** — `ComplianceAccess` for ELD, `ComplianceAccess` + `DispatchAccess`
+    for out-of-service — never by a hard-coded address. That audience comes from
+    `notifications.user_lookup`, Notifications' own replica of Identity users on Budgeting's exact
+    model (fed by `UserChangedIntegrationEvent`, with a **mandatory** backfill from
+    `identity.users` in the same migration), because a domain library never reads another's
+    tables. Each alert is recorded as an `EmailDispatch` of the Notifications-only
+    `ComplianceAlert` service type under a **deterministic id derived from the event id**, so a
+    redelivered event sends nothing twice; no recipients is logged, not failed. Two facts about
+    delivery that this decision made visible and that future consumers must respect: (a) a
+    producer outbox row carries **one** `processing_status` shared by every consuming module —
+    with two subscribers to a key (Budgeting and Notifications both consume
+    `identity.user-changed`), whichever module's `OutboxPollingConsumer` polls first runs **both**
+    modules' handlers (it resolves every registered `IIntegrationEventHandler<TEvent>`) before
+    marking the row, so nothing is lost but a failure in either backs off the row for both; and
+    (b) rows already processed by the first subscriber **never replay** for a later one, which is
+    why the backfill is mandatory rather than a convenience. The Dispatch Board's compliance tile
+    reads `GET /api/drivers/hos/alerts/today` (Drivers owns the facts); its trips-at-risk figure is
+    Trips' to serve, deliberately not folded in here. The out-of-service event carries no driver
+    name (the aggregate holds none), so that email names the driver by record id — a known gap
+    to close with a name snapshot on the event, as `EldMalfunctionReport` already does.
 
 ---
 

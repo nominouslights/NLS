@@ -31,6 +31,10 @@ public static class HosLocalTime
     public static DateOnly DateOf(DateTimeOffset instant) =>
         DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(instant, Zone).DateTime);
 
+    /// <summary>The instant as local wall-clock text for an alert — "Sep 14, 15:00".</summary>
+    public static string DateAndClock(DateTimeOffset instant) =>
+        TimeZoneInfo.ConvertTime(instant, Zone).ToString("MMM d, HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+
     /// <summary>Parses a transcription's "HH:mm" (or "HH:mm:ss"); anything else is <see cref="HosErrors.InvalidTime"/>.</summary>
     public static Result<TimeOnly> ParseTime(string? value) =>
         TimeOnly.TryParseExact(value?.Trim(), ["HH:mm", "HH:mm:ss", "H:mm"], null, System.Globalization.DateTimeStyles.None, out var time)

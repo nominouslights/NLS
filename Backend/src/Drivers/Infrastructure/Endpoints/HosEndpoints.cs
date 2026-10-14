@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using NorthernLink.Drivers.Application.Drivers.SelfAccess;
 using NorthernLink.Drivers.Application.Hos;
+using NorthernLink.Drivers.Application.Hos.Alerts;
 using NorthernLink.Drivers.Application.Hos.DutyDays.Certify;
 using NorthernLink.Drivers.Application.Hos.DutyDays.GetOne;
 using NorthernLink.Drivers.Application.Hos.DutyDays.GetRange;
@@ -564,6 +565,26 @@ public static class HosEndpoints
         }
 
         var result = await sender.Query(new GetHosRosterStatusQuery(tenantId), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>
+    /// Today's compliance alerts for the Dispatch Board tile and the Compliance screen — mapped
+    /// by <see cref="DriversEndpoints"/> onto the DriverRosterAccess group beside the roster
+    /// batch. Counts and rows for near/over an hours limit, out of service, open ELD
+    /// malfunctions, yesterday's uncertified records and unacknowledged exceptions. The
+    /// board's "trips at risk" figure is deliberately absent: Trips owns the assignment and the
+    /// fitness verdict, so it serves that number itself.
+    /// </summary>
+    internal static async Task<IResult> GetTodayAlerts(
+        ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(new GetHosAlertsQuery(tenantId), cancellationToken);
         return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
     }
 
