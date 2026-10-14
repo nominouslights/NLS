@@ -1,8 +1,10 @@
 import type { DutyStatus as DutyState, StatusKind } from "../theme";
+import type { HosExceptionKindWire, HosExceptionStatus } from "../api/hos";
 import {
   addDays,
   DEFAULT_HOS_BANDS,
   evaluate,
+  HOS_LIMITS,
   HosCalendar,
   HosWire,
   type BlockingReason,
@@ -98,6 +100,33 @@ export function formatDateOnly(date: DateOnly): string {
 
 export function unixOfUtc(iso: string): number {
   return Math.floor(Date.parse(iso) / 1000);
+}
+
+/** ISO UTC timestamp (what the API accepts) for a Unix instant. */
+export function isoOfUnix(unix: number): string {
+  return new Date(unix * 1000).toISOString();
+}
+
+// en-US rather than en-CA: en-CA abbreviates months with a trailing period ("Oct."), which
+// reads as a sentence break inside a chip label.
+const dateTimeFmt = new Intl.DateTimeFormat("en-US", {
+  timeZone: HOS_TIME_ZONE,
+  hourCycle: "h23",
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+/** Local (America/Winnipeg) "Oct 12, 14:00" for an ISO UTC timestamp; "—" when malformed. */
+export function formatDateTimeUtc(iso: string): string {
+  const ms = Date.parse(iso);
+  return Number.isNaN(ms) ? "—" : dateTimeFmt.format(new Date(ms));
+}
+
+/** The local date ("yyyy-MM-dd") and wall clock ("HH:MM") of a Unix instant in the HOS zone — the modals' default "now". */
+export function localDateTimeOf(unix: number): { date: DateOnly; time: string } {
+  return { date: HOS_CALENDAR.dayOf(unix), time: formatClock(unix) };
 }
 
 /** Wall seconds "as if UTC" of a Unix instant in the HOS zone. */
@@ -207,6 +236,64 @@ const BLOCKING_SHORT: Record<BlockingReason, string> = {
 
 export function blockingShort(reason: BlockingReason): string {
   return BLOCKING_SHORT[reason] ?? String(reason);
+}
+
+// ---- Compliance records: exceptions, personal conveyance -------------------------------
+
+/** A chip spec: colour kind + glyph + label, always all three. */
+export interface ChipSpec {
+  kind: StatusKind;
+  glyph: string;
+  label: string;
+}
+
+/**
+ * One chip per exception status. Declared and Acknowledged are both "in force" to the engine,
+ * so each carries its own glyph as well as its kind: ◐ awaiting dispatch, ● acknowledged,
+ * ✓ approved (a deferral), ▲ rejected, — withdrawn.
+ */
+export const EXCEPTION_STATUS_CHIP: Record<HosExceptionStatus, { kind: StatusKind; glyph: string }> = {
+  Declared: { kind: "soon", glyph: "◐" },
+  Acknowledged: { kind: "info", glyph: "●" },
+  Approved: { kind: "ontime", glyph: "✓" },
+  Rejected: { kind: "over", glyph: "▲" },
+  Withdrawn: { kind: "off", glyph: "—" },
+};
+
+export function exceptionStatusChip(status: HosExceptionStatus): ChipSpec {
+  const c = EXCEPTION_STATUS_CHIP[status] ?? { kind: "off" as StatusKind, glyph: "—" };
+  return { ...c, label: status };
+}
+
+/** The wire kind string is already the label the regulation uses; "Off-duty deferral (CO approved)" reads as "Off-duty deferral". */
+export function exceptionKindLabel(kind: HosExceptionKindWire): string {
+  return kind === HosWire.OffDutyDeferralKind ? "Off-duty deferral" : kind;
+}
+
+/** Statuses the engine honours — the exception is in force. */
+export function exceptionInForce(status: HosExceptionStatus): boolean {
+  return status === "Declared" || status === "Acknowledged" || status === "Approved";
+}
+
+/** The regulation's daily personal-conveyance allowance in km (s.1: 75.0 km). */
+export const PC_DAILY_LIMIT_KM = HOS_LIMITS.pcDailyLimitDecikm / 10;
+
+/** Where the PC caution band begins — the tablet's ◐ at 60 km (owner default). */
+export const PC_CAUTION_KM = 60;
+
+/**
+ * One day's personal-conveyance distance as a verdict: ✓ under 60 km, ◐ "n km left" from
+ * 60 to 74.9, ▲ at 75 and beyond (the remainder is reclassified on-duty by the engine).
+ */
+export function pcDayVerdict(km: number): ChipSpec {
+  const shown = `${km.toFixed(1)} km`;
+  if (km >= PC_DAILY_LIMIT_KM) {
+    return { kind: "over", glyph: "▲", label: `${shown} — ${PC_DAILY_LIMIT_KM} km reached, remainder counts as on-duty` };
+  }
+  if (km >= PC_CAUTION_KM) {
+    return { kind: "soon", glyph: "◐", label: `${shown} — ${(PC_DAILY_LIMIT_KM - km).toFixed(1)} km left` };
+  }
+  return { kind: "ontime", glyph: "✓", label: shown };
 }
 
 // ---- Gauge figures -----------------------------------------------------------------

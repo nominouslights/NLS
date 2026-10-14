@@ -8,11 +8,13 @@ import { incidents } from "@/lib/data";
 import { getClaims } from "@/lib/auth";
 import { inspectionDue } from "@/lib/inspectionGate";
 import { startLedger } from "@/lib/hos/ledger";
+import { useHosLedger } from "@/lib/hos/useHosLedger";
 import { startSync } from "@/lib/sync/queue";
 import { useInspectionStoreHydrated } from "@/lib/useInspectionStore";
 import TopBar from "@/components/TopBar";
 import DutyRail from "@/components/DutyRail";
 import HosAlerts from "@/components/HosAlerts";
+import OutOfServiceScreen from "@/components/OutOfServiceScreen";
 import Today from "@/components/screens/Today";
 import Trips from "@/components/screens/Trips";
 import Manifest from "@/components/screens/Manifest";
@@ -75,6 +77,12 @@ export default function Console() {
 
   const openIncidents = incidents.filter((i) => i.status !== "Closed").length;
 
+  // OUT OF SERVICE takes the whole frame below the bar: no rail, no screens, no trip to start.
+  // The declaration is the server's (through the ledger); the notice offers a read-only Hours
+  // and the dispatch number, and nothing else. The bar stays so the ✕ chip and the sync pill
+  // are still on screen.
+  const { outOfService } = useHosLedger();
+
   return (
     <div
       style={{
@@ -88,50 +96,57 @@ export default function Console() {
     >
       <TopBar />
 
-      <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
-        <DutyRail
-          active={screen}
-          onSelect={setScreen}
-          collapsed={railCollapsed}
-          onToggleCollapsed={() => setRailCollapsed((c) => !c)}
-          pendingIncidents={openIncidents}
-          inspectionDue={due}
-        />
-
-        <div style={{ flex: 1, minWidth: 0, background: colors.mainBg, display: "flex", flexDirection: "column" }}>
-          {/* The hours alerts: a modal at 60/30/0 minutes and the out-of-hours banner, on
-              every screen — a driver who is out of hours must not be able to navigate away
-              from being told so. */}
+      {outOfService !== null ? (
+        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
           <HosAlerts />
-          <div style={{ flex: 1, minHeight: 0 }}>
-          {screen === "today" && (
-            <Today
-              onOpenTrip={(id) => {
-                setActiveScreenTripId(id);
-                setScreen("manifest");
-              }}
-              onStartInspection={startInspection}
-            />
-          )}
-          {screen === "trips" && (
-            <Trips
-              onOpenManifest={(id) => {
-                setActiveScreenTripId(id);
-                setScreen("manifest");
-              }}
-            />
-          )}
-          {screen === "manifest" && (
-            <Manifest tripId={activeScreenTripId} onStartInspection={startInspection} />
-          )}
-          {screen === "inspection" && <Inspection mode={inspectionMode} />}
-          {screen === "hours" && <Hours />}
-          {screen === "incidents" && <Incidents />}
-          {screen === "vehicle" && <Vehicle />}
-          {screen === "profile" && <Profile />}
+          <OutOfServiceScreen record={outOfService} />
+        </div>
+      ) : (
+        <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
+          <DutyRail
+            active={screen}
+            onSelect={setScreen}
+            collapsed={railCollapsed}
+            onToggleCollapsed={() => setRailCollapsed((c) => !c)}
+            pendingIncidents={openIncidents}
+            inspectionDue={due}
+          />
+
+          <div style={{ flex: 1, minWidth: 0, background: colors.mainBg, display: "flex", flexDirection: "column" }}>
+            {/* The hours alerts: a modal at 60/30/0 minutes and the out-of-hours banner, on
+                every screen — a driver who is out of hours must not be able to navigate away
+                from being told so. */}
+            <HosAlerts />
+            <div style={{ flex: 1, minHeight: 0 }}>
+              {screen === "today" && (
+                <Today
+                  onOpenTrip={(id) => {
+                    setActiveScreenTripId(id);
+                    setScreen("manifest");
+                  }}
+                  onStartInspection={startInspection}
+                />
+              )}
+              {screen === "trips" && (
+                <Trips
+                  onOpenManifest={(id) => {
+                    setActiveScreenTripId(id);
+                    setScreen("manifest");
+                  }}
+                />
+              )}
+              {screen === "manifest" && (
+                <Manifest tripId={activeScreenTripId} onStartInspection={startInspection} />
+              )}
+              {screen === "inspection" && <Inspection mode={inspectionMode} />}
+              {screen === "hours" && <Hours />}
+              {screen === "incidents" && <Incidents />}
+              {screen === "vehicle" && <Vehicle />}
+              {screen === "profile" && <Profile />}
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

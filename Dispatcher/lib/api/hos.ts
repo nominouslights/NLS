@@ -78,19 +78,36 @@ export interface DutyDaySummary {
   segments: DutySegmentRecord[];
   events: DutyEventRecord[];
   violations: HosViolation[];
+  /** The exceptions in force on the day — the ones the engine honoured (Declared, Acknowledged or Approved). */
+  exceptions: HosExceptionRecord[];
+  /** An out-of-service declaration overlapping the day, or null. */
+  outOfService: OutOfServiceRecord | null;
   label: string;
 }
 
-/** Reserved for the out-of-service declaration (next PR); always null today. */
+/** The out-of-service declaration in force (status) or overlapping a day (summaries) — OutOfServiceResponse. */
 export interface OutOfServiceRecord {
+  id: string;
   fromUtc: string;
   untilUtc: string | null;
   reason: string;
 }
 
+/** The compliance officer's prior-records attestation (PriorRecordsResponse, s.82(1)(f)). */
+export interface PriorRecordsRecord {
+  coveredThroughDate: string; // DateOnly
+  attestedAtUtc: string;
+  attestedByUserId: string;
+  note: string | null;
+  worksForOtherCarriers: boolean;
+}
+
 /** A driver's standing right now (HosStatusResponse). `evaluation` is the
  *  engine's HosEvaluation verbatim. recordsOnFile=false means the ledger does
- *  not cover the regulation's 14-day window (not dispatchable). */
+ *  not cover the regulation's 14-day window (not dispatchable). `outOfService`
+ *  is the declaration in force (null when none); `eldMalfunctionOpen` is
+ *  paper-log mode (a warning, never a block); `priorRecords` is null until a
+ *  compliance officer attests. */
 export interface HosStatus {
   driverId: string;
   label: string;
@@ -100,7 +117,208 @@ export interface HosStatus {
   knownFromUtc: string | null;
   outOfService: OutOfServiceRecord | null;
   eldMalfunctionOpen: boolean;
+  priorRecords: PriorRecordsRecord | null;
   evaluation: HosEvaluation;
+}
+
+// ---------------------------------------------------------------------------
+// Compliance records (ComplianceResponses.cs) — exceptions, out-of-service,
+// ELD malfunctions, findings, the audit. Status strings are enum member names.
+// ---------------------------------------------------------------------------
+
+/** The kind strings the API emits and accepts (HosWire exception kinds). */
+export type HosExceptionKindWire = "Adverse driving conditions" | "Emergency" | "Off-duty deferral (CO approved)";
+
+/** The two kinds a driver (or dispatch for them) may declare; a deferral goes through the compliance route. */
+export type DeclarableExceptionKind = "Adverse driving conditions" | "Emergency";
+
+export type HosExceptionStatus = "Declared" | "Acknowledged" | "Approved" | "Rejected" | "Withdrawn";
+
+/** An hours-of-service exception as the API shows it (HosExceptionResponse).
+ *  `applying` is true while the rule engine honours it; `extraDrivingMinutes`
+ *  is set for adverse conditions only, `deferredOffDutyMinutes` for a deferral only. */
+export interface HosExceptionRecord {
+  id: string;
+  driverId: string;
+  kind: HosExceptionKindWire;
+  status: HosExceptionStatus;
+  applying: boolean;
+  tripId: string | null;
+  declaredAtUtc: string;
+  declaredByUserId: string;
+  effectiveFromUtc: string;
+  effectiveToUtc: string | null;
+  reason: string;
+  location: string | null;
+  notKnownBeforeDeparture: boolean;
+  extraDrivingMinutes: number | null;
+  deferredOffDutyMinutes: number | null;
+  eldRemarkRecorded: boolean;
+  dispatchAcknowledgedAtUtc: string | null;
+  dispatchAcknowledgedByUserId: string | null;
+  approvedAtUtc: string | null;
+  approvedByUserId: string | null;
+  closedAtUtc: string | null;
+  closedByUserId: string | null;
+  closureNote: string | null;
+}
+
+/** POST …/hos/exceptions body (DeclareHosExceptionRequest). For adverse
+ *  conditions `notKnownBeforeDeparture` must be true and `extraDrivingMinutes`
+ *  is required (1–120). `effectiveFromUtc` is within the last 24 hours. */
+export interface DeclareExceptionInput {
+  kind: DeclarableExceptionKind;
+  effectiveFromUtc: string;
+  reason: string;
+  effectiveToUtc?: string | null;
+  location?: string | null;
+  tripId?: string | null;
+  notKnownBeforeDeparture?: boolean;
+  extraDrivingMinutes?: number | null;
+  eldRemarkRecorded?: boolean;
+}
+
+/** POST …/hos/exceptions/deferral body (ApproveDeferralRequest) — compliance
+ *  roles only. `tripId` is required; `effectiveFromUtc` must be in the future
+ *  and within seven days; `deferredOffDutyMinutes` is 1–120. */
+export interface ApproveDeferralInput {
+  tripId: string;
+  effectiveFromUtc: string;
+  deferredOffDutyMinutes: number;
+  reason: string;
+  location?: string | null;
+  eldRemarkRecorded?: boolean;
+}
+
+export type OutOfServiceStatus = "Active" | "Lifted";
+
+/** An out-of-service declaration as the API shows it (OutOfServiceRecordResponse).
+ *  `active` is whether it is in force right now; `effectiveUntilUtc` is the lift
+ *  instant once lifted, else `untilUtc` (null = until lifted). */
+export interface OutOfServiceDeclaration {
+  id: string;
+  driverId: string;
+  status: OutOfServiceStatus;
+  active: boolean;
+  declaredAtUtc: string;
+  recordedAtUtc: string;
+  recordedByUserId: string;
+  untilUtc: string | null;
+  effectiveUntilUtc: string | null;
+  reason: string;
+  evidence: string | null;
+  liftedAtUtc: string | null;
+  liftedByUserId: string | null;
+  liftReason: string | null;
+}
+
+/** POST …/out-of-service body (RecordOutOfServiceRequest). `untilUtc` omitted
+ *  means 72 hours after `declaredAtUtc`; `openEnded` true means until lifted. */
+export interface RecordOutOfServiceInput {
+  declaredAtUtc: string;
+  reason: string;
+  untilUtc?: string | null;
+  openEnded?: boolean;
+  evidence?: string | null;
+}
+
+export type EldMalfunctionStatus = "Open" | "Resolved";
+
+/** An ELD malfunction report as the API shows it (EldMalfunctionResponse). */
+export interface EldMalfunctionRecord {
+  id: string;
+  driverId: string;
+  vehicleId: string | null;
+  code: string;
+  status: EldMalfunctionStatus;
+  noticedAtUtc: string;
+  reportedAtUtc: string;
+  reportedByUserId: string;
+  description: string;
+  resolvedAtUtc: string | null;
+  resolvedByUserId: string | null;
+  resolutionNote: string | null;
+}
+
+/** POST …/hos/eld-malfunctions body (ReportEldMalfunctionRequest). `code` is what the device displayed (≤ 32 chars). */
+export interface ReportEldMalfunctionInput {
+  code: string;
+  noticedAtUtc: string;
+  description: string;
+  vehicleId?: string | null;
+}
+
+export type FindingSeverity = "Minor" | "Major" | "Severe";
+export type FindingStatus = "Open" | "Corrected" | "Closed";
+export type FindingSource = "Audit" | "Enforcement" | "Auto";
+
+/** A compliance finding as the API shows it (ComplianceFindingResponse). `rule`
+ *  is an HosRule name or Falsification / Tampering / TwoRecords / OutOfServiceDeclared. */
+export interface ComplianceFindingRecord {
+  id: string;
+  driverId: string;
+  localDate: string;
+  rule: string;
+  severity: FindingSeverity;
+  status: FindingStatus;
+  source: FindingSource;
+  description: string;
+  followUpNote: string | null;
+  openedAtUtc: string;
+  openedByUserId: string;
+  closedAtUtc: string | null;
+  closedByUserId: string | null;
+}
+
+/** POST …/findings body (OpenFindingRequest). `source` defaults to Audit server-side. */
+export interface OpenFindingInput {
+  localDate: string;
+  rule: string;
+  severity: FindingSeverity;
+  description: string;
+  source?: FindingSource | null;
+  followUpNote?: string | null;
+}
+
+/** PUT …/findings/{id} body (UpdateFindingRequest): Open → Corrected → Closed (or Open → Closed), never backwards. */
+export interface UpdateFindingInput {
+  status: FindingStatus;
+  followUpNote?: string | null;
+}
+
+/** POST …/prior-records-attestation body (AttestPriorRecordsRequest). */
+export interface AttestPriorRecordsInput {
+  coveredThroughDate: string;
+  note?: string | null;
+  worksForOtherCarriers?: boolean;
+}
+
+/** Other-carrier work on an audit day: one row per carrier name (HosAuditOtherCarrierRow). */
+export interface HosAuditOtherCarrierRow {
+  carrierName: string;
+  eventCount: number;
+}
+
+/** One America/Winnipeg day of the compliance audit (HosAuditDayResponse). */
+export interface HosAuditDay {
+  driverId: string;
+  date: string;
+  hasRecords: boolean;
+  eventCount: number;
+  sources: EventSourceWire[];
+  certified: boolean;
+  certifiedAtUtc: string | null;
+  recertificationRequired: boolean;
+  totals: DayTotals;
+  personalConveyanceKm: number;
+  violations: HosViolation[];
+  exceptions: HosExceptionRecord[];
+  outOfService: OutOfServiceDeclaration | null;
+  eldMalfunctionOpen: boolean;
+  otherCarrier: HosAuditOtherCarrierRow[];
+  priorRecordsAttested: boolean;
+  findings: ComplianceFindingRecord[];
+  label: string;
 }
 
 /** One roster row of GET /api/drivers/hos/status (HosRosterStatusResponse). */
@@ -245,4 +463,138 @@ export function amendDutyEvent(driverId: string, eventId: string, input: AmendDu
     method: "POST",
     body: JSON.stringify(input),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Exceptions and ELD malfunctions — the HosAccess group (own-record check;
+// dispatch and compliance roles may act on any driver).
+// ---------------------------------------------------------------------------
+
+function dateRangeQuery(range?: { from?: string; to?: string }): string {
+  const q = new URLSearchParams();
+  if (range?.from) q.set("from", range.from);
+  if (range?.to) q.set("to", range.to);
+  const qs = q.toString();
+  return qs ? `?${qs}` : "";
+}
+
+/** GET …/hos/exceptions?from&to — defaults server-side to the 14-day window ending today. */
+export function listHosExceptions(driverId: string, range?: { from?: string; to?: string }): Promise<HosExceptionRecord[]> {
+  return request<HosExceptionRecord[]>(`/api/drivers/${driverId}/hos/exceptions${dateRangeQuery(range)}`);
+}
+
+/** POST → 201 with the new exception (Declared). */
+export function declareHosException(driverId: string, input: DeclareExceptionInput): Promise<HosExceptionRecord> {
+  return request<HosExceptionRecord>(`/api/drivers/${driverId}/hos/exceptions`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+/** POST …/exceptions/{id}/acknowledge — dispatch's act; no body. */
+export function acknowledgeHosException(driverId: string, exceptionId: string): Promise<HosExceptionRecord> {
+  return request<HosExceptionRecord>(`/api/drivers/${driverId}/hos/exceptions/${exceptionId}/acknowledge`, { method: "POST" });
+}
+
+/** POST …/exceptions/{id}/withdraw {note?} — withdrawing an acknowledged one is compliance's act (the handler draws that line). */
+export function withdrawHosException(driverId: string, exceptionId: string, note?: string | null): Promise<HosExceptionRecord> {
+  return request<HosExceptionRecord>(`/api/drivers/${driverId}/hos/exceptions/${exceptionId}/withdraw`, {
+    method: "POST",
+    body: JSON.stringify({ note: note ?? null }),
+  });
+}
+
+export function listEldMalfunctions(driverId: string): Promise<EldMalfunctionRecord[]> {
+  return request<EldMalfunctionRecord[]>(`/api/drivers/${driverId}/hos/eld-malfunctions`);
+}
+
+/** POST → 201 with the new report (Open). */
+export function reportEldMalfunction(driverId: string, input: ReportEldMalfunctionInput): Promise<EldMalfunctionRecord> {
+  return request<EldMalfunctionRecord>(`/api/drivers/${driverId}/hos/eld-malfunctions`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// The ComplianceAccess group (Owner, ComplianceOfficer) — any other role gets
+// the server's 403; the client gate in lib/roles.ts is UX only.
+// ---------------------------------------------------------------------------
+
+/** POST …/hos/exceptions/deferral → 201 with the Approved deferral. */
+export function approveOffDutyDeferral(driverId: string, input: ApproveDeferralInput): Promise<HosExceptionRecord> {
+  return request<HosExceptionRecord>(`/api/drivers/${driverId}/hos/exceptions/deferral`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+/** POST …/exceptions/{id}/reject {note?}. */
+export function rejectHosException(driverId: string, exceptionId: string, note?: string | null): Promise<HosExceptionRecord> {
+  return request<HosExceptionRecord>(`/api/drivers/${driverId}/hos/exceptions/${exceptionId}/reject`, {
+    method: "POST",
+    body: JSON.stringify({ note: note ?? null }),
+  });
+}
+
+/** POST …/eld-malfunctions/{id}/resolve {note?}. */
+export function resolveEldMalfunction(driverId: string, reportId: string, note?: string | null): Promise<EldMalfunctionRecord> {
+  return request<EldMalfunctionRecord>(`/api/drivers/${driverId}/hos/eld-malfunctions/${reportId}/resolve`, {
+    method: "POST",
+    body: JSON.stringify({ note: note ?? null }),
+  });
+}
+
+export function listOutOfService(driverId: string): Promise<OutOfServiceDeclaration[]> {
+  return request<OutOfServiceDeclaration[]>(`/api/drivers/${driverId}/out-of-service`);
+}
+
+/** POST → 201; a 409 Drivers.Hos.AlreadyOutOfService when one is already active. */
+export function recordOutOfService(driverId: string, input: RecordOutOfServiceInput): Promise<OutOfServiceDeclaration> {
+  return request<OutOfServiceDeclaration>(`/api/drivers/${driverId}/out-of-service`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+/** POST …/out-of-service/{id}/lift {reason?} — the reason is required for an early lift. */
+export function liftOutOfService(driverId: string, recordId: string, reason?: string | null): Promise<OutOfServiceDeclaration> {
+  return request<OutOfServiceDeclaration>(`/api/drivers/${driverId}/out-of-service/${recordId}/lift`, {
+    method: "POST",
+    body: JSON.stringify({ reason: reason ?? null }),
+  });
+}
+
+/** GET …/findings?from&to. */
+export function listComplianceFindings(driverId: string, range?: { from?: string; to?: string }): Promise<ComplianceFindingRecord[]> {
+  return request<ComplianceFindingRecord[]>(`/api/drivers/${driverId}/findings${dateRangeQuery(range)}`);
+}
+
+/** POST → 201 with the new finding (Open). */
+export function openComplianceFinding(driverId: string, input: OpenFindingInput): Promise<ComplianceFindingRecord> {
+  return request<ComplianceFindingRecord>(`/api/drivers/${driverId}/findings`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+/** PUT …/findings/{id}. */
+export function updateComplianceFinding(driverId: string, findingId: string, input: UpdateFindingInput): Promise<ComplianceFindingRecord> {
+  return request<ComplianceFindingRecord>(`/api/drivers/${driverId}/findings/${findingId}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+/** POST …/prior-records-attestation → 200 with the attestation. */
+export function attestPriorRecords(driverId: string, input: AttestPriorRecordsInput): Promise<PriorRecordsRecord> {
+  return request<PriorRecordsRecord>(`/api/drivers/${driverId}/prior-records-attestation`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+/** GET …/hos/audit?from&to — defaults server-side to the 14-day window ending today. */
+export function getHosAudit(driverId: string, range?: { from?: string; to?: string }): Promise<HosAuditDay[]> {
+  return request<HosAuditDay[]>(`/api/drivers/${driverId}/hos/audit${dateRangeQuery(range)}`);
 }

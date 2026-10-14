@@ -11,7 +11,7 @@
 // ---------------------------------------------------------------------------
 
 import type { NavGroup, NavItem, ScreenId } from "./nav";
-import { BUDGET_ROLES, DISPATCH_ROLES, hasRole, normalizeRole } from "./roles";
+import { BUDGET_ROLES, DISPATCH_ROLES, DRIVERS_APP_ROLES, hasRole, normalizeRole } from "./roles";
 
 export type AppId =
   | "today"
@@ -55,7 +55,8 @@ export type AppDef = InternalApp | ExternalApp;
 const BUDGETING_URL = process.env.NEXT_PUBLIC_BUDGETING_URL || null;
 
 // Role visibility (adjustable — edit the `roles` field):
-//   Today, Trip Operations, Fleet, Drivers, Community Booking, Admin → Owner, Dispatcher, Supervisor
+//   Today, Trip Operations, Fleet, Community Booking, Admin → Owner, Dispatcher, Supervisor
+//   Drivers & Compliance → those three plus ComplianceOfficer (Roles.DriverRosterAccess)
 //   Commercial → those three plus Accountant (billing, reports)
 //   Budgeting tile → Owner, Accountant (Roles.BudgetAccess)
 // Legacy "Admin" is normalised to Owner before matching. Driver sees nothing — the Driver Field
@@ -107,7 +108,7 @@ export const APPS: AppDef[] = [
     label: "Drivers & Compliance",
     code: "DC",
     tagline: "Credentials, hours of service, incidents and faults.",
-    roles: DISPATCH_ROLES,
+    roles: DRIVERS_APP_ROLES,
     screens: [
       { id: "drivers", label: "Drivers", code: "DR", badge: "2" },
       { id: "incidents", label: "Incidents & Faults", code: "IN", badge: "2" },

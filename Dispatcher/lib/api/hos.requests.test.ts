@@ -1,14 +1,32 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  acknowledgeHosException,
   amendDutyEvent,
+  approveOffDutyDeferral,
+  attestPriorRecords,
+  declareHosException,
   getDutyDay,
+  getHosAudit,
   getHosStatus,
+  liftOutOfService,
+  listComplianceFindings,
   listDutyDays,
+  listEldMalfunctions,
+  listHosExceptions,
   listHosStatusBatch,
+  listOutOfService,
+  openComplianceFinding,
   recordDutyEvent,
+  recordOutOfService,
+  rejectHosException,
+  reportEldMalfunction,
+  resolveEldMalfunction,
   transcribeDay,
+  updateComplianceFinding,
+  withdrawHosException,
   type DutyStatusWire,
   type EventSourceWire,
+  type HosExceptionKindWire,
 } from "./hos";
 import { ApiError } from "./transport";
 import { DUTY_STATUSES, EVENT_SOURCES, HosWire } from "../hos/engine";
@@ -60,6 +78,155 @@ describe("wire string unions", () => {
   it("EventSourceWire is exactly HosWire's five source strings", () => {
     const sources: EventSourceWire[] = EVENT_SOURCES.map((s) => HosWire.source(s) as EventSourceWire);
     expect(sources).toEqual(["Driver App", "ELD transcription", "Manual (paper backup)", "Other carrier (declared)", "System"]);
+  });
+
+  it("HosExceptionKindWire is exactly HosWire's three kind strings", () => {
+    const kinds: HosExceptionKindWire[] = [HosWire.AdverseDrivingConditionsKind, HosWire.EmergencyKind, HosWire.OffDutyDeferralKind] as HosExceptionKindWire[];
+    expect(kinds).toEqual(["Adverse driving conditions", "Emergency", "Off-duty deferral (CO approved)"]);
+  });
+});
+
+// ---- Compliance records: the HosAccess group (exceptions, ELD malfunctions) ----
+
+describe("exceptions (HosAccess)", () => {
+  it("listHosExceptions GETs …/hos/exceptions with from/to when given, bare when not", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, [])).mockResolvedValueOnce(jsonResponse(200, []));
+    await listHosExceptions(DRIVER, { from: "2026-10-01", to: "2026-10-14" });
+    await listHosExceptions(DRIVER);
+    expect(callPath(0)).toBe(`/api/drivers/${DRIVER}/hos/exceptions?from=2026-10-01&to=2026-10-14`);
+    expect(callPath(1)).toBe(`/api/drivers/${DRIVER}/hos/exceptions`);
+  });
+
+  it("declareHosException POSTs the adverse body — kind as the wire string, attestation and minutes", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(201, { id: "x", status: "Declared" }));
+    const input = {
+      kind: "Adverse driving conditions" as const,
+      effectiveFromUtc: "2026-10-09T15:00:00.000Z",
+      reason: "Whiteout on PTH 6",
+      effectiveToUtc: null,
+      location: "North of Grand Rapids",
+      notKnownBeforeDeparture: true,
+      extraDrivingMinutes: 60,
+      eldRemarkRecorded: true,
+    };
+    const res = await declareHosException(DRIVER, input);
+    expect(callPath()).toBe(`/api/drivers/${DRIVER}/hos/exceptions`);
+    expect(callInit().method).toBe("POST");
+    expect(bodyOf()).toEqual(input);
+    expect(res.status).toBe("Declared");
+  });
+
+  it("surfaces the adverse attestation refusal verbatim", async () => {
+    const message = "Adverse driving conditions must not have been knowable before departure (s.76).";
+    fetchMock.mockResolvedValueOnce(jsonResponse(400, { code: "Drivers.Hos.AdverseKnowabilityRequired", message }));
+    const err = await declareHosException(DRIVER, { kind: "Adverse driving conditions", effectiveFromUtc: "2026-10-09T15:00:00Z", reason: "r" }).catch((e) => e);
+    expect((err as ApiError).code).toBe("Drivers.Hos.AdverseKnowabilityRequired");
+    expect((err as ApiError).message).toBe(message);
+  });
+
+  it("acknowledge POSTs …/exceptions/{id}/acknowledge with no body", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { id: EVENT, status: "Acknowledged" }));
+    await acknowledgeHosException(DRIVER, EVENT);
+    expect(callPath()).toBe(`/api/drivers/${DRIVER}/hos/exceptions/${EVENT}/acknowledge`);
+    expect(callInit().method).toBe("POST");
+    expect(callInit().body).toBeUndefined();
+  });
+
+  it("withdraw and reject POST their routes with {note} — null when none", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, {})).mockResolvedValueOnce(jsonResponse(200, {}));
+    await withdrawHosException(DRIVER, EVENT, "Declared in error");
+    await rejectHosException(DRIVER, EVENT);
+    expect(callPath(0)).toBe(`/api/drivers/${DRIVER}/hos/exceptions/${EVENT}/withdraw`);
+    expect(bodyOf(0)).toEqual({ note: "Declared in error" });
+    expect(callPath(1)).toBe(`/api/drivers/${DRIVER}/hos/exceptions/${EVENT}/reject`);
+    expect(bodyOf(1)).toEqual({ note: null });
+  });
+
+  it("approveOffDutyDeferral POSTs …/hos/exceptions/deferral with the trip and minutes", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(201, { id: "d", status: "Approved" }));
+    const input = { tripId: EVENT, effectiveFromUtc: "2026-10-11T12:00:00.000Z", deferredOffDutyMinutes: 90, reason: "Late return from Thompson", location: null, eldRemarkRecorded: false };
+    await approveOffDutyDeferral(DRIVER, input);
+    expect(callPath()).toBe(`/api/drivers/${DRIVER}/hos/exceptions/deferral`);
+    expect(callInit().method).toBe("POST");
+    expect(bodyOf()).toEqual(input);
+  });
+});
+
+describe("ELD malfunctions", () => {
+  it("list GETs and report POSTs …/hos/eld-malfunctions; resolve POSTs …/{id}/resolve with {note}", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, [])).mockResolvedValueOnce(jsonResponse(201, {})).mockResolvedValueOnce(jsonResponse(200, {}));
+    await listEldMalfunctions(DRIVER);
+    const input = { code: "P-01", noticedAtUtc: "2026-10-09T12:00:00.000Z", description: "Display frozen" };
+    await reportEldMalfunction(DRIVER, input);
+    await resolveEldMalfunction(DRIVER, EVENT, "Replaced unit");
+    expect(callPath(0)).toBe(`/api/drivers/${DRIVER}/hos/eld-malfunctions`);
+    expect(callInit(0).method).toBeUndefined();
+    expect(callPath(1)).toBe(`/api/drivers/${DRIVER}/hos/eld-malfunctions`);
+    expect(callInit(1).method).toBe("POST");
+    expect(bodyOf(1)).toEqual(input);
+    expect(callPath(2)).toBe(`/api/drivers/${DRIVER}/hos/eld-malfunctions/${EVENT}/resolve`);
+    expect(bodyOf(2)).toEqual({ note: "Replaced unit" });
+  });
+});
+
+// ---- The ComplianceAccess group ----
+
+describe("out of service (ComplianceAccess)", () => {
+  it("list GETs and record POSTs …/out-of-service; lift POSTs …/{id}/lift with {reason}", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, [])).mockResolvedValueOnce(jsonResponse(201, { id: "o" })).mockResolvedValueOnce(jsonResponse(200, {}));
+    await listOutOfService(DRIVER);
+    const input = { declaredAtUtc: "2026-10-09T12:00:00.000Z", reason: "Roadside inspection", untilUtc: "2026-10-12T12:00:00.000Z", evidence: null };
+    await recordOutOfService(DRIVER, input);
+    await liftOutOfService(DRIVER, EVENT, "Records produced");
+    expect(callPath(0)).toBe(`/api/drivers/${DRIVER}/out-of-service`);
+    expect(callPath(1)).toBe(`/api/drivers/${DRIVER}/out-of-service`);
+    expect(callInit(1).method).toBe("POST");
+    expect(bodyOf(1)).toEqual(input);
+    expect(callPath(2)).toBe(`/api/drivers/${DRIVER}/out-of-service/${EVENT}/lift`);
+    expect(bodyOf(2)).toEqual({ reason: "Records produced" });
+  });
+
+  it("surfaces the 409 Drivers.Hos.AlreadyOutOfService sentence verbatim", async () => {
+    const message = "This driver already has an active out-of-service declaration; lift it before recording another.";
+    fetchMock.mockResolvedValueOnce(jsonResponse(409, { code: "Drivers.Hos.AlreadyOutOfService", message }));
+    const err = await recordOutOfService(DRIVER, { declaredAtUtc: "2026-10-09T12:00:00Z", reason: "r" }).catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(409);
+    expect((err as ApiError).code).toBe("Drivers.Hos.AlreadyOutOfService");
+    expect((err as ApiError).message).toBe(message);
+  });
+});
+
+describe("findings, attestation, audit (ComplianceAccess)", () => {
+  it("findings: GET with range, POST, PUT …/{id}", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, [])).mockResolvedValueOnce(jsonResponse(201, {})).mockResolvedValueOnce(jsonResponse(200, {}));
+    await listComplianceFindings(DRIVER, { from: "2026-10-01" });
+    const input = { localDate: "2026-10-09", rule: "DailyDriving13h", severity: "Major" as const, description: "Drove 14h" };
+    await openComplianceFinding(DRIVER, input);
+    await updateComplianceFinding(DRIVER, EVENT, { status: "Corrected", followUpNote: "Coached" });
+    expect(callPath(0)).toBe(`/api/drivers/${DRIVER}/findings?from=2026-10-01`);
+    expect(callPath(1)).toBe(`/api/drivers/${DRIVER}/findings`);
+    expect(callInit(1).method).toBe("POST");
+    expect(bodyOf(1)).toEqual(input);
+    expect(callPath(2)).toBe(`/api/drivers/${DRIVER}/findings/${EVENT}`);
+    expect(callInit(2).method).toBe("PUT");
+    expect(bodyOf(2)).toEqual({ status: "Corrected", followUpNote: "Coached" });
+  });
+
+  it("attestPriorRecords POSTs …/prior-records-attestation", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { coveredThroughDate: "2026-10-09" }));
+    const input = { coveredThroughDate: "2026-10-09", note: null, worksForOtherCarriers: true };
+    const res = await attestPriorRecords(DRIVER, input);
+    expect(callPath()).toBe(`/api/drivers/${DRIVER}/prior-records-attestation`);
+    expect(callInit().method).toBe("POST");
+    expect(bodyOf()).toEqual(input);
+    expect(res.coveredThroughDate).toBe("2026-10-09");
+  });
+
+  it("getHosAudit GETs …/hos/audit with from/to", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, []));
+    await getHosAudit(DRIVER, { from: "2026-09-26", to: "2026-10-09" });
+    expect(callPath()).toBe(`/api/drivers/${DRIVER}/hos/audit?from=2026-09-26&to=2026-10-09`);
   });
 });
 

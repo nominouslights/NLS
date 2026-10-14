@@ -14,8 +14,12 @@ import type { DayTotals, HosEvaluation, HosViolation } from "../hos/engine";
 // recordDutyEvent and their shapes are identical); this file keeps those names
 // so it can become a header-copied file once that one settles. Two members are
 // this app's alone and are not in the console's: getMyDriver (the Field App's
-// first call) and certifyDay (the driver's own act). Imports only ./transport
-// and TYPES from ../hos/engine.
+// first call) and certifyDay (the driver's own act). The compliance members
+// (listHosExceptions / declareHosException / withdrawHosException /
+// listEldMalfunctions / reportEldMalfunction and their records, mirroring
+// ComplianceResponses.cs) are written to the same contract so the console's
+// can take the same names. Imports only ./transport and TYPES from
+// ../hos/engine.
 //
 // Every route is under the HosAccess policy, which admits every Driver, so the
 // server runs the caller-owns-this-row check on each {driverId} route and
@@ -105,19 +109,97 @@ export interface DutyDaySummary {
   segments: DutySegmentRecord[];
   events: DutyEventRecord[];
   violations: HosViolation[];
+  /** The exceptions in force on the day — the ones the engine honoured (Declared, Acknowledged or Approved). */
+  exceptions: HosExceptionRecord[];
+  /** An out-of-service declaration overlapping the day, or null. */
+  outOfService: OutOfServiceRecord | null;
   label: string;
 }
 
-/** Reserved for the out-of-service declaration (next PR); always null today. */
+/** The exception kind strings the API emits and accepts (HosWire.ExceptionKind). */
+export type HosExceptionKindWire = "Adverse driving conditions" | "Emergency" | "Off-duty deferral (CO approved)";
+
+/** The two kinds a driver (or dispatch for them) may declare; a deferral goes through the compliance route. */
+export type DeclarableExceptionKind = "Adverse driving conditions" | "Emergency";
+
+/** HosExceptionStatus member names, as the API spells them. */
+export type HosExceptionStatus = "Declared" | "Acknowledged" | "Approved" | "Rejected" | "Withdrawn";
+
+/** An hours-of-service exception as the API shows it (HosExceptionResponse).
+ *  `applying` is true while the rule engine honours it (Declared, Acknowledged
+ *  or Approved). `extraDrivingMinutes` is set for adverse conditions only,
+ *  `deferredOffDutyMinutes` for a deferral only. */
+export interface HosExceptionRecord {
+  id: string;
+  driverId: string;
+  kind: HosExceptionKindWire;
+  status: HosExceptionStatus;
+  applying: boolean;
+  tripId: string | null;
+  declaredAtUtc: string;
+  declaredByUserId: string;
+  effectiveFromUtc: string;
+  effectiveToUtc: string | null;
+  reason: string;
+  location: string | null;
+  notKnownBeforeDeparture: boolean;
+  extraDrivingMinutes: number | null;
+  deferredOffDutyMinutes: number | null;
+  eldRemarkRecorded: boolean;
+  dispatchAcknowledgedAtUtc: string | null;
+  dispatchAcknowledgedByUserId: string | null;
+  approvedAtUtc: string | null;
+  approvedByUserId: string | null;
+  closedAtUtc: string | null;
+  closedByUserId: string | null;
+  closureNote: string | null;
+}
+
+/** The out-of-service declaration in force (status) or overlapping a day
+ *  (summaries): its id, span and reason (OutOfServiceResponse). untilUtc null
+ *  = until lifted. */
 export interface OutOfServiceRecord {
+  id: string;
   fromUtc: string;
   untilUtc: string | null;
   reason: string;
 }
 
+export type EldMalfunctionStatus = "Open" | "Resolved";
+
+/** An ELD malfunction report as the API shows it (EldMalfunctionResponse). */
+export interface EldMalfunctionRecord {
+  id: string;
+  driverId: string;
+  vehicleId: string | null;
+  code: string;
+  status: EldMalfunctionStatus;
+  noticedAtUtc: string;
+  reportedAtUtc: string;
+  reportedByUserId: string;
+  description: string;
+  resolvedAtUtc: string | null;
+  resolvedByUserId: string | null;
+  resolutionNote: string | null;
+}
+
+/** The driver's prior-records attestation (PriorRecordsResponse, s.82(1)(f));
+ *  null on a status until a compliance officer records one. */
+export interface PriorRecordsRecord {
+  coveredThroughDate: string; // DateOnly
+  attestedAtUtc: string;
+  attestedByUserId: string;
+  note: string | null;
+  worksForOtherCarriers: boolean;
+}
+
 /** A driver's standing right now (HosStatusResponse). `evaluation` is the
  *  engine's HosEvaluation verbatim. recordsOnFile=false means the ledger does
- *  not cover the regulation's 14-day window (not dispatchable). */
+ *  not cover the regulation's 14-day window (not dispatchable).
+ *  `outOfService` is the declaration in force right now; `eldMalfunctionOpen`
+ *  is true while any ELD malfunction report is open (paper-log mode — a
+ *  warning, never a block); `priorRecords` is the compliance officer's
+ *  attestation, null until one exists. */
 export interface HosStatus {
   driverId: string;
   label: string;
@@ -127,6 +209,7 @@ export interface HosStatus {
   knownFromUtc: string | null;
   outOfService: OutOfServiceRecord | null;
   eldMalfunctionOpen: boolean;
+  priorRecords: PriorRecordsRecord | null;
   evaluation: HosEvaluation;
 }
 
@@ -156,6 +239,43 @@ export interface DutyEventRecorded {
   dutyDayId: string;
   localDate: string;
   created: boolean;
+}
+
+/** POST /api/drivers/{driverId}/hos/exceptions body (DeclareHosExceptionRequest).
+ *  `kind` is "Adverse driving conditions" or "Emergency" — a deferral goes
+ *  through the compliance route. `effectiveFromUtc` is when the conditions
+ *  arose (within the last 24 hours, not more than five minutes ahead). For
+ *  adverse conditions `notKnownBeforeDeparture` must be true and
+ *  `extraDrivingMinutes` is required (1–120). */
+export interface DeclareExceptionInput {
+  kind: DeclarableExceptionKind;
+  effectiveFromUtc: string;
+  reason: string;
+  effectiveToUtc?: string | null;
+  location?: string | null;
+  tripId?: string | null;
+  notKnownBeforeDeparture?: boolean;
+  extraDrivingMinutes?: number | null;
+  eldRemarkRecorded?: boolean;
+}
+
+/** POST /api/drivers/{driverId}/hos/eld-malfunctions body (ReportEldMalfunctionRequest). `code` is what the device displayed (≤ 32 chars). */
+export interface ReportEldMalfunctionInput {
+  code: string;
+  noticedAtUtc: string;
+  description: string;
+  vehicleId?: string | null;
+}
+
+/** Per-request options shared by the compliance writes. The exception and
+ *  malfunction routes do not honour `Idempotency-Key` yet; the client sends it
+ *  from day one so each can start honouring it with no client change. */
+export interface WriteOptions {
+  idempotencyKey?: string;
+}
+
+function idempotencyHeaders(options?: WriteOptions): Record<string, string> | undefined {
+  return options?.idempotencyKey ? { "Idempotency-Key": options.idempotencyKey } : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -196,4 +316,52 @@ export function recordDutyEvent(driverId: string, input: DutyEventInput): Promis
  *  403 Drivers.Hos.CertifyDriverOnly for anyone but the driver. */
 export function certifyDay(driverId: string, date: string): Promise<void> {
   return request<void>(`/api/drivers/${driverId}/hos/days/${date}/certify`, { method: "POST" });
+}
+
+/** GET …/hos/exceptions?from&to — every status, defaults server-side to the 14-day window ending today. */
+export function listHosExceptions(driverId: string, range?: { from?: string; to?: string }): Promise<HosExceptionRecord[]> {
+  const q = new URLSearchParams();
+  if (range?.from) q.set("from", range.from);
+  if (range?.to) q.set("to", range.to);
+  const qs = q.toString();
+  return request<HosExceptionRecord[]>(`/api/drivers/${driverId}/hos/exceptions${qs ? `?${qs}` : ""}`);
+}
+
+/** POST …/hos/exceptions → 201 with the record. 400 Drivers.Hos.ExceptionKindInvalid |
+ *  ExceptionReasonRequired | ExceptionBackdated | ExceptionInFuture |
+ *  AdverseKnowabilityRequired | AdverseExtensionRequired | AdverseExtensionTooLong;
+ *  403 Drivers.Hos.DeferralRequiresComplianceOfficer for a deferral. */
+export function declareHosException(driverId: string, input: DeclareExceptionInput, options?: WriteOptions): Promise<HosExceptionRecord> {
+  return request<HosExceptionRecord>(`/api/drivers/${driverId}/hos/exceptions`, {
+    method: "POST",
+    headers: idempotencyHeaders(options),
+    body: JSON.stringify(input),
+  });
+}
+
+/** POST …/hos/exceptions/{id}/withdraw → 200 with the record. The driver may
+ *  withdraw only while it is Declared (403
+ *  Drivers.Hos.ExceptionWithdrawRequiresComplianceOfficer otherwise); a
+ *  withdrawn one is a no-op, a rejected one 409 Drivers.Hos.ExceptionClosed. */
+export function withdrawHosException(driverId: string, exceptionId: string, note?: string | null, options?: WriteOptions): Promise<HosExceptionRecord> {
+  return request<HosExceptionRecord>(`/api/drivers/${driverId}/hos/exceptions/${exceptionId}/withdraw`, {
+    method: "POST",
+    headers: idempotencyHeaders(options),
+    body: JSON.stringify({ note: note ?? null }),
+  });
+}
+
+/** GET …/hos/eld-malfunctions — every report for the driver, open and resolved. */
+export function listEldMalfunctions(driverId: string): Promise<EldMalfunctionRecord[]> {
+  return request<EldMalfunctionRecord[]>(`/api/drivers/${driverId}/hos/eld-malfunctions`);
+}
+
+/** POST …/hos/eld-malfunctions → 201 with the record. 400 Drivers.Hos.EldCodeRequired |
+ *  EldCodeTooLong | EldDescriptionRequired | EldNoticedInFuture. */
+export function reportEldMalfunction(driverId: string, input: ReportEldMalfunctionInput, options?: WriteOptions): Promise<EldMalfunctionRecord> {
+  return request<EldMalfunctionRecord>(`/api/drivers/${driverId}/hos/eld-malfunctions`, {
+    method: "POST",
+    headers: idempotencyHeaders(options),
+    body: JSON.stringify(input),
+  });
 }

@@ -19,6 +19,8 @@ import {
   type DriverRecord,
 } from "@/lib/api/drivers";
 import { getHosStatus, listDutyDays, listHosStatusBatch, type DutyDaySummary, type HosRosterStatus, type HosStatus } from "@/lib/api/hos";
+import { getRole } from "@/lib/claims";
+import { COMPLIANCE_ROLES, hasRole, normalizeRole } from "@/lib/roles";
 import { leaveOnDate } from "@/lib/driverCompliance";
 import { corridorLabel, listTrips, sortTrips, tripChip, tripWindowLabel, type TripRecord } from "@/lib/api/trips";
 import { BAND_KIND, blockingShort, blockingText, dutyStateFromWire, formatRemaining } from "@/lib/hos/display";
@@ -35,6 +37,8 @@ import { CredentialRow } from "./drivers/CredentialRow";
 import { ClearanceRow } from "./drivers/ClearanceRow";
 import { HoursOfServiceTab } from "./drivers/HoursOfServiceTab";
 import { HosStatusGauge } from "./drivers/hos/HosStatusGauge";
+import { OutOfServiceBanner } from "./drivers/hos/OutOfServiceBanner";
+import { LiftOutOfServiceModal } from "./drivers/hos/RecordOutOfServiceModal";
 import CredentialFormModal from "@/components/CredentialFormModal";
 import CredentialImageLightbox from "@/components/CredentialImageLightbox";
 import CredentialPhotoModal from "@/components/CredentialPhotoModal";
@@ -187,6 +191,12 @@ export default function Drivers({
 
   const [busy, setBusy] = useState(false);
   const [actionErrorState, setActionErrorState] = useState<{ driverId: string; message: string } | null>(null);
+
+  // The ComplianceAccess client gate (lib/roles.ts): LIFT on the out-of-service banner and the
+  // compliance actions inside the HOS tab. UX only — the server's policy is the boundary, and
+  // the role changes only with the token, which already re-renders through AuthGate.
+  const canCompliance = hasRole(COMPLIANCE_ROLES, normalizeRole(getRole()));
+  const [liftModal, setLiftModal] = useState<{ driverId: string; recordId: string } | null>(null);
 
   // Image lightbox — when not null, shows the credential photo for the identified credential
   const [imageLightbox, setImageLightbox] = useState<{ driverId: string; credentialId: string } | null>(null);
@@ -537,8 +547,15 @@ export default function Drivers({
   function statusOrDutyChip(row: DriverRecord) {
     if (row.status === "Deactivated") return <StatusChip kind="over" label="Deactivated" />;
     if (row.status === "Inactive") return <StatusChip kind="off" label="Inactive" />;
+    const batch = hosBatch?.get(row.id);
+    // Out of service outranks the duty chip. The roster batch (HosRosterStatusResponse) carries
+    // no out-of-service record — only the engine's blocking reasons — so the roster reads the
+    // OutOfService reason; the detail reads the per-driver status's full declaration instead.
+    // The selected driver's own status is the tie-break when the batch has not loaded yet.
+    const outOfService = batch ? batch.blockingReasons.includes("OutOfService") : row.id === d?.id && hosStatus?.outOfService != null;
+    if (outOfService) return <StatusChip kind="over" glyph="✕" label="Out of service" />;
     // The batch's current duty is the ledger's; the read-model rollup is the fallback.
-    const duty = hosBatch?.get(row.id)?.currentDuty ?? row.latestDutyStatus;
+    const duty = batch?.currentDuty ?? row.latestDutyStatus;
     return <DutyChip status={dutyStateFromWire(duty)} />;
   }
 
@@ -714,6 +731,15 @@ export default function Drivers({
               )}
             </div>
 
+            {/* The declaration in force sits above every tab — it changes what every tab means. */}
+            {hosStatus?.outOfService && (
+              <OutOfServiceBanner
+                outOfService={hosStatus.outOfService}
+                canCompliance={canCompliance}
+                onLift={() => setLiftModal({ driverId: d.id, recordId: hosStatus.outOfService!.id })}
+              />
+            )}
+
             {/* tab bar */}
             <div style={{ display: "flex", gap: 2, borderBottom: `1px solid ${colors.border}`, marginBottom: 16 }}>
               {TABS.map((label, i) => (
@@ -825,6 +851,7 @@ export default function Drivers({
                 status={hosStatus}
                 statusError={hosStatusError}
                 version={hosVersion}
+                canCompliance={canCompliance}
                 onLedgerChanged={onLedgerChanged}
               />
             )}
@@ -1035,6 +1062,15 @@ export default function Drivers({
             )}
             {modal === "leave" && (
               <LeaveFormModal driverId={mockId} driverName={d.name} onClose={() => setModal(null)} />
+            )}
+            {liftModal && liftModal.driverId === d.id && (
+              <LiftOutOfServiceModal
+                driverId={liftModal.driverId}
+                driverName={d.name}
+                recordId={liftModal.recordId}
+                onClose={() => setLiftModal(null)}
+                onSaved={onLedgerChanged}
+              />
             )}
             {(modal === "register" || modal === "edit") && (
               <DriverFormModal

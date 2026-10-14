@@ -4,16 +4,80 @@ import {
   blockingShort,
   blockingText,
   dutyStateFromWire,
+  EXCEPTION_STATUS_CHIP,
+  exceptionInForce,
+  exceptionKindLabel,
+  exceptionStatusChip,
   formatClock,
   formatDateOnly,
+  formatDateTimeUtc,
   formatRemaining,
   HOS_CALENDAR,
+  isoOfUnix,
+  localDateTimeOf,
   localTimeToUnix,
+  PC_CAUTION_KM,
+  PC_DAILY_LIMIT_KM,
+  pcDayVerdict,
   previewDay,
   remainingKind,
   SOURCE_GLYPH,
   sourceGlyphFor,
 } from "./display";
+
+describe("pcDayVerdict — the personal-conveyance bands", () => {
+  it("reads 75.0 km from the engine's limit and cautions from 60", () => {
+    expect(PC_DAILY_LIMIT_KM).toBe(75);
+    expect(PC_CAUTION_KM).toBe(60);
+  });
+
+  it("is ✓ under 60, ◐ with the km left from 60 to 74.9, ▲ at 75 and beyond — each a different glyph", () => {
+    expect(pcDayVerdict(59.9)).toEqual({ kind: "ontime", glyph: "✓", label: "59.9 km" });
+    expect(pcDayVerdict(60)).toEqual({ kind: "soon", glyph: "◐", label: "60.0 km — 15.0 km left" });
+    expect(pcDayVerdict(74.9)).toEqual({ kind: "soon", glyph: "◐", label: "74.9 km — 0.1 km left" });
+    expect(pcDayVerdict(75)).toEqual({ kind: "over", glyph: "▲", label: "75.0 km — 75 km reached, remainder counts as on-duty" });
+    expect(pcDayVerdict(75.1).kind).toBe("over");
+    expect(pcDayVerdict(0)).toEqual({ kind: "ontime", glyph: "✓", label: "0.0 km" });
+  });
+});
+
+describe("exception chips", () => {
+  it("gives each status its own kind and glyph, with the status as the label", () => {
+    expect(exceptionStatusChip("Declared")).toEqual({ kind: "soon", glyph: "◐", label: "Declared" });
+    expect(exceptionStatusChip("Acknowledged")).toEqual({ kind: "info", glyph: "●", label: "Acknowledged" });
+    expect(exceptionStatusChip("Approved")).toEqual({ kind: "ontime", glyph: "✓", label: "Approved" });
+    expect(exceptionStatusChip("Rejected")).toEqual({ kind: "over", glyph: "▲", label: "Rejected" });
+    expect(exceptionStatusChip("Withdrawn")).toEqual({ kind: "off", glyph: "—", label: "Withdrawn" });
+    const glyphs = Object.values(EXCEPTION_STATUS_CHIP).map((c) => c.glyph);
+    expect(new Set(glyphs).size).toBe(glyphs.length);
+  });
+
+  it("in force = the statuses the engine honours", () => {
+    expect(["Declared", "Acknowledged", "Approved"].map((s) => exceptionInForce(s as "Declared"))).toEqual([true, true, true]);
+    expect(["Rejected", "Withdrawn"].map((s) => exceptionInForce(s as "Rejected"))).toEqual([false, false]);
+  });
+
+  it("shortens the deferral's wire kind and passes the others through", () => {
+    expect(exceptionKindLabel(HosWire.OffDutyDeferralKind as "Off-duty deferral (CO approved)")).toBe("Off-duty deferral");
+    expect(exceptionKindLabel("Adverse driving conditions")).toBe("Adverse driving conditions");
+    expect(exceptionKindLabel("Emergency")).toBe("Emergency");
+  });
+});
+
+describe("local date-time helpers", () => {
+  it("formatDateTimeUtc renders America/Winnipeg wall time with a short month", () => {
+    // 2026-10-12 06:00 CDT = 11:00Z.
+    expect(formatDateTimeUtc("2026-10-12T11:00:00Z")).toBe("Oct 12, 06:00");
+    expect(formatDateTimeUtc("not a date")).toBe("—");
+  });
+
+  it("localDateTimeOf and isoOfUnix round-trip through localTimeToUnix", () => {
+    const unix = Date.UTC(2026, 9, 12, 11) / 1000;
+    expect(localDateTimeOf(unix)).toEqual({ date: "2026-10-12", time: "06:00" });
+    expect(localTimeToUnix("2026-10-12", "06:00")).toBe(unix);
+    expect(isoOfUnix(unix)).toBe("2026-10-12T11:00:00.000Z");
+  });
+});
 
 // The console's HOS display helpers: the band thresholds the gauge and roster share, the
 // local-time arithmetic the entry and amendment modals rely on (DST-safe), and the
