@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { colors, fonts, rowSurface, statusMeta, type StatusKind } from "@/lib/theme";
 import { ApiError, formatUtcDate } from "@/lib/api";
 import {
@@ -55,6 +55,15 @@ import LeaveFormModal from "@/components/LeaveFormModal";
 // position (row index + 1, `mockId`).
 
 const TABS = ["Profile", "Licence & certs", "Hours of Service", "Clearances", "Calendar", "History"];
+
+/** The Hours of Service tab's index — where a hand-off from the Compliance screen lands. */
+export const HOS_TAB_INDEX = TABS.indexOf("Hours of Service");
+
+/** A hand-off from another screen: select this driver and open this tab. */
+export interface DriverFocus {
+  driverId: string;
+  tab: number;
+}
 
 const EYEBROW = "Operations · Roster & compliance engine source";
 const TITLE = "Drivers & Compliance";
@@ -149,9 +158,14 @@ function DriversLoadingSkeleton() {
 export default function Drivers({
   driverSel,
   setDriverSel,
+  focus = null,
+  onFocusApplied,
 }: {
   driverSel: number;
   setDriverSel: (i: number) => void;
+  /** Applied once, when the roster first lands (driverSel is a roster index, so it waits for it). */
+  focus?: DriverFocus | null;
+  onFocusApplied?: () => void;
 }) {
   useDriverStore(); // re-render when the mock leave store mutates
   // Today's date (yyyy-MM-dd) anchors the calendar's default month/day and the
@@ -164,7 +178,9 @@ export default function Drivers({
   const [roster, setRoster] = useState<DriverRecord[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [tab, setTab] = useState(0);
+  // The hand-off as it stood at mount — a ref, so the mount-only roster fetch can read it.
+  const focusRef = useRef({ focus, onFocusApplied, setDriverSel });
+  const [tab, setTab] = useState(() => focus?.tab ?? 0);
   const [modal, setModal] = useState<null | "credential" | "clearance" | "leave" | "register" | "edit">(null);
   const [calState, setCalState] = useState<{ year: number; month: number } | null>(null);
   const [selectedDayState, setSelectedDay] = useState<string | null>(null);
@@ -222,6 +238,12 @@ export default function Drivers({
         if (active) {
           setRoster(fresh);
           setLoadError(null);
+          const { focus: pending, onFocusApplied: applied, setDriverSel: select } = focusRef.current;
+          if (pending) {
+            const i = fresh.findIndex((r) => r.id === pending.driverId);
+            if (i >= 0) select(i);
+            applied?.();
+          }
         }
       },
       (e) => {
