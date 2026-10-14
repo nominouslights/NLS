@@ -97,6 +97,85 @@ public class GetTripActivityQueryHandlerTests
     }
 
     [Fact]
+    public async Task A_driver_correction_shows_reason_who_and_the_before_after_detail()
+    {
+        var trip = TestPlanning.ScheduleTrip().Value;
+        _trips.Add(trip);
+        _activity.Entries.Add(new TripActivityJournalEntry(T1, "trip", "trip-driver-corrected",
+            $$"""
+            {"tripId":"{{trip.Id}}","previousDriverId":"{{TestPlanning.DriverId}}","previousDriverName":"R. Ballantyne",
+             "newDriverId":"{{Guid.NewGuid()}}","newDriverName":"J. Moose","reason":"Logged against the wrong driver",
+             "enteredByUserId":"{{Guid.NewGuid()}}","enteredBy":"dispatch@northernlink.ca","occurredAtUtc":"{{T1:O}}"}
+            """));
+
+        var entry = Assert.Single((await Handler.Handle(
+            new GetTripActivityQuery(trip.Id, TestPlanning.TenantId), CancellationToken.None)).Value);
+
+        Assert.Equal("trip-driver-corrected", entry.EventType);
+        Assert.Equal("Logged against the wrong driver", entry.Reason);
+        Assert.Equal("dispatch@northernlink.ca", entry.EnteredBy);
+        Assert.Equal("Driver: R. Ballantyne → J. Moose", entry.Detail);
+        Assert.Null(entry.Source);
+    }
+
+    [Fact]
+    public async Task A_correction_of_a_trip_with_no_previous_driver_reads_none()
+    {
+        var trip = TestPlanning.ScheduleTrip().Value;
+        _trips.Add(trip);
+        _activity.Entries.Add(new TripActivityJournalEntry(T1, "trip", "trip-driver-corrected",
+            """{"previousDriverId":null,"previousDriverName":null,"newDriverName":"J. Moose","reason":"no driver logged"}"""));
+
+        var entry = Assert.Single((await Handler.Handle(
+            new GetTripActivityQuery(trip.Id, TestPlanning.TenantId), CancellationToken.None)).Value);
+
+        Assert.Equal("Driver: none → J. Moose", entry.Detail);
+    }
+
+    [Fact]
+    public async Task A_reason_on_any_trip_event_surfaces_generically_without_a_detail()
+    {
+        // e.g. the reopen work's trip-reopened: the timeline needs no per-event code for a reason.
+        var trip = TestPlanning.ScheduleTrip().Value;
+        _trips.Add(trip);
+        _activity.Entries.Add(new TripActivityJournalEntry(T1, "trip", "trip-some-future-event",
+            """{"reason":"cancelled by mistake","previousStatus":"Cancelled"}"""));
+
+        var entry = Assert.Single((await Handler.Handle(
+            new GetTripActivityQuery(trip.Id, TestPlanning.TenantId), CancellationToken.None)).Value);
+
+        Assert.Equal("cancelled by mistake", entry.Reason);
+        Assert.Null(entry.Detail);
+        Assert.Null(entry.EnteredBy);
+    }
+
+    [Fact]
+    public async Task Other_entries_are_unchanged_and_malformed_payloads_do_not_throw()
+    {
+        var manifestId = Guid.NewGuid();
+        var trip = TestPlanning.ScheduleTrip().Value;
+        trip.AttachManifest(manifestId);
+        _trips.Add(trip);
+        _activity.Entries.AddRange(
+        [
+            new TripActivityJournalEntry(T0, "trip", "trip-scheduled", $$"""{"tripId":"{{trip.Id}}"}"""),
+            new TripActivityJournalEntry(T1, "trip", "trip-driver-corrected", "not json"),
+            // A manifest event's "reason" is not a trip reason — manifests keep their own provenance only.
+            new TripActivityJournalEntry(T2, "trip-manifest", "trip-manifest-updated",
+                """{"source":"App","enteredBy":"driver@northernlink.ca","reason":"ignored"}"""),
+        ]);
+
+        var timeline = (await Handler.Handle(
+            new GetTripActivityQuery(trip.Id, TestPlanning.TenantId), CancellationToken.None)).Value;
+
+        Assert.All(timeline.Take(2), e => Assert.True(e is { Reason: null, Detail: null, EnteredBy: null, Source: null }));
+        Assert.Equal("App", timeline[2].Source);
+        Assert.Equal("driver@northernlink.ca", timeline[2].EnteredBy);
+        Assert.Null(timeline[2].Reason);
+        Assert.Null(timeline[2].Detail);
+    }
+
+    [Fact]
     public async Task Trip_without_a_manifest_passes_null_manifest_id()
     {
         var trip = TestPlanning.ScheduleTrip().Value; // no manifest attached

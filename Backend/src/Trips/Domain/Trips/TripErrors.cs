@@ -106,6 +106,28 @@ public static class TripErrors
         "Trips.Trip.OnWorksheetCannotCloseWithoutBilling",
         "A worksheet already claims this trip — void the draft (or write the invoice off) instead of closing the trip without billing.");
 
+    // ---- Driver correction (Trip.CorrectDriver + CorrectTripDriverCommandHandler) ----
+
+    public static readonly Error DriverCorrectionReasonRequired = Error.Validation(
+        "Trips.Trip.DriverCorrectionReasonRequired", "Correcting a trip's driver requires a reason.");
+
+    public static readonly Error DriverCorrectionReasonTooLong = Error.Validation(
+        "Trips.Trip.DriverCorrectionReasonTooLong",
+        $"The reason for a driver correction can be at most {Trip.MaxReasonLength} characters.");
+
+    /// <summary>The run has not happened yet, so this is ordinary reassignment, not a correction.</summary>
+    public static Error UseReassign(TripStatus status) => Error.Conflict(
+        "Trips.Trip.UseReassign",
+        $"This trip is still {status} — change its driver through the normal reassign (POST /api/trips/{{id}}/assign); a driver correction is only for a run that is already over.");
+
+    /// <summary>Cancelled and WrittenOff — the statuses a correction never applies to.</summary>
+    public static Error DriverCorrectionNotAllowed(TripStatus status) => Error.Conflict(
+        "Trips.Trip.DriverCorrectionNotAllowed",
+        $"A {status} trip's driver cannot be corrected — only a trip that is ready for billing, invoiced, or completed can be.");
+
+    public static readonly Error DriverUnchanged = Error.Conflict(
+        "Trips.Trip.DriverUnchanged", "That driver is already recorded on this trip.");
+
     public static readonly Error BillingStateOnClientlessTrip = Error.Conflict(
         "Trips.Trip.BillingStateOnClientlessTrip", "A run with no client never enters the billing arc, so no invoice can speak for it.");
 

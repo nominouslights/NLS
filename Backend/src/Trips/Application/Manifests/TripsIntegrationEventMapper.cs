@@ -11,8 +11,9 @@ namespace NorthernLink.Trips.Application.Manifests;
 /// <summary>
 /// Trips' explicit domain-event → integration-event translation. The public contracts today are
 /// a trip becoming billable (Billing records a billable trip), post-hoc round-trip pairing
-/// changes (Billing re-keys its uninvoiced replica rows), and route changes (Booking maintains
-/// its <c>corridor_lookup</c> replica — a booking corridor is a Trips route).
+/// changes (Billing re-keys its uninvoiced replica rows), route changes (Booking maintains
+/// its <c>corridor_lookup</c> replica — a booking corridor is a Trips route), and driver
+/// corrections on finished runs (published for future consumers; none subscribes yet).
 /// <para>
 /// The billable feed hangs off <see cref="TripReadyForBillingDomainEvent"/>, not completion:
 /// under the billing-driven lifecycle a trip reaches Completed only once payment is confirmed,
@@ -36,6 +37,7 @@ public sealed class TripsIntegrationEventMapper : IIntegrationEventMapper
         {
             TripReadyForBillingDomainEvent => MapReadyForBilling((Trip)aggregate),
             TripClosedWithoutBillingDomainEvent => MapClosedWithoutBilling((Trip)aggregate),
+            TripDriverCorrectedDomainEvent corrected => MapDriverCorrected(corrected, (Trip)aggregate),
             TripRoundTripChangedDomainEvent => MapRoundTripChanged((Trip)aggregate),
             TripScheduledFromBookingDomainEvent => MapScheduledFromBooking((Trip)aggregate),
             RouteCreatedDomainEvent => MapRouteChanged((Route)aggregate),
@@ -67,6 +69,29 @@ public sealed class TripsIntegrationEventMapper : IIntegrationEventMapper
         trip.TenantId,
         trip.TripNumber,
         trip.WrittenOffReason ?? string.Empty);
+
+    /// <summary>
+    /// A dispatcher corrected the driver on a finished run. Built from the domain event for the
+    /// previous driver, the reason, and who made it — the aggregate keeps none of those — and
+    /// from the aggregate for the trip's identity. The occurrence time is the domain event's, so
+    /// the published fact and the journal entry agree. No consumer yet (intended).
+    /// </summary>
+    private static TripDriverCorrectedIntegrationEvent MapDriverCorrected(
+        TripDriverCorrectedDomainEvent corrected, Trip trip) => new(
+        trip.Id,
+        trip.TenantId,
+        trip.TripNumber,
+        trip.ServiceDate,
+        corrected.PreviousDriverId,
+        corrected.PreviousDriverName,
+        corrected.NewDriverId,
+        corrected.NewDriverName,
+        corrected.Reason,
+        corrected.EnteredByUserId,
+        corrected.EnteredBy)
+    {
+        OccurredAtUtc = corrected.OccurredAtUtc,
+    };
 
     /// <summary>
     /// Defence in depth: the aggregate only raises the ready-for-billing event on the client

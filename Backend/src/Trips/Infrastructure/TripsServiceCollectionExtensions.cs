@@ -56,6 +56,7 @@ using NorthernLink.Trips.Application.Trips.ChangeStatus;
 using NorthernLink.Trips.Application.Trips.CloseWithoutBilling;
 using NorthernLink.Trips.Application.Trips.ConvertToDeadhead;
 using NorthernLink.Trips.Application.Trips.ConvertToPassengerTrip;
+using NorthernLink.Trips.Application.Trips.CorrectDriver;
 using NorthernLink.Trips.Application.Trips.FinishOperations;
 using NorthernLink.Trips.Application.Trips.Create;
 using NorthernLink.Trips.Application.Trips.CreateDeadheadReturn;
@@ -179,6 +180,7 @@ public static class TripsServiceCollectionExtensions
         services.AddScoped<ICommandHandler<ChangeTripStatusCommand>, ChangeTripStatusCommandHandler>();
         services.AddScoped<ICommandHandler<FinishTripOperationsCommand>, FinishTripOperationsCommandHandler>();
         services.AddScoped<ICommandHandler<CloseTripWithoutBillingCommand>, CloseTripWithoutBillingCommandHandler>();
+        services.AddScoped<ICommandHandler<CorrectTripDriverCommand>, CorrectTripDriverCommandHandler>();
         services.AddScoped<ICommandHandler<RecordTripDemandCommand>, RecordTripDemandCommandHandler>();
         services.AddScoped<ICommandHandler<AttachManifestToTripCommand>, AttachManifestToTripCommandHandler>();
         services.AddScoped<ICommandHandler<MergeRoundTripCommand>, MergeRoundTripCommandHandler>();

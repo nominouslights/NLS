@@ -3,14 +3,24 @@ namespace NorthernLink.Trips.Application.Trips.GetActivity;
 /// <summary>
 /// One entry in a trip's activity (audit) timeline — a single journaled domain event on
 /// the trip itself (<c>AggregateType == "trip"</c>) or on its attached manifest
-/// (<c>AggregateType == "trip-manifest"</c>). <see cref="Source"/> and
-/// <see cref="EnteredBy"/> are the provenance carried by manifest edit events
-/// (App vs Dispatcher, and who), and are null for trip lifecycle events and for the
-/// manifest-created event (which carries no provenance).
+/// (<c>AggregateType == "trip-manifest"</c>). <see cref="Source"/> is the provenance carried by
+/// manifest edit events (App vs Dispatcher) and is null for trip events and for the
+/// manifest-created event. <see cref="EnteredBy"/> is who made the change, read from the
+/// journaled payload of a manifest edit event or of any trip event that records it (today
+/// <c>trip-driver-corrected</c>, taken from the signed token server-side); null otherwise.
+/// <para>
+/// <see cref="Reason"/> is the free-text reason a trip event journaled in its own payload, read
+/// generically from any trip event's <c>reason</c> field (today <c>trip-driver-corrected</c>);
+/// null for every other entry. <see cref="Detail"/> is a short server-composed summary of what
+/// changed — for <c>trip-driver-corrected</c>, "Driver: {previous ?? none} → {new}"; null for
+/// every other entry. Both are additive and nullable, so older clients ignore them.
+/// </para>
 /// </summary>
 public sealed record TripActivityEntryResponse(
     DateTimeOffset OccurredAtUtc,
     string AggregateType,
     string EventType,
     string? Source,
-    string? EnteredBy);
+    string? EnteredBy,
+    string? Reason = null,
+    string? Detail = null);

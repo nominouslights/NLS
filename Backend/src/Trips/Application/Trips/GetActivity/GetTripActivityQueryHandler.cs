@@ -25,6 +25,12 @@ public sealed class GetTripActivityQueryHandler(
     /// </summary>
     private const string ManifestAggregateType = "trip-manifest";
 
+    /// <summary>Stable journal aggregate name for the trip (<c>AuditNames.ForAggregate(typeof(Trip))</c>).</summary>
+    private const string TripAggregateType = "trip";
+
+    /// <summary>Journal event name of <c>TripDriverCorrectedDomainEvent</c> (<c>AuditNames.ForEvent</c>).</summary>
+    private const string DriverCorrectedEventType = "trip-driver-corrected";
+
     public async Task<Result<IReadOnlyList<TripActivityEntryResponse>>> Handle(
         GetTripActivityQuery query, CancellationToken cancellationToken)
     {
@@ -53,12 +59,64 @@ public sealed class GetTripActivityQueryHandler(
 
     private static TripActivityEntryResponse Map(TripActivityJournalEntry entry)
     {
-        var (source, enteredBy) = entry.AggregateType == ManifestAggregateType
-            ? ReadManifestProvenance(entry.Payload)
-            : (null, null);
+        if (entry.AggregateType == ManifestAggregateType)
+        {
+            var (source, manifestEnteredBy) = ReadManifestProvenance(entry.Payload);
+            return new TripActivityEntryResponse(
+                entry.OccurredAtUtc, entry.AggregateType, entry.EventType, source, manifestEnteredBy);
+        }
 
+        if (entry.AggregateType != TripAggregateType)
+        {
+            return new TripActivityEntryResponse(
+                entry.OccurredAtUtc, entry.AggregateType, entry.EventType, null, null);
+        }
+
+        // Trip events journal their whole domain-event record, so anything that lives only on
+        // the event — a reason, who made the change, the before/after of a correction — is read
+        // straight back out. Generic on purpose: any trip event carrying "reason" or "enteredBy"
+        // surfaces without a change here.
+        var (reason, enteredBy, detail) = ReadTripPayload(entry.EventType, entry.Payload);
         return new TripActivityEntryResponse(
-            entry.OccurredAtUtc, entry.AggregateType, entry.EventType, source, enteredBy);
+            entry.OccurredAtUtc, entry.AggregateType, entry.EventType, null, enteredBy, reason, detail);
+    }
+
+    /// <summary>
+    /// The <c>reason</c> and <c>enteredBy</c> string fields of a trip event payload, plus the
+    /// event-specific <see cref="TripActivityEntryResponse.Detail"/> — each null when absent,
+    /// non-string, or the JSON is malformed.
+    /// </summary>
+    private static (string? Reason, string? EnteredBy, string? Detail) ReadTripPayload(string eventType, string payload)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(payload);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return (null, null, null);
+            }
+
+            var detail = eventType == DriverCorrectedEventType ? DriverCorrectionDetail(root) : null;
+            return (ReadString(root, "reason"), ReadString(root, "enteredBy"), detail);
+        }
+        catch (JsonException)
+        {
+            return (null, null, null);
+        }
+    }
+
+    /// <summary>"Driver: R. Ballantyne → J. Moose" — "none" when the trip had no driver on record.</summary>
+    private static string? DriverCorrectionDetail(JsonElement root)
+    {
+        var newDriver = ReadString(root, "newDriverName");
+        if (newDriver is null)
+        {
+            return null;
+        }
+
+        var previousDriver = ReadString(root, "previousDriverName");
+        return $"Driver: {previousDriver ?? "none"} → {newDriver}";
     }
 
     /// <summary>

@@ -145,4 +145,33 @@ public class TripsIntegrationEventMapperTests
         var integrationEvent = Assert.IsType<TripReadyForBillingIntegrationEvent>(_mapper.Map(domainEvent, trip));
         Assert.Null(integrationEvent.Direction);
     }
+
+    [Fact]
+    public void Driver_correction_maps_to_the_public_event_with_every_field()
+    {
+        var newDriverId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var trip = TestPlanning.ScheduleTrip(tripNumber: "TR-9010", clientId: Guid.NewGuid()).Value;
+        trip.RecordPostTripInspection();
+        trip.FinishOperations();
+        trip.ClearDomainEvents();
+        Assert.True(trip.CorrectDriver(newDriverId, "J. Moose", "wrong driver", actorId, "dispatch@northernlink.ca").IsSuccess);
+        var domainEvent = (TripDriverCorrectedDomainEvent)trip.DomainEvents.Single();
+
+        var integrationEvent = Assert.IsType<TripDriverCorrectedIntegrationEvent>(_mapper.Map(domainEvent, trip));
+
+        Assert.Equal(trip.Id, integrationEvent.TripId);
+        Assert.Equal(TestPlanning.TenantId, integrationEvent.TenantId);
+        Assert.Equal("TR-9010", integrationEvent.TripNumber);
+        Assert.Equal(new DateOnly(2026, 7, 21), integrationEvent.ServiceDate);
+        Assert.Equal(TestPlanning.DriverId, integrationEvent.PreviousDriverId);
+        Assert.Equal(TestPlanning.DriverName, integrationEvent.PreviousDriverName);
+        Assert.Equal(newDriverId, integrationEvent.NewDriverId);
+        Assert.Equal("J. Moose", integrationEvent.NewDriverName);
+        Assert.Equal("wrong driver", integrationEvent.Reason);
+        Assert.Equal(actorId, integrationEvent.CorrectedByUserId);
+        Assert.Equal("dispatch@northernlink.ca", integrationEvent.CorrectedByEmail);
+        Assert.Equal(domainEvent.OccurredAtUtc, integrationEvent.OccurredAtUtc);
+        Assert.Equal("trips.trip-driver-corrected", Shared.EventBus.EventRoutingKey.For(typeof(TripDriverCorrectedIntegrationEvent)));
+    }
 }

@@ -780,6 +780,103 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         return Result.Success();
     }
 
+    /// <summary>
+    /// Longest free-text reason a dispatcher may record against a trip correction. Shared so
+    /// every reason-carrying trip command caps at the same length.
+    /// </summary>
+    public const int MaxReasonLength = 500;
+
+    /// <summary>
+    /// Whether <see cref="CorrectDriver"/> applies to a trip in <paramref name="status"/>: only
+    /// once the run is over and has not been called off — ReadyForBilling, Invoiced, or Completed.
+    /// Scheduled and InProgress trips change driver through the normal reassign path; Cancelled
+    /// and WrittenOff trips are refused (a cancelled run had no driver doing the work, and a
+    /// written-off one is closed for good).
+    /// </summary>
+    public static bool DriverCorrectionAllowedFor(TripStatus status) =>
+        status is TripStatus.ReadyForBilling or TripStatus.Invoiced or TripStatus.Completed;
+
+    /// <summary>
+    /// Corrects the driver recorded on a trip whose run is already over — the dispatcher's fix
+    /// for a trip that was logged against the wrong driver. Deliberately separate from
+    /// <see cref="AssignDriver"/>, which stays refused on an operationally-closed trip: this is a
+    /// correction of history, so it takes a required reason (trimmed, at most
+    /// <see cref="MaxReasonLength"/> characters) and records who made it.
+    /// <para>
+    /// The caller validates <paramref name="driverId"/> against driver_lookup and passes the name
+    /// snapshot. Any driver row qualifies, Inactive or Deactivated included — the question is who
+    /// actually drove, which is a historical fact, not an availability check.
+    /// </para>
+    /// <para>
+    /// Changes <see cref="DriverId"/>, <see cref="DriverName"/>, and <see cref="UpdatedAtUtc"/>
+    /// only: status, the lifecycle timestamps, the vehicle, the post-trip inspection flag, and
+    /// round-trip pairing are untouched. A trip with no driver on record may be corrected.
+    /// Raises <see cref="TripDriverCorrectedDomainEvent"/> (and NOT
+    /// <see cref="TripAssignmentChangedDomainEvent"/> — this is not an assignment).
+    /// </para>
+    /// </summary>
+    public Result CorrectDriver(
+        Guid driverId,
+        string driverName,
+        string reason,
+        Guid? actorUserId,
+        string? actorEmail)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return Result.Failure(TripErrors.DriverCorrectionReasonRequired);
+        }
+
+        var trimmedReason = reason.Trim();
+        if (trimmedReason.Length > MaxReasonLength)
+        {
+            return Result.Failure(TripErrors.DriverCorrectionReasonTooLong);
+        }
+
+        if (Status is TripStatus.Scheduled or TripStatus.InProgress)
+        {
+            return Result.Failure(TripErrors.UseReassign(Status));
+        }
+
+        if (!DriverCorrectionAllowedFor(Status))
+        {
+            return Result.Failure(TripErrors.DriverCorrectionNotAllowed(Status));
+        }
+
+        if (driverId == Guid.Empty)
+        {
+            return Result.Failure(TripErrors.DriverRequired);
+        }
+
+        if (string.IsNullOrWhiteSpace(driverName))
+        {
+            return Result.Failure(TripErrors.DriverNameRequired);
+        }
+
+        if (DriverId == driverId)
+        {
+            return Result.Failure(TripErrors.DriverUnchanged);
+        }
+
+        var previousDriverId = DriverId;
+        var previousDriverName = DriverName;
+
+        DriverId = driverId;
+        DriverName = driverName.Trim();
+        UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        Raise(new TripDriverCorrectedDomainEvent(
+            Id,
+            previousDriverId,
+            previousDriverName,
+            driverId,
+            DriverName,
+            trimmedReason,
+            actorUserId,
+            Normalize(actorEmail)));
+        return Result.Success();
+    }
+
     public Result Start()
     {
         if (!CanTransition(Status, TripStatus.InProgress))
