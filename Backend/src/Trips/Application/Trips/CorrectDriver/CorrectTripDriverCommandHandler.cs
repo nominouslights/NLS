@@ -30,6 +30,14 @@ public sealed class CorrectTripDriverCommandHandler(
             return Result.Failure(TripErrors.NotFound);
         }
 
+        // A missing/empty driver id is a malformed request (400 DriverRequired), not an unknown
+        // driver (404): skip the lookup and let the aggregate refuse it, so its status and reason
+        // checks still come first and the refusal is the domain's own validation error.
+        if (command.DriverId == Guid.Empty)
+        {
+            return trip.CorrectDriver(Guid.Empty, string.Empty, command.Reason, actor.UserId, actor.Email);
+        }
+
         var driver = await driverLookup.GetAsync(command.DriverId, cancellationToken);
         if (driver is null)
         {

@@ -334,7 +334,9 @@ export function unpairRoundTrip(id: string): Promise<void> {
 // that lands in the activity log. Live trips use REASSIGN (assignTrip) instead.
 // ---------------------------------------------------------------------------
 
-/** Longest correction reason the server accepts (DriverCorrectionReasonTooLong). */
+/** Longest correction reason the server accepts — mirrors the C# constant
+ *  `Trip.MaxReasonLength` (Backend/src/Trips/Domain/Trips/Trip.cs); over it the
+ *  server returns DriverCorrectionReasonTooLong. Change both together. */
 export const DRIVER_CORRECTION_REASON_MAX = 500;
 
 /** POST /api/trips/{id}/correct-driver → 204. The new driver may be any driver
@@ -349,9 +351,11 @@ export function correctTripDriver(id: string, driverId: string, reason: string):
   });
 }
 
-/** UI mirror of where the server allows a driver correction: a finished trip
- *  (ReadyForBilling, Invoiced, Completed). Scheduled/InProgress use REASSIGN;
- *  Cancelled/WrittenOff are never corrected. */
+/** UI mirror of the C# `Trip.DriverCorrectionAllowedFor`
+ *  (Backend/src/Trips/Domain/Trips/Trip.cs) — where the server allows a driver
+ *  correction: a finished trip (ReadyForBilling, Invoiced, Completed).
+ *  Scheduled/InProgress use REASSIGN; Cancelled/WrittenOff are never corrected.
+ *  Change both together. */
 export function canCorrectDriver(t: Pick<TripRecord, "status">): boolean {
   return t.status === "ReadyForBilling" || t.status === "Invoiced" || t.status === "Completed";
 }
@@ -1106,20 +1110,33 @@ export function seatsLabel(t: TripRecord): string {
   return t.seatsCapacity != null ? `${t.seatsConfirmed} / ${t.seatsCapacity}` : String(t.seatsConfirmed);
 }
 
-/** True when the driver holds an unexpired clearance for the trip's client.
- *  Matching is by client name (the backend stores clearance clientName as free
- *  text); clearance checks are a UI-side warning in v1, never a hard block. */
+/** True when the driver held a clearance for the trip's client that was in
+ *  force on `asOf` (yyyy-MM-dd, default today): already granted that day and not
+ *  yet expired. Live assignment checks today; a historical driver correction
+ *  checks the trip's own serviceDate. Matching is by client name (the backend
+ *  stores clearance clientName as free text); clearance checks are a UI-side
+ *  warning in v1, never a hard block. */
 export function hasClearanceFor(
   clearances: DriverClearanceRecord[],
   clientName: string | null,
+  asOf: string = todayIso(),
 ): boolean {
   if (!clientName) return true; // no client on the trip — nothing to clear
-  const today = todayIso();
-  return clearances.some(
-    (c) =>
-      c.clientName.trim().toLowerCase() === clientName.trim().toLowerCase() &&
-      (c.expiry === null || c.expiry >= today),
-  );
+  return clearances.some((c) => {
+    if (c.clientName.trim().toLowerCase() !== clientName.trim().toLowerCase()) return false;
+    if (c.expiry !== null && c.expiry < asOf) return false;
+    const granted = localIsoDate(c.grantedAtUtc);
+    return granted === null || granted <= asOf;
+  });
+}
+
+/** A UTC instant's local calendar date (yyyy-MM-dd); null when absent/unparseable. */
+function localIsoDate(utc: string | null | undefined): string | null {
+  if (!utc) return null;
+  const d = new Date(utc);
+  if (Number.isNaN(d.getTime())) return null;
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
 /** Local-time ISO date (yyyy-MM-dd) — service dates are local operational days. */

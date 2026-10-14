@@ -444,6 +444,9 @@ internal static class TripPlanningEndpoints
     /// Corrects the driver on a trip whose run is over. Body <c>{ "driverId": guid, "reason": string }</c>,
     /// 204 on success; refusals are the usual <c>{ code, message }</c> ProblemDetails mapping. Who
     /// made the correction comes from the access token inside the handler, never from the body.
+    /// A missing or empty <c>driverId</c> is passed through as <see cref="Guid.Empty"/>, which the
+    /// handler answers with the domain's 400 DriverRequired; 404 DriverNotFound is reserved for an
+    /// id that does not exist in this tenant.
     /// </summary>
     private static async Task<IResult> CorrectTripDriver(
         Guid id,

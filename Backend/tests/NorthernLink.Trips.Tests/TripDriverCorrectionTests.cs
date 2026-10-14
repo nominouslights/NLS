@@ -161,6 +161,41 @@ public class TripDriverCorrectionTests
         Assert.Equal(500, Trip.MaxReasonLength);
     }
 
+    [Theory]
+    [InlineData(TripStatus.Scheduled, "Trips.Trip.UseReassign")]
+    [InlineData(TripStatus.InProgress, "Trips.Trip.UseReassign")]
+    [InlineData(TripStatus.Cancelled, "Trips.Trip.DriverCorrectionNotAllowed")]
+    [InlineData(TripStatus.WrittenOff, "Trips.Trip.DriverCorrectionNotAllowed")]
+    public void The_wrong_path_is_reported_before_a_bad_reason_or_driver(TripStatus status, string expectedCode)
+    {
+        // Blank reason, over-long reason, empty driver, and the same driver: every one of them is
+        // also wrong, but the caller is told the action itself is wrong first.
+        Assert.Equal(expectedCode, TripIn(status).CorrectDriver(NewDriverId, NewDriverName, "  ", ActorId, ActorEmail).Error.Code);
+        Assert.Equal(expectedCode, Correct(TripIn(status), new string('x', Trip.MaxReasonLength + 1)).Error.Code);
+        Assert.Equal(expectedCode, TripIn(status).CorrectDriver(Guid.Empty, "", "", ActorId, ActorEmail).Error.Code);
+        Assert.Equal(expectedCode, Correct(TripIn(status), driverId: TestPlanning.DriverId).Error.Code);
+    }
+
+    [Fact]
+    public void A_bad_reason_is_reported_before_a_missing_or_unchanged_driver()
+    {
+        Assert.Equal(TripErrors.DriverCorrectionReasonRequired,
+            TripIn(TripStatus.ReadyForBilling).CorrectDriver(Guid.Empty, "", " ", ActorId, ActorEmail).Error);
+        Assert.Equal(TripErrors.DriverCorrectionReasonRequired,
+            TripIn(TripStatus.ReadyForBilling).CorrectDriver(TestPlanning.DriverId, NewDriverName, "", ActorId, ActorEmail).Error);
+        Assert.Equal(TripErrors.DriverCorrectionReasonTooLong,
+            Correct(TripIn(TripStatus.ReadyForBilling), new string('x', Trip.MaxReasonLength + 1), TestPlanning.DriverId).Error);
+    }
+
+    [Fact]
+    public void An_empty_driver_id_is_a_validation_error()
+    {
+        var result = TripIn(TripStatus.Invoiced).CorrectDriver(Guid.Empty, "", "wrong driver", ActorId, ActorEmail);
+
+        Assert.Equal(TripErrors.DriverRequired, result.Error);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+    }
+
     [Fact]
     public void The_same_driver_is_refused()
     {

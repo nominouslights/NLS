@@ -41,7 +41,11 @@ const DRIVERS = [
   driver("drv-gone", "Dale Deactivated", "Deactivated"),
 ];
 
-const CLEARANCE = { id: "c-1", clientName: "Alamos Gold", expiry: null };
+const CLEARANCE = { id: "c-1", clientName: "Alamos Gold", expiry: null as string | null, grantedAtUtc: "2026-01-05T15:00:00Z" };
+
+// Clearances served per driver id; tests override entries to set up the as-of cases.
+let clearancesById: Record<string, unknown[]> = {};
+let clearanceRequests: string[] = [];
 
 const TRIP = {
   id: "trip-1",
@@ -72,6 +76,11 @@ let postResponse: () => Response = () => new Response(null, { status: 204 });
 
 beforeEach(() => {
   postBodies = [];
+  clearancesById = { "drv-cleared": [CLEARANCE] };
+  clearanceRequests = [];
+  // Pin "today" well after the trip (2026-10-10) so serviceDate-vs-today differs.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-20T12:00:00"));
   postResponse = () => new Response(null, { status: 204 });
   getValidAccessToken.mockResolvedValue("access-1");
   getAccessToken.mockReturnValue("access-1");
@@ -80,7 +89,10 @@ beforeEach(() => {
     const method = init?.method ?? "GET";
     if (url === "/api/drivers") return json(200, DRIVERS);
     const m = /^\/api\/drivers\/([^/]+)\/clearances$/.exec(url);
-    if (m) return json(200, m[1] === "drv-cleared" ? [CLEARANCE] : []);
+    if (m) {
+      clearanceRequests.push(m[1]);
+      return json(200, clearancesById[m[1]] ?? []);
+    }
     if (url === "/api/trips/trip-1/correct-driver" && method === "POST") {
       postBodies.push(JSON.parse(String(init!.body)));
       return postResponse();
@@ -92,6 +104,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
@@ -102,8 +115,12 @@ const isDisabled = () => submitButton().getAttribute("aria-disabled") === "true"
 const option = (name: RegExp) => screen.getByRole("radio", { name });
 const reasonBox = () => screen.getByRole("textbox") as HTMLTextAreaElement;
 
-async function renderModal(onCorrected = vi.fn<(driverId: string) => Promise<void>>(async () => undefined), onClose = vi.fn()) {
-  render(<CorrectDriverModal trip={TRIP} onClose={onClose} onCorrected={onCorrected} />);
+async function renderModal(
+  onCorrected = vi.fn<(driverId: string) => Promise<void>>(async () => undefined),
+  onClose = vi.fn(),
+  trip: TripRecord = TRIP,
+) {
+  render(<CorrectDriverModal trip={trip} onClose={onClose} onCorrected={onCorrected} />);
   await screen.findByRole("radio", { name: /Avery Cleared/ });
   return { onCorrected, onClose };
 }
@@ -164,11 +181,13 @@ describe("CorrectDriverModal", () => {
 
   it("warns when the picked driver lacks the client clearance, but still submits", async () => {
     const { onCorrected } = await renderModal();
-    expect(option(/Blake Uncleared/).textContent).toContain("No Alamos Gold clearance");
-    expect(option(/Avery Cleared/).textContent).toContain("Alamos Gold clearance");
+    expect(option(/Blake Uncleared/).textContent).toContain("No Alamos Gold clearance on Sat, Oct 10");
+    expect(option(/Avery Cleared/).textContent).toContain("Alamos Gold clearance on Sat, Oct 10");
 
     fireEvent.click(option(/Blake Uncleared/));
-    expect(screen.getByTestId("clearance-warning").textContent).toContain("warning, not a block");
+    const warning = screen.getByTestId("clearance-warning").textContent;
+    expect(warning).toContain("Blake Uncleared had no Alamos Gold clearance on Sat, Oct 10.");
+    expect(warning).toContain("warning, not a block");
     fireEvent.change(reasonBox(), { target: { value: "Blake drove it" } });
     expect(isDisabled()).toBe(false);
     fireEvent.click(submitButton());
@@ -198,5 +217,39 @@ describe("CorrectDriverModal", () => {
     expect(onCorrected).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
     expect(isDisabled()).toBe(false);
+  });
+  it("judges clearance on the trip date: one expired since then raises no warning", async () => {
+    // Expired 2026-10-15 — after the trip (10-10), before "today" (10-20).
+    clearancesById["drv-uncleared"] = [{ ...CLEARANCE, id: "c-2", expiry: "2026-10-15" }];
+    await renderModal();
+    expect(option(/Blake Uncleared/).textContent).toContain("Alamos Gold clearance on Sat, Oct 10");
+    expect(option(/Blake Uncleared/).textContent).not.toContain("No Alamos Gold");
+    fireEvent.click(option(/Blake Uncleared/));
+    expect(screen.queryByTestId("clearance-warning")).toBeNull();
+  });
+
+  it("judges clearance on the trip date: one granted after it still warns", async () => {
+    // Valid today, but granted 2026-10-12 — two days after the trip.
+    clearancesById["drv-uncleared"] = [{ ...CLEARANCE, id: "c-3", grantedAtUtc: "2026-10-12T15:00:00Z" }];
+    await renderModal();
+    expect(option(/Blake Uncleared/).textContent).toContain("No Alamos Gold clearance on Sat, Oct 10");
+    fireEvent.click(option(/Blake Uncleared/));
+    expect(screen.getByTestId("clearance-warning").textContent).toContain(
+      "Blake Uncleared had no Alamos Gold clearance on Sat, Oct 10.",
+    );
+  });
+
+  it("fetches clearances once per listed driver — never for the current driver", async () => {
+    await renderModal();
+    expect([...clearanceRequests].sort()).toEqual(["drv-cleared", "drv-gone", "drv-inactive", "drv-uncleared"]);
+  });
+
+  it("makes no clearance requests for a trip with no client, and shows no clearance chips", async () => {
+    const clientless = { ...TRIP, clientId: null, clientName: null } as TripRecord;
+    await renderModal(undefined, undefined, clientless);
+    expect(clearanceRequests).toEqual([]);
+    expect(screen.getAllByTestId("driver-option").map((o) => o.textContent ?? "").join(" ")).not.toMatch(/clearance/);
+    fireEvent.click(option(/Blake Uncleared/));
+    expect(screen.queryByTestId("clearance-warning")).toBeNull();
   });
 });

@@ -781,8 +781,10 @@ public sealed class Trip : AggregateRoot, ITenantScoped
     }
 
     /// <summary>
-    /// Longest free-text reason a dispatcher may record against a trip correction. Shared so
-    /// every reason-carrying trip command caps at the same length.
+    /// Longest free-text reason a dispatcher may record against a trip correction. Today only
+    /// <see cref="CorrectDriver"/> enforces it; it lives on the aggregate so the other
+    /// reason-carrying trip commands (cancel, close without billing, ...) can adopt the same cap
+    /// later — they do not apply it yet.
     /// </summary>
     public const int MaxReasonLength = 500;
 
@@ -822,6 +824,18 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         Guid? actorUserId,
         string? actorEmail)
     {
+        // Order matters: a caller on the wrong path (a live trip, or one closed for good) is told
+        // the action itself is wrong before anything about the reason or the driver it sent.
+        if (Status is TripStatus.Scheduled or TripStatus.InProgress)
+        {
+            return Result.Failure(TripErrors.UseReassign(Status));
+        }
+
+        if (!DriverCorrectionAllowedFor(Status))
+        {
+            return Result.Failure(TripErrors.DriverCorrectionNotAllowed(Status));
+        }
+
         if (string.IsNullOrWhiteSpace(reason))
         {
             return Result.Failure(TripErrors.DriverCorrectionReasonRequired);
@@ -831,16 +845,6 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         if (trimmedReason.Length > MaxReasonLength)
         {
             return Result.Failure(TripErrors.DriverCorrectionReasonTooLong);
-        }
-
-        if (Status is TripStatus.Scheduled or TripStatus.InProgress)
-        {
-            return Result.Failure(TripErrors.UseReassign(Status));
-        }
-
-        if (!DriverCorrectionAllowedFor(Status))
-        {
-            return Result.Failure(TripErrors.DriverCorrectionNotAllowed(Status));
         }
 
         if (driverId == Guid.Empty)

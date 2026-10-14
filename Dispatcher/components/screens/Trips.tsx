@@ -43,7 +43,6 @@ import {
   svcForTrip,
   tripBillingChip,
   tripChip,
-  tripActivityReason,
   tripStatusLabel,
   tripWindowLabel,
   unpairRoundTrip,
@@ -55,12 +54,9 @@ import {
   type TripUpdateInput,
 } from "@/lib/api/trips";
 import { isShipmentOpen, listShipments, shipmentLegChip, type ShipmentRecord } from "@/lib/api/shipments";
-import {
-  listDrivers,
-  listDriverClearances,
-  type DriverClearanceRecord,
-  type DriverRecord,
-} from "@/lib/api/drivers";
+import { listDriverClearances } from "@/lib/api/drivers";
+import { useDriverRoster } from "@/lib/useDriverRoster";
+import { activityEntryView } from "@/lib/tripActivity";
 import { listVehicles, type Vehicle } from "@/lib/api/fleet";
 import { contractRateLabel, getClient, type ActiveContractSummary } from "@/lib/api/clients";
 // Leg-direction glyph + label — the one place that mapping lives (Billing.tsx
@@ -128,40 +124,6 @@ function fmtUtcDateTime(iso: string | null): string {
   });
 }
 
-// Friendly labels for the kebab-case audit event types (GET /activity). Unknown
-// types fall back to their de-kebabed form.
-const EVENT_LABELS: Record<string, string> = {
-  "trip-scheduled": "Trip scheduled",
-  // The real journal name for REASSIGN; the three below are legacy aliases.
-  "trip-assignment-changed": "Assignment changed",
-  "trip-assigned": "Driver / vehicle assigned",
-  "trip-driver-assigned": "Driver assigned",
-  "trip-vehicle-assigned": "Vehicle assigned",
-  "trip-started": "Trip started",
-  "trip-completed": "Trip completed",
-  "trip-cancelled": "Trip cancelled",
-  "trip-demand-recorded": "Demand recorded",
-  "trip-manifest-linked": "Manifest linked",
-  "trip-manifest-created": "Manifest created",
-  "trip-manifest-updated": "Manifest updated",
-  "trip-route-changed": "Route changed",
-  "trip-manifest-route-renamed": "Manifest route renamed",
-  "trip-converted-to-deadhead": "Converted to deadhead",
-  "trip-converted-to-passenger-trip": "Converted to passenger trip",
-  "trip-driver-corrected": "Driver corrected",
-};
-
-/** "Who did what" line for one audit entry (source + event). */
-function activityLabel(e: TripActivityEntry): string {
-  const who =
-    e.source === "App"
-      ? "Driver App"
-      : e.source === "Dispatcher"
-        ? `Dispatcher${e.enteredBy ? ` (${e.enteredBy})` : ""}`
-        : null;
-  const action = EVENT_LABELS[e.eventType] ?? e.eventType.replace(/-/g, " ");
-  return who ? `${who} · ${action}` : action;
-}
 
 // ---------------------------------------------------------------------------
 // Pre-data states (Drivers.tsx conventions)
@@ -242,41 +204,14 @@ function AssignModal({
   onClose: () => void;
   onSaved: (driverId: string | null, vehicleId: string | null) => Promise<void>;
 }) {
-  const [roster, setRoster] = useState<{ driver: DriverRecord; cleared: boolean }[] | null>(null);
-  const [rosterError, setRosterError] = useState<string | null>(null);
+  // Active drivers, clearance judged as of today (live assignment). A failed
+  // clearance fetch degrades to "no clearances on file" (warn), never a block.
+  const { roster, error: rosterError } = useDriverRoster({ clientName: trip.clientName, include: "active" });
   const [driverId, setDriverId] = useState<string | null>(trip.driverId);
   const [vehicles, setVehicles] = useState<Vehicle[] | null>(null);
   const [vehicleId, setVehicleId] = useState<string>(trip.vehicleId ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const drivers = (await listDrivers()).filter((d) => d.status === "Active");
-        // Clearance check needs each driver's clearances — small roster, so a
-        // parallel fan-out is fine. A failed clearance fetch degrades to
-        // "no clearances on file" (warn) rather than blocking the modal.
-        const clearances = await Promise.all(
-          drivers.map((d) => listDriverClearances(d.id).catch(() => [] as DriverClearanceRecord[])),
-        );
-        if (active) {
-          setRoster(
-            drivers.map((driver, i) => ({
-              driver,
-              cleared: hasClearanceFor(clearances[i], trip.clientName),
-            })),
-          );
-        }
-      } catch (e) {
-        if (active) setRosterError(e instanceof ApiError ? e.message : "Failed to load drivers.");
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [trip.clientName]);
 
   // Active vehicles for the assignable-vehicle dropdown. The current vehicle is
   // merged in even if it is no longer Active, so it still shows selected.
@@ -636,8 +571,8 @@ function CreateReturnModal({
   const [windowEnd, setWindowEnd] = useState("");
   const [isEmptyLeg, setIsEmptyLeg] = useState(false);
 
-  const [roster, setRoster] = useState<{ driver: DriverRecord; cleared: boolean }[] | null>(null);
-  const [rosterError, setRosterError] = useState<string | null>(null);
+  // Same roster as REASSIGN — Active drivers, clearance as of today.
+  const { roster, error: rosterError } = useDriverRoster({ clientName: trip.clientName, include: "active" });
   const [driverId, setDriverId] = useState<string | null>(trip.driverId);
   const [vehicles, setVehicles] = useState<Vehicle[] | null>(null);
   const [vehicleId, setVehicleId] = useState<string>(trip.vehicleId ?? "");
@@ -647,26 +582,6 @@ function CreateReturnModal({
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const drivers = (await listDrivers()).filter((d) => d.status === "Active");
-        const clearances = await Promise.all(
-          drivers.map((d) => listDriverClearances(d.id).catch(() => [] as DriverClearanceRecord[])),
-        );
-        if (active) {
-          setRoster(drivers.map((driver, i) => ({ driver, cleared: hasClearanceFor(clearances[i], trip.clientName) })));
-        }
-      } catch (e) {
-        if (active) setRosterError(e instanceof ApiError ? e.message : "Failed to load drivers.");
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [trip.clientName]);
 
   useEffect(() => {
     let active = true;
@@ -2822,12 +2737,10 @@ export default function Trips({
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
                       {activity.map((ev, i) => {
-                        const isManifest = ev.aggregateType === "trip-manifest";
-                        const detail = ev.detail?.trim() || null;
-                        const reason = tripActivityReason(ev);
                         // Manifest events already name their author in the label
                         // (Dispatcher (name)); trip events get a "by" line instead.
-                        const by = !isManifest && ev.source !== "Dispatcher" ? ev.enteredBy?.trim() || null : null;
+                        // Null reason/detail/enteredBy → that line is just omitted.
+                        const { isManifest, label, detail, reason, by } = activityEntryView(ev);
                         const sub = { fontFamily: fonts.body, fontSize: 11.5, color: colors.textMuted, lineHeight: 1.45 };
                         return (
                           <div key={`${ev.eventType}-${ev.occurredAtUtc}-${i}`} style={{ display: "flex", alignItems: "flex-start", gap: 9 }}>
@@ -2835,7 +2748,7 @@ export default function Trips({
                             <StatusBadge kind={isManifest ? "info" : "ontime"} size={14} />
                             <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
                               <span style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textSecondary }}>
-                                {activityLabel(ev)}
+                                {label}
                               </span>
                               {detail && <span style={sub}>{detail}</span>}
                               {reason && <span style={sub}>Reason: {reason}</span>}

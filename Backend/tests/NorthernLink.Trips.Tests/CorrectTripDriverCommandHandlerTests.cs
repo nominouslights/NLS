@@ -1,4 +1,5 @@
 using NorthernLink.Shared.Kernel;
+using NorthernLink.Trips.Application.Abstractions;
 using NorthernLink.Trips.Application.Integration;
 using NorthernLink.Trips.Application.Trips;
 using NorthernLink.Trips.Application.Trips.CorrectDriver;
@@ -120,6 +121,36 @@ public class CorrectTripDriverCommandHandlerTests
     }
 
     [Fact]
+    public async Task A_missing_driver_id_is_the_domains_DriverRequired_validation_not_DriverNotFound()
+    {
+        // The endpoint maps an absent/empty driverId to Guid.Empty; that is a malformed request
+        // (400), not an unknown driver (404).
+        var trip = SeedFinishedTrip();
+
+        var result = await Handler.Handle(
+            new CorrectTripDriverCommand(trip.Id, Guid.Empty, "wrong driver"), CancellationToken.None);
+
+        Assert.Equal(TripErrors.DriverRequired, result.Error);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+        Assert.Equal(TestPlanning.DriverId, trip.DriverId);
+        Assert.Empty(trip.DomainEvents);
+        Assert.Equal(0, _trips.SaveCount);
+    }
+
+    [Fact]
+    public async Task A_missing_driver_id_on_a_live_trip_still_reports_the_wrong_path_first()
+    {
+        var trip = TripDriverCorrectionTests.TripIn(TripStatus.InProgress);
+        _trips.Add(trip);
+
+        var result = await Handler.Handle(
+            new CorrectTripDriverCommand(trip.Id, Guid.Empty, ""), CancellationToken.None);
+
+        Assert.Equal("Trips.Trip.UseReassign", result.Error.Code);
+        Assert.Equal(0, _trips.SaveCount);
+    }
+
+    [Fact]
     public async Task Domain_refusals_pass_through_without_saving()
     {
         var trip = TripDriverCorrectionTests.TripIn(TripStatus.Scheduled);
@@ -142,6 +173,8 @@ public class CorrectTripDriverCommandHandlerTests
             new CorrectTripDriverCommand(trip.Id, NewDriverId, "wrong driver"), CancellationToken.None)).IsSuccess);
 
         var activity = new FakeTripActivityReadService();
+        activity.Entries.Add(new TripActivityJournalEntry(DateTimeOffset.UtcNow, "trip", "trip-driver-corrected",
+            """{"previousDriverName":"R. Ballantyne","newDriverName":"J. Moose","reason":"wrong driver","enteredBy":"dispatch@northernlink.ca"}"""));
         GetTripActivityQueryHandler ActivityAs(Guid userId) =>
             new(_trips, activity, new TripOperatorAccess(FakeCurrentActor.Driver(userId), _drivers));
 
@@ -149,9 +182,24 @@ public class CorrectTripDriverCommandHandlerTests
             new GetTripActivityQuery(trip.Id, TestPlanning.TenantId), CancellationToken.None);
         var asOld = await ActivityAs(OldDriverUserId).Handle(
             new GetTripActivityQuery(trip.Id, TestPlanning.TenantId), CancellationToken.None);
+        var asDispatch = await new GetTripActivityQueryHandler(
+                _trips, activity, new TripOperatorAccess(FakeCurrentActor.Dispatcher, _drivers))
+            .Handle(new GetTripActivityQuery(trip.Id, TestPlanning.TenantId), CancellationToken.None);
 
         Assert.True(asNew.IsSuccess);
         Assert.Equal(TripErrors.NotYourTrip, asOld.Error);
+
+        // The new driver sees that the driver was corrected, but not the dispatch-side narrative.
+        var driverView = Assert.Single(asNew.Value);
+        Assert.Equal("trip-driver-corrected", driverView.EventType);
+        Assert.Null(driverView.Reason);
+        Assert.Null(driverView.Detail);
+        Assert.Null(driverView.EnteredBy);
+
+        var dispatchView = Assert.Single(asDispatch.Value);
+        Assert.Equal("wrong driver", dispatchView.Reason);
+        Assert.Equal("Driver: R. Ballantyne → J. Moose", dispatchView.Detail);
+        Assert.Equal("dispatch@northernlink.ca", dispatchView.EnteredBy);
     }
 
     [Fact]

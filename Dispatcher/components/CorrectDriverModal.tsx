@@ -5,24 +5,20 @@
 // record fix, so it lists EVERY driver on record (Inactive / Deactivated
 // included, labelled) and requires a reason that lands in the activity log.
 // POST /api/trips/{id}/correct-driver — the modal owns the call; server errors
-// render verbatim.
+// render verbatim. Client clearance is checked against the trip's serviceDate
+// (who was cleared THEN), and only warns — it never blocks.
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { colors, fonts, rowSurface, statusMeta } from "@/lib/theme";
 import { ApiError } from "@/lib/api/transport";
 import {
   correctTripDriver,
   DRIVER_CORRECTION_REASON_MAX,
-  hasClearanceFor,
+  shortDateLabel,
   type TripRecord,
 } from "@/lib/api/trips";
-import {
-  driverStatusKindFor,
-  listDriverClearances,
-  listDrivers,
-  type DriverClearanceRecord,
-  type DriverRecord,
-} from "@/lib/api/drivers";
+import { driverStatusKindFor } from "@/lib/api/drivers";
+import { useDriverRoster } from "@/lib/useDriverRoster";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { ActionButton } from "@/components/ui/Button";
 import { TextAreaField } from "@/components/ui/Field";
@@ -39,37 +35,21 @@ export default function CorrectDriverModal({
   /** Runs after the POST succeeds (refresh); the modal closes after it. */
   onCorrected: (driverId: string) => Promise<void>;
 }) {
-  const [roster, setRoster] = useState<{ driver: DriverRecord; cleared: boolean }[] | null>(null);
-  const [rosterError, setRosterError] = useState<string | null>(null);
+  // Every driver on record — a correction may name someone since made Inactive
+  // or Deactivated — minus the current driver (that is not a correction). The
+  // correction is historical, so clearance is judged on the trip's own date,
+  // not today.
+  const { roster, error: rosterError } = useDriverRoster({
+    clientName: trip.clientName,
+    asOf: trip.serviceDate,
+    include: "all",
+    excludeDriverId: trip.driverId,
+  });
   const [driverId, setDriverId] = useState<string | null>(null);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        // Every driver on record — a correction may name someone since made
-        // Inactive or Deactivated. The current driver is not a correction.
-        const drivers = (await listDrivers()).filter((d) => d.id !== trip.driverId);
-        // Same degrade-to-warn clearance fan-out as REASSIGN's AssignModal.
-        const clearances = await Promise.all(
-          drivers.map((d) => listDriverClearances(d.id).catch(() => [] as DriverClearanceRecord[])),
-        );
-        if (active) {
-          setRoster(
-            drivers.map((driver, i) => ({ driver, cleared: hasClearanceFor(clearances[i], trip.clientName) })),
-          );
-        }
-      } catch (e) {
-        if (active) setRosterError(e instanceof ApiError ? e.message : "Failed to load drivers.");
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [trip.driverId, trip.clientName]);
+  const tripDay = shortDateLabel(trip.serviceDate);
 
   const trimmed = reason.trim();
   const tooLong = trimmed.length > DRIVER_CORRECTION_REASON_MAX;
@@ -173,9 +153,9 @@ export default function CorrectDriverModal({
                     )}
                     {trip.clientName &&
                       (cleared ? (
-                        <StatusChip kind="ontime" label={`${trip.clientName} clearance`} />
+                        <StatusChip kind="ontime" label={`${trip.clientName} clearance on ${tripDay}`} />
                       ) : (
-                        <StatusChip kind="soon" label={`No ${trip.clientName} clearance`} />
+                        <StatusChip kind="soon" label={`No ${trip.clientName} clearance on ${tripDay}`} />
                       ))}
                   </span>
                 </button>
@@ -208,7 +188,7 @@ export default function CorrectDriverModal({
             >
               <StatusBadge kind="soon" />
               <span>
-                {selected.driver.name} has no current {trip.clientName} clearance on file. You can still record them —
+                {selected.driver.name} had no {trip.clientName} clearance on {tripDay}. You can still record them —
                 this is a warning, not a block.
               </span>
             </div>

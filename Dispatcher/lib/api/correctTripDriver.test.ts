@@ -2,11 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   canCorrectDriver,
   correctTripDriver,
+  DRIVER_CORRECTION_REASON_MAX,
+  hasClearanceFor,
   tripActivityReason,
   type TripActivityEntry,
   type TripStatus,
 } from "./trips";
 import { ApiError } from "./transport";
+import type { DriverClearanceRecord } from "./drivers";
 
 // CORRECT DRIVER: the endpoint on the wire, the status gate the console
 // pre-applies (the server stays the final authority), and the generic
@@ -64,7 +67,13 @@ describe("correctTripDriver", () => {
   });
 });
 
-describe("canCorrectDriver", () => {
+describe("DRIVER_CORRECTION_REASON_MAX (mirrors C# Trip.MaxReasonLength)", () => {
+  it("equals Trip.MaxReasonLength = 500", () => {
+    expect(DRIVER_CORRECTION_REASON_MAX).toBe(500);
+  });
+});
+
+describe("canCorrectDriver (mirrors C# Trip.DriverCorrectionAllowedFor)", () => {
   const cases: [TripStatus, boolean][] = [
     ["Scheduled", false],
     ["InProgress", false],
@@ -74,7 +83,7 @@ describe("canCorrectDriver", () => {
     ["Cancelled", false],
     ["WrittenOff", false],
   ];
-  it.each(cases)("%s → %s", (status, expected) => {
+  it.each(cases)("Trip.DriverCorrectionAllowedFor(%s) → %s", (status, expected) => {
     expect(canCorrectDriver({ status })).toBe(expected);
   });
 });
@@ -105,5 +114,37 @@ describe("tripActivityReason", () => {
     expect(
       tripActivityReason(entry({ aggregateType: "trip-manifest", eventType: "trip-manifest-updated", reason: "Late add" })),
     ).toBe("Late add");
+  });
+});
+
+describe("hasClearanceFor — as of a given date (a correction is historical)", () => {
+  const clearance = (over: Partial<DriverClearanceRecord>): DriverClearanceRecord => ({
+    id: "c-1",
+    driverId: "drv-1",
+    title: "Site access",
+    clientName: "Alamos Gold",
+    expiry: null,
+    grantedAtUtc: "2026-01-05T15:00:00Z",
+    ...over,
+  });
+
+  it("an expired-since clearance counts on the trip's date but not today", () => {
+    const rows = [clearance({ expiry: "2026-10-12" })];
+    expect(hasClearanceFor(rows, "Alamos Gold", "2026-10-10")).toBe(true);
+    expect(hasClearanceFor(rows, "Alamos Gold", "2026-10-20")).toBe(false);
+  });
+
+  it("a clearance granted after the trip's date does not count on that date", () => {
+    const rows = [clearance({ grantedAtUtc: "2026-10-12T15:00:00Z" })];
+    expect(hasClearanceFor(rows, "Alamos Gold", "2026-10-10")).toBe(false);
+    expect(hasClearanceFor(rows, "Alamos Gold", "2026-10-20")).toBe(true);
+  });
+
+  it("the expiry day itself still counts", () => {
+    expect(hasClearanceFor([clearance({ expiry: "2026-10-10" })], "Alamos Gold", "2026-10-10")).toBe(true);
+  });
+
+  it("a trip with no client needs no clearance", () => {
+    expect(hasClearanceFor([], null, "2026-10-10")).toBe(true);
   });
 });

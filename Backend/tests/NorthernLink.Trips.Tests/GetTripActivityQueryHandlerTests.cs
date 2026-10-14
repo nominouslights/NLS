@@ -176,6 +176,59 @@ public class GetTripActivityQueryHandlerTests
     }
 
     [Fact]
+    public async Task The_trips_own_driver_sees_trip_events_without_reason_detail_or_who()
+    {
+        var driverUserId = Guid.Parse("00000000-0000-0000-0000-00000000ab07");
+        _drivers.Drivers.Add(TestPlanning.ActiveDriver(userId: driverUserId));
+        var manifestId = Guid.NewGuid();
+        var trip = TestPlanning.ScheduleTrip().Value;
+        trip.AttachManifest(manifestId);
+        _trips.Add(trip);
+        _activity.Entries.AddRange(
+        [
+            new TripActivityJournalEntry(T1, "trip", "trip-driver-corrected",
+                """{"previousDriverName":"R. Ballantyne","newDriverName":"J. Moose","reason":"Logged against the wrong driver","enteredBy":"dispatch@northernlink.ca"}"""),
+            new TripActivityJournalEntry(T2, "trip", "trip-some-future-event",
+                """{"reason":"cancelled by mistake","enteredBy":"dispatch@northernlink.ca"}"""),
+            // Manifest rows keep their existing behaviour for drivers.
+            new TripActivityJournalEntry(T3, "trip-manifest", "trip-manifest-updated",
+                """{"source":"Dispatcher","enteredBy":"dispatch@northernlink.ca"}"""),
+        ]);
+
+        var asDriver = new GetTripActivityQueryHandler(
+            _trips, _activity, new TripOperatorAccess(FakeCurrentActor.Driver(driverUserId), _drivers));
+        var timeline = (await asDriver.Handle(
+            new GetTripActivityQuery(trip.Id, TestPlanning.TenantId), CancellationToken.None)).Value;
+
+        Assert.Equal(3, timeline.Count);
+        Assert.Equal(new[] { "trip-driver-corrected", "trip-some-future-event" }, timeline.Take(2).Select(e => e.EventType));
+        Assert.All(timeline.Take(2), e => Assert.True(
+            e is { AggregateType: "trip", Reason: null, Detail: null, EnteredBy: null, Source: null }));
+        Assert.Equal("Dispatcher", timeline[2].Source);
+        Assert.Equal("dispatch@northernlink.ca", timeline[2].EnteredBy);
+
+        // The same journal read by dispatch is unredacted.
+        var asDispatch = (await Handler.Handle(
+            new GetTripActivityQuery(trip.Id, TestPlanning.TenantId), CancellationToken.None)).Value;
+        Assert.Equal("Logged against the wrong driver", asDispatch[0].Reason);
+        Assert.Equal("Driver: R. Ballantyne → J. Moose", asDispatch[0].Detail);
+        Assert.Equal("dispatch@northernlink.ca", asDispatch[0].EnteredBy);
+    }
+
+    [Fact]
+    public void The_journal_names_the_handler_derives_are_the_stored_literals()
+    {
+        // The handler derives these from AuditNames; pinning the literals here means renaming
+        // Trip, TripManifest or TripDriverCorrectedDomainEvent fails a test instead of silently
+        // orphaning every journal row already written under the old name.
+        Assert.Equal("trip", Shared.Persistence.Auditing.AuditNames.ForAggregate(typeof(Trip)));
+        Assert.Equal("trip-manifest",
+            Shared.Persistence.Auditing.AuditNames.ForAggregate(typeof(Domain.Manifests.TripManifest)));
+        Assert.Equal("trip-driver-corrected",
+            Shared.Persistence.Auditing.AuditNames.ForEvent(typeof(Domain.Trips.Events.TripDriverCorrectedDomainEvent)));
+    }
+
+    [Fact]
     public async Task Trip_without_a_manifest_passes_null_manifest_id()
     {
         var trip = TestPlanning.ScheduleTrip().Value; // no manifest attached

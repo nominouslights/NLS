@@ -15,6 +15,11 @@ namespace NorthernLink.Trips.Application.Trips.GetActivity;
 /// changed — for <c>trip-driver-corrected</c>, "Driver: {previous ?? none} → {new}"; null for
 /// every other entry. Both are additive and nullable, so older clients ignore them.
 /// </para>
+/// <para>
+/// <b>Redaction:</b> for a caller without a dispatch role (a driver reading their own trip),
+/// <see cref="Reason"/>, <see cref="Detail"/> and <see cref="EnteredBy"/> are always null on trip
+/// events — the entry and its <see cref="EventType"/> still appear. Manifest entries are unaffected.
+/// </para>
 /// </summary>
 public sealed record TripActivityEntryResponse(
     DateTimeOffset OccurredAtUtc,
