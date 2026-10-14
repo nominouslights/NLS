@@ -118,7 +118,7 @@ public static class TripErrors
     /// <summary>The run has not happened yet, so this is ordinary reassignment, not a correction.</summary>
     public static Error UseReassign(TripStatus status) => Error.Conflict(
         "Trips.Trip.UseReassign",
-        $"This trip is still {status} — change its driver through the normal reassign (POST /api/trips/{{id}}/assign); a driver correction is only for a run that is already over.");
+        $"This trip is {status} — change its driver with REASSIGN; a correction is only for finished trips.");
 
     /// <summary>Cancelled and WrittenOff — the statuses a correction never applies to.</summary>
     public static Error DriverCorrectionNotAllowed(TripStatus status) => Error.Conflict(

@@ -1110,24 +1110,42 @@ export function seatsLabel(t: TripRecord): string {
   return t.seatsCapacity != null ? `${t.seatsConfirmed} / ${t.seatsCapacity}` : String(t.seatsConfirmed);
 }
 
-/** True when the driver held a clearance for the trip's client that was in
- *  force on `asOf` (yyyy-MM-dd, default today): already granted that day and not
- *  yet expired. Live assignment checks today; a historical driver correction
- *  checks the trip's own serviceDate. Matching is by client name (the backend
- *  stores clearance clientName as free text); clearance checks are a UI-side
- *  warning in v1, never a hard block. */
+/** True when the driver held a clearance for the trip's client in force on
+ *  `asOf` (yyyy-MM-dd, default today). Live assignment checks today; a finished
+ *  trip (detail panel, driver correction) checks its own serviceDate — see
+ *  `clearanceAsOf`.
+ *
+ *  A clearance records its EXPIRY but not when it took effect: `grantedAtUtc`
+ *  is when the row was entered (DriverClearance.cs sets it to UtcNow), so a
+ *  long-held clearance keyed in last week would wrongly read as "not yet
+ *  granted" on an older trip. For an as-of date in the PAST the start is
+ *  therefore unknown and ignored — cleared when the client matches and it had
+ *  not expired by asOf. For today (or later) the entry date is a fair floor and
+ *  still applies. Matching is by client name (the backend stores clearance
+ *  clientName as free text); clearance checks are a UI-side warning in v1,
+ *  never a hard block. */
 export function hasClearanceFor(
   clearances: DriverClearanceRecord[],
   clientName: string | null,
   asOf: string = todayIso(),
 ): boolean {
   if (!clientName) return true; // no client on the trip — nothing to clear
+  const historical = asOf < todayIso();
   return clearances.some((c) => {
     if (c.clientName.trim().toLowerCase() !== clientName.trim().toLowerCase()) return false;
     if (c.expiry !== null && c.expiry < asOf) return false;
+    if (historical) return true; // start date unknown — expiry is the only evidence
     const granted = localIsoDate(c.grantedAtUtc);
     return granted === null || granted <= asOf;
   });
+}
+
+/** The date a trip's driver clearance is judged on: a FINISHED trip (the same
+ *  set `canCorrectDriver` allows — ReadyForBilling, Invoiced, Completed) is
+ *  judged on its own serviceDate, exactly as CORRECT DRIVER does; a live trip
+ *  (and Cancelled / WrittenOff) on today. */
+export function clearanceAsOf(t: Pick<TripRecord, "status" | "serviceDate">): string {
+  return canCorrectDriver(t) ? t.serviceDate : todayIso();
 }
 
 /** A UTC instant's local calendar date (yyyy-MM-dd); null when absent/unparseable. */

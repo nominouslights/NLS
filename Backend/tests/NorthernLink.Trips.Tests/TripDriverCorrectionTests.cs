@@ -187,6 +187,40 @@ public class TripDriverCorrectionTests
             Correct(TripIn(TripStatus.ReadyForBilling), new string('x', Trip.MaxReasonLength + 1), TestPlanning.DriverId).Error);
     }
 
+    [Theory]
+    [InlineData(TripStatus.Scheduled, "wrong driver")]
+    [InlineData(TripStatus.InProgress, "")]
+    [InlineData(TripStatus.Cancelled, "wrong driver")]
+    [InlineData(TripStatus.WrittenOff, null)]
+    [InlineData(TripStatus.Completed, "  ")]
+    [InlineData(TripStatus.Invoiced, null)]
+    [InlineData(TripStatus.ReadyForBilling, "wrong driver")]
+    public void CanCorrectDriver_returns_exactly_what_CorrectDriver_would_for_status_and_reason(
+        TripStatus status, string? reason)
+    {
+        var trip = TripIn(status);
+
+        var check = trip.CanCorrectDriver(reason);
+        var actual = TripIn(status).CorrectDriver(NewDriverId, NewDriverName, reason!, ActorId, ActorEmail);
+
+        Assert.Equal(actual.IsSuccess, check.IsSuccess);
+        if (check.IsFailure)
+        {
+            Assert.Equal(actual.Error, check.Error);
+        }
+
+        // Side-effect free: nothing changed on the trip it checked.
+        Assert.Equal(TestPlanning.DriverId, trip.DriverId);
+        Assert.Empty(trip.DomainEvents);
+    }
+
+    [Fact]
+    public void CanCorrectDriver_rejects_an_over_long_reason()
+    {
+        Assert.Equal(TripErrors.DriverCorrectionReasonTooLong,
+            TripIn(TripStatus.Completed).CanCorrectDriver(new string('x', Trip.MaxReasonLength + 1)).Error);
+    }
+
     [Fact]
     public void An_empty_driver_id_is_a_validation_error()
     {

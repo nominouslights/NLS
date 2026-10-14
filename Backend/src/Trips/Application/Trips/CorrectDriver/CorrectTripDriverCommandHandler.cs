@@ -30,9 +30,16 @@ public sealed class CorrectTripDriverCommandHandler(
             return Result.Failure(TripErrors.NotFound);
         }
 
+        // Documented order: status → reason → driver. The trip's own pre-checks run before the
+        // lookup, so an unknown driver id (404) never masks a wrong-path or missing-reason refusal.
+        var preCheck = trip.CanCorrectDriver(command.Reason);
+        if (preCheck.IsFailure)
+        {
+            return preCheck;
+        }
+
         // A missing/empty driver id is a malformed request (400 DriverRequired), not an unknown
-        // driver (404): skip the lookup and let the aggregate refuse it, so its status and reason
-        // checks still come first and the refusal is the domain's own validation error.
+        // driver (404): skip the lookup and let the aggregate refuse it with its own validation error.
         if (command.DriverId == Guid.Empty)
         {
             return trip.CorrectDriver(Guid.Empty, string.Empty, command.Reason, actor.UserId, actor.Email);

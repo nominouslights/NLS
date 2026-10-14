@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   canCorrectDriver,
+  clearanceAsOf,
   correctTripDriver,
   DRIVER_CORRECTION_REASON_MAX,
   hasClearanceFor,
@@ -118,6 +119,15 @@ describe("tripActivityReason", () => {
 });
 
 describe("hasClearanceFor — as of a given date (a correction is historical)", () => {
+  // "Today" pinned to 2026-10-20; the trip under correction ran 2026-10-10.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-20T12:00:00"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   const clearance = (over: Partial<DriverClearanceRecord>): DriverClearanceRecord => ({
     id: "c-1",
     driverId: "drv-1",
@@ -134,10 +144,27 @@ describe("hasClearanceFor — as of a given date (a correction is historical)", 
     expect(hasClearanceFor(rows, "Alamos Gold", "2026-10-20")).toBe(false);
   });
 
-  it("a clearance granted after the trip's date does not count on that date", () => {
+  it("a past date ignores grantedAtUtc — it is the ENTRY date, not when the clearance took effect", () => {
+    // Entered 2026-10-12 (after the trip), unexpired: a long-held clearance
+    // keyed in late must not make the trip look uncleared.
     const rows = [clearance({ grantedAtUtc: "2026-10-12T15:00:00Z" })];
-    expect(hasClearanceFor(rows, "Alamos Gold", "2026-10-10")).toBe(false);
+    expect(hasClearanceFor(rows, "Alamos Gold", "2026-10-10")).toBe(true);
     expect(hasClearanceFor(rows, "Alamos Gold", "2026-10-20")).toBe(true);
+  });
+
+  it("a past date still warns when the clearance had expired before the trip", () => {
+    const rows = [clearance({ expiry: "2026-10-09", grantedAtUtc: "2026-10-12T15:00:00Z" })];
+    expect(hasClearanceFor(rows, "Alamos Gold", "2026-10-10")).toBe(false);
+  });
+
+  it("today keeps the entry-date floor (a row dated in the future does not count yet)", () => {
+    const rows = [clearance({ grantedAtUtc: "2026-10-22T15:00:00Z" })];
+    expect(hasClearanceFor(rows, "Alamos Gold")).toBe(false);
+    expect(hasClearanceFor(rows, "Alamos Gold", "2026-10-20")).toBe(false);
+  });
+
+  it("a different client never counts", () => {
+    expect(hasClearanceFor([clearance({ clientName: "Vale" })], "Alamos Gold", "2026-10-10")).toBe(false);
   });
 
   it("the expiry day itself still counts", () => {
@@ -146,5 +173,43 @@ describe("hasClearanceFor — as of a given date (a correction is historical)", 
 
   it("a trip with no client needs no clearance", () => {
     expect(hasClearanceFor([], null, "2026-10-10")).toBe(true);
+  });
+});
+
+describe("clearanceAsOf — the date the detail panel judges clearance on", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-20T12:00:00"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const cases: [TripStatus, string][] = [
+    ["Scheduled", "2026-10-20"],
+    ["InProgress", "2026-10-20"],
+    ["ReadyForBilling", "2026-10-10"],
+    ["Invoiced", "2026-10-10"],
+    ["Completed", "2026-10-10"],
+    ["Cancelled", "2026-10-20"],
+    ["WrittenOff", "2026-10-20"],
+  ];
+  it.each(cases)("%s → %s (finished trips use serviceDate, like CORRECT DRIVER)", (status, expected) => {
+    expect(clearanceAsOf({ status, serviceDate: "2026-10-10" })).toBe(expected);
+  });
+
+  it("panel and modal agree: a finished trip with a late-entered clearance reads cleared", () => {
+    const rows: DriverClearanceRecord[] = [
+      {
+        id: "c-1",
+        driverId: "drv-1",
+        title: "Site access",
+        clientName: "Alamos Gold",
+        expiry: null,
+        grantedAtUtc: "2026-10-12T15:00:00Z",
+      },
+    ];
+    const trip = { status: "ReadyForBilling" as TripStatus, serviceDate: "2026-10-10" };
+    expect(hasClearanceFor(rows, "Alamos Gold", clearanceAsOf(trip))).toBe(true);
   });
 });

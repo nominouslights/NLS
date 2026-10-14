@@ -186,8 +186,9 @@ describe("CorrectDriverModal", () => {
 
     fireEvent.click(option(/Blake Uncleared/));
     const warning = screen.getByTestId("clearance-warning").textContent;
-    expect(warning).toContain("Blake Uncleared had no Alamos Gold clearance on Sat, Oct 10.");
-    expect(warning).toContain("warning, not a block");
+    expect(warning).toContain("Blake Uncleared may not have held a Alamos Gold clearance on Sat, Oct 10");
+    expect(warning).toContain("clearances record their expiry, not their start.");
+    expect(warning).toContain("This is a warning, not a block.");
     fireEvent.change(reasonBox(), { target: { value: "Blake drove it" } });
     expect(isDisabled()).toBe(false);
     fireEvent.click(submitButton());
@@ -228,14 +229,23 @@ describe("CorrectDriverModal", () => {
     expect(screen.queryByTestId("clearance-warning")).toBeNull();
   });
 
-  it("judges clearance on the trip date: one granted after it still warns", async () => {
-    // Valid today, but granted 2026-10-12 — two days after the trip.
+  it("a clearance ENTERED after the trip but unexpired raises no warning (grantedAtUtc is the entry date)", async () => {
+    // Recorded 2026-10-12 — two days after the trip — and never expires.
     clearancesById["drv-uncleared"] = [{ ...CLEARANCE, id: "c-3", grantedAtUtc: "2026-10-12T15:00:00Z" }];
+    await renderModal();
+    expect(option(/Blake Uncleared/).textContent).toContain("Alamos Gold clearance on Sat, Oct 10");
+    expect(option(/Blake Uncleared/).textContent).not.toContain("No Alamos Gold");
+    fireEvent.click(option(/Blake Uncleared/));
+    expect(screen.queryByTestId("clearance-warning")).toBeNull();
+  });
+
+  it("a clearance that expired before the trip still warns", async () => {
+    clearancesById["drv-uncleared"] = [{ ...CLEARANCE, id: "c-4", expiry: "2026-10-09" }];
     await renderModal();
     expect(option(/Blake Uncleared/).textContent).toContain("No Alamos Gold clearance on Sat, Oct 10");
     fireEvent.click(option(/Blake Uncleared/));
     expect(screen.getByTestId("clearance-warning").textContent).toContain(
-      "Blake Uncleared had no Alamos Gold clearance on Sat, Oct 10.",
+      "Blake Uncleared may not have held a Alamos Gold clearance on Sat, Oct 10",
     );
   });
 

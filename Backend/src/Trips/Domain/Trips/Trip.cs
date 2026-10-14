@@ -799,6 +799,40 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         status is TripStatus.ReadyForBilling or TripStatus.Invoiced or TripStatus.Completed;
 
     /// <summary>
+    /// The side-effect-free first half of <see cref="CorrectDriver"/>: the status checks
+    /// (<see cref="TripErrors.UseReassign"/>, then <see cref="TripErrors.DriverCorrectionNotAllowed"/>)
+    /// and the reason checks (required, at most <see cref="MaxReasonLength"/> after trimming), in
+    /// that order, returning exactly the error <see cref="CorrectDriver"/> would. The handler calls
+    /// it before looking the driver up, so the documented order status → reason → driver holds even
+    /// when the driver id is unknown (a 404 lookup miss never masks a wrong-path or missing-reason
+    /// refusal). <see cref="CorrectDriver"/> runs it too, so the two can never disagree.
+    /// </summary>
+    public Result CanCorrectDriver(string? reason)
+    {
+        if (Status is TripStatus.Scheduled or TripStatus.InProgress)
+        {
+            return Result.Failure(TripErrors.UseReassign(Status));
+        }
+
+        if (!DriverCorrectionAllowedFor(Status))
+        {
+            return Result.Failure(TripErrors.DriverCorrectionNotAllowed(Status));
+        }
+
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return Result.Failure(TripErrors.DriverCorrectionReasonRequired);
+        }
+
+        if (reason.Trim().Length > MaxReasonLength)
+        {
+            return Result.Failure(TripErrors.DriverCorrectionReasonTooLong);
+        }
+
+        return Result.Success();
+    }
+
+    /// <summary>
     /// Corrects the driver recorded on a trip whose run is already over — the dispatcher's fix
     /// for a trip that was logged against the wrong driver. Deliberately separate from
     /// <see cref="AssignDriver"/>, which stays refused on an operationally-closed trip: this is a
@@ -826,26 +860,13 @@ public sealed class Trip : AggregateRoot, ITenantScoped
     {
         // Order matters: a caller on the wrong path (a live trip, or one closed for good) is told
         // the action itself is wrong before anything about the reason or the driver it sent.
-        if (Status is TripStatus.Scheduled or TripStatus.InProgress)
+        var preCheck = CanCorrectDriver(reason);
+        if (preCheck.IsFailure)
         {
-            return Result.Failure(TripErrors.UseReassign(Status));
-        }
-
-        if (!DriverCorrectionAllowedFor(Status))
-        {
-            return Result.Failure(TripErrors.DriverCorrectionNotAllowed(Status));
-        }
-
-        if (string.IsNullOrWhiteSpace(reason))
-        {
-            return Result.Failure(TripErrors.DriverCorrectionReasonRequired);
+            return preCheck;
         }
 
         var trimmedReason = reason.Trim();
-        if (trimmedReason.Length > MaxReasonLength)
-        {
-            return Result.Failure(TripErrors.DriverCorrectionReasonTooLong);
-        }
 
         if (driverId == Guid.Empty)
         {

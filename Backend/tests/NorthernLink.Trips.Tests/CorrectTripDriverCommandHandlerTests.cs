@@ -163,6 +163,47 @@ public class CorrectTripDriverCommandHandlerTests
         Assert.Equal(0, _trips.SaveCount);
     }
 
+    // ---- Order: status → reason → driver, even when the driver id is unknown ----
+
+    [Fact]
+    public async Task An_unknown_driver_on_a_scheduled_trip_reports_UseReassign_not_DriverNotFound()
+    {
+        var trip = TripDriverCorrectionTests.TripIn(TripStatus.Scheduled);
+        _trips.Add(trip);
+
+        var result = await Handler.Handle(
+            new CorrectTripDriverCommand(trip.Id, Guid.NewGuid(), "wrong driver"), CancellationToken.None);
+
+        Assert.Equal(TripErrors.UseReassign(TripStatus.Scheduled), result.Error);
+        Assert.Equal(0, _trips.SaveCount);
+    }
+
+    [Fact]
+    public async Task An_unknown_driver_with_a_blank_reason_reports_ReasonRequired_not_DriverNotFound()
+    {
+        var trip = SeedFinishedTrip(TripStatus.Completed);
+
+        var result = await Handler.Handle(
+            new CorrectTripDriverCommand(trip.Id, Guid.NewGuid(), "   "), CancellationToken.None);
+
+        Assert.Equal(TripErrors.DriverCorrectionReasonRequired, result.Error);
+        Assert.Equal(0, _trips.SaveCount);
+    }
+
+    [Fact]
+    public async Task An_unknown_driver_with_a_valid_reason_on_a_finished_trip_is_DriverNotFound()
+    {
+        var trip = SeedFinishedTrip(TripStatus.Completed);
+
+        var result = await Handler.Handle(
+            new CorrectTripDriverCommand(trip.Id, Guid.NewGuid(), "wrong driver"), CancellationToken.None);
+
+        Assert.Equal(TripErrors.DriverNotFound, result.Error);
+        Assert.Equal(TestPlanning.DriverId, trip.DriverId);
+        Assert.Empty(trip.DomainEvents);
+        Assert.Equal(0, _trips.SaveCount);
+    }
+
     // ---- The identity gate reads trip.DriverId live, so access follows the correction ----
 
     [Fact]

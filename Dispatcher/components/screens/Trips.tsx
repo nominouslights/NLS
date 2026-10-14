@@ -18,6 +18,7 @@ import {
   canCorrectDriver,
   canPairRoundTrip,
   changeTripStatus,
+  clearanceAsOf,
   closeTripWithoutBilling,
   convertTripToDeadhead,
   convertTripToPassengerTrip,
@@ -1382,7 +1383,9 @@ export default function Trips({
   const [extraTrip, setExtraTrip] = useState<TripRecord | null>(null);
 
   // Per-selected-trip auxiliary data, keyed by trip id (Drivers.tsx pattern).
-  const [clearanceState, setClearanceState] = useState<{ tripId: string; cleared: boolean } | null>(null);
+  const [clearanceState, setClearanceState] = useState<{ tripId: string; asOf: string; cleared: boolean } | null>(
+    null,
+  );
   const [contractState, setContractState] = useState<{ tripId: string; contract: ActiveContractSummary | null } | null>(null);
   const [manifestState, setManifestState] = useState<{ tripId: string; manifest: TripManifest | null } | null>(null);
   const [inspectionsState, setInspectionsState] = useState<{ tripId: string; rows: VehicleInspection[] } | null>(null);
@@ -1563,6 +1566,9 @@ export default function Trips({
   const tripDriverId = t?.driverId ?? null;
   const tripClientId = t?.clientId ?? null;
   const tripClientName = t?.clientName ?? null;
+  // Finished trips are judged on their serviceDate (same rule as CORRECT DRIVER);
+  // live trips on today.
+  const tripClearanceAsOf = t ? clearanceAsOf(t) : null;
   const tripManifestId = t?.manifestId ?? null;
   const tripIsCargo = !!t && isCargoService(t.serviceType);
   // No synchronous setState here: the aux states are keyed by tripId, so a
@@ -1583,10 +1589,15 @@ export default function Trips({
       );
     }
 
-    if (tripDriverId && tripClientName) {
+    if (tripDriverId && tripClientName && tripClearanceAsOf) {
       listDriverClearances(tripDriverId).then(
         (rows2) => {
-          if (active) setClearanceState({ tripId, cleared: hasClearanceFor(rows2, tripClientName) });
+          if (active)
+            setClearanceState({
+              tripId,
+              asOf: tripClearanceAsOf,
+              cleared: hasClearanceFor(rows2, tripClientName, tripClearanceAsOf),
+            });
         },
         () => undefined, // clearance check is best-effort — render falls back to "checking…"/"—"
       );
@@ -1641,7 +1652,7 @@ export default function Trips({
     return () => {
       active = false;
     };
-  }, [tripId, tripNumber, tripDriverId, tripClientId, tripClientName, tripManifestId, tripIsCargo]);
+  }, [tripId, tripNumber, tripDriverId, tripClientId, tripClientName, tripClearanceAsOf, tripManifestId, tripIsCargo]);
 
   async function runAction(fn: () => Promise<void>) {
     if (busy) return;
@@ -2041,7 +2052,11 @@ export default function Trips({
   // ---- loaded ----
 
   const chip = t ? tripChip(t) : null;
-  const clearance = t && clearanceState?.tripId === t.id ? clearanceState.cleared : null;
+  // Keyed by trip AND as-of date: a status change that finishes the trip moves
+  // the as-of date, and the old verdict must not show while the new one loads.
+  const clearance =
+    t && clearanceState?.tripId === t.id && clearanceState.asOf === tripClearanceAsOf ? clearanceState.cleared : null;
+  const clearanceDay = t && canCorrectDriver(t) ? ` on ${shortDateLabel(t.serviceDate)}` : "";
   const contract = t && contractState?.tripId === t.id ? contractState.contract : null;
   const manifest = t && manifestState?.tripId === t.id ? manifestState.manifest : null;
   const inspections = t && inspectionsState?.tripId === t.id ? inspectionsState.rows : [];
@@ -2380,9 +2395,12 @@ export default function Trips({
                         ) : clearance === null ? (
                           "checking…"
                         ) : clearance ? (
-                          <StatusChip kind="ontime" label={`${t.clientName} clearance on file`} />
+                          <StatusChip
+                            kind="ontime"
+                            label={clearanceDay ? `${t.clientName} clearance${clearanceDay}` : `${t.clientName} clearance on file`}
+                          />
                         ) : (
-                          <StatusChip kind="soon" label={`No ${t.clientName} clearance`} />
+                          <StatusChip kind="soon" label={`No ${t.clientName} clearance${clearanceDay}`} />
                         )
                       }
                     />

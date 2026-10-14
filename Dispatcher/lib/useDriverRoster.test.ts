@@ -108,10 +108,11 @@ describe("loadDriverRoster — CORRECT DRIVER (include: all, as of the trip date
   it("judges clearance on asOf, not today — both directions", async () => {
     clearancesById = {
       a2: [clearance({ expiry: "2026-10-15" })], // expired since the trip → cleared then
-      i1: [clearance({ grantedAtUtc: "2026-10-12T15:00:00Z" })], // granted after the trip → not cleared then
+      i1: [clearance({ grantedAtUtc: "2026-10-12T15:00:00Z" })], // entered after the trip, unexpired → cleared then
+      d1: [clearance({ expiry: "2026-10-09" })], // expired before the trip → not cleared then
     };
     const rows = await loadDriverRoster({ clientName: "Alamos Gold", include: "all", excludeDriverId: "a1", asOf: "2026-10-10" });
-    expect(summary(rows)).toEqual(["a2:cleared", "i1:uncleared", "d1:uncleared"]);
+    expect(summary(rows)).toEqual(["a2:cleared", "i1:cleared", "d1:uncleared"]);
   });
 });
 
@@ -138,5 +139,62 @@ describe("useDriverRoster", () => {
     const { result } = renderHook(() => useDriverRoster({ clientName: "Alamos Gold", include: "active" }));
     await waitFor(() => expect(result.current.error).toBe("Drivers are unavailable."));
     expect(result.current.roster).toBeNull();
+  });
+
+  it("a failed load then a successful reload (inputs changed) clears the error", async () => {
+    driversResponse = () => json(503, { code: "Drivers.Unavailable", message: "Drivers are unavailable." });
+    const { result, rerender } = renderHook((props: { excludeDriverId: string | null }) =>
+      useDriverRoster({ clientName: "Alamos Gold", include: "active", excludeDriverId: props.excludeDriverId }),
+      { initialProps: { excludeDriverId: null as string | null } },
+    );
+    await waitFor(() => expect(result.current.error).toBe("Drivers are unavailable."));
+
+    driversResponse = () => json(200, DRIVERS);
+    rerender({ excludeDriverId: "a1" });
+    // Immediately: the old error is gone and the hook reports loading.
+    expect(result.current.error).toBeNull();
+    expect(result.current.roster).toBeNull();
+    expect(result.current.loading).toBe(true);
+
+    await waitFor(() => expect(result.current.roster).not.toBeNull());
+    expect(result.current.error).toBeNull();
+    expect(result.current.loading).toBe(false);
+    expect(result.current.roster!.map((r) => r.driver.id)).toEqual(["a2"]);
+  });
+
+  it("clears the old roster while the new inputs load — nothing stale stays clickable", async () => {
+    const { result, rerender } = renderHook((props: { excludeDriverId: string | null }) =>
+      useDriverRoster({ clientName: "Alamos Gold", include: "active", excludeDriverId: props.excludeDriverId }),
+      { initialProps: { excludeDriverId: null as string | null } },
+    );
+    await waitFor(() => expect(result.current.roster).not.toBeNull());
+    rerender({ excludeDriverId: "a1" });
+    expect(result.current.roster).toBeNull();
+    expect(result.current.loading).toBe(true);
+    await waitFor(() => expect(result.current.roster).not.toBeNull());
+  });
+
+  it("a stale response that resolves late never overwrites the newer one", async () => {
+    // First /api/drivers call hangs until released; the second answers at once.
+    let releaseFirst: (r: Response) => void = () => undefined;
+    const first = new Promise<Response>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let calls = 0;
+    driversResponse = () => (++calls === 1 ? (first as unknown as Response) : json(200, DRIVERS));
+
+    const { result, rerender } = renderHook((props: { excludeDriverId: string | null }) =>
+      useDriverRoster({ clientName: null, include: "all", excludeDriverId: props.excludeDriverId }),
+      { initialProps: { excludeDriverId: null as string | null } },
+    );
+    rerender({ excludeDriverId: "a1" });
+    await waitFor(() => expect(result.current.roster).not.toBeNull());
+    expect(result.current.roster!.map((r) => r.driver.id)).toEqual(["a2", "i1", "d1"]);
+
+    // The superseded load (no exclusion → would list a1) lands last.
+    releaseFirst(json(200, DRIVERS));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(result.current.roster!.map((r) => r.driver.id)).toEqual(["a2", "i1", "d1"]);
+    expect(result.current.error).toBeNull();
   });
 });

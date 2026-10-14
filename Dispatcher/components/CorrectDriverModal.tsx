@@ -188,8 +188,8 @@ export default function CorrectDriverModal({
             >
               <StatusBadge kind="soon" />
               <span>
-                {selected.driver.name} had no {trip.clientName} clearance on {tripDay}. You can still record them —
-                this is a warning, not a block.
+                {selected.driver.name} may not have held a {trip.clientName} clearance on {tripDay} — clearances
+                record their expiry, not their start. This is a warning, not a block.
               </span>
             </div>
           )}

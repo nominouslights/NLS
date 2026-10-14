@@ -55,28 +55,42 @@ export async function loadDriverRoster({
 }
 
 /** React wrapper over loadDriverRoster: `roster` is null while loading; `error`
- *  is the server message (verbatim) or a generic fallback. */
+ *  is the server message (verbatim) or a generic fallback.
+ *
+ *  Every result is stored with the inputs it was loaded for, and the render
+ *  only reads a result whose key matches the CURRENT inputs. So when the inputs
+ *  change, the old roster and any old error vanish at once (roster null =
+ *  loading, nothing clickable as if current), and a response for superseded
+ *  inputs — even one that resolves after the newer load — is never shown. The
+ *  `active` flag additionally drops responses from an effect that has been
+ *  torn down. */
 export function useDriverRoster({ clientName, asOf, include, excludeDriverId = null }: DriverRosterOptions): {
   roster: DriverRosterEntry[] | null;
   error: string | null;
+  loading: boolean;
 } {
-  const [roster, setRoster] = useState<DriverRosterEntry[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const key = JSON.stringify([clientName, asOf ?? null, include, excludeDriverId]);
+  const [result, setResult] = useState<{
+    key: string;
+    roster: DriverRosterEntry[] | null;
+    error: string | null;
+  } | null>(null);
 
   useEffect(() => {
     let active = true;
     loadDriverRoster({ clientName, asOf, include, excludeDriverId }).then(
       (rows) => {
-        if (active) setRoster(rows);
+        if (active) setResult({ key, roster: rows, error: null });
       },
       (e: unknown) => {
-        if (active) setError(e instanceof ApiError ? e.message : "Failed to load drivers.");
+        if (active) setResult({ key, roster: null, error: e instanceof ApiError ? e.message : "Failed to load drivers." });
       },
     );
     return () => {
       active = false;
     };
-  }, [clientName, asOf, include, excludeDriverId]);
+  }, [key, clientName, asOf, include, excludeDriverId]);
 
-  return { roster, error };
+  const current = result?.key === key ? result : null;
+  return { roster: current?.roster ?? null, error: current?.error ?? null, loading: current === null };
 }
