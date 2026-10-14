@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- End-to-end tests for the Compliance module against a real Postgres in a Testcontainers
+       container, connecting as a NON-superuser role so Row-Level Security is actually enforced
+       (a superuser bypasses it even with FORCE). Proves what the in-memory unit tests cannot:
+       the migrations apply, the one-Current partial unique indexes survive a renewal's
+       update-and-insert in one SaveChanges, the jsonb value objects round-trip, tenant isolation
+       holds, and the outbox polling consumer (status and fan-out paths) drives the record
+       registry and the stamp-back. Requires Docker. -->
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Compliance\NorthernLink.Compliance.csproj" />
+  </ItemGroup>
+
+</Project>

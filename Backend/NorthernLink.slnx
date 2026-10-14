@@ -37,5 +37,6 @@
     <Project Path="tests/NorthernLink.Budgeting.Tests/NorthernLink.Budgeting.Tests.csproj" />
     <Project Path="tests/NorthernLink.Booking.Tests/NorthernLink.Booking.Tests.csproj" />
     <Project Path="tests/NorthernLink.Compliance.Tests/NorthernLink.Compliance.Tests.csproj" />
+    <Project Path="tests/NorthernLink.Compliance.IntegrationTests/NorthernLink.Compliance.IntegrationTests.csproj" />
   </Folder>
 </Solution>

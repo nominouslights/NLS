@@ -25,6 +25,7 @@
     <!-- The retention worker's OnceAsync and DocumentSeries.Rehydrate are internal by design;
          the unit tests drive them directly. -->
     <InternalsVisibleTo Include="NorthernLink.Compliance.Tests" />
+    <InternalsVisibleTo Include="NorthernLink.Compliance.IntegrationTests" />
   </ItemGroup>
 
   <ItemGroup>

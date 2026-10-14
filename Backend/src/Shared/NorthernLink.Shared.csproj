@@ -20,6 +20,7 @@
     <!-- Drives OutboxPollingConsumer.ProcessOnceAsync directly (internal by design, like
          the projection worker's) and builds IntegrationEventSubscriptions in isolation. -->
     <InternalsVisibleTo Include="NorthernLink.Trips.IntegrationTests" />
+    <InternalsVisibleTo Include="NorthernLink.Compliance.IntegrationTests" />
   </ItemGroup>
 
   <ItemGroup>
