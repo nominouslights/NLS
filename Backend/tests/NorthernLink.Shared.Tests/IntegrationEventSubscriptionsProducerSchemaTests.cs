@@ -78,3 +78,50 @@ public class IntegrationEventSubscriptionsProducerSchemaTests
         Assert.Throws<ArgumentException>(() => builder.OnProducedBy<ComplianceRecordProducedIntegrationEvent, ProducedHandler>());
     }
 }
+
+/// <summary>
+/// The fan-out mode: a module joining a routing key another module already consumes must not
+/// share the per-row <c>processing_status</c> (each would see only the rows it won). Fan-out keys
+/// are therefore kept out of the status-tracked map entirely and listed on their own.
+/// </summary>
+public class IntegrationEventSubscriptionsFanOutTests
+{
+    private sealed class VehicleHandler : IIntegrationEventHandler<VehicleChangedIntegrationEvent>
+    {
+        public Task Handle(VehicleChangedIntegrationEvent integrationEvent, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class ProducedHandler : IIntegrationEventHandler<ComplianceRecordProducedIntegrationEvent>
+    {
+        public Task Handle(ComplianceRecordProducedIntegrationEvent integrationEvent, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    [Fact]
+    public void A_fan_out_key_is_read_by_cursor_and_never_by_status()
+    {
+        var services = new ServiceCollection();
+        var subscriptions = new IntegrationEventSubscriptions("compliance");
+        new IntegrationEventSubscriptionsBuilder(services, subscriptions)
+            .OnProducedBy<ComplianceRecordProducedIntegrationEvent, ProducedHandler>("fleet")
+            .OnFanOut<VehicleChangedIntegrationEvent, VehicleHandler>();
+
+        Assert.Equal(["compliance.compliance-record-produced"], subscriptions.RoutingKeysBySchema["fleet"]);
+        Assert.Equal(["fleet.vehicle-changed"], subscriptions.FanOutRoutingKeysBySchema["fleet"]);
+        Assert.Equal(typeof(VehicleChangedIntegrationEvent), subscriptions.EventTypeFor("fleet.vehicle-changed"));
+        Assert.Contains("fleet.vehicle-changed", subscriptions.RoutingKeys);
+
+        using var provider = services.BuildServiceProvider();
+        Assert.Single(provider.GetServices<IIntegrationEventHandler<VehicleChangedIntegrationEvent>>());
+    }
+
+    [Fact]
+    public void A_module_with_only_fan_out_subscriptions_has_no_status_tracked_schema()
+    {
+        var subscriptions = new IntegrationEventSubscriptions("compliance");
+        new IntegrationEventSubscriptionsBuilder(new ServiceCollection(), subscriptions)
+            .OnFanOut<VehicleChangedIntegrationEvent, VehicleHandler>();
+
+        Assert.Empty(subscriptions.RoutingKeysBySchema);
+        Assert.Equal(["fleet"], subscriptions.FanOutRoutingKeysBySchema.Keys);
+    }
+}

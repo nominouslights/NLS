@@ -14,6 +14,7 @@ public sealed class IntegrationEventSubscriptions
 {
     private readonly Dictionary<string, Type> _eventTypesByRoutingKey = [];
     private readonly Dictionary<string, string[]> _producerSchemasByRoutingKey = [];
+    private readonly HashSet<string> _fanOutRoutingKeys = [];
 
     internal IntegrationEventSubscriptions(string moduleName)
     {
@@ -39,8 +40,25 @@ public sealed class IntegrationEventSubscriptions
         _producerSchemasByRoutingKey[routingKey] = producerSchemas;
     }
 
+    internal void AddFanOut(Type eventType)
+    {
+        var routingKey = EventRoutingKey.For(eventType);
+        _eventTypesByRoutingKey[routingKey] = eventType;
+        _fanOutRoutingKeys.Add(routingKey);
+    }
+
     public Type? EventTypeFor(string routingKey) =>
         _eventTypesByRoutingKey.TryGetValue(routingKey, out var eventType) ? eventType : null;
+
+    /// <summary>
+    /// The routing keys this module reads by <b>its own cursor</b> (see
+    /// <see cref="IntegrationEventSubscriptionsBuilder.OnFanOut{TEvent,THandler}"/>), grouped by
+    /// the producer schema their first segment names. Disjoint from <see cref="RoutingKeysBySchema"/>.
+    /// </summary>
+    public IReadOnlyDictionary<string, string[]> FanOutRoutingKeysBySchema =>
+        _fanOutRoutingKeys
+            .GroupBy(key => key[..key.IndexOf('.')])
+            .ToDictionary(group => group.Key, group => group.Order(StringComparer.Ordinal).ToArray());
 
     /// <summary>
     /// Which producer schemas' <c>outbox_messages</c> tables the polling consumer reads, and for
@@ -56,7 +74,7 @@ public sealed class IntegrationEventSubscriptions
         get
         {
             var bySchema = new Dictionary<string, List<string>>();
-            foreach (var routingKey in _eventTypesByRoutingKey.Keys)
+            foreach (var routingKey in _eventTypesByRoutingKey.Keys.Where(key => !_fanOutRoutingKeys.Contains(key)))
             {
                 var schemas = _producerSchemasByRoutingKey.TryGetValue(routingKey, out var explicitSchemas)
                     ? explicitSchemas
@@ -131,6 +149,32 @@ public sealed class IntegrationEventSubscriptionsBuilder
 
         _services.AddScoped<IIntegrationEventHandler<TEvent>, THandler>();
         _subscriptions.AddProducedBy(typeof(TEvent), producerSchemas);
+        return this;
+    }
+
+    /// <summary>
+    /// Like <see cref="On{TEvent,THandler}"/>, but for an event <b>another module already
+    /// consumes</b>. The status-tracked path keeps one <c>processing_status</c> per outbox row, so
+    /// the first consumer to process a row marks it Processed and every other consumer of the same
+    /// routing key silently never sees it — two status subscribers to <c>fleet.vehicle-changed</c>
+    /// would each receive roughly half the vehicles. A fan-out subscription instead reads the
+    /// producer's rows past <b>this module's own cursor</b> (one row per routing key in the
+    /// consumer's <c>projection_checkpoints</c>, named <c>inbox:&lt;routing-key&gt;</c>) and never
+    /// reads or writes <c>processing_status</c>, so it is invisible to every other consumer.
+    /// <para>
+    /// A new fan-out subscription starts at position 0 — the routing key's whole history replays,
+    /// which is what builds a replica. A row whose handler keeps failing is retried with backoff,
+    /// then logged and skipped after <see cref="OutboxPollingOptions.MaxAttempts"/> (there is no
+    /// per-consumer Failed state to park it in); reserve this mode for full-snapshot "changed"
+    /// events, where the next change heals a skipped one.
+    /// </para>
+    /// </summary>
+    public IntegrationEventSubscriptionsBuilder OnFanOut<TEvent, THandler>()
+        where TEvent : IIntegrationEvent
+        where THandler : class, IIntegrationEventHandler<TEvent>
+    {
+        _services.AddScoped<IIntegrationEventHandler<TEvent>, THandler>();
+        _subscriptions.AddFanOut(typeof(TEvent));
         return this;
     }
 }

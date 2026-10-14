@@ -25,6 +25,13 @@ namespace NorthernLink.Shared.IntegrationEvents.Compliance;
 /// consumer parks as Failed with no retry (see <c>UserChangedIntegrationEvent</c>). Collections
 /// are nullable so an older producer that omits them still binds.
 /// </para>
+/// <para>
+/// <see cref="SupersedesSourceRecordId"/> (appended 2026-10, default null) names the producer's
+/// previous record this one replaces — a renewed insurance certificate, a new SFC. Compliance looks
+/// the predecessor up by (<see cref="SourceModule"/>, that id) and registers this record as its
+/// next version, which starts the predecessor's "superseded copies" retention clock. Null, or a
+/// predecessor that was never registered, registers a fresh record.
+/// </para>
 /// </summary>
 public sealed record ComplianceRecordProducedIntegrationEvent(
     Guid TenantId,
@@ -38,7 +45,8 @@ public sealed record ComplianceRecordProducedIntegrationEvent(
     IReadOnlyDictionary<string, DateOnly>? AnchorDates,
     IReadOnlyList<ComplianceSupportingLinkPayload>? SupportingLinks,
     IReadOnlyList<string>? RegulatoryBasisKeys,
-    string? PrintTemplateKey) : IntegrationEvent;
+    string? PrintTemplateKey,
+    string? SupersedesSourceRecordId = null) : IntegrationEvent;
 
 /// <summary>
 /// One supporting document reference carried by <see cref="ComplianceRecordProducedIntegrationEvent"/>:

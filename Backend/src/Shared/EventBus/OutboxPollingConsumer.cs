@@ -7,6 +7,7 @@ using NorthernLink.Shared.Events;
 using NorthernLink.Shared.Hosting;
 using NorthernLink.Shared.Persistence;
 using NorthernLink.Shared.Persistence.Auditing;
+using NorthernLink.Shared.Persistence.Projections;
 using NorthernLink.Shared.Tenancy;
 using Npgsql;
 
@@ -33,6 +34,13 @@ namespace NorthernLink.Shared.EventBus;
 /// A row whose routing key has no subscription anywhere stays Pending forever — subscribing
 /// to it later auto-replays that key's entire history through the new handler.
 ///
+/// <b>One consumer per routing key on this path.</b> <c>processing_status</c> is a single column
+/// per row, so a second module subscribing the same key here would race the first and each would
+/// see only the rows it won. A module joining a key someone else already consumes subscribes with
+/// <see cref="IntegrationEventSubscriptionsBuilder.OnFanOut{TEvent,THandler}"/> instead: it reads
+/// past its own cursor (<c>projection_checkpoints</c> row <c>inbox:&lt;routing-key&gt;</c> in the
+/// consumer's schema) and never touches the status columns.
+///
 /// Single API instance assumed (same as <c>OutboxDispatcher</c>): two instances would
 /// double-process, which idempotent handlers absorb but logs would show. FOR UPDATE SKIP
 /// LOCKED is deliberately omitted until scale-out is real.
@@ -49,6 +57,19 @@ public sealed class OutboxPollingConsumer<TDbContext>(
     // validate defensively anyway.
     private readonly IReadOnlyDictionary<string, string[]> _routingKeysBySchema =
         Validated(subscriptions.RoutingKeysBySchema);
+
+    private readonly IReadOnlyDictionary<string, string[]> _fanOutRoutingKeysBySchema =
+        Validated(subscriptions.FanOutRoutingKeysBySchema);
+
+    // Fan-out rows carry no per-consumer failure state in the database, so a failing row's
+    // attempt count and backoff gate live here, keyed by routing key (only the cursor's head row
+    // can be failing). Lost on restart, which only means a fresh set of attempts.
+    private readonly Dictionary<string, FanOutFailure> _fanOutFailures = new(StringComparer.Ordinal);
+
+    private sealed record FanOutFailure(long Position, int Attempts, DateTimeOffset NextAttemptAtUtc);
+
+    /// <summary>The <c>projection_checkpoints</c> row a fan-out subscription keeps its cursor in.</summary>
+    internal static string FanOutCheckpointName(string routingKey) => $"inbox:{routingKey}";
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -119,6 +140,14 @@ public sealed class OutboxPollingConsumer<TDbContext>(
             foreach (var (schema, routingKeys) in _routingKeysBySchema)
             {
                 await ProcessSchemaAsync(context, schema, routingKeys, cancellationToken);
+            }
+
+            foreach (var (schema, routingKeys) in _fanOutRoutingKeysBySchema)
+            {
+                foreach (var routingKey in routingKeys)
+                {
+                    await ProcessFanOutAsync(context, schema, routingKey, cancellationToken);
+                }
             }
         }
         finally
@@ -250,6 +279,112 @@ public sealed class OutboxPollingConsumer<TDbContext>(
             """,
             [Truncate(error), position],
             cancellationToken);
+    }
+
+    /// <summary>
+    /// The fan-out path (<see cref="IntegrationEventSubscriptionsBuilder.OnFanOut{TEvent,THandler}"/>):
+    /// read the producer's rows of one routing key past this module's own cursor, in position
+    /// order, regardless of <c>processing_status</c> — which this path never writes, so other
+    /// consumers of the key are unaffected. The cursor lives in the CONSUMER's own
+    /// <c>projection_checkpoints</c> table (tracked through this context, which maps that table to
+    /// the consumer's schema) and is saved after the batch, or at the first failing row.
+    /// </summary>
+    private async Task ProcessFanOutAsync(
+        TDbContext context,
+        string schema,
+        string routingKey,
+        CancellationToken cancellationToken)
+    {
+        var checkpointName = FanOutCheckpointName(routingKey);
+        var checkpoint = await context.Set<ProjectionCheckpoint>()
+            .FirstOrDefaultAsync(c => c.ProjectionName == checkpointName, cancellationToken);
+        if (checkpoint is null)
+        {
+            checkpoint = new ProjectionCheckpoint { ProjectionName = checkpointName, LastPosition = 0 };
+            context.Set<ProjectionCheckpoint>().Add(checkpoint);
+        }
+
+        var rows = await context.Set<OutboxMessage>()
+            .FromSqlRaw(
+                $"""
+                SELECT * FROM {schema}.outbox_messages
+                WHERE position > @after AND routing_key = @key
+                ORDER BY position
+                LIMIT {options.BatchSize}
+                """,
+                new NpgsqlParameter("after", checkpoint.LastPosition),
+                new NpgsqlParameter("key", routingKey))
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+        var startPosition = checkpoint.LastPosition;
+        var eventType = subscriptions.EventTypeFor(routingKey)!;
+        foreach (var row in rows)
+        {
+            if (_fanOutFailures.TryGetValue(routingKey, out var failure)
+                && failure.Position == row.Position
+                && failure.NextAttemptAtUtc > DateTimeOffset.UtcNow)
+            {
+                break; // the head row is in backoff; later rows wait so order holds
+            }
+
+            IIntegrationEvent integrationEvent;
+            try
+            {
+                integrationEvent = (IIntegrationEvent)JsonSerializer.Deserialize(
+                    row.Payload, eventType, IntegrationEventJson.Options)!;
+            }
+            catch (JsonException exception)
+            {
+                logger.LogError(
+                    exception,
+                    "Fan-out row {Position} in {Schema} ({RoutingKey}, event {EventId}) is not valid {EventType} JSON; {Module} skips it",
+                    row.Position, schema, row.RoutingKey, row.Id, eventType.Name, subscriptions.ModuleName);
+                checkpoint.LastPosition = row.Position;
+                continue;
+            }
+
+            try
+            {
+                await InvokeHandlers(row.TenantId, eventType, integrationEvent, cancellationToken);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                var attempts = (failure?.Position == row.Position ? failure.Attempts : 0) + 1;
+                if (attempts < options.MaxAttempts)
+                {
+                    logger.LogWarning(
+                        exception,
+                        "Fan-out row {Position} in {Schema} ({RoutingKey}, event {EventId}) failed {Module} handler attempt {Attempt}",
+                        row.Position, schema, row.RoutingKey, row.Id, subscriptions.ModuleName, attempts);
+                    var backoffSeconds = Math.Min(options.MaxBackoffSeconds, Math.Pow(2, attempts));
+                    _fanOutFailures[routingKey] = new FanOutFailure(row.Position, attempts, DateTimeOffset.UtcNow.AddSeconds(backoffSeconds));
+                    break;
+                }
+
+                logger.LogError(
+                    exception,
+                    "Fan-out row {Position} in {Schema} ({RoutingKey}, event {EventId}) exhausted {MaxAttempts} {Module} attempts; skipping it",
+                    row.Position, schema, row.RoutingKey, row.Id, options.MaxAttempts, subscriptions.ModuleName);
+            }
+
+            _fanOutFailures.Remove(routingKey);
+            checkpoint.LastPosition = row.Position;
+        }
+
+        if (checkpoint.LastPosition != startPosition || context.Entry(checkpoint).State == EntityState.Added)
+        {
+            checkpoint.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            await context.SaveChangesAsync(cancellationToken);
+
+            if (checkpoint.LastPosition != startPosition)
+            {
+                logger.LogInformation(
+                    "{Module} advanced its {RoutingKey} cursor in {Schema} to {Position}",
+                    subscriptions.ModuleName, routingKey, schema, checkpoint.LastPosition);
+            }
+        }
     }
 #pragma warning restore EF1002
 

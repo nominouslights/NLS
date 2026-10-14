@@ -8,6 +8,12 @@ namespace NorthernLink.Shared.Persistence.Projections;
 /// session, so the cursor is a single module-wide value. Lives in the module's own schema
 /// (<c>projection_checkpoints</c>), registered centrally from
 /// <see cref="Auditing"/>-style config in <c>ModuleDbContext</c>.
+/// <para>
+/// The same table also holds the cursors of the module's <b>fan-out</b> event subscriptions
+/// (<c>OutboxPollingConsumer</c>), one row per routing key named <c>inbox:&lt;routing-key&gt;</c>,
+/// whose <see cref="LastPosition"/> is a position in the <em>producer's</em> outbox. The two
+/// kinds never collide: a projection row is named after the bare schema.
+/// </para>
 /// </summary>
 public sealed class ProjectionCheckpoint
 {
