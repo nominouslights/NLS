@@ -6,6 +6,7 @@ import {
   attestPriorRecords,
   declareHosException,
   getDutyDay,
+  getHosAlertsToday,
   getHosAudit,
   getHosStatus,
   liftOutOfService,
@@ -227,6 +228,27 @@ describe("findings, attestation, audit (ComplianceAccess)", () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, []));
     await getHosAudit(DRIVER, { from: "2026-09-26", to: "2026-10-09" });
     expect(callPath()).toBe(`/api/drivers/${DRIVER}/hos/audit?from=2026-09-26&to=2026-10-09`);
+  });
+});
+
+describe("today alerts (DriverRosterAccess)", () => {
+  it("getHosAlertsToday GETs /api/drivers/hos/alerts/today with no query and returns the body as-is", async () => {
+    const body = {
+      asOfUtc: "2026-10-12T14:00:00+00:00",
+      driversNearLimit: 1,
+      driversOverLimit: 0,
+      outOfService: 0,
+      openMalfunctions: 0,
+      uncertifiedYesterday: 0,
+      unassignedExceptions: 0,
+      items: [{ driverId: DRIVER, driverName: "K. Beardy", kind: "NearLimit", message: "K. Beardy has 45m left before the tightest limit." }],
+      label: "Planning figures",
+    };
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, body));
+    const result = await getHosAlertsToday();
+    expect(callPath()).toBe("/api/drivers/hos/alerts/today");
+    expect(callInit().method ?? "GET").toBe("GET");
+    expect(result).toEqual(body);
   });
 });
 

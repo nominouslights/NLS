@@ -435,6 +435,37 @@ export function getHosStatus(driverId: string): Promise<HosStatus> {
   return request<HosStatus>(`/api/drivers/${driverId}/hos/status`);
 }
 
+/** HosAlertKind member names, in the order the server lists them (most urgent first). */
+export type HosAlertKind = "OutOfService" | "OverLimit" | "NearLimit" | "EldMalfunction" | "ExceptionDeclared" | "Uncertified";
+
+/** One row of the today alerts (HosAlertItemResponse). `message` is the server's sentence, shown verbatim. */
+export interface HosAlertItem {
+  driverId: string;
+  driverName: string;
+  kind: HosAlertKind;
+  message: string;
+}
+
+/** GET /api/drivers/hos/alerts/today (HosAlertsResponse). The six counts summarise `items`:
+ *  one per driver for the bands and out-of-service, one per open malfunction, uncertified
+ *  yesterday and declared exception. Deactivated drivers are excluded server-side. */
+export interface HosAlertsToday {
+  asOfUtc: string;
+  driversNearLimit: number;
+  driversOverLimit: number;
+  outOfService: number;
+  openMalfunctions: number;
+  uncertifiedYesterday: number;
+  unassignedExceptions: number;
+  items: HosAlertItem[];
+  label: string;
+}
+
+/** The Dispatch Board's compliance tile and the Compliance screen's today list — DriverRosterAccess. */
+export function getHosAlertsToday(): Promise<HosAlertsToday> {
+  return request<HosAlertsToday>("/api/drivers/hos/alerts/today");
+}
+
 /** The roster batch — one call for every driver's band. */
 export function listHosStatusBatch(): Promise<HosRosterStatus[]> {
   return request<HosRosterStatus[]>("/api/drivers/hos/status");
