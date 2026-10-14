@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The Compliance domain library: Domain/, Application/, and Infrastructure/ layers in one
+       assembly, composed by the API gateway. References NorthernLink.Shared and nothing
+       else internal — never another domain library; cross-domain communication is
+       integration-events-only. Extracting this into its own microservice = copy this
+       library (endpoints included) plus Shared.
+
+       Owns: the CA-MB rule set (a display mirror of the HOS engine's constants plus the
+       retention / inspection / qualification / filing / threshold / insurance rules of
+       NL-SP-02), the compliance record registry and its retention lifecycle, document
+       numbering, the regulatory-basis catalogue and the record print frame. Does NOT own HOS
+       findings, out-of-service declarations or ELD malfunctions — those are Drivers'. -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\Shared\NorthernLink.Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Minimal-API endpoint mapping lives in the library, not the host. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The retention worker's OnceAsync and DocumentSeries.Rehydrate are internal by design;
+         the unit tests drive them directly. -->
+    <InternalsVisibleTo Include="NorthernLink.Compliance.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- QuestPDF (Community license, set once in AddCompliance) — renders record cover sheets. -->
+    <PackageReference Include="QuestPDF" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>

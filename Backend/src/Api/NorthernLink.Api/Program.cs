@@ -22,6 +22,9 @@ using NorthernLink.Budgeting.Infrastructure.Persistence;
 using NorthernLink.Clients.Infrastructure;
 using NorthernLink.Clients.Infrastructure.Endpoints;
 using NorthernLink.Clients.Infrastructure.Persistence;
+using NorthernLink.Compliance.Infrastructure;
+using NorthernLink.Compliance.Infrastructure.Endpoints;
+using NorthernLink.Compliance.Infrastructure.Persistence;
 using NorthernLink.Drivers.Infrastructure;
 using NorthernLink.Drivers.Infrastructure.Endpoints;
 using NorthernLink.Drivers.Infrastructure.Persistence;
@@ -121,6 +124,7 @@ builder.Services
     .AddBilling(builder.Configuration)
     .AddBooking(builder.Configuration)
     .AddBudgeting(builder.Configuration)
+    .AddCompliance(builder.Configuration)
     .AddIncidents(builder.Configuration)
     .AddNotifications(builder.Configuration)
     .AddGrocery(builder.Configuration);
@@ -139,6 +143,7 @@ builder.Services.AddModuleMigrations(
     typeof(BillingDbContext),
     typeof(BookingDbContext),
     typeof(BudgetingDbContext),
+    typeof(ComplianceDbContext),
     typeof(NotificationsDbContext));
 
 var app = builder.Build();
@@ -164,6 +169,7 @@ app.MapClientsEndpoints();
 app.MapBillingEndpoints();
 app.MapBookingEndpoints();
 app.MapBudgetingEndpoints();
+app.MapComplianceEndpoints();
 app.MapNotificationsEndpoints();
 
 await app.RunAsync();

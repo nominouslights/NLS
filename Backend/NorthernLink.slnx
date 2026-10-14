@@ -10,6 +10,7 @@
     <Project Path="src/Booking/NorthernLink.Booking.csproj" />
     <Project Path="src/Budgeting/NorthernLink.Budgeting.csproj" />
     <Project Path="src/Clients/NorthernLink.Clients.csproj" />
+    <Project Path="src/Compliance/NorthernLink.Compliance.csproj" />
     <Project Path="src/Drivers/NorthernLink.Drivers.csproj" />
     <Project Path="src/Fleet/NorthernLink.Fleet.csproj" />
     <Project Path="src/Grocery/NorthernLink.Grocery.csproj" />
@@ -36,5 +37,6 @@
     <Project Path="tests/NorthernLink.Api.Tests/NorthernLink.Api.Tests.csproj" />
     <Project Path="tests/NorthernLink.Budgeting.Tests/NorthernLink.Budgeting.Tests.csproj" />
     <Project Path="tests/NorthernLink.Booking.Tests/NorthernLink.Booking.Tests.csproj" />
+    <Project Path="tests/NorthernLink.Compliance.Tests/NorthernLink.Compliance.Tests.csproj" />
   </Folder>
 </Solution>
