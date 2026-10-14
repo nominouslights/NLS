@@ -15,8 +15,10 @@ import {
 } from "@/lib/api";
 import {
   assignTrip,
+  canCorrectDriver,
   canPairRoundTrip,
   changeTripStatus,
+  clearanceAsOf,
   closeTripWithoutBilling,
   convertTripToDeadhead,
   convertTripToPassengerTrip,
@@ -53,12 +55,9 @@ import {
   type TripUpdateInput,
 } from "@/lib/api/trips";
 import { isShipmentOpen, listShipments, shipmentLegChip, type ShipmentRecord } from "@/lib/api/shipments";
-import {
-  listDrivers,
-  listDriverClearances,
-  type DriverClearanceRecord,
-  type DriverRecord,
-} from "@/lib/api/drivers";
+import { listDriverClearances } from "@/lib/api/drivers";
+import { useDriverRoster } from "@/lib/useDriverRoster";
+import { activityEntryView } from "@/lib/tripActivity";
 import { listVehicles, type Vehicle } from "@/lib/api/fleet";
 import { contractRateLabel, getClient, type ActiveContractSummary } from "@/lib/api/clients";
 // Leg-direction glyph + label — the one place that mapping lives (Billing.tsx
@@ -79,6 +78,7 @@ import ManifestEditorModal from "@/components/ManifestEditorModal";
 import TripInspectionModal from "@/components/TripInspectionModal";
 import SendPickupEmailModal from "@/components/SendPickupEmailModal";
 import ChangeRouteModal from "@/components/ChangeRouteModal";
+import CorrectDriverModal from "@/components/CorrectDriverModal";
 import ConvertToDeadheadModal from "@/components/ConvertToDeadheadModal";
 import DefectsPanel from "@/components/fleet/DefectsPanel";
 
@@ -125,37 +125,6 @@ function fmtUtcDateTime(iso: string | null): string {
   });
 }
 
-// Friendly labels for the kebab-case audit event types (GET /activity). Unknown
-// types fall back to their de-kebabed form.
-const EVENT_LABELS: Record<string, string> = {
-  "trip-scheduled": "Trip scheduled",
-  "trip-assigned": "Driver / vehicle assigned",
-  "trip-driver-assigned": "Driver assigned",
-  "trip-vehicle-assigned": "Vehicle assigned",
-  "trip-started": "Trip started",
-  "trip-completed": "Trip completed",
-  "trip-cancelled": "Trip cancelled",
-  "trip-demand-recorded": "Demand recorded",
-  "trip-manifest-linked": "Manifest linked",
-  "trip-manifest-created": "Manifest created",
-  "trip-manifest-updated": "Manifest updated",
-  "trip-route-changed": "Route changed",
-  "trip-manifest-route-renamed": "Manifest route renamed",
-  "trip-converted-to-deadhead": "Converted to deadhead",
-  "trip-converted-to-passenger-trip": "Converted to passenger trip",
-};
-
-/** "Who did what" line for one audit entry (source + event). */
-function activityLabel(e: TripActivityEntry): string {
-  const who =
-    e.source === "App"
-      ? "Driver App"
-      : e.source === "Dispatcher"
-        ? `Dispatcher${e.enteredBy ? ` (${e.enteredBy})` : ""}`
-        : null;
-  const action = EVENT_LABELS[e.eventType] ?? e.eventType.replace(/-/g, " ");
-  return who ? `${who} · ${action}` : action;
-}
 
 // ---------------------------------------------------------------------------
 // Pre-data states (Drivers.tsx conventions)
@@ -236,41 +205,14 @@ function AssignModal({
   onClose: () => void;
   onSaved: (driverId: string | null, vehicleId: string | null) => Promise<void>;
 }) {
-  const [roster, setRoster] = useState<{ driver: DriverRecord; cleared: boolean }[] | null>(null);
-  const [rosterError, setRosterError] = useState<string | null>(null);
+  // Active drivers, clearance judged as of today (live assignment). A failed
+  // clearance fetch degrades to "no clearances on file" (warn), never a block.
+  const { roster, error: rosterError } = useDriverRoster({ clientName: trip.clientName, include: "active" });
   const [driverId, setDriverId] = useState<string | null>(trip.driverId);
   const [vehicles, setVehicles] = useState<Vehicle[] | null>(null);
   const [vehicleId, setVehicleId] = useState<string>(trip.vehicleId ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const drivers = (await listDrivers()).filter((d) => d.status === "Active");
-        // Clearance check needs each driver's clearances — small roster, so a
-        // parallel fan-out is fine. A failed clearance fetch degrades to
-        // "no clearances on file" (warn) rather than blocking the modal.
-        const clearances = await Promise.all(
-          drivers.map((d) => listDriverClearances(d.id).catch(() => [] as DriverClearanceRecord[])),
-        );
-        if (active) {
-          setRoster(
-            drivers.map((driver, i) => ({
-              driver,
-              cleared: hasClearanceFor(clearances[i], trip.clientName),
-            })),
-          );
-        }
-      } catch (e) {
-        if (active) setRosterError(e instanceof ApiError ? e.message : "Failed to load drivers.");
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [trip.clientName]);
 
   // Active vehicles for the assignable-vehicle dropdown. The current vehicle is
   // merged in even if it is no longer Active, so it still shows selected.
@@ -630,8 +572,8 @@ function CreateReturnModal({
   const [windowEnd, setWindowEnd] = useState("");
   const [isEmptyLeg, setIsEmptyLeg] = useState(false);
 
-  const [roster, setRoster] = useState<{ driver: DriverRecord; cleared: boolean }[] | null>(null);
-  const [rosterError, setRosterError] = useState<string | null>(null);
+  // Same roster as REASSIGN — Active drivers, clearance as of today.
+  const { roster, error: rosterError } = useDriverRoster({ clientName: trip.clientName, include: "active" });
   const [driverId, setDriverId] = useState<string | null>(trip.driverId);
   const [vehicles, setVehicles] = useState<Vehicle[] | null>(null);
   const [vehicleId, setVehicleId] = useState<string>(trip.vehicleId ?? "");
@@ -641,26 +583,6 @@ function CreateReturnModal({
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const drivers = (await listDrivers()).filter((d) => d.status === "Active");
-        const clearances = await Promise.all(
-          drivers.map((d) => listDriverClearances(d.id).catch(() => [] as DriverClearanceRecord[])),
-        );
-        if (active) {
-          setRoster(drivers.map((driver, i) => ({ driver, cleared: hasClearanceFor(clearances[i], trip.clientName) })));
-        }
-      } catch (e) {
-        if (active) setRosterError(e instanceof ApiError ? e.message : "Failed to load drivers.");
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [trip.clientName]);
 
   useEffect(() => {
     let active = true;
@@ -1461,7 +1383,9 @@ export default function Trips({
   const [extraTrip, setExtraTrip] = useState<TripRecord | null>(null);
 
   // Per-selected-trip auxiliary data, keyed by trip id (Drivers.tsx pattern).
-  const [clearanceState, setClearanceState] = useState<{ tripId: string; cleared: boolean } | null>(null);
+  const [clearanceState, setClearanceState] = useState<{ tripId: string; asOf: string; cleared: boolean } | null>(
+    null,
+  );
   const [contractState, setContractState] = useState<{ tripId: string; contract: ActiveContractSummary | null } | null>(null);
   const [manifestState, setManifestState] = useState<{ tripId: string; manifest: TripManifest | null } | null>(null);
   const [inspectionsState, setInspectionsState] = useState<{ tripId: string; rows: VehicleInspection[] } | null>(null);
@@ -1473,6 +1397,7 @@ export default function Trips({
   const [modal, setModal] = useState<
     | null
     | "assign"
+    | "correctDriver"
     | "edit"
     | "createReturn"
     | "pairRoundTrip"
@@ -1641,6 +1566,9 @@ export default function Trips({
   const tripDriverId = t?.driverId ?? null;
   const tripClientId = t?.clientId ?? null;
   const tripClientName = t?.clientName ?? null;
+  // Finished trips are judged on their serviceDate (same rule as CORRECT DRIVER);
+  // live trips on today.
+  const tripClearanceAsOf = t ? clearanceAsOf(t) : null;
   const tripManifestId = t?.manifestId ?? null;
   const tripIsCargo = !!t && isCargoService(t.serviceType);
   // No synchronous setState here: the aux states are keyed by tripId, so a
@@ -1661,10 +1589,15 @@ export default function Trips({
       );
     }
 
-    if (tripDriverId && tripClientName) {
+    if (tripDriverId && tripClientName && tripClearanceAsOf) {
       listDriverClearances(tripDriverId).then(
         (rows2) => {
-          if (active) setClearanceState({ tripId, cleared: hasClearanceFor(rows2, tripClientName) });
+          if (active)
+            setClearanceState({
+              tripId,
+              asOf: tripClearanceAsOf,
+              cleared: hasClearanceFor(rows2, tripClientName, tripClearanceAsOf),
+            });
         },
         () => undefined, // clearance check is best-effort — render falls back to "checking…"/"—"
       );
@@ -1719,7 +1652,7 @@ export default function Trips({
     return () => {
       active = false;
     };
-  }, [tripId, tripNumber, tripDriverId, tripClientId, tripClientName, tripManifestId, tripIsCargo]);
+  }, [tripId, tripNumber, tripDriverId, tripClientId, tripClientName, tripClearanceAsOf, tripManifestId, tripIsCargo]);
 
   async function runAction(fn: () => Promise<void>) {
     if (busy) return;
@@ -1751,6 +1684,14 @@ export default function Trips({
     await assignTrip(id, driverId, vehicleId);
     await reloadUntil(id, (trip) => trip !== undefined && trip.driverId === driverId && trip.vehicleId === vehicleId);
     setDefectsRefresh((n) => n + 1);
+  }
+
+  /** CORRECT DRIVER — the POST already succeeded (the modal owns it); poll until
+   *  the trip reads back with the new driver, then refresh the activity log so
+   *  the correction and its reason show. Mirrors onRouteChanged. */
+  async function onDriverCorrected(id: string, driverId: string) {
+    await reloadUntil(id, (trip) => trip !== undefined && trip.driverId === driverId);
+    await refreshActivity(id);
   }
 
   async function onEditSaved(id: string, input: TripUpdateInput) {
@@ -2111,7 +2052,11 @@ export default function Trips({
   // ---- loaded ----
 
   const chip = t ? tripChip(t) : null;
-  const clearance = t && clearanceState?.tripId === t.id ? clearanceState.cleared : null;
+  // Keyed by trip AND as-of date: a status change that finishes the trip moves
+  // the as-of date, and the old verdict must not show while the new one loads.
+  const clearance =
+    t && clearanceState?.tripId === t.id && clearanceState.asOf === tripClearanceAsOf ? clearanceState.cleared : null;
+  const clearanceDay = t && canCorrectDriver(t) ? ` on ${shortDateLabel(t.serviceDate)}` : "";
   const contract = t && contractState?.tripId === t.id ? contractState.contract : null;
   const manifest = t && manifestState?.tripId === t.id ? manifestState.manifest : null;
   const inspections = t && inspectionsState?.tripId === t.id ? inspectionsState.rows : [];
@@ -2450,9 +2395,12 @@ export default function Trips({
                         ) : clearance === null ? (
                           "checking…"
                         ) : clearance ? (
-                          <StatusChip kind="ontime" label={`${t.clientName} clearance on file`} />
+                          <StatusChip
+                            kind="ontime"
+                            label={clearanceDay ? `${t.clientName} clearance${clearanceDay}` : `${t.clientName} clearance on file`}
+                          />
                         ) : (
-                          <StatusChip kind="soon" label={`No ${t.clientName} clearance`} />
+                          <StatusChip kind="soon" label={`No ${t.clientName} clearance${clearanceDay}`} />
                         )
                       }
                     />
@@ -2807,14 +2755,23 @@ export default function Trips({
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
                       {activity.map((ev, i) => {
-                        const isManifest = ev.aggregateType === "trip-manifest";
+                        // Manifest events already name their author in the label
+                        // (Dispatcher (name)); trip events get a "by" line instead.
+                        // Null reason/detail/enteredBy → that line is just omitted.
+                        const { isManifest, label, detail, reason, by } = activityEntryView(ev);
+                        const sub = { fontFamily: fonts.body, fontSize: 11.5, color: colors.textMuted, lineHeight: 1.45 };
                         return (
-                          <div key={`${ev.eventType}-${ev.occurredAtUtc}-${i}`} style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                          <div key={`${ev.eventType}-${ev.occurredAtUtc}-${i}`} style={{ display: "flex", alignItems: "flex-start", gap: 9 }}>
                             {/* colour + glyph + label — never colour alone */}
                             <StatusBadge kind={isManifest ? "info" : "ontime"} size={14} />
-                            <span style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textSecondary, flex: 1 }}>
-                              {activityLabel(ev)}
-                            </span>
+                            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+                              <span style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textSecondary }}>
+                                {label}
+                              </span>
+                              {detail && <span style={sub}>{detail}</span>}
+                              {reason && <span style={sub}>Reason: {reason}</span>}
+                              {by && <span style={{ ...sub, color: colors.textDim }}>by {by}</span>}
+                            </div>
                             <span style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textDim }}>
                               {fmtUtcDateTime(ev.occurredAtUtc)}
                             </span>
@@ -2873,6 +2830,11 @@ export default function Trips({
                   ))}
                 {(t.status === "Scheduled" || t.status === "InProgress") && (
                   <ActionButton onClick={() => setModal("assign")}>REASSIGN</ActionButton>
+                )}
+                {/* Finished trips: REASSIGN is gone, but the record can still be
+                    corrected — with a reason that lands in the activity log. */}
+                {canCorrectDriver(t) && (
+                  <ActionButton onClick={() => setModal("correctDriver")}>CORRECT DRIVER</ActionButton>
                 )}
                 {!t.isEmptyLeg && canPairRoundTrip(t) && (
                   <ActionButton onClick={() => setModal("createReturn")}>CREATE RETURN</ActionButton>
@@ -2957,6 +2919,13 @@ export default function Trips({
                   trip={t}
                   onClose={() => setModal(null)}
                   onSaved={(driverId, vehicleId) => onAssignSaved(t.id, driverId, vehicleId)}
+                />
+              )}
+              {modal === "correctDriver" && (
+                <CorrectDriverModal
+                  trip={t}
+                  onClose={() => setModal(null)}
+                  onCorrected={(driverId) => onDriverCorrected(t.id, driverId)}
                 />
               )}
               {modal === "createReturn" && (

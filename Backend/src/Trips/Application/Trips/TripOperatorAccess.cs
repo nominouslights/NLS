@@ -37,6 +37,13 @@ public sealed class TripOperatorAccess(ICurrentActor actor, IDriverLookupReposit
             : Task.FromResult(actor.HoldsAnyRole(Roles.DispatchAccess));
 
     /// <summary>
+    /// True when the caller holds a dispatch role — the same test <see cref="MayOperateAsync"/>
+    /// short-circuits on. False means any access they have to a trip is as its own driver, so
+    /// reads that show dispatch-side narrative (who corrected it, and why) must redact it.
+    /// </summary>
+    public bool HasDispatchAccess => actor.HoldsAnyRole(Roles.DispatchAccess);
+
+    /// <summary>
     /// The scope a list read runs under: every trip for dispatch, the caller's own driver's
     /// trips for a linked driver account, and nothing for an account linked to no driver (or
     /// no principal at all — background work never reads as "sees everything").

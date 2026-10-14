@@ -244,7 +244,8 @@ internal sealed class FakeCurrentActor(Guid? userId, params string[] roles) : IC
 
     public Guid? UserId => userId;
 
-    public string? Email => null;
+    /// <summary>The token's email claim — null unless a test sets it.</summary>
+    public string? Email { get; init; }
 
     public IReadOnlyCollection<string> Roles => roles;
 }

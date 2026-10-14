@@ -29,6 +29,7 @@ using NorthernLink.Trips.Application.Trips.ChangeStatus;
 using NorthernLink.Trips.Application.Trips.CloseWithoutBilling;
 using NorthernLink.Trips.Application.Trips.ConvertToDeadhead;
 using NorthernLink.Trips.Application.Trips.ConvertToPassengerTrip;
+using NorthernLink.Trips.Application.Trips.CorrectDriver;
 using NorthernLink.Trips.Application.Trips.Create;
 using NorthernLink.Trips.Application.Trips.CreateDeadheadReturn;
 using NorthernLink.Trips.Application.Trips.FinishOperations;
@@ -72,6 +73,9 @@ internal static class TripPlanningEndpoints
         tripPlanning.MapPost("{id:guid}/assign", AssignTrip);
         tripPlanning.MapPost("{id:guid}/finish", FinishTripOperations);
         tripPlanning.MapPost("{id:guid}/close-without-billing", CloseTripWithoutBilling);
+        // Fix the driver recorded on a finished run (ReadyForBilling/Invoiced/Completed) — a
+        // correction of history with a required reason, never the assign path. Dispatch only.
+        tripPlanning.MapPost("{id:guid}/correct-driver", CorrectTripDriver);
         tripPlanning.MapPost("{id:guid}/demand", RecordTripDemand);
         tripPlanning.MapPost("{id:guid}/merge-round-trip", MergeRoundTrip);
         tripPlanning.MapPost("{id:guid}/unpair-round-trip", UnpairRoundTrip);
@@ -433,6 +437,32 @@ internal static class TripPlanningEndpoints
 
         var result = await sender.Send(
             new CloseTripWithoutBillingCommand(id, request.Reason), cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>
+    /// Corrects the driver on a trip whose run is over. Body <c>{ "driverId": guid, "reason": string }</c>,
+    /// 204 on success; refusals are the usual <c>{ code, message }</c> ProblemDetails mapping. Who
+    /// made the correction comes from the access token inside the handler, never from the body.
+    /// A missing or empty <c>driverId</c> is passed through as <see cref="Guid.Empty"/>, which the
+    /// handler answers with the domain's 400 DriverRequired; 404 DriverNotFound is reserved for an
+    /// id that does not exist in this tenant.
+    /// </summary>
+    private static async Task<IResult> CorrectTripDriver(
+        Guid id,
+        CorrectTripDriverRequest request,
+        ITenantContext tenantContext,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(
+            new CorrectTripDriverCommand(id, request.DriverId ?? Guid.Empty, request.Reason ?? string.Empty),
+            cancellationToken);
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
@@ -1038,6 +1068,13 @@ public sealed record ChangeTripStatusRequest(TripStatus Status, string? Reason);
 
 /// <summary>Request body for POST /api/trips/{id}/close-without-billing.</summary>
 public sealed record CloseTripWithoutBillingRequest(string Reason);
+
+/// <summary>
+/// Request body for POST /api/trips/{id}/correct-driver. Both members are nullable so a missing
+/// one reaches the handler and gets its proper error (DriverNotFound / DriverCorrectionReasonRequired)
+/// instead of a binding failure. There is deliberately no "who" member — that comes from the token.
+/// </summary>
+public sealed record CorrectTripDriverRequest(Guid? DriverId, string? Reason);
 
 /// <summary>Request body for POST /api/trips/{id}/demand.</summary>
 public sealed record RecordTripDemandRequest(int SeatsConfirmed, bool DemandGuaranteed);

@@ -330,6 +330,37 @@ export function unpairRoundTrip(id: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Driver correction — fixes who actually drove a FINISHED trip, with a reason
+// that lands in the activity log. Live trips use REASSIGN (assignTrip) instead.
+// ---------------------------------------------------------------------------
+
+/** Longest correction reason the server accepts — mirrors the C# constant
+ *  `Trip.MaxReasonLength` (Backend/src/Trips/Domain/Trips/Trip.cs); over it the
+ *  server returns DriverCorrectionReasonTooLong. Change both together. */
+export const DRIVER_CORRECTION_REASON_MAX = 500;
+
+/** POST /api/trips/{id}/correct-driver → 204. The new driver may be any driver
+ *  on record, including Inactive/Deactivated ones. Errors (server message shown
+ *  verbatim): DriverCorrectionReasonRequired / DriverCorrectionReasonTooLong
+ *  (400), DriverCorrectionNotAllowed / UseReassign / DriverUnchanged (409),
+ *  Trips.Trip.DriverNotFound (404), trip not found (404). */
+export function correctTripDriver(id: string, driverId: string, reason: string): Promise<void> {
+  return request<void>(`/api/trips/${id}/correct-driver`, {
+    method: "POST",
+    body: JSON.stringify({ driverId, reason }),
+  });
+}
+
+/** UI mirror of the C# `Trip.DriverCorrectionAllowedFor`
+ *  (Backend/src/Trips/Domain/Trips/Trip.cs) — where the server allows a driver
+ *  correction: a finished trip (ReadyForBilling, Invoiced, Completed).
+ *  Scheduled/InProgress use REASSIGN; Cancelled/WrittenOff are never corrected.
+ *  Change both together. */
+export function canCorrectDriver(t: Pick<TripRecord, "status">): boolean {
+  return t.status === "ReadyForBilling" || t.status === "Invoiced" || t.status === "Completed";
+}
+
+// ---------------------------------------------------------------------------
 // Deadhead conversion — a Scheduled trip nobody is booked on can be turned into
 // an empty repositioning run, and back. Both take no body and return 204.
 // ---------------------------------------------------------------------------
@@ -1079,20 +1110,51 @@ export function seatsLabel(t: TripRecord): string {
   return t.seatsCapacity != null ? `${t.seatsConfirmed} / ${t.seatsCapacity}` : String(t.seatsConfirmed);
 }
 
-/** True when the driver holds an unexpired clearance for the trip's client.
- *  Matching is by client name (the backend stores clearance clientName as free
- *  text); clearance checks are a UI-side warning in v1, never a hard block. */
+/** True when the driver held a clearance for the trip's client in force on
+ *  `asOf` (yyyy-MM-dd, default today). Live assignment checks today; a finished
+ *  trip (detail panel, driver correction) checks its own serviceDate — see
+ *  `clearanceAsOf`.
+ *
+ *  A clearance records its EXPIRY but not when it took effect: `grantedAtUtc`
+ *  is when the row was entered (DriverClearance.cs sets it to UtcNow), so a
+ *  long-held clearance keyed in last week would wrongly read as "not yet
+ *  granted" on an older trip. For an as-of date in the PAST the start is
+ *  therefore unknown and ignored — cleared when the client matches and it had
+ *  not expired by asOf. For today (or later) the entry date is a fair floor and
+ *  still applies. Matching is by client name (the backend stores clearance
+ *  clientName as free text); clearance checks are a UI-side warning in v1,
+ *  never a hard block. */
 export function hasClearanceFor(
   clearances: DriverClearanceRecord[],
   clientName: string | null,
+  asOf: string = todayIso(),
 ): boolean {
   if (!clientName) return true; // no client on the trip — nothing to clear
-  const today = todayIso();
-  return clearances.some(
-    (c) =>
-      c.clientName.trim().toLowerCase() === clientName.trim().toLowerCase() &&
-      (c.expiry === null || c.expiry >= today),
-  );
+  const historical = asOf < todayIso();
+  return clearances.some((c) => {
+    if (c.clientName.trim().toLowerCase() !== clientName.trim().toLowerCase()) return false;
+    if (c.expiry !== null && c.expiry < asOf) return false;
+    if (historical) return true; // start date unknown — expiry is the only evidence
+    const granted = localIsoDate(c.grantedAtUtc);
+    return granted === null || granted <= asOf;
+  });
+}
+
+/** The date a trip's driver clearance is judged on: a FINISHED trip (the same
+ *  set `canCorrectDriver` allows — ReadyForBilling, Invoiced, Completed) is
+ *  judged on its own serviceDate, exactly as CORRECT DRIVER does; a live trip
+ *  (and Cancelled / WrittenOff) on today. */
+export function clearanceAsOf(t: Pick<TripRecord, "status" | "serviceDate">): string {
+  return canCorrectDriver(t) ? t.serviceDate : todayIso();
+}
+
+/** A UTC instant's local calendar date (yyyy-MM-dd); null when absent/unparseable. */
+function localIsoDate(utc: string | null | undefined): string | null {
+  if (!utc) return null;
+  const d = new Date(utc);
+  if (Number.isNaN(d.getTime())) return null;
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
 /** Local-time ISO date (yyyy-MM-dd) — service dates are local operational days. */
@@ -1240,7 +1302,19 @@ export interface TripActivityEntry {
   /** Kebab-case event type, e.g. "trip-scheduled", "trip-manifest-updated". */
   eventType: string;
   source: ManifestSource | null;
+  /** Who entered it — manifest events, and trip events too since driver correction. */
   enteredBy: string | null;
+  /** Free-text reason the actor gave (e.g. a driver correction). Optional on the wire. */
+  reason?: string | null;
+  /** Server-written one-line detail, e.g. "Driver: Old → New". Optional on the wire. */
+  detail?: string | null;
+}
+
+/** The entry's reason, trimmed, when it has a non-blank one — for ANY event
+ *  type (not gated to a particular event), else null. */
+export function tripActivityReason(e: Pick<TripActivityEntry, "reason">): string | null {
+  const r = e.reason?.trim();
+  return r ? r : null;
 }
 
 export function listTripActivity(id: string): Promise<TripActivityEntry[]> {
