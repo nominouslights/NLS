@@ -18,11 +18,27 @@ policy `ComplianceAccess` (Owner + ComplianceOfficer).
 Cross-module flow is events only:
 
 - **Intake** — a producer raises `ComplianceRecordProducedIntegrationEvent`
-  (`Shared/IntegrationEvents/Compliance/`) into *its own* outbox; this module polls `drivers`,
-  `fleet` and `trips` for it (`OnProducedBy`) and registers the record idempotently on
-  (`SourceModule`, `SourceRecordId`).
+  (`Shared/IntegrationEvents/Compliance/`) into *its own* outbox; this module polls `compliance`,
+  `drivers`, `fleet` and `trips` for it (`OnProducedBy`, `RecordProducerSchemas`) and registers the
+  record idempotently on (`SourceModule`, `SourceRecordId`). An event carrying
+  `SupersedesSourceRecordId` (appended, default null) registers as the next version of that
+  producer's earlier record when it is registered and Active — the predecessor moves to
+  `Superseded` and its 2-year copy clock starts.
 - **Answer** — `ComplianceRecordRegisteredIntegrationEvent` carries the issued number back so the
   producer can stamp it on the document.
+- **Compliance is its own producer.** Its R20 documents (SFC, insurance, registration) raise the
+  produced event into `compliance.outbox_messages` through `ComplianceIntegrationEventMapper`, and
+  `ComplianceRecordRegisteredIntegrationEventHandler` stamps the answer back by source-id prefix
+  (`sfc:`, `insurance-policy:`, `vehicle-registration:`). Until it lands, `documentNumber` is null —
+  a screen or print shows "number pending".
+- **Replicas** — `vehicle_lookup`, `driver_lookup`, `user_lookup` are upserted from Fleet's,
+  Drivers' and Identity's change events. Trips and Budgeting already consume those keys on the
+  status-tracked path, and an outbox row has **one** `processing_status`, so a second status
+  subscriber would see only the rows it won. These subscriptions (and the registered answer) use
+  `OnFanOut` instead: the consumer reads the producer's rows past this module's own cursor
+  (`projection_checkpoints` row `inbox:<routing-key>`) and never touches the status columns. A new
+  fan-out key replays its whole history. The consumer pushes the event's `AmbientTenant` before it
+  resolves the handler scope, so the scope's DbContext and its RLS session carry the right tenant.
 
 ## Record types — NL-SP-02 s. 11
 
@@ -83,6 +99,43 @@ gap-free (`RecordRegistrar`). Types the plan assigns no form to use their R-code
 Manitoba), publishes and applies the CA-MB rule set, opens the twelve series for the current year,
 upserts the regulatory-basis catalogue. `RegisterRecord` also self-heals missing settings so a
 producer's event never parks because nobody seeded.
+
+## Carrier authority, insurance and registration (Epic 2 tasks 1–4)
+
+| Route (under `/api/compliance`) | What it does |
+|---|---|
+| `GET authority` | The tenant's one `CarrierAuthority`; `exists: false` (200) is the first-run state |
+| `POST authority/sfc` | Records the SFC in force. A new number or expiry moves the current one to `sfcHistory` and supersedes its R20 record |
+| `POST`/`GET authority/sfc/{certificateId}/certificate` | Scan of the SFC (upload: current certificate only, else 409 `SfcNotCurrent`; download: current or superseded) |
+| `POST authority/nsc-number` | The NSC number. The authority owns it; the settings print-header copy updates in the same save |
+| `PUT authority/safety-rating`, `authority/intra-provincial`, `authority/routes` | Rating + as-of date; the Owner-signed intra-provincial declaration (statement kept verbatim); routes markdown |
+| `GET vehicles`, `PUT vehicles/{vehicleId}/regulated` | The vehicle replica and the Compliance-only override (`true`/`false`/`null` = seating decides) |
+| `GET`/`POST insurance-policies`, `GET …/{id}`, `POST …/{id}/renew` | One Current policy per vehicle; renew supersedes. A limit below the rule set's minimum is **saved and flagged** (`belowMinimum`), never refused |
+| `POST insurance-policies/{id}/certificate`, `…/filing-confirmation`, `GET …/attachments/{slot}` | Certificate and the insurer's HTA s. 312.4 filing confirmation |
+| `GET`/`POST vehicle-registrations`, `GET …/{id}`, `POST …/{id}/renew`, `POST …/{id}/document`, `GET …/attachments/{slot}` | Same shape; class defaults to `AR`, expiry to `effectiveOn` + the rule set's 6-month term |
+
+- **NSC rule.** Once the authority holds an NSC number, `PUT settings` with a different one is
+  409 `Compliance.Settings.NscNumberManagedByAuthority` — echo the number `GET settings` returned.
+- **Regulated vehicle** = `regulatedOverride ?? seatingCapacity ≥ authority.regulatedMinSeatingCapacity`
+  (11, including the driver — HTA s. 1(1) "bus"; owner question Q1). Retired, Sold and Recycled
+  vehicles never count toward readiness.
+- **Attachments** go to `IObjectStorage` under
+  `compliance/{tenant}/{ownerKind}/{ownerId}/{slot}/{guid}{ext}` — PDF, JPEG, PNG or HEIC, at most
+  15 MB, multipart field `file`, antiforgery disabled (bearer auth behind the frontends' proxy). A
+  replacement is a new key; the superseded object is kept for R20. Refusals are the static
+  `AttachmentErrors`. The wire never carries the storage key.
+- **Rule set v2** (`CaMbRuleSets.V2026_10_12`) adds the `authority` section (warning horizons, SFC
+  and insurance warning days, NET-course window 180 d, registration term 6 months, plan
+  re-acknowledgement 30 d, regulated seating 11). `rule_sets.authority` is nullable: a version-1 row
+  reads as `AuthorityRuleSection.Default`.
+- **Persistence.** Migration `AddCarrierAuthority` adds `carrier_authorities` (unique per tenant),
+  `insurance_policies` and `vehicle_registrations` (partial unique index on
+  `(tenant_id, vehicle_id, status) WHERE status = 'Current'` — `status` is in the key so EF orders a
+  renewal's UPDATE before its INSERT), the three replicas, and `rule_sets.authority`. Every new
+  table has a query filter and the canonical tenant RLS policy.
+- `tests/NorthernLink.Compliance.IntegrationTests` (Testcontainers, needs Docker) proves the
+  migration, the index under renewal, RLS between tenants, the fan-out cursor leaving the
+  producer's row Pending, and the full SFC register → stamp → supersede loop.
 
 ## Reference tables and RLS
 
