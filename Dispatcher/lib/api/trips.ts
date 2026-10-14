@@ -330,6 +330,33 @@ export function unpairRoundTrip(id: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Driver correction — fixes who actually drove a FINISHED trip, with a reason
+// that lands in the activity log. Live trips use REASSIGN (assignTrip) instead.
+// ---------------------------------------------------------------------------
+
+/** Longest correction reason the server accepts (DriverCorrectionReasonTooLong). */
+export const DRIVER_CORRECTION_REASON_MAX = 500;
+
+/** POST /api/trips/{id}/correct-driver → 204. The new driver may be any driver
+ *  on record, including Inactive/Deactivated ones. Errors (server message shown
+ *  verbatim): DriverCorrectionReasonRequired / DriverCorrectionReasonTooLong
+ *  (400), DriverCorrectionNotAllowed / UseReassign / DriverUnchanged (409),
+ *  Trips.Trip.DriverNotFound (404), trip not found (404). */
+export function correctTripDriver(id: string, driverId: string, reason: string): Promise<void> {
+  return request<void>(`/api/trips/${id}/correct-driver`, {
+    method: "POST",
+    body: JSON.stringify({ driverId, reason }),
+  });
+}
+
+/** UI mirror of where the server allows a driver correction: a finished trip
+ *  (ReadyForBilling, Invoiced, Completed). Scheduled/InProgress use REASSIGN;
+ *  Cancelled/WrittenOff are never corrected. */
+export function canCorrectDriver(t: Pick<TripRecord, "status">): boolean {
+  return t.status === "ReadyForBilling" || t.status === "Invoiced" || t.status === "Completed";
+}
+
+// ---------------------------------------------------------------------------
 // Deadhead conversion — a Scheduled trip nobody is booked on can be turned into
 // an empty repositioning run, and back. Both take no body and return 204.
 // ---------------------------------------------------------------------------
@@ -1240,7 +1267,19 @@ export interface TripActivityEntry {
   /** Kebab-case event type, e.g. "trip-scheduled", "trip-manifest-updated". */
   eventType: string;
   source: ManifestSource | null;
+  /** Who entered it — manifest events, and trip events too since driver correction. */
   enteredBy: string | null;
+  /** Free-text reason the actor gave (e.g. a driver correction). Optional on the wire. */
+  reason?: string | null;
+  /** Server-written one-line detail, e.g. "Driver: Old → New". Optional on the wire. */
+  detail?: string | null;
+}
+
+/** The entry's reason, trimmed, when it has a non-blank one — for ANY event
+ *  type (not gated to a particular event), else null. */
+export function tripActivityReason(e: Pick<TripActivityEntry, "reason">): string | null {
+  const r = e.reason?.trim();
+  return r ? r : null;
 }
 
 export function listTripActivity(id: string): Promise<TripActivityEntry[]> {

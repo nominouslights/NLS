@@ -15,6 +15,7 @@ import {
 } from "@/lib/api";
 import {
   assignTrip,
+  canCorrectDriver,
   canPairRoundTrip,
   changeTripStatus,
   closeTripWithoutBilling,
@@ -42,6 +43,7 @@ import {
   svcForTrip,
   tripBillingChip,
   tripChip,
+  tripActivityReason,
   tripStatusLabel,
   tripWindowLabel,
   unpairRoundTrip,
@@ -79,6 +81,7 @@ import ManifestEditorModal from "@/components/ManifestEditorModal";
 import TripInspectionModal from "@/components/TripInspectionModal";
 import SendPickupEmailModal from "@/components/SendPickupEmailModal";
 import ChangeRouteModal from "@/components/ChangeRouteModal";
+import CorrectDriverModal from "@/components/CorrectDriverModal";
 import ConvertToDeadheadModal from "@/components/ConvertToDeadheadModal";
 import DefectsPanel from "@/components/fleet/DefectsPanel";
 
@@ -129,6 +132,8 @@ function fmtUtcDateTime(iso: string | null): string {
 // types fall back to their de-kebabed form.
 const EVENT_LABELS: Record<string, string> = {
   "trip-scheduled": "Trip scheduled",
+  // The real journal name for REASSIGN; the three below are legacy aliases.
+  "trip-assignment-changed": "Assignment changed",
   "trip-assigned": "Driver / vehicle assigned",
   "trip-driver-assigned": "Driver assigned",
   "trip-vehicle-assigned": "Vehicle assigned",
@@ -143,6 +148,7 @@ const EVENT_LABELS: Record<string, string> = {
   "trip-manifest-route-renamed": "Manifest route renamed",
   "trip-converted-to-deadhead": "Converted to deadhead",
   "trip-converted-to-passenger-trip": "Converted to passenger trip",
+  "trip-driver-corrected": "Driver corrected",
 };
 
 /** "Who did what" line for one audit entry (source + event). */
@@ -1473,6 +1479,7 @@ export default function Trips({
   const [modal, setModal] = useState<
     | null
     | "assign"
+    | "correctDriver"
     | "edit"
     | "createReturn"
     | "pairRoundTrip"
@@ -1751,6 +1758,14 @@ export default function Trips({
     await assignTrip(id, driverId, vehicleId);
     await reloadUntil(id, (trip) => trip !== undefined && trip.driverId === driverId && trip.vehicleId === vehicleId);
     setDefectsRefresh((n) => n + 1);
+  }
+
+  /** CORRECT DRIVER — the POST already succeeded (the modal owns it); poll until
+   *  the trip reads back with the new driver, then refresh the activity log so
+   *  the correction and its reason show. Mirrors onRouteChanged. */
+  async function onDriverCorrected(id: string, driverId: string) {
+    await reloadUntil(id, (trip) => trip !== undefined && trip.driverId === driverId);
+    await refreshActivity(id);
   }
 
   async function onEditSaved(id: string, input: TripUpdateInput) {
@@ -2808,13 +2823,24 @@ export default function Trips({
                     <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
                       {activity.map((ev, i) => {
                         const isManifest = ev.aggregateType === "trip-manifest";
+                        const detail = ev.detail?.trim() || null;
+                        const reason = tripActivityReason(ev);
+                        // Manifest events already name their author in the label
+                        // (Dispatcher (name)); trip events get a "by" line instead.
+                        const by = !isManifest && ev.source !== "Dispatcher" ? ev.enteredBy?.trim() || null : null;
+                        const sub = { fontFamily: fonts.body, fontSize: 11.5, color: colors.textMuted, lineHeight: 1.45 };
                         return (
-                          <div key={`${ev.eventType}-${ev.occurredAtUtc}-${i}`} style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                          <div key={`${ev.eventType}-${ev.occurredAtUtc}-${i}`} style={{ display: "flex", alignItems: "flex-start", gap: 9 }}>
                             {/* colour + glyph + label — never colour alone */}
                             <StatusBadge kind={isManifest ? "info" : "ontime"} size={14} />
-                            <span style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textSecondary, flex: 1 }}>
-                              {activityLabel(ev)}
-                            </span>
+                            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+                              <span style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textSecondary }}>
+                                {activityLabel(ev)}
+                              </span>
+                              {detail && <span style={sub}>{detail}</span>}
+                              {reason && <span style={sub}>Reason: {reason}</span>}
+                              {by && <span style={{ ...sub, color: colors.textDim }}>by {by}</span>}
+                            </div>
                             <span style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textDim }}>
                               {fmtUtcDateTime(ev.occurredAtUtc)}
                             </span>
@@ -2873,6 +2899,11 @@ export default function Trips({
                   ))}
                 {(t.status === "Scheduled" || t.status === "InProgress") && (
                   <ActionButton onClick={() => setModal("assign")}>REASSIGN</ActionButton>
+                )}
+                {/* Finished trips: REASSIGN is gone, but the record can still be
+                    corrected — with a reason that lands in the activity log. */}
+                {canCorrectDriver(t) && (
+                  <ActionButton onClick={() => setModal("correctDriver")}>CORRECT DRIVER</ActionButton>
                 )}
                 {!t.isEmptyLeg && canPairRoundTrip(t) && (
                   <ActionButton onClick={() => setModal("createReturn")}>CREATE RETURN</ActionButton>
@@ -2957,6 +2988,13 @@ export default function Trips({
                   trip={t}
                   onClose={() => setModal(null)}
                   onSaved={(driverId, vehicleId) => onAssignSaved(t.id, driverId, vehicleId)}
+                />
+              )}
+              {modal === "correctDriver" && (
+                <CorrectDriverModal
+                  trip={t}
+                  onClose={() => setModal(null)}
+                  onCorrected={(driverId) => onDriverCorrected(t.id, driverId)}
                 />
               )}
               {modal === "createReturn" && (
