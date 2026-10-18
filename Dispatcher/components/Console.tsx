@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { colors } from "@/lib/theme";
 import type { ScreenId } from "@/lib/nav";
-import { appForScreen, canUseApp, railGroupsFor, type AppId, type InternalApp } from "@/lib/apps";
+import { appForScreen, canUseApp, canUseScreen, railGroupsFor, type AppId, type InternalApp } from "@/lib/apps";
 import { clearRetainedState } from "@/lib/appState";
 import { getRole } from "@/lib/claims";
 import type { Shell } from "@/components/apps/shell";
@@ -54,7 +54,8 @@ export default function Console() {
 
   function navigate(target: ScreenId) {
     const targetApp = appForScreen(target);
-    if (!canUseApp(targetApp, role)) {
+    // The app's gate and the screen's own (the Compliance screen narrows Drivers & Compliance).
+    if (!canUseScreen(target, role)) {
       setLocation("home");
       return;
     }
@@ -108,7 +109,7 @@ export default function Console() {
             screen={screen}
             collapsed={railCollapsed}
             onSelect={navigate}
-            groups={railGroupsFor(app)}
+            groups={railGroupsFor(app, role)}
             onHome={goHome}
           />
         )}

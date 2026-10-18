@@ -11,7 +11,7 @@
 // ---------------------------------------------------------------------------
 
 import type { NavGroup, NavItem, ScreenId } from "./nav";
-import { BUDGET_ROLES, DISPATCH_ROLES, DRIVERS_APP_ROLES, hasRole, normalizeRole } from "./roles";
+import { BUDGET_ROLES, COMPLIANCE_ROLES, DISPATCH_ROLES, DRIVERS_APP_ROLES, hasRole, normalizeRole } from "./roles";
 
 export type AppId =
   | "today"
@@ -56,7 +56,8 @@ const BUDGETING_URL = process.env.NEXT_PUBLIC_BUDGETING_URL || null;
 
 // Role visibility (adjustable — edit the `roles` field):
 //   Today, Trip Operations, Fleet, Community Booking, Admin → Owner, Dispatcher, Supervisor
-//   Drivers & Compliance → those three plus ComplianceOfficer (Roles.DriverRosterAccess)
+//   Drivers & Compliance → those three plus ComplianceOfficer (Roles.DriverRosterAccess);
+//     its Compliance screen narrows further to Owner + ComplianceOfficer (Roles.ComplianceAccess)
 //   Commercial → those three plus Accountant (billing, reports)
 //   Budgeting tile → Owner, Accountant (Roles.BudgetAccess)
 // Legacy "Admin" is normalised to Owner before matching. Driver sees nothing — the Driver Field
@@ -112,6 +113,7 @@ export const APPS: AppDef[] = [
     screens: [
       { id: "drivers", label: "Drivers", code: "DR", badge: "2" },
       { id: "incidents", label: "Incidents & Faults", code: "IN", badge: "2" },
+      { id: "compliance", label: "Compliance", code: "CP", roles: COMPLIANCE_ROLES },
     ],
   },
   {
@@ -184,6 +186,7 @@ const APP_FOR_SCREEN: Record<ScreenId, AppId> = {
   fleet: "fleet",
   drivers: "drivers",
   incidents: "drivers",
+  compliance: "drivers",
   bookings: "communityBooking",
   bookingPolicy: "communityBooking",
   clients: "commercial",
@@ -203,9 +206,27 @@ export function appForScreen(screen: ScreenId): InternalApp {
   return app;
 }
 
-/** The NavRail groups for one app: a single group, headed by the app's label. */
-export function railGroupsFor(app: InternalApp): NavGroup[] {
-  return [{ label: app.label.toUpperCase(), collapsedLabel: app.code, items: app.screens }];
+/** Whether `role` may open `screen`: the app's gate, then the screen's own `roles` when it has one. */
+export function canUseScreen(screen: ScreenId, role: string | null): boolean {
+  const app = appForScreen(screen);
+  if (!canUseApp(app, role)) return false;
+  const item = app.screens.find((s) => s.id === screen);
+  return !item?.roles || hasRole(item.roles, normalizeRole(role));
+}
+
+/** The app's screens `role` may open, in rail order. */
+export function screensFor(app: InternalApp, role: string | null): NavItem[] {
+  return app.screens.filter((s) => !s.roles || hasRole(s.roles, normalizeRole(role)));
+}
+
+/** One rail group headed by the app's label, over the given items. */
+export function railGroup(app: InternalApp, items: NavItem[]): NavGroup {
+  return { label: app.label.toUpperCase(), collapsedLabel: app.code, items };
+}
+
+/** The NavRail groups for one app as `role` sees it: a single group, role-gated screens dropped. */
+export function railGroupsFor(app: InternalApp, role: string | null): NavGroup[] {
+  return [railGroup(app, screensFor(app, role))];
 }
 
 /** Sum of the app's screens' badges (literals today), or undefined when none carries one. */
