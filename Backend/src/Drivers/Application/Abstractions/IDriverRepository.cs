@@ -18,6 +18,13 @@ public interface IDriverRepository
     /// </summary>
     Task<Driver?> GetByUserIdAsync(Guid userId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// The driver carrying this Motive user id in the current tenant, or null — the uniqueness
+    /// check today, and the Motive sync's driver lookup later. Write side, so a mapping made
+    /// moments ago is visible.
+    /// </summary>
+    Task<Driver?> GetByMotiveUserIdAsync(string motiveUserId, CancellationToken cancellationToken = default);
+
     void Add(Driver driver);
 
     Task SaveChangesAsync(CancellationToken cancellationToken = default);

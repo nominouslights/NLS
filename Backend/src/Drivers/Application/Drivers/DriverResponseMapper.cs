@@ -34,5 +34,6 @@ public static class DriverResponseMapper
         driver.UpdatedAtUtc,
         driver.PriorRecordsCoveredThroughDate,
         driver.PriorRecordsAttestedAtUtc,
-        driver.WorksForOtherCarriers);
+        driver.WorksForOtherCarriers,
+        driver.MotiveUserId);
 }

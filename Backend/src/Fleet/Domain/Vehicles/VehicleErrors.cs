@@ -53,6 +53,16 @@ public static class VehicleErrors
     public static readonly Error OdometerRollback = Error.Validation(
         "Fleet.Vehicle.OdometerRollback", "An odometer reading cannot be lower than the current reading.");
 
+    public static readonly Error MotiveVehicleIdRequired = Error.Validation(
+        "Fleet.Vehicle.MotiveVehicleIdRequired", "A Motive vehicle id cannot be blank. Remove the link to clear it.");
+
+    public static readonly Error MotiveVehicleIdTooLong = Error.Validation(
+        "Fleet.Vehicle.MotiveVehicleIdTooLong",
+        $"A Motive vehicle id may be at most {Vehicle.MotiveVehicleIdMaxLength} characters.");
+
+    public static readonly Error DuplicateMotiveVehicleId = Error.Conflict(
+        "Fleet.Vehicle.DuplicateMotiveVehicleId", "Another vehicle in this tenant already has this Motive vehicle id.");
+
     public static readonly Error CertificateNotFound = Error.NotFound(
         "Fleet.Vehicle.CertificateNotFound", "No retirement certificate exists for this vehicle.");
 }

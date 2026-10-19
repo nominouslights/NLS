@@ -158,6 +158,11 @@ namespace NorthernLink.Drivers.Infrastructure.Persistence.Migrations
                         .HasColumnType("date")
                         .HasColumnName("licence_expiry");
 
+                    b.Property<string>("MotiveUserId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("motive_user_id");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(128)
@@ -228,6 +233,10 @@ namespace NorthernLink.Drivers.Infrastructure.Persistence.Migrations
                     b.HasIndex("UserId")
                         .IsUnique()
                         .HasFilter("user_id IS NOT NULL");
+
+                    b.HasIndex("TenantId", "MotiveUserId")
+                        .IsUnique()
+                        .HasFilter("motive_user_id IS NOT NULL");
 
                     b.HasIndex("TenantId", "Name");
 
@@ -1023,6 +1032,10 @@ namespace NorthernLink.Drivers.Infrastructure.Persistence.Migrations
                     b.Property<DateOnly?>("LicenceExpiry")
                         .HasColumnType("date")
                         .HasColumnName("licence_expiry");
+
+                    b.Property<string>("MotiveUserId")
+                        .HasColumnType("text")
+                        .HasColumnName("motive_user_id");
 
                     b.Property<string>("Name")
                         .IsRequired()

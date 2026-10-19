@@ -6,6 +6,7 @@ using NorthernLink.Fleet.Application.Vehicles.GetVehicleById;
 using NorthernLink.Fleet.Application.Vehicles.GetVehicles;
 using NorthernLink.Fleet.Application.Vehicles.RecordOdometer;
 using NorthernLink.Fleet.Application.Vehicles.Register;
+using NorthernLink.Fleet.Application.Vehicles.SetMotiveId;
 using NorthernLink.Fleet.Application.Vehicles.Update;
 using NorthernLink.Fleet.Domain.Vehicles;
 using NorthernLink.Shared.Messaging;
@@ -136,6 +137,34 @@ public static partial class FleetEndpoints
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
+    private static async Task<IResult> SetVehicleMotiveId(
+        Guid id, SetVehicleMotiveIdRequest request, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        // A missing value is sent as "" so the aggregate refuses it (MotiveVehicleIdRequired)
+        // instead of reading it as "clear" — clearing is the DELETE.
+        var result = await sender.Send(
+            new SetVehicleMotiveIdCommand(tenantId, id, request.MotiveVehicleId ?? string.Empty),
+            cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> ClearVehicleMotiveId(
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(new SetVehicleMotiveIdCommand(tenantId, id, null), cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
     private static async Task<IResult> GetRetirementCertificate(
         Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
     {
@@ -181,6 +210,13 @@ public sealed record ChangeVehicleStatusRequest(VehicleStatus Status, string? Re
 
 /// <summary>Request body for POST /api/fleet/vehicles/{id}/odometer.</summary>
 public sealed record RecordOdometerRequest(int OdometerKm);
+
+/// <summary>
+/// Request body for PUT /api/fleet/vehicles/{id}/motive — the vehicle's Motive id as a string
+/// (Motive's JSON carries an integer; send it as text). Trimmed, at most 64 characters, unique
+/// per tenant. DELETE on the same route clears it.
+/// </summary>
+public sealed record SetVehicleMotiveIdRequest(string? MotiveVehicleId);
 
 /// <summary>Request body for POST /api/fleet/vehicles/{id}/dispose. Method is "Sold" or "Recycled".</summary>
 public sealed record DisposeVehicleRequest(DisposalMethod Method, decimal? SalePriceCad, string? Note);

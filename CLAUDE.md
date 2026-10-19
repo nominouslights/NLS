@@ -158,7 +158,8 @@ Collision protocol for parallel batches:
   `RabbitMq__Password` (plus optional `ObjectStorage__AccessKey`/`ObjectStorage__SecretKey`,
   `Notifications__PostmarkApiKey`, and the QuickBooks Online trio `Budgeting__QboClientId`/
   `Budgeting__QboClientSecret`/`Budgeting__QboTokenKey` with rotation-only
-  `Budgeting__QboTokenKeyPrevious`, which fail lazily on first use) — are read directly via
+  `Budgeting__QboTokenKeyPrevious`, and the Motive ELD key `Motive__ApiKey`, which fail lazily on
+  first use) — are read directly via
   `Environment.GetEnvironmentVariable` (`NorthernLink.Shared.Kernel.RequiredEnvironmentVariable`),
   never through `IConfiguration`/`appsettings.json`, so they can never end up in a committed
   config file. **In every mode they come from the shell environment** — export them in `~/.zshrc`

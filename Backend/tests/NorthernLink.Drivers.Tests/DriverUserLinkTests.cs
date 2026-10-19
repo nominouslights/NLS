@@ -409,6 +409,9 @@ public class DriverUserLinkTests
             return Task.FromResult(_drivers.FirstOrDefault(d => d.UserId == userId));
         }
 
+        public Task<Driver?> GetByMotiveUserIdAsync(string motiveUserId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(_drivers.FirstOrDefault(d => d.MotiveUserId == motiveUserId));
+
         public void Add(Driver driver) => _drivers.Add(driver);
 
         public Task SaveChangesAsync(CancellationToken cancellationToken = default)
