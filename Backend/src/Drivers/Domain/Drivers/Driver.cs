@@ -74,6 +74,19 @@ public sealed class Driver : AggregateRoot, ITenantScoped
 
     public const int PriorRecordsNoteMaxLength = 1000;
 
+    /// <summary>
+    /// The driver's user id in Motive (the ELD provider), or null. This is the key the Motive HOS
+    /// sync will match Motive's duty-status logs on, to mirror them into this driver's
+    /// <c>DutyDay</c> ledger (Motive stays the record of duty status; the ledger stays a planning
+    /// mirror). Stored as a string even though Motive's JSON carries an integer, so nothing here
+    /// depends on their id type. Unique per tenant when set. Its own transition
+    /// (<see cref="SetMotiveUserId"/>), never part of <see cref="Update"/>: re-pointing whose
+    /// Motive logs land on this driver's ledger is not a roster-details edit.
+    /// </summary>
+    public string? MotiveUserId { get; private set; }
+
+    public const int MotiveUserIdMaxLength = 64;
+
     /// <summary>The regulation's day boundaries, America/Winnipeg — for "not after today".</summary>
     private static readonly HosCalendar DefaultCalendar = new();
 
@@ -224,6 +237,42 @@ public sealed class Driver : AggregateRoot, ITenantScoped
         UpdatedAtUtc = DateTimeOffset.UtcNow;
 
         Raise(new DriverUserUnlinkedDomainEvent(Id, previousUserId));
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Sets (non-null) or clears (null) the driver's Motive user id. The value is trimmed; a
+    /// blank value is refused rather than read as "clear". Setting the current value again is a
+    /// no-op (no event, no write). Per-tenant uniqueness is the handler's check (it needs the
+    /// repository), backed by a partial unique index.
+    /// </summary>
+    public Result SetMotiveUserId(string? motiveUserId)
+    {
+        string? clean = null;
+        if (motiveUserId is not null)
+        {
+            clean = motiveUserId.Trim();
+            if (clean.Length == 0)
+            {
+                return Result.Failure(DriverErrors.MotiveUserIdRequired);
+            }
+
+            if (clean.Length > MotiveUserIdMaxLength)
+            {
+                return Result.Failure(DriverErrors.MotiveUserIdTooLong);
+            }
+        }
+
+        if (string.Equals(MotiveUserId, clean, StringComparison.Ordinal))
+        {
+            return Result.Success();
+        }
+
+        var previous = MotiveUserId;
+        MotiveUserId = clean;
+        UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        Raise(new DriverMotiveUserIdChangedDomainEvent(Id, previous, clean));
         return Result.Success();
     }
 

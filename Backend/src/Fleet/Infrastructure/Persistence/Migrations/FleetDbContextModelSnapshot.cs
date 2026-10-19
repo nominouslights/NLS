@@ -725,6 +725,11 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(64)")
                         .HasColumnName("model");
 
+                    b.Property<string>("MotiveVehicleId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("motive_vehicle_id");
+
                     b.Property<int>("OdometerKm")
                         .HasColumnType("integer")
                         .HasColumnName("odometer_km");
@@ -783,6 +788,10 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                         .HasColumnName("year");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "MotiveVehicleId")
+                        .IsUnique()
+                        .HasFilter("motive_vehicle_id IS NOT NULL");
 
                     b.HasIndex("TenantId", "UnitNumber")
                         .IsUnique();
@@ -1546,6 +1555,10 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("model");
+
+                    b.Property<string>("MotiveVehicleId")
+                        .HasColumnType("text")
+                        .HasColumnName("motive_vehicle_id");
 
                     b.Property<int>("OdometerKm")
                         .HasColumnType("integer")

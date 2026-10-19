@@ -176,8 +176,8 @@ validation failures. Example: `Backend/src/Fleet/Domain/Vehicles/Vin.cs`.
 | **Identity & Access** | Auth, users, roles, tenants, sessions |
 | **Client & Contract Management** | Alamos and future client profiles, contracts, PO tracking, billing terms |
 | **Vendor/Partner Management** | Miller the Mover, independent operators, partner compliance (licence, insurance) |
-| **Fleet & Vehicle Management** | Vehicles, capacity, maintenance records (NSC Standard 13) |
-| **Driver & Compliance** | Driver profiles, licensing, DVIR (NSC Standard 11), Hours of Service (CVDHS Regulations) |
+| **Fleet & Vehicle Management** | Vehicles, capacity, maintenance records (NSC Standard 13); the per-vehicle **regulated** flag (`MotiveVehicleId`, the vehicle has a Motive ELD gateway; see 13.19) |
+| **Driver & Compliance** | Driver profiles, licensing, DVIR (NSC Standard 11), Hours of Service (CVDHS Regulations); the Motive ELD mirror: the driver's `MotiveUserId`, the credential seam, and later the user-pressed sync (5.5, 13.19) |
 | **Trip & Manifest Management** | Trip creation, passenger manifests, cargo manifests, dispatch, PDF generation |
 | **Incident & Fault Reporting** | Post-trip issues, accident reports, contractor clearance workflow |
 | **Community Booking & Payments** | Demand-triggered shuttle booking, Gift-a-Seat, seat inventory, Stripe payments |
@@ -501,6 +501,24 @@ reporting an ELD malfunction stay on the `HosAccess` group behind the own-record
 handler re-proves the role underneath the policy. Changes publish `drivers.hos-exception-changed`,
 `drivers.driver-out-of-service-changed` and `drivers.eld-malfunction-changed`, and the attestation
 rides on `drivers.driver-changed` as two additive fields; nothing consumes them yet.
+
+**The Motive ELD mirror (2026-10-18, Section 13.19).** Regulated vehicles carry Motive Vehicle
+Gateway ELDs. Motive is the record of duty status for them, and this ledger mirrors it. The
+mapping keys are:
+
+- Fleet's `Vehicle.MotiveVehicleId`: present means regulated. Routes are `PUT`/`DELETE
+  /api/fleet/vehicles/{id}/motive` on `DispatchAccess`.
+- Drivers' `Driver.MotiveUserId`. Routes are `PUT`/`DELETE /api/drivers/{id}/motive` on the
+  dispatch-only roster-admin group.
+
+Both are trimmed strings of at most 64 characters, unique per tenant through a partial unique
+index plus a 409 from the handler. Each sits on its own transition and raises its own internal
+domain event, never part of the roster form. Auth goes through `IMotiveCredentialProvider`
+(`Drivers/Infrastructure/Motive/`), which applies the credential to an outgoing
+`HttpRequestMessage`. `ApiKeyMotiveCredentialProvider` reads `Motive__ApiKey` lazily on each call,
+so the API boots without it. Motive events win for the windows they cover, and the tablet fills
+the gaps. **Sync is a user-pressed button, never a background poller.** It is not built yet, and
+neither is a Motive event source on `DutyEvent`.
 
 ---
 
@@ -894,6 +912,22 @@ the roadmap locks them in:
     Trips' to serve, deliberately not folded in here. The out-of-service event carries no driver
     name (the aggregate holds none), so that email names the driver by record id — a known gap
     to close with a name snapshot on the event, as `EldMalfunctionReport` already does.
+19. **Motive ELD mirror: regulated vehicles per flag, sync is a button** — **Decided (2026-10-18,
+    owner)**. Regulated vehicles run Motive Vehicle Gateway ELDs, and Motive stays the legal
+    record of duty status. The Drivers `DutyDay` ledger mirrors Motive HOS and stays a planning
+    ledger (Section 5.5, unchanged: "platform is the RODS" is not reopened). "Regulated" is a
+    per-vehicle flag: `Vehicle.MotiveVehicleId`. Drivers are matched by `Driver.MotiveUserId`.
+    Both are strings even though Motive's ids are integers, and both are unique per tenant. Motive
+    events win for the windows they cover, and the tablet ledger fills the gaps. Non-regulated
+    vehicles keep the tablet ledger. **Sync is a user-pressed button and never background polling.**
+    There will never be a Motive polling worker or hosted service. The sync arrives as `POST`
+    endpoints (all drivers, and one driver), gated to dispatch plus Compliance Officer, with a
+    "last synced" stamp. Auth starts with a static API key (`X-API-Key`, env `Motive__ApiKey`,
+    read lazily) and moves to OAuth 2 (`Authorization: Bearer`) later, behind
+    `IMotiveCredentialProvider` so that no caller changes. Base URL is `https://api.gomotive.com`.
+    PR A (foundation: the two ids, their endpoints, and the credential seam) landed first.
+    `DutyEventSource.Motive` was deferred because its wire string is mirrored by `HosWire`, the
+    Shared engine's `EventSource`, and both TypeScript engine ports.
 
 ---
 

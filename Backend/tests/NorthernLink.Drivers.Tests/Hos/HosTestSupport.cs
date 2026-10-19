@@ -173,6 +173,9 @@ public static class HosTestSupport
         public Task<Driver?> GetByUserIdAsync(Guid userId, CancellationToken cancellationToken = default) =>
             Task.FromResult(Drivers.FirstOrDefault(d => d.UserId == userId));
 
+        public Task<Driver?> GetByMotiveUserIdAsync(string motiveUserId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Drivers.FirstOrDefault(d => d.MotiveUserId == motiveUserId));
+
         public void Add(Driver driver) => Drivers.Add(driver);
 
         public Task SaveChangesAsync(CancellationToken cancellationToken = default)

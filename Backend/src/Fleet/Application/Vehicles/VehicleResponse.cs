@@ -4,6 +4,8 @@ namespace NorthernLink.Fleet.Application.Vehicles;
 /// The Fleet module's public representation of a vehicle — the shape every frontend
 /// consumes. <paramref name="Status"/> is the <c>VehicleStatus</c> name as a string
 /// (Active, InMaintenance, OutOfService, Retired, Sold, Recycled).
+/// <paramref name="MotiveVehicleId"/> is the vehicle's id in Motive (the ELD provider), or null;
+/// present means the vehicle has a Motive gateway, i.e. it is a regulated vehicle.
 /// </summary>
 public sealed record VehicleResponse(
     Guid Id,
@@ -27,4 +29,5 @@ public sealed record VehicleResponse(
     decimal? SalePriceCad,
     DateTimeOffset? DisposedAtUtc,
     DateTimeOffset CreatedAtUtc,
-    DateTimeOffset UpdatedAtUtc);
+    DateTimeOffset UpdatedAtUtc,
+    string? MotiveVehicleId = null);

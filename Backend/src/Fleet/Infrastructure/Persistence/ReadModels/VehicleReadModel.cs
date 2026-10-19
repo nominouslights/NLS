@@ -36,6 +36,9 @@ public sealed class VehicleReadModel
     public DateTimeOffset UpdatedAtUtc { get; set; }
     public int Version { get; set; }
 
+    /// <summary>The Motive (ELD) vehicle id, or null. Present = a regulated vehicle.</summary>
+    public string? MotiveVehicleId { get; set; }
+
     // Derived columns, computed by the matview.
     public bool RequiresPeriodicInspection { get; set; }
     public decimal CurrentValueCad { get; set; }
@@ -76,6 +79,7 @@ public sealed class VehicleReadModelConfiguration : IEntityTypeConfiguration<Veh
         builder.Property(v => v.CreatedAtUtc).HasColumnName("created_at_utc");
         builder.Property(v => v.UpdatedAtUtc).HasColumnName("updated_at_utc");
         builder.Property(v => v.Version).HasColumnName("version");
+        builder.Property(v => v.MotiveVehicleId).HasColumnName("motive_vehicle_id");
         builder.Property(v => v.RequiresPeriodicInspection).HasColumnName("requires_periodic_inspection");
         builder.Property(v => v.CurrentValueCad).HasColumnName("current_value_cad");
         builder.Property(v => v.RemainingKm).HasColumnName("remaining_km");

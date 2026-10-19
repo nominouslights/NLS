@@ -40,6 +40,16 @@ public static class DriverErrors
         "Drivers.Driver.AlreadyLinkedToAnotherUser",
         "This driver is already linked to a different account. Unlink it first.");
 
+    public static readonly Error MotiveUserIdRequired = Error.Validation(
+        "Drivers.Driver.MotiveUserIdRequired", "A Motive user id cannot be blank. Remove the link to clear it.");
+
+    public static readonly Error MotiveUserIdTooLong = Error.Validation(
+        "Drivers.Driver.MotiveUserIdTooLong",
+        $"A Motive user id may be at most {Driver.MotiveUserIdMaxLength} characters.");
+
+    public static readonly Error DuplicateMotiveUserId = Error.Conflict(
+        "Drivers.Driver.DuplicateMotiveUserId", "Another driver in this tenant already has this Motive user id.");
+
     public static readonly Error UserAlreadyLinkedToAnotherDriver = Error.Conflict(
         "Drivers.Driver.UserAlreadyLinkedToAnotherDriver",
         "That account is already linked to a different driver. Unlink it first.");

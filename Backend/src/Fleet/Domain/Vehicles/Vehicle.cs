@@ -42,6 +42,22 @@ public sealed class Vehicle : AggregateRoot, ITenantScoped
     public DateTimeOffset CreatedAtUtc { get; private set; }
     public DateTimeOffset UpdatedAtUtc { get; private set; }
 
+    /// <summary>
+    /// The vehicle's id in Motive (the ELD provider), or null. Present means the bus carries a
+    /// Motive Vehicle Gateway, which is what makes it a <b>regulated</b> vehicle: its hours of
+    /// service are recorded by Motive (the legal record of duty status) and mirrored into the
+    /// Drivers ledger, while a vehicle without one keeps the tablet ledger. Stored as a string
+    /// even though Motive's JSON carries an integer, so nothing here depends on their id type.
+    /// Unique per tenant when set. Changed only through <see cref="SetMotiveVehicleId"/>, never
+    /// through <see cref="UpdateDetails"/>: whether a bus is regulated is not a roster detail.
+    /// </summary>
+    public string? MotiveVehicleId { get; private set; }
+
+    public const int MotiveVehicleIdMaxLength = 64;
+
+    /// <summary>True when the vehicle has a Motive gateway (<see cref="MotiveVehicleId"/> is set).</summary>
+    public bool IsRegulated => MotiveVehicleId is not null;
+
     /// <summary>NSC-11: vehicles seating 11 or more require periodic inspections.</summary>
     public bool RequiresPeriodicInspection => SeatingCapacity >= 11;
 
@@ -259,6 +275,49 @@ public sealed class Vehicle : AggregateRoot, ITenantScoped
 
         Raise(new VehicleStatusChangedDomainEvent(Id, previous, Status, StatusReason));
         Raise(new VehicleDisposedDomainEvent(Id, method, SalePriceCad));
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Sets (non-null) or clears (null) the vehicle's Motive id. The value is trimmed; a blank
+    /// value is refused rather than read as "clear", so a half-filled form cannot silently
+    /// de-regulate a bus. Setting the current value again is a no-op (no event, no write).
+    /// A disposed vehicle may still be cleared — its gateway gets pulled — but not newly set.
+    /// Per-tenant uniqueness is the handler's check (it needs the repository) backed by a
+    /// partial unique index.
+    /// </summary>
+    public Result SetMotiveVehicleId(string? motiveVehicleId)
+    {
+        string? clean = null;
+        if (motiveVehicleId is not null)
+        {
+            clean = motiveVehicleId.Trim();
+            if (clean.Length == 0)
+            {
+                return Result.Failure(VehicleErrors.MotiveVehicleIdRequired);
+            }
+
+            if (clean.Length > MotiveVehicleIdMaxLength)
+            {
+                return Result.Failure(VehicleErrors.MotiveVehicleIdTooLong);
+            }
+        }
+
+        if (string.Equals(MotiveVehicleId, clean, StringComparison.Ordinal))
+        {
+            return Result.Success();
+        }
+
+        if (clean is not null && IsDisposed)
+        {
+            return Result.Failure(VehicleErrors.Disposed);
+        }
+
+        var previous = MotiveVehicleId;
+        MotiveVehicleId = clean;
+        UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        Raise(new VehicleMotiveIdChangedDomainEvent(Id, TenantId, previous, clean));
         return Result.Success();
     }
 

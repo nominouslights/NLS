@@ -137,6 +137,7 @@ internal sealed class DriverProjection : IProjection<DriversDbContext>
         row.PriorRecordsAttestedByUserId = source.PriorRecordsAttestedByUserId;
         row.PriorRecordsNote = source.PriorRecordsNote;
         row.WorksForOtherCarriers = source.WorksForOtherCarriers;
+        row.MotiveUserId = source.MotiveUserId;
     }
 }
 

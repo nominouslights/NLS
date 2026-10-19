@@ -22,6 +22,9 @@ public interface IVehicleRepository
     /// <summary>True when another vehicle (excluding <paramref name="excludeVehicleId"/>) already uses this unit number.</summary>
     Task<bool> ExistsByUnitNumberAsync(string unitNumber, Guid? excludeVehicleId = null, CancellationToken cancellationToken = default);
 
+    /// <summary>True when another vehicle (excluding <paramref name="excludeVehicleId"/>) already carries this Motive vehicle id.</summary>
+    Task<bool> ExistsByMotiveVehicleIdAsync(string motiveVehicleId, Guid? excludeVehicleId = null, CancellationToken cancellationToken = default);
+
     void Add(Vehicle vehicle);
 
     void AddCertificate(RetirementCertificate certificate);
