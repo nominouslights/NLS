@@ -7,6 +7,11 @@
     <IsAspireHost>true</IsAspireHost>
     <IsPackable>false</IsPackable>
     <UserSecretsId>northernlink-apphost</UserSecretsId>
+    <!-- Opt out of the root Directory.Packages.props transitive pinning. Aspire.Hosting.AppHost
+         needs Microsoft.Extensions.* >= 10.0.8, and the central 10.0.0 entries (sized for the
+         Backend) would pin them below that and fail restore with NU1109. The pin that pinning
+         exists for (System.Security.Cryptography.Pkcs) never reaches this project anyway. -->
+    <CentralPackageTransitivePinningEnabled>false</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
 
   <ItemGroup>
