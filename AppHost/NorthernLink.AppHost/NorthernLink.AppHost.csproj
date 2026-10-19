@@ -1,12 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <Sdk Name="Aspire.AppHost.Sdk" Version="13.4.6" />
+  <Sdk Name="Aspire.AppHost.Sdk" Version="13.6.1" />
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <IsAspireHost>true</IsAspireHost>
     <IsPackable>false</IsPackable>
     <UserSecretsId>northernlink-apphost</UserSecretsId>
+    <!-- Aspire 13.6 warns (ASPIRE010) whenever DCP and the dashboard come from NuGet packages
+         rather than the Aspire CLI bundle — and package delivery is the SDK's own default. Keep it:
+         the bundle path makes the build depend on the locally installed CLI version. Revisit
+         (AspireUseCliBundle=true) only as a deliberate decision with the CLI pinned to the SDK. -->
+    <AspireUseCliBundle>false</AspireUseCliBundle>
+    <NoWarn>$(NoWarn);ASPIRE010</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -14,6 +20,8 @@
     <PackageReference Include="Aspire.Hosting.PostgreSQL" />
     <PackageReference Include="Aspire.Hosting.RabbitMQ" />
     <PackageReference Include="Aspire.Hosting.JavaScript" />
+    <!-- Security pin only (GHSA-qhrr-8q5h-9q3h) — see Directory.Packages.props. -->
+    <PackageReference Include="MessagePack" />
   </ItemGroup>
 
   <ItemGroup>
