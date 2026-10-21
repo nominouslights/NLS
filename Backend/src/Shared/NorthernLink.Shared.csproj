@@ -28,9 +28,11 @@
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Binder" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
-    <!-- Direct, so every module and test project resolves Relational at the same version as
-         EF Core and EF Design (Npgsql 10.0.3 only asks for >= 10.0.4; without this, projects
-         that do not reference EF Design compile against 10.0.4 and fail CS1705). -->
+    <!-- Direct, so every module and test project resolves Relational at the same central version
+         as EF Core and EF Design. The Npgsql provider only sets a floor on Relational, which lags
+         EF's; without this reference, projects that don't reference EF Design (PrivateAssets=all,
+         so it never flows) compile against the provider's older floor and fail CS1705 against
+         modules built with the newer one. Keep it for as long as the provider's floor lags. -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
     <PackageReference Include="RabbitMQ.Client" />
