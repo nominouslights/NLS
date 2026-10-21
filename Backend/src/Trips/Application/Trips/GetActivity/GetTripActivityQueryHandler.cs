@@ -54,8 +54,9 @@ public sealed class GetTripActivityQueryHandler(
         var entries = await activity.GetJournalEntriesAsync(query.TripId, trip.ManifestId, cancellationToken);
 
         // Past the gate, a caller without a dispatch role is here only as the trip's own driver.
-        // They see that a trip event happened (e.g. "Driver corrected") but not the dispatch-side
-        // narrative behind it: the free-text reason, the before/after detail, and who made it.
+        // They see that a trip event happened (e.g. "Driver corrected", "Trip reopened") but not
+        // the dispatch-side narrative behind it: the free-text reason, the reason it replaced, the
+        // before/after detail, and who made it.
         var redactTripNarrative = !operatorAccess.HasDispatchAccess;
 
         IReadOnlyList<TripActivityEntryResponse> timeline = entries
@@ -82,27 +83,29 @@ public sealed class GetTripActivityQueryHandler(
         }
 
         // Trip events journal their whole domain-event record, so anything that lives only on
-        // the event — a reason, who made the change, the before/after of a correction — is read
-        // straight back out. Generic on purpose: any trip event carrying "reason" or "enteredBy"
-        // surfaces without a change here — which is also why the driver-only redaction is applied
-        // to every trip event, not just the correction.
+        // the event — a reason, the cancel/close-out reason a reopen cleared off the trip, who made
+        // the change, the before/after of a correction — is read straight back out. Generic on
+        // purpose: any trip event carrying "reason", "clearedReason" or "enteredBy" surfaces
+        // without a change here — which is also why the driver-only redaction is applied to every
+        // trip event, not just the correction or the reopen.
         if (redactTripNarrative)
         {
             return new TripActivityEntryResponse(
-                entry.OccurredAtUtc, entry.AggregateType, entry.EventType, null, null, null, null);
+                entry.OccurredAtUtc, entry.AggregateType, entry.EventType, null, null, null, null, null);
         }
 
-        var (reason, enteredBy, detail) = ReadTripPayload(entry.EventType, entry.Payload);
+        var (reason, enteredBy, detail, previousReason) = ReadTripPayload(entry.EventType, entry.Payload);
         return new TripActivityEntryResponse(
-            entry.OccurredAtUtc, entry.AggregateType, entry.EventType, null, enteredBy, reason, detail);
+            entry.OccurredAtUtc, entry.AggregateType, entry.EventType, null, enteredBy, reason, detail, previousReason);
     }
 
     /// <summary>
-    /// The <c>reason</c> and <c>enteredBy</c> string fields of a trip event payload, plus the
-    /// event-specific <see cref="TripActivityEntryResponse.Detail"/> — each null when absent,
-    /// non-string, or the JSON is malformed.
+    /// The <c>reason</c>, <c>enteredBy</c> and <c>clearedReason</c> (as PreviousReason) string
+    /// fields of a trip event payload, plus the event-specific
+    /// <see cref="TripActivityEntryResponse.Detail"/> — each null when absent, non-string, or the
+    /// JSON is malformed.
     /// </summary>
-    private static (string? Reason, string? EnteredBy, string? Detail) ReadTripPayload(string eventType, string payload)
+    private static (string? Reason, string? EnteredBy, string? Detail, string? PreviousReason) ReadTripPayload(string eventType, string payload)
     {
         try
         {
@@ -110,15 +113,15 @@ public sealed class GetTripActivityQueryHandler(
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object)
             {
-                return (null, null, null);
+                return (null, null, null, null);
             }
 
             var detail = eventType == DriverCorrectedEventType ? DriverCorrectionDetail(root) : null;
-            return (ReadString(root, "reason"), ReadString(root, "enteredBy"), detail);
+            return (ReadString(root, "reason"), ReadString(root, "enteredBy"), detail, ReadString(root, "clearedReason"));
         }
         catch (JsonException)
         {
-            return (null, null, null);
+            return (null, null, null, null);
         }
     }
 

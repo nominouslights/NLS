@@ -18,6 +18,7 @@ const EVENT_LABELS: Record<string, string> = {
   "trip-started": "Trip started",
   "trip-completed": "Trip completed",
   "trip-cancelled": "Trip cancelled",
+  "trip-reopened": "Trip reopened",
   "trip-demand-recorded": "Demand recorded",
   "trip-manifest-linked": "Manifest linked",
   "trip-manifest-created": "Manifest created",
