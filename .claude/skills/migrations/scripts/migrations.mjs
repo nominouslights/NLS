@@ -324,12 +324,15 @@ const clearCache = () => { try { fs.unlinkSync(cacheFile); } catch { /* already 
 
 // ── Commands ───────────────────────────────────────────────────────────────
 
+const noConnectionStringMessage = () =>
+  `No connection string found. Export ConnectionStrings__Postgres in your shell (the platform `
+  + `convention), or put it in ${path.relative(repoRoot, launchSettings)}, which is gitignored.`;
+
 async function gather() {
   const modules = discoverModules();
   const vars = loadEnv();
   if (!vars) {
-    const rel = path.relative(repoRoot, launchSettings);
-    return { fatal: `No connection string found. Export ConnectionStrings__Postgres in your shell (the platform convention), or put it in ${rel}, which is gitignored.` };
+    return { fatal: noConnectionStringMessage() };
   }
   const redact = makeRedactor(vars);
   const reports = [];
@@ -344,6 +347,16 @@ async function gather() {
 async function check({ force = false, quiet = false } = {}) {
   const modules = discoverModules();
   const print = fingerprint(modules);
+  // Credentials BEFORE the cache. The fingerprint is over migration filenames only, so with no
+  // connection string a matching clean entry would return "current" without the database ever
+  // being contacted — a false all-clear. That is the same failure the per-module-error path below
+  // is written to prevent; it slipped through here because this path returned before `gather()`
+  // (which owns `loadEnv()`) was ever reached. `loadEnv()` is a cheap pure read, so calling it
+  // here and again in `gather()` costs nothing.
+  if (!loadEnv()) {
+    if (!quiet) console.error(noConnectionStringMessage());
+    return 2;
+  }
   if (!force) {
     const cached = readCache();
     if (cached?.fingerprint === print && cached.pending?.length === 0) return 0;
