@@ -22,6 +22,7 @@ import {
 import { corridorLabel, listTrips, shortDateLabel, todayIso, type TripRecord } from "@/lib/api/trips";
 import {
   ACCRUAL_BUCKET_META,
+  ACCRUAL_OPEN_STATUSES,
   ACCRUALS_ESTIMATE_NOTE,
   ACCRUALS_TAX_NOTE,
   AMOUNT_FLAG_META,
@@ -31,8 +32,11 @@ import {
   accrualBucketDetail,
   accrualSectionAmountLabel,
   accrualSectionDetail,
+  accrualsCarriedForwardNote,
   accrualsClipboardText,
+  accrualsReportIsEmpty,
   buildAccrualsReport,
+  carryForwardThrough,
   groupAmountLabel,
   groupPoLabel,
   groupRefLabel,
@@ -57,11 +61,15 @@ import { PeriodNav } from "@/components/ui/PeriodNav";
 
 // Client Accruals — the monthly per-client accruals report, one of the two
 // reports the Reports screen hosts. It answers two questions in order:
-// what upcoming work is not yet done (the upcoming + scheduled buckets,
-// estimated at each purchase order's own round-trip rate with the contract rate
-// as the fallback), and what is still owed (the ready + invoiced buckets, real
-// invoice amounts plus clearly-marked estimates). A purchase-order block sits
-// above them: what each PO authorises against what this month draws down on it.
+// what upcoming work is not yet done (the scheduled bucket — Scheduled and
+// InProgress alike, estimated at each purchase order's own round-trip rate with
+// the contract rate as the fallback), and what is still owed (the ready +
+// invoiced buckets, real invoice amounts plus clearly-marked estimates). Trips
+// from earlier months that are not yet completed are carried in, so money
+// still owing from August counts in September's Monies owed; each such row
+// carries a plain "EARLIER MONTH" tag beside its date — a fact, not a status,
+// so no status colour. A purchase-order block sits above them: what each PO
+// authorises against what this month's own work draws down on it.
 // Settled work closes the month on ONE line — it still has to reconcile, but it
 // is not what the report is for, so it has no per-trip table. Cancelled and
 // written-off trips keep their reconciliation section.
@@ -79,7 +87,7 @@ import { PeriodNav } from "@/components/ui/PeriodNav";
 // clipboard export and the emailed PDF so all four agree on every dollar.
 
 /** Pseudo-table column template shared by the header row and every group row. */
-const GRID_COLS = "88px 170px 1fr 150px 140px 150px";
+const GRID_COLS = "104px 170px 1fr 150px 140px 150px";
 
 // ---------------------------------------------------------------------------
 // Row pieces
@@ -166,7 +174,13 @@ function GroupRow({ group, last }: { group: AccrualGroup; last: boolean }) {
         borderBottom: last ? undefined : `1px solid ${colors.borderSubtle}`,
       }}
     >
-      <div style={cellStyle}>{shortDateLabel(group.legs[0].serviceDate)}</div>
+      {/* the date, plus a plain tag on work carried in from an earlier month —
+          deliberately NOT a status chip: carried forward is not a good / warn /
+          bad state, and it is never an age or a due date */}
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 3, minWidth: 0 }}>
+        <span style={cellStyle}>{shortDateLabel(group.legs[0].serviceDate)}</span>
+        {group.carriedForward && <MonoTag>EARLIER MONTH</MonoTag>}
+      </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0 }}>
         {group.legs.map((leg) => (
           <LegLine key={leg.id} leg={leg} />
@@ -407,6 +421,10 @@ export default function ClientAccruals({
     key: string;
     today: string;
     trips: TripRecord[];
+    /** Earlier trips not yet completed, carried into this month. null = the
+     *  carry-forward fetch failed: the report degrades to this month only and
+     *  says so — never "nothing carried forward" (an Accountant may get 403). */
+    carriedTrips: TripRecord[] | null;
     invoices: InvoiceDetailRecord[];
     /** null = the PO fetch failed: pricing degrades to the contract rate and
      *  the report raises a banner, rather than the report blanking. */
@@ -425,16 +443,36 @@ export default function ClientAccruals({
       // estimates are priced at, and their values are what the upcoming figure
       // is measured against. A failed PO fetch degrades to contract-rate
       // pricing with a banner (null below) — it never blanks the report.
-      const [page, purchaseOrders] = await Promise.all([
+      //
+      // Carry forward: every earlier trip of the client that is not yet
+      // completed. The trips list takes `to` without `from` (open-ended back)
+      // and ONE exact status, so it is one unpaged call per open status. The
+      // group fails as a whole (.catch → null): a partial set would understate
+      // what is owed while looking complete, so it degrades to this month only
+      // with a banner instead.
+      const through = carryForwardThrough({ start: from });
+      const [page, purchaseOrders, carriedTrips] = await Promise.all([
         listTrips({ from, to, clientId: cid }),
         listPurchaseOrders(cid).catch((): PurchaseOrderRecord[] | null => null),
+        Promise.all(
+          ACCRUAL_OPEN_STATUSES.map((status) => listTrips({ to: through, clientId: cid, status })),
+        )
+          .then((pages) => {
+            // Deduped by id — a trip changing status between two of the calls
+            // could otherwise come back twice. (The builder dedupes too.)
+            const byId = new Map<string, TripRecord>();
+            for (const p of pages) for (const t of p.items) byId.set(t.id, t);
+            return [...byId.values()];
+          })
+          .catch((): TripRecord[] | null => null),
       ]);
-      // Then the distinct invoices the trips' billing states reference: the
-      // real amounts live on their lines. One failed detail fetch degrades
-      // that invoice's amounts to "unavailable", not the whole report.
+      // Then the distinct invoices the trips' billing states reference — the
+      // month's AND the carried ones: the real amounts live on their lines.
+      // One failed detail fetch degrades that invoice's amounts to
+      // "unavailable", not the whole report.
       const ids = [
         ...new Set(
-          page.items
+          [...page.items, ...(carriedTrips ?? [])]
             .map((t) => t.billing?.invoiceId)
             .filter((id): id is string => Boolean(id)),
         ),
@@ -445,10 +483,11 @@ export default function ClientAccruals({
       if (!active) return;
       setData({
         key: dataKey,
-        // The day the scheduled/upcoming split was made against — captured at
-        // fetch time so the memoised report stays stable across renders.
+        // The report's Prepared date — captured at fetch time so the memoised
+        // report stays stable across renders.
         today: todayIso(),
         trips: page.items,
+        carriedTrips,
         invoices: fetched.filter((inv): inv is InvoiceDetailRecord => inv !== null),
         purchaseOrders,
       });
@@ -475,6 +514,8 @@ export default function ClientAccruals({
             period,
             today: loaded.today,
             trips: loaded.trips,
+            carriedTrips: loaded.carriedTrips ?? [],
+            carriedTripsUnavailable: loaded.carriedTrips === null,
             invoices: loaded.invoices,
             purchaseOrders: loaded.purchaseOrders ?? [],
             purchaseOrdersUnavailable: loaded.purchaseOrders === null,
@@ -503,7 +544,12 @@ export default function ClientAccruals({
 
   const contract = selected?.activeContract ?? null;
   const renewalChip = selected ? renewalChipFor(contract) : null;
-  const emptyMonth = report !== null && report.buckets.every((b) => b.groups.length === 0);
+  // ONE empty test, shared with the printed sheet: carried-forward work makes a
+  // month with no trips of its own non-empty.
+  const emptyMonth = report !== null && accrualsReportIsEmpty(report);
+  // Informational, NOT a warning — rendered as plain muted text, outside the
+  // gold degradation panel and with no status badge.
+  const carriedNote = report ? accrualsCarriedForwardNote(report) : null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }} className="detailfade">
@@ -596,7 +642,9 @@ export default function ClientAccruals({
             <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textMuted, lineHeight: 1.6 }}>
               Pick a client to build their accruals report for the month shown. It leads with the work
               not yet done and what it is estimated to cost, then what is still owed — issued invoices
-              plus runs complete but not yet billed. Settled work closes the month on one line, and
+              plus runs complete but not yet billed. Trips from earlier months that are not yet
+              completed are carried in and marked, so what is still owed from those months counts
+              too. Settled work closes the month on one line, and
               cancelled or written-off trips are reconciled below. Estimates are at each purchase
               order&rsquo;s rate (the contract rate where a PO records none) and always marked as
               such; issued invoice amounts govern.
@@ -664,6 +712,21 @@ export default function ClientAccruals({
               </Panel>
             )}
 
+            {/* carried-forward count — a plain fact, so no badge and no colour */}
+            {carriedNote && (
+              <div
+                style={{
+                  marginTop: 12,
+                  fontFamily: fonts.body,
+                  fontSize: 12.5,
+                  color: colors.textMuted,
+                  lineHeight: 1.5,
+                }}
+              >
+                {carriedNote}
+              </div>
+            )}
+
             {/* purchase orders — authorised value vs this month's work */}
             {report.poCommitments.length > 0 && (
               <Panel style={{ marginTop: 14 }}>
@@ -682,9 +745,18 @@ export default function ClientAccruals({
             {emptyMonth && (
               <Panel style={{ marginTop: 14 }}>
                 <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textMuted }}>
-                  No trips for {report.client.name} in {periodLabel(report.period)}. The report can
-                  still be printed as an explicit nil statement.
+                  No trips for {report.client.name} in {periodLabel(report.period)}.{" "}
+                  {report.carriedTripsUnavailable
+                    ? "Open trips from earlier months could not be loaded, so this is not a nil statement — amounts still owing from earlier months are unknown. Retry before printing or sending it."
+                    : "The report can still be printed as an explicit nil statement."}
                 </div>
+                {report.carriedTripsUnavailable && (
+                  <div style={{ marginTop: 10 }}>
+                    <ActionButton variant="primary" onClick={retry}>
+                      RETRY
+                    </ActionButton>
+                  </div>
+                )}
               </Panel>
             )}
 
@@ -768,7 +840,7 @@ export default function ClientAccruals({
               <SectionLabel>Invoices referenced</SectionLabel>
               {report.invoices.length === 0 ? (
                 <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textDim }}>
-                  No issued invoices are referenced by this month&rsquo;s trips.
+                  No issued invoices are referenced by the trips on this report.
                 </div>
               ) : (
                 report.invoices.map((inv) => {

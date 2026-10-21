@@ -5,15 +5,23 @@ import type { TripDirection, TripRecord } from "@/lib/api/trips";
 import type { Period } from "@/lib/period";
 import {
   ACCRUAL_BUCKET_ORDER,
+  ACCRUAL_OPEN_STATUSES,
   ACCRUAL_SECTION_ORDER,
   AMOUNT_FLAG_META,
   PO_FLAG_META,
   accrualHeadlines,
+  accrualTallyDetail,
   accrualTotals,
+  accrualsCarriedForwardNote,
   accrualsClipboardText,
   accrualsEmailPayload,
+  accrualsEmptyText,
+  accrualsReportIsEmpty,
   buildAccrualsReport,
+  carryForwardThrough,
+  groupDateText,
   groupPoLabel,
+  isCarriedForwardTrip,
   previewDraftsByPo,
   type AccrualBucketId,
   type AccrualsReport,
@@ -729,14 +737,17 @@ describe("previewDraftsByPo", () => {
 // ---------------------------------------------------------------------------
 
 describe("bucket membership and the claim rule", () => {
-  it("splits Scheduled on the operational day", () => {
+  it("holds Scheduled and InProgress in ONE bucket, whatever the date", () => {
+    // Scheduled and upcoming are the same thing (owner's decision): a run not
+    // yet complete is one bucket whether it is due after today or before it.
     const report = build([
       trip({ status: "Scheduled", serviceDate: "2026-09-20", direction: "Outbound", roundTripKey: "a" }),
       trip({ status: "Scheduled", serviceDate: "2026-09-10", direction: "Outbound", roundTripKey: "b" }),
       trip({ status: "InProgress", serviceDate: "2026-09-15", direction: "Outbound", roundTripKey: "c" }),
     ]);
-    expect(bucket(report, "upcoming").groups).toHaveLength(1);
-    expect(bucket(report, "scheduled").groups).toHaveLength(2);
+    expect(bucket(report, "scheduled").groups).toHaveLength(3);
+    expect(report.buckets.map((b) => b.id)).toEqual(["paid", "invoiced", "ready", "scheduled"]);
+    expect(bucket(report, "scheduled").label).toBe("Scheduled");
   });
 
   it("counts one invoice line once when its legs straddle two buckets", () => {
@@ -777,7 +788,7 @@ describe("bucket membership and the claim rule", () => {
   });
 
   it("keeps the claim order pinned — it is a money rule, not a display order", () => {
-    expect(ACCRUAL_BUCKET_ORDER).toEqual(["paid", "invoiced", "ready", "scheduled", "upcoming"]);
+    expect(ACCRUAL_BUCKET_ORDER).toEqual(["paid", "invoiced", "ready", "scheduled"]);
   });
 });
 
@@ -787,7 +798,7 @@ describe("bucket membership and the claim rule", () => {
 
 describe("sections", () => {
   const trips = [
-    // upcoming: a lone future leg → one full round-trip rate
+    // scheduled: a lone future leg → one full round-trip rate
     trip({ status: "Scheduled", serviceDate: "2026-09-25", direction: "Outbound", roundTripKey: "f1" }),
     // scheduled: a pair under way → 1 × rate
     trip({ status: "InProgress", serviceDate: "2026-09-14", direction: "Outbound", roundTripKey: "s1" }),
@@ -1039,7 +1050,6 @@ describe("email payload", () => {
     const rows = accrualsEmailPayload(report).summary;
     expect(rows.map((r) => [r.bucketLabel, r.emphasis])).toEqual([
       ["Upcoming work — not yet done", true],
-      ["Upcoming", false],
       ["Scheduled", false],
       ["Monies owed", true],
       ["Ready for billing", false],
@@ -1047,16 +1057,355 @@ describe("email payload", () => {
       ["Settled this month", true],
       ["Paid", false],
     ]);
-    // Still the complete position: all five buckets, every zero.
+    // Still the complete position: all four buckets, every zero.
     expect(rows.filter((r) => !r.emphasis)).toHaveLength(ACCRUAL_BUCKET_ORDER.length);
   });
 
   it("emits detail tables only for the detail-bearing sections, in section order", () => {
     const payload = accrualsEmailPayload(report);
-    expect(payload.buckets.map((b) => b.label)).toEqual(["Upcoming", "Ready for billing"]);
+    expect(payload.buckets.map((b) => b.label)).toEqual(["Scheduled", "Ready for billing"]);
     // Paid has a row in the summary and an invoice in Invoices Referenced, but
     // no per-trip table anywhere.
     expect(payload.buckets.map((b) => b.label)).not.toContain("Paid");
     expect(payload.invoices).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Carry forward — earlier trips not yet completed join this month's report
+// ---------------------------------------------------------------------------
+
+describe("carry forward", () => {
+  /** The month's trips plus the carried-forward fetch, like the screen. */
+  function buildCarried(
+    trips: TripRecord[],
+    carriedTrips: TripRecord[],
+    invoices: InvoiceDetailRecord[] = [],
+    extra: { carriedTripsUnavailable?: boolean; purchaseOrders?: PurchaseOrderRecord[] } = {},
+  ): AccrualsReport {
+    return buildAccrualsReport({
+      client: client(),
+      period: PERIOD,
+      today: TODAY,
+      trips,
+      carriedTrips,
+      carriedTripsUnavailable: extra.carriedTripsUnavailable,
+      invoices,
+      purchaseOrders: extra.purchaseOrders ?? [],
+    });
+  }
+
+  it("pins the open statuses — everything not yet Completed, nothing closed", () => {
+    expect([...ACCRUAL_OPEN_STATUSES]).toEqual(["ReadyForBilling", "Invoiced", "InProgress", "Scheduled"]);
+    const aug = (status: TripRecord["status"]) => trip({ status, serviceDate: "2026-08-20" });
+    expect(isCarriedForwardTrip(aug("Invoiced"), PERIOD)).toBe(true);
+    expect(isCarriedForwardTrip(aug("Completed"), PERIOD)).toBe(false);
+    expect(isCarriedForwardTrip(aug("Cancelled"), PERIOD)).toBe(false);
+    expect(isCarriedForwardTrip(aug("WrittenOff"), PERIOD)).toBe(false);
+    // In-month and later-month trips never carry, whatever their status.
+    expect(isCarriedForwardTrip(trip({ status: "Invoiced", serviceDate: "2026-09-01" }), PERIOD)).toBe(false);
+    expect(isCarriedForwardTrip(trip({ status: "Invoiced", serviceDate: "2026-10-02" }), PERIOD)).toBe(false);
+  });
+
+  it("fetches through the day before the period starts", () => {
+    expect(carryForwardThrough({ start: "2026-09-01" })).toBe("2026-08-31");
+    expect(carryForwardThrough({ start: "2026-03-01" })).toBe("2026-02-28");
+    expect(carryForwardThrough({ start: "2026-01-01" })).toBe("2025-12-31");
+  });
+
+  it("counts a carried Invoiced trip's invoice line in Invoiced and the Monies owed headline", () => {
+    const aug = trip({
+      status: "Invoiced",
+      serviceDate: "2026-08-20",
+      direction: "Outbound",
+      billing: billed("Invoiced", "inv-aug"),
+    });
+    const inv = invoice([line({ lineId: "L-AUG", tripIds: [aug.id], amountCad: 480 })], {
+      id: "inv-aug",
+      invoiceNumber: "NL-INV-0090",
+      periodStart: "2026-08-01",
+      periodEnd: "2026-08-31",
+    });
+    const report = buildCarried([readyLeg("Outbound"), readyLeg("Inbound")], [aug], [inv]);
+    const invoiced = bucket(report, "invoiced");
+    expect(invoiced.groups).toHaveLength(1);
+    expect(invoiced.groups[0].carriedForward).toBe(true);
+    expect(invoiced.groups[0].amountCad).toBe(480);
+    expect(invoiced.actualCad).toBe(480);
+    expect(invoiced.carriedForwardCount).toBe(1);
+    // Monies owed = this month's ready estimate + the earlier month's invoice.
+    const owed = accrualHeadlines(report).find((h) => h.id === "owed")!;
+    expect(owed.amountCad).toBe("$980.00");
+    expect(owed.detail).toBe("2 trips · 1 from an earlier month · incl. $500.00 est.");
+    // The earlier invoice is listed among the invoices referenced.
+    expect(report.invoices.map((i) => i.invoiceNumber)).toContain("NL-INV-0090");
+  });
+
+  it("estimates a carried ReadyForBilling run like any other", () => {
+    const report = buildCarried(
+      [],
+      [
+        readyLeg("Outbound", { serviceDate: "2026-08-12", roundTripKey: "aug" }),
+        readyLeg("Inbound", { serviceDate: "2026-08-12", roundTripKey: "aug" }),
+      ],
+    );
+    const g = bucket(report, "ready").groups[0];
+    expect(g.carriedForward).toBe(true);
+    expect(g.paired).toBe(true);
+    expect(g.amountCad).toBe(RATE);
+    expect(g.amountSource).toBe("estimate");
+    expect(section(report, "owed").estimatedCad).toBe(RATE);
+  });
+
+  it("puts carried Scheduled and InProgress trips in the Scheduled bucket", () => {
+    const report = buildCarried(
+      [],
+      [
+        trip({ status: "Scheduled", serviceDate: "2026-08-28", roundTripKey: "s1" }),
+        trip({ status: "InProgress", serviceDate: "2026-08-30", roundTripKey: "s2" }),
+      ],
+    );
+    const sched = bucket(report, "scheduled");
+    expect(sched.groups).toHaveLength(2);
+    expect(sched.groups.every((g) => g.carriedForward)).toBe(true);
+    expect(sched.estimatedCad).toBe(2 * RATE);
+    expect(section(report, "upcoming").carriedForwardCount).toBe(2);
+  });
+
+  it("keeps carried Completed, Cancelled and WrittenOff trips out entirely", () => {
+    // The screen only fetches open statuses, but the rule lives in the builder:
+    // a stray closed trip must not reach a bucket OR the reconciliation lists.
+    const report = buildCarried(
+      [],
+      [
+        trip({ status: "Completed", serviceDate: "2026-08-10", billing: billed("Paid") }),
+        trip({ status: "Cancelled", serviceDate: "2026-08-11", cancelledReason: "weather" }),
+        trip({ status: "WrittenOff", serviceDate: "2026-08-12", writtenOffReason: "dispute" }),
+      ],
+    );
+    expect(accrualTotals(report).groupCount).toBe(0);
+    expect(report.cancelled).toEqual([]);
+    expect(report.writtenOff).toEqual([]);
+    expect(accrualsReportIsEmpty(report)).toBe(true);
+  });
+
+  it("never carries a later month's trip, nor an in-month trip twice", () => {
+    const inMonth = readyLeg("Outbound", { serviceDate: "2026-09-10", roundTripKey: "m" });
+    const report = buildCarried(
+      [inMonth],
+      [
+        readyLeg("Outbound", { serviceDate: "2026-10-03", roundTripKey: "oct" }),
+        // The same trip arriving on both lists is one trip, not two.
+        inMonth,
+        // An in-month date on the carried list is not carried — the month's own
+        // fetch is authoritative for it.
+        readyLeg("Inbound", { serviceDate: "2026-09-20", roundTripKey: "sep" }),
+      ],
+    );
+    const groups = bucket(report, "ready").groups;
+    expect(groups).toHaveLength(1);
+    expect(groups[0].legs.map((l) => l.id)).toEqual([inMonth.id]);
+    expect(groups[0].carriedForward).toBe(false);
+  });
+
+  it("groups a round trip straddling the month boundary once, priced once", () => {
+    // Outbound on the last day of August, inbound on the first of September:
+    // one run, one round-trip rate — not a lone leg in each month's report.
+    const out = readyLeg("Outbound", { serviceDate: "2026-08-31", roundTripKey: "edge" });
+    const back = readyLeg("Inbound", { serviceDate: "2026-09-01", roundTripKey: "edge" });
+    const report = buildCarried([back], [out]);
+    const groups = bucket(report, "ready").groups;
+    expect(groups).toHaveLength(1);
+    expect(groups[0].legs.map((l) => l.id)).toEqual([out.id, back.id]);
+    expect(groups[0].paired).toBe(true);
+    expect(groups[0].amountCad).toBe(RATE);
+    expect(groups[0].amountFlag).toBeNull();
+    // Its first leg is August's, so the group is marked carried forward.
+    expect(groups[0].carriedForward).toBe(true);
+    expect(accrualTotals(report).estimatedCad).toBe(RATE);
+  });
+
+  it("claims an invoice line once when its legs span two months", () => {
+    const out = trip({ status: "Invoiced", serviceDate: "2026-08-31", direction: "Outbound", billing: billed("Invoiced") });
+    const back = trip({ status: "Invoiced", serviceDate: "2026-09-01", direction: "Inbound", billing: billed("Invoiced") });
+    const inv = invoice([line({ lineId: "L-EDGE", tripIds: [out.id, back.id], amountCad: RATE })]);
+    const report = buildCarried([back], [out], [inv]);
+    const invoiced = bucket(report, "invoiced");
+    expect(invoiced.groups).toHaveLength(1);
+    expect(invoiced.groups[0].legs).toHaveLength(2);
+    expect(invoiced.actualCad).toBe(RATE);
+    expect(accrualTotals(report).actualCad).toBe(RATE);
+    expect(accrualTotals(report).actualCad).not.toBe(2 * RATE);
+  });
+
+  it("leaves carried groups out of the PO commitments", () => {
+    // "Invoiced in this period" / "upcoming" must stay literally true: an
+    // August invoice awaiting payment is neither.
+    const aug = trip({ status: "Invoiced", serviceDate: "2026-08-20", direction: "Outbound", billing: billed("Invoiced") });
+    const report = buildCarried(
+      [readyLeg("Outbound"), readyLeg("Inbound")],
+      [aug, trip({ status: "Scheduled", serviceDate: "2026-08-29", roundTripKey: "old" })],
+      [invoice([line({ tripIds: [aug.id], amountCad: 480 })])],
+      { purchaseOrders: [po({ amountCad: 600 })] },
+    );
+    const [c] = report.poCommitments;
+    expect(report.poCommitments).toHaveLength(1);
+    expect(c.invoicedCad).toBe(0);
+    expect(c.upcomingCad).toBe(RATE);
+    expect(c.overageCad).toBeNull();
+    // …while the carried money is still in the buckets and the headline.
+    expect(bucket(report, "invoiced").actualCad).toBe(480);
+    expect(bucket(report, "scheduled").estimatedCad).toBe(RATE);
+    // A report of carried work only has no commitment row at all.
+    const carriedOnly = buildCarried([], [aug], [invoice([line({ tripIds: [aug.id], amountCad: 480 })])]);
+    expect(carriedOnly.poCommitments).toEqual([]);
+  });
+
+  it("raises a banner when the carry-forward fetch failed — never 'nothing carried'", () => {
+    const report = buildCarried([readyLeg("Outbound")], [], [], { carriedTripsUnavailable: true });
+    expect(report.notes).toContain(
+      "Open trips from earlier months could not be loaded — this report shows this month's trips only, so amounts still owing from earlier months are missing.",
+    );
+    expect(report.notes.some((n) => n.includes("carried into this report"))).toBe(false);
+    // Still a full report of the month.
+    expect(bucket(report, "ready").groups).toHaveLength(1);
+  });
+
+  it("counts carried trips in a plain note — never among the warning notes", () => {
+    const one = buildCarried([], [readyLeg("Outbound", { serviceDate: "2026-08-12" })]);
+    expect(one.carriedForwardCount).toBe(1);
+    expect(accrualsCarriedForwardNote(one)).toBe(
+      "1 trip from an earlier month is not yet completed and is carried into this report.",
+    );
+    // notes render as warnings everywhere — carry-forward is not one.
+    expect(one.notes.some((n) => n.includes("carried into"))).toBe(false);
+    expect(accrualsEmailPayload(one).notes.some((n) => n.includes("carried into"))).toBe(false);
+    const two = buildCarried(
+      [],
+      [
+        readyLeg("Outbound", { serviceDate: "2026-08-12", roundTripKey: "a" }),
+        readyLeg("Outbound", { serviceDate: "2026-07-12", roundTripKey: "b" }),
+      ],
+    );
+    expect(accrualsCarriedForwardNote(two)).toBe(
+      "2 trips from earlier months are not yet completed and are carried into this report.",
+    );
+    // The clipboard carries it as a plain line, not a "Note:" warning.
+    const text = accrualsClipboardText(two);
+    expect(text).toContain("\n2 trips from earlier months are not yet completed and are carried into this report.\n");
+    expect(text).not.toContain("Note: 2 trips from earlier months");
+    // No carried work → no such note.
+    expect(accrualsCarriedForwardNote(build([readyLeg("Outbound")]))).toBeNull();
+  });
+
+  it("keeps the PO-rate note when only carried work is priced at a PO's own rate", () => {
+    // Manual contract → no contract rate, so the manual banner says unbilled
+    // trips carry no estimate. A carried run on a PO with its own rate IS
+    // estimated, though, and poCommitments (period-only) never sees it — the
+    // note must still explain the "est." figure on the report.
+    const manual = client({
+      activeContract: { ...client().activeContract!, billingModel: "Manual", ratePerRoundTripCad: null },
+    });
+    const aug = readyLeg("Outbound", { serviceDate: "2026-08-12", poNumber: "PO-X" });
+    const report = buildAccrualsReport({
+      client: manual,
+      period: PERIOD,
+      today: TODAY,
+      trips: [],
+      carriedTrips: [aug],
+      invoices: [],
+      purchaseOrders: [po({ poNumber: "PO-X", roundTripRateCad: 300 })],
+    });
+    expect(report.poCommitments).toEqual([]);
+    expect(bucket(report, "ready").estimatedCad).toBe(300);
+    expect(report.notes).toContain(
+      "Some purchase orders record their own round-trip rate — trips priced under those POs are still estimated, from the PO rather than the contract.",
+    );
+  });
+
+  it("never offers a nil statement when the carry-forward fetch failed on an empty month", () => {
+    const failed = buildCarried([], [], [], { carriedTripsUnavailable: true });
+    expect(failed.carriedTripsUnavailable).toBe(true);
+    expect(accrualsReportIsEmpty(failed)).toBe(true);
+    expect(accrualsEmptyText(failed)).toContain("this is NOT a nil statement");
+    expect(accrualsClipboardText(failed)).toContain("this is NOT a nil statement");
+    // A genuinely empty month keeps the plain nil wording.
+    const nil = buildCarried([], []);
+    expect(nil.carriedTripsUnavailable).toBe(false);
+    expect(accrualsEmptyText(nil)).toBe("No trips for this client in the period.");
+    // And a non-empty report has no empty text at all.
+    expect(accrualsEmptyText(buildCarried([readyLeg("Outbound")], []))).toBeNull();
+  });
+
+  it("renders a month with no trips of its own when work is carried in", () => {
+    const aug = readyLeg("Outbound", { serviceDate: "2026-08-12", tripNumber: "NL-AUG-1" });
+    const report = buildCarried([], [aug]);
+    expect(accrualsReportIsEmpty(report)).toBe(false);
+    const text = accrualsClipboardText(report);
+    expect(text).toContain("NL-AUG-1");
+    expect(text).toContain("2026-08-12 · from an earlier month");
+    expect(text).not.toMatch(/GST|HST|PST/);
+  });
+
+  it("marks carried rows identically in the clipboard and the email payload", () => {
+    const aug = readyLeg("Outbound", { serviceDate: "2026-08-12", roundTripKey: "aug" });
+    const sep = readyLeg("Outbound", { serviceDate: "2026-09-12", roundTripKey: "sep" });
+    const report = buildCarried([sep], [aug]);
+    const [carried, own] = bucket(report, "ready").groups;
+    expect(groupDateText(carried)).toBe("2026-08-12 · from an earlier month");
+    expect(groupDateText(own)).toBe("2026-09-12");
+    const rows = accrualsEmailPayload(report).buckets.find((b) => b.label === "Ready for billing")!.rows;
+    expect(rows.map((r) => r.date)).toEqual(["2026-08-12 · from an earlier month", "2026-09-12"]);
+    const text = accrualsClipboardText(report);
+    expect(text).toContain("2026-08-12 · from an earlier month\t");
+    // No AR aging: never an age, a due date, or "overdue".
+    for (const out of [text, JSON.stringify(accrualsEmailPayload(report))]) {
+      expect(out).not.toMatch(/overdue|days outstanding|past due|due date/i);
+      expect(out).not.toMatch(/GST|HST|PST/);
+    }
+  });
+
+  it("adds 'from earlier months' to the tally detail only when there are some", () => {
+    expect(
+      accrualTallyDetail({ count: 5, actualCad: 1000, estimatedCad: 450, unpricedCount: 0, carriedForwardCount: 2 }),
+    ).toBe("5 trips · 2 from earlier months · incl. $450.00 est.");
+    expect(
+      accrualTallyDetail({ count: 1, actualCad: 0, estimatedCad: 500, unpricedCount: 0, carriedForwardCount: 1 }),
+    ).toBe("1 trip · 1 from an earlier month");
+    expect(
+      accrualTallyDetail({ count: 3, actualCad: 0, estimatedCad: 500, unpricedCount: 0, carriedForwardCount: 0 }),
+    ).toBe("3 trips");
+  });
+
+  it("keeps the section invariants with carried work in the mix", () => {
+    const aug = trip({ status: "Invoiced", serviceDate: "2026-08-20", direction: "Outbound", billing: billed("Invoiced") });
+    const report = buildCarried(
+      [
+        readyLeg("Outbound"),
+        readyLeg("Inbound"),
+        trip({ status: "Scheduled", serviceDate: "2026-09-25", roundTripKey: "f" }),
+      ],
+      [aug, readyLeg("Outbound", { serviceDate: "2026-08-02", roundTripKey: "a" })],
+      [invoice([line({ tripIds: [aug.id], amountCad: 480 })])],
+    );
+    for (const s of report.sections) {
+      expect(s.groupCount).toBe(s.buckets.reduce((n, b) => n + b.groups.length, 0));
+      expect(s.actualCad).toBe(s.buckets.reduce((n, b) => n + b.actualCad, 0));
+      expect(s.estimatedCad).toBe(s.buckets.reduce((n, b) => n + b.estimatedCad, 0));
+      expect(s.carriedForwardCount).toBe(s.buckets.reduce((n, b) => n + b.carriedForwardCount, 0));
+    }
+    const totals = accrualTotals(report);
+    expect(report.sections.reduce((n, s) => n + s.actualCad, 0)).toBe(totals.actualCad);
+    expect(report.sections.reduce((n, s) => n + s.estimatedCad, 0)).toBe(totals.estimatedCad);
+    expect(totals.actualCad).toBe(480);
+    expect(totals.estimatedCad).toBe(3 * RATE);
+  });
+});
+
+describe("accrualsReportIsEmpty", () => {
+  it("is true only with no group in any bucket and no reconciliation row", () => {
+    expect(accrualsReportIsEmpty(build([]))).toBe(true);
+    expect(accrualsReportIsEmpty(build([readyLeg("Outbound")]))).toBe(false);
+    expect(accrualsReportIsEmpty(build([trip({ status: "Cancelled", cancelledReason: "x" })]))).toBe(false);
   });
 });

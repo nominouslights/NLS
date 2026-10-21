@@ -26,6 +26,12 @@ export const ACCRUALS_REPORT_STYLES = `
   border: 1.5px solid #9C6500; background: #fbf3e0; padding: 6px 10px; margin-bottom: 10px;
   font-size: 10px; font-weight: 700; letter-spacing: .02em; color: #7a4f00;
 }
+/* An informational line (the carried-forward count) — plain, untinted, never
+   styled like .warn: it is the report working as designed, not a warning. */
+.acc .info {
+  border: 1px solid #999; padding: 6px 10px; margin-bottom: 10px;
+  font-size: 10px; color: #333;
+}
 
 .acc .sec {
   background: #102A43; color: #fff; font-weight: 700; font-size: 10.5px;
@@ -46,6 +52,14 @@ export const ACCRUALS_REPORT_STYLES = `
 .acc table td.amt, .acc table th.amt { text-align: right; white-space: nowrap; font-family: "Cascadia Mono", Consolas, ui-monospace, monospace; }
 .acc table td.ref { font-family: "Cascadia Mono", Consolas, ui-monospace, monospace; color: #444; white-space: nowrap; }
 .acc table td.note { font-style: italic; color: #555; }
+/* The carried-forward marker under a Date: its own line, in the body face at a
+   smaller size, and allowed to WRAP (it overrides the nowrap td.ref) — so it
+   never widens the Date column past the 190mm sheet. A plain fact, so no tint. */
+.acc table td.ref .cf {
+  display: block; white-space: normal; margin-top: 2px;
+  font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  font-size: 8px; font-style: italic; color: #555;
+}
 .acc table tfoot td { font-weight: 700; }
 .acc table tfoot td.lbl2 { text-align: right; text-transform: uppercase; font-size: 8.5px; letter-spacing: .04em; color: #333; }
 .acc table tfoot tr.total td { font-size: 11px; color: #102A43; background: #eef2f6; }

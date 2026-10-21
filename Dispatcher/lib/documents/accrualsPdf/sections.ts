@@ -23,12 +23,20 @@
 //
 // Reading order is the SECTION order (upcoming work, then monies owed, then the
 // settled closing line), not the bucket order — see ACCRUAL_SECTION_ORDER.
+//
+// Trips from earlier months that are not yet completed are carried into the
+// report; their Date cell says so in words (CARRIED_FORWARD_LABEL — the same
+// words groupDateText gives the clipboard and the emailed PDF), stacked under
+// the date in a wrapping cell so the marker never widens the Date column past
+// the 190mm sheet. The count of carried trips prints as a PLAIN line, never in
+// a .warn box: carry-forward is not a warning.
 
 import {
   ACCRUAL_BUCKET_META,
   ACCRUALS_ESTIMATE_NOTE,
   ACCRUALS_TAX_NOTE,
   AMOUNT_FLAG_META,
+  CARRIED_FORWARD_LABEL,
   accrualBucketAmountLabel,
   accrualBucketDetail,
   accrualHeadlines,
@@ -36,6 +44,8 @@ import {
   accrualSectionDetail,
   accrualTallyAmountLabel,
   accrualTotals,
+  accrualsCarriedForwardNote,
+  accrualsEmptyText,
   groupAmountLabel,
   groupPoText,
   groupRefLabel,
@@ -60,9 +70,16 @@ import { esc, field, grid, sectionBar } from "../workOrderPdf/html";
 // ---- header -----------------------------------------------------------------
 
 export function header(company: CompanyInfo, report: AccrualsReport): string {
+  // The carry-forward sentence follows what actually happened: when the
+  // earlier months could not be loaded, the sheet must not claim they were.
+  const carried = report.carriedTripsUnavailable
+    ? "Trips from earlier months could NOT be loaded for this sheet — see the warning below. "
+    : "Trips from earlier months that are not yet completed are carried in and marked as such. ";
   const banner =
     "Accruals statement — upcoming work not yet done, then monies owed, then the month's " +
-    "settled work. NOT an invoice. Amounts marked EST. are estimates at the purchase order's " +
+    "settled work. " +
+    carried +
+    "NOT an invoice. Amounts marked EST. are estimates at the purchase order's " +
     "rate (the contract rate where a PO records none); issued invoice amounts govern. All " +
     "amounts CAD. Taxes are applied in QuickBooks; this report contains none.";
   return `
@@ -84,7 +101,10 @@ export function header(company: CompanyInfo, report: AccrualsReport): string {
  *  half-rate groups, manual-line groups) — printed up front so a "—" further
  *  down is never a mystery. */
 export function notesBlock(report: AccrualsReport): string {
-  return report.notes.map((n) => `<div class="warn">${esc(n)}</div>`).join("");
+  const warnings = report.notes.map((n) => `<div class="warn">${esc(n)}</div>`).join("");
+  // Informational, so a plain .info line — never the .warn box.
+  const carried = accrualsCarriedForwardNote(report);
+  return warnings + (carried ? `<div class="info">${esc(carried)}</div>` : "");
 }
 
 // ---- report details ---------------------------------------------------------
@@ -276,7 +296,9 @@ function amountCell(g: AccrualGroup): string {
 
 function groupRow(g: AccrualGroup): string {
   return `<tr>
-    <td class="ref">${esc(g.legs[0].serviceDate)}</td>
+    <td class="ref">${esc(g.legs[0].serviceDate)}${
+      g.carriedForward ? `<span class="cf">${esc(CARRIED_FORWARD_LABEL)}</span>` : ""
+    }</td>
     <td class="ref">${tripsCell(g)}</td>
     <td>${esc(groupRouteLabel(g))}</td>
     <td class="ref">${esc(groupPoText(g))}</td>
@@ -331,13 +353,19 @@ function sectionBlock(section: AccrualSection): string {
  *  work, then monies owed) with their non-empty buckets, then the settled
  *  one-liner. Settled work deliberately has NO per-trip table — it still has to
  *  reconcile the month, and the summary plus this line is how it does.
- *  An empty month still prints: one line says so, on purpose. */
+ *  A truly empty report still prints: one line says so, on purpose. "Empty"
+ *  is accrualsReportIsEmpty — the screen's test too — so a month with no trips
+ *  of its own but open work carried in from earlier months prints its
+ *  sections, never a nil statement over money still owed — and when the
+ *  earlier months could not be loaded, the empty line says it is NOT one
+ *  (accrualsEmptyText, the clipboard's wording too). */
 export function bucketsBlock(report: AccrualsReport): string {
-  if (report.buckets.every((b) => b.groups.length === 0)) {
+  const emptyText = accrualsEmptyText(report);
+  if (emptyText !== null) {
     return (
       `<div class="blk">` +
       sectionBar("Trip Detail") +
-      `<table><tbody><tr><td class="note">No trips for this client in the period.</td></tr></tbody></table></div>`
+      `<table><tbody><tr><td class="note">${esc(emptyText)}</td></tr></tbody></table></div>`
     );
   }
   const detail = report.sections.filter((s) => s.detail).map(sectionBlock).join("");
@@ -407,7 +435,7 @@ export function reconciliationBlock(report: AccrualsReport): string {
 export function invoicesBlock(report: AccrualsReport): string {
   const rows =
     report.invoices.length === 0
-      ? `<tr><td class="note" colspan="5">No issued invoices are referenced by this period's trips.</td></tr>`
+      ? `<tr><td class="note" colspan="5">No issued invoices are referenced by the trips on this report.</td></tr>`
       : report.invoices
           .map(
             (inv) => `<tr>
