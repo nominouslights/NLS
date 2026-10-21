@@ -39,7 +39,8 @@ public enum TripStatus
 
     /// <summary>
     /// The money will never arrive — the invoice was written off, or the run was never billable
-    /// and a dispatcher closed it out. Final.
+    /// and a dispatcher closed it out. Final as far as <c>Trip.CanTransition</c> is concerned; a
+    /// dispatcher close-out (and only that kind) can be undone by the separate reopen command.
     /// </summary>
     WrittenOff = 6,
 }

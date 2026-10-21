@@ -90,6 +90,25 @@ public class TripsIntegrationEventMapperTests
     }
 
     [Fact]
+    public void Reopen_maps_to_the_public_reopened_event_with_reason_and_both_statuses()
+    {
+        var trip = TestPlanning.ScheduleTrip(tripNumber: "TR-9007", clientId: Guid.NewGuid()).Value;
+        trip.RecordPostTripInspection();
+        trip.FinishOperations();
+        trip.ClearDomainEvents();
+        trip.Reopen("Finished before the return leg ran");
+        var domainEvent = (TripReopenedDomainEvent)trip.DomainEvents.Single();
+
+        var integrationEvent = Assert.IsType<TripReopenedIntegrationEvent>(_mapper.Map(domainEvent, trip));
+        Assert.Equal(trip.Id, integrationEvent.TripId);
+        Assert.Equal(TestPlanning.TenantId, integrationEvent.TenantId);
+        Assert.Equal("TR-9007", integrationEvent.TripNumber);
+        Assert.Equal("Finished before the return leg ran", integrationEvent.Reason);
+        Assert.Equal("ReadyForBilling", integrationEvent.PreviousStatus);
+        Assert.Equal("Scheduled", integrationEvent.NewStatus);
+    }
+
+    [Fact]
     public void Deadhead_leg_finish_carries_the_empty_leg_flag()
     {
         var trip = TestPlanning.ScheduleTrip(

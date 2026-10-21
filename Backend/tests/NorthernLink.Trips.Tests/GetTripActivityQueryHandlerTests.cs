@@ -115,6 +115,7 @@ public class GetTripActivityQueryHandlerTests
         Assert.Equal("Logged against the wrong driver", entry.Reason);
         Assert.Equal("dispatch@northernlink.ca", entry.EnteredBy);
         Assert.Equal("Driver: R. Ballantyne → J. Moose", entry.Detail);
+        Assert.Null(entry.PreviousReason);
         Assert.Null(entry.Source);
     }
 
@@ -135,7 +136,7 @@ public class GetTripActivityQueryHandlerTests
     [Fact]
     public async Task A_reason_on_any_trip_event_surfaces_generically_without_a_detail()
     {
-        // e.g. the reopen work's trip-reopened: the timeline needs no per-event code for a reason.
+        // The timeline needs no per-event code for a reason.
         var trip = TestPlanning.ScheduleTrip().Value;
         _trips.Add(trip);
         _activity.Entries.Add(new TripActivityJournalEntry(T1, "trip", "trip-some-future-event",
@@ -147,6 +148,60 @@ public class GetTripActivityQueryHandlerTests
         Assert.Equal("cancelled by mistake", entry.Reason);
         Assert.Null(entry.Detail);
         Assert.Null(entry.EnteredBy);
+        Assert.Null(entry.PreviousReason);
+    }
+
+    [Fact]
+    public async Task The_reopen_reason_is_read_from_the_journaled_trip_event()
+    {
+        var trip = TestPlanning.ScheduleTrip().Value;
+        _trips.Add(trip);
+
+        // The payload shape AuditJson writes for TripReopenedDomainEvent: camelCase, enums as names.
+        _activity.Entries.AddRange(
+        [
+            new TripActivityJournalEntry(T0, "trip", "trip-status-changed",
+                $$"""{"tripId":"{{trip.Id}}","occurredAtUtc":"{{T0:O}}"}"""),
+            new TripActivityJournalEntry(T1, "trip", "trip-reopened",
+                $$"""{"tripId":"{{trip.Id}}","previousStatus":"Cancelled","newStatus":"Scheduled","reason":"Cancelled the wrong run","clearedReason":"Weather","occurredAtUtc":"{{T1:O}}"}"""),
+            // A manifest payload with a "reason" key must not leak into the trip-event reason.
+            new TripActivityJournalEntry(T2, "trip-manifest", "trip-manifest-updated",
+                """{"reason":"not a trip reason","source":"App"}"""),
+            // Malformed JSON yields null rather than throwing.
+            new TripActivityJournalEntry(T3, "trip", "trip-updated", "{not json"),
+        ]);
+
+        var result = await Handler.Handle(
+            new GetTripActivityQuery(trip.Id, TestPlanning.TenantId), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        var timeline = result.Value;
+        Assert.Null(timeline[0].Reason);
+        Assert.Equal("trip-reopened", timeline[1].EventType);
+        Assert.Equal("Cancelled the wrong run", timeline[1].Reason);
+        Assert.Equal("Weather", timeline[1].PreviousReason); // the cleared cancel reason stays visible
+        Assert.Null(timeline[1].Detail); // Detail is composed for driver corrections only
+        Assert.Null(timeline[0].PreviousReason);
+        Assert.Null(timeline[2].Reason);
+        Assert.Null(timeline[2].PreviousReason);
+        Assert.Null(timeline[3].Reason);
+        Assert.Null(timeline[3].PreviousReason);
+    }
+
+    [Fact]
+    public async Task Reason_and_previous_reason_are_read_generically_from_any_trip_event()
+    {
+        var trip = TestPlanning.ScheduleTrip().Value;
+        _trips.Add(trip);
+        _activity.Entries.Add(new TripActivityJournalEntry(T0, "trip", "trip-some-future-event",
+            """{"reason":"why","clearedReason":"what it replaced"}"""));
+
+        var result = await Handler.Handle(
+            new GetTripActivityQuery(trip.Id, TestPlanning.TenantId), CancellationToken.None);
+
+        var entry = Assert.Single(result.Value);
+        Assert.Equal("why", entry.Reason);
+        Assert.Equal("what it replaced", entry.PreviousReason);
     }
 
     [Fact]
@@ -162,70 +217,89 @@ public class GetTripActivityQueryHandlerTests
             new TripActivityJournalEntry(T1, "trip", "trip-driver-corrected", "not json"),
             // A manifest event's "reason" is not a trip reason — manifests keep their own provenance only.
             new TripActivityJournalEntry(T2, "trip-manifest", "trip-manifest-updated",
-                """{"source":"App","enteredBy":"driver@northernlink.ca","reason":"ignored"}"""),
+                """{"source":"App","enteredBy":"driver@northernlink.ca","reason":"ignored","clearedReason":"ignored"}"""),
         ]);
 
         var timeline = (await Handler.Handle(
             new GetTripActivityQuery(trip.Id, TestPlanning.TenantId), CancellationToken.None)).Value;
 
-        Assert.All(timeline.Take(2), e => Assert.True(e is { Reason: null, Detail: null, EnteredBy: null, Source: null }));
+        Assert.All(timeline.Take(2), e => Assert.True(
+            e is { Reason: null, Detail: null, PreviousReason: null, EnteredBy: null, Source: null }));
         Assert.Equal("App", timeline[2].Source);
         Assert.Equal("driver@northernlink.ca", timeline[2].EnteredBy);
         Assert.Null(timeline[2].Reason);
         Assert.Null(timeline[2].Detail);
+        Assert.Null(timeline[2].PreviousReason);
     }
 
     [Fact]
-    public async Task The_trips_own_driver_sees_trip_events_without_reason_detail_or_who()
+    public async Task The_trips_own_driver_sees_trip_events_without_reason_previous_reason_detail_or_who()
     {
         var driverUserId = Guid.Parse("00000000-0000-0000-0000-00000000ab07");
         _drivers.Drivers.Add(TestPlanning.ActiveDriver(userId: driverUserId));
         var manifestId = Guid.NewGuid();
-        var trip = TestPlanning.ScheduleTrip().Value;
+        var trip = TestPlanning.ScheduleTrip().Value; // assigned to TestPlanning.DriverId
         trip.AttachManifest(manifestId);
         _trips.Add(trip);
         _activity.Entries.AddRange(
         [
-            new TripActivityJournalEntry(T1, "trip", "trip-driver-corrected",
+            new TripActivityJournalEntry(T0, "trip", "trip-driver-corrected",
                 """{"previousDriverName":"R. Ballantyne","newDriverName":"J. Moose","reason":"Logged against the wrong driver","enteredBy":"dispatch@northernlink.ca"}"""),
+            new TripActivityJournalEntry(T1, "trip", "trip-reopened",
+                $$"""{"tripId":"{{trip.Id}}","previousStatus":"Cancelled","newStatus":"Scheduled","reason":"Cancelled the wrong run","clearedReason":"Weather"}"""),
             new TripActivityJournalEntry(T2, "trip", "trip-some-future-event",
-                """{"reason":"cancelled by mistake","enteredBy":"dispatch@northernlink.ca"}"""),
+                """{"reason":"cancelled by mistake","clearedReason":"old reason","enteredBy":"dispatch@northernlink.ca"}"""),
             // Manifest rows keep their existing behaviour for drivers.
             new TripActivityJournalEntry(T3, "trip-manifest", "trip-manifest-updated",
-                """{"source":"Dispatcher","enteredBy":"dispatch@northernlink.ca"}"""),
+                $$"""{"manifestId":"{{manifestId}}","source":"Dispatcher","enteredBy":"dispatch@northernlink.ca"}"""),
         ]);
 
         var asDriver = new GetTripActivityQueryHandler(
             _trips, _activity, new TripOperatorAccess(FakeCurrentActor.Driver(driverUserId), _drivers));
-        var timeline = (await asDriver.Handle(
-            new GetTripActivityQuery(trip.Id, TestPlanning.TenantId), CancellationToken.None)).Value;
+        var result = await asDriver.Handle(
+            new GetTripActivityQuery(trip.Id, TestPlanning.TenantId), CancellationToken.None);
 
-        Assert.Equal(3, timeline.Count);
-        Assert.Equal(new[] { "trip-driver-corrected", "trip-some-future-event" }, timeline.Take(2).Select(e => e.EventType));
-        Assert.All(timeline.Take(2), e => Assert.True(
-            e is { AggregateType: "trip", Reason: null, Detail: null, EnteredBy: null, Source: null }));
-        Assert.Equal("Dispatcher", timeline[2].Source);
-        Assert.Equal("dispatch@northernlink.ca", timeline[2].EnteredBy);
+        Assert.True(result.IsSuccess);
+        var timeline = result.Value;
+        Assert.Equal(4, timeline.Count);
+        // The entries still appear, with their event types...
+        Assert.Equal(
+            new[] { "trip-driver-corrected", "trip-reopened", "trip-some-future-event" },
+            timeline.Take(3).Select(e => e.EventType));
+        // ...but every piece of dispatch narrative on a trip event is redacted.
+        Assert.All(timeline.Take(3), e => Assert.True(
+            e is { AggregateType: "trip", Reason: null, PreviousReason: null, Detail: null, EnteredBy: null, Source: null }));
 
-        // The same journal read by dispatch is unredacted.
+        // Manifest provenance is not dispatch narrative — unaffected by the redaction.
+        Assert.Equal("Dispatcher", timeline[3].Source);
+        Assert.Equal("dispatch@northernlink.ca", timeline[3].EnteredBy);
+
+        // The same journal read by dispatch is unredacted: reason, previousReason and detail.
         var asDispatch = (await Handler.Handle(
             new GetTripActivityQuery(trip.Id, TestPlanning.TenantId), CancellationToken.None)).Value;
         Assert.Equal("Logged against the wrong driver", asDispatch[0].Reason);
         Assert.Equal("Driver: R. Ballantyne → J. Moose", asDispatch[0].Detail);
         Assert.Equal("dispatch@northernlink.ca", asDispatch[0].EnteredBy);
+        Assert.Equal("Cancelled the wrong run", asDispatch[1].Reason);
+        Assert.Equal("Weather", asDispatch[1].PreviousReason);
+        Assert.Equal("cancelled by mistake", asDispatch[2].Reason);
+        Assert.Equal("old reason", asDispatch[2].PreviousReason);
+        Assert.Equal("dispatch@northernlink.ca", asDispatch[2].EnteredBy);
     }
 
     [Fact]
     public void The_journal_names_the_handler_derives_are_the_stored_literals()
     {
         // The handler derives these from AuditNames; pinning the literals here means renaming
-        // Trip, TripManifest or TripDriverCorrectedDomainEvent fails a test instead of silently
-        // orphaning every journal row already written under the old name.
+        // Trip, TripManifest, TripDriverCorrectedDomainEvent or TripReopenedDomainEvent fails a
+        // test instead of silently orphaning every journal row already written under the old name.
         Assert.Equal("trip", Shared.Persistence.Auditing.AuditNames.ForAggregate(typeof(Trip)));
         Assert.Equal("trip-manifest",
             Shared.Persistence.Auditing.AuditNames.ForAggregate(typeof(Domain.Manifests.TripManifest)));
         Assert.Equal("trip-driver-corrected",
             Shared.Persistence.Auditing.AuditNames.ForEvent(typeof(Domain.Trips.Events.TripDriverCorrectedDomainEvent)));
+        Assert.Equal("trip-reopened",
+            Shared.Persistence.Auditing.AuditNames.ForEvent(typeof(Domain.Trips.Events.TripReopenedDomainEvent)));
     }
 
     [Fact]

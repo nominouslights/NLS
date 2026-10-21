@@ -38,6 +38,7 @@ using NorthernLink.Trips.Application.Trips.GetTripById;
 using NorthernLink.Trips.Application.Trips.GetTrips;
 using NorthernLink.Trips.Application.Trips.MergeRoundTrip;
 using NorthernLink.Trips.Application.Trips.RecordDemand;
+using NorthernLink.Trips.Application.Trips.Reopen;
 using NorthernLink.Trips.Application.Trips.UnpairRoundTrip;
 using NorthernLink.Trips.Application.Trips.Update;
 using NorthernLink.Trips.Domain.Manifests;
@@ -76,6 +77,10 @@ internal static class TripPlanningEndpoints
         // Fix the driver recorded on a finished run (ReadyForBilling/Invoiced/Completed) — a
         // correction of history with a required reason, never the assign path. Dispatch only.
         tripPlanning.MapPost("{id:guid}/correct-driver", CorrectTripDriver);
+
+        // Undo a lifecycle mistake (cancelled/started/finished/closed-out in error). Reason
+        // required; a paid trip, an Invoiced one, or any trip Billing claims is refused.
+        tripPlanning.MapPost("{id:guid}/reopen", ReopenTrip);
         tripPlanning.MapPost("{id:guid}/demand", RecordTripDemand);
         tripPlanning.MapPost("{id:guid}/merge-round-trip", MergeRoundTrip);
         tripPlanning.MapPost("{id:guid}/unpair-round-trip", UnpairRoundTrip);
@@ -463,6 +468,27 @@ internal static class TripPlanningEndpoints
         var result = await sender.Send(
             new CorrectTripDriverCommand(id, request.DriverId ?? Guid.Empty, request.Reason ?? string.Empty),
             cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>
+    /// Reopens a trip a dispatcher moved on by mistake. Body <c>{ "reason": string, "expectedStatus"?: TripStatus }</c>, 204 on
+    /// success; refusals are the usual <c>{ code, message }</c> ProblemDetails mapping.
+    /// </summary>
+    private static async Task<IResult> ReopenTrip(
+        Guid id,
+        ReopenTripRequest request,
+        ITenantContext tenantContext,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(
+            new ReopenTripCommand(id, request.Reason ?? string.Empty, request.ExpectedStatus), cancellationToken);
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
@@ -1075,6 +1101,14 @@ public sealed record CloseTripWithoutBillingRequest(string Reason);
 /// instead of a binding failure. There is deliberately no "who" member — that comes from the token.
 /// </summary>
 public sealed record CorrectTripDriverRequest(Guid? DriverId, string? Reason);
+
+/// <summary>
+/// Request body for POST /api/trips/{id}/reopen — the reason is required. <see cref="ExpectedStatus"/>
+/// is optional: the status the dispatcher saw, spelled as <c>TripResponse.Status</c> spells it (the
+/// enum member name, e.g. "Cancelled", "ReadyForBilling"). When sent and no longer current, the
+/// reopen is refused 409 <c>Trips.Trip.ReopenStatusChanged</c>.
+/// </summary>
+public sealed record ReopenTripRequest(string? Reason, TripStatus? ExpectedStatus = null);
 
 /// <summary>Request body for POST /api/trips/{id}/demand.</summary>
 public sealed record RecordTripDemandRequest(int SeatsConfirmed, bool DemandGuaranteed);

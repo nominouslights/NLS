@@ -109,6 +109,7 @@ public static class BillingServiceCollectionExtensions
             .On<TripCompletedIntegrationEvent, TripCompletedIntegrationEventHandler>()
             .On<TripReadyForBillingIntegrationEvent, TripReadyForBillingIntegrationEventHandler>()
             .On<TripClosedWithoutBillingIntegrationEvent, TripClosedWithoutBillingIntegrationEventHandler>()
+            .On<TripReopenedIntegrationEvent, TripReopenedIntegrationEventHandler>()
             .On<TripRoundTripChangedIntegrationEvent, TripRoundTripChangedIntegrationEventHandler>());
 
         // 5. Read-side projections — one worker polls billing.event_journal and upserts
