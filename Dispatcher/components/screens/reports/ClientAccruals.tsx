@@ -22,7 +22,6 @@ import {
 import { corridorLabel, listTrips, shortDateLabel, todayIso, type TripRecord } from "@/lib/api/trips";
 import {
   ACCRUAL_BUCKET_META,
-  ACCRUAL_OPEN_STATUSES,
   ACCRUALS_ESTIMATE_NOTE,
   ACCRUALS_TAX_NOTE,
   AMOUNT_FLAG_META,
@@ -36,7 +35,7 @@ import {
   accrualsClipboardText,
   accrualsReportIsEmpty,
   buildAccrualsReport,
-  carryForwardThrough,
+  fetchCarriedTrips,
   groupAmountLabel,
   groupPoLabel,
   groupRefLabel,
@@ -445,26 +444,13 @@ export default function ClientAccruals({
       // pricing with a banner (null below) — it never blanks the report.
       //
       // Carry forward: every earlier trip of the client that is not yet
-      // completed. The trips list takes `to` without `from` (open-ended back)
-      // and ONE exact status, so it is one unpaged call per open status. The
-      // group fails as a whole (.catch → null): a partial set would understate
-      // what is owed while looking complete, so it degrades to this month only
-      // with a banner instead.
-      const through = carryForwardThrough({ start: from });
+      // completed — one unpaged call per open status, deduped, failing as ONE
+      // group (null → this month only, with a banner; never a partial set that
+      // understates what is owed). See fetchCarriedTrips.
       const [page, purchaseOrders, carriedTrips] = await Promise.all([
         listTrips({ from, to, clientId: cid }),
         listPurchaseOrders(cid).catch((): PurchaseOrderRecord[] | null => null),
-        Promise.all(
-          ACCRUAL_OPEN_STATUSES.map((status) => listTrips({ to: through, clientId: cid, status })),
-        )
-          .then((pages) => {
-            // Deduped by id — a trip changing status between two of the calls
-            // could otherwise come back twice. (The builder dedupes too.)
-            const byId = new Map<string, TripRecord>();
-            for (const p of pages) for (const t of p.items) byId.set(t.id, t);
-            return [...byId.values()];
-          })
-          .catch((): TripRecord[] | null => null),
+        fetchCarriedTrips(listTrips, { clientId: cid, period: { start: from } }),
       ]);
       // Then the distinct invoices the trips' billing states reference — the
       // month's AND the carried ones: the real amounts live on their lines.

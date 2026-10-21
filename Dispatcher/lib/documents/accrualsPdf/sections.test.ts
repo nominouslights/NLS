@@ -557,3 +557,66 @@ describe("NL-ACC-01 carry forward — edge cases", () => {
     expect(bucketsBlock(r)).not.toContain('class="cf"');
   });
 });
+
+// ---------------------------------------------------------------------------
+// A "counted with the paired leg" row is priced elsewhere — the sheet must not
+// print it as unpriced anywhere
+// ---------------------------------------------------------------------------
+
+describe("NL-ACC-01 counted row", () => {
+  // Carried August Invoiced leg + September Completed leg on ONE $500 line:
+  // Settled carries the $500, the carried Invoiced row reads "counted".
+  function straddle(): AccrualsReport {
+    const billing = (state: "Invoiced" | "Paid"): NonNullable<TripRecord["billing"]> => ({
+      state,
+      invoiceId: "inv-1",
+      invoiceNumber: "NL-INV-0001",
+      qboInvoiceId: "QBO-77",
+      qboEnteredDate: "2026-09-12",
+      paymentConfirmedDate: state === "Paid" ? "2026-09-14" : null,
+    });
+    const out = trip({ status: "Invoiced", serviceDate: "2026-08-31", direction: "Outbound", billing: billing("Invoiced") });
+    const back = trip({ status: "Completed", serviceDate: "2026-09-01", direction: "Inbound", billing: billing("Paid") });
+    return buildAccrualsReport({
+      client: client(),
+      period: PERIOD,
+      today: TODAY,
+      trips: [back],
+      carriedTrips: [out],
+      invoices: [invoice([line({ lineId: "L-CNT", tripIds: [out.id, back.id] })])],
+      purchaseOrders: [],
+    });
+  }
+
+  it("keeps the row's own words, but tallies the bucket as $0.00 with no unpriced clause", () => {
+    const html = bucketsBlock(straddle());
+    expect(html).toContain('<td class="flag">COUNTED WITH THE PAIRED LEG</td>');
+    expect(html).toContain(
+      '<td class="lbl2" colspan="5">1 trip · 1 from an earlier month</td><td class="amt">$0.00</td>',
+    );
+    expect(html).not.toContain("unpriced");
+    expect(html).not.toContain("Not priced");
+  });
+
+  it("prints — in every Unpriced cell of the summary, the totals row included", () => {
+    const html = summaryBlock(straddle());
+    expect(html).toMatch(
+      /<td>Monies owed<\/td>\s*<td class="amt">1<\/td>\s*<td class="amt">\$0\.00<\/td>\s*<td class="amt">—<\/td>/,
+    );
+    expect(html).toMatch(
+      /<td class="ind">Invoiced<\/td>\s*<td class="amt">1<\/td>\s*<td class="amt">\$0\.00<\/td>\s*<td class="amt">—<\/td>/,
+    );
+    expect(html).toMatch(
+      /<td class="lbl2">Totals<\/td>\s*<td class="amt">2<\/td>\s*<td class="amt">\$500\.00<\/td>\s*<td class="amt">—<\/td>/,
+    );
+    expect(html).not.toContain("Not priced");
+  });
+
+  it("leads Monies owed with $0.00, not 'Not priced'", () => {
+    const html = headlineBlock(straddle());
+    expect(html).toContain('<div class="hl-amt">$0.00</div>');
+    expect(html).not.toContain("Not priced");
+    expect(html).not.toContain("unpriced");
+    expect(html).toContain('<div class="hl-det">1 trip · 1 from an earlier month</div>');
+  });
+});

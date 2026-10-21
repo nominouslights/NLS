@@ -111,7 +111,14 @@ import {
   type ClientRecord,
   type PurchaseOrderRecord,
 } from "@/lib/api/clients";
-import { corridorLabel, sortTrips, type TripRecord, type TripStatus } from "@/lib/api/trips";
+import {
+  corridorLabel,
+  sortTrips,
+  type TripListParams,
+  type TripPage,
+  type TripRecord,
+  type TripStatus,
+} from "@/lib/api/trips";
 import { periodLabel, type Period } from "@/lib/period";
 import type { StatusKind } from "@/lib/theme";
 
@@ -211,6 +218,38 @@ export function carryForwardThrough(period: Pick<Period, "start">): string {
   return new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10);
 }
 
+/**
+ * The carry-forward fetch: every trip of the client dated before the period
+ * that is not yet completed. The trips list takes `to` without `from`
+ * (open-ended back) and ONE exact status, so this is one UNPAGED call per
+ * ACCRUAL_OPEN_STATUSES entry, `to` = carryForwardThrough(period).
+ *
+ * The calls fail as ONE group: any rejection → null, never a partial list. A
+ * partial set would understate what is owed while looking complete, so the
+ * caller degrades to the month only and says so (carriedTripsUnavailable).
+ * Results are deduped by id — a trip changing status between two of the calls
+ * could otherwise come back twice (the builder dedupes too).
+ *
+ * `list` is injected (the screen passes listTrips) so the request shape and the
+ * fail-together rule are testable without a network.
+ */
+export async function fetchCarriedTrips(
+  list: (params: TripListParams) => Promise<TripPage>,
+  args: { clientId: string; period: Pick<Period, "start"> },
+): Promise<TripRecord[] | null> {
+  const to = carryForwardThrough(args.period);
+  try {
+    const pages = await Promise.all(
+      ACCRUAL_OPEN_STATUSES.map((status) => list({ to, clientId: args.clientId, status })),
+    );
+    const byId = new Map<string, TripRecord>();
+    for (const p of pages) for (const t of p.items) byId.set(t.id, t);
+    return [...byId.values()];
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Shapes
 // ---------------------------------------------------------------------------
@@ -230,6 +269,7 @@ export const AMOUNT_NOTE_META: Record<AccrualAmountNote, { kind: StatusKind; lab
   manual: { kind: "soon", label: "Manual line — not estimated" },
   // Only reachable when one invoice line's legs land in different buckets: the
   // first bucket carries the money, this row says so rather than repeating it.
+  // PRICED, just elsewhere — so never part of unpricedCount (isUnpricedGroup).
   counted: { kind: "info", label: "Counted with the paired leg" },
 };
 
@@ -303,7 +343,8 @@ export interface AccrualGroup {
    *  two same-direction legs are not a pair. Unpaired no longer changes the
    *  price (it is still one full round trip), only the flag. */
   paired: boolean;
-  /** Dollars attributed to this group; null = unpriced (see amountNote and
+  /** Dollars attributed to this group; null = no figure on THIS row — unpriced
+   *  unless amountNote is "counted" (see isUnpricedGroup, amountNote and
    *  amountFlag — a split-PO group is null-with-a-flag, deliberately, because
    *  "$0.00" would read to a client as work performed for free). */
   amountCad: number | null;
@@ -323,6 +364,18 @@ export interface AccrualGroup {
   carriedForward: boolean;
 }
 
+/**
+ * Is this group UNPRICED — no figure on it and none anywhere else in the
+ * report? The ONE definition every "unpriced" count derives from (bucket →
+ * section → accrualTotals → tally detail, "Not priced", the email's trips cell
+ * and the sheet's Unpriced column). A "counted" group has a null amount too,
+ * but it is priced: its invoice line's money is carried by an earlier bucket
+ * in claim order, and its own cell says "Counted with the paired leg".
+ */
+export function isUnpricedGroup(g: Pick<AccrualGroup, "amountCad" | "amountNote">): boolean {
+  return g.amountCad === null && g.amountNote !== "counted";
+}
+
 export interface AccrualBucket {
   id: AccrualBucketId;
   label: string;
@@ -335,8 +388,9 @@ export interface AccrualBucket {
   actualCad: number;
   /** Sum of PO-rate estimates in this bucket (always shown " est."). */
   estimatedCad: number;
-  /** Groups carrying no amount at all — including a split-PO group, which is
-   *  unpriced ON PURPOSE and still needs a decision. */
+  /** Groups with no price anywhere (isUnpricedGroup) — including a split-PO
+   *  group, which is unpriced ON PURPOSE and still needs a decision. NOT a
+   *  "counted" group: its line's money is already in an earlier bucket. */
   unpricedCount: number;
   /** Groups carried in from earlier months. Their money is already INSIDE
    *  actualCad / estimatedCad — this count only feeds the detail line. */
@@ -773,7 +827,7 @@ export function buildAccrualsReport(args: {
       groups,
       actualCad: groups.reduce((s, g) => s + (g.amountSource === "invoice" ? g.amountCad ?? 0 : 0), 0),
       estimatedCad: groups.reduce((s, g) => s + (g.amountSource === "estimate" ? g.amountCad ?? 0 : 0), 0),
-      unpricedCount: groups.filter((g) => g.amountCad === null).length,
+      unpricedCount: groups.filter(isUnpricedGroup).length,
       carriedForwardCount: groups.filter((g) => g.carriedForward).length,
     };
   });
@@ -1230,7 +1284,9 @@ export function accrualTallyDetail(t: AccrualTallyInput): string {
 /** The ONE merged amount: billed plus estimated as a single figure, carrying
  *  " est." when all of it is an estimate. Nothing priced at all reads "Not
  *  priced" rather than a false $0.00 (manual billing / no contract / no rate /
- *  a split-PO group awaiting a decision — the banner notes say which). */
+ *  a split-PO group awaiting a decision — the banner notes say which). A tally
+ *  whose only rows are "counted with the paired leg" is NOT unpriced — that
+ *  money is carried by an earlier bucket — so it reads a true "$0.00". */
 export function accrualTallyAmountLabel(t: AccrualTallyInput): string {
   const total = t.actualCad + t.estimatedCad;
   if (total === 0 && t.unpricedCount > 0) return "Not priced";
@@ -1308,7 +1364,9 @@ export function accrualSettledLine(report: AccrualsReport): string {
   return `${settled.label} · ${accrualSectionDetail(settled)} · ${accrualSectionAmountLabel(settled)}`;
 }
 
-/** "$450.00" / "$450.00 est." — null when unpriced (render amountNote or "—"). */
+/** "$450.00" / "$450.00 est." — null when the group carries no figure of its
+ *  own (render amountFlag / amountNote or "—"; a "counted" group is null here
+ *  but NOT unpriced — see isUnpricedGroup). */
 export function groupAmountLabel(g: AccrualGroup): string | null {
   if (g.amountCad === null) return null;
   return g.amountSource === "estimate"

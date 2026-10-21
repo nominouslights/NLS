@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ClientRecord, PurchaseOrderRecord } from "@/lib/api/clients";
 import type { InvoiceDetailRecord, InvoiceLineRecord } from "@/lib/api/billing";
-import type { TripDirection, TripRecord } from "@/lib/api/trips";
+import type { TripDirection, TripListParams, TripPage, TripRecord } from "@/lib/api/trips";
 import type { Period } from "@/lib/period";
 import {
   ACCRUAL_BUCKET_ORDER,
@@ -11,6 +11,7 @@ import {
   PO_FLAG_META,
   accrualHeadlines,
   accrualSettledLine,
+  accrualTallyAmountLabel,
   accrualTallyDetail,
   accrualTotals,
   accrualsCarriedForwardNote,
@@ -20,9 +21,11 @@ import {
   accrualsReportIsEmpty,
   buildAccrualsReport,
   carryForwardThrough,
+  fetchCarriedTrips,
   groupDateText,
   groupPoLabel,
   isCarriedForwardTrip,
+  isUnpricedGroup,
   previewDraftsByPo,
   type AccrualBucketId,
   type AccrualsReport,
@@ -1878,5 +1881,159 @@ describe("carry forward — edge cases and error paths", () => {
     expect(bucket(report, "invoiced").groups.map((g) => g.legs[0].id)).toEqual([owedAug.id]);
     expect(accrualTotals(report).actualCad).toBe(980);
     expect(report.carriedForwardCount).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// "Counted with the paired leg" is priced elsewhere — never unpriced
+// ---------------------------------------------------------------------------
+
+describe("a counted row is not unpriced", () => {
+  // The repro: a carried August Invoiced leg and a September Completed leg on
+  // the SAME $500 invoice line. Paid claims first (ACCRUAL_BUCKET_ORDER), so
+  // Settled holds the $500 and the carried Invoiced row reads "counted". Monies
+  // owed then has nothing owing — "$0.00", not "Not priced" / "1 unpriced".
+  function straddle(): AccrualsReport {
+    const out = trip({ status: "Invoiced", serviceDate: "2026-08-31", direction: "Outbound", billing: billed("Invoiced") });
+    const back = trip({ status: "Completed", serviceDate: "2026-09-01", direction: "Inbound", billing: billed("Paid") });
+    return buildAccrualsReport({
+      client: client(),
+      period: PERIOD,
+      today: TODAY,
+      trips: [back],
+      carriedTrips: [out],
+      invoices: [invoice([line({ lineId: "L-CNT", tripIds: [out.id, back.id] })])],
+      purchaseOrders: [],
+    });
+  }
+
+  it("defines unpriced in one predicate: null amount AND not counted", () => {
+    expect(isUnpricedGroup({ amountCad: null, amountNote: "counted" })).toBe(false);
+    expect(isUnpricedGroup({ amountCad: null, amountNote: "unavailable" })).toBe(true);
+    expect(isUnpricedGroup({ amountCad: null, amountNote: "manual" })).toBe(true);
+    expect(isUnpricedGroup({ amountCad: null, amountNote: null })).toBe(true); // split PO / no rate
+    expect(isUnpricedGroup({ amountCad: 0, amountNote: null })).toBe(false);
+    expect(isUnpricedGroup({ amountCad: RATE, amountNote: null })).toBe(false);
+  });
+
+  it("keeps the counted row out of every unpriced count — bucket, section, totals", () => {
+    const report = straddle();
+    const counted = bucket(report, "invoiced").groups[0];
+    expect(counted.amountNote).toBe("counted");
+    expect(counted.amountCad).toBeNull();
+    expect(bucket(report, "invoiced").unpricedCount).toBe(0);
+    expect(section(report, "owed").unpricedCount).toBe(0);
+    expect(accrualTotals(report).unpricedCount).toBe(0);
+    // The money is still exactly one $500 line, in Settled.
+    expect(accrualTotals(report).actualCad).toBe(RATE);
+    expect(section(report, "settled").actualCad).toBe(RATE);
+  });
+
+  it("reads Monies owed as $0.00 with no unpriced clause — never 'Not priced'", () => {
+    const owed = accrualHeadlines(straddle()).find((h) => h.id === "owed")!;
+    expect(owed.amountCad).toBe("$0.00");
+    expect(owed.detail).toBe("1 trip · 1 from an earlier month");
+  });
+
+  it("still reads 'Not priced' when a genuinely unpriced row is the only one", () => {
+    // The other side of the boundary: the counted exclusion must not swallow
+    // a real unpriced row (here, a count of one).
+    expect(accrualTallyAmountLabel({ count: 1, actualCad: 0, estimatedCad: 0, unpricedCount: 1 })).toBe(
+      "Not priced",
+    );
+    expect(accrualTallyAmountLabel({ count: 1, actualCad: 0, estimatedCad: 0, unpricedCount: 0 })).toBe("$0.00");
+  });
+
+  it("sends no '(N unpriced)' in the email's trips cells and no unpriced in the clipboard", () => {
+    const report = straddle();
+    const payload = accrualsEmailPayload(report);
+    for (const row of payload.summary) expect(row.roundTrips).not.toContain("unpriced");
+    const byLabel = (label: string) => payload.summary.find((r) => r.bucketLabel === label)!;
+    expect(byLabel("Monies owed")).toMatchObject({ roundTrips: "1", amountCad: "$0.00" });
+    expect(byLabel("Invoiced")).toMatchObject({ roundTrips: "1", amountCad: "$0.00" });
+    expect(payload.headline.find((h) => h.label === "Monies owed")).toMatchObject({
+      amountCad: "$0.00",
+      detail: "1 trip · 1 from an earlier month",
+    });
+    const text = accrualsClipboardText(report);
+    expect(text).not.toContain("unpriced");
+    expect(text).not.toContain("Not priced");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fetchCarriedTrips — the screen's carry-forward fetch, with `list` injected
+// ---------------------------------------------------------------------------
+
+describe("fetchCarriedTrips", () => {
+  const page = (items: TripRecord[]): TripPage => ({
+    items,
+    page: null,
+    pageSize: null,
+    totalCount: items.length,
+  });
+
+  /** A fake listTrips: records every call, answers from `byStatus`. */
+  function fakeList(byStatus: Partial<Record<string, TripRecord[] | "reject">> = {}) {
+    const calls: TripListParams[] = [];
+    const list = async (p: TripListParams): Promise<TripPage> => {
+      calls.push(p);
+      const answer = byStatus[p.status ?? ""] ?? [];
+      if (answer === "reject") throw new Error("403");
+      return page(answer);
+    };
+    return { list, calls };
+  }
+
+  it("asks for exactly the four open statuses, up to the day before the period, unpaged", async () => {
+    const { list, calls } = fakeList();
+    await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD });
+    expect(calls.map((c) => c.status)).toEqual([...ACCRUAL_OPEN_STATUSES]);
+    expect(calls.map((c) => c.status).sort()).toEqual(["InProgress", "Invoiced", "ReadyForBilling", "Scheduled"]);
+    for (const c of calls) {
+      // Exactly { to, clientId, status } — no `from` (open-ended back), no
+      // paging params (unpaged = the complete match), nothing else.
+      expect(c).toEqual({ to: "2026-08-31", clientId: "c1", status: c.status });
+      expect(c.to).toBe(carryForwardThrough(PERIOD));
+      expect("from" in c).toBe(false);
+      expect("page" in c).toBe(false);
+      expect("pageSize" in c).toBe(false);
+    }
+  });
+
+  it("dedupes a trip returned by two of the calls", async () => {
+    const a = trip({ status: "Invoiced", serviceDate: "2026-08-10" });
+    const b = trip({ status: "ReadyForBilling", serviceDate: "2026-08-11" });
+    // `a` changed status between calls and came back under both.
+    const { list } = fakeList({ Invoiced: [a], ReadyForBilling: [b, { ...a, status: "ReadyForBilling" }] });
+    const got = await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD });
+    expect(got).not.toBeNull();
+    expect(got!.map((t) => t.id).sort()).toEqual([a.id, b.id].sort());
+  });
+
+  it("fails as ONE group: any rejected call → null, never a partial list", async () => {
+    const a = trip({ status: "Invoiced", serviceDate: "2026-08-10" });
+    const { list, calls } = fakeList({ Invoiced: [a], Scheduled: "reject" });
+    expect(await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD })).toBeNull();
+    expect(calls).toHaveLength(ACCRUAL_OPEN_STATUSES.length);
+  });
+
+  it("returns null when the list function throws synchronously", async () => {
+    const list = (): Promise<TripPage> => {
+      throw new Error("boom");
+    };
+    expect(await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD })).toBeNull();
+  });
+
+  it("returns [] — not null — when every call comes back empty", async () => {
+    const { list } = fakeList();
+    expect(await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD })).toEqual([]);
+  });
+
+  it("crosses a year boundary for `to`", async () => {
+    const { list, calls } = fakeList();
+    await fetchCarriedTrips(list, { clientId: "c9", period: { start: "2027-01-01" } });
+    expect(calls).toHaveLength(4);
+    expect(calls.every((c) => c.to === "2026-12-31" && c.clientId === "c9")).toBe(true);
   });
 });
