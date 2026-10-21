@@ -38,6 +38,9 @@ public sealed class DriverConfiguration : IEntityTypeConfiguration<Driver>
         builder.Property(d => d.PriorRecordsNote).HasColumnName("prior_records_note").HasMaxLength(Driver.PriorRecordsNoteMaxLength);
         builder.Property(d => d.WorksForOtherCarriers).HasColumnName("works_for_other_carriers");
 
+        // The Motive (ELD) user id the HOS sync will match on.
+        builder.Property(d => d.MotiveUserId).HasColumnName("motive_user_id").HasMaxLength(Driver.MotiveUserIdMaxLength);
+
         // Roster lists sort/search by name; duplicates are legal (two J. Spences can drive).
         builder.HasIndex(d => new { d.TenantId, d.Name });
 
@@ -50,6 +53,13 @@ public sealed class DriverConfiguration : IEntityTypeConfiguration<Driver>
         builder.HasIndex(d => d.UserId)
             .IsUnique()
             .HasFilter("user_id IS NOT NULL");
+
+        // One Motive user, one driver — per tenant (unlike user_id, a Motive id is only unique
+        // inside one Motive company account, and each tenant brings its own). Partial on NOT
+        // NULL for the same reason as user_id: most drivers are not on a regulated vehicle.
+        builder.HasIndex(d => new { d.TenantId, d.MotiveUserId })
+            .IsUnique()
+            .HasFilter("motive_user_id IS NOT NULL");
 
         // DomainEvents ignore + Version concurrency token come from ModuleDbContext's
         // central aggregate conventions.

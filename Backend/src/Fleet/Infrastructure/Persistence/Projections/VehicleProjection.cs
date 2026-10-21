@@ -35,6 +35,7 @@ internal sealed class VehicleProjection : FleetProjection<Vehicle, VehicleReadMo
         row.CreatedAtUtc = source.CreatedAtUtc;
         row.UpdatedAtUtc = source.UpdatedAtUtc;
         row.Version = source.Version;
+        row.MotiveVehicleId = source.MotiveVehicleId;
 
         // Derived — the aggregate is the only implementation.
         row.RequiresPeriodicInspection = source.RequiresPeriodicInspection;

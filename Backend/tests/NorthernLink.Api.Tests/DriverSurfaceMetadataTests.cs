@@ -201,6 +201,12 @@ public class DriverSurfaceMetadataTests : IAsyncLifetime
     [InlineData("POST", "/api/drivers/{driverId:guid}/clearances")]
     [InlineData("POST", "/api/drivers/{id:guid}/user")]
     [InlineData("DELETE", "/api/drivers/{id:guid}/user")]
+    // The Motive (ELD) mappings: which Motive user's logs land on a driver's ledger, and whether a
+    // bus is regulated. A driver must not be able to re-point either.
+    [InlineData("PUT", "/api/drivers/{id:guid}/motive")]
+    [InlineData("DELETE", "/api/drivers/{id:guid}/motive")]
+    [InlineData("PUT", "/api/fleet/vehicles/{id:guid}/motive")]
+    [InlineData("DELETE", "/api/fleet/vehicles/{id:guid}/motive")]
     public void Dispatch_only_routes_never_carry_the_wider_DriverAccess_policy(string method, string pattern)
     {
         var endpoint = Endpoint(method, pattern);

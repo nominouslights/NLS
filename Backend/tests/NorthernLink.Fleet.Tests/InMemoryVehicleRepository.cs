@@ -35,6 +35,13 @@ internal sealed class InMemoryVehicleRepository : IVehicleRepository
         Task.FromResult(Vehicles.Any(v =>
             v.UnitNumber == unitNumber && (excludeVehicleId is null || v.Id != excludeVehicleId)));
 
+    public Task<bool> ExistsByMotiveVehicleIdAsync(
+        string motiveVehicleId,
+        Guid? excludeVehicleId = null,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(Vehicles.Any(v =>
+            v.MotiveVehicleId == motiveVehicleId && (excludeVehicleId is null || v.Id != excludeVehicleId)));
+
     public void Add(Vehicle vehicle) => Vehicles.Add(vehicle);
 
     public void AddCertificate(RetirementCertificate certificate) => Certificates.Add(certificate);

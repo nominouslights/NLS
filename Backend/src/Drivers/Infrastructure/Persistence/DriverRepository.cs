@@ -13,6 +13,9 @@ internal sealed class DriverRepository(DriversDbContext context) : IDriverReposi
     public Task<Driver?> GetByUserIdAsync(Guid userId, CancellationToken cancellationToken = default) =>
         context.Drivers.FirstOrDefaultAsync(d => d.UserId == userId, cancellationToken);
 
+    public Task<Driver?> GetByMotiveUserIdAsync(string motiveUserId, CancellationToken cancellationToken = default) =>
+        context.Drivers.FirstOrDefaultAsync(d => d.MotiveUserId == motiveUserId, cancellationToken);
+
     public void Add(Driver driver) => context.Drivers.Add(driver);
 
     public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>

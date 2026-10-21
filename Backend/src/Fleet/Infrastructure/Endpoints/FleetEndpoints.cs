@@ -33,6 +33,11 @@ public static partial class FleetEndpoints
         vehicles.MapPost("{id:guid}/dispose", DisposeVehicle);
         vehicles.MapGet("{id:guid}/retirement-certificate", GetRetirementCertificate);
 
+        // The Motive (ELD) link — the per-vehicle "regulated" flag. Its own pair of routes, not a
+        // field on the PUT above: whether Motive owns a bus's hours is not a roster detail.
+        vehicles.MapPut("{id:guid}/motive", SetVehicleMotiveId);
+        vehicles.MapDelete("{id:guid}/motive", ClearVehicleMotiveId);
+
         // Compliance documents (metadata) — nested under their vehicle.
         vehicles.MapGet("{vehicleId:guid}/documents", GetVehicleDocuments);
         vehicles.MapPost("{vehicleId:guid}/documents", AddVehicleDocument);

@@ -48,6 +48,9 @@ public sealed class DriverReadModel
     public Guid? PriorRecordsAttestedByUserId { get; set; }
     public string? PriorRecordsNote { get; set; }
     public bool WorksForOtherCarriers { get; set; }
+
+    /// <summary>The Motive (ELD) user id, copied from the aggregate; null when unmapped.</summary>
+    public string? MotiveUserId { get; set; }
 }
 
 /// <summary>
@@ -91,5 +94,6 @@ public sealed class DriverReadModelConfiguration : IEntityTypeConfiguration<Driv
         builder.Property(d => d.PriorRecordsAttestedByUserId).HasColumnName("prior_records_attested_by_user_id");
         builder.Property(d => d.PriorRecordsNote).HasColumnName("prior_records_note");
         builder.Property(d => d.WorksForOtherCarriers).HasColumnName("works_for_other_carriers");
+        builder.Property(d => d.MotiveUserId).HasColumnName("motive_user_id");
     }
 }

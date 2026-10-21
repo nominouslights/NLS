@@ -16,6 +16,7 @@ using NorthernLink.Drivers.Application.Drivers.GetDrivers;
 using NorthernLink.Drivers.Application.Drivers.LinkUser;
 using NorthernLink.Drivers.Application.Drivers.Register;
 using NorthernLink.Drivers.Application.Drivers.SelfAccess;
+using NorthernLink.Drivers.Application.Drivers.SetMotiveUser;
 using NorthernLink.Drivers.Application.Drivers.UnlinkUser;
 using NorthernLink.Drivers.Application.Drivers.Update;
 using NorthernLink.Drivers.Domain.Drivers;
@@ -54,6 +55,12 @@ public static class DriversEndpoints
         // an access grant, not a roster detail.
         driverAdmin.MapPost("{id:guid}/user", LinkDriverUser);
         driverAdmin.MapDelete("{id:guid}/user", UnlinkDriverUser);
+
+        // Motive (ELD) mapping — whose Motive duty-status logs the HOS sync will mirror onto this
+        // driver's ledger. Roster administration, so dispatch-only like the Identity link, and its
+        // own pair of routes rather than a field on the roster form.
+        driverAdmin.MapPut("{id:guid}/motive", SetDriverMotiveUserId);
+        driverAdmin.MapDelete("{id:guid}/motive", ClearDriverMotiveUserId);
 
         // Compliance credentials — nested under their driver. Writes are dispatch-only.
         driverAdmin.MapPost("{driverId:guid}/credentials", AddDriverCredential);
@@ -157,6 +164,33 @@ public static class DriversEndpoints
         }
 
         var result = await sender.Send(new UnlinkDriverUserCommand(tenantId, id), cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> SetDriverMotiveUserId(
+        Guid id, SetDriverMotiveUserIdRequest request, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        // A missing value is sent as "" so the aggregate refuses it (MotiveUserIdRequired)
+        // instead of reading it as "clear" — clearing is the DELETE.
+        var result = await sender.Send(
+            new SetDriverMotiveUserIdCommand(tenantId, id, request.MotiveUserId ?? string.Empty), cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> ClearDriverMotiveUserId(
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(new SetDriverMotiveUserIdCommand(tenantId, id, null), cancellationToken);
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
@@ -477,3 +511,10 @@ public sealed record DriverClearanceRequest(
 
 /// <summary>Request body for POST /api/drivers/{id}/user — the account's <c>sub</c>.</summary>
 public sealed record LinkDriverUserRequest(Guid UserId);
+
+/// <summary>
+/// Request body for PUT /api/drivers/{id}/motive — the driver's Motive user id as a string
+/// (Motive's JSON carries an integer; send it as text). Trimmed, at most 64 characters, unique per
+/// tenant. DELETE on the same route clears it.
+/// </summary>
+public sealed record SetDriverMotiveUserIdRequest(string? MotiveUserId);

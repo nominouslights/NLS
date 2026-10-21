@@ -48,6 +48,7 @@ using NorthernLink.Fleet.Application.Vehicles.GetRetirementCertificate;
 using NorthernLink.Fleet.Application.Vehicles.GetVehicleById;
 using NorthernLink.Fleet.Application.Vehicles.GetVehicles;
 using NorthernLink.Fleet.Application.Vehicles.RecordOdometer;
+using NorthernLink.Fleet.Application.Vehicles.SetMotiveId;
 using NorthernLink.Fleet.Application.Vehicles.Register;
 using NorthernLink.Fleet.Application.Vehicles.Update;
 using NorthernLink.Fleet.Application.Vehicles;
@@ -118,6 +119,7 @@ public static class FleetServiceCollectionExtensions
         // 3. Command/query handlers — registered explicitly, one line per handler.
         services.AddScoped<ICommandHandler<RegisterVehicleCommand, Guid>, RegisterVehicleCommandHandler>();
         services.AddScoped<ICommandHandler<UpdateVehicleCommand>, UpdateVehicleCommandHandler>();
+        services.AddScoped<ICommandHandler<SetVehicleMotiveIdCommand>, SetVehicleMotiveIdCommandHandler>();
         services.AddScoped<ICommandHandler<ChangeVehicleStatusCommand>, ChangeVehicleStatusCommandHandler>();
         services.AddScoped<ICommandHandler<RecordOdometerCommand>, RecordOdometerCommandHandler>();
         services.AddScoped<ICommandHandler<DisposeVehicleCommand>, DisposeVehicleCommandHandler>();

@@ -32,6 +32,14 @@ internal sealed class VehicleRepository(FleetDbContext context) : IVehicleReposi
             v => v.UnitNumber == unitNumber && (excludeVehicleId == null || v.Id != excludeVehicleId),
             cancellationToken);
 
+    public Task<bool> ExistsByMotiveVehicleIdAsync(
+        string motiveVehicleId,
+        Guid? excludeVehicleId = null,
+        CancellationToken cancellationToken = default) =>
+        context.Vehicles.AnyAsync(
+            v => v.MotiveVehicleId == motiveVehicleId && (excludeVehicleId == null || v.Id != excludeVehicleId),
+            cancellationToken);
+
     public void Add(Vehicle vehicle) => context.Vehicles.Add(vehicle);
 
     public void AddCertificate(RetirementCertificate certificate) =>
