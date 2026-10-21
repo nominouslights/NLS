@@ -5,6 +5,25 @@
 // about a bucket, a pairing, or a dollar. Sibling of tripDetail.ts, and shaped
 // so an email payload mapper (Part B) can be added here without reshaping it.
 //
+// What a month's report covers — CARRY FORWARD. The report for a month is every
+// trip of the client whose serviceDate falls inside the month, PLUS every
+// earlier trip that is not yet completed: ReadyForBilling, Invoiced, InProgress
+// or Scheduled (ACCRUAL_OPEN_STATUSES). An amount still owing from August is
+// still owed in September, so it belongs in September's Monies owed headline.
+// Completed (= paid), Cancelled and WrittenOff trips before the month are closed
+// and stay out, and later months never come in. The rule is enforced HERE
+// (isCarriedForwardTrip), not only by the screen's fetch, and carried trips go
+// through the SAME sort, partition, grouping, claim rule and split-PO check as
+// the month's own — so a round trip straddling the month boundary is one group,
+// priced once, and an invoice line is still claimed at most once. A carried
+// group is marked (AccrualGroup.carriedForward, groupDateText) on every output
+// — as a plain tag, never a status colour, and never as an age or a due date:
+// this report does no AR aging (netTermsDays is informational only).
+//
+// Four buckets: Paid, Invoiced, Ready for billing, Scheduled. "Scheduled" holds
+// every Scheduled and InProgress trip regardless of date — scheduled and
+// upcoming are the same thing, by the owner's decision.
+//
 // Ground rules, in order of how much they bite:
 //   - The money-bearing unit is a ROUND-TRIP GROUP, and what defines the group
 //     depends on whether the work has been billed yet:
@@ -16,7 +35,7 @@
 //         into two groups that each resolve to that one line and each claim its
 //         full amount — the bucket total doubles. Group by line and the report
 //         mirrors the invoice by construction.
-//       * UNBILLED (ready / scheduled / upcoming) → roundTripKey, falling back
+//       * UNBILLED (ready / scheduled) → roundTripKey, falling back
 //         to the trip's own id. There is no line yet, so the trip records are
 //         the only pairing signal there is; an unpaired leg stays unpaired
 //         rather than being guessed into a pair.
@@ -25,7 +44,7 @@
 //     claimed at most ONCE per report — so a line can never be counted twice,
 //     even if its legs somehow land in different buckets. Missing invoice →
 //     "amount unavailable", excluded from totals.
-//   - Estimates (ready / scheduled / upcoming) MIRROR the invoice generator leg
+//   - Estimates (ready / scheduled) MIRROR the invoice generator leg
 //     for leg — Backend/src/Billing/Domain/Invoices/InvoiceDraftBuilder.cs is
 //     the authority, and this file's job is to agree with it. Rates are
 //     PER PURCHASE ORDER, with the contract as the fallback, and there is now
@@ -92,7 +111,15 @@ import {
   type ClientRecord,
   type PurchaseOrderRecord,
 } from "@/lib/api/clients";
-import { corridorLabel, sortTrips, type TripRecord } from "@/lib/api/trips";
+import {
+  corridorLabel,
+  shortDateLabel,
+  sortTrips,
+  type TripListParams,
+  type TripPage,
+  type TripRecord,
+  type TripStatus,
+} from "@/lib/api/trips";
 import { periodLabel, type Period } from "@/lib/period";
 import type { StatusKind } from "@/lib/theme";
 
@@ -100,28 +127,25 @@ import type { StatusKind } from "@/lib/theme";
 // Buckets
 // ---------------------------------------------------------------------------
 
-export type AccrualBucketId = "paid" | "invoiced" | "ready" | "scheduled" | "upcoming";
+export type AccrualBucketId = "paid" | "invoiced" | "ready" | "scheduled";
 
 /**
  * Fixed bucket order — and NOT merely a display order, so do not reorder it to
  * change what the report leads with. It is the CLAIM order for the claimedLines
  * set below: buckets are built in this sequence, so when one invoice line's legs
  * land in two different buckets the earlier bucket carries the money and the
- * later row says "counted with the paired leg". Reordering these five ids
+ * later row says "counted with the paired leg". Reordering these four ids
  * silently moves dollars from one bucket to another and breaks nothing loudly.
+ * (Only the billed buckets — paid, invoiced — ever claim a line; estimate
+ * buckets never do. That is why folding the old "upcoming" bucket into
+ * "scheduled" moved no billed dollar.)
  *
  * Presentation order lives in ACCRUAL_SECTION_ORDER instead — a parallel view
  * over these same bucket objects, which is what the screen and the sheets lead
  * with. report.buckets stays in THIS order for the claim rule, the summary
- * table, accrualTotals, and the empty-month check.
+ * table, accrualTotals, and the empty-report check.
  */
-export const ACCRUAL_BUCKET_ORDER: AccrualBucketId[] = [
-  "paid",
-  "invoiced",
-  "ready",
-  "scheduled",
-  "upcoming",
-];
+export const ACCRUAL_BUCKET_ORDER: AccrualBucketId[] = ["paid", "invoiced", "ready", "scheduled"];
 
 /** Chip kind + label + one-line explainer per bucket. The kind pairs a colour
  *  with StatusChip's glyph and this label — colour never stands alone. */
@@ -132,17 +156,16 @@ export const ACCRUAL_BUCKET_META: Record<
   paid: { label: "Paid", kind: "ontime", hint: "Payment received — amounts are the issued invoice lines" },
   invoiced: { label: "Invoiced", kind: "info", hint: "Billed, awaiting payment — amounts are the issued invoice lines" },
   ready: { label: "Ready for billing", kind: "soon", hint: "Run complete, not yet invoiced — amounts are PO-rate estimates" },
-  scheduled: { label: "Scheduled", kind: "info", hint: "Run due or under way — amounts are PO-rate estimates" },
-  upcoming: { label: "Upcoming", kind: "off", hint: "Scheduled after today — amounts are PO-rate estimates" },
+  scheduled: { label: "Scheduled", kind: "info", hint: "Run not yet complete — amounts are PO-rate estimates" },
 };
 
 /**
  * Which accrual bucket a trip belongs to, or null for the reconciliation
- * section (Cancelled / WrittenOff — never counted as accruals). `today` splits
- * Scheduled: a service date after today is genuinely upcoming, on/before today
- * it is a run that should already be under way, counted with InProgress.
+ * section (Cancelled / WrittenOff — never counted as accruals). Scheduled and
+ * InProgress are one bucket regardless of the service date: a run not yet
+ * complete is the same thing whether it is due next week or under way today.
  */
-export function accrualBucketFor(t: TripRecord, today: string): AccrualBucketId | null {
+export function accrualBucketFor(t: TripRecord): AccrualBucketId | null {
   switch (t.status) {
     case "Completed":
       return "paid"; // Completed = payment arrived, for client trips
@@ -151,14 +174,98 @@ export function accrualBucketFor(t: TripRecord, today: string): AccrualBucketId 
     case "ReadyForBilling":
       return "ready"; // OnWorksheet drafts stay here — a draft is not an invoice
     case "InProgress":
-      return "scheduled";
     case "Scheduled":
-      return t.serviceDate > today ? "upcoming" : "scheduled";
+      return "scheduled";
     case "Cancelled":
     case "WrittenOff":
       return null;
     default:
       return t.status satisfies never;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Carry forward — earlier trips that are not yet completed
+// ---------------------------------------------------------------------------
+
+/**
+ * The statuses that keep an EARLIER trip on this month's report: everything
+ * that has not yet reached Completed (paid). Cancelled and WrittenOff are closed
+ * too and never carry. The screen fetches exactly these (one listTrips call per
+ * status), and the builder re-applies the rule, so it lives in one place.
+ *
+ * The ORDER matters: it is lifecycle order, the forward-only path through the
+ * open statuses in the backend's Trip.CanTransition (Scheduled → InProgress →
+ * ReadyForBilling → Invoiced, with Scheduled/InProgress → ReadyForBilling jumps;
+ * Invoiced → ReadyForBilling is deliberately absent). fetchCarriedTrips queries
+ * one status at a time in this order, so a trip that moves between two queries
+ * always lands in a status queried LATER and is still caught.
+ */
+export const ACCRUAL_OPEN_STATUSES: readonly TripStatus[] = [
+  "Scheduled",
+  "InProgress",
+  "ReadyForBilling",
+  "Invoiced",
+];
+
+/** Is this status "not yet completed" — i.e. would an earlier trip carry? */
+export function isOpenAccrualStatus(status: TripStatus): boolean {
+  return ACCRUAL_OPEN_STATUSES.includes(status);
+}
+
+/** Does this trip carry into `period`'s report: dated BEFORE the period (never
+ *  after it) and still open. ISO dates compare correctly as strings. */
+export function isCarriedForwardTrip(t: TripRecord, period: Period): boolean {
+  return t.serviceDate < period.start && isOpenAccrualStatus(t.status);
+}
+
+/** The last day the carry-forward fetch covers — the day before period.start,
+ *  as an ISO date (the trips list's `to` bound is inclusive). */
+export function carryForwardThrough(period: Pick<Period, "start">): string {
+  const [y, m, d] = period.start.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10);
+}
+
+/**
+ * The carry-forward fetch: every trip of the client dated before the period
+ * that is not yet completed. The trips list takes `to` without `from`
+ * (open-ended back) and ONE exact status, so this is one UNPAGED call per
+ * ACCRUAL_OPEN_STATUSES entry, `to` = carryForwardThrough(period).
+ *
+ * The calls run ONE AT A TIME in lifecycle order (ACCRUAL_OPEN_STATUSES), not
+ * in parallel. Transitions inside the open set only move forward, so a trip
+ * that changes status between two calls lands in a status a LATER call asks
+ * for — it can come back twice, never zero times. Parallel calls could run in
+ * any order on the server, and a trip moving ReadyForBilling → Invoiced after
+ * the Invoiced query but before the ReadyForBilling one would vanish from both
+ * while the result still looked complete. Results are deduped by id, last write
+ * wins (= the later status); the builder dedupes too. A trip LEAVING the open
+ * set mid-fetch (Completed/WrittenOff/Cancelled) is rightly dropped; the only
+ * way back in (Completed → Invoiced, a payment confirmation cleared in error)
+ * no query order can catch, and is accepted as a snapshot.
+ *
+ * The calls fail as ONE group: any rejection → null, never a partial list. A
+ * partial set would understate what is owed while looking complete, so the
+ * caller degrades to the month only and says so (carriedTripsUnavailable).
+ *
+ * `list` is injected (the screen passes listTrips) so the request shape and the
+ * fail-together rule are testable without a network.
+ */
+export async function fetchCarriedTrips(
+  list: (params: TripListParams) => Promise<TripPage>,
+  args: { clientId: string; period: Pick<Period, "start"> },
+): Promise<TripRecord[] | null> {
+  const to = carryForwardThrough(args.period);
+  try {
+    const byId = new Map<string, TripRecord>();
+    // Sequential on purpose — see the doc comment. Never Promise.all here.
+    for (const status of ACCRUAL_OPEN_STATUSES) {
+      const p = await list({ to, clientId: args.clientId, status });
+      for (const t of p.items) byId.set(t.id, t); // later call = later status, so the last write wins
+    }
+    return [...byId.values()];
+  } catch {
+    return null;
   }
 }
 
@@ -181,6 +288,7 @@ export const AMOUNT_NOTE_META: Record<AccrualAmountNote, { kind: StatusKind; lab
   manual: { kind: "soon", label: "Manual line — not estimated" },
   // Only reachable when one invoice line's legs land in different buckets: the
   // first bucket carries the money, this row says so rather than repeating it.
+  // PRICED, just elsewhere — so never part of unpricedCount (isUnpricedGroup).
   counted: { kind: "info", label: "Counted with the paired leg" },
 };
 
@@ -254,7 +362,8 @@ export interface AccrualGroup {
    *  two same-direction legs are not a pair. Unpaired no longer changes the
    *  price (it is still one full round trip), only the flag. */
   paired: boolean;
-  /** Dollars attributed to this group; null = unpriced (see amountNote and
+  /** Dollars attributed to this group; null = no figure on THIS row — unpriced
+   *  unless amountNote is "counted" (see isUnpricedGroup, amountNote and
    *  amountFlag — a split-PO group is null-with-a-flag, deliberately, because
    *  "$0.00" would read to a client as work performed for free). */
   amountCad: number | null;
@@ -268,6 +377,22 @@ export interface AccrualGroup {
   invoiceNumber: string | null;
   /** Draft worksheet already claiming the group — shown as "On worksheet …". */
   onWorksheetNumber: string | null;
+  /** True when the group's first leg (service order) is dated before the
+   *  report's period — work from an earlier month, not yet completed, carried
+   *  in. A plain marker (groupDateText), never a status colour or an age. */
+  carriedForward: boolean;
+}
+
+/**
+ * Is this group UNPRICED — no figure on it and none anywhere else in the
+ * report? The ONE definition every "unpriced" count derives from (bucket →
+ * section → accrualTotals → tally detail, "Not priced", the email's trips cell
+ * and the sheet's Unpriced column). A "counted" group has a null amount too,
+ * but it is priced: its invoice line's money is carried by an earlier bucket
+ * in claim order, and its own cell says "Counted with the paired leg".
+ */
+export function isUnpricedGroup(g: Pick<AccrualGroup, "amountCad" | "amountNote">): boolean {
+  return g.amountCad === null && g.amountNote !== "counted";
 }
 
 export interface AccrualBucket {
@@ -282,13 +407,17 @@ export interface AccrualBucket {
   actualCad: number;
   /** Sum of PO-rate estimates in this bucket (always shown " est."). */
   estimatedCad: number;
-  /** Groups carrying no amount at all — including a split-PO group, which is
-   *  unpriced ON PURPOSE and still needs a decision. */
+  /** Groups with no price anywhere (isUnpricedGroup) — including a split-PO
+   *  group, which is unpriced ON PURPOSE and still needs a decision. NOT a
+   *  "counted" group: its line's money is already in an earlier bucket. */
   unpricedCount: number;
+  /** Groups carried in from earlier months. Their money is already INSIDE
+   *  actualCad / estimatedCad — this count only feeds the detail line. */
+  carriedForwardCount: number;
 }
 
 // ---------------------------------------------------------------------------
-// Sections — the PRESENTATION grouping over the same five buckets. Two headline
+// Sections — the PRESENTATION grouping over the same four buckets. Two headline
 // questions lead the report ("what is coming" / "what do I owe"), and settled
 // money closes it on one line. No dollar moves between buckets to make this
 // happen: a section simply holds references to the bucket objects it covers.
@@ -316,14 +445,14 @@ export const ACCRUAL_SECTION_META: Record<
   upcoming: {
     label: "Upcoming work — not yet done",
     kind: "soon",
-    hint: "Scheduled trips not yet run — amounts are PO-rate estimates",
-    buckets: ["upcoming", "scheduled"],
+    hint: "Scheduled or under-way trips not yet complete — amounts are PO-rate estimates",
+    buckets: ["scheduled"],
     detail: true,
   },
   owed: {
     label: "Monies owed",
     kind: "info",
-    hint: "Work already performed — issued invoices plus runs not yet billed",
+    hint: "Work already performed — issued invoices plus runs not yet billed, earlier months included",
     buckets: ["ready", "invoiced"],
     detail: true,
   },
@@ -350,12 +479,16 @@ export interface AccrualSection {
   actualCad: number;
   estimatedCad: number;
   unpricedCount: number;
+  /** Sum of the member buckets' carriedForwardCount. */
+  carriedForwardCount: number;
   detail: boolean;
 }
 
 // ---------------------------------------------------------------------------
 // Purchase-order authorisation — the payoff for the upcoming-expenses headline:
 // what each PO authorises against what this period's work draws down on it.
+// THIS period's work only: groups carried in from earlier months are left out,
+// so "invoiced in this period" and "upcoming" stay literally true.
 // Money already invoiced plus work not yet billed, per PO, so a PO about to be
 // overspent is visible BEFORE the run happens rather than at invoice time.
 // A breach warns; it never blocks (owner's decision).
@@ -371,7 +504,7 @@ export interface AccrualPoCommitment {
   amountCad: number | null;
   /** Real invoice dollars in this period's buckets (invoiced + paid). */
   invoicedCad: number;
-  /** Estimated dollars for work not yet billed (ready + scheduled + upcoming). */
+  /** Estimated dollars for this period's work not yet billed (ready + scheduled). */
   upcomingCad: number;
   /** invoicedCad + upcomingCad. */
   committedCad: number;
@@ -389,27 +522,42 @@ export interface AccrualPoCommitment {
 export interface AccrualsReport {
   client: ClientRecord;
   period: Period;
-  /** The local operational day the scheduled/upcoming split was made against. */
+  /** The local operational day the report was prepared (its "Prepared" date). */
   today: string;
-  /** All five buckets in ACCRUAL_BUCKET_ORDER — empty buckets included. This is
+  /** All four buckets in ACCRUAL_BUCKET_ORDER — empty buckets included. This is
    *  the claim order and the summary table; read `sections` to render. */
   buckets: AccrualBucket[];
   /** The same buckets grouped for reading, in ACCRUAL_SECTION_ORDER. */
   sections: AccrualSection[];
-  /** Cancelled trips with reasons — reconciliation, never counted as accruals. */
+  /** Cancelled trips with reasons — reconciliation, never counted as accruals.
+   *  This month's only (earlier cancelled trips are closed and never carry). */
   cancelled: TripRecord[];
-  /** Written-off groups with reasons + lost amounts — reconciliation. */
+  /** Written-off groups with reasons + lost amounts — reconciliation, this
+   *  month's only. */
   writtenOff: AccrualGroup[];
-  /** The fetched invoices behind the real amounts. */
+  /** The fetched invoices behind the real amounts — those of every trip on the
+   *  report, carried-forward trips included. */
   invoices: InvoiceDetailRecord[];
   /** One row per PO this period's work was priced under, in PO-number order
-   *  (a no-PO row last). Rendered by the screen and the printed sheet; the
+   *  (a no-PO row last), carried-forward groups excluded. Rendered by the
+   *  screen and the printed sheet; the
    *  overage warnings also ride `notes`, so all four consumers carry them. */
   poCommitments: AccrualPoCommitment[];
   /** Degradation banners: manual billing, missing rate, failed fetches,
    *  unpaired full-rate groups, split-PO pairs, trips outside their PO window,
-   *  POs over their authorised value, and no-key groups left for a manual line. */
+   *  POs over their authorised value, and no-key groups left for a manual line.
+   *  Warnings ONLY — every output renders them as one (gold badge on screen,
+   *  the .warn box on the sheet), so the plain carried-forward count is NOT
+   *  here: read accrualsCarriedForwardNote for that. */
   notes: string[];
+  /** Groups carried in from earlier months — the sum of the buckets'
+   *  carriedForwardCount, held once so no output recounts it. */
+  carriedForwardCount: number;
+  /** True when the carry-forward fetch failed. Its banner rides `notes`; this
+   *  flag is what the empty-state and header wording branch on, so a month
+   *  with no trips of its own never reads as a nil statement while earlier
+   *  months' money is unknown. */
+  carriedTripsUnavailable: boolean;
 }
 
 /** Footer wording shared by the screen, the printed sheet, and the clipboard. */
@@ -476,13 +624,22 @@ function issuedRef(legs: TripRecord[]): string | null {
 export function buildAccrualsReport(args: {
   client: ClientRecord;
   period: Period;
-  /** From todayIso() — passed in so the derivation stays pure and testable. */
+  /** From todayIso() — the Prepared date. Passed in so the derivation stays
+   *  pure and testable; it no longer decides any bucket. */
   today: string;
   /** Every trip for the client in the period (listTrips unpaged = complete). */
   trips: TripRecord[];
+  /** The client's trips dated BEFORE the period that are not yet completed
+   *  (ACCRUAL_OPEN_STATUSES). Re-filtered here with isCarriedForwardTrip, so a
+   *  stray Completed / Cancelled / later-month trip can never carry in. */
+  carriedTrips?: TripRecord[];
+  /** True when the carry-forward fetch failed. The report degrades to this
+   *  month only, with a banner — it never reads as "nothing carried forward". */
+  carriedTripsUnavailable?: boolean;
   /** Successfully fetched invoice details for the billing.invoiceIds the trips
-   *  reference. A referenced id missing here reads as a failed fetch — the
-   *  affected amounts degrade to "unavailable", never to a guess. */
+   *  (month + carried) reference. A referenced id missing here reads as a
+   *  failed fetch — the affected amounts degrade to "unavailable", never to a
+   *  guess. */
   invoices: InvoiceDetailRecord[];
   /** Every PO on file for the client (listPurchaseOrders). Their rates override
    *  the contract rate; an empty list prices exactly as it did before per-PO
@@ -493,6 +650,17 @@ export function buildAccrualsReport(args: {
   purchaseOrdersUnavailable?: boolean;
 }): AccrualsReport {
   const { client, period, today, invoices, purchaseOrders } = args;
+
+  // Month trips plus the carried-forward ones, deduped by id (month copy wins).
+  // ONE list from here on: one sort, one partition, one grouping, one claim
+  // rule — which is what makes a round trip straddling the month boundary a
+  // single group priced once, rather than one half in each report.
+  const tripsById = new Map<string, TripRecord>();
+  for (const t of args.trips) if (!tripsById.has(t.id)) tripsById.set(t.id, t);
+  for (const t of args.carriedTrips ?? []) {
+    if (isCarriedForwardTrip(t, period) && !tripsById.has(t.id)) tripsById.set(t.id, t);
+  }
+  const isCarried = (legs: TripRecord[]): boolean => legs[0].serviceDate < period.start;
 
   // Real amounts resolve trip → invoice line. A trip is claimed by at most one
   // line (the backend rejects double-invoicing), so first-hit is authoritative.
@@ -519,19 +687,20 @@ export function buildAccrualsReport(args: {
   const poRecord = (poNumber: string | null): PurchaseOrderRecord | null =>
     poNumber ? poByNumber.get(poNumber) ?? null : null;
 
-  // Partition the month into buckets + the two reconciliation lists.
-  const sorted = sortTrips(args.trips);
+  // Partition into buckets + the two reconciliation lists. Carried trips are
+  // open by construction, so they only ever reach a bucket — the
+  // reconciliation lists stay this month's.
+  const sorted = sortTrips([...tripsById.values()]);
   const byBucket: Record<AccrualBucketId, TripRecord[]> = {
     paid: [],
     invoiced: [],
     ready: [],
     scheduled: [],
-    upcoming: [],
   };
   const cancelled: TripRecord[] = [];
   const writtenOffTrips: TripRecord[] = [];
   for (const t of sorted) {
-    const bucket = accrualBucketFor(t, today);
+    const bucket = accrualBucketFor(t);
     if (bucket) byBucket[bucket].push(t);
     else if (t.status === "Cancelled") cancelled.push(t);
     else writtenOffTrips.push(t);
@@ -580,7 +749,7 @@ export function buildAccrualsReport(args: {
   // routinely straddle buckets (one still Scheduled, its return already
   // ReadyForBilling) and the split is a property of the round trip, not a bucket.
   const posByRoundTripKey = new Map<string, Set<string>>();
-  for (const t of [...byBucket.ready, ...byBucket.scheduled, ...byBucket.upcoming]) {
+  for (const t of [...byBucket.ready, ...byBucket.scheduled]) {
     if (!t.roundTripKey) continue;
     const seen = posByRoundTripKey.get(t.roundTripKey) ?? new Set<string>();
     seen.add(effectivePo(t) ?? "");
@@ -657,6 +826,7 @@ export function buildAccrualsReport(args: {
       ...(realAmounts ? invoiceAmount(legs) : estimateAmount(legs, paired, poNumber)),
       invoiceNumber: realAmounts ? issuedRef(legs) : null,
       onWorksheetNumber: onWorksheet?.invoiceNumber ?? null,
+      carriedForward: isCarried(legs),
     };
   }
 
@@ -676,7 +846,8 @@ export function buildAccrualsReport(args: {
       groups,
       actualCad: groups.reduce((s, g) => s + (g.amountSource === "invoice" ? g.amountCad ?? 0 : 0), 0),
       estimatedCad: groups.reduce((s, g) => s + (g.amountSource === "estimate" ? g.amountCad ?? 0 : 0), 0),
-      unpricedCount: groups.filter((g) => g.amountCad === null).length,
+      unpricedCount: groups.filter(isUnpricedGroup).length,
+      carriedForwardCount: groups.filter((g) => g.carriedForward).length,
     };
   });
 
@@ -693,12 +864,18 @@ export function buildAccrualsReport(args: {
   // Invoiced dollars are real invoice-line money (invoiced + paid); upcoming is
   // the estimate for work not yet billed. Reconciliation (cancelled /
   // written-off) is excluded — it is not accruing against the PO.
+  // Carried-forward groups are excluded too, deliberately: this block and its
+  // overage banner say "invoiced in this period" and "upcoming", and an
+  // August invoice still awaiting payment is neither. Their money is still in
+  // the buckets, sections and headlines (Monies owed) — only this draw-down
+  // view is limited to the period's own work.
   const commitmentRows = new Map<
     string,
     { poNumber: string | null; invoicedCad: number; upcomingCad: number }
   >();
   for (const b of buckets) {
     for (const g of b.groups) {
+      if (g.carriedForward) continue;
       const key = g.poNumber ?? "";
       const row = commitmentRows.get(key) ?? { poNumber: g.poNumber, invoicedCad: 0, upcomingCad: 0 };
       if (g.amountSource === "invoice") row.invoicedCad += g.amountCad ?? 0;
@@ -757,6 +934,15 @@ export function buildAccrualsReport(args: {
         `${formatInvoiceCad(c.overageCad)} over. Warning only — nothing is blocked.`,
     );
   }
+  if (args.carriedTripsUnavailable) {
+    notes.push(
+      "Open trips from earlier months could not be loaded — this report shows this month's trips only, so amounts still owing from earlier months are missing.",
+    );
+  }
+  // The count of carried groups is deliberately NOT a note: notes render as
+  // warnings everywhere, and carry-forward is normal behaviour, not a warn
+  // state. It rides report.carriedForwardCount (accrualsCarriedForwardNote).
+  const carriedForwardCount = buckets.reduce((s, b) => s + b.carriedForwardCount, 0);
   if (args.purchaseOrdersUnavailable) {
     notes.push(
       "Purchase orders could not be loaded — estimates fall back to the contract round-trip rate, so a PO carrying its own rates is not reflected and PO values are not checked.",
@@ -774,8 +960,12 @@ export function buildAccrualsReport(args: {
     );
   }
   // …but a PO can price work the contract cannot: say so rather than letting the
-  // banner above read as "nothing on this report is estimated".
-  if (contractRate === null && poCommitments.some((c) => c.po?.roundTripRateCad != null)) {
+  // banner above read as "nothing on this report is estimated". Read off the
+  // priced GROUPS, not poCommitments: those exclude carried-forward work, and a
+  // carried run priced at its PO's own rate is still an estimate on this
+  // report. With no contract rate, every estimate came from a PO rate.
+  const allGroups = buckets.flatMap((b) => b.groups);
+  if (contractRate === null && allGroups.some((g) => g.amountSource === "estimate")) {
     notes.push(
       "Some purchase orders record their own round-trip rate — trips priced under those POs are still estimated, from the PO rather than the contract.",
     );
@@ -786,7 +976,6 @@ export function buildAccrualsReport(args: {
       `${n} referenced invoice${n === 1 ? "" : "s"} could not be loaded — affected amounts show as unavailable and are excluded from totals.`,
     );
   }
-  const allGroups = buckets.flatMap((b) => b.groups);
   const unpairedCount = allGroups.filter((g) => g.amountFlag === "unpaired").length;
   if (unpairedCount > 0) {
     notes.push(
@@ -832,6 +1021,7 @@ export function buildAccrualsReport(args: {
       actualCad: members.reduce((s, b) => s + b.actualCad, 0),
       estimatedCad: members.reduce((s, b) => s + b.estimatedCad, 0),
       unpricedCount: members.reduce((s, b) => s + b.unpricedCount, 0),
+      carriedForwardCount: members.reduce((s, b) => s + b.carriedForwardCount, 0),
     };
   });
 
@@ -846,6 +1036,8 @@ export function buildAccrualsReport(args: {
     invoices: [...invoices].sort((a, b) => a.invoiceNumber.localeCompare(b.invoiceNumber)),
     poCommitments,
     notes,
+    carriedForwardCount,
+    carriedTripsUnavailable: args.carriedTripsUnavailable === true,
   };
 }
 
@@ -995,7 +1187,50 @@ export interface AccrualTotals {
   unpricedCount: number;
 }
 
-/** Whole-report totals across the five buckets (reconciliation excluded). */
+/**
+ * Is there nothing at all on this report — no group in any bucket (carried-
+ * forward groups included) and no reconciliation row? The ONE empty test, read
+ * by the screen and the printed sheet alike, so a month with no trips of its
+ * own but open work carried in from earlier months still renders its sections
+ * everywhere rather than printing a nil statement over money still owed.
+ */
+export function accrualsReportIsEmpty(report: AccrualsReport): boolean {
+  return (
+    report.buckets.every((b) => b.groups.length === 0) &&
+    report.cancelled.length === 0 &&
+    report.writtenOff.length === 0
+  );
+}
+
+/**
+ * The empty-report sentence for the colourless outputs (printed sheet,
+ * clipboard) — or null when the report is not empty. When the carry-forward
+ * fetch failed it is NOT a nil statement: this month has nothing of its own,
+ * but what is still owed from earlier months is unknown, and it says so.
+ */
+export function accrualsEmptyText(report: AccrualsReport): string | null {
+  if (!accrualsReportIsEmpty(report)) return null;
+  return report.carriedTripsUnavailable
+    ? "No trips for this client in the period. Open trips from earlier months could not be loaded, so this is NOT a nil statement — amounts still owing from earlier months are unknown."
+    : "No trips for this client in the period.";
+}
+
+/**
+ * The informational carried-forward sentence — or null when nothing carried
+ * in. Kept OUT of report.notes on purpose: notes render as warnings, and
+ * carry-forward is the report working as designed. The screen shows it as
+ * muted text and the sheet and clipboard as a plain line; the email leaves it
+ * out, its rows and tally lines already marking the work.
+ */
+export function accrualsCarriedForwardNote(report: AccrualsReport): string | null {
+  const n = report.carriedForwardCount;
+  if (n === 0) return null;
+  return n === 1
+    ? "1 trip from an earlier month is not yet completed and is carried into this report."
+    : `${n} trips from earlier months are not yet completed and are carried into this report.`;
+}
+
+/** Whole-report totals across the four buckets (reconciliation excluded). */
 export function accrualTotals(report: AccrualsReport): AccrualTotals {
   return report.buckets.reduce<AccrualTotals>(
     (acc, b) => ({
@@ -1039,9 +1274,14 @@ export interface AccrualTallyInput {
   actualCad: number;
   estimatedCad: number;
   unpricedCount: number;
+  /** Groups carried in from earlier months — already inside the counts and
+   *  amounts above; this only adds "N from earlier months" to the line.
+   *  Optional so a whole-report tally that does not care can omit it. */
+  carriedForwardCount?: number;
 }
 
-/** Tally as one line — "3 trips · incl. $450.00 est. · 1 unpriced".
+/** Tally as one line — "5 trips · 2 from earlier months · incl. $450.00 est. ·
+ *  1 unpriced".
  *  There is ONE amount column everywhere now, so this sub-line is where a
  *  bucket that mixes billed and estimated money keeps the split recoverable:
  *  the merged figure alone would hide it. "Trips", not "round trips" — an
@@ -1049,6 +1289,8 @@ export interface AccrualTallyInput {
  *  trip is the wording the owner asked us to drop. */
 export function accrualTallyDetail(t: AccrualTallyInput): string {
   const parts = [`${t.count} trip${t.count === 1 ? "" : "s"}`];
+  const carried = t.carriedForwardCount ?? 0;
+  if (carried > 0) parts.push(`${carried} from ${carried === 1 ? "an earlier month" : "earlier months"}`);
   // Only when the figure itself is NOT already marked wholly estimated —
   // otherwise the subline would repeat what the amount already says.
   if (t.estimatedCad > 0 && t.actualCad > 0) {
@@ -1061,7 +1303,9 @@ export function accrualTallyDetail(t: AccrualTallyInput): string {
 /** The ONE merged amount: billed plus estimated as a single figure, carrying
  *  " est." when all of it is an estimate. Nothing priced at all reads "Not
  *  priced" rather than a false $0.00 (manual billing / no contract / no rate /
- *  a split-PO group awaiting a decision — the banner notes say which). */
+ *  a split-PO group awaiting a decision — the banner notes say which). A tally
+ *  whose only rows are "counted with the paired leg" is NOT unpriced — that
+ *  money is carried by an earlier bucket — so it reads a true "$0.00". */
 export function accrualTallyAmountLabel(t: AccrualTallyInput): string {
   const total = t.actualCad + t.estimatedCad;
   if (total === 0 && t.unpricedCount > 0) return "Not priced";
@@ -1076,6 +1320,7 @@ function sectionTally(section: AccrualSection): AccrualTallyInput {
     actualCad: section.actualCad,
     estimatedCad: section.estimatedCad,
     unpricedCount: section.unpricedCount,
+    carriedForwardCount: section.carriedForwardCount,
   };
 }
 
@@ -1085,6 +1330,7 @@ function bucketTally(bucket: AccrualBucket): AccrualTallyInput {
     actualCad: bucket.actualCad,
     estimatedCad: bucket.estimatedCad,
     unpricedCount: bucket.unpricedCount,
+    carriedForwardCount: bucket.carriedForwardCount,
   };
 }
 
@@ -1137,7 +1383,9 @@ export function accrualSettledLine(report: AccrualsReport): string {
   return `${settled.label} · ${accrualSectionDetail(settled)} · ${accrualSectionAmountLabel(settled)}`;
 }
 
-/** "$450.00" / "$450.00 est." — null when unpriced (render amountNote or "—"). */
+/** "$450.00" / "$450.00 est." — null when the group carries no figure of its
+ *  own (render amountFlag / amountNote or "—"; a "counted" group is null here
+ *  but NOT unpriced — see isUnpricedGroup). */
 export function groupAmountLabel(g: AccrualGroup): string | null {
   if (g.amountCad === null) return null;
   return g.amountSource === "estimate"
@@ -1177,6 +1425,30 @@ export function poCommitmentDetail(c: AccrualPoCommitment): string {
     `${formatInvoiceCad(c.invoicedCad)} invoiced in this period`,
     `${formatInvoiceCad(c.upcomingCad)} upcoming`,
   ].join(" · ");
+}
+
+/** Plain-text wording of the carried-forward marker — ONE string, so the
+ *  clipboard, the printed sheet and the emailed PDF word it identically. */
+export const CARRIED_FORWARD_LABEL = "from an earlier month";
+
+/** Date cell for the colourless outputs (clipboard, print, emailed PDF): the
+ *  first leg's ISO service date, plus " · from an earlier month" on a group
+ *  carried in. A plain fact about the date — never an age or a due date. */
+export function groupDateText(g: AccrualGroup): string {
+  const date = g.legs[0].serviceDate;
+  return g.carriedForward ? `${date} · ${CARRIED_FORWARD_LABEL}` : date;
+}
+
+/** Date cell for the SCREEN: the short weekday/month/day label, plus the year
+ *  on a carried group only ("Tue Sep 8, 2026"). The carry-forward fetch has no
+ *  lower date bound, so a carried trip can be from any earlier year — without
+ *  the year, last October's open trip would read as this October's. This
+ *  month's rows stay short. The year comes off the bare ISO string, never via a
+ *  Date (a UTC-midnight parse would shift it a day west of Greenwich). */
+export function groupScreenDateLabel(g: AccrualGroup): string {
+  const date = g.legs[0].serviceDate;
+  const short = shortDateLabel(date);
+  return g.carriedForward ? `${short}, ${date.slice(0, 4)}` : short;
 }
 
 /** Route line for a group — the first leg's corridor (a pair mirrors it). */
@@ -1223,6 +1495,11 @@ export function accrualsClipboardText(report: AccrualsReport): string {
   const contract = report.client.activeContract;
   out.push(`Contract: ${contract ? contractRateLabel(contract) : "No active contract"}`);
   for (const note of report.notes) out.push(`Note: ${note}`);
+  // Informational, not a warning — so no "Note:" prefix.
+  const carriedNote = accrualsCarriedForwardNote(report);
+  if (carriedNote) out.push(carriedNote);
+  const emptyText = accrualsEmptyText(report);
+  if (emptyText) out.push(emptyText);
 
   // The two questions the report answers, first — then the sections in reading
   // order, upcoming work ahead of monies owed.
@@ -1269,7 +1546,7 @@ export function accrualsClipboardText(report: AccrualsReport): string {
       for (const g of b.groups) {
         out.push(
           [
-            g.legs[0].serviceDate,
+            groupDateText(g),
             groupTripsText(g),
             groupRouteLabel(g),
             groupPoText(g),
@@ -1300,7 +1577,7 @@ export function accrualsClipboardText(report: AccrualsReport): string {
   out.push("");
   out.push("INVOICES REFERENCED");
   if (report.invoices.length === 0) {
-    out.push("No issued invoices are referenced by this period's trips.");
+    out.push("No issued invoices are referenced by the trips on this report.");
   } else {
     out.push(["Invoice", "QBO #", "Status", "Invoice period", "Total (CAD)"].join("\t"));
     for (const inv of report.invoices) {
@@ -1346,7 +1623,9 @@ export function accrualsEmailPayload(report: AccrualsReport): AccrualsEmailRepor
     periodLabel: periodLabel(report.period),
     preparedDate: report.today,
     // Degradation banners only — the backend PDF bakes its own tax/estimate
-    // disclaimer banner, so sending ours here would print it twice.
+    // disclaimer banner, so sending ours here would print it twice. The
+    // carried-forward count is not a degradation, so it stays out: each row
+    // reads "from an earlier month" and the tally lines count them.
     notes: report.notes,
     // The two leading figures — upcoming expenses first, then monies owed. The
     // backend renders them above the summary; a client that sends none still
@@ -1357,7 +1636,7 @@ export function accrualsEmailPayload(report: AccrualsReport): AccrualsEmailRepor
       detail: h.detail,
     })),
     // Summary in SECTION order: a subtotal row per section (emphasis true) with
-    // its buckets nested under it (emphasis false). Still all five buckets and
+    // its buckets nested under it (emphasis false). Still all four buckets and
     // every zero, so the summary remains the complete position of the month.
     // Unpriced counts ride the trips cell (the wire row has no column).
     // ONE amount per row: the backend's AccrualsSummaryRow has a single
@@ -1387,7 +1666,7 @@ export function accrualsEmailPayload(report: AccrualsReport): AccrualsEmailRepor
       .map((b) => ({
         label: b.label,
         rows: b.groups.map((g) => ({
-          date: g.legs[0].serviceDate,
+          date: groupDateText(g),
           tripNumbers: groupTripsText(g),
           route: groupRouteLabel(g),
           poNumber: groupPoText(g),

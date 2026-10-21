@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { accrualsReportHtml } from "./index";
-import { bucketsBlock, header, summaryBlock } from "./sections";
+import { bucketsBlock, header, headlineBlock, notesBlock, summaryBlock } from "./sections";
+import { ACCRUALS_REPORT_STYLES } from "./styles";
 import { COMPANY } from "@/lib/company";
 import { buildAccrualsReport, type AccrualsReport } from "@/lib/billing/accruals";
 import type { ClientRecord, PurchaseOrderRecord } from "@/lib/api/clients";
@@ -174,6 +175,19 @@ function build(
   });
 }
 
+/** Like build(), plus the carried-forward trips the screen fetches. */
+function buildCarried(trips: TripRecord[], carriedTrips: TripRecord[]): AccrualsReport {
+  return buildAccrualsReport({
+    client: client(),
+    period: PERIOD,
+    today: TODAY,
+    trips,
+    carriedTrips,
+    invoices: [],
+    purchaseOrders: [],
+  });
+}
+
 /** The <th> texts of the first table in a block — the column contract. */
 function headersOf(html: string): string[] {
   const table = html.slice(html.indexOf("<thead>"), html.indexOf("</thead>"));
@@ -221,10 +235,10 @@ describe("summaryBlock", () => {
   });
 
   it("prints exactly one figure per row", () => {
-    // 3 section subtotals + 5 buckets + the totals row, one amount each.
+    // 3 section subtotals + 4 buckets + the totals row, one amount each.
     const rows = [...html.matchAll(/<tr[^>]*>[\s\S]*?<\/tr>/g)].map((m) => m[0]);
     const bodyRows = rows.filter((r) => r.includes("class=\"amt\"") && !r.includes("<th"));
-    expect(bodyRows).toHaveLength(9);
+    expect(bodyRows).toHaveLength(8);
     for (const row of bodyRows) {
       expect(amountsIn(row)).toHaveLength(1);
     }
@@ -317,6 +331,46 @@ describe("bucketsBlock", () => {
     const html = bucketsBlock(build([]));
     expect(html).toContain("No trips for this client in the period.");
   });
+
+  it("prints the sections — not a nil statement — when only carried work exists", () => {
+    // No trips dated in September, but an August run is still not billed: that
+    // money is still owed, so the sheet must show it rather than say "nothing".
+    const html = bucketsBlock(
+      buildCarried([], [readyLeg("Outbound", { serviceDate: "2026-08-12", tripNumber: "NL-AUG-1" })]),
+    );
+    expect(html).not.toContain("No trips for this client in the period.");
+    expect(html).toContain("NL-AUG-1");
+    expect(html).toContain("$500.00 EST.");
+  });
+
+  it("marks a carried row's date in words, beside plain in-month dates", () => {
+    const html = bucketsBlock(
+      buildCarried(
+        [readyLeg("Outbound", { serviceDate: "2026-09-12", roundTripKey: "sep" })],
+        [readyLeg("Outbound", { serviceDate: "2026-08-12", roundTripKey: "aug" })],
+      ),
+    );
+    // Stacked under the date in its own wrapping span — never one long nowrap
+    // string that would widen the Date column past the 190mm sheet.
+    expect(html).toContain('>2026-08-12<span class="cf">from an earlier month</span></td>');
+    expect(html).not.toContain("2026-08-12 · from an earlier month");
+    expect(html).toContain(">2026-09-12</td>");
+    // The bucket's tally line counts it, and the sheet never ages the debt.
+    expect(html).toContain("2 trips · 1 from an earlier month");
+    expect(html).not.toMatch(/overdue|days outstanding|past due/i);
+  });
+
+  it("prints one Scheduled bucket — Scheduled and InProgress together", () => {
+    const html = bucketsBlock(
+      build([
+        trip({ status: "Scheduled", serviceDate: "2026-09-25", roundTripKey: "a" }),
+        trip({ status: "InProgress", serviceDate: "2026-09-14", roundTripKey: "b" }),
+      ]),
+    );
+    expect(html).toContain("Scheduled — Run not yet complete");
+    expect(html).not.toMatch(/>Upcoming —/);
+    expect(html).toContain("2 trips");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -335,5 +389,234 @@ describe("the sheet as a whole", () => {
     const html = accrualsReportHtml(build([readyLeg("Outbound"), readyLeg("Inbound")]), COMPANY);
     expect(html).not.toMatch(/GST|HST|PST/);
     expect(html).toContain("Taxes are applied in QuickBooks; this report contains none.");
+  });
+
+  it("prints no tax with carried work either, and words the invoices line for the whole report", () => {
+    const html = accrualsReportHtml(
+      buildCarried([], [readyLeg("Outbound", { serviceDate: "2026-08-12" })]),
+      COMPANY,
+    );
+    expect(html).not.toMatch(/GST|HST|PST/);
+    expect(html).toContain("No issued invoices are referenced by the trips on this report.");
+    expect(html).not.toContain("this period's trips");
+    // The count says earlier-month work is carried in — as a plain .info line,
+    // never inside the .warn box (carry-forward is not a warning).
+    expect(html).toContain(
+      '<div class="info">1 trip from an earlier month is not yet completed and is carried into this report.</div>',
+    );
+    expect(html).not.toMatch(/<div class="warn">[^<]*carried into this report/);
+    expect(header(COMPANY, build([]))).toContain("Trips from earlier months that are not yet completed");
+  });
+
+  it("lets the carried-forward marker wrap inside the nowrap Date cell", () => {
+    expect(ACCRUALS_REPORT_STYLES).toMatch(/td\.ref \.cf \{[^}]*white-space: normal/);
+    expect(ACCRUALS_REPORT_STYLES).toMatch(/td\.ref \.cf \{[^}]*display: block/);
+  });
+
+  it("never prints a nil statement, or claims carry-in, when earlier months failed to load", () => {
+    const report = buildAccrualsReport({
+      client: client(),
+      period: PERIOD,
+      today: TODAY,
+      trips: [],
+      carriedTripsUnavailable: true,
+      invoices: [],
+      purchaseOrders: [],
+    });
+    const block = bucketsBlock(report);
+    expect(block).toContain("this is NOT a nil statement");
+    expect(block).not.toContain("No trips for this client in the period.</td>");
+    const head = header(COMPANY, report);
+    expect(head).not.toContain("are carried in and marked as such");
+    expect(head).toContain("could NOT be loaded");
+    expect(notesBlock(report)).toContain("Open trips from earlier months could not be loaded");
+  });
+
+  it("prints the carry-forward failure banner rather than a silent omission", () => {
+    const report = buildAccrualsReport({
+      client: client(),
+      period: PERIOD,
+      today: TODAY,
+      trips: [readyLeg("Outbound")],
+      carriedTripsUnavailable: true,
+      invoices: [],
+      purchaseOrders: [],
+    });
+    expect(notesBlock(report)).toContain("Open trips from earlier months could not be loaded");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Carry forward on the printed sheet — edge cases (QA audit of b84ab32)
+// ---------------------------------------------------------------------------
+
+describe("NL-ACC-01 carry forward — edge cases", () => {
+  function billing(state: "Invoiced" | "Paid", invoiceId = "inv-1"): NonNullable<TripRecord["billing"]> {
+    return {
+      state,
+      invoiceId,
+      invoiceNumber: "NL-INV-0001",
+      qboInvoiceId: "QBO-77",
+      qboEnteredDate: "2026-09-12",
+      paymentConfirmedDate: state === "Paid" ? "2026-09-14" : null,
+    };
+  }
+
+  function report(args: { trips?: TripRecord[]; carriedTrips?: TripRecord[]; invoices?: InvoiceDetailRecord[] }) {
+    return buildAccrualsReport({
+      client: client(),
+      period: PERIOD,
+      today: TODAY,
+      trips: args.trips ?? [],
+      carriedTrips: args.carriedTrips ?? [],
+      invoices: args.invoices ?? [],
+      purchaseOrders: [],
+    });
+  }
+
+  it("prints a carried invoiced row with its real amount — never EST. — and the date marker", () => {
+    const aug = trip({ status: "Invoiced", serviceDate: "2026-08-20", billing: billing("Invoiced") });
+    const html = bucketsBlock(
+      report({ carriedTrips: [aug], invoices: [invoice([line({ lineId: "L-AUG", tripIds: [aug.id], amountCad: 480 })])] }),
+    );
+    expect(html).toContain('>2026-08-20<span class="cf">from an earlier month</span></td>');
+    expect(html).toContain("QBO-77");
+    expect(amountsIn(html)).toContain("$480.00");
+    expect(amountsIn(html)).not.toContain("$480.00 EST.");
+  });
+
+  it("prints AMOUNT UNAVAILABLE on a carried row whose invoice failed, with the warning before the plain count", () => {
+    const aug = trip({ status: "Invoiced", serviceDate: "2026-08-20", billing: billing("Invoiced", "inv-missing") });
+    const r = report({ carriedTrips: [aug] });
+    const html = bucketsBlock(r);
+    expect(html).toContain('>2026-08-20<span class="cf">from an earlier month</span></td>');
+    expect(html).toContain('<td class="miss">AMOUNT UNAVAILABLE</td>');
+    // The bucket's tally reads Not priced, never a false $0.00 owed.
+    expect(html).toContain(
+      '<td class="lbl2" colspan="5">1 trip · 1 from an earlier month · 1 unpriced</td><td class="amt">Not priced</td>',
+    );
+    const notes = notesBlock(r);
+    const warn = notes.indexOf('<div class="warn">1 referenced invoice could not be loaded');
+    const info = notes.indexOf('<div class="info">1 trip from an earlier month');
+    expect(warn).toBeGreaterThanOrEqual(0);
+    expect(info).toBeGreaterThan(warn);
+  });
+
+  it("prints 'needs a decision' — never $0.00 — on both sides of a boundary round trip split across POs", () => {
+    const html = bucketsBlock(
+      report({
+        trips: [readyLeg("Inbound", { serviceDate: "2026-09-01", roundTripKey: "edge", poNumber: "PO-B" })],
+        carriedTrips: [readyLeg("Outbound", { serviceDate: "2026-08-31", roundTripKey: "edge", poNumber: "PO-A" })],
+      }),
+    );
+    const flag = "ROUND-TRIP LEGS ON DIFFERENT POS — NOT PRICED, NEEDS A DECISION";
+    expect(html.split(flag)).toHaveLength(3);
+    expect(html).toContain('>2026-08-31<span class="cf">from an earlier month</span></td>');
+    expect(html).toContain(">2026-09-01</td>");
+    // Neither leg's row carries a figure (the $0.00 on the empty Settled line is not a row).
+    const rows = [...html.matchAll(/<tr>[\s\S]*?<\/tr>/g)]
+      .map((m) => m[0])
+      .filter((r) => r.includes('class="ref">2026-0'));
+    expect(rows).toHaveLength(2);
+    for (const r of rows) expect(amountsIn(r)).toEqual([]);
+  });
+
+  it("leads the headline block with carried estimates, still marked EST.", () => {
+    const html = headlineBlock(
+      report({
+        carriedTrips: [
+          readyLeg("Outbound", { serviceDate: "2026-08-12", roundTripKey: "aug" }),
+          readyLeg("Inbound", { serviceDate: "2026-08-12", roundTripKey: "aug" }),
+        ],
+      }),
+    );
+    expect(html).toContain('<div class="hl-amt">$500.00 EST.</div>');
+    expect(html).toContain('<div class="hl-det">1 trip · 1 from an earlier month</div>');
+  });
+
+  it("counts carried groups in the summary like any other — the totals row included", () => {
+    const aug = trip({ status: "Invoiced", serviceDate: "2026-08-20", roundTripKey: "i", billing: billing("Invoiced") });
+    const html = summaryBlock(
+      report({
+        trips: [readyLeg("Outbound"), readyLeg("Inbound")],
+        carriedTrips: [aug],
+        invoices: [invoice([line({ lineId: "L-AUG", tripIds: [aug.id], amountCad: 480 })])],
+      }),
+    );
+    // Monies owed subtotal: 2 groups, $980.00 merged (not EST. — part is billed).
+    expect(html).toMatch(/<td>Monies owed<\/td>\s*<td class="amt">2<\/td>\s*<td class="amt">\$980\.00<\/td>/);
+    expect(html).toMatch(/<td class="lbl2">Totals<\/td>\s*<td class="amt">2<\/td>\s*<td class="amt">\$980\.00<\/td>/);
+  });
+
+  it("prints no .info line and the normal carry-in sentence when nothing is carried", () => {
+    const r = report({ trips: [readyLeg("Outbound")] });
+    expect(notesBlock(r)).not.toContain('class="info"');
+    const head = header(COMPANY, r);
+    expect(head).toContain("are carried in and marked as such");
+    expect(head).not.toContain("could NOT be loaded");
+    expect(bucketsBlock(r)).not.toContain('class="cf"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A "counted with the paired leg" row is priced elsewhere — the sheet must not
+// print it as unpriced anywhere
+// ---------------------------------------------------------------------------
+
+describe("NL-ACC-01 counted row", () => {
+  // Carried August Invoiced leg + September Completed leg on ONE $500 line:
+  // Settled carries the $500, the carried Invoiced row reads "counted".
+  function straddle(): AccrualsReport {
+    const billing = (state: "Invoiced" | "Paid"): NonNullable<TripRecord["billing"]> => ({
+      state,
+      invoiceId: "inv-1",
+      invoiceNumber: "NL-INV-0001",
+      qboInvoiceId: "QBO-77",
+      qboEnteredDate: "2026-09-12",
+      paymentConfirmedDate: state === "Paid" ? "2026-09-14" : null,
+    });
+    const out = trip({ status: "Invoiced", serviceDate: "2026-08-31", direction: "Outbound", billing: billing("Invoiced") });
+    const back = trip({ status: "Completed", serviceDate: "2026-09-01", direction: "Inbound", billing: billing("Paid") });
+    return buildAccrualsReport({
+      client: client(),
+      period: PERIOD,
+      today: TODAY,
+      trips: [back],
+      carriedTrips: [out],
+      invoices: [invoice([line({ lineId: "L-CNT", tripIds: [out.id, back.id] })])],
+      purchaseOrders: [],
+    });
+  }
+
+  it("keeps the row's own words, but tallies the bucket as $0.00 with no unpriced clause", () => {
+    const html = bucketsBlock(straddle());
+    expect(html).toContain('<td class="flag">COUNTED WITH THE PAIRED LEG</td>');
+    expect(html).toContain(
+      '<td class="lbl2" colspan="5">1 trip · 1 from an earlier month</td><td class="amt">$0.00</td>',
+    );
+    expect(html).not.toContain("unpriced");
+    expect(html).not.toContain("Not priced");
+  });
+
+  it("prints — in every Unpriced cell of the summary, the totals row included", () => {
+    const html = summaryBlock(straddle());
+    expect(html).toMatch(
+      /<td>Monies owed<\/td>\s*<td class="amt">1<\/td>\s*<td class="amt">\$0\.00<\/td>\s*<td class="amt">—<\/td>/,
+    );
+    expect(html).toMatch(
+      /<td class="ind">Invoiced<\/td>\s*<td class="amt">1<\/td>\s*<td class="amt">\$0\.00<\/td>\s*<td class="amt">—<\/td>/,
+    );
+    expect(html).toMatch(
+      /<td class="lbl2">Totals<\/td>\s*<td class="amt">2<\/td>\s*<td class="amt">\$500\.00<\/td>\s*<td class="amt">—<\/td>/,
+    );
+    expect(html).not.toContain("Not priced");
+  });
+
+  it("leads Monies owed with $0.00, not 'Not priced'", () => {
+    const html = headlineBlock(straddle());
+    expect(html).toContain('<div class="hl-amt">$0.00</div>');
+    expect(html).not.toContain("Not priced");
+    expect(html).not.toContain("unpriced");
+    expect(html).toContain('<div class="hl-det">1 trip · 1 from an earlier month</div>');
   });
 });
