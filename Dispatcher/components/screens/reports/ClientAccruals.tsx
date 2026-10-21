@@ -40,6 +40,7 @@ import {
   groupPoLabel,
   groupRefLabel,
   groupRouteLabel,
+  groupScreenDateLabel,
   poCommitmentDetail,
   type AccrualBucket,
   type AccrualGroup,
@@ -177,7 +178,7 @@ function GroupRow({ group, last }: { group: AccrualGroup; last: boolean }) {
           deliberately NOT a status chip: carried forward is not a good / warn /
           bad state, and it is never an age or a due date */}
       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 3, minWidth: 0 }}>
-        <span style={cellStyle}>{shortDateLabel(group.legs[0].serviceDate)}</span>
+        <span style={cellStyle}>{groupScreenDateLabel(group)}</span>
         {group.carriedForward && <MonoTag>EARLIER MONTH</MonoTag>}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0 }}>
@@ -695,6 +696,16 @@ export default function ClientAccruals({
                     <span>{note}</span>
                   </div>
                 ))}
+                {/* the ONE retry for a failed carry-forward fetch — here, not
+                    in the empty-month panel, so a month with its own trips can
+                    retry too (the note above always exists in that case) */}
+                {report.carriedTripsUnavailable && (
+                  <div style={{ marginTop: 10 }}>
+                    <ActionButton variant="primary" onClick={retry}>
+                      RETRY
+                    </ActionButton>
+                  </div>
+                )}
               </Panel>
             )}
 
@@ -736,13 +747,6 @@ export default function ClientAccruals({
                     ? "Open trips from earlier months could not be loaded, so this is not a nil statement — amounts still owing from earlier months are unknown. Retry before printing or sending it."
                     : "The report can still be printed as an explicit nil statement."}
                 </div>
-                {report.carriedTripsUnavailable && (
-                  <div style={{ marginTop: 10 }}>
-                    <ActionButton variant="primary" onClick={retry}>
-                      RETRY
-                    </ActionButton>
-                  </div>
-                )}
               </Panel>
             )}
 

@@ -113,6 +113,7 @@ import {
 } from "@/lib/api/clients";
 import {
   corridorLabel,
+  shortDateLabel,
   sortTrips,
   type TripListParams,
   type TripPage,
@@ -192,12 +193,19 @@ export function accrualBucketFor(t: TripRecord): AccrualBucketId | null {
  * that has not yet reached Completed (paid). Cancelled and WrittenOff are closed
  * too and never carry. The screen fetches exactly these (one listTrips call per
  * status), and the builder re-applies the rule, so it lives in one place.
+ *
+ * The ORDER matters: it is lifecycle order, the forward-only path through the
+ * open statuses in the backend's Trip.CanTransition (Scheduled → InProgress →
+ * ReadyForBilling → Invoiced, with Scheduled/InProgress → ReadyForBilling jumps;
+ * Invoiced → ReadyForBilling is deliberately absent). fetchCarriedTrips queries
+ * one status at a time in this order, so a trip that moves between two queries
+ * always lands in a status queried LATER and is still caught.
  */
 export const ACCRUAL_OPEN_STATUSES: readonly TripStatus[] = [
+  "Scheduled",
+  "InProgress",
   "ReadyForBilling",
   "Invoiced",
-  "InProgress",
-  "Scheduled",
 ];
 
 /** Is this status "not yet completed" — i.e. would an earlier trip carry? */
@@ -224,11 +232,21 @@ export function carryForwardThrough(period: Pick<Period, "start">): string {
  * (open-ended back) and ONE exact status, so this is one UNPAGED call per
  * ACCRUAL_OPEN_STATUSES entry, `to` = carryForwardThrough(period).
  *
+ * The calls run ONE AT A TIME in lifecycle order (ACCRUAL_OPEN_STATUSES), not
+ * in parallel. Transitions inside the open set only move forward, so a trip
+ * that changes status between two calls lands in a status a LATER call asks
+ * for — it can come back twice, never zero times. Parallel calls could run in
+ * any order on the server, and a trip moving ReadyForBilling → Invoiced after
+ * the Invoiced query but before the ReadyForBilling one would vanish from both
+ * while the result still looked complete. Results are deduped by id, last write
+ * wins (= the later status); the builder dedupes too. A trip LEAVING the open
+ * set mid-fetch (Completed/WrittenOff/Cancelled) is rightly dropped; the only
+ * way back in (Completed → Invoiced, a payment confirmation cleared in error)
+ * no query order can catch, and is accepted as a snapshot.
+ *
  * The calls fail as ONE group: any rejection → null, never a partial list. A
  * partial set would understate what is owed while looking complete, so the
  * caller degrades to the month only and says so (carriedTripsUnavailable).
- * Results are deduped by id — a trip changing status between two of the calls
- * could otherwise come back twice (the builder dedupes too).
  *
  * `list` is injected (the screen passes listTrips) so the request shape and the
  * fail-together rule are testable without a network.
@@ -239,11 +257,12 @@ export async function fetchCarriedTrips(
 ): Promise<TripRecord[] | null> {
   const to = carryForwardThrough(args.period);
   try {
-    const pages = await Promise.all(
-      ACCRUAL_OPEN_STATUSES.map((status) => list({ to, clientId: args.clientId, status })),
-    );
     const byId = new Map<string, TripRecord>();
-    for (const p of pages) for (const t of p.items) byId.set(t.id, t);
+    // Sequential on purpose — see the doc comment. Never Promise.all here.
+    for (const status of ACCRUAL_OPEN_STATUSES) {
+      const p = await list({ to, clientId: args.clientId, status });
+      for (const t of p.items) byId.set(t.id, t); // later call = later status, so the last write wins
+    }
     return [...byId.values()];
   } catch {
     return null;
@@ -1418,6 +1437,18 @@ export const CARRIED_FORWARD_LABEL = "from an earlier month";
 export function groupDateText(g: AccrualGroup): string {
   const date = g.legs[0].serviceDate;
   return g.carriedForward ? `${date} · ${CARRIED_FORWARD_LABEL}` : date;
+}
+
+/** Date cell for the SCREEN: the short weekday/month/day label, plus the year
+ *  on a carried group only ("Tue Sep 8, 2026"). The carry-forward fetch has no
+ *  lower date bound, so a carried trip can be from any earlier year — without
+ *  the year, last October's open trip would read as this October's. This
+ *  month's rows stay short. The year comes off the bare ISO string, never via a
+ *  Date (a UTC-midnight parse would shift it a day west of Greenwich). */
+export function groupScreenDateLabel(g: AccrualGroup): string {
+  const date = g.legs[0].serviceDate;
+  const short = shortDateLabel(date);
+  return g.carriedForward ? `${short}, ${date.slice(0, 4)}` : short;
 }
 
 /** Route line for a group — the first leg's corridor (a pair mirrors it). */

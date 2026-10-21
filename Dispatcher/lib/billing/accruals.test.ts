@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ClientRecord, PurchaseOrderRecord } from "@/lib/api/clients";
 import type { InvoiceDetailRecord, InvoiceLineRecord } from "@/lib/api/billing";
-import type { TripDirection, TripListParams, TripPage, TripRecord } from "@/lib/api/trips";
+import { shortDateLabel, type TripDirection, type TripListParams, type TripPage, type TripRecord } from "@/lib/api/trips";
 import type { Period } from "@/lib/period";
 import {
   ACCRUAL_BUCKET_ORDER,
@@ -23,6 +23,7 @@ import {
   carryForwardThrough,
   fetchCarriedTrips,
   groupDateText,
+  groupScreenDateLabel,
   groupPoLabel,
   isCarriedForwardTrip,
   isUnpricedGroup,
@@ -1100,7 +1101,8 @@ describe("carry forward", () => {
   }
 
   it("pins the open statuses — everything not yet Completed, nothing closed", () => {
-    expect([...ACCRUAL_OPEN_STATUSES]).toEqual(["ReadyForBilling", "Invoiced", "InProgress", "Scheduled"]);
+    // Lifecycle order — fetchCarriedTrips relies on it (see the race tests).
+    expect([...ACCRUAL_OPEN_STATUSES]).toEqual(["Scheduled", "InProgress", "ReadyForBilling", "Invoiced"]);
     const aug = (status: TripRecord["status"]) => trip({ status, serviceDate: "2026-08-20" });
     expect(isCarriedForwardTrip(aug("Invoiced"), PERIOD)).toBe(true);
     expect(isCarriedForwardTrip(aug("Completed"), PERIOD)).toBe(false);
@@ -1358,6 +1360,9 @@ describe("carry forward", () => {
     const [carried, own] = bucket(report, "ready").groups;
     expect(groupDateText(carried)).toBe("2026-08-12 · from an earlier month");
     expect(groupDateText(own)).toBe("2026-09-12");
+    // The screen's short label carries the YEAR on a carried row only.
+    expect(groupScreenDateLabel(carried)).toBe(`${shortDateLabel("2026-08-12")}, 2026`);
+    expect(groupScreenDateLabel(own)).toBe(shortDateLabel("2026-09-12"));
     const rows = accrualsEmailPayload(report).buckets.find((b) => b.label === "Ready for billing")!.rows;
     expect(rows.map((r) => r.date)).toEqual(["2026-08-12 · from an earlier month", "2026-09-12"]);
     const text = accrualsClipboardText(report);
@@ -1965,6 +1970,31 @@ describe("a counted row is not unpriced", () => {
 // fetchCarriedTrips — the screen's carry-forward fetch, with `list` injected
 // ---------------------------------------------------------------------------
 
+describe("groupScreenDateLabel", () => {
+  it("names the year of a carried trip from an EARLIER YEAR — same month, different year", () => {
+    const octPeriod: Period = { granularity: "month", start: "2026-10-01", end: "2026-10-31" };
+    const lastOct = trip({ status: "Scheduled", serviceDate: "2025-10-08", roundTripKey: "old" });
+    const thisOct = trip({ status: "Scheduled", serviceDate: "2026-10-08", roundTripKey: "new" });
+    const report = buildAccrualsReport({
+      client: client(),
+      period: octPeriod,
+      today: "2026-10-01",
+      trips: [thisOct],
+      carriedTrips: [lastOct],
+      invoices: [],
+      purchaseOrders: [],
+    });
+    const groups = report.buckets.flatMap((b) => b.groups);
+    const old = groups.find((g) => g.legs[0].id === lastOct.id)!;
+    const own = groups.find((g) => g.legs[0].id === thisOct.id)!;
+    expect(old.carriedForward).toBe(true);
+    expect(groupScreenDateLabel(old)).toMatch(/, 2025$/);
+    expect(groupScreenDateLabel(own)).not.toMatch(/2026|2025/);
+    // Never shifted a day by a UTC parse: the day number survives.
+    expect(groupScreenDateLabel(old)).toContain("8");
+  });
+});
+
 describe("fetchCarriedTrips", () => {
   const page = (items: TripRecord[]): TripPage => ({
     items,
@@ -2012,10 +2042,93 @@ describe("fetchCarriedTrips", () => {
   });
 
   it("fails as ONE group: any rejected call → null, never a partial list", async () => {
-    const a = trip({ status: "Invoiced", serviceDate: "2026-08-10" });
-    const { list, calls } = fakeList({ Invoiced: [a], Scheduled: "reject" });
+    // The LAST call rejects after three succeeded with data — still null.
+    const a = trip({ status: "ReadyForBilling", serviceDate: "2026-08-10" });
+    const b = trip({ status: "Scheduled", serviceDate: "2026-08-11" });
+    const { list, calls } = fakeList({ ReadyForBilling: [a], Scheduled: [b], Invoiced: "reject" });
     expect(await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD })).toBeNull();
     expect(calls).toHaveLength(ACCRUAL_OPEN_STATUSES.length);
+  });
+
+  it("stops at the first rejection — the calls are sequential", async () => {
+    const { list, calls } = fakeList({ Scheduled: "reject" });
+    expect(await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD })).toBeNull();
+    expect(calls.map((c) => c.status)).toEqual(["Scheduled"]);
+  });
+
+  it("never runs two calls at once", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const list = async (): Promise<TripPage> => {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((r) => setTimeout(r, 0));
+      inFlight--;
+      return page([]);
+    };
+    await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD });
+    expect(maxInFlight).toBe(1);
+  });
+
+  /** A fake server holding ONE mutable trip: each call answers from the trip's
+   *  CURRENT status, then `afterCall` may move it (a status change landing
+   *  between two of the calls). */
+  function liveServer(start: TripRecord, afterCall: (asked: string, t: TripRecord) => TripRecord["status"] | null) {
+    let current = { ...start };
+    const list = async (p: TripListParams): Promise<TripPage> => {
+      const answer = current.status === p.status ? [{ ...current }] : [];
+      const next = afterCall(p.status ?? "", current);
+      if (next) current = { ...current, status: next };
+      return page(answer);
+    };
+    return list;
+  }
+
+  it("catches a trip that moves ReadyForBilling → Invoiced between calls — once, as Invoiced", async () => {
+    const x = trip({ status: "ReadyForBilling", serviceDate: "2026-08-12" });
+    const list = liveServer(x, (asked) => (asked === "ReadyForBilling" ? "Invoiced" : null));
+    const got = await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD });
+    expect(got).not.toBeNull();
+    expect(got!.filter((t) => t.id === x.id)).toHaveLength(1);
+    expect(got!.find((t) => t.id === x.id)!.status).toBe("Invoiced");
+  });
+
+  it("dedupes a trip seen twice after a forward jump (Scheduled → ReadyForBilling) — last status wins", async () => {
+    // Scheduled when Scheduled is asked → returned; then jumps straight to
+    // ReadyForBilling (a legal move) — the later call returns it again.
+    const x = trip({ status: "Scheduled", serviceDate: "2026-08-12" });
+    const list = liveServer(x, (asked) => (asked === "Scheduled" ? "ReadyForBilling" : null));
+    const got = await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD });
+    expect(got!.filter((t) => t.id === x.id)).toHaveLength(1);
+    expect(got!.find((t) => t.id === x.id)!.status).toBe("ReadyForBilling");
+  });
+
+  it("every forward move at every gap is still caught (exhaustive over the open path)", async () => {
+    // For each gap between two calls and each legal forward target, the trip
+    // must come back exactly once.
+    const forward: Record<string, TripRecord["status"][]> = {
+      Scheduled: ["InProgress", "ReadyForBilling"],
+      InProgress: ["ReadyForBilling"],
+      ReadyForBilling: ["Invoiced"],
+      Invoiced: [],
+    };
+    for (const from of ACCRUAL_OPEN_STATUSES) {
+      for (const gap of ACCRUAL_OPEN_STATUSES) {
+        for (const to of forward[from]) {
+          const x = trip({ status: from, serviceDate: "2026-08-12" });
+          let moved = false;
+          const list = liveServer(x, (asked) => {
+            if (!moved && asked === gap) {
+              moved = true;
+              return to;
+            }
+            return null;
+          });
+          const got = await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD });
+          expect(got!.filter((t) => t.id === x.id), `${from}→${to} after the ${gap} call`).toHaveLength(1);
+        }
+      }
+    }
   });
 
   it("returns null when the list function throws synchronously", async () => {
