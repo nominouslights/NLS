@@ -7,7 +7,7 @@
 # upward to find them. A build context of Backend/ silently loses both.
 
 # ---------- build ----------
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0.402 AS build
 WORKDIR /src
 
 # Platform-wide build settings first: they change far less often than source, so this layer
@@ -29,7 +29,7 @@ RUN dotnet publish src/Api/NorthernLink.Api/NorthernLink.Api.csproj \
     /p:UseAppHost=false
 
 # ---------- runtime ----------
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.13 AS runtime
 WORKDIR /app
 
 COPY --from=build /app/publish ./
