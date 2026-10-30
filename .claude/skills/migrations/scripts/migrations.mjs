@@ -162,13 +162,16 @@ async function listMigrations(module, vars, redact) {
         + 'check the DigitalOcean Trusted Sources firewall before assuming a code problem',
     };
   }
-  const pending = [], applied = [];
+  // `all` keeps EF's own order (by migration id), interleaving applied and pending — `explain`
+  // needs each pending migration's true predecessor, which the split lists alone cannot give.
+  const pending = [], applied = [], all = [];
   for (const line of result.out.split('\n')) {
     const match = line.trim().match(/^(\d{14}_\S+?)(\s+\(Pending\))?$/);
     if (!match) continue;
     (match[2] ? pending : applied).push(match[1]);
+    all.push(match[1]);
   }
-  return { module: module.name, pending, applied };
+  return { module: module.name, pending, applied, all };
 }
 
 // ── Migration source parsing ────────────────────────────────────────────────
@@ -281,20 +284,48 @@ function provenance(file) {
   }
 }
 
-/** The real DDL, straight from EF — not our reading of it. */
+/**
+ * The real DDL, straight from EF — not our reading of it — one block per pending migration.
+ *
+ * Never a single `script <lastApplied> <lastPending>`: a branch migration can sort BEFORE ones main
+ * already applied (Budgeting's AddActualTransactions vs AddBudgetItemDetails…AddBudgetItemVendorShares),
+ * and with `from` later than `to` EF emits the ROLLBACK script — the Down DDL of migrations that are
+ * not pending, and none of the Up DDL that is. So each pending migration is scripted on its own,
+ * from its predecessor in the module's full list (or 0) to itself, which is always forward.
+ * `database update` (what `apply` runs) handles an out-of-order unapplied migration correctly.
+ */
 async function pendingSql(module, report, vars, redact) {
   if (!report.pending?.length) return null;
-  const from = report.applied.length ? report.applied[report.applied.length - 1] : '0';
-  const to = report.pending[report.pending.length - 1];
-  const result = await run(efArgs(module, 'migrations', 'script', from, to), vars, redact);
-  if (result.code !== 0) return null;
-  return result.out
-    .split('\n')
-    .filter((l) => !/^\s*(START TRANSACTION|COMMIT|SELECT|BEGIN)/i.test(l))
-    .filter((l) => !/__EFMigrationsHistory/.test(l) && !/^VALUES \('\d{14}_/.test(l))
-    .join('\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+  const all = report.all ?? [];
+  const blocks = [];
+  for (const id of [...report.pending].sort((a, b) => all.indexOf(a) - all.indexOf(b))) {
+    const index = all.indexOf(id);
+    const from = index > 0 ? all[index - 1] : '0';
+    const file = migrationFile(module, id);
+    const origin = file ? provenance(file) : null;
+    const label = `-- ── ${id}${origin ? `  (${origin.sha}, ${origin.onMain ? 'on main' : 'NOT on main'})` : ''}`;
+    // Refuse rather than ever print a Down script as "the DDL that will run".
+    if (index < 0 || (from !== '0' && from >= id)) {
+      blocks.push(`${label}\n-- refused: predecessor ${from} does not sort before ${id}; `
+        + 'EF would generate a rollback script. Not shown.');
+      continue;
+    }
+    const result = await run(efArgs(module, 'migrations', 'script', from, id), vars, redact);
+    if (result.code !== 0) {
+      blocks.push(`${label}\n-- dotnet ef migrations script failed: `
+        + (result.err || result.out).trim().split('\n').slice(-1)[0]);
+      continue;
+    }
+    const sql = result.out
+      .split('\n')
+      .filter((l) => !/^\s*(START TRANSACTION|COMMIT|SELECT|BEGIN)/i.test(l))
+      .filter((l) => !/__EFMigrationsHistory/.test(l) && !/^VALUES \('\d{14}_/.test(l))
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    blocks.push(`${label}\n${sql || '-- (no DDL)'}`);
+  }
+  return blocks.join('\n\n');
 }
 
 // ── Cache ──────────────────────────────────────────────────────────────────
