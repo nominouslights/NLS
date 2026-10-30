@@ -16,6 +16,10 @@ public sealed class DeletePurchaseOrderCommandHandler(IPurchaseOrderRepository r
             return Result.Failure(PurchaseOrderErrors.NotFound);
         }
 
+        // Raise before removing: a hard delete raises nothing on its own, and Billing's
+        // purchase_order_snapshots replica has to be told to drop the row or it keeps pricing
+        // work against withdrawn terms. (The Fleet inspection-removal precedent.)
+        purchaseOrder.MarkDeleted();
         repository.Remove(purchaseOrder);
         await repository.SaveChangesAsync(cancellationToken);
         return Result.Success();

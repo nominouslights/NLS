@@ -28,6 +28,17 @@ public class BookingStatusMachineTests
     }
 
     [Fact]
+    public void New_booking_carries_the_supplied_reference()
+    {
+        var reference = BookingReference.Create("NL-7K3M2Q").Value;
+
+        var booking = TestBookings.Create(reference: reference);
+
+        Assert.Equal(reference, booking.Reference);
+        Assert.Equal("NL-7K3M2Q", booking.Reference.Value);
+    }
+
+    [Fact]
     public void Confirm_from_unconfirmed_succeeds()
     {
         var booking = TestBookings.Create();
@@ -148,6 +159,7 @@ public class BookingStatusMachineTests
     {
         var result = BookingAggregate.Create(
             TestBookings.TenantId,
+            BookingReference.Generate(),
             TestBookings.CustomerId,
             "Doris Spence",
             TestBookings.CorridorId,
@@ -169,6 +181,7 @@ public class BookingStatusMachineTests
     {
         var result = BookingAggregate.Create(
             TestBookings.TenantId,
+            BookingReference.Generate(),
             TestBookings.CustomerId,
             "Doris Spence",
             TestBookings.CorridorId,

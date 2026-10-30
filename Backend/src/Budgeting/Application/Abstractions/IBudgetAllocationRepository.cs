@@ -6,32 +6,38 @@ namespace NorthernLink.Budgeting.Application.Abstractions;
 public interface IBudgetAllocationRepository
 {
     /// <summary>
-    /// The tenant's line for that (period, code) pair, or null. Lines are keyed by the pair
-    /// rather than by their own id everywhere a caller reaches them — the upsert-by-code rule
-    /// means the pair <em>is</em> the identity a planner thinks in.
+    /// The tenant's budget item with that id <b>in that period</b>, or null. The period is part of
+    /// the lookup so a route naming one period can never reach an item of another; the tenant
+    /// query filter (and RLS beneath it) means another tenant's item id is null here too.
     /// </summary>
-    Task<BudgetAllocation?> GetAsync(Guid periodId, Guid budgetCodeId, CancellationToken cancellationToken = default);
+    Task<BudgetAllocation?> GetByIdAsync(Guid periodId, Guid allocationId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Whether any line, in any period, references the code — by id <b>or</b> by string. Serves
-    /// <see cref="IBudgetCodeUsageProbe"/>: a code deleted and recreated under the same string
-    /// has a new id, and its old lines must still count as references.
+    /// Whether any item <b>in that period</b> references the code — by id <b>or</b> by string.
+    /// Serves <see cref="IBudgetCodeUsageProbe"/>: a code deleted and recreated under the same
+    /// string has a new id, and its old items must still count as references. Period-scoped
+    /// because codes are: another period's items reference another period's code of that string.
     /// </summary>
-    Task<bool> ExistsForCodeAsync(Guid budgetCodeId, string code, CancellationToken cancellationToken = default);
+    Task<bool> ExistsForCodeAsync(Guid periodId, Guid budgetCodeId, string code, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// The distinct periods that have planned against the code — by id <b>or</b> by string, the
-    /// same match <see cref="ExistsForCodeAsync"/> makes, so "which rows belong to this code" has
-    /// one answer across the module rather than two.
-    /// <para>
-    /// Serves the retirement rule, which needs to know <em>which</em> periods reference the code
-    /// and what state each is in. <see cref="IBudgetCodeUsageProbe"/> deliberately cannot answer
-    /// that — it returns a bool, and widening it to carry period state would make "is this code
-    /// referenced" mean two different things at its two call sites.
-    /// </para>
+    /// Every one of the tenant's lines in that period, in no guaranteed order. The copy handler's
+    /// working set — it reads the source period's whole plan and the target's whole plan, then
+    /// decides per line. Write-side rather than the <c>rm_</c> projection for the same reason
+    /// <see cref="ExistsForCodeAsync"/> is: the copy writes in the same request, and the
+    /// projection may still be a poll behind.
     /// </summary>
-    Task<IReadOnlyList<Guid>> GetPeriodIdsForCodeAsync(
-        Guid budgetCodeId, string code, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<BudgetAllocation>> ListForPeriodAsync(
+        Guid periodId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Whether any of the tenant's items, <b>in any period</b> (closed ones included — a closed
+    /// plan still explains its numbers), carries a vendor share for this vendor. Serves
+    /// <see cref="IVendorUsageProbe"/>. Over the write table, for the
+    /// <see cref="ExistsForCodeAsync"/> reason: the vendor delete asks in the same request that
+    /// would remove the vendor, and the projection may be a poll behind.
+    /// </summary>
+    Task<bool> AnyWithVendorShareAsync(Guid vendorId, CancellationToken cancellationToken = default);
 
     void Add(BudgetAllocation allocation);
 

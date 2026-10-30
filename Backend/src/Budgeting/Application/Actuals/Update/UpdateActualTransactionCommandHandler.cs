@@ -68,7 +68,9 @@ public sealed class UpdateActualTransactionCommandHandler(
             return covered;
         }
 
-        var code = await codes.GetByIdAsync(command.BudgetCodeId, cancellationToken);
+        // Looked up in the covering period: codes belong to a period, and a transaction counts in
+        // the one its date falls in. Another period's code reads as NotFound here.
+        var code = await codes.GetByIdAsync(covered.Value.Id, command.BudgetCodeId, cancellationToken);
         if (code is null)
         {
             return Result.Failure(BudgetCodeErrors.NotFound);

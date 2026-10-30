@@ -164,6 +164,7 @@ export const INVITE_ROLES = [
   "Accountant",
   "BoardMember",
   "Driver",
+  "ComplianceOfficer",
 ] as const;
 
 export type InviteRole = (typeof INVITE_ROLES)[number];

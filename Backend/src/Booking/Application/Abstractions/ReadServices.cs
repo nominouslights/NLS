@@ -41,9 +41,15 @@ public sealed record BookingRecipientRow(
     BookingStatus Status,
     string? Email);
 
-/// <summary>Read side for bookings — day panel detail, month seat rows, revert recipients.</summary>
+/// <summary>Read side for bookings — single-booking detail, day panel list, month seat rows, revert recipients.</summary>
 public interface IBookingReadService
 {
+    /// <summary>
+    /// One booking with its passengers plus the customer roster row, or null when no booking
+    /// in the ambient tenant has this id (another tenant's booking reads as null → 404).
+    /// </summary>
+    Task<BookingDetailResponse?> GetByIdAsync(Guid bookingId, CancellationToken cancellationToken = default);
+
     /// <summary>All bookings (every status, cancelled included) for one corridor + date.</summary>
     Task<IReadOnlyList<BookingResponse>> GetForDateAsync(
         Guid corridorId, DateOnly serviceDate, CancellationToken cancellationToken = default);

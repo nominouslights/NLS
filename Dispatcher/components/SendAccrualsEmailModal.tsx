@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { colors, fonts, statusMeta } from "@/lib/theme";
+import { colors, fonts } from "@/lib/theme";
 import { ApiError } from "@/lib/api/transport";
 import { listContacts, type ClientContactRecord } from "@/lib/api/clients";
 import {
@@ -11,7 +11,6 @@ import {
   sendClientAccrualsEmail,
   type ClientAccrualsPreviewResult,
   type EmailDispatchRecord,
-  type EmailRecipientResult,
   type NotificationServiceType,
 } from "@/lib/api/notifications";
 import { accrualsEmailPayload, type AccrualsReport } from "@/lib/billing/accruals";
@@ -21,6 +20,7 @@ import { ModalShell } from "@/components/ui/ModalShell";
 import { ActionButton } from "@/components/ui/Button";
 import { StatusChip } from "@/components/ui/Chip";
 import { SectionLabel } from "@/components/ui/Panel";
+import { fmtUtcDateTime, RecipientOutcomeRow } from "@/components/email/RecipientOutcomeRow";
 
 // Send-accruals-email modal (Reports screen → Notifications module), modeled
 // on SendPickupEmailModal. The frontend composes the WHOLE send request — the
@@ -35,38 +35,6 @@ import { SectionLabel } from "@/components/ui/Panel";
 // fresh-GUID-per-attempt, dispatchId here is ONE GUID held for the modal's
 // lifetime: a retry after a network failure replays idempotently instead of
 // double-sending the same report.
-
-function fmtUtcDateTime(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("en-CA", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-  });
-}
-
-/** Per-recipient outcome line — colour + glyph + label, never colour alone.
- *  On accruals dispatches, passengerName carries the CONTACT's display name. */
-function RecipientOutcomeRow({ r }: { r: EmailRecipientResult }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-      <StatusChip kind={r.status === "Sent" ? "ontime" : "over"} label={r.status === "Sent" ? "Sent" : "Failed"} />
-      <span style={{ fontFamily: fonts.body, fontSize: 12, fontWeight: 500, color: colors.textSecondary }}>
-        {r.passengerName}
-      </span>
-      <span style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textDim }}>{r.email}</span>
-      {r.errorMessage && (
-        <span style={{ fontFamily: fonts.body, fontSize: 11, color: statusMeta("over").t, flexBasis: "100%" }}>
-          {r.errorCode ? `${r.errorCode} · ` : ""}
-          {r.errorMessage}
-        </span>
-      )}
-    </div>
-  );
-}
 
 export default function SendAccrualsEmailModal({
   report,

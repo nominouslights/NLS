@@ -23,6 +23,19 @@ public static class RouteErrors
     public static readonly Error InactiveStop = Error.Validation(
         "Trips.Route.InactiveStop", "A route cannot include an inactive stop.");
 
+    /// <summary>A route stop carries a province that is not one of the thirteen codes/names — only reachable through a legacy row, since the catalog normalises on write.</summary>
+    public static Error StopUnknownProvince(string stopName, string value) => Error.Validation(
+        "Trips.Route.StopUnknownProvince",
+        $"Stop \"{stopName.Trim()}\" has an unrecognised province \"{value.Trim()}\" — correct the stop in the catalog before placing it on a route.");
+
+    /// <summary>
+    /// The Manitoba-only rule (OperatingArea): a catalog stop outside the operating area may
+    /// exist, but it can never be placed on a route. <paramref name="province"/> is the code.
+    /// </summary>
+    public static Error StopOutsideOperatingArea(string stopName, string province) => Error.Validation(
+        "Trips.Route.StopOutsideOperatingArea",
+        $"Stop \"{stopName.Trim()}\" is in {Stops.CanadianProvince.NameOf(province)} ({province}), outside the {Planning.OperatingArea.Description} operating area, and cannot be placed on a route — this request must be declined or referred to a partner carrier.");
+
     public static readonly Error InvalidDistance = Error.Validation(
         "Trips.Route.InvalidDistance", "The route distance must be greater than zero kilometres.");
 

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using NorthernLink.Trips.Domain.Routes;
+using NorthernLink.Trips.Domain.Stops;
 
 namespace NorthernLink.Trips.Infrastructure.Persistence.ReadModels;
 
@@ -25,7 +26,9 @@ public sealed class TripReadModel
     public Guid? RouteId { get; set; }
     public string RouteName { get; set; } = null!;
     public string Origin { get; set; } = null!;
+    public string OriginProvince { get; set; } = CanadianProvince.Manitoba;
     public string Destination { get; set; } = null!;
+    public string DestinationProvince { get; set; } = CanadianProvince.Manitoba;
     public List<RouteStop> Stops { get; set; } = [];
     public int DistanceKm { get; set; }
 
@@ -80,7 +83,13 @@ public sealed class TripReadModelConfiguration : IEntityTypeConfiguration<TripRe
         builder.Property(t => t.RouteId).HasColumnName("route_id");
         builder.Property(t => t.RouteName).HasColumnName("route_name");
         builder.Property(t => t.Origin).HasColumnName("origin");
+        builder.Property(t => t.OriginProvince)
+            .HasColumnName("origin_province")
+            .HasDefaultValue(CanadianProvince.Manitoba);
         builder.Property(t => t.Destination).HasColumnName("destination");
+        builder.Property(t => t.DestinationProvince)
+            .HasColumnName("destination_province")
+            .HasDefaultValue(CanadianProvince.Manitoba);
         builder.OwnsMany(t => t.Stops, stop => stop.ToJson("stops"));
         builder.Property(t => t.DistanceKm).HasColumnName("distance_km");
 

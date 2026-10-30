@@ -26,6 +26,7 @@ public sealed class BudgetCodeReadModel
 {
     public Guid Id { get; set; }
     public Guid TenantId { get; set; }
+    public Guid PeriodId { get; set; }
     public string Code { get; set; } = null!;
     public string Name { get; set; } = null!;
     public string? Description { get; set; }
@@ -55,6 +56,7 @@ public sealed class BudgetCodeReadModelConfiguration : IEntityTypeConfiguration<
 
         builder.Property(c => c.Id).HasColumnName("id");
         builder.Property(c => c.TenantId).HasColumnName("tenant_id");
+        builder.Property(c => c.PeriodId).HasColumnName("period_id");
         builder.Property(c => c.Code).HasColumnName("code").HasMaxLength(BudgetCode.CodeMaxLength);
         builder.Property(c => c.Name).HasColumnName("name").HasMaxLength(BudgetCode.NameMaxLength);
         builder.Property(c => c.Description)
@@ -79,10 +81,10 @@ public sealed class BudgetCodeReadModelConfiguration : IEntityTypeConfiguration<
         builder.Property(c => c.UpdatedAtUtc).HasColumnName("updated_at_utc");
         builder.Property(c => c.Version).HasColumnName("version");
 
-        // The screen's default ordering. The allocation read services resolve a line's code by
-        // id (the primary key) rather than by this string, so the index is for the chart's own
-        // listing and for whatever later needs to look a code string back up.
-        builder.HasIndex(c => new { c.TenantId, c.Code }).IsUnique();
+        // One code string per period, like the write table. Its leading (tenant_id, period_id)
+        // columns also serve the per-period chart read and the period totals' code lookup, so no
+        // separate (tenant_id, period_id) index is needed.
+        builder.HasIndex(c => new { c.TenantId, c.PeriodId, c.Code }).IsUnique();
 
         // Forward-looking: the revenue-mix report groups the read side by service line, and
         // that is the only query this index exists for.

@@ -25,4 +25,37 @@ public static class AuthorizationPolicies
     /// added there must join that group or attach this policy itself.
     /// </summary>
     public const string DispatchAccess = "DispatchAccess";
+
+    /// <summary>
+    /// The Driver Field App's surface — Owner, Dispatcher, Supervisor <i>and</i> Driver
+    /// (<see cref="Roles.DriverAccess"/>). Carried only by the driver-facing sibling groups:
+    /// <c>/api/drivers</c> (me, own HOS, own credentials/clearances), <c>/api/fleet/inspections</c>
+    /// (DVIR submit), <c>/api/trips</c> (reads + status) and <c>/api/trips/manifests</c> (reads).
+    /// <para>
+    /// This policy is <b>wider</b> than <see cref="DispatchAccess"/>, so adding it to an existing
+    /// group opens that group to drivers. Map a second group on the same prefix instead.
+    /// </para>
+    /// </summary>
+    public const string DriverAccess = "DriverAccess";
+
+    /// <summary>
+    /// Hours-of-service compliance decisions — Owner and ComplianceOfficer only
+    /// (<see cref="Roles.ComplianceAccess"/>). Registered ahead of the endpoints that will carry
+    /// it (deferral approval, out-of-service, ELD malfunction resolution, findings).
+    /// </summary>
+    public const string ComplianceAccess = "ComplianceAccess";
+
+    /// <summary>
+    /// Duty-status reads and writes — <see cref="DriverAccess"/> widened with ComplianceOfficer
+    /// (<see cref="Roles.HosAccess"/>). Contains Driver, so like <see cref="DriverAccess"/> it
+    /// belongs only on its own sibling group, never on a dispatch group.
+    /// </summary>
+    public const string HosAccess = "HosAccess";
+
+    /// <summary>
+    /// The driver roster's read routes — <see cref="DispatchAccess"/> widened with
+    /// ComplianceOfficer (<see cref="Roles.DriverRosterAccess"/>). Reads only; the write routes
+    /// keep <see cref="DispatchAccess"/>.
+    /// </summary>
+    public const string DriverRosterAccess = "DriverRosterAccess";
 }

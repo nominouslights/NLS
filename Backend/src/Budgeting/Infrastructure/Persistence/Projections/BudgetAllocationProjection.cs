@@ -16,8 +16,24 @@ internal sealed class BudgetAllocationProjection : BudgetingProjection<BudgetAll
         row.PeriodId = source.PeriodId;
         row.BudgetCodeId = source.BudgetCodeId;
         row.Code = source.Code;
+        row.Title = source.Title;
         row.AmountCad = source.AmountCad;
+        row.Quantity = source.Quantity;
+        row.UnitCostCad = source.UnitCostCad;
+        row.Unit = source.Unit;
         row.Justification = source.Justification;
+        row.SpendType = source.SpendType.ToString();
+        row.Recurrence = source.Recurrence.ToString();
+        row.Vendor = source.Vendor;
+        // Fresh instances, not just a fresh list: the source is tracked in this same context, and EF
+        // tracks owned JSON entities by reference — one share instance under the aggregate AND the
+        // read row would be one dependent with two owners, and the poll's SaveChanges would throw.
+        row.VendorShares = [.. source.VendorShares.Select(share => share.CopyForNewOwner())];
+        // A fresh list, never the aggregate's own: the read row must not alias write-side state.
+        row.Tags = [.. source.Tags];
+        row.Priority = source.Priority.ToString();
+        row.Assumptions = source.Assumptions;
+        row.ConsequenceIfUnfunded = source.ConsequenceIfUnfunded;
         row.CreatedBy = source.CreatedBy;
         row.ModifiedBy = source.ModifiedBy;
         row.CreatedAtUtc = source.CreatedAtUtc;

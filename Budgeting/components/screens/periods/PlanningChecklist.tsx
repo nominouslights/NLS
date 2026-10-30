@@ -5,26 +5,26 @@ import { Panel, SectionLabel } from "@/components/ui/Panel";
 import { StatusChip } from "@/components/ui/Chip";
 import type { ChecklistStep } from "@/lib/api/budgeting";
 
-// "Where am I in the planning?" — every non-lifecycle step planningProgress returns: the two
-// line rows, then the zero-based balance row. Transitions are not gated on any of them
-// (finalizing an unbalanced or empty plan is allowed server-side, by decision), so this is what
-// makes an unfinished plan visible instead of forbidden.
+// "Where am I in the zero-based plan?" — the four checklist rows from planningProgress, which
+// maps them onto the steps of zero-based budgeting (see that function's comment; step 4, track
+// all month, deliberately has no row — spend is tracked on Actuals vs Budget, not checked off).
 //
-// A pure render: the chip (glyph + Done/Pending), the step's name, and the sentence
-// planningProgress already wrote. Nothing is re-derived or re-phrased here, so adding a fourth
-// row later is a change to one function, not to two files that must agree.
+// Transitions are not gated on any of these — finalizing an empty plan is allowed server-side —
+// so this is what makes an incomplete plan visible instead. Every row is chip (glyph + written
+// status) + step name + detail sentence, and both the kind and the status word come from
+// planningProgress, so this component picks no colour and takes no branch.
 
 export default function PlanningChecklist({ steps }: { steps: ChecklistStep[] }) {
   return (
     <Panel>
-      <SectionLabel>Planning checklist</SectionLabel>
+      <SectionLabel>Zero-based checklist</SectionLabel>
       <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
         {steps.map((s) => (
           <div
             key={s.id}
             style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}
           >
-            <StatusChip kind={s.done ? "ontime" : "info"} label={s.done ? "Done" : "Pending"} />
+            <StatusChip kind={s.kind} label={s.status} />
             <span
               style={{
                 fontFamily: fonts.body,

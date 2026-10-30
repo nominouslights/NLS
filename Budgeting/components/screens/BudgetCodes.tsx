@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { colors, fonts, rowSurface } from "@/lib/theme";
-import type { BudgetCode } from "@/lib/types";
+import type { BudgetCode, BudgetPeriod } from "@/lib/types";
 import { MonoTag, StatusChip } from "@/components/ui/Chip";
 import { ActionButton } from "@/components/ui/Button";
 import { DetailRow, Panel, SectionLabel } from "@/components/ui/Panel";
@@ -11,84 +11,136 @@ import { ApiError } from "@/lib/api/transport";
 import {
   budgetCodeCategoryKind,
   budgetCodeGroupKey,
+  canEditPlan,
+  copyBudgetCodes,
   costCentreApplies,
   deleteBudgetCode,
   groupBudgetCodesByCostCentre,
   listBudgetCodes,
   listBudgetOwnerCandidates,
+  listCostCentres,
   matchesBudgetCodeQuery,
+  refetchUntil,
   seedStarterBudgetCodes,
   setBudgetCodeActive,
   toBudgetCode,
   userDisplay,
+  PERIOD_STATE_LABELS,
   REVIEW_FREQUENCY_LABELS,
   SERVICE_LINE_LABELS,
   TAX_TREATMENT_LABELS,
+  type BudgetCodeCopyResult,
   type BudgetCodeGroup,
   type BudgetCodeRecord,
   type BudgetOwnerOption,
+  type CostCentreRecord,
 } from "@/lib/api/budgeting";
+import { findCostCentre } from "@/lib/costCentres";
+import { usePeriodHold } from "@/lib/periodHold";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import BudgetCodeFormModal from "@/components/BudgetCodeFormModal";
+import CopyCodesPanel from "@/components/screens/codes/CopyCodesPanel";
 import { EmptyNote, Screen } from "@/components/screens/shared";
 
-// Master/detail on real data (GET/POST/PUT/DELETE /api/budgeting/codes), following Dispatcher's
-// Clients and Trips screens: a left column of rows and a right detail pane on the tinted
-// detailBg, split by a CSS grid with a top border.
+// Master/detail on real data (periods/{id}/codes), following Dispatcher's Clients and Trips
+// screens: a left column of rows and a right detail pane on the tinted detailBg, split by a CSS
+// grid with a top border.
+//
+// The chart belongs to the ENTERED PERIOD. Each period has its own codes (the same code string —
+// FUEL — exists once per period, as its own row), so this is a period-scoped screen like the
+// dashboard: Console renders the chooser until a period is entered and remounts this screen on
+// every switch. Every request names the period; every confirm names it too.
+//
+// The chart follows the period lifecycle (BudgetPeriod.AllowsPlanChanges, mirrored by
+// canEditPlan): in Draft or Open it can be built — create, edit, retire, restore, delete, the
+// starter set, and a copy from another period. In Finalized, In review and Closed it is
+// read-only: every control is absent and one note names the period and its state, so "I can't
+// add a code" reads as the rule it is rather than as a bug.
+//
+// A new period starts with an empty chart, and the empty state offers the three ways out: copy
+// from an earlier period (CopyCodesPanel), load the starter set, or add a code by hand.
 //
 // This screen owns its own fetch rather than taking the list as a prop — unlike periods, which
-// Console hoists because five screens read them. The period dashboard and Actuals vs Budget fetch
-// the chart too (for their pickers, coverage and rollup); the two still-mock screens (Variance,
-// Reports) read the lookup in lib/data.ts until their slice lands.
+// Console hoists because several screens read them. The Period Dashboard fetches the same
+// period's chart for its picker and coverage.
 //
-// Retiring is a flag flip and is the normal end of a code's life — a retired code stays listed,
-// because last period's allocations and actuals reference it by string and must keep resolving.
-// Deleting exists only for a code created in error that nothing has ever used, and the server
-// answers 409 the moment that stops being true.
+// Retiring is a flag flip and is the normal end of a code's life in a period — a retired code
+// stays listed, because the period's items on it must keep resolving. Deleting exists only for a
+// code created in error that has no items in this period, and the server answers 409 the moment
+// that stops being true.
 //
-// **Retiring is no longer unconditional either.** The server refuses a deactivate with 409
-// Budgeting.Code.PeriodNotClosed while any period that plans or spends against the code is not
-// Closed, and that message is the only thing naming *which* period must close — so a failed
-// action carries the server's text under its own heading, rather than the load banner's "Budget
-// codes / RETRY", which would invite the user to retry a load they never asked for.
+// A retire can be refused, and the server's message is the only thing that says why, so every
+// refusal reaches the banner verbatim (with its code). Two 409s matter here:
+// Budgeting.Code.PeriodNotEditable (this period is past Open), and Budgeting.Code.PeriodNotClosed
+// (the server's retirement rule: a code is retired only once the periods using it have closed —
+// its message names the blocking periods by label). The screen does not pre-judge either rule;
+// it shows what the server said.
 //
 // **The list is grouped by cost centre** (groupBudgetCodesByCostCentre in lib/api/budgeting.ts),
-// so a growing chart is not one long scroll. Cost centres are free text, so the grouping key is
-// case-folded — `Fleet` and `FLEET` are one group, labelled with the most common spelling, and the
-// header says "· N spellings" rather than hiding the drift (the server keeps the exact strings).
-// Named cost centres come A–Z, then "No cost centre" (expense codes still to be filed), then
-// Revenue, which sits in its own bucket because costCentreApplies says a revenue code never has
-// one. Groups start collapsed; the selected code's group is always open (derived, not set in an
-// effect — so the detail pane always matches a visible card); and typing in the search box opens
-// every group. The search matches code or name only, retired codes included, because the
-// server's uniqueness check counts them too. Open/closed state is component state only.
+// so a growing chart is not one long scroll. The grouping axis is the code's own free-text
+// `costCentre` string, case-folded — NOT the tenant-wide cost-centre register the code form picks
+// from, because a code may still carry a retired or unregistered value and every row must land
+// somewhere; grouping by the register is a follow-up. `Fleet` and `FLEET` are one group, labelled
+// with the most common spelling, and the header says "· N spellings" rather than hiding the drift
+// (the server keeps the exact strings). Named cost centres come A–Z, then "No cost centre"
+// (expense codes still to be filed), then Revenue, which sits in its own bucket because
+// costCentreApplies says a revenue code never has one. Groups start collapsed; the selected
+// code's group is always open and locked (derived, not set in an effect — so the detail pane
+// always matches a visible card); and typing in "Find a code" opens and locks every group. The
+// search matches code or name only, retired codes included, because the server's uniqueness
+// check counts them too. Open/closed state is component state only.
+//
+// While a retire, restore, delete, starter set or copy is in flight (`busy`), the screen holds
+// the period (lib/periodHold.ts) so SWITCH PERIOD refuses until the request settles; the code
+// modal takes its own hold for its save.
+
+/** Exactly one two-click confirm at a time, as on the dashboard. Restore stays one click. */
+type PendingConfirm = { kind: "retire" | "delete"; id: string } | { kind: "copy" } | null;
 
 export default function BudgetCodes({
+  period,
+  periods,
   selId,
   onSelect,
 }: {
+  /** The entered period — the chart shown and changed here is this period's. */
+  period: BudgetPeriod;
+  /** Every period, for the copy panel's source picker. */
+  periods: BudgetPeriod[];
   selId: string | null;
   onSelect: (id: string | null) => void;
 }) {
+  const periodId = period.id;
+  const editable = canEditPlan(period.state);
+  const stateLabel = PERIOD_STATE_LABELS[period.state];
+
   // null = still loading.
   const [codes, setCodes] = useState<BudgetCode[] | null>(null);
   const [owners, setOwners] = useState<BudgetOwnerOption[]>([]);
-  /** `retry` distinguishes a failed load (offer RETRY) from a refused action (offer DISMISS). */
-  const [error, setError] = useState<{
-    title: string;
-    message: string;
-    code: string;
-    retry: boolean;
-  } | null>(null);
+  /** The tenant-wide cost-centre register (retired included), for the code form's picker. */
+  const [costCentres, setCostCentres] = useState<CostCentreRecord[] | null>(null);
+  /**
+   * Bumped by every register request and every register pushed up from the code modal; a load
+   * whose number is no longer current is stale and is dropped, so `costCentres` never regresses.
+   */
+  const costCentresSeq = useRef(0);
+  const [error, setError] = useState<{ message: string; code: string } | null>(null);
   const [editing, setEditing] = useState<BudgetCode | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [busy, setBusy] = useState(false);
-  /** Two-click delete: holds the id awaiting confirmation, so a stray click cannot destroy a code. */
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  /**
+   * Whether the copy panel is open on a non-empty chart. On an empty chart it is always shown
+   * (it is one of the three ways out), and a copy started there keeps it open afterwards so its
+   * outcome stays on screen once the list fills.
+   */
+  const [showCopy, setShowCopy] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<PendingConfirm>(null);
   /** The code/name search. While it is non-blank every group is forced open. */
   const [query, setQuery] = useState("");
   /** Group keys the user opened. Empty = all collapsed; the selected group opens regardless. */
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+
+  usePeriodHold(busy);
 
   const applyLoaded = useCallback((records: BudgetCodeRecord[]) => {
     setCodes(records.map(toBudgetCode));
@@ -99,33 +151,19 @@ export default function BudgetCodes({
     setCodes((prev) => prev ?? []);
     setError(
       e instanceof ApiError
-        ? { title: "Budget codes", message: e.message, code: e.code, retry: true }
-        : { title: "Budget codes", message: "Failed to load budget codes.", code: "Unknown", retry: true },
-    );
-  }, []);
-
-  /**
-   * A refused action, shown under its own heading with the server's message verbatim. That text
-   * is load-bearing for two refusals in particular: PeriodNotClosed names the periods that must
-   * close before the code can be retired, and InUse names retirement as the alternative to a
-   * delete. Paraphrasing either would leave the user with no way to find the way out.
-   */
-  const applyActionError = useCallback((title: string, e: unknown) => {
-    setError(
-      e instanceof ApiError
-        ? { title, message: e.message, code: e.code, retry: false }
-        : { title, message: "Something went wrong — please try again.", code: "Unknown", retry: false },
+        ? { message: e.message, code: e.code }
+        : { message: "Failed to load budget codes.", code: "Unknown" },
     );
   }, []);
 
   /** Retry handler — the mount fetch below uses then-callbacks per the Stops.tsx lint idiom. */
   const load = useCallback(() => {
-    listBudgetCodes().then(applyLoaded, applyLoadError);
-  }, [applyLoaded, applyLoadError]);
+    listBudgetCodes(periodId).then(applyLoaded, applyLoadError);
+  }, [periodId, applyLoaded, applyLoadError]);
 
   useEffect(() => {
     let active = true;
-    listBudgetCodes().then(
+    listBudgetCodes(periodId).then(
       (records) => {
         if (active) applyLoaded(records);
       },
@@ -133,23 +171,36 @@ export default function BudgetCodes({
         if (active) applyLoadError(e);
       },
     );
-    // The owner picker's options. A failure here is not worth blocking the screen for — the
-    // picker just shows "Unassigned" only, and every other field still works.
+    // The owner picker's options (tenant-wide — they are people, not codes). A failure here is
+    // not worth blocking the screen for — the picker just shows "Unassigned" only.
     listBudgetOwnerCandidates().then(
       (rows) => {
         if (active) setOwners(rows);
       },
       () => {},
     );
+    // The cost-centre register, tenant-wide. A failure leaves the picker offering only a code's
+    // current value (the modal says the register did not load) — not worth blocking the chart.
+    // Sequenced against acceptCostCentres: an inline create in the code modal pushes a NEWER
+    // register up, and this slower initial read must not land on top of it afterwards.
+    const ccRequest = ++costCentresSeq.current;
+    listCostCentres({ includeInactive: true }).then(
+      (rows) => {
+        if (active && ccRequest === costCentresSeq.current) setCostCentres(rows);
+      },
+      () => {},
+    );
     return () => {
       active = false;
     };
-  }, [applyLoaded, applyLoadError]);
+  }, [periodId, applyLoaded, applyLoadError]);
 
   const list = useMemo(() => codes ?? [], [codes]);
   const groups = useMemo(() => groupBudgetCodesByCostCentre(list), [list]);
+  const loaded = codes !== null;
+  const empty = loaded && list.length === 0 && !error;
   // selId can point at a code that has since been deleted — or, when Variance jumps here, at a
-  // mock id that never existed (Allocations jumps with real ids now). Falling back to the first
+  // mock id that never existed (its rows come from lib/data.ts). Falling back to the first
   // card of the first group (not list[0], which may sit in a later group) keeps the pane
   // populated with a card that is on screen. Display-only: onSelect is not called, and the
   // fallback is never *named* as selected ("· selected", the hidden-by-search line) — nobody
@@ -191,7 +242,13 @@ export default function BudgetCodes({
       return next;
     });
   }
+
   const selectedHasChildren = selected !== null && list.some((c) => c.parentCodeId === selected.id);
+  const confirmingRetire =
+    selected !== null && confirmAction?.kind === "retire" && confirmAction.id === selected.id;
+  const confirmingDelete =
+    selected !== null && confirmAction?.kind === "delete" && confirmAction.id === selected.id;
+  const copyPanelShown = editable && loaded && (showCopy || list.length === 0);
 
   function handleSaved(records: BudgetCodeRecord[], id: string) {
     setCodes(records.map(toBudgetCode));
@@ -199,94 +256,205 @@ export default function BudgetCodes({
     onSelect(id);
   }
 
+  /** The register the code modal read after an inline create — newer than any load in flight. */
+  function acceptCostCentres(records: CostCentreRecord[]) {
+    costCentresSeq.current += 1;
+    setCostCentres(records);
+  }
+
   function selectCode(id: string) {
     onSelect(id);
-    setConfirmDeleteId(null); // a pending confirmation never survives a selection change
+    setConfirmAction(null); // a pending confirmation never survives a selection change
+  }
+
+  function openCreate() {
+    setConfirmAction(null);
+    setEditing(null);
+    setShowForm(true);
   }
 
   /** Resolves true when the action succeeded, false when it was refused (or already busy). */
-  async function runAction(title: string, action: () => Promise<unknown>): Promise<boolean> {
+  async function runAction(action: () => Promise<unknown>): Promise<boolean> {
     if (busy) return false;
     setBusy(true);
     setError(null);
     try {
       await action();
       // Re-read rather than patching local state, so the row reflects what the server stored.
-      applyLoaded(await listBudgetCodes());
+      applyLoaded(await listBudgetCodes(periodId));
       return true;
     } catch (e) {
-      applyActionError(title, e);
+      applyLoadError(e);
       return false;
     } finally {
       setBusy(false);
     }
   }
 
-  // A refused retire is the interesting one: 409 Budgeting.Code.PeriodNotClosed names every
-  // period still using the code, and that list is the whole instruction for what to do next.
-  const toggleActive = (target: BudgetCode) =>
-    runAction(target.active ? "Retire budget code" : "Restore budget code", () =>
-      setBudgetCodeActive(target.id, !target.active),
-    );
+  async function toggleActive(target: BudgetCode) {
+    if (target.active) {
+      if (confirmAction?.kind !== "retire" || confirmAction.id !== target.id) {
+        setConfirmAction({ kind: "retire", id: target.id });
+        return;
+      }
+      setConfirmAction(null);
+    }
+    // A refused retire (PeriodNotEditable or PeriodNotClosed) lands in the banner verbatim.
+    await runAction(() => setBudgetCodeActive(periodId, target.id, !target.active));
+  }
 
-  const seedStarterSet = () => runAction("Starter set", seedStarterBudgetCodes);
+  async function seedStarterSet() {
+    if (busy) return;
+    const before = list.length;
+    setConfirmAction(null);
+    setBusy(true);
+    setError(null);
+    try {
+      const { created } = await seedStarterBudgetCodes(periodId);
+      // A bulk write needs a COUNT predicate — and none at all when nothing was created, since
+      // "at least 0 more rows" is satisfied by the stale read anyway.
+      const rows = await refetchUntil(
+        () => listBudgetCodes(periodId),
+        (rows) => rows.length >= before + created,
+      );
+      applyLoaded(rows);
+    } catch (e) {
+      applyLoadError(e);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function confirmDelete(target: BudgetCode) {
-    if (confirmDeleteId !== target.id) {
-      setConfirmDeleteId(target.id);
+    if (confirmAction?.kind !== "delete" || confirmAction.id !== target.id) {
+      setConfirmAction({ kind: "delete", id: target.id });
       return;
     }
-    setConfirmDeleteId(null);
-    // A 409 (children, or the code has been used) surfaces with the server's own message, which
-    // already names retirement as the alternative.
+    setConfirmAction(null);
+    // A 409 (children, or the code has items in this period) surfaces through applyLoadError
+    // with the server's own message, which already names retirement as the alternative.
     // Only a successful delete clears the selection — a refused one keeps the pane on the code
     // the error banner is talking about.
-    if (await runAction("Delete budget code", () => deleteBudgetCode(target.id))) onSelect(null);
+    if (await runAction(() => deleteBudgetCode(periodId, target.id))) onSelect(null);
+  }
+
+  /**
+   * Seed this period's chart from another period's. Returns the server's counts for the panel to
+   * report, or null when refused — the banner then carries the server's own message
+   * (CopySourceRequired / CopySourceIsTarget / Period.NotFound / PeriodNotEditable /
+   * CopySourceNotFound), which names the rule.
+   */
+  async function runCopy(sourcePeriodId: string): Promise<BudgetCodeCopyResult | null> {
+    if (busy) return null;
+    const before = list.length;
+    setConfirmAction(null);
+    setShowCopy(true);
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await copyBudgetCodes(periodId, { sourcePeriodId });
+      // Skip the refetch when nothing was copied: a count predicate can never be satisfied by a
+      // successful no-op, and the button would hang until the retry loop gave up.
+      if (result.copied > 0) {
+        const rows = await refetchUntil(
+          () => listBudgetCodes(periodId),
+          (rows) => rows.length >= before + result.copied,
+        );
+        applyLoaded(rows);
+      }
+      return result;
+    } catch (e) {
+      applyLoadError(e);
+      return null;
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
     <Screen
-      eyebrow="Planning"
+      eyebrow={`Planning · ${period.label}`}
       title="Budget Codes"
       right={
-        <ActionButton
-          variant="primary"
-          onClick={() => {
-            setEditing(null);
-            setShowForm(true);
-          }}
-        >
-          + NEW CODE
-        </ActionButton>
+        editable && list.length > 0 ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <ActionButton
+              onClick={() => {
+                setConfirmAction(null);
+                setShowCopy((v) => !v);
+              }}
+              disabled={busy}
+            >
+              {showCopy ? "HIDE COPY" : "COPY FROM A PERIOD"}
+            </ActionButton>
+            <ActionButton variant="primary" onClick={openCreate}>
+              + NEW CODE
+            </ActionButton>
+          </div>
+        ) : undefined
       }
     >
+      {!editable && (
+        <div style={{ marginBottom: 12 }}>
+          <EmptyNote>
+            {period.label} is {stateLabel}; its budget codes are read-only. A period&apos;s codes
+            can be added, changed, retired or deleted only while it is Draft or Open.
+          </EmptyNote>
+        </div>
+      )}
+
       {error && (
         <div style={{ marginBottom: 12 }}>
-          <ErrorNotice title={error.title} message={error.message} code={error.code} />
+          <ErrorNotice title="Budget codes" message={error.message} code={error.code} />
           <div style={{ marginTop: 9 }}>
-            {error.retry ? (
-              <ActionButton onClick={load}>RETRY</ActionButton>
-            ) : (
-              <ActionButton onClick={() => setError(null)}>DISMISS</ActionButton>
-            )}
+            <ActionButton onClick={load}>RETRY</ActionButton>
           </div>
         </div>
       )}
 
       {codes === null && !error && <EmptyNote>Loading budget codes…</EmptyNote>}
 
-      {codes !== null && list.length === 0 && !error && (
-        <div>
+      {empty && (
+        <div style={{ marginBottom: 12 }}>
           <EmptyNote>
-            No budget codes yet — create one so allocations and actuals have something to tag.
+            {editable
+              ? `No budget codes in ${period.label} yet — every budget item is tagged to a code, so the chart comes first. Copy it from an earlier period, load the starter set, or add a code by hand.`
+              : `No budget codes in ${period.label}.`}
           </EmptyNote>
-          <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 10 }}>
-            <ActionButton onClick={seedStarterSet} disabled={busy}>
-              {busy ? "ADDING…" : "START FROM THE STANDARD SET"}
+        </div>
+      )}
+
+      {/* Rendered at one fixed position for both the empty and the filled chart, so a copy made
+          from the empty state keeps its outcome on screen once the list fills in. */}
+      {copyPanelShown && (
+        <CopyCodesPanel
+          period={period}
+          periods={periods}
+          busy={busy}
+          confirming={confirmAction?.kind === "copy"}
+          onRequestConfirm={() => setConfirmAction({ kind: "copy" })}
+          onCancelConfirm={() => setConfirmAction(null)}
+          onCopy={runCopy}
+        />
+      )}
+
+      {empty && editable && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <ActionButton onClick={() => void seedStarterSet()} disabled={busy}>
+              {busy ? "WORKING…" : `LOAD THE STARTER SET INTO ${period.label.toUpperCase()}`}
             </ActionButton>
             <span style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim }}>
               Creates a starter chart covering each service line and the main cost categories.
-              Every code can then be edited, and retired once the periods using it have closed.
+              Every code can then be edited or retired.
+            </span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <ActionButton variant="primary" onClick={openCreate} disabled={busy}>
+              + NEW CODE
+            </ActionButton>
+            <span style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim }}>
+              Start from nothing and add each code yourself.
             </span>
           </div>
         </div>
@@ -445,43 +613,60 @@ export default function BudgetCodes({
                   >
                     {selected.name}
                   </div>
-                  <ActionButton
-                    onClick={() => {
-                      setEditing(selected);
-                      setShowForm(true);
-                    }}
-                  >
-                    EDIT
-                  </ActionButton>
-                  <ActionButton
-                    variant={selected.active ? "amber" : "success"}
-                    onClick={() => toggleActive(selected)}
-                    disabled={busy}
-                  >
-                    {busy ? "WORKING…" : selected.active ? "RETIRE" : "RESTORE"}
-                  </ActionButton>
-                  <ActionButton
-                    variant="destructive"
-                    onClick={() => confirmDelete(selected)}
-                    disabled={busy}
-                  >
-                    {confirmDeleteId === selected.id ? "CONFIRM DELETE" : "DELETE"}
-                  </ActionButton>
+                  {editable && (
+                    <>
+                      <ActionButton
+                        onClick={() => {
+                          setConfirmAction(null);
+                          setEditing(selected);
+                          setShowForm(true);
+                        }}
+                      >
+                        EDIT
+                      </ActionButton>
+                      <ActionButton
+                        variant={selected.active ? "amber" : "success"}
+                        onClick={() => toggleActive(selected)}
+                        disabled={busy}
+                      >
+                        {busy
+                          ? "WORKING…"
+                          : !selected.active
+                            ? "RESTORE"
+                            : confirmingRetire
+                              ? "CONFIRM RETIRE"
+                              : "RETIRE"}
+                      </ActionButton>
+                      <ActionButton
+                        variant="destructive"
+                        onClick={() => confirmDelete(selected)}
+                        disabled={busy}
+                      >
+                        {confirmingDelete ? "CONFIRM DELETE" : "DELETE"}
+                      </ActionButton>
+                    </>
+                  )}
                 </div>
 
-                {confirmDeleteId === selected.id && (
-                  <div
-                    style={{
-                      marginBottom: 12,
-                      fontFamily: fonts.body,
-                      fontSize: 11.5,
-                      color: colors.textSecondary,
-                    }}
-                  >
-                    Deleting is permanent and is only for a code created in error. If this code has
-                    ever been used, retire it instead — which the server allows once every period
-                    using it is closed. Click anything else to cancel.
-                  </div>
+                {confirmingRetire && (
+                  <ConfirmNote>
+                    Retiring {selected.code} in {period.label} changes {period.label}&apos;s chart
+                    only — other periods keep their own {selected.code}. Items already planned on
+                    it here stay and still count, but no item in {period.label} can be added to it
+                    or changed on it until it is restored. The server may still refuse — for
+                    instance until the periods using the code have closed — and its reason is
+                    shown above as given. Click CONFIRM RETIRE to proceed; selecting another code
+                    cancels.
+                  </ConfirmNote>
+                )}
+
+                {confirmingDelete && (
+                  <ConfirmNote>
+                    Deleting {selected.code} from {period.label} is permanent and is only for a
+                    code created in error; other periods keep their own {selected.code}. If it has
+                    budget items in {period.label}, retire it instead — click anything else to
+                    cancel.
+                  </ConfirmNote>
                 )}
 
                 {selected.description && (
@@ -511,7 +696,7 @@ export default function BudgetCodes({
                       }
                     />
                     {costCentreApplies(selected.category) && (
-                      <DetailRow label="Cost centre" value={selected.costCentre ?? "—"} />
+                      <DetailRow label="Cost centre" value={costCentreDisplay(selected.costCentre, costCentres)} />
                     )}
                     <DetailRow
                       label="Parent code"
@@ -572,18 +757,11 @@ export default function BudgetCodes({
                   </div>
                 </Panel>
 
-                {selected.active ? (
+                {!selected.active && (
                   <Note>
-                    Retiring is the normal end of a code&apos;s life, but not at any moment: the server
-                    refuses it while a period that plans or spends against this code is still
-                    open, and the refusal names the periods to close first. A Draft or Open period
-                    can release the code sooner by removing its line.
-                  </Note>
-                ) : (
-                  <Note>
-                    Retired codes stay listed on purpose — allocations and actuals already tagged
-                    with this code still resolve to it. A transaction already on this code stays
-                    correctable; no new one can be recorded against it.
+                    Retired codes stay listed on purpose — {period.label}&apos;s items already
+                    tagged with this code still resolve to it. A transaction already on this
+                    code stays correctable; no new one can be recorded against it.
                   </Note>
                 )}
 
@@ -595,7 +773,7 @@ export default function BudgetCodes({
                 )}
               </>
             ) : (
-              <EmptyNote>No budget codes defined for this tenant yet.</EmptyNote>
+              <EmptyNote>No code selected.</EmptyNote>
             )}
           </div>
         </div>
@@ -603,14 +781,63 @@ export default function BudgetCodes({
 
       {showForm && (
         <BudgetCodeFormModal
+          periodId={periodId}
+          periodLabel={period.label}
           code={editing}
           allCodes={list}
           owners={owners}
+          costCentres={costCentres}
+          onCostCentresChanged={acceptCostCentres}
           onClose={() => setShowForm(false)}
           onSaved={handleSaved}
         />
       )}
     </Screen>
+  );
+}
+
+/**
+ * A code's cost centre as "THOMPSON · Thompson base", with the register's name when it resolves
+ * (ordinal match, as the server joins) and "(retired)" when that entry is retired.
+ */
+function costCentreDisplay(value: string | null, register: CostCentreRecord[] | null): string {
+  if (!value) return "—";
+  const entry = findCostCentre(register ?? [], value);
+  if (!entry) return value;
+  return `${entry.code} · ${entry.name}${entry.isActive ? "" : " (retired)"}`;
+}
+
+/** The text under a pending two-click confirm, naming what the second click will do. */
+function ConfirmNote({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        marginBottom: 12,
+        fontFamily: fonts.body,
+        fontSize: 11.5,
+        color: colors.textSecondary,
+        lineHeight: 1.6,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** A quiet explanatory line under the detail panels. */
+function Note({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        marginTop: 10,
+        fontFamily: fonts.body,
+        fontSize: 11.5,
+        color: colors.textDim,
+        lineHeight: 1.6,
+      }}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -704,22 +931,5 @@ function GroupHeader({
         {open ? "▾" : "▸"}
       </span>
     </button>
-  );
-}
-
-/** A quiet explanatory line under the detail panels. */
-function Note({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        marginTop: 10,
-        fontFamily: fonts.body,
-        fontSize: 11.5,
-        color: colors.textDim,
-        lineHeight: 1.6,
-      }}
-    >
-      {children}
-    </div>
   );
 }

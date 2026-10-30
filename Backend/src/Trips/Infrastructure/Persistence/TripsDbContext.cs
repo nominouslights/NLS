@@ -3,6 +3,7 @@ using NorthernLink.Shared.Persistence;
 using NorthernLink.Shared.Tenancy;
 using NorthernLink.Trips.Application.Integration;
 using NorthernLink.Trips.Application.Manifests;
+using NorthernLink.Trips.Domain.BookeoImports;
 using NorthernLink.Trips.Domain.Manifests;
 using NorthernLink.Trips.Domain.Riders;
 using NorthernLink.Trips.Domain.Routes;
@@ -75,6 +76,16 @@ public sealed class TripsDbContext(
     public DbSet<ScheduleExceptionReadModel> ScheduleExceptionReadModels => Set<ScheduleExceptionReadModel>();
     public DbSet<RiderReadModel> RiderReadModels => Set<RiderReadModel>();
 
+    /// <summary>
+    /// The Bookeo booking-report import: uploaded batches, the ledger of imported bookings, and the
+    /// product/unit mappings. Plain tenant-scoped rows (not aggregates — nothing projects them); the
+    /// trips and manifests an import writes are ordinary aggregates saved in the same transaction.
+    /// </summary>
+    public DbSet<BookeoImportBatch> BookeoImportBatches => Set<BookeoImportBatch>();
+    public DbSet<BookeoBooking> BookeoBookings => Set<BookeoBooking>();
+    public DbSet<BookeoProductMapping> BookeoProductMappings => Set<BookeoProductMapping>();
+    public DbSet<BookeoUnitMapping> BookeoUnitMappings => Set<BookeoUnitMapping>();
+
     protected override void ConfigureModule(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfiguration(new TripManifestConfiguration());
@@ -101,6 +112,10 @@ public sealed class TripsDbContext(
         modelBuilder.ApplyConfiguration(new ScheduleTemplateReadModelConfiguration());
         modelBuilder.ApplyConfiguration(new ScheduleExceptionReadModelConfiguration());
         modelBuilder.ApplyConfiguration(new RiderReadModelConfiguration());
+        modelBuilder.ApplyConfiguration(new BookeoImportBatchConfiguration());
+        modelBuilder.ApplyConfiguration(new BookeoBookingConfiguration());
+        modelBuilder.ApplyConfiguration(new BookeoProductMappingConfiguration());
+        modelBuilder.ApplyConfiguration(new BookeoUnitMappingConfiguration());
 
         // Tenant isolation, API half. Never remove: RLS is the backstop, not the substitute.
         modelBuilder.Entity<TripManifest>().HasQueryFilter(m => m.TenantId == TenantId);
@@ -127,5 +142,9 @@ public sealed class TripsDbContext(
         modelBuilder.Entity<ScheduleTemplateReadModel>().HasQueryFilter(t => t.TenantId == TenantId);
         modelBuilder.Entity<ScheduleExceptionReadModel>().HasQueryFilter(e => e.TenantId == TenantId);
         modelBuilder.Entity<RiderReadModel>().HasQueryFilter(r => r.TenantId == TenantId);
+        modelBuilder.Entity<BookeoImportBatch>().HasQueryFilter(b => b.TenantId == TenantId);
+        modelBuilder.Entity<BookeoBooking>().HasQueryFilter(b => b.TenantId == TenantId);
+        modelBuilder.Entity<BookeoProductMapping>().HasQueryFilter(m => m.TenantId == TenantId);
+        modelBuilder.Entity<BookeoUnitMapping>().HasQueryFilter(m => m.TenantId == TenantId);
     }
 }

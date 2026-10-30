@@ -8,6 +8,14 @@ public static class TripErrors
     public static readonly Error NotFound = Error.NotFound(
         "Trips.Trip.NotFound", "The trip was not found.");
 
+    /// <summary>
+    /// The caller may use the driver-facing routes but is not the driver assigned to this trip
+    /// (or their account is linked to no driver at all). 403, deliberately not 404: the trip
+    /// exists, the caller simply is not its driver.
+    /// </summary>
+    public static readonly Error NotYourTrip = Error.Forbidden(
+        "Trips.Trip.NotYourTrip", "You may only act on trips assigned to you.");
+
     public static readonly Error TripNumberRequired = Error.Validation(
         "Trips.Trip.TripNumberRequired", "A trip number is required.");
 
@@ -19,6 +27,23 @@ public static class TripErrors
 
     public static readonly Error InvalidDistance = Error.Validation(
         "Trips.Trip.InvalidDistance", "The trip distance cannot be negative.");
+
+    /// <summary>
+    /// A corridor endpoint or stop names a province that is not one of the thirteen
+    /// codes/names. <paramref name="which"/> reads like <c>origin "Flin Flon"</c>.
+    /// </summary>
+    public static Error UnknownProvince(string which, string value) => Error.Validation(
+        "Trips.Trip.UnknownProvince",
+        $"The trip's {which} has an unrecognised province \"{value.Trim()}\" — use the two-letter code (MB) or the full name (Manitoba).");
+
+    /// <summary>
+    /// The Manitoba-only rule (OperatingArea): the trip's origin, destination, or a stop lies
+    /// outside the operating area. <paramref name="which"/> reads like <c>destination "Flin Flon"</c>;
+    /// <paramref name="province"/> is the code.
+    /// </summary>
+    public static Error OutsideOperatingArea(string which, string province) => Error.Validation(
+        "Trips.Trip.OutsideOperatingArea",
+        $"The trip's {which} is in {Stops.CanadianProvince.NameOf(province)} ({province}), outside the {Planning.OperatingArea.Description} operating area — this request must be declined or referred to a partner carrier.");
 
     public static readonly Error InvalidSeats = Error.Validation(
         "Trips.Trip.InvalidSeats", "Seat counts cannot be negative.");
@@ -81,6 +106,28 @@ public static class TripErrors
         "Trips.Trip.OnWorksheetCannotCloseWithoutBilling",
         "A worksheet already claims this trip — void the draft (or write the invoice off) instead of closing the trip without billing.");
 
+    // ---- Driver correction (Trip.CorrectDriver + CorrectTripDriverCommandHandler) ----
+
+    public static readonly Error DriverCorrectionReasonRequired = Error.Validation(
+        "Trips.Trip.DriverCorrectionReasonRequired", "Correcting a trip's driver requires a reason.");
+
+    public static readonly Error DriverCorrectionReasonTooLong = Error.Validation(
+        "Trips.Trip.DriverCorrectionReasonTooLong",
+        $"The reason for a driver correction can be at most {Trip.MaxReasonLength} characters.");
+
+    /// <summary>The run has not happened yet, so this is ordinary reassignment, not a correction.</summary>
+    public static Error UseReassign(TripStatus status) => Error.Conflict(
+        "Trips.Trip.UseReassign",
+        $"This trip is {status} — change its driver with REASSIGN; a correction is only for finished trips.");
+
+    /// <summary>Cancelled and WrittenOff — the statuses a correction never applies to.</summary>
+    public static Error DriverCorrectionNotAllowed(TripStatus status) => Error.Conflict(
+        "Trips.Trip.DriverCorrectionNotAllowed",
+        $"A {status} trip's driver cannot be corrected — only a trip that is ready for billing, invoiced, or completed can be.");
+
+    public static readonly Error DriverUnchanged = Error.Conflict(
+        "Trips.Trip.DriverUnchanged", "That driver is already recorded on this trip.");
+
     public static readonly Error BillingStateOnClientlessTrip = Error.Conflict(
         "Trips.Trip.BillingStateOnClientlessTrip", "A run with no client never enters the billing arc, so no invoice can speak for it.");
 
@@ -130,6 +177,74 @@ public static class TripErrors
 
     public static readonly Error DeadheadReturnOfEmptyLeg = Error.Conflict(
         "Trips.Trip.DeadheadReturnOfEmptyLeg", "An empty leg cannot get a deadhead return of its own.");
+
+    public static readonly Error UseChangeRoute = Error.Conflict(
+        "Trips.Trip.UseChangeRoute",
+        "A trip's route is changed through POST /api/trips/{id}/change-route, which also moves a still-scheduled paired leg — an edit can only keep the current route.");
+
+    public static readonly Error RouteChangeNotScheduled = Error.Conflict(
+        "Trips.Trip.RouteChangeNotScheduled", "Only a scheduled trip's route can be changed — this run has already started or ended.");
+
+    public static readonly Error RouteOwnedByBooking = Error.Conflict(
+        "Trips.Trip.RouteOwnedByBooking",
+        "This trip was confirmed from a community booking day, so its route belongs to the booking — change the booking instead.");
+
+    public static readonly Error RouteUnchanged = Error.Conflict(
+        "Trips.Trip.RouteUnchanged", "The trip already runs on this route.");
+
+    public static readonly Error RouteInactive = Error.Validation(
+        "Trips.Trip.RouteInactive", "An inactive route cannot be given to a trip.");
+
+    public static readonly Error RouteChangeNeedsAcknowledgement = Error.Conflict(
+        "Trips.Trip.RouteChangeNeedsAcknowledgement",
+        "Changing the route affects passengers, cargo, or an imported booking — review the warnings and confirm to proceed.");
+
+    public static readonly Error ChangedConcurrently = Error.Conflict(
+        "Trips.Trip.ChangedConcurrently", "Someone else changed this trip at the same time — reload it and try again.");
+
+    public static readonly Error DeadheadConversionNotScheduled = Error.Conflict(
+        "Trips.Trip.DeadheadConversionNotScheduled",
+        "Only a scheduled trip can be converted to a deadhead — this run has already started or ended.");
+
+    public static readonly Error AlreadyEmptyLeg = Error.Conflict(
+        "Trips.Trip.AlreadyEmptyLeg", "The trip is already a deadhead.");
+
+    public static readonly Error DeadheadConversionBookingSourced = Error.Conflict(
+        "Trips.Trip.DeadheadConversionBookingSourced",
+        "This trip was confirmed from a community booking day — its passengers are booked in Community Booking, so it cannot become a deadhead.");
+
+    public static readonly Error PassengerTripConversionNotScheduled = Error.Conflict(
+        "Trips.Trip.PassengerTripConversionNotScheduled",
+        "Only a scheduled deadhead can be converted back — this run has already started or ended.");
+
+    public static readonly Error NotEmptyLeg = Error.Conflict(
+        "Trips.Trip.NotEmptyLeg", "The trip is not a deadhead.");
+
+    public static Error DeadheadConversionHasDemand(int seatsConfirmed, bool demandGuaranteed) => Error.Conflict(
+        "Trips.Trip.DeadheadConversionHasDemand",
+        demandGuaranteed
+            ? $"This trip has a gift-a-seat pledge{(seatsConfirmed > 0 ? $" and {seatsConfirmed} confirmed seat{(seatsConfirmed == 1 ? string.Empty : "s")}" : string.Empty)} — clear its demand before converting it to a deadhead."
+            : $"This trip has {seatsConfirmed} confirmed seat{(seatsConfirmed == 1 ? string.Empty : "s")} — clear its demand before converting it to a deadhead.");
+
+    public static Error DeadheadConversionManifestNotEmpty(int passengers, int cargoItems) => Error.Conflict(
+        "Trips.Trip.DeadheadConversionManifestNotEmpty",
+        $"This trip's manifest still lists {passengers} passenger{(passengers == 1 ? string.Empty : "s")} and {cargoItems} cargo item{(cargoItems == 1 ? string.Empty : "s")} — empty it before converting the trip to a deadhead.");
+
+    public static Error DeadheadConversionHasExternalBookings(int bookings) => Error.Conflict(
+        "Trips.Trip.DeadheadConversionHasExternalBookings",
+        $"{bookings} imported Bookeo booking{(bookings == 1 ? " is" : "s are")} placed on this trip — cancel or move {(bookings == 1 ? "it" : "them")} in Bookeo and re-import before converting it to a deadhead.");
+
+    public static Error RoundTripBothLegsEmpty(string partnerTripNumber) => Error.Conflict(
+        "Trips.Trip.RoundTripBothLegsEmpty",
+        $"The paired leg {partnerTripNumber} is already a deadhead — both legs of a round trip cannot run empty. Unpair them first.");
+
+    public static Error RouteChangePartnerOwnedByBooking(string partnerTripNumber) => Error.Conflict(
+        "Trips.Trip.RouteOwnedByBooking",
+        $"The paired leg {partnerTripNumber} was confirmed from a community booking day, so its route belongs to the booking.");
+
+    public static Error RouteChangeCargoUnderway(string tripNumber) => Error.Conflict(
+        "Trips.Trip.RouteChangeCargoUnderway",
+        $"Freight has already been picked up or dropped on {tripNumber}, so its route can no longer change.");
 
     public static Error InvalidStatusTransition(TripStatus from, TripStatus to) => Error.Conflict(
         "Trips.Trip.InvalidStatusTransition", $"A trip cannot move from {from} to {to}.");

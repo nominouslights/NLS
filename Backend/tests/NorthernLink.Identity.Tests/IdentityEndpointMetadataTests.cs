@@ -116,5 +116,8 @@ public class IdentityEndpointMetadataTests : IAsyncLifetime
         public Guid? UserId => null;
 
         public string? Email => null;
+
+        // Empty, never null — the contract's "no authenticated principal" case.
+        public IReadOnlyCollection<string> Roles => [];
     }
 }

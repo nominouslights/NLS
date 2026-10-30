@@ -13,25 +13,24 @@ public interface IActualTransactionRepository
     Task<ActualTransaction?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Whether any transaction references the code — by id <b>or</b> by string. Serves
-    /// <see cref="IBudgetCodeUsageProbe"/> alongside the allocation half: a code deleted and
-    /// recreated under the same string has a new id, and its old rows must still count as
-    /// references.
-    /// </summary>
-    Task<bool> ExistsForCodeAsync(Guid budgetCodeId, string code, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// The distinct dates on which anything was recorded against the code — by id <b>or</b> by
-    /// string, the same match <see cref="ExistsForCodeAsync"/> makes.
+    /// Whether any transaction <b>dated inside the code's period</b> references the code — by id
+    /// <b>or</b> by string. Serves <see cref="IBudgetCodeUsageProbe"/> and the retirement rule
+    /// alongside the allocation half: a code deleted and recreated under the same string has a new
+    /// id, and its old rows must still count as references.
     /// <para>
-    /// <b>Dates, not period ids</b>, because a transaction stores no period: the caller maps each
-    /// date onto the period covering it. That is the same derivation every other read makes, so
-    /// the retirement rule and the period view can never disagree about which period a
-    /// transaction belongs to.
+    /// <b>Scoped by date, because codes belong to a period and a transaction stores none.</b> The
+    /// string is the cross-period identity, so an unscoped match would let Q3's spend on its FUEL
+    /// pin Q4's unused FUEL. A transaction counts in the period covering its date — the same
+    /// derivation every other read makes — so the caller passes that period's
+    /// <paramref name="startsOn"/>/<paramref name="endsOn"/>, both inclusive.
     /// </para>
     /// </summary>
-    Task<IReadOnlyList<DateOnly>> GetDatesForCodeAsync(
-        Guid budgetCodeId, string code, CancellationToken cancellationToken = default);
+    Task<bool> ExistsForCodeAsync(
+        Guid budgetCodeId,
+        string code,
+        DateOnly startsOn,
+        DateOnly endsOn,
+        CancellationToken cancellationToken = default);
 
     void Add(ActualTransaction transaction);
 

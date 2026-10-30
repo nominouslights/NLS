@@ -9,9 +9,12 @@ using NorthernLink.Budgeting.Application.Actuals.GetActuals;
 using NorthernLink.Budgeting.Application.Actuals.GetRollup;
 using NorthernLink.Budgeting.Application.Actuals.Record;
 using NorthernLink.Budgeting.Application.Actuals.Update;
+using NorthernLink.Budgeting.Application.Allocations.CopyFromPeriod;
 using NorthernLink.Budgeting.Application.Allocations.GetAllocations;
 using NorthernLink.Budgeting.Application.Allocations.Remove;
-using NorthernLink.Budgeting.Application.Allocations.Set;
+using NorthernLink.Budgeting.Application.Allocations.Create;
+using NorthernLink.Budgeting.Application.Allocations.Update;
+using NorthernLink.Budgeting.Application.Codes.CopyFromPeriod;
 using NorthernLink.Budgeting.Application.Codes.Create;
 using NorthernLink.Budgeting.Application.Codes.Delete;
 using NorthernLink.Budgeting.Application.Codes.GetCodes;
@@ -19,12 +22,33 @@ using NorthernLink.Budgeting.Application.Codes.GetOwnerCandidates;
 using NorthernLink.Budgeting.Application.Codes.SeedStarterSet;
 using NorthernLink.Budgeting.Application.Codes.SetActive;
 using NorthernLink.Budgeting.Application.Codes.Update;
+using NorthernLink.Budgeting.Application.CostCentres.Create;
+using NorthernLink.Budgeting.Application.CostCentres.Delete;
+using NorthernLink.Budgeting.Application.CostCentres.GetCostCentreById;
+using NorthernLink.Budgeting.Application.CostCentres.GetCostCentres;
+using NorthernLink.Budgeting.Application.CostCentres.GetPlannedRollup;
+using NorthernLink.Budgeting.Application.CostCentres.SetActive;
+using NorthernLink.Budgeting.Application.CostCentres.Update;
 using NorthernLink.Budgeting.Application.Periods.Create;
 using NorthernLink.Budgeting.Application.Periods.GetPeriodById;
 using NorthernLink.Budgeting.Application.Periods.GetPeriods;
 using NorthernLink.Budgeting.Application.Periods.Transition;
+using NorthernLink.Budgeting.Application.Qbo.Authorize;
+using NorthernLink.Budgeting.Application.Qbo.Complete;
+using NorthernLink.Budgeting.Application.Qbo.Disconnect;
+using NorthernLink.Budgeting.Application.Qbo.GetConnection;
+using NorthernLink.Budgeting.Application.Vendors.Create;
+using NorthernLink.Budgeting.Application.Vendors.Delete;
+using NorthernLink.Budgeting.Application.Vendors.GetVendorById;
+using NorthernLink.Budgeting.Application.Vendors.GetPlannedRollup;
+using NorthernLink.Budgeting.Application.Vendors.GetVendors;
+using NorthernLink.Budgeting.Application.Vendors.SetActive;
+using NorthernLink.Budgeting.Application.Vendors.Update;
+using NorthernLink.Budgeting.Domain.Allocations;
 using NorthernLink.Budgeting.Domain.Codes;
+using NorthernLink.Budgeting.Domain.CostCentres;
 using NorthernLink.Budgeting.Domain.Periods;
+using NorthernLink.Budgeting.Domain.Vendors;
 
 namespace NorthernLink.Budgeting.Infrastructure.Endpoints;
 
@@ -54,13 +78,25 @@ public static class BudgetingEndpoints
         budgeting.MapPost("periods/{id:guid}/begin-review", BeginPeriodReview);
         budgeting.MapPost("periods/{id:guid}/close", ClosePeriod);
 
-        // Allocations — one period's plan, one line per code, addressed by (period, code). PUT is
-        // an upsert (200 with { id, created }); there is no POST because the pair is the identity
-        // and a second line for the same code is never a valid request. Both writes answer 409
-        // PeriodNotEditable outside Draft and Open.
+        // Allocations — the UI calls them budget items. A period holds any number of items per
+        // code (a code's budget is the sum of its items), so items are created with POST and
+        // addressed by their own id afterwards. Every write answers 409 PeriodNotEditable outside
+        // Draft and Open.
         budgeting.MapGet("periods/{id:guid}/allocations", GetAllocations);
-        budgeting.MapPut("periods/{id:guid}/allocations/{codeId:guid}", SetAllocation);
-        budgeting.MapDelete("periods/{id:guid}/allocations/{codeId:guid}", RemoveAllocation);
+        budgeting.MapPost("periods/{id:guid}/allocations", CreateAllocation);
+        budgeting.MapPut("periods/{id:guid}/allocations/{allocationId:guid}", UpdateAllocation);
+        budgeting.MapDelete("periods/{id:guid}/allocations/{allocationId:guid}", RemoveAllocation);
+
+        // Seed this period's plan from an earlier one — every field across, justifications
+        // cleared (see CopyBudgetAllocationsCommandHandler). 200 with counts rather than 201, the
+        // codes/starter-set precedent: it adds many items or none and has no single new resource
+        // to point a Location at.
+        //
+        // No collision with the item routes above: POST .../allocations has one segment fewer,
+        // and PUT/DELETE .../{allocationId:guid} are other verbs whose :guid constraint means the
+        // literal "copy" can never bind as an id. A future POST .../allocations/{allocationId}
+        // WOULD collide with this route — if one is ever added, keep the :guid constraint.
+        budgeting.MapPost("periods/{id:guid}/allocations/copy", CopyAllocations);
 
         // Actuals — what was really spent or received, and the plan-against-spend rollup built
         // from it. The two reads hang off a period because that is how the console navigates;
@@ -77,25 +113,82 @@ public static class BudgetingEndpoints
         budgeting.MapPut("actuals/{id:guid}", UpdateActual);
         budgeting.MapDelete("actuals/{id:guid}", DeleteActual);
 
-        // Codes. Retiring (activate/deactivate) is the normal end-of-life path and stays that
-        // way: allocation lines and actual transactions reference codes by id and by string and
-        // must keep resolving, so a code that has ever been used is retired, never deleted.
-        // DELETE exists only for the narrow case retirement does not cover — a code created in
-        // error and never referenced — and IBudgetCodeUsageProbe turns it into a 409 InUse the
-        // moment any period has planned against the code or any spend has been recorded on it.
+        // Codes belong to a period: each period owns its chart, and the code STRING is the
+        // cross-period identity. Every code route lives under its period, and every write answers
+        // 409 Budgeting.Code.PeriodNotEditable outside Draft and Open (reads work in any state).
+        // Retiring (activate/deactivate) is the normal end-of-life path: items and actual
+        // transactions reference codes by id and by string and must keep resolving, so a code any
+        // item of its period, or any spend dated inside that period, has used is retired, never
+        // deleted. DELETE exists only for a code created in error and never referenced —
+        // IBudgetCodeUsageProbe turns it into a 409 otherwise.
         //
-        // deactivate additionally answers 409 PeriodNotClosed while any period using the code is
-        // still open: retiring a code out from under a live plan would leave a planner holding
-        // lines they can no longer edit. The message names the blocking periods. activate carries
-        // no such check — restoring a code takes nothing away from anyone.
-        budgeting.MapGet("codes", GetCodes);
+        // deactivate additionally answers 409 Budgeting.Code.PeriodNotClosed while any period
+        // using the code is not yet Closed (BudgetCodeRetirementRule); activate carries no such
+        // check — restoring a code takes nothing away from anyone.
+        //
+        // No collision between the literal segments (starter-set, copy) and the id routes: the
+        // literals are POST-only with one segment after "codes", and every {codeId} carries the
+        // :guid constraint, so "copy" can never bind as an id. Keep the constraint if a new
+        // POST .../codes/{codeId} route is ever added.
+        budgeting.MapGet("periods/{id:guid}/codes", GetCodes);
+        budgeting.MapPost("periods/{id:guid}/codes", CreateCode);
+        budgeting.MapPut("periods/{id:guid}/codes/{codeId:guid}", UpdateCode);
+        budgeting.MapPost("periods/{id:guid}/codes/{codeId:guid}/activate", ActivateCode);
+        budgeting.MapPost("periods/{id:guid}/codes/{codeId:guid}/deactivate", DeactivateCode);
+        budgeting.MapDelete("periods/{id:guid}/codes/{codeId:guid}", DeleteCode);
+        budgeting.MapPost("periods/{id:guid}/codes/starter-set", SeedStarterSet);
+
+        // Seed this period's chart from another period's — active codes whose string this period
+        // lacks, hierarchy remapped by string (see CopyBudgetCodesCommandHandler). 200 with
+        // counts, the allocations/copy precedent.
+        budgeting.MapPost("periods/{id:guid}/codes/copy", CopyCodes);
+
+        // Tenant-wide by design: it lists the people who can own a code, not codes.
         budgeting.MapGet("codes/owners", GetOwnerCandidates);
-        budgeting.MapPost("codes", CreateCode);
-        budgeting.MapPut("codes/{id:guid}", UpdateCode);
-        budgeting.MapPost("codes/{id:guid}/activate", ActivateCode);
-        budgeting.MapPost("codes/{id:guid}/deactivate", DeactivateCode);
-        budgeting.MapDelete("codes/{id:guid}", DeleteCode);
-        budgeting.MapPost("codes/starter-set", SeedStarterSet);
+
+        // The vendor register — tenant-wide, not per period: a vendor is the same counterparty in
+        // every period. Names are unique per tenant ignoring case (409 Budgeting.Vendor.DuplicateName).
+        // Retiring (activate/deactivate) is the normal end of a vendor's life; DELETE is for a
+        // vendor created in error and answers 409 Budgeting.Vendor.InUse once anything references
+        // it (IVendorUsageProbe — any budget item's vendor share). GET lists active vendors unless
+        // ?includeInactive=true.
+        budgeting.MapGet("vendors", GetVendors);
+        budgeting.MapGet("vendors/{vendorId:guid}", GetVendor);
+        budgeting.MapPost("vendors", CreateVendor);
+        budgeting.MapPut("vendors/{vendorId:guid}", UpdateVendor);
+        budgeting.MapPost("vendors/{vendorId:guid}/activate", ActivateVendor);
+        budgeting.MapPost("vendors/{vendorId:guid}/deactivate", DeactivateVendor);
+        budgeting.MapDelete("vendors/{vendorId:guid}", DeleteVendor);
+
+        // The cost-centre register — tenant-wide, NOT under a period: a cost centre is an
+        // organisational unit or base, and outlives every period's chart. Budget codes carry an
+        // entry's code string, validated against this register on create/edit. Retiring is the
+        // normal end of life; DELETE is for an entry nothing carries (409 InUse / HasChildren
+        // otherwise). Every id route keeps the :guid constraint, so no literal can bind as an id.
+        budgeting.MapGet("cost-centres", GetCostCentres);
+        budgeting.MapGet("cost-centres/{id:guid}", GetCostCentre);
+        budgeting.MapPost("cost-centres", CreateCostCentre);
+        budgeting.MapPut("cost-centres/{id:guid}", UpdateCostCentre);
+        budgeting.MapPost("cost-centres/{id:guid}/activate", ActivateCostCentre);
+        budgeting.MapPost("cost-centres/{id:guid}/deactivate", DeactivateCostCentre);
+        budgeting.MapDelete("cost-centres/{id:guid}", DeleteCostCentre);
+
+        // A period's planned expense per cost centre, plus a "No cost centre" bucket. Planned only
+        // — actuals arrive in a later slice and the shape carries no actual field until then.
+        budgeting.MapGet("periods/{id:guid}/rollups/cost-centres", GetCostCentreRollup);
+
+        // QuickBooks Online — the read-only connection (one per tenant). The OAuth redirect lands on
+        // the Budgeting console's own /qbo/callback page, never here: the API is not public. That
+        // page, signed in and role-gated, posts the callback's code/state/realmId to complete. So
+        // every route stays inside this BudgetAccess group and nothing here is anonymous.
+        budgeting.MapGet("qbo/connection", GetQboConnection);
+        budgeting.MapPost("qbo/connection/authorize", AuthorizeQbo);
+        budgeting.MapPost("qbo/connection/complete", CompleteQboConnection);
+        budgeting.MapDelete("qbo/connection", DisconnectQbo);
+
+        // A period's planned expense per vendor (the sum of each vendor's shares on expense
+        // items), plus a "No vendor" bucket. Planned only, like the cost-centre rollup.
+        budgeting.MapGet("periods/{id:guid}/rollups/vendors", GetVendorRollup);
 
         return app;
     }
@@ -184,14 +277,12 @@ public static class BudgetingEndpoints
     }
 
     /// <summary>
-    /// Upsert by (period, code): 200 on both the create and the rewrite, with the body saying
-    /// which happened. Not 201 — the resource's URL is the one the caller just PUT to, so there
-    /// is no Location to hand back that the client does not already have.
+    /// Adds a budget item: 201 with <c>{ id }</c>. There is no single-item GET, so the Location
+    /// points at the period's item list the new item now appears in.
     /// </summary>
-    private static async Task<IResult> SetAllocation(
+    private static async Task<IResult> CreateAllocation(
         Guid id,
-        Guid codeId,
-        SetBudgetAllocationRequest request,
+        BudgetItemRequest request,
         ITenantContext tenantContext,
         ICurrentActor currentActor,
         ISender sender,
@@ -202,20 +293,69 @@ public static class BudgetingEndpoints
             return Results.Unauthorized();
         }
 
-        var command = new SetBudgetAllocationCommand(
-            tenantId, id, codeId, request.AmountCad, request.Justification, currentActor.UserId);
+        var command = new CreateBudgetAllocationCommand(
+            tenantId, id, request.BudgetCodeId, request.ToDetails(), currentActor.UserId);
 
         var result = await sender.Send(command, cancellationToken);
         return result.IsSuccess
-            ? Results.Ok(new BudgetAllocationSetResponse(result.Value.AllocationId, result.Value.Created))
+            ? Results.Created($"/api/budgeting/periods/{id}/allocations", new EntityCreatedResponse(result.Value))
+            : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>Rewrites a budget item (its code may change): 204.</summary>
+    private static Task<IResult> UpdateAllocation(
+        Guid id,
+        Guid allocationId,
+        BudgetItemRequest request,
+        ITenantContext tenantContext,
+        ICurrentActor currentActor,
+        ISender sender,
+        CancellationToken cancellationToken) =>
+        SendCommand(
+            tenantContext,
+            sender,
+            tenantId => new UpdateBudgetAllocationCommand(
+                tenantId, id, allocationId, request.BudgetCodeId, request.ToDetails(), currentActor.UserId),
+            cancellationToken);
+
+    /// <summary>
+    /// Copies an earlier period's plan into this one: 200 with a full account of every source
+    /// line (copied / skipped because this period's code with that string is already planned /
+    /// skipped because this period has no active code with that string), which always sums to
+    /// <c>sourceLineCount</c>. Items land on this period's code with the same string. An empty source period
+    /// is a 200 with zeroes, not an error.
+    /// </summary>
+    private static async Task<IResult> CopyAllocations(
+        Guid id,
+        CopyBudgetAllocationsRequest request,
+        ITenantContext tenantContext,
+        ICurrentActor currentActor,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var command = new CopyBudgetAllocationsCommand(
+            tenantId, id, request.SourcePeriodId, currentActor.UserId);
+
+        var result = await sender.Send(command, cancellationToken);
+        return result.IsSuccess
+            ? Results.Ok(new BudgetAllocationCopyResponse(
+                result.Value.Copied,
+                result.Value.SkippedAlreadyPlanned,
+                result.Value.SkippedRetiredCode,
+                result.Value.SourceLineCount))
             : EndpointResults.Problem(result.Error);
     }
 
     // No actor: a deleted row has nowhere to record who deleted it. See RemoveBudgetAllocationCommand.
     private static Task<IResult> RemoveAllocation(
-        Guid id, Guid codeId, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken) =>
+        Guid id, Guid allocationId, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken) =>
         SendCommand(
-            tenantContext, sender, tenantId => new RemoveBudgetAllocationCommand(tenantId, id, codeId), cancellationToken);
+            tenantContext, sender, tenantId => new RemoveBudgetAllocationCommand(tenantId, id, allocationId), cancellationToken);
 
     private static async Task<IResult> GetActuals(
         Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
@@ -297,15 +437,16 @@ public static class BudgetingEndpoints
         SendCommand(
             tenantContext, sender, tenantId => new DeleteActualTransactionCommand(tenantId, id), cancellationToken);
 
+
     private static async Task<IResult> GetCodes(
-        ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
     {
         if (tenantContext.TenantId is not { } tenantId)
         {
             return Results.Unauthorized();
         }
 
-        var result = await sender.Query(new GetBudgetCodesQuery(tenantId), cancellationToken);
+        var result = await sender.Query(new GetBudgetCodesQuery(tenantId, id), cancellationToken);
         return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
     }
 
@@ -321,7 +462,12 @@ public static class BudgetingEndpoints
         return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
     }
 
+    /// <summary>
+    /// Adds a code to the period's chart: 201 with <c>{ id }</c>. There is no single-code GET, so
+    /// the Location points at the period's chart the new code now appears in.
+    /// </summary>
     private static async Task<IResult> CreateCode(
+        Guid id,
         CreateBudgetCodeRequest request,
         ITenantContext tenantContext,
         ICurrentActor currentActor,
@@ -334,16 +480,17 @@ public static class BudgetingEndpoints
         }
 
         var command = new CreateBudgetCodeCommand(
-            tenantId, request.Code ?? string.Empty, request.ToDetails(), currentActor.UserId);
+            tenantId, id, request.Code ?? string.Empty, request.ToDetails(), currentActor.UserId);
 
         var result = await sender.Send(command, cancellationToken);
         return result.IsSuccess
-            ? Results.Created($"/api/budgeting/codes/{result.Value}", new EntityCreatedResponse(result.Value))
+            ? Results.Created($"/api/budgeting/periods/{id}/codes", new EntityCreatedResponse(result.Value))
             : EndpointResults.Problem(result.Error);
     }
 
     private static Task<IResult> UpdateCode(
         Guid id,
+        Guid codeId,
         UpdateBudgetCodeRequest request,
         ITenantContext tenantContext,
         ICurrentActor currentActor,
@@ -352,11 +499,12 @@ public static class BudgetingEndpoints
         SendCommand(
             tenantContext,
             sender,
-            tenantId => new UpdateBudgetCodeCommand(tenantId, id, request.ToDetails(), currentActor.UserId),
+            tenantId => new UpdateBudgetCodeCommand(tenantId, id, codeId, request.ToDetails(), currentActor.UserId),
             cancellationToken);
 
     private static Task<IResult> ActivateCode(
         Guid id,
+        Guid codeId,
         ITenantContext tenantContext,
         ICurrentActor currentActor,
         ISender sender,
@@ -364,11 +512,12 @@ public static class BudgetingEndpoints
         SendCommand(
             tenantContext,
             sender,
-            tenantId => new SetBudgetCodeActiveCommand(tenantId, id, true, currentActor.UserId),
+            tenantId => new SetBudgetCodeActiveCommand(tenantId, id, codeId, true, currentActor.UserId),
             cancellationToken);
 
     private static Task<IResult> DeactivateCode(
         Guid id,
+        Guid codeId,
         ITenantContext tenantContext,
         ICurrentActor currentActor,
         ISender sender,
@@ -376,21 +525,22 @@ public static class BudgetingEndpoints
         SendCommand(
             tenantContext,
             sender,
-            tenantId => new SetBudgetCodeActiveCommand(tenantId, id, false, currentActor.UserId),
+            tenantId => new SetBudgetCodeActiveCommand(tenantId, id, codeId, false, currentActor.UserId),
             cancellationToken);
 
     // No actor: a deleted row has nowhere to record who deleted it. See DeleteBudgetCodeCommand.
     private static Task<IResult> DeleteCode(
-        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken) =>
+        Guid id, Guid codeId, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken) =>
         SendCommand(
-            tenantContext, sender, tenantId => new DeleteBudgetCodeCommand(tenantId, id), cancellationToken);
+            tenantContext, sender, tenantId => new DeleteBudgetCodeCommand(tenantId, id, codeId), cancellationToken);
 
     /// <summary>
-    /// Creates any of the starter chart the tenant does not already have. 200 with a count rather
-    /// than 201: it is idempotent, creates many rows or none, and there is no single new resource
-    /// to point a Location header at.
+    /// Creates any of the starter chart the period does not already have. 200 with a count rather
+    /// than 201: it is idempotent per period, creates many rows or none, and there is no single
+    /// new resource to point a Location header at.
     /// </summary>
     private static async Task<IResult> SeedStarterSet(
+        Guid id,
         ITenantContext tenantContext,
         ICurrentActor currentActor,
         ISender sender,
@@ -402,12 +552,304 @@ public static class BudgetingEndpoints
         }
 
         var result = await sender.Send(
-            new SeedStarterBudgetCodesCommand(tenantId, currentActor.UserId), cancellationToken);
+            new SeedStarterBudgetCodesCommand(tenantId, id, currentActor.UserId), cancellationToken);
 
         return result.IsSuccess
             ? Results.Ok(new StarterSetSeededResponse(result.Value))
             : EndpointResults.Problem(result.Error);
     }
+
+    /// <summary>
+    /// Copies another period's active codes into this period's chart: 200 with a full account of
+    /// every source code (copied / skipped because this period already has the string / skipped
+    /// because the source code is retired), which always sums to <c>sourceCodeCount</c>. An empty
+    /// source chart is a 200 with zeroes, not an error.
+    /// </summary>
+    private static async Task<IResult> CopyCodes(
+        Guid id,
+        CopyBudgetCodesRequest request,
+        ITenantContext tenantContext,
+        ICurrentActor currentActor,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var command = new CopyBudgetCodesCommand(tenantId, id, request.SourcePeriodId, currentActor.UserId);
+
+        var result = await sender.Send(command, cancellationToken);
+        return result.IsSuccess
+            ? Results.Ok(new BudgetCodeCopyResponse(
+                result.Value.Copied,
+                result.Value.SkippedExisting,
+                result.Value.SkippedRetired,
+                result.Value.SourceCodeCount))
+            : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> GetVendors(
+        bool? includeInactive, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(new GetVendorsQuery(tenantId, includeInactive ?? false), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> GetVendor(
+        Guid vendorId, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(new GetVendorByIdQuery(tenantId, vendorId), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>Adds a vendor to the register: 201 with <c>{ id }</c> and a Location at the vendor.</summary>
+    private static async Task<IResult> CreateVendor(
+        VendorRequest request,
+        ITenantContext tenantContext,
+        ICurrentActor currentActor,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(
+            new CreateVendorCommand(tenantId, request.ToDetails(), currentActor.UserId), cancellationToken);
+        return result.IsSuccess
+            ? Results.Created($"/api/budgeting/vendors/{result.Value}", new EntityCreatedResponse(result.Value))
+            : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>Rewrites every editable field of a vendor (omitted optional fields are cleared): 204.</summary>
+    private static Task<IResult> UpdateVendor(
+        Guid vendorId,
+        VendorRequest request,
+        ITenantContext tenantContext,
+        ICurrentActor currentActor,
+        ISender sender,
+        CancellationToken cancellationToken) =>
+        SendCommand(
+            tenantContext,
+            sender,
+            tenantId => new UpdateVendorCommand(tenantId, vendorId, request.ToDetails(), currentActor.UserId),
+            cancellationToken);
+
+    private static Task<IResult> ActivateVendor(
+        Guid vendorId,
+        ITenantContext tenantContext,
+        ICurrentActor currentActor,
+        ISender sender,
+        CancellationToken cancellationToken) =>
+        SendCommand(
+            tenantContext,
+            sender,
+            tenantId => new SetVendorActiveCommand(tenantId, vendorId, true, currentActor.UserId),
+            cancellationToken);
+
+    private static Task<IResult> DeactivateVendor(
+        Guid vendorId,
+        ITenantContext tenantContext,
+        ICurrentActor currentActor,
+        ISender sender,
+        CancellationToken cancellationToken) =>
+        SendCommand(
+            tenantContext,
+            sender,
+            tenantId => new SetVendorActiveCommand(tenantId, vendorId, false, currentActor.UserId),
+            cancellationToken);
+
+    // No actor: a deleted row has nowhere to record who deleted it. See DeleteVendorCommand.
+    private static Task<IResult> DeleteVendor(
+        Guid vendorId, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken) =>
+        SendCommand(
+            tenantContext, sender, tenantId => new DeleteVendorCommand(tenantId, vendorId), cancellationToken);
+
+    private static async Task<IResult> GetCostCentres(
+        bool? includeInactive, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(
+            new GetCostCentresQuery(tenantId, includeInactive ?? false), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> GetCostCentre(
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(new GetCostCentreByIdQuery(tenantId, id), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>Adds a register entry: 201 with <c>{ id }</c>, Location the entry's own GET.</summary>
+    private static async Task<IResult> CreateCostCentre(
+        CostCentreRequest request,
+        ITenantContext tenantContext,
+        ICurrentActor currentActor,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var command = new CreateCostCentreCommand(
+            tenantId, request.Code, request.ToDetails(), currentActor.UserId);
+
+        var result = await sender.Send(command, cancellationToken);
+        return result.IsSuccess
+            ? Results.Created($"/api/budgeting/cost-centres/{result.Value}", new EntityCreatedResponse(result.Value))
+            : EndpointResults.Problem(result.Error);
+    }
+
+    private static Task<IResult> UpdateCostCentre(
+        Guid id,
+        CostCentreRequest request,
+        ITenantContext tenantContext,
+        ICurrentActor currentActor,
+        ISender sender,
+        CancellationToken cancellationToken) =>
+        SendCommand(
+            tenantContext,
+            sender,
+            tenantId => new UpdateCostCentreCommand(
+                tenantId, id, request.Code, request.ToDetails(), currentActor.UserId),
+            cancellationToken);
+
+    private static Task<IResult> ActivateCostCentre(
+        Guid id, ITenantContext tenantContext, ICurrentActor currentActor, ISender sender, CancellationToken cancellationToken) =>
+        SendCommand(
+            tenantContext,
+            sender,
+            tenantId => new SetCostCentreActiveCommand(tenantId, id, true, currentActor.UserId),
+            cancellationToken);
+
+    private static Task<IResult> DeactivateCostCentre(
+        Guid id, ITenantContext tenantContext, ICurrentActor currentActor, ISender sender, CancellationToken cancellationToken) =>
+        SendCommand(
+            tenantContext,
+            sender,
+            tenantId => new SetCostCentreActiveCommand(tenantId, id, false, currentActor.UserId),
+            cancellationToken);
+
+    // No actor: a deleted row has nowhere to record who deleted it. See DeleteCostCentreCommand.
+    private static Task<IResult> DeleteCostCentre(
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken) =>
+        SendCommand(
+            tenantContext, sender, tenantId => new DeleteCostCentreCommand(tenantId, id), cancellationToken);
+
+    private static async Task<IResult> GetCostCentreRollup(
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(new GetCostCentreRollupQuery(tenantId, id), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> GetVendorRollup(
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(new GetVendorRollupQuery(tenantId, id), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>
+    /// The tenant's QuickBooks connection: always 200, <c>status: "NotConnected"</c> when there has
+    /// never been one. See <see cref="QboConnectionResponse"/>.
+    /// </summary>
+    private static async Task<IResult> GetQboConnection(
+        ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(new GetQboConnectionQuery(tenantId), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>
+    /// Starts connecting: 200 with <c>{ authorizeUrl }</c> for the browser to visit. 503
+    /// <c>Budgeting.Qbo.NotConfigured</c> when the server lacks its Intuit credentials or vault key.
+    /// </summary>
+    private static async Task<IResult> AuthorizeQbo(
+        ITenantContext tenantContext, ICurrentActor currentActor, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(
+            new StartQboAuthorizationCommand(tenantId, currentActor.UserId), cancellationToken);
+        return result.IsSuccess
+            ? Results.Ok(new QboAuthorizeResponse(result.Value))
+            : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>
+    /// Finishes connecting with the callback's values: 204. 400 StateInvalid / StateExpired /
+    /// CallbackIncomplete / RealmIdInvalid, 409 DifferentCompany / HomeCurrencyNotCad, 502
+    /// TokenExchangeFailed / CompanyLookupFailed, 503 NotConfigured.
+    /// </summary>
+    private static Task<IResult> CompleteQboConnection(
+        CompleteQboConnectionRequest request,
+        ITenantContext tenantContext,
+        ICurrentActor currentActor,
+        ISender sender,
+        CancellationToken cancellationToken) =>
+        SendCommand(
+            tenantContext,
+            sender,
+            tenantId => new CompleteQboConnectionCommand(
+                tenantId, currentActor.UserId, request.Code, request.State, request.RealmId),
+            cancellationToken);
+
+    /// <summary>
+    /// Disconnects: 204. Revokes at Intuit (best effort), deletes the stored tokens, keeps the
+    /// connection row as Disconnected history. 404 <c>Budgeting.Qbo.NotConnected</c> when there is
+    /// no live connection.
+    /// </summary>
+    private static Task<IResult> DisconnectQbo(
+        ITenantContext tenantContext, ICurrentActor currentActor, ISender sender, CancellationToken cancellationToken) =>
+        SendCommand(
+            tenantContext,
+            sender,
+            tenantId => new DisconnectQboCommand(tenantId, currentActor.UserId),
+            cancellationToken);
 
     /// <summary>
     /// Resolve tenant → build command → dispatch → 204, for every bodiless write (code edits,
@@ -433,9 +875,19 @@ public static class BudgetingEndpoints
 /// <summary>Body of a successful create (201, with Location header).</summary>
 public sealed record EntityCreatedResponse(Guid Id);
 
+/// <summary>Body of POST /api/budgeting/qbo/connection/authorize: the Intuit URL to send the browser to.</summary>
+public sealed record QboAuthorizeResponse(string AuthorizeUrl);
+
 /// <summary>
-/// Body of POST /api/budgeting/codes/starter-set. <paramref name="Created"/> counts only the
-/// codes actually added — zero on a re-run, which is a success, not a failure.
+/// Body of POST /api/budgeting/qbo/connection/complete — the three query-string values Intuit
+/// put on the console's callback URL, passed through unchanged. All nullable so a missing one is
+/// a 400 <c>Budgeting.Qbo.CallbackIncomplete</c> rather than a binding failure.
+/// </summary>
+public sealed record CompleteQboConnectionRequest(string? Code, string? State, string? RealmId);
+
+/// <summary>
+/// Body of POST /api/budgeting/periods/{id}/codes/starter-set. <paramref name="Created"/> counts
+/// only the codes actually added to that period — zero on a re-run, which is a success.
 /// </summary>
 public sealed record StarterSetSeededResponse(int Created);
 
@@ -450,21 +902,74 @@ public sealed record CreateBudgetPeriodRequest(
     int Ordinal);
 
 /// <summary>
-/// Request body for PUT /api/budgeting/periods/{id}/allocations/{codeId}. Both fields are
-/// nullable on the wire so a missing one fails as a readable domain validation error
-/// (<c>AmountRequired</c> / <c>JustificationRequired</c>) rather than a model-binding 400 with
-/// no code in it. Zero is a valid amount; the justification is required — zero-based budgeting
-/// argues every line from zero. The period and code come from the route, never the body.
+/// Request body for POST /api/budgeting/periods/{id}/allocations and
+/// PUT /api/budgeting/periods/{id}/allocations/{allocationId} — one budget item. The period (and,
+/// on PUT, the item) come from the route, never the body.
+/// <para>
+/// Every field is nullable on the wire so a missing one fails as a readable domain validation
+/// error (<c>CodeRequired</c>, <c>TitleRequired</c>, <c>AmountRequired</c>,
+/// <c>JustificationRequired</c>…) rather than a model-binding 400 with no code in it. Send
+/// <see cref="AmountCad"/> for a lump sum, or <see cref="Quantity"/> and
+/// <see cref="UnitCostCad"/> together — the server then computes the amount
+/// (round(q × u, 2, AwayFromZero)) and ignores any amount sent. Enums travel as their names
+/// (<c>Operating|Capital</c>, <c>OneTime|Recurring</c>, <c>MustHave|ShouldHave|NiceToHave</c>);
+/// they are nullable for the <see cref="CreateBudgetCodeRequest"/> reason — a non-nullable enum
+/// binds an omitted property to value 0, which for Priority is MustHave rather than the
+/// documented default ShouldHave.
+/// </para>
+/// <para>
+/// <see cref="Vendor"/> is free text — on a revenue item, <b>the payer</b> (the name is kept for
+/// the wire's sake); an expense item refuses new text (<c>PayerNotAllowedForExpense</c>).
+/// <see cref="VendorShares"/> are an expense item's vendors, <c>[{ vendorId, amountCad }]</c>, each
+/// vendor once, summing to exactly the item's amount (computed or lump sum). <b>Omitted or null
+/// keeps</b> the item's current shares on PUT (none on POST) — so a client that does not know the
+/// field cannot wipe them — and they are then re-checked against the new amount; <c>[]</c> clears
+/// them. A revenue item refuses shares (<c>VendorSharesNotAllowedForRevenue</c>).
+/// </para>
 /// </summary>
-public sealed record SetBudgetAllocationRequest(
+public sealed record BudgetItemRequest(
+    Guid? BudgetCodeId,
+    string? Title,
     decimal? AmountCad,
-    string? Justification);
+    decimal? Quantity,
+    decimal? UnitCostCad,
+    string? Unit,
+    string? Justification,
+    BudgetSpendType? SpendType,
+    BudgetRecurrence? Recurrence,
+    string? Vendor,
+    IReadOnlyList<string>? Tags,
+    BudgetItemPriority? Priority,
+    string? Assumptions,
+    string? ConsequenceIfUnfunded,
+    IReadOnlyList<BudgetItemVendorShareRequest?>? VendorShares = null)
+{
+    public BudgetItemDetails ToDetails() => new()
+    {
+        VendorShares = VendorShares?
+            .Select(share => new BudgetItemVendorShareDetails(share?.VendorId, share?.AmountCad))
+            .ToList(),
+        Title = Title,
+        AmountCad = AmountCad,
+        Quantity = Quantity,
+        UnitCostCad = UnitCostCad,
+        Unit = Unit,
+        Justification = Justification,
+        SpendType = SpendType ?? BudgetSpendType.Operating,
+        Recurrence = Recurrence ?? BudgetRecurrence.OneTime,
+        Vendor = Vendor,
+        Tags = Tags,
+        Priority = Priority ?? BudgetItemPriority.ShouldHave,
+        Assumptions = Assumptions,
+        ConsequenceIfUnfunded = ConsequenceIfUnfunded,
+    };
+}
 
 /// <summary>
-/// Body of a successful PUT to an allocation. <paramref name="Created"/> is true when this call
-/// added the line and false when it rewrote one; <paramref name="Id"/> is the same either way.
+/// One vendor share in a <see cref="BudgetItemRequest"/>. Nullable on the wire so a missing vendor
+/// or amount fails as <c>VendorShareVendorRequired</c> / <c>VendorShareAmountInvalid</c>.
 /// </summary>
-public sealed record BudgetAllocationSetResponse(Guid Id, bool Created);
+public sealed record BudgetItemVendorShareRequest(Guid? VendorId, decimal? AmountCad);
 
 /// <summary>
 /// Request body for POST /api/budgeting/actuals and PUT /api/budgeting/actuals/{id} — one shape
@@ -494,7 +999,50 @@ public sealed record RecordActualTransactionRequest(
     string? Description);
 
 /// <summary>
-/// Request body for POST /api/budgeting/codes. Every string is nullable on the wire so a missing
+/// Request body for POST /api/budgeting/periods/{id}/allocations/copy. The target period comes
+/// from the route; this names the period to copy <em>from</em>. Nullable on the wire so an
+/// omitted or null value fails as a readable <c>Budgeting.Allocation.CopySourceRequired</c>
+/// rather than binding to <c>Guid.Empty</c> and reporting a not-found for the all-zeroes id.
+/// </summary>
+public sealed record CopyBudgetAllocationsRequest(Guid? SourcePeriodId);
+
+/// <summary>
+/// Body of a successful items copy. <paramref name="Copied"/> plus the two skip counts always
+/// equals <paramref name="SourceLineCount"/> — the console reports all four so a skipped line never
+/// reads as a line that vanished. Each source item lands on this period's code with the same
+/// string; <paramref name="SkippedRetiredCode"/> counts items for which this period has <b>no
+/// active code with that string</b> (missing or retired — the name is kept to spare churn).
+/// Every copied line arrives with an <b>empty justification</b> and must be argued before it can
+/// be saved again.
+/// </summary>
+public sealed record BudgetAllocationCopyResponse(
+    int Copied,
+    int SkippedAlreadyPlanned,
+    int SkippedRetiredCode,
+    int SourceLineCount);
+
+/// <summary>
+/// Request body for POST /api/budgeting/periods/{id}/codes/copy. The target period comes from the
+/// route; this names the period to copy codes <em>from</em>. Nullable on the wire so an omitted
+/// value fails as a readable <c>Budgeting.Code.CopySourceRequired</c> — the
+/// <see cref="CopyBudgetAllocationsRequest"/> reasoning.
+/// </summary>
+public sealed record CopyBudgetCodesRequest(Guid? SourcePeriodId);
+
+/// <summary>
+/// Body of a successful codes copy. <paramref name="Copied"/> + <paramref name="SkippedExisting"/>
+/// + <paramref name="SkippedRetired"/> always equals <paramref name="SourceCodeCount"/>. Copied
+/// codes are active, carry every descriptive field of the source, and roll up into this period's
+/// code with the source parent's string when there is one (top-level otherwise).
+/// </summary>
+public sealed record BudgetCodeCopyResponse(
+    int Copied,
+    int SkippedExisting,
+    int SkippedRetired,
+    int SourceCodeCount);
+
+/// <summary>
+/// Request body for POST /api/budgeting/periods/{id}/codes. The period comes from the route. Every string is nullable on the wire so a missing
 /// field fails as a readable domain validation error rather than a model-binding 400 with no code
 /// in it. Enums travel as their names ("Revenue", "Nihb", "GstApplicable", "Quarterly"). The code
 /// string is normalized server-side (trim + upper case) and cannot be changed afterwards.
@@ -535,7 +1083,7 @@ public sealed record CreateBudgetCodeRequest(
 }
 
 /// <summary>
-/// Request body for PUT /api/budgeting/codes/{id}. Carries no Code: the code string is set once
+/// Request body for PUT /api/budgeting/periods/{id}/codes/{codeId}. Carries no Code: the code string is set once
 /// at creation and is not renameable — allocations and actuals reference it by string. Same
 /// nullable-enum reasoning as <see cref="CreateBudgetCodeRequest"/>.
 /// </summary>
@@ -563,5 +1111,65 @@ public sealed record UpdateBudgetCodeRequest(
         TaxTreatment = TaxTreatment,
         BudgetOwnerUserId = BudgetOwnerUserId,
         ReviewFrequency = ReviewFrequency ?? BudgetReviewFrequency.Quarterly,
+    };
+}
+
+/// <summary>
+/// Request body for POST /api/budgeting/vendors and PUT /api/budgeting/vendors/{vendorId} — the
+/// same shape both ways, and PUT is a full replace: an omitted optional field is cleared. Every
+/// field is nullable on the wire so a missing name fails as a readable
+/// <c>Budgeting.Vendor.NameRequired</c> rather than a model-binding 400 with no code in it.
+/// Strings are trimmed server-side and blank becomes null. <see cref="DefaultBudgetCode"/> is a
+/// code string, normalized like one (trim + upper case) but not required to exist.
+/// <see cref="GstRegistrationNumber"/> is reference data — nothing computes tax from it.
+/// </summary>
+public sealed record VendorRequest(
+    string? Name,
+    string? ContactName,
+    string? Email,
+    string? Phone,
+    string? Address,
+    string? Notes,
+    string? GstRegistrationNumber,
+    string? QboDisplayName,
+    string? DefaultBudgetCode)
+{
+    public VendorDetails ToDetails() => new()
+    {
+        Name = Name,
+        ContactName = ContactName,
+        Email = Email,
+        Phone = Phone,
+        Address = Address,
+        Notes = Notes,
+        GstRegistrationNumber = GstRegistrationNumber,
+        QboDisplayName = QboDisplayName,
+        DefaultBudgetCode = DefaultBudgetCode,
+    };
+}
+
+/// <summary>
+/// Request body for POST /api/budgeting/cost-centres and PUT /api/budgeting/cost-centres/{id}.
+/// Every string is nullable on the wire so a missing one fails as a readable domain error.
+/// <para>
+/// <see cref="Code"/> is required on POST (trimmed server-side, case preserved). On PUT it is
+/// optional and never written: omitted/null/blank or the entry's own code is accepted, anything
+/// else is 400 <c>Budgeting.CostCentre.CodeImmutable</c> — so a client that round-trips the whole
+/// record gets a clear refusal instead of a silently ignored rename.
+/// </para>
+/// </summary>
+public sealed record CostCentreRequest(
+    string? Code,
+    string? Name,
+    string? Description,
+    Guid? OwnerUserId,
+    Guid? ParentId)
+{
+    public CostCentreDetails ToDetails() => new()
+    {
+        Name = Name ?? string.Empty,
+        Description = Description,
+        OwnerUserId = OwnerUserId,
+        ParentId = ParentId,
     };
 }

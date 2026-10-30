@@ -42,6 +42,10 @@ const nextConfig: NextConfig = {
   // Next rejects an empty string here — omit the key entirely when unmounted.
   ...(basePath ? { basePath } : {}),
 
+  // A plain <a href> to a public/ file is not prefixed by Next, so the client needs the prefix
+  // itself (lib/legal.ts builds the Privacy Policy / EULA links from it). Inlined at build time.
+  env: { NEXT_PUBLIC_BASE_PATH: basePath },
+
   async rewrites() {
     return [
       {

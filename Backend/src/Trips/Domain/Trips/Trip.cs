@@ -36,6 +36,8 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         RouteName = null!;
         Origin = null!;
         Destination = null!;
+        OriginProvince = null!;
+        DestinationProvince = null!;
     }
 
     public Guid TenantId { get; private set; }
@@ -52,6 +54,17 @@ public sealed class Trip : AggregateRoot, ITenantScoped
     public string RouteName { get; private set; }
     public string Origin { get; private set; }
     public string Destination { get; private set; }
+
+    /// <summary>
+    /// Province code of <see cref="Origin"/> — "MB" unless a free-form corridor said otherwise,
+    /// in which case the trip was refused (<see cref="Planning.OperatingArea"/>). On a route
+    /// snapshot it is the first stop's province. Stored NOT NULL DEFAULT 'MB'.
+    /// </summary>
+    public string OriginProvince { get; private set; }
+
+    /// <summary>Province code of <see cref="Destination"/>; see <see cref="OriginProvince"/>.</summary>
+    public string DestinationProvince { get; private set; }
+
     public List<RouteStop> Stops { get; private set; } = [];
     public int DistanceKm { get; private set; }
 
@@ -63,6 +76,20 @@ public sealed class Trip : AggregateRoot, ITenantScoped
     /// idempotent: a redelivered confirmation event can never create a second trip.
     /// </summary>
     public Guid? BookingDayId { get; private set; }
+
+    /// <summary>
+    /// The external system that created this trip — <see cref="BookeoImportSource"/> for a trip
+    /// <see cref="ScheduleFromImport"/> materialized from a Bookeo booking report, null for every
+    /// other creation path. It is what lets a later import cancel a trip it emptied while never
+    /// touching a trip a dispatcher or the generation worker made.
+    /// </summary>
+    public string? ImportSource { get; private set; }
+
+    /// <summary>The <see cref="ImportSource"/> value stamped by the Bookeo booking-report import.</summary>
+    public const string BookeoImportSource = "bookeo";
+
+    /// <summary>Whether the Bookeo import created this trip (and so may cancel it once empty).</summary>
+    public bool IsCreatedByBookeoImport => ImportSource == BookeoImportSource;
 
     // Template provenance.
     public Guid? ScheduleTemplateId { get; private set; }
@@ -171,6 +198,13 @@ public sealed class Trip : AggregateRoot, ITenantScoped
     /// — callers validate both against the lookup replicas before calling. Reassignment
     /// and unassignment after creation still move through
     /// <see cref="AssignDriver"/>/<see cref="UnassignDriver"/>/<see cref="AssignVehicle"/>.
+    /// <para>
+    /// Manitoba-only (<see cref="Planning.OperatingArea"/>): <paramref name="originProvince"/> and
+    /// <paramref name="destinationProvince"/> are the free-form corridor's endpoint provinces
+    /// (any spelling <see cref="Stops.CanadianProvince"/> recognises; null = the first/last
+    /// stop's province, or Manitoba when there are no stops). They and every stop must lie
+    /// inside the area or the trip is refused with <c>Trips.Trip.OutsideOperatingArea</c>.
+    /// </para>
     /// </summary>
     public static Result<Trip> Schedule(
         Guid tenantId,
@@ -197,7 +231,9 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         Guid vehicleId,
         string vehicleUnit,
         int? seatsCapacity,
-        int? seatsMinimum)
+        int? seatsMinimum,
+        string? originProvince = null,
+        string? destinationProvince = null)
     {
         if (string.IsNullOrWhiteSpace(tripNumber))
         {
@@ -208,6 +244,12 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         if (validation.IsFailure)
         {
             return Result.Failure<Trip>(validation.Error);
+        }
+
+        var corridor = ValidateCorridor(origin, originProvince, destination, destinationProvince, stops);
+        if (corridor.IsFailure)
+        {
+            return Result.Failure<Trip>(corridor.Error);
         }
 
         if (driverId == Guid.Empty)
@@ -242,8 +284,10 @@ public sealed class Trip : AggregateRoot, ITenantScoped
             RouteId = routeId,
             RouteName = routeName.Trim(),
             Origin = origin.Trim(),
+            OriginProvince = corridor.Value.OriginProvince,
             Destination = destination.Trim(),
-            Stops = [.. stops],
+            DestinationProvince = corridor.Value.DestinationProvince,
+            Stops = [.. corridor.Value.Stops],
             DistanceKm = distanceKm,
             ScheduleTemplateId = scheduleTemplateId,
             RoundTripKey = Normalize(roundTripKey),
@@ -316,6 +360,13 @@ public sealed class Trip : AggregateRoot, ITenantScoped
             return Result.Failure<Trip>(validation.Error);
         }
 
+        // Endpoint provinces come from the route's own stops — a booking corridor is a route.
+        var corridor = ValidateCorridor(origin, null, destination, null, stops);
+        if (corridor.IsFailure)
+        {
+            return Result.Failure<Trip>(corridor.Error);
+        }
+
         if (seatsConfirmed < 0)
         {
             return Result.Failure<Trip>(TripErrors.InvalidSeats);
@@ -333,8 +384,10 @@ public sealed class Trip : AggregateRoot, ITenantScoped
             RouteId = routeId,
             RouteName = routeName.Trim(),
             Origin = origin.Trim(),
+            OriginProvince = corridor.Value.OriginProvince,
             Destination = destination.Trim(),
-            Stops = [.. stops],
+            DestinationProvince = corridor.Value.DestinationProvince,
+            Stops = [.. corridor.Value.Stops],
             DistanceKm = distanceKm,
             BookingDayId = bookingDayId,
             SeatsCapacity = seatsCapacity,
@@ -351,10 +404,139 @@ public sealed class Trip : AggregateRoot, ITenantScoped
     }
 
     /// <summary>
+    /// The Bookeo-import creation path, modelled on <see cref="ScheduleFromBooking"/>: a community
+    /// trip materialized from a group of Bookeo bookings sharing (route, direction, date,
+    /// departure). Community service type ONLY, and — the same scoped relaxation as the booking
+    /// path — driver and vehicle are optional: Bookeo knows who is riding, not who is driving.
+    /// The window comes from Bookeo, the route snapshot from the product mapping's route (the
+    /// caller orients <paramref name="stops"/>/<paramref name="origin"/>/<paramref name="destination"/>
+    /// for <paramref name="direction"/>), and <see cref="SeatsConfirmed"/> starts at the imported
+    /// passenger count. A vehicle is passed only when the import matched it to one Active fleet
+    /// unit that seats everyone; its seating capacity becomes <see cref="SeatsCapacity"/>, as on
+    /// every other assignment. Stamps <see cref="ImportSource"/> so a later import may cancel it
+    /// once every booking on it is cancelled. Raises the ordinary
+    /// <see cref="TripScheduledDomainEvent"/> — nothing here is a Booking-module fact, so no
+    /// backlink goes anywhere.
+    /// </summary>
+    public static Result<Trip> ScheduleFromImport(
+        Guid tenantId,
+        string tripNumber,
+        DateOnly serviceDate,
+        TimeOnly windowStart,
+        TimeOnly? windowEnd,
+        Guid routeId,
+        string routeName,
+        string origin,
+        string destination,
+        IReadOnlyList<RouteStop> stops,
+        int distanceKm,
+        TripDirection? direction,
+        int seatsConfirmed,
+        Guid? vehicleId,
+        string? vehicleUnit,
+        int? vehicleSeatingCapacity)
+    {
+        if (string.IsNullOrWhiteSpace(tripNumber))
+        {
+            return Result.Failure<Trip>(TripErrors.TripNumberRequired);
+        }
+
+        if (routeId == Guid.Empty)
+        {
+            return Result.Failure<Trip>(TripErrors.RouteNameRequired);
+        }
+
+        var validation = ValidateDetails(routeName, origin, destination, distanceKm, vehicleSeatingCapacity, seatsMinimum: null);
+        if (validation.IsFailure)
+        {
+            return Result.Failure<Trip>(validation.Error);
+        }
+
+        // Endpoint provinces come from the oriented route stops the caller passed.
+        var corridor = ValidateCorridor(origin, null, destination, null, stops);
+        if (corridor.IsFailure)
+        {
+            return Result.Failure<Trip>(corridor.Error);
+        }
+
+        if (seatsConfirmed < 0)
+        {
+            return Result.Failure<Trip>(TripErrors.InvalidSeats);
+        }
+
+        if (vehicleId is not null)
+        {
+            if (vehicleId == Guid.Empty)
+            {
+                return Result.Failure<Trip>(TripErrors.VehicleRequired);
+            }
+
+            if (string.IsNullOrWhiteSpace(vehicleUnit))
+            {
+                return Result.Failure<Trip>(TripErrors.VehicleUnitRequired);
+            }
+
+            if (vehicleSeatingCapacity is { } capacity && seatsConfirmed > capacity)
+            {
+                return Result.Failure<Trip>(TripErrors.VehicleCapacityBelowConfirmed);
+            }
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var trip = new Trip
+        {
+            TenantId = tenantId,
+            TripNumber = tripNumber.Trim(),
+            ServiceDate = serviceDate,
+            WindowStart = windowStart,
+            WindowEnd = windowEnd,
+            ServiceType = TripServiceType.Community,
+            RouteId = routeId,
+            RouteName = routeName.Trim(),
+            Origin = origin.Trim(),
+            OriginProvince = corridor.Value.OriginProvince,
+            Destination = destination.Trim(),
+            DestinationProvince = corridor.Value.DestinationProvince,
+            Stops = [.. corridor.Value.Stops],
+            DistanceKm = distanceKm,
+            ImportSource = BookeoImportSource,
+            Direction = direction,
+            VehicleId = vehicleId,
+            VehicleUnit = vehicleId is null ? null : Normalize(vehicleUnit),
+            SeatsCapacity = vehicleId is null ? null : vehicleSeatingCapacity,
+            SeatsConfirmed = seatsConfirmed,
+            DemandGuaranteed = false,
+            Status = TripStatus.Scheduled,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+        };
+
+        trip.Raise(new TripScheduledDomainEvent(trip.Id));
+        return Result.Success(trip);
+    }
+
+    /// <summary>
     /// Edits the trip's plan while it is still Scheduled. Assignment, demand, and status
     /// move through their own methods; the trip number and <see cref="ScheduleTemplateId"/>
     /// never change, and round-trip pairing moves only through
     /// <see cref="MergeRoundTrip"/>/<see cref="AssignRoundTrip"/>/<see cref="ClearRoundTrip"/>.
+    /// <para>
+    /// The route is NOT editable here: <paramref name="routeId"/> must equal the trip's current
+    /// <see cref="RouteId"/> (null stays null — a free-form trip may still edit its corridor
+    /// text). Moving to another route goes through <see cref="ChangeRoute"/>, which the
+    /// application layer applies to both legs of a round trip at once; a re-route here would
+    /// silently split a pair across two corridors.
+    /// </para>
+    /// <para>
+    /// <see cref="IsEmptyLeg"/> is NOT editable here either: a trip becomes a deadhead only
+    /// through <see cref="ConvertToDeadhead"/> (which proves nobody is booked on it) and back
+    /// through <see cref="ConvertToPassengerTrip"/>.
+    /// </para>
+    /// <para>
+    /// The Manitoba-only check runs again on every edit (<see cref="Planning.OperatingArea"/>):
+    /// a free-form corridor's <paramref name="originProvince"/>/<paramref name="destinationProvince"/>
+    /// (null = first/last stop's province, else Manitoba) and every stop must be inside the area.
+    /// </para>
     /// </summary>
     public Result Update(
         DateOnly serviceDate,
@@ -367,22 +549,34 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         string destination,
         IReadOnlyList<RouteStop> stops,
         int distanceKm,
-        bool isEmptyLeg,
         Guid? clientId,
         string? clientName,
         string? poNumber,
         int? seatsCapacity,
-        int? seatsMinimum)
+        int? seatsMinimum,
+        string? originProvince = null,
+        string? destinationProvince = null)
     {
         if (Status != TripStatus.Scheduled)
         {
             return Result.Failure(TripErrors.NotEditable);
         }
 
+        if (routeId != RouteId)
+        {
+            return Result.Failure(TripErrors.UseChangeRoute);
+        }
+
         var validation = ValidateDetails(routeName, origin, destination, distanceKm, seatsCapacity, seatsMinimum);
         if (validation.IsFailure)
         {
             return validation;
+        }
+
+        var corridor = ValidateCorridor(origin, originProvince, destination, destinationProvince, stops);
+        if (corridor.IsFailure)
+        {
+            return Result.Failure(corridor.Error);
         }
 
         ServiceDate = serviceDate;
@@ -392,10 +586,11 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         RouteId = routeId;
         RouteName = routeName.Trim();
         Origin = origin.Trim();
+        OriginProvince = corridor.Value.OriginProvince;
         Destination = destination.Trim();
-        Stops = [.. stops];
+        DestinationProvince = corridor.Value.DestinationProvince;
+        Stops = [.. corridor.Value.Stops];
         DistanceKm = distanceKm;
-        IsEmptyLeg = isEmptyLeg;
         ClientId = clientId;
         ClientName = Normalize(clientName);
         PoNumber = Normalize(poNumber);
@@ -406,6 +601,110 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         UpdatedAtUtc = DateTimeOffset.UtcNow;
 
         Raise(new TripUpdatedDomainEvent(Id));
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Whether this trip could move onto <paramref name="route"/> right now — the same checks
+    /// <see cref="ChangeRoute"/> applies, without mutating, so the change preview can list them.
+    /// Order matters only for which single error a caller sees first: not Scheduled, owned by a
+    /// booking day, already on that route, then the route being inactive.
+    /// </summary>
+    public Result CanChangeRouteTo(Route route)
+    {
+        if (Status != TripStatus.Scheduled)
+        {
+            return Result.Failure(TripErrors.RouteChangeNotScheduled);
+        }
+
+        // A booking-confirmed trip's corridor IS the booking day's corridor (Booking's replica
+        // of this route). Moving the trip would strand every booking on the day.
+        if (BookingDayId is not null)
+        {
+            return Result.Failure(TripErrors.RouteOwnedByBooking);
+        }
+
+        if (RouteId == route.Id)
+        {
+            return Result.Failure(TripErrors.RouteUnchanged);
+        }
+
+        if (!route.Active)
+        {
+            return Result.Failure(TripErrors.RouteInactive);
+        }
+
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// The snapshot this trip would carry on <paramref name="route"/>, oriented for its own
+    /// <see cref="Direction"/>: an Inbound leg runs the stops backwards with origin and
+    /// destination swapped (<see cref="RouteStop.OrientedFor"/> — the reversal generation, the
+    /// deadhead return and the Bookeo import all share). The window end is recomputed the way
+    /// the generation materializer stamps it — departure + the route's estimated duration —
+    /// but only when the trip had one; an open-ended window stays open-ended.
+    /// </summary>
+    public TripRouteSnapshot RouteSnapshotFor(Route route)
+    {
+        var inbound = Direction == TripDirection.Inbound;
+        return new TripRouteSnapshot(
+            route.Id,
+            route.Name,
+            inbound ? route.Destination : route.Origin,
+            inbound ? route.DestinationProvince : route.OriginProvince,
+            inbound ? route.Origin : route.Destination,
+            inbound ? route.OriginProvince : route.DestinationProvince,
+            RouteStop.OrientedFor(route.Stops, Direction),
+            route.DistanceKm,
+            WindowEnd is null ? null : WindowStart.Add(route.EstimatedDuration));
+    }
+
+    /// <summary>
+    /// Moves a Scheduled trip onto a different catalogue route: the route snapshot (id, name,
+    /// endpoints, stops, distance) is replaced by <see cref="RouteSnapshotFor"/> and the window
+    /// end recomputed from the route's duration. Everything else stays — trip number, template
+    /// provenance, round-trip key and direction, assignment, seats, client, and the manifest's
+    /// passengers (whose stop picks may now be off-route; the dispatcher re-picks them).
+    /// Pairing is the caller's concern: the application layer changes both legs of a round trip
+    /// in one save, each oriented for its own direction.
+    /// <para>
+    /// The Manitoba-only gate is re-run on the new snapshot — <see cref="Route.Create"/> already
+    /// refuses an out-of-area stop, but a route written before the rule may still carry one, and
+    /// a trip must never inherit it (<c>Trips.Trip.OutsideOperatingArea</c>).
+    /// </para>
+    /// </summary>
+    public Result ChangeRoute(Route route)
+    {
+        var check = CanChangeRouteTo(route);
+        if (check.IsFailure)
+        {
+            return check;
+        }
+
+        var snapshot = RouteSnapshotFor(route);
+        var corridor = ValidateCorridor(
+            snapshot.Origin, snapshot.OriginProvince, snapshot.Destination, snapshot.DestinationProvince, snapshot.Stops);
+        if (corridor.IsFailure)
+        {
+            return Result.Failure(corridor.Error);
+        }
+
+        var previousRouteId = RouteId;
+        var previousRouteName = RouteName;
+
+        RouteId = snapshot.RouteId;
+        RouteName = snapshot.RouteName.Trim();
+        Origin = snapshot.Origin.Trim();
+        OriginProvince = corridor.Value.OriginProvince;
+        Destination = snapshot.Destination.Trim();
+        DestinationProvince = corridor.Value.DestinationProvince;
+        Stops = [.. corridor.Value.Stops];
+        DistanceKm = snapshot.DistanceKm;
+        WindowEnd = snapshot.WindowEnd;
+        UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        Raise(new TripRouteChangedDomainEvent(Id, previousRouteId, previousRouteName, RouteId.Value, RouteName));
         return Result.Success();
     }
 
@@ -478,6 +777,128 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         UpdatedAtUtc = DateTimeOffset.UtcNow;
 
         Raise(new TripAssignmentChangedDomainEvent(Id));
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Longest free-text reason a dispatcher may record against a trip correction. Today only
+    /// <see cref="CorrectDriver"/> enforces it; it lives on the aggregate so the other
+    /// reason-carrying trip commands (cancel, close without billing, ...) can adopt the same cap
+    /// later — they do not apply it yet.
+    /// </summary>
+    public const int MaxReasonLength = 500;
+
+    /// <summary>
+    /// Whether <see cref="CorrectDriver"/> applies to a trip in <paramref name="status"/>: only
+    /// once the run is over and has not been called off — ReadyForBilling, Invoiced, or Completed.
+    /// Scheduled and InProgress trips change driver through the normal reassign path; Cancelled
+    /// and WrittenOff trips are refused (a cancelled run had no driver doing the work, and a
+    /// written-off one is closed for good).
+    /// </summary>
+    public static bool DriverCorrectionAllowedFor(TripStatus status) =>
+        status is TripStatus.ReadyForBilling or TripStatus.Invoiced or TripStatus.Completed;
+
+    /// <summary>
+    /// The side-effect-free first half of <see cref="CorrectDriver"/>: the status checks
+    /// (<see cref="TripErrors.UseReassign"/>, then <see cref="TripErrors.DriverCorrectionNotAllowed"/>)
+    /// and the reason checks (required, at most <see cref="MaxReasonLength"/> after trimming), in
+    /// that order, returning exactly the error <see cref="CorrectDriver"/> would. The handler calls
+    /// it before looking the driver up, so the documented order status → reason → driver holds even
+    /// when the driver id is unknown (a 404 lookup miss never masks a wrong-path or missing-reason
+    /// refusal). <see cref="CorrectDriver"/> runs it too, so the two can never disagree.
+    /// </summary>
+    public Result CanCorrectDriver(string? reason)
+    {
+        if (Status is TripStatus.Scheduled or TripStatus.InProgress)
+        {
+            return Result.Failure(TripErrors.UseReassign(Status));
+        }
+
+        if (!DriverCorrectionAllowedFor(Status))
+        {
+            return Result.Failure(TripErrors.DriverCorrectionNotAllowed(Status));
+        }
+
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return Result.Failure(TripErrors.DriverCorrectionReasonRequired);
+        }
+
+        if (reason.Trim().Length > MaxReasonLength)
+        {
+            return Result.Failure(TripErrors.DriverCorrectionReasonTooLong);
+        }
+
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Corrects the driver recorded on a trip whose run is already over — the dispatcher's fix
+    /// for a trip that was logged against the wrong driver. Deliberately separate from
+    /// <see cref="AssignDriver"/>, which stays refused on an operationally-closed trip: this is a
+    /// correction of history, so it takes a required reason (trimmed, at most
+    /// <see cref="MaxReasonLength"/> characters) and records who made it.
+    /// <para>
+    /// The caller validates <paramref name="driverId"/> against driver_lookup and passes the name
+    /// snapshot. Any driver row qualifies, Inactive or Deactivated included — the question is who
+    /// actually drove, which is a historical fact, not an availability check.
+    /// </para>
+    /// <para>
+    /// Changes <see cref="DriverId"/>, <see cref="DriverName"/>, and <see cref="UpdatedAtUtc"/>
+    /// only: status, the lifecycle timestamps, the vehicle, the post-trip inspection flag, and
+    /// round-trip pairing are untouched. A trip with no driver on record may be corrected.
+    /// Raises <see cref="TripDriverCorrectedDomainEvent"/> (and NOT
+    /// <see cref="TripAssignmentChangedDomainEvent"/> — this is not an assignment).
+    /// </para>
+    /// </summary>
+    public Result CorrectDriver(
+        Guid driverId,
+        string driverName,
+        string reason,
+        Guid? actorUserId,
+        string? actorEmail)
+    {
+        // Order matters: a caller on the wrong path (a live trip, or one closed for good) is told
+        // the action itself is wrong before anything about the reason or the driver it sent.
+        var preCheck = CanCorrectDriver(reason);
+        if (preCheck.IsFailure)
+        {
+            return preCheck;
+        }
+
+        var trimmedReason = reason.Trim();
+
+        if (driverId == Guid.Empty)
+        {
+            return Result.Failure(TripErrors.DriverRequired);
+        }
+
+        if (string.IsNullOrWhiteSpace(driverName))
+        {
+            return Result.Failure(TripErrors.DriverNameRequired);
+        }
+
+        if (DriverId == driverId)
+        {
+            return Result.Failure(TripErrors.DriverUnchanged);
+        }
+
+        var previousDriverId = DriverId;
+        var previousDriverName = DriverName;
+
+        DriverId = driverId;
+        DriverName = driverName.Trim();
+        UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        Raise(new TripDriverCorrectedDomainEvent(
+            Id,
+            previousDriverId,
+            previousDriverName,
+            driverId,
+            DriverName,
+            trimmedReason,
+            actorUserId,
+            Normalize(actorEmail)));
         return Result.Success();
     }
 
@@ -833,21 +1254,8 @@ public sealed class Trip : AggregateRoot, ITenantScoped
             return Result.Failure<Trip>(TripErrors.DeadheadReturnOfEmptyLeg);
         }
 
-        // Only Order is re-sequenced — both timetable offsets stay attached to their own stop,
-        // and the new leg's Inbound direction is what selects the return one.
-        var reversedStops = Stops
-            .OrderByDescending(s => s.Order)
-            .Select((stop, index) => new RouteStop
-            {
-                StopId = stop.StopId,
-                Name = stop.Name,
-                Order = index,
-                Latitude = stop.Latitude,
-                Longitude = stop.Longitude,
-                OutboundOffsetMinutes = stop.OutboundOffsetMinutes,
-                ReturnOffsetMinutes = stop.ReturnOffsetMinutes,
-            })
-            .ToList();
+        // The new leg's Inbound direction is what selects the return timetable offsets.
+        var reversedStops = RouteStop.Reversed(Stops);
 
         var key = NewMergeRoundTripKey();
         var returnTrip = Schedule(
@@ -875,7 +1283,9 @@ public sealed class Trip : AggregateRoot, ITenantScoped
             vehicleId,
             vehicleUnit,
             seatsCapacity: null,
-            seatsMinimum: null);
+            seatsMinimum: null,
+            originProvince: DestinationProvince,
+            destinationProvince: OriginProvince);
 
         if (returnTrip.IsFailure)
         {
@@ -884,6 +1294,105 @@ public sealed class Trip : AggregateRoot, ITenantScoped
 
         var paired = AssignRoundTrip(key, TripDirection.Outbound);
         return paired.IsFailure ? Result.Failure<Trip>(paired.Error) : returnTrip;
+    }
+
+    /// <summary>
+    /// Turns a Scheduled trip nobody is booked on into a deadhead — an empty repositioning run —
+    /// so it no longer needs a passenger manifest to start or a post-trip inspection to finish.
+    /// The caller loads what lives outside this aggregate and passes it in (the
+    /// <see cref="MergeRoundTrip"/> shape): <paramref name="manifests"/> is EVERY manifest for the
+    /// trip — the one on <see cref="ManifestId"/> and any recorded under its trip number, because
+    /// linking is lazy; <paramref name="externalBookingCount"/> is the number of live Bookeo ledger
+    /// rows placed on it; <paramref name="roundTripPartners"/> the other legs sharing its
+    /// <see cref="RoundTripKey"/>.
+    /// <para>
+    /// Refused, in this order, unless: Scheduled; not already a deadhead; not confirmed from a
+    /// community booking day (those passengers live in Community Booking); no confirmed seats
+    /// and no gift-a-seat pledge (demand blocks — it is never reset here); every manifest has no
+    /// passengers and no cargo items; no imported Bookeo booking points at it; and no paired leg
+    /// is already a deadhead. Shipment legs are NOT checked — freight on a deadhead is the point
+    /// of having one. Cargo/grocery runs and unpaired client trips may convert.
+    /// </para>
+    /// <para>
+    /// On success the trip drops its manifest link; the caller deletes the (empty) manifests in
+    /// the same save, so a passenger added concurrently moves a manifest's version token and the
+    /// save loses cleanly instead of stranding someone on a deadhead.
+    /// </para>
+    /// </summary>
+    public Result ConvertToDeadhead(
+        IReadOnlyCollection<TripManifest> manifests,
+        int externalBookingCount,
+        IReadOnlyCollection<Trip> roundTripPartners)
+    {
+        if (Status != TripStatus.Scheduled)
+        {
+            return Result.Failure(TripErrors.DeadheadConversionNotScheduled);
+        }
+
+        if (IsEmptyLeg)
+        {
+            return Result.Failure(TripErrors.AlreadyEmptyLeg);
+        }
+
+        if (BookingDayId is not null)
+        {
+            return Result.Failure(TripErrors.DeadheadConversionBookingSourced);
+        }
+
+        if (SeatsConfirmed > 0 || DemandGuaranteed)
+        {
+            return Result.Failure(TripErrors.DeadheadConversionHasDemand(SeatsConfirmed, DemandGuaranteed));
+        }
+
+        var passengers = manifests.Sum(m => m.Passengers.Count);
+        var cargoItems = manifests.Sum(m => m.Cargo.Count);
+        if (passengers > 0 || cargoItems > 0)
+        {
+            return Result.Failure(TripErrors.DeadheadConversionManifestNotEmpty(passengers, cargoItems));
+        }
+
+        if (externalBookingCount > 0)
+        {
+            return Result.Failure(TripErrors.DeadheadConversionHasExternalBookings(externalBookingCount));
+        }
+
+        var emptyPartner = roundTripPartners.FirstOrDefault(p => p.Id != Id && p.IsEmptyLeg);
+        if (emptyPartner is not null)
+        {
+            return Result.Failure(TripErrors.RoundTripBothLegsEmpty(emptyPartner.TripNumber));
+        }
+
+        IsEmptyLeg = true;
+        ManifestId = null;
+        UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        Raise(new TripConvertedToDeadheadDomainEvent(Id, [.. manifests.Select(m => m.Id).Distinct()]));
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Turns a Scheduled deadhead back into an ordinary trip. Only the flag changes: the en-route
+    /// gates (a passenger manifest, or a shipment for a cargo run) and the post-trip inspection
+    /// gate on <see cref="FinishOperations"/> apply again by themselves, and a manifest can be
+    /// recorded for it again.
+    /// </summary>
+    public Result ConvertToPassengerTrip()
+    {
+        if (Status != TripStatus.Scheduled)
+        {
+            return Result.Failure(TripErrors.PassengerTripConversionNotScheduled);
+        }
+
+        if (!IsEmptyLeg)
+        {
+            return Result.Failure(TripErrors.NotEmptyLeg);
+        }
+
+        IsEmptyLeg = false;
+        UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        Raise(new TripConvertedToPassengerTripDomainEvent(Id));
+        return Result.Success();
     }
 
     /// <summary>
@@ -1067,6 +1576,28 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         }
 
         return Result.Success();
+    }
+
+    /// <summary>
+    /// The Manitoba-only gate for a corridor about to be written. An endpoint province left null
+    /// follows its end's stop (the first stop for the origin, the last for the destination —
+    /// the stops are already oriented for the leg), and Manitoba when there are no stops. The
+    /// result's provinces and stops are the normalised codes the trip stores.
+    /// </summary>
+    private static Result<Planning.TripCorridor> ValidateCorridor(
+        string origin,
+        string? originProvince,
+        string destination,
+        string? destinationProvince,
+        IReadOnlyList<RouteStop> stops)
+    {
+        var ordered = stops.OrderBy(stop => stop.Order).ToList();
+        return Planning.OperatingArea.ValidateTripCorridor(
+            origin,
+            originProvince ?? ordered.FirstOrDefault()?.Province,
+            destination,
+            destinationProvince ?? ordered.LastOrDefault()?.Province,
+            stops);
     }
 
     /// <summary>Mirrored corridors: a.Origin==b.Destination and a.Destination==b.Origin, trimmed, case-insensitive.</summary>

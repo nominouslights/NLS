@@ -19,6 +19,8 @@ public static class EmailDispatchResponseMapper
         dispatch.TemplateName,
         dispatch.ServiceType.ToString(),
         dispatch.ClientId,
+        dispatch.BookingId,
+        dispatch.BookingReference,
         dispatch.Status.ToString(),
         dispatch.SentAtUtc,
         dispatch.Recipients

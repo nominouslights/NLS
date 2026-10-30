@@ -3,10 +3,11 @@ using NorthernLink.Shared.Kernel;
 namespace NorthernLink.Budgeting.Domain.Allocations.Events;
 
 /// <summary>
-/// Raised when a budget period gets its first line against a code. Carries the code string and
-/// the amount so a journal row reads on its own. <see cref="ActorId"/> carries the authenticated
-/// user — see <c>BudgetCodeCreatedDomainEvent</c> for why it rides the event rather than only
-/// the aggregate (it is what fills <c>event_journal.actor_id</c>'s role today).
+/// Raised when a budget item is added to a period (by create or by copy). Carries the code
+/// string, the title and the amount so a journal row reads on its own; the rest of the item is in
+/// the journal's aggregate snapshot, and the projection maps from the aggregate itself, not from
+/// this payload. <see cref="ActorId"/> carries the authenticated user — see
+/// <c>BudgetCodeCreatedDomainEvent</c> for why it rides the event rather than only the aggregate.
 /// </summary>
 public sealed record BudgetAllocationCreatedDomainEvent(
     Guid AllocationId,
@@ -14,6 +15,7 @@ public sealed record BudgetAllocationCreatedDomainEvent(
     Guid PeriodId,
     Guid BudgetCodeId,
     string Code,
+    string Title,
     decimal AmountCad,
     Guid? ActorId) : IDomainEvent
 {

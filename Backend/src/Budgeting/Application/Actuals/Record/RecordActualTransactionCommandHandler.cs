@@ -15,8 +15,8 @@ namespace NorthernLink.Budgeting.Application.Actuals.Record;
 /// error, not a not-found for a code it was never going to reach.</item>
 /// <item><b>A period covers the date.</b> Nothing is stored that the period-driven console could
 /// never show; see <see cref="CoveringPeriodRule"/>.</item>
-/// <item><b>The code exists</b> (tenant-filtered, so another tenant's id reads as NotFound)
-/// <b>and is active.</b> A retired code stays listed so old rows keep resolving, but it takes no
+/// <item><b>The code exists in that period</b> (tenant-filtered, so another tenant's id reads as
+/// NotFound; codes belong to a period, so another period's code does too) <b>and is active.</b> A retired code stays listed so old rows keep resolving, but it takes no
 /// new spend — <see cref="ActualTransactionErrors.CodeRetired"/> names the way out.</item>
 /// </list>
 /// <b>What is deliberately absent is the period's state.</b> There is no
@@ -52,7 +52,9 @@ public sealed class RecordActualTransactionCommandHandler(
             return Result.Failure<Guid>(covered.Error);
         }
 
-        var code = await codes.GetByIdAsync(command.BudgetCodeId, cancellationToken);
+        // Looked up in the covering period: codes belong to a period, and a transaction counts in
+        // the one its date falls in. Another period's code reads as NotFound here.
+        var code = await codes.GetByIdAsync(covered.Value.Id, command.BudgetCodeId, cancellationToken);
         if (code is null)
         {
             return Result.Failure<Guid>(BudgetCodeErrors.NotFound);

@@ -13,6 +13,7 @@ using NorthernLink.Billing.Application.Invoices.WriteOff;
 using NorthernLink.Billing.Application.Invoices.UpdateQboReference;
 using NorthernLink.Billing.Application.Invoices.Void;
 using NorthernLink.Billing.Domain.Invoices;
+using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Shared.Tenancy;
 
@@ -27,7 +28,13 @@ public static class BillingEndpoints
 {
     public static IEndpointRouteBuilder MapBillingEndpoints(this IEndpointRouteBuilder app)
     {
-        var invoices = app.MapGroup("/api/billing/invoices").RequireAuthorization();
+        // DispatchAccess, not a bare RequireAuthorization: invoices are every client's rates and
+        // volumes in one list, and a bare authorize let any authenticated account — a Driver
+        // token included — read the lot. Accountant and BoardMember are deliberately absent:
+        // this module is a QuickBooks prep worksheet driven from the Dispatch Console, and
+        // financial oversight has its own boundary (BudgetAccess on /api/budgeting).
+        var invoices = app.MapGroup("/api/billing/invoices")
+            .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
 
         invoices.MapGet("", GetInvoices);
         invoices.MapGet("{id:guid}", GetInvoiceById);
@@ -41,7 +48,8 @@ public static class BillingEndpoints
         invoices.MapPost("{id:guid}/void", VoidInvoice);
 
         // The billable-trip pool the drafts draw from (uninvoiced view for manual lines).
-        app.MapGet("/api/billing/billable-trips", GetBillableTrips).RequireAuthorization();
+        app.MapGet("/api/billing/billable-trips", GetBillableTrips)
+            .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
 
         return app;
     }
@@ -105,9 +113,18 @@ public static class BillingEndpoints
             new GenerateDraftInvoiceCommand(tenantId, request.ClientId, request.PeriodStart, request.PeriodEnd),
             cancellationToken);
 
-        return result.IsSuccess
-            ? Results.Created($"/api/billing/invoices/{result.Value}", new { id = result.Value })
-            : EndpointResults.Problem(result.Error);
+        if (result.IsFailure)
+        {
+            return EndpointResults.Problem(result.Error);
+        }
+
+        // One worksheet per purchase order, so the body is a list. There is always at least one
+        // entry, and the Location header points at the first — enough for the console to
+        // navigate somewhere sensible while still showing the whole set.
+        var created = result.Value.Invoices;
+        return Results.Created(
+            $"/api/billing/invoices/{created[0].InvoiceId}",
+            new GenerateDraftInvoicesResponse(created));
     }
 
     private static async Task<IResult> ReplaceLines(
@@ -259,6 +276,14 @@ public static class BillingEndpoints
     // Request bodies — module-local contracts, mirrored by the frontend's typed client.
 
     public sealed record GenerateDraftInvoiceRequest(Guid ClientId, DateOnly PeriodStart, DateOnly PeriodEnd);
+
+    /// <summary>
+    /// Body of a successful POST /generate-draft. Generation produces one worksheet per
+    /// effective purchase order, so this is a list — never a single id.
+    /// <c>Warnings</c> are advisory strings (today: the PO's authorized value being exceeded)
+    /// and never mean the worksheet failed to generate.
+    /// </summary>
+    public sealed record GenerateDraftInvoicesResponse(IReadOnlyList<GeneratedInvoiceDraft> Invoices);
 
     public sealed record InvoiceLineRequest(
         Guid? LineId,

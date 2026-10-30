@@ -14,6 +14,10 @@ using NorthernLink.Shared.Persistence.Auditing;
 using NorthernLink.Shared.Persistence.Projections;
 using NorthernLink.Shared.Tenancy;
 using NorthernLink.Trips.Application.Abstractions;
+using NorthernLink.Trips.Application.BookeoImports;
+using NorthernLink.Trips.Application.BookeoImports.Commit;
+using NorthernLink.Trips.Application.BookeoImports.Mappings;
+using NorthernLink.Trips.Application.BookeoImports.Preview;
 using NorthernLink.Trips.Application.Integration;
 using NorthernLink.Trips.Application.Manifests;
 using NorthernLink.Trips.Application.Manifests.Create;
@@ -37,6 +41,7 @@ using NorthernLink.Trips.Application.Stops.SetActive;
 using NorthernLink.Trips.Application.Stops.Update;
 using NorthernLink.Trips.Application.Schedules.AddException;
 using NorthernLink.Trips.Application.Schedules.Create;
+using NorthernLink.Trips.Application.Schedules.GenerateTrips;
 using NorthernLink.Trips.Application.Schedules.GetExceptions;
 using NorthernLink.Trips.Application.Schedules.GetScheduleTemplates;
 using NorthernLink.Trips.Application.Schedules.RemoveException;
@@ -46,8 +51,12 @@ using NorthernLink.Trips.Application.Schedules.UpdateException;
 using NorthernLink.Trips.Application.Trips;
 using NorthernLink.Trips.Application.Trips.Assign;
 using NorthernLink.Trips.Application.Trips.AttachManifest;
+using NorthernLink.Trips.Application.Trips.ChangeRoute;
 using NorthernLink.Trips.Application.Trips.ChangeStatus;
 using NorthernLink.Trips.Application.Trips.CloseWithoutBilling;
+using NorthernLink.Trips.Application.Trips.ConvertToDeadhead;
+using NorthernLink.Trips.Application.Trips.ConvertToPassengerTrip;
+using NorthernLink.Trips.Application.Trips.CorrectDriver;
 using NorthernLink.Trips.Application.Trips.FinishOperations;
 using NorthernLink.Trips.Application.Trips.Create;
 using NorthernLink.Trips.Application.Trips.CreateDeadheadReturn;
@@ -60,6 +69,7 @@ using NorthernLink.Trips.Application.Trips.UnpairRoundTrip;
 using NorthernLink.Trips.Application.Trips.Update;
 using NorthernLink.Trips.Domain.Manifests.Events;
 using NorthernLink.Trips.Domain.Trips.Events;
+using NorthernLink.Trips.Infrastructure.BookeoImports;
 using NorthernLink.Trips.Infrastructure.Generation;
 using NorthernLink.Trips.Infrastructure.Persistence;
 using NorthernLink.Trips.Infrastructure.Persistence.Projections;
@@ -135,6 +145,26 @@ public static class TripsServiceCollectionExtensions
         services.AddScoped<IRiderReadService, RiderReadService>();
         services.AddScoped<ManifestRiderUpserter>();
 
+        // The one trip-generation code path (worker + on-demand generate/preview), and the
+        // injectable clock its handlers take "today" from. TryAdd: the system clock is
+        // process-wide plumbing another module may also register.
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddScoped<ScheduleTripMaterializer>();
+
+        // The Bookeo booking-report import: the workbook reader (ExcelDataReader — stateless),
+        // its persistence, and the plan loader both preview and commit run.
+        services.AddSingleton<IBookeoWorkbookReader, ExcelBookeoWorkbookReader>();
+        services.AddScoped<IBookeoImportRepository, BookeoImportRepository>();
+        services.AddScoped<BookeoImportPlanLoader>();
+
+        // Route change: one impact calculator shared by the preview and the command, so the
+        // dialog can never promise something the command then refuses.
+        services.AddScoped<TripRouteChangeImpactCalculator>();
+
+        // The caller-owns-this-trip check behind the driver-facing /api/trips routes (list,
+        // detail, activity, status). Resolves the token's user to a driver_lookup row.
+        services.AddScoped<TripOperatorAccess>();
+
         // 3. Command/query handlers — registered explicitly, one line per handler.
         services.AddScoped<ICommandHandler<CreateTripManifestCommand, Guid>, CreateTripManifestCommandHandler>();
         services.AddScoped<ICommandHandler<UpdateTripManifestCommand>, UpdateTripManifestCommandHandler>();
@@ -142,10 +172,15 @@ public static class TripsServiceCollectionExtensions
         services.AddScoped<IQueryHandler<GetTripManifestByIdQuery, TripManifestResponse>, GetTripManifestByIdQueryHandler>();
         services.AddScoped<ICommandHandler<CreateTripCommand, Guid>, CreateTripCommandHandler>();
         services.AddScoped<ICommandHandler<UpdateTripCommand>, UpdateTripCommandHandler>();
+        services.AddScoped<ICommandHandler<ChangeTripRouteCommand>, ChangeTripRouteCommandHandler>();
+        services.AddScoped<IQueryHandler<PreviewTripRouteChangeQuery, TripRouteChangePreviewResponse>, PreviewTripRouteChangeQueryHandler>();
+        services.AddScoped<ICommandHandler<ConvertTripToDeadheadCommand>, ConvertTripToDeadheadCommandHandler>();
+        services.AddScoped<ICommandHandler<ConvertTripToPassengerTripCommand>, ConvertTripToPassengerTripCommandHandler>();
         services.AddScoped<ICommandHandler<AssignTripCommand>, AssignTripCommandHandler>();
         services.AddScoped<ICommandHandler<ChangeTripStatusCommand>, ChangeTripStatusCommandHandler>();
         services.AddScoped<ICommandHandler<FinishTripOperationsCommand>, FinishTripOperationsCommandHandler>();
         services.AddScoped<ICommandHandler<CloseTripWithoutBillingCommand>, CloseTripWithoutBillingCommandHandler>();
+        services.AddScoped<ICommandHandler<CorrectTripDriverCommand>, CorrectTripDriverCommandHandler>();
         services.AddScoped<ICommandHandler<RecordTripDemandCommand>, RecordTripDemandCommandHandler>();
         services.AddScoped<ICommandHandler<AttachManifestToTripCommand>, AttachManifestToTripCommandHandler>();
         services.AddScoped<ICommandHandler<MergeRoundTripCommand>, MergeRoundTripCommandHandler>();
@@ -183,10 +218,21 @@ public static class TripsServiceCollectionExtensions
         services.AddScoped<ICommandHandler<UpdateScheduleExceptionCommand>, UpdateScheduleExceptionCommandHandler>();
         services.AddScoped<ICommandHandler<RemoveScheduleExceptionCommand>, RemoveScheduleExceptionCommandHandler>();
         services.AddScoped<IQueryHandler<GetScheduleExceptionsQuery, IReadOnlyList<ScheduleExceptionResponse>>, GetScheduleExceptionsQueryHandler>();
+        services.AddScoped<ICommandHandler<GenerateScheduleTripsCommand, ScheduleTripGenerationResult>, GenerateScheduleTripsCommandHandler>();
+        services.AddScoped<IQueryHandler<PreviewScheduleTripGenerationQuery, ScheduleTripGenerationResult>, PreviewScheduleTripGenerationQueryHandler>();
         services.AddScoped<IQueryHandler<GetRidersQuery, IReadOnlyList<RiderResponse>>, GetRidersQueryHandler>();
         services.AddScoped<ICommandHandler<SetRiderRotationCommand>, SetRiderRotationCommandHandler>();
         services.AddScoped<ICommandHandler<UpsertRidersFromTripCommand>, UpsertRidersFromTripCommandHandler>();
         services.AddScoped<ICommandHandler<UpsertRidersFromManifestCommand>, UpsertRidersFromManifestCommandHandler>();
+        services.AddScoped<ICommandHandler<PreviewBookeoImportCommand, BookeoImportPreview>, PreviewBookeoImportCommandHandler>();
+        services.AddScoped<ICommandHandler<CommitBookeoImportCommand, BookeoImportCommitResult>, CommitBookeoImportCommandHandler>();
+        services.AddScoped<IQueryHandler<GetBookeoProductMappingsQuery, IReadOnlyList<BookeoProductMappingResponse>>, GetBookeoProductMappingsQueryHandler>();
+        services.AddScoped<ICommandHandler<UpsertBookeoProductMappingsCommand, IReadOnlyList<BookeoProductMappingResponse>>, UpsertBookeoProductMappingsCommandHandler>();
+        services.AddScoped<ICommandHandler<DeleteBookeoProductMappingCommand>, DeleteBookeoProductMappingCommandHandler>();
+        services.AddScoped<IQueryHandler<GetBookeoUnitMappingsQuery, IReadOnlyList<BookeoUnitMappingResponse>>, GetBookeoUnitMappingsQueryHandler>();
+        services.AddScoped<ICommandHandler<UpsertBookeoUnitMappingsCommand, IReadOnlyList<BookeoUnitMappingResponse>>, UpsertBookeoUnitMappingsCommandHandler>();
+        services.AddScoped<ICommandHandler<DeleteBookeoUnitMappingCommand>, DeleteBookeoUnitMappingCommandHandler>();
+        services.AddScoped<IQueryHandler<GetBookeoImportBatchesQuery, IReadOnlyList<BookeoImportBatchResponse>>, GetBookeoImportBatchesQueryHandler>();
 
         // 4. Integration event consumers — the Drivers/Fleet/Clients replicas that keep
         //    driver_lookup/vehicle_lookup/client_lookup current for assignment validation,
@@ -229,7 +275,9 @@ public static class TripsServiceCollectionExtensions
             .OnEvent<TripManifestLinkedDomainEvent>(entry =>
                 new UpsertRidersFromTripCommand(entry.AggregateId)));
 
-        // 6. Trip generation — materializes upcoming trips from active schedule templates.
+        // 6. Trip generation — the background pass that keeps every active template's own
+        //    horizon topped up, through the same ScheduleTripMaterializer the on-demand
+        //    generate endpoint uses.
         var generationOptions = configuration.GetSection(TripGenerationOptions.SectionName).Get<TripGenerationOptions>()
             ?? new TripGenerationOptions();
         services.AddSingleton(generationOptions);

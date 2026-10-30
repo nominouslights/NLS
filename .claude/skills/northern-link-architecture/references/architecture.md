@@ -131,7 +131,7 @@ burden becomes a real problem at scale.
 
 | Tenant | Roles |
 |---|---|
-| Internal (Admin) | Owner, Dispatcher, Supervisor/Manager, Accountant, Board Member (future) |
+| Internal (Admin) | Owner, Dispatcher, Supervisor/Manager, Accountant, Board Member (future), **Compliance Officer** *(hours-of-service compliance — approves off-duty deferrals, records out-of-service, resolves ELD malfunctions; the Owner may act as one, so `ComplianceAccess = [Owner, ComplianceOfficer]`; added 2026-10, see Section 13.15)* |
 | Client | Client Admin, Client Viewer, **Logistics Coordinator (new — see 5.1, logs crew movements + roster)** |
 | Vendor/Partner | Partner Admin, Partner Driver |
 | Internal (Admin) | Driver *(Northern Link's own drivers — distinct from Partner Driver)* |
@@ -184,7 +184,7 @@ validation failures. Example: `Backend/src/Fleet/Domain/Vehicles/Vin.cs`.
 | **NIHB Medical Transport** | Voucher-based bookings, Tier 1/2/3 pricing, no-minimum override |
 | **Grocery & Parcel Services** | Weekly grocery run, parcel service, pickup hub logistics |
 | **Billing & Accounting Integration** | QuickBooks Online sync, invoicing, payment reconciliation, client-facing accrual statement export |
-| **Notifications** | SendGrid (email), Twilio (SMS), push notifications |
+| **Notifications** | Transactional email (Postmark in the built system; SendGrid/Twilio/push were the original plan), templates and dispatch history; event-driven sends — community "trip at risk", and the hours-of-service **compliance alerts** (ELD malfunction reported/resolved → `ComplianceAccess`, driver placed out of service → compliance + dispatch) addressed from its own `user_lookup` replica of Identity users |
 | **Reporting & Analytics** | Cross-domain dashboards for Admin Web App and Owner Desktop App |
 | **Crew & Workforce Visibility** | Client-requested: real-time location/status of client crew across ALL transport modes and carriers, not just Northern Link service. See 5.1. |
 | **Budget & Financial Control (Zero-Based Budgeting)** | Every cost and revenue transaction tagged to a Budget Code; codes re-justified from zero each period rather than carried forward. See 5.3. |
@@ -333,9 +333,10 @@ for *governing* it.
 - `BudgetPeriod` — a month or quarter
 - `BudgetAllocation` — a Budget Code × Period × planned amount, entered fresh each period
   (the "zero-based" part — no auto-carry-forward)
-- `ActualTransaction` — synced from QuickBooks Online via the existing Billing & Accounting
-  Integration (read-only, same pattern already established for the NLBC concept), tagged to a
-  Budget Code
+- `ActualTransaction` — synced from QuickBooks Online, read-only, tagged to a Budget Code.
+  *Superseded in mechanism (2026-10-08, Section 13 item 15):* the Budgeting module itself owns
+  the QBO connection and imports expense lines (`QboExpenseLine`), each assigned to a budget
+  item — not via Billing & Accounting Integration
 
 **Rider Express lens applied directly here**: a natural starter set of Budget Codes maps onto the
 same revenue categories Rider Express's model tracks — Passenger, Parcel/Freight, Charter,
@@ -387,6 +388,119 @@ the following hold:
 not just a client-side filter — two drivers must never be able to claim the same trip in a race
 condition, and eligibility (especially HOS and clearance status) must be re-checked at the moment
 of claiming, not just when the list was last loaded.
+
+### 5.5 Driver & Compliance — the Hours-of-Service ledger
+
+**What it is.** The platform's hours-of-service record is a **planning ledger and ELD mirror,
+never a second record of duty status** — the RODS lives on the bus's ELD, and keeping two is
+itself a violation under NSC Standard 9 / M.R. 72/2007. Every figure the API shows therefore
+carries the label *"Planning figures from the app ledger — not the record of duty status (the ELD
+is the RODS)"* (`HosDisplay.PlanningLabel`), and the frontends render it.
+
+**Shape.** One `DutyDay` aggregate per (tenant, driver, America/Winnipeg calendar day) in the
+Drivers library (`Domain/Hos/DutyDay.cs`), holding an **append-only jsonb array of
+`DutyEvent`s** — timestamped duty changes (`Off Duty / On Duty / Driving / Personal Conveyance`)
+with their source (`Driver App`, `ELD transcription`, `Manual (paper backup)`,
+`Other carrier (declared)`, `System`), the recording actor from the token, and the odometer
+readings personal conveyance requires. A unique index on (tenant, driver, local_date) makes "two
+records for a day" impossible to store; certification, amendments and the personal-conveyance
+figure are all day-scoped. The day boundaries come from the rule engine's `HosCalendar`, so DST
+days are 23 or 25 hours long here exactly as they are in the engine.
+
+**Rules the aggregate enforces** are the ones that make a timeline well-formed — inside the local
+day, not more than five minutes in the future, a real status change, personal conveyance opened
+with a start odometer plus the three attestations (no passengers or cargo, no trailer, no work)
+and closed with an end odometer that did not go backwards. Whether the hours are *lawful* is the
+engine's job (Section 13.15); an over-limit day is recorded, never refused. The one engine-adjacent
+rule kept in the aggregate is the 75.0 km personal-conveyance limit: when a closing odometer takes
+the day past it, a `System`-source on-duty event is appended at the linearly interpolated instant
+the allowance ran out, carrying the interpolated odometer, so the stored timeline, the engine and
+every replica agree — the same thing a compliant ELD does.
+
+**Idempotency is the offline contract.** `Append` is idempotent on the client-minted `EventId`
+(the `Idempotency-Key` header is its alias on `POST …/hos/duty-events`): a replayed Field App
+queue item changes nothing and raises nothing, which is what keeps it clear of the eventless-write
+guard. A transcription (`POST …/hos/days/{date}/transcribe`, ELD or paper, all-or-nothing)
+derives each entry's id from the transcription id and line index, so a retry appends nothing.
+Amendments never edit in place: the original is voided and kept, the replacement appended with a
+reason, and a certified day flips to "recertification required". Certification
+(`POST …/hos/days/{date}/certify`) is the driver's own act — the route is marked
+`OwnDriverOnlyMetadata` and the own-record check runs with **no** override, while every other HOS
+route lets `Roles.HosRecordOverride` (Owner, Dispatcher, Supervisor, ComplianceOfficer) act on any
+driver's record.
+
+**Reads go through the engine, from the write side.** `GET …/hos/status`, `GET …/hos/days` and
+the roster batch `GET /api/drivers/hos/status` load the last 21 days plus today through
+`IDutyDayRepository`, assemble the engine's `DutyLedger` (`DutyLedgerAssembler`; `KnownFrom` = the
+driver's earliest day on file until the prior-records attestation lands) and return the engine's
+`HosEvaluation` / `DayTotals` verbatim. Write-side on purpose: the figure a driver acts on must
+include the event they appended a second ago. `rm_duty_days` (engine totals in minutes, PC km,
+certification, violation count, the effective timeline as jsonb) and the `rm_drivers` rollup —
+which now prefers a driver's ledger over the legacy `HosLogEntry` totals — are the roster's and
+the audit's copies, one projection poll behind. Every change publishes
+`drivers.duty-day-changed` (`DutyDayChangedIntegrationEvent`: the whole effective timeline,
+certified flag, PC km, version) for the Trips hours-gate replica to upsert.
+
+**Routes** live on their own sibling group under `/api/drivers` carrying `HosAccess`; the
+roster's read routes (`GET /api/drivers`, `GET /api/drivers/{id}`, the HOS roster batch) moved to a
+`DriverRosterAccess` group so a Compliance Officer can use the console's Drivers screen without
+the write routes ever admitting one. `HosLogEntry` and `GET/POST …/hos` remain as the legacy
+daily-totals path.
+
+**The compliance aggregates** (Drivers `Domain/Hos/`, 2026-10) are the records that override or
+stand behind the hours gate, each its own aggregate and table with the standard RLS policies:
+
+- `HosException` (`hos_exceptions`) — the only overrides the safety policy allows. Adverse
+  driving conditions and an emergency are **declared** by the driver (or dispatch for them)
+  within 24 hours of the conditions arising and apply at once; an off-duty deferral (s.16) is
+  **approved** by a compliance officer ahead of a named trip and is born `Approved`. Statuses
+  Declared → Acknowledged / Approved → Rejected / Withdrawn; only the first three *apply* — the
+  engine never sees a rejected or withdrawn one. The aggregate enforces the regulation's shape
+  (s.76 not-knowable-before-departure, a 1-minute-to-2-hour extension; a deferral's trip, future
+  start and 1-minute-to-2-hour amount); whether the exception rescues the hours is the engine's
+  call. The engine is handed the exception at `EffectiveFromUtc` (when the conditions arose),
+  which is what its "declared inside the shift" test means. The driver may withdraw only while
+  still Declared; dispatch or compliance acknowledges; compliance rejects or withdraws at any
+  applying status.
+- `DriverOutOfService` (`driver_out_of_service`) — enforcement's declaration (s.91), recorded by
+  a compliance officer only: 72 hours by default, an explicit end, or open-ended until lifted; at
+  most one active per driver; lifting early requires a reason. Recording one opens a Severe
+  `OutOfServiceDeclared` finding **in the same transaction** (the handler adds both aggregates to
+  one unit of work — Drivers has no journal-driven `OnEvent` reactions, and one transaction needs
+  no idempotency key). The engine blocks driving inside the span and reports any driving that
+  happened anyway as `DroveWhileOutOfService`.
+- `EldMalfunctionReport` (`eld_malfunction_reports`) — the driver or dispatch reports the ELD
+  stopped recording (s.78.2); a compliance officer resolves it. While open, `hos/status` says
+  `eldMalfunctionOpen` — paper-log mode, a warning that never blocks. It snapshots the driver's
+  name so the integration event can address the compliance alert without a lookup.
+- `ComplianceFinding` (`compliance_findings`) — a compliance officer's finding against one day:
+  an `HosRule` name or one of the four record-keeping offences the engine cannot see
+  (`Falsification`, `Tampering`, `TwoRecords`, `OutOfServiceDeclared`), a severity, and a
+  one-way workflow Open → Corrected → Closed. Never deleted; Closed is terminal. Internal to
+  Drivers — no integration event.
+- **The prior-records attestation** lives on `Driver` (`AttestPriorRecords`, ComplianceAccess):
+  the officer confirms the driver's previous 14 days of records (s.82(1)(f)) are on file through
+  a date, plus whether they drive for another carrier. `DutyLedgerAssembler` then sets the
+  ledger's known-from to the earlier of the first day on file and `coveredThrough − 13`, and
+  feeds each attested day before the driver's first own day as a zero-hour `OtherCarrierDay` —
+  the engine's own model of a pre-hire declaration, and the only input it has for "records on
+  file but not keyed". That is what clears `RecordsIncomplete` for a new hire. The engine reads
+  a zero-hour row as a declared day off, which the attestation does not actually establish; an
+  attested-range input on `DutyLedger` is the engine change that would close that gap.
+
+Every compliance read goes through `IComplianceRecordsReader` (write side, like the ledger) and
+the one `DutyLedgerAssembler.Build` overload, so `hos/status`, `hos/days`, the roster batch, the
+`rm_duty_days` projection and the new `GET …/hos/audit` (one row per Winnipeg day — events and
+sources, certification, engine totals and violations, every exception touching the day, the
+out-of-service overlap, open ELD malfunction, other-carrier rows, attested-window flag, findings)
+all evaluate the same ledger. Decisions sit on a fifth sibling group carrying `ComplianceAccess`
+(`ComplianceEndpoints.cs`: deferral approval and rejection, ELD resolution, out-of-service record
+and lift, findings, the attestation, the audit) with no own-record check — a compliance officer
+acts on any driver's record — while declaring, acknowledging and withdrawing an exception and
+reporting an ELD malfunction stay on the `HosAccess` group behind the own-record check; every
+handler re-proves the role underneath the policy. Changes publish `drivers.hos-exception-changed`,
+`drivers.driver-out-of-service-changed` and `drivers.eld-malfunction-changed`, and the attestation
+rides on `drivers.driver-changed` as two additive fields; nothing consumes them yet.
 
 ---
 
@@ -484,8 +598,12 @@ Read models power the Admin and Owner dashboards without hammering the transacti
 This is the one app where offline-first is not optional — cellular coverage between Thompson,
 Lynn Lake, and the Alamos mine site is patchy by design of geography, not a corner case.
 
-- **Local-first store** on the tablet (SQLite) mirrors the subset of data the driver needs for
-  their assigned trips.
+- **Local-first store** on the tablet (**IndexedDB** — this said SQLite when the app was going to
+  be Flutter; the 2026-09 PWA reversal changes the storage engine and nothing else in this
+  section) mirrors the subset of data the driver needs for their assigned trips.
+  IndexedDB adds one obligation SQLite did not have: it is **evictable** unless
+  `navigator.storage.persist()` has been granted. A queued DVIR disappearing because the browser
+  reclaimed space is a compliance failure, not a lost draft — call it, and handle refusal visibly.
 - **Command queue**: every action (DVIR submission, manifest update, fault report, cargo log
   entry) is written locally first, queued, and synced when connectivity returns.
 - **Idempotent commands**: each queued command carries a client-generated GUID so retried syncs
@@ -502,7 +620,7 @@ Lynn Lake, and the Alamos mine site is patchy by design of geography, not a corn
 
 | Service | Purpose | Notes |
 |---|---|---|
-| **QuickBooks Online** | Invoicing, payment sync | OAuth tokens held centrally in API, never on client devices |
+| **QuickBooks Online** | Read-only expense import for Budgeting (owner decision 2026-10-08, Section 13 item 15); invoicing stays manual | OAuth tokens held centrally in API, encrypted, never on client devices |
 | **Square** *(superseded Stripe — Community Booking & Dispatch spec, 2026-08)* | Community booking payments, online + in-person tap-to-pay | PCI scope stays on Square's side; **Interac e-Transfer** also accepted, reconciled manually (dispatcher marks received) |
 | **SendGrid** | Transactional email | Trip confirmations, invoices, endorsements |
 | **Twilio** | SMS notifications | Departure reminders, driver contact reveal |
@@ -593,16 +711,18 @@ carry them as literal values and are **gitignored** — a fresh clone needs both
 | Backend API | .NET 10, CQRS/DDD — one class library per domain, composed by the API gateway |
 | Database | PostgreSQL (+ RLS for tenant isolation) |
 | Object storage | OVHcloud Object Storage (S3-compatible) |
-| Mobile — Community App | **Flutter — decided.** Personal device (passenger's own phone), iOS/Android |
-| Mobile — Driver Field App | **Flutter — decided, company-issued tablet only.** Deployed exclusively on Northern Link-owned, MDM-enrolled tablets — **not** a BYOD (bring-your-own-device) app, and not intended for a driver's personal phone. This keeps company/client data off personal devices (a real PIPEDA-relevant simplification), ensures consistent hardware for badge-scan check-in (Feature 3.2/3.4), and matches the existing operational pattern already established for the Zello Work / Starlink tablet setup |
+| Mobile — Community App | ~~Flutter~~ → **Next.js PWA — superseded 2026-08** by the Community Booking & Dispatch spec. Personal device (passenger's own phone), installable from the browser |
+| Mobile — Driver Field App | ~~Flutter~~ → **Next.js PWA — superseded 2026-09**, company-issued tablet only. **Every word of the original rationale still holds and is unchanged by the reversal:** deployed exclusively on Northern Link-owned, MDM-enrolled tablets — **not** a BYOD (bring-your-own-device) app, and not intended for a driver's personal phone. This keeps company/client data off personal devices (a real PIPEDA-relevant simplification), ensures consistent hardware for badge-scan check-in (Feature 3.2/3.4), and matches the existing operational pattern already established for the Zello Work / Starlink tablet setup. Only the framework changed. What the PWA form does cost, and what must be answered before the offline batch: **badge scanning** (a hardware HID/Bluetooth scanner works fine — it types like a keyboard — but Web NFC is Chrome-on-Android-only and `BarcodeDetector` is Chromium-only, so **confirm the badge technology**), **kiosk lockdown** (an installed WebAPK pins via Android managed configuration, but is not an MDM-pushed APK), **storage eviction** (see Section 8), and **background sync** (`SyncManager` is Chromium-only and unreliable — the queue must drain on app open). Implemented at `DriverField/` |
 | Desktop (Owner/Exec App) | **Access restricted to super-user roles only** (Owner, Accountant, future Board) — see 6.1. Technical approach still open; recommend a lightweight Electron wrapper reusing the Admin Web App's Next.js dashboard code rather than a separate native build, given the very small, low-churn user base |
 | Hosting | OVHcloud Canada, Beauharnois QC |
 | Identity | Self-hosted OIDC (OpenIddict recommended) — confirmed |
 | Monitoring/Observability | **Recommended stack** — see Section 11.1 |
 
-*Both Flutter apps share the same offline-storage approach (SQLite via `sqflite`/`drift`), which
-matters most for the Driver Field App given its offline-first requirement, but keeps the codebase
-patterns consistent across both.*
+*~~Both Flutter apps share the same offline-storage approach (SQLite via `sqflite`/`drift`).~~
+**No longer true, and this was the sentence most likely to mislead — neither app is Flutter any
+more.** Both are Next.js PWAs, and the Driver Field App's offline store is IndexedDB (Section 8).
+The consistency argument survives in a different form: all four frontends are now Next.js, and
+three of them share Dispatcher's design system by verbatim copy.*
 
 ---
 
@@ -612,10 +732,14 @@ These are real decisions, not defaults I've silently picked — worth a delibera
 the roadmap locks them in:
 
 1. ~~Identity provider~~ — **Resolved**: self-host OIDC for now.
-2. ~~Mobile app framework~~ — **Resolved, then partially superseded (2026-08)**: Flutter stands
-   for the Driver Field App; the Community App was re-decided as a **Next.js PWA** by the
-   Community Booking & Dispatch spec (the Flutter `CommunityMobile/` mockup is shelved as its
-   IA reference).
+2. ~~Mobile app framework~~ — **Resolved, then fully superseded (2026-08, 2026-09)**: the
+   Community App was re-decided as a **Next.js PWA** (Aug 2026, Community Booking & Dispatch
+   spec); the Driver Field App followed (Sep 2026, owner's decision, scaffolded at
+   `DriverField/`). **Flutter now ships nowhere on this platform** — `CommunityMobile/` is the
+   only Flutter folder left and is already shelved as an IA reference. Device policy (company
+   tablet, landscape, 10-inch, never BYOD) and the offline-first requirement are **unchanged** —
+   only the framework moved. See Section 12 for what the PWA form costs and what must be
+   confirmed before the offline batch.
 3. ~~Desktop app approach~~ — **Resolved (access model)**: restricted to super-user roles (Owner,
    Accountant, future Board). Technical implementation recommended as Electron wrapping the Admin
    Web App's Next.js code, given the small user base — confirm if you want a different approach.
@@ -655,6 +779,121 @@ the roadmap locks them in:
     produced a real isolation bug and a `42704` migration failure on fresh databases. CQRS read
     models are ordinary projector-maintained tables (`rm_*`) precisely so they can carry the same
     policy as everything else.
+
+13. **Driver Field App v1 scope** — **Decided (2026-09)**: shell plus mock screens, with real
+    authentication and a real `DriverAccess` role gate. Offline-first is designed as an explicit
+    seam (`DriverField/lib/sync/` — real types, no-op bodies, every screen mutation already
+    routed through `queue.enqueue()`) but **implemented in a later batch**. Recorded here so that
+    "the driver app exists" is never read as "drivers can work offline", and so the offline work
+    has a decision to point at rather than being quietly forgotten. Open items that gate it:
+    confirm the **badge technology** (Section 12), honour an `Idempotency-Key` server-side (no
+    endpoint anywhere does today, and there is no `processed_commands` table), call
+    `navigator.storage.persist()` (Section 8), and self-host the four Google fonts so a first run
+    in a dead zone does not fall back to the wrong families.
+
+14. **Driver-facing API authorization** — **Decided (2026-09)**, recorded because it fixed a live
+    hole rather than adding a feature. A `Driver`-role token previously satisfied the bare
+    `.RequireAuthorization()` on `/api/trips`, `/api/fleet`, `/api/clients` and `/api/billing`,
+    so a driver could create routes, delete stops, register drivers, write work orders and read
+    every invoice. The fix has three parts, and **the first alone is not the fix**: (a) a
+    `DriverAccess` policy, which *widens* rather than narrows because it contains `Driver`;
+    (b) a **group restructure** — dispatcher-shaped routes narrowed to `DispatchAccess`, with
+    driver-facing routes given their own sibling `MapGroup` (ASP.NET group policies are additive,
+    so you cannot widen inside a narrowed group); and (c) **own-record enforcement**, so a Driver
+    token reaches only its own driver row. `Driver.UserId` on the Drivers aggregate is what makes
+    (c) answerable — `GET /api/drivers/me` resolves the `sub` claim against it, with no Identity
+    claim and no cross-module replica. A `DriverSurfaceMetadataTests` walk of the endpoint data
+    source is what stops the hole reopening.
+
+15. **Hours-of-service rule engine lives in `NorthernLink.Shared.HoursOfService`** — **Decided
+    (2026-10-09, owner's safety policy adopting NSC Standard 9 / M.R. 72/2007)**. A pure,
+    deterministic, System-only rule engine (integer seconds, Unix instants, tenths of a
+    kilometre; no clock, no I/O, no other NorthernLink namespace) sits in Shared rather than in a
+    domain library. This is a **deliberate exception to "no business logic in Shared"**: the
+    Drivers module (display, violations, audit) and the Trips module (assignment / start gate on
+    its event-fed replica) must agree bit-for-bit on every boundary, and `Project` needs the
+    whole algorithm, so neither a copy nor an integration event would do. The exception is held
+    to its terms by `HoursOfServicePurityTests` (a NetArchTest dependency rule plus a source scan
+    for `UtcNow`, `TimeZoneInfo.Local`, `Random`, `Environment`, `System.IO`, `Task`, `async`),
+    and the engine's behaviour is pinned by `hos-fixtures.json` (boundary matrix with hand-written
+    expectations and canonical snapshots) that a TypeScript mirror in the Dispatcher and the
+    Driver Field App asserts against byte-for-byte. Companion decisions from the same policy:
+    the new **ComplianceOfficer** role (Section 4.3) with `ComplianceAccess`, `HosAccess` and
+    `DriverRosterAccess` policies; on-duty-not-driving beyond 14h is **not** a violation; an
+    unknown day **blocks** driving rather than counting as zero; the 36h cycle reset (s.28) is
+    modelled, Cycle 2 / sleeper berth / 160 km exemption are not; the platform is the **planning
+    ledger and ELD mirror, never a second RODS**, and every figure it shows says so.
+
+16. *(Reserved — QuickBooks actuals integration, recorded on its own branch.)*
+
+17. **Manitoba-only operating area, hard-coded** — **Decided (2026-10-09, owner's safety policy;
+    built 2026-10-11)**. Northern Link operates solely within Manitoba: no regulated vehicle
+    crosses a provincial, territorial or international border, and a request that would need one
+    is **declined or referred to a partner carrier**. The area is a constant, not configuration:
+    `OperatingArea.Provinces = ["MB"]` in `Backend/src/Trips/Domain/Planning/OperatingArea.cs` —
+    one company, a written policy, no UI toggle, no per-tenant row. Enforcement is a required
+    province on every stop and corridor endpoint, compared as two-letter codes
+    (`CanadianProvince.Normalize` turns "Manitoba"/"mb"/"Man." into "MB" on every write; an
+    unrecognised spelling is refused, never guessed): a catalog `Stop` outside Manitoba **may
+    exist** but can never be placed on a route (`Route.Create`/`Update` →
+    `Trips.Route.StopOutsideOperatingArea`); every trip creation path, `Trip.Update` and
+    `Trip.ChangeRoute` re-check the free-form endpoints and every snapshot stop
+    (`Trips.Trip.OutsideOperatingArea`); schedule generation inherits both. Each stop snapshot
+    carries its province in the existing `stops` jsonb (`RouteStop.Province`, null on rows written
+    before the rule = Manitoba, since no vehicle ever crossed the border), and a trip's free-form
+    corridor stores `origin_province`/`destination_province` (`NOT NULL DEFAULT 'MB'`). Every
+    refusal message ends "— this request must be declined or referred to a partner carrier." so
+    the wizard can show it verbatim. Widening the area is a code change and a decision-register
+    entry, by design.
+16. **QuickBooks Online API access** — **Decided (2026-10-08, owner)**, reversing "all QBO work
+    is manual" *for Budgeting only* (Billing's QBO prep worksheet stays manual). The **Budgeting
+    module owns a read-only QuickBooks Online connection**: Intuit OAuth 2.0, scope
+    `com.intuit.quickbooks.accounting` only, one QBO company per tenant, CAD home currency
+    required. It exists to import expense lines as actuals against budget items. Rules that
+    make it safe to build on:
+    (a) **Read-only, always.** The platform never writes to QuickBooks, and never reads,
+    computes or shows tax — an imported line is QuickBooks' own line amount (Non-Negotiable 8).
+    (b) **Behind ports.** All Intuit code lives in `Backend/src/Budgeting/Infrastructure/Qbo/`
+    behind `IQboAuthClient`, `IQboAccountingClient`, `IQboTokenStore` and `IQboTokenProtector`,
+    which carry no domain types — a future Accounting module copies it out. Not in Billing (no
+    QBO code to reuse there, and its routes are `DispatchAccess`), and not an outbox replica
+    (the period close gate must read actuals consistently, not eventually).
+    (c) **Tokens never touch the audit pipeline.** `ModuleDbContext` snapshots every saved
+    aggregate into `aggregate_snapshots`, so the `QboConnection` aggregate holds no token.
+    Tokens live AES-256-GCM encrypted (key from `Budgeting__QboTokenKey`, associated data
+    `tenant|realm`) in the plain, non-audited `budgeting.qbo_token_vault`, whose RLS policy has
+    **no `app.is_system` bypass**. Refreshes lock the row and persist a rotated refresh token
+    before the access token is used; `invalid_grant` flips the connection to NeedsReconnect.
+    (d) **The OAuth redirect lands on the Budgeting console**, never the API (which is not
+    public), and the console posts the callback values to an authenticated endpoint — so no
+    API route is anonymous. The state is hashed, single use, 10 minutes, bound to tenant + user.
+    (e) **JournalEntry and BillPayment are out of v1.** Sources are Purchase, Bill and
+    VendorCredit: a journal entry needs a chart-of-accounts sync, and a bill payment would
+    double-count the bill it pays.
+18. **Notifications keeps a `user_lookup` replica; compliance alerts go by email** — **Decided
+    (2026-10-11, HOS plan PR 7)**. The hours-of-service alerts (ELD malfunction reported and
+    resolved, driver placed out of service) are emails from the Notifications module, driven by
+    the Drivers module's `EldMalfunctionChanged` / `DriverOutOfServiceChanged` integration events
+    and addressed by **role** — `ComplianceAccess` for ELD, `ComplianceAccess` + `DispatchAccess`
+    for out-of-service — never by a hard-coded address. That audience comes from
+    `notifications.user_lookup`, Notifications' own replica of Identity users on Budgeting's exact
+    model (fed by `UserChangedIntegrationEvent`, with a **mandatory** backfill from
+    `identity.users` in the same migration), because a domain library never reads another's
+    tables. Each alert is recorded as an `EmailDispatch` of the Notifications-only
+    `ComplianceAlert` service type under a **deterministic id derived from the event id**, so a
+    redelivered event sends nothing twice; no recipients is logged, not failed. Two facts about
+    delivery that this decision made visible and that future consumers must respect: (a) a
+    producer outbox row carries **one** `processing_status` shared by every consuming module —
+    with two subscribers to a key (Budgeting and Notifications both consume
+    `identity.user-changed`), whichever module's `OutboxPollingConsumer` polls first runs **both**
+    modules' handlers (it resolves every registered `IIntegrationEventHandler<TEvent>`) before
+    marking the row, so nothing is lost but a failure in either backs off the row for both; and
+    (b) rows already processed by the first subscriber **never replay** for a later one, which is
+    why the backfill is mandatory rather than a convenience. The Dispatch Board's compliance tile
+    reads `GET /api/drivers/hos/alerts/today` (Drivers owns the facts); its trips-at-risk figure is
+    Trips' to serve, deliberately not folded in here. The out-of-service event carries no driver
+    name (the aggregate holds none), so that email names the driver by record id — a known gap
+    to close with a name snapshot on the event, as `EldMalfunctionReport` already does.
 
 ---
 

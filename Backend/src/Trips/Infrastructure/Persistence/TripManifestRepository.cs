@@ -12,6 +12,27 @@ internal sealed class TripManifestRepository(TripsDbContext context) : ITripMani
     public Task<TripManifest?> GetByIdAsync(Guid manifestId, CancellationToken cancellationToken = default) =>
         context.Manifests.FirstOrDefaultAsync(m => m.Id == manifestId, cancellationToken);
 
+    public Task<TripManifest?> GetForTripAsync(
+        Guid? manifestId,
+        string tripNumber,
+        CancellationToken cancellationToken = default) =>
+        manifestId is { } id
+            ? context.Manifests.FirstOrDefaultAsync(m => m.Id == id, cancellationToken)
+            : context.Manifests
+                .Where(m => m.TripNumber == tripNumber)
+                .OrderBy(m => m.CreatedAtUtc)
+                .FirstOrDefaultAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<TripManifest>> GetByTripNumberAsync(
+        string tripNumber,
+        CancellationToken cancellationToken = default) =>
+        await context.Manifests
+            .Where(m => m.TripNumber == tripNumber)
+            .OrderBy(m => m.CreatedAtUtc)
+            .ToListAsync(cancellationToken);
+
+    public void Remove(TripManifest manifest) => context.Manifests.Remove(manifest);
+
     public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
         context.SaveChangesAsync(cancellationToken);
 }

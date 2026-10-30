@@ -103,21 +103,110 @@ public class BookingDayRevertedIntegrationEventHandlerTests
         Assert.Equal(2, _dispatches.Dispatches.Count);
     }
 
-    [Fact]
-    public void Dispatch_ids_are_deterministic_per_event_and_chunk()
-    {
-        var eventId = Guid.NewGuid();
+    /// <summary>
+    /// The event id behind the golden dispatch ids below. Fixed, not <c>Guid.NewGuid()</c> —
+    /// the contract is the value, not the function's self-consistency.
+    /// </summary>
+    private static readonly Guid GoldenEventId = Guid.Parse("9a4d2f18-0c7b-4f3a-9e51-6b2c8d7a1e40");
 
+    /// <summary>
+    /// SHA-256("booking-day-reverted:9a4d2f180c7b4f3a9e516b2c8d7a1e40:chunk:{i}"), first 16
+    /// bytes read as a Guid — computed outside this codebase, not captured from the method
+    /// under test.
+    /// </summary>
+    private static readonly Guid[] GoldenDispatchIds =
+    [
+        Guid.Parse("0c191d60-c23b-8a71-0d86-f9a4471c38fe"),
+        Guid.Parse("9e03f305-d2e9-6c12-29c5-8b9d7aa30b6e"),
+        Guid.Parse("fa4d9871-b2ba-0c47-7b36-78764ead6c1d"),
+    ];
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void Dispatch_ids_match_their_golden_values(int chunkIndex)
+    {
+        // The real contract is the VALUE, not that a pure function equals itself. Every outbox
+        // row still in flight was written against these ids: change the seed string, the hash,
+        // or the byte-to-Guid fold and a redelivered event mints fresh ids, finds no recorded
+        // chunk, and re-emails every recipient. That must fail here, loudly, not in someone's
+        // inbox.
         Assert.Equal(
-            BookingDayRevertedIntegrationEventHandler.DeterministicDispatchId(eventId, 0),
-            BookingDayRevertedIntegrationEventHandler.DeterministicDispatchId(eventId, 0));
+            GoldenDispatchIds[chunkIndex],
+            BookingDayRevertedIntegrationEventHandler.DeterministicDispatchId(GoldenEventId, chunkIndex));
+    }
+
+    [Fact]
+    public async Task A_sent_dispatch_lands_on_its_golden_id()
+    {
+        // Pins the wiring as well as the function: the handler must derive the id from the
+        // event's own EventId and the chunk index, in that order.
+        await Handler.Handle(Event(eventId: GoldenEventId), CancellationToken.None);
+
+        var dispatch = Assert.Single(_dispatches.Dispatches);
+        Assert.Equal(GoldenDispatchIds[0], dispatch.Id);
+    }
+
+    [Fact]
+    public void Dispatch_ids_are_distinct_per_chunk_and_per_event()
+    {
+        Assert.Equal(GoldenDispatchIds.Length, GoldenDispatchIds.Distinct().Count());
         Assert.NotEqual(
-            BookingDayRevertedIntegrationEventHandler.DeterministicDispatchId(eventId, 0),
-            BookingDayRevertedIntegrationEventHandler.DeterministicDispatchId(eventId, 1));
-        Assert.NotEqual(
-            BookingDayRevertedIntegrationEventHandler.DeterministicDispatchId(eventId, 0),
+            BookingDayRevertedIntegrationEventHandler.DeterministicDispatchId(GoldenEventId, 0),
             BookingDayRevertedIntegrationEventHandler.DeterministicDispatchId(Guid.NewGuid(), 0));
     }
+
+    [Fact]
+    public async Task A_crash_mid_event_resends_only_the_unrecorded_tail()
+    {
+        // The finer half of the redelivery invariant the handler documents: chunks are recorded
+        // as they complete, so a process that died between chunk 1 and chunk 2 must, on
+        // redelivery, skip the chunks already on record and send ONLY the gap. "All chunks
+        // already recorded" (the test above) would still pass if the handler bailed out on the
+        // first recorded chunk instead of continuing — this one would not.
+        var integrationEvent = Event(recipientCount: 40, eventId: GoldenEventId);
+        Assert.Equal(3, integrationEvent.Recipients.Count / EmailDispatch.MaxRecipients + 1);
+
+        // Chunks 0 and 2 already went out before the crash; chunk 1 never did.
+        _dispatches.Add(AlreadyRecorded(GoldenDispatchIds[0]));
+        _dispatches.Add(AlreadyRecorded(GoldenDispatchIds[2]));
+
+        await Handler.Handle(integrationEvent, CancellationToken.None);
+
+        var batch = Assert.Single(_sender.Batches);
+        Assert.Equal(EmailDispatch.MaxRecipients, batch.Count);
+        // Chunk 1 is recipients 17..32 of the 40.
+        Assert.Equal("customer17@example.com", batch[0].To);
+        Assert.Equal("customer32@example.com", batch[^1].To);
+
+        var recorded = Assert.Single(_dispatches.Dispatches, d => d.Id == GoldenDispatchIds[1]);
+        Assert.Equal(EmailDispatch.MaxRecipients, recorded.Recipients.Count);
+        Assert.Equal(3, _dispatches.Dispatches.Count);
+    }
+
+    /// <summary>A dispatch already on record under <paramref name="dispatchId"/> — the replay marker.</summary>
+    private static EmailDispatch AlreadyRecorded(Guid dispatchId) =>
+        EmailDispatch.Record(
+            dispatchId,
+            TenantId,
+            tripId: BookingDayId,
+            tripNumber: "DAY-2026-09-15",
+            manifestId: null,
+            templateId: Guid.Empty,
+            templateName: BookingDayRevertedIntegrationEventHandler.BuiltInTemplateName,
+            serviceType: NotificationServiceType.CommunityBookingAtRisk,
+            clientId: null,
+            clientName: null,
+            recipients:
+            [
+                new DispatchRecipient
+                {
+                    Email = "already@example.com",
+                    PassengerName = "Already Sent",
+                    Status = DispatchRecipientStatus.Sent,
+                },
+            ]).Value;
 
     [Fact]
     public async Task An_active_community_booking_at_risk_template_overrides_the_built_in_body()

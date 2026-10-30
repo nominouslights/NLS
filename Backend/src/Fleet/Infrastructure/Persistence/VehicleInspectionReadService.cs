@@ -49,11 +49,12 @@ internal sealed class VehicleInspectionReadService(FleetDbContext context) : IVe
             i.ChecklistItems.Select(item => new InspectionChecklistItemResponse(
                 item.Group,
                 item.Item,
-                item.Passed)).ToList(),
-            i.Defects.Select(defect => new InspectionDefectResponse(
-                defect.Item,
-                defect.Severity.ToString(),
-                defect.Note)).ToList(),
+                item.Passed,
+                // EffectiveState, matching VehicleInspectionResponseMapper: both sides of the
+                // contract must resolve the pre-NL-PTI-01 fallback the same way.
+                item.EffectiveState.ToString(),
+                item.Note)).ToList(),
+            i.Defects.Select(InspectionDefectResponse.From).ToList(),
             i.Weather.Select(w => w.ToString()).ToList(),
             i.TemperatureC,
             i.RoadConditions.Select(r => r.ToString()).ToList(),
@@ -68,6 +69,11 @@ internal sealed class VehicleInspectionReadService(FleetDbContext context) : IVe
             i.FuelLitres,
             i.FuelCostCad,
             i.GeneratedWorkOrderId,
-            i.CreatedAtUtc)).ToList();
+            i.CreatedAtUtc,
+            i.CarrierAcknowledgedBy,
+            i.CarrierAcknowledgedAtUtc,
+            i.CarrierAcknowledgementNote,
+            i.CertificationStatement,
+            i.Location)).ToList();
     }
 }

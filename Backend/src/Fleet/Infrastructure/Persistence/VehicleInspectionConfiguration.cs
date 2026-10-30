@@ -42,6 +42,12 @@ public sealed class VehicleInspectionConfiguration : IEntityTypeConfiguration<Ve
         builder.Property(i => i.ManifestId).HasColumnName("manifest_id");
         builder.Property(i => i.GeneratedWorkOrderId).HasColumnName("generated_work_order_id");
         builder.Property(i => i.PerformedAt).HasColumnName("performed_at");
+
+        // M.R. 95/2008 s.12(1) inspection location. Nullable, no default: historical rows have
+        // none, and the aggregate does not require it (paper-form back-entries lack it).
+        builder.Property(i => i.Location)
+            .HasColumnName("location")
+            .HasMaxLength(VehicleInspection.LocationMaxLength);
         builder.Property(i => i.OdometerKm).HasColumnName("odometer_km");
 
         builder.Property(i => i.Result)
@@ -49,7 +55,17 @@ public sealed class VehicleInspectionConfiguration : IEntityTypeConfiguration<Ve
             .HasConversion<string>()
             .HasMaxLength(32);
 
-        builder.OwnsMany(i => i.ChecklistItems, item => item.ToJson("checklist_items"));
+        builder.OwnsMany(i => i.ChecklistItems, item =>
+        {
+            item.ToJson("checklist_items");
+            // The tri-state and per-item note are new properties on the same owned record, so
+            // they change the jsonb PAYLOAD only — no DDL, exactly as the defect resolution
+            // fields below did. The state serialises as its name for the same reason Severity
+            // does, and VehicleInspectionReadModelConfiguration MUST carry this identical line:
+            // a conversion on one side only has the writer emit "NotApplicable" while the
+            // reader expects 0, which fails at runtime in the projector and nowhere else.
+            item.Property(c => c.State).HasConversion<string>();
+        });
         builder.OwnsMany(i => i.Defects, defect =>
         {
             defect.ToJson("defects");
@@ -81,11 +97,24 @@ public sealed class VehicleInspectionConfiguration : IEntityTypeConfiguration<Ve
         // Post-trip log & certification (moved off the manifest).
         builder.PrimitiveCollection(i => i.Issues).HasColumnName("issues");
         builder.PrimitiveCollection(i => i.Attestations).HasColumnName("attestations");
+        builder.Property(i => i.CertificationStatement)
+            .HasColumnName("certification_statement")
+            .HasMaxLength(1000);
         builder.Property(i => i.DriverSignatureName).HasColumnName("driver_signature_name").HasMaxLength(128);
         builder.Property(i => i.CertifiedAt).HasColumnName("certified_at");
         builder.Property(i => i.FuelAdded).HasColumnName("fuel_added");
         builder.Property(i => i.FuelLitres).HasColumnName("fuel_litres").HasColumnType("numeric(8,2)");
         builder.Property(i => i.FuelCostCad).HasColumnName("fuel_cost_cad").HasColumnType("numeric(12,2)");
+
+        // Carrier acknowledgement (NL-PTI-01) — all nullable, no defaults: an additive migration
+        // against a table that is already full of unacknowledged reports.
+        builder.Property(i => i.CarrierAcknowledgedBy)
+            .HasColumnName("carrier_acknowledged_by")
+            .HasMaxLength(128);
+        builder.Property(i => i.CarrierAcknowledgedAtUtc).HasColumnName("carrier_acknowledged_at_utc");
+        builder.Property(i => i.CarrierAcknowledgementNote)
+            .HasColumnName("carrier_acknowledgement_note")
+            .HasMaxLength(500);
 
         builder.Property(i => i.CreatedAtUtc).HasColumnName("created_at_utc");
 

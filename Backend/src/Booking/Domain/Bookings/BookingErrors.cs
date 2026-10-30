@@ -29,6 +29,15 @@ public static class BookingErrors
     public static readonly Error AlreadyCancelled = Error.Conflict(
         "Booking.Booking.AlreadyCancelled", "The booking is already cancelled.");
 
+    public static readonly Error InvalidReference = Error.Validation(
+        "Booking.Booking.InvalidReference",
+        $"A booking reference is \"{BookingReference.Prefix}\" followed by {BookingReference.BodyLength} characters from {BookingReference.Alphabet}.");
+
+    /// <summary>Three random references in a row already existed — astronomically unlikely; retry.</summary>
+    public static readonly Error ReferenceExhausted = Error.Conflict(
+        "Booking.Booking.ReferenceExhausted",
+        "Could not allocate a unique booking reference. Please retry.");
+
     public static readonly Error CorridorNotFound = Error.NotFound(
         "Booking.Booking.CorridorNotFound",
         "The corridor was not found. Corridors are synced from Trips routes — re-save the route if it is missing.");

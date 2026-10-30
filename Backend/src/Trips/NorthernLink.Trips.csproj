@@ -19,10 +19,14 @@
     <!-- The read services are internal; the integration tests exercise them against a
          real Postgres rather than through a fake (matches Drivers/Fleet/Identity). -->
     <InternalsVisibleTo Include="NorthernLink.Trips.IntegrationTests" />
+    <!-- The Bookeo workbook reader is internal; the unit tests read the synthetic fixtures through it. -->
+    <InternalsVisibleTo Include="NorthernLink.Trips.Tests" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <!-- Reads the Bookeo booking-report export (.xls BIFF8 / .xlsx) for the import. -->
+    <PackageReference Include="ExcelDataReader" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

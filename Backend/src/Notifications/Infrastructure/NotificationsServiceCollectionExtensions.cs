@@ -4,6 +4,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using NorthernLink.Shared.EventBus;
 using NorthernLink.Shared.IntegrationEvents.Booking;
+using NorthernLink.Shared.IntegrationEvents.Drivers;
+using NorthernLink.Shared.IntegrationEvents.Identity;
 using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Shared.Persistence.Auditing;
@@ -13,10 +15,13 @@ using NorthernLink.Notifications.Application;
 using NorthernLink.Notifications.Application.Abstractions;
 using NorthernLink.Notifications.Application.Integration;
 using NorthernLink.Notifications.Application.Dispatches;
+using NorthernLink.Notifications.Application.Dispatches.GetBookingEmailHistory;
 using NorthernLink.Notifications.Application.Dispatches.GetClientEmailHistory;
 using NorthernLink.Notifications.Application.Dispatches.GetTripEmailHistory;
+using NorthernLink.Notifications.Application.Dispatches.PreviewBookingPassesEmail;
 using NorthernLink.Notifications.Application.Dispatches.PreviewClientAccrualsEmail;
 using NorthernLink.Notifications.Application.Dispatches.PreviewTripPickupReport;
+using NorthernLink.Notifications.Application.Dispatches.SendBookingPassesEmail;
 using NorthernLink.Notifications.Application.Dispatches.SendClientAccrualsEmail;
 using NorthernLink.Notifications.Application.Dispatches.SendTripPickupEmail;
 using NorthernLink.Notifications.Application.Templates;
@@ -72,6 +77,11 @@ public static class NotificationsServiceCollectionExtensions
         services.AddScoped<IEmailTemplateReadService, EmailTemplateReadService>();
         services.AddScoped<IEmailDispatchRepository, EmailDispatchRepository>();
         services.AddScoped<IEmailDispatchReadService, EmailDispatchReadService>();
+        services.AddScoped<IUserLookupRepository, UserLookupRepository>();
+
+        // The compliance alerts' shared send/record step — used by the two Drivers-event
+        // handlers below, scoped like them.
+        services.AddScoped<ComplianceAlertMailer>();
 
         // Allowlist HTML sanitizer for stored/sent template bodies. Singleton: the underlying
         // Ganss HtmlSanitizer is configured once and each Sanitize call is a self-contained parse.
@@ -109,15 +119,33 @@ public static class NotificationsServiceCollectionExtensions
         services.AddScoped<IQueryHandler<PreviewTripPickupReportQuery, PickupReportPreviewResponse>, PreviewTripPickupReportQueryHandler>();
         services.AddScoped<ICommandHandler<SendClientAccrualsEmailCommand, EmailDispatchResponse>, SendClientAccrualsEmailCommandHandler>();
         services.AddScoped<IQueryHandler<PreviewClientAccrualsEmailQuery, AccrualsEmailPreviewResponse>, PreviewClientAccrualsEmailQueryHandler>();
+        services.AddScoped<ICommandHandler<SendBookingPassesEmailCommand, EmailDispatchResponse>, SendBookingPassesEmailCommandHandler>();
+        services.AddScoped<IQueryHandler<PreviewBookingPassesEmailQuery, BookingPassesEmailPreviewResponse>, PreviewBookingPassesEmailQueryHandler>();
         services.AddScoped<IQueryHandler<GetTripEmailHistoryQuery, IReadOnlyList<EmailDispatchResponse>>, GetTripEmailHistoryQueryHandler>();
         services.AddScoped<IQueryHandler<GetClientEmailHistoryQuery, IReadOnlyList<EmailDispatchResponse>>, GetClientEmailHistoryQueryHandler>();
+        services.AddScoped<IQueryHandler<GetBookingEmailHistoryQuery, IReadOnlyList<EmailDispatchResponse>>, GetBookingEmailHistoryQueryHandler>();
 
-        // 5. Integration event consumers — the module's first: booking.booking-day-reverted
-        //    (a storing event, polled from the booking outbox) drives the automated
-        //    "trip at risk" emails. The event carries its full recipient snapshot, so the
-        //    handler still never queries another module.
+        // 5. Integration event consumers, all storing events polled from the producers'
+        //    outboxes:
+        //    - booking.booking-day-reverted drives the automated "trip at risk" emails (the
+        //      event carries its full recipient snapshot);
+        //    - identity.user-changed keeps the user_lookup replica current — the audience of
+        //      the compliance alerts. Budgeting consumes the same key: a producer outbox row
+        //      carries ONE processing_status, so whichever module's consumer polls it first
+        //      runs BOTH modules' handlers (InvokeHandlers resolves every registered
+        //      IIntegrationEventHandler<TEvent>) and marks it Processed — nothing is lost, but
+        //      a failure in either handler backs off the row for both, and rows Budgeting
+        //      processed before this subscription existed never replay here. Existing users
+        //      therefore land via the mandatory backfill in the AddNotificationsUserLookup
+        //      migration, not by history replay;
+        //    - drivers.eld-malfunction-changed and drivers.driver-out-of-service-changed drive
+        //      the compliance alert emails (ComplianceAccess; plus DispatchAccess for
+        //      out-of-service), addressed from that replica.
         services.AddOutboxPollingConsumer<NotificationsDbContext>(SchemaName, subscriptions => subscriptions
-            .On<BookingDayRevertedIntegrationEvent, BookingDayRevertedIntegrationEventHandler>());
+            .On<BookingDayRevertedIntegrationEvent, BookingDayRevertedIntegrationEventHandler>()
+            .On<UserChangedIntegrationEvent, UserChangedIntegrationEventHandler>()
+            .On<EldMalfunctionChangedIntegrationEvent, EldMalfunctionChangedIntegrationEventHandler>()
+            .On<DriverOutOfServiceChangedIntegrationEvent, DriverOutOfServiceChangedIntegrationEventHandler>());
 
         // 6. Read-side projections — one worker polls notifications.event_journal and upserts
         //    the read-model rows for the aggregates the batch touched.

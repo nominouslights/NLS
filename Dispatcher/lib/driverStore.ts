@@ -1,34 +1,27 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { driverLeaves, hosLogs } from "./data";
-import type { DriverLeave, HosLogEntry } from "./types";
+import { driverLeaves } from "./data";
+import type { DriverLeave } from "./types";
 
 // -----------------------------------------------------------------------------
-// HOS & leave prototype store — MOCK ONLY (HOS/leave is explicitly outside the
-// backend Drivers module's scope). Adds manual-entry mutations on top of the
-// seed arrays in lib/data.ts, mirroring lib/clientStore.ts's module-level
-// store + useSyncExternalStore pattern so edits survive navigating away from
-// and back to the Drivers screen. Driver records, credentials, and clearances
-// live in the real API now — see lib/api/drivers.ts.
+// Leave prototype store — MOCK ONLY (leave is explicitly outside the backend
+// Drivers module's scope). Adds manual-entry mutations on top of the seed
+// array in lib/data.ts, mirroring lib/clientStore.ts's module-level store +
+// useSyncExternalStore pattern so edits survive navigating away from and back
+// to the Drivers screen. Driver records, credentials, clearances and hours of
+// service live in the real API now — see lib/api/drivers.ts and lib/api/hos.ts.
 // -----------------------------------------------------------------------------
 
 // ---- id counters ------------------------------------------------------------
 
-const counters = { hos: 2100, lv: 4100 };
+const counters = { lv: 4100 };
 function nextId(kind: keyof typeof counters, prefix: string): string {
   counters[kind] += 1;
   return `${prefix}-${counters[kind]}`;
 }
 
 // ---- mutations --------------------------------------------------------------
-
-export function addHosLogEntry(input: Omit<HosLogEntry, "id">): HosLogEntry {
-  const entry: HosLogEntry = { ...input, id: nextId("hos", "HOS") };
-  hosLogs.unshift(entry);
-  emit();
-  return entry;
-}
 
 export function addLeave(input: Omit<DriverLeave, "id">): DriverLeave {
   const leave: DriverLeave = { ...input, id: nextId("lv", "LV") };

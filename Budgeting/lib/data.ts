@@ -1,5 +1,5 @@
 // MOCK DATA — the last not-yet-real screen in this console (Stage 6.1). Budget periods, codes,
-// allocations and now **actual transactions** are all real (lib/api/budgeting.ts); variance is
+// budget items and now **actual transactions** are all real (lib/api/budgeting.ts); variance is
 // what is left here. It is not waiting on QuickBooks: actuals became real by manual entry
 // (POST/PUT/DELETE /api/budgeting/actuals), and a QuickBooks pull is a later slice of its own.
 // Variance goes the moment it is rebuilt on GET periods/{id}/rollup, which already ships the
@@ -18,7 +18,7 @@
 // (components/screens/Settings.tsx, "Budget Codes" tab), so the two apps tell one story.
 //
 // `budgetCodes` below is NOT what the Budget Codes screen renders any more — that screen is on
-// the real API (GET/POST/PUT/DELETE /api/budgeting/codes). The array survives only as the
+// the real API (per period: /api/budgeting/periods/{id}/codes). The array survives only as the
 // name-and-category lookup for the variance rows further down and for Reports' revenue mix,
 // which are still mock and are keyed to these code strings. It goes when that slice lands.
 //

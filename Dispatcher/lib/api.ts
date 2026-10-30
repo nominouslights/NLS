@@ -37,6 +37,10 @@ export {
   listTripManifests,
   getTripManifest,
   listTripActivity,
+  // The only correct way to seed an <input type="time"> from a wire value — hhmm() is the
+  // display formatter and renders such a field blank. Exported here so no screen writes a
+  // third local copy of it.
+  timeInputValue,
 } from "./api/trips";
 
 export type {

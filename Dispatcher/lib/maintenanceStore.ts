@@ -4,22 +4,10 @@ import { useSyncExternalStore } from "react";
 import type { StatusKind } from "./theme";
 import type { ServiceRecord, VehicleDocument } from "./types";
 
-// Standard DVIR checklist (NSC Standard 11 / trip inspection). Single source of
-// truth for the dispatcher inspection-entry modal.
-export const DVIR_CHECKLIST = [
-  "Service brakes",
-  "Parking brake",
-  "Steering",
-  "Lights & reflectors",
-  "Tires & wheels",
-  "Windshield & wipers",
-  "Mirrors",
-  "Horn",
-  "Coupling / hitch",
-  "Emergency equipment",
-  "Seats & seatbelts",
-  "Exhaust / fluid leaks",
-] as const;
+// The twelve-row DVIR_CHECKLIST that used to live here is GONE. It was a fourth
+// fork of the inspection form; the one catalogue is `lib/inspectionForm.ts`
+// (Form NL-PTI-01), narrowed per unit and mode by `itemsFor()`. Never reintroduce
+// a checklist here.
 
 // -----------------------------------------------------------------------------
 // Fleet & Maintenance prototype store — MOCK ONLY (no backend domain yet).

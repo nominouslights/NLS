@@ -37,6 +37,19 @@ internal sealed class EmailDispatchReadService(NotificationsDbContext context) :
         return dispatches.Select(ToResponse).ToList();
     }
 
+    public async Task<IReadOnlyList<EmailDispatchResponse>> GetForBookingAsync(
+        Guid bookingId,
+        CancellationToken cancellationToken = default)
+    {
+        var dispatches = await context.EmailDispatchReadModels
+            .AsNoTracking()
+            .Where(d => d.BookingId == bookingId)
+            .OrderByDescending(d => d.SentAtUtc)
+            .ToListAsync(cancellationToken);
+
+        return dispatches.Select(ToResponse).ToList();
+    }
+
     private static EmailDispatchResponse ToResponse(EmailDispatchReadModel dispatch) => new(
         dispatch.Id,
         dispatch.TripId,
@@ -46,6 +59,8 @@ internal sealed class EmailDispatchReadService(NotificationsDbContext context) :
         dispatch.TemplateName,
         dispatch.ServiceType,
         dispatch.ClientId,
+        dispatch.BookingId,
+        dispatch.BookingReference,
         dispatch.Status,
         dispatch.SentAtUtc,
         dispatch.Recipients

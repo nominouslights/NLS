@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using NorthernLink.Fleet.Domain.WorkOrders;
 
 namespace NorthernLink.Fleet.Infrastructure.Persistence.ReadModels;
 
@@ -30,6 +31,7 @@ public sealed class WorkOrderReadModel
     public decimal? AuthorizedLimitCad { get; set; }
     public string? BudgetCode { get; set; }
     public DateTimeOffset? DateRequiredOrOos { get; set; }
+    public List<WorkOrderDefectLine> Defects { get; set; } = [];
     public int Version { get; set; }
 }
 
@@ -62,5 +64,8 @@ public sealed class WorkOrderReadModelConfiguration : IEntityTypeConfiguration<W
         builder.Property(w => w.BudgetCode).HasColumnName("budget_code");
         builder.Property(w => w.DateRequiredOrOos).HasColumnName("date_required_or_oos");
         builder.Property(w => w.Version).HasColumnName("version");
+
+        // Same owned-jsonb shape as the aggregate — which is also why this read model is keyed.
+        WorkOrderDefectLineMapping.MapDefects(builder, w => w.Defects);
     }
 }

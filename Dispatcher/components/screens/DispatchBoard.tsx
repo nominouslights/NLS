@@ -15,11 +15,13 @@ import {
   type TripRecord,
 } from "@/lib/api/trips";
 import { listInvoices } from "@/lib/api/billing";
+import { getHosAlertsToday, type HosAlertsToday } from "@/lib/api/hos";
 import { statusShort } from "@/lib/format";
 import { MetricTile } from "@/components/ui/MetricTile";
 import { ServiceChip, StatusChip } from "@/components/ui/Chip";
 import { Panel, SectionLabel } from "@/components/ui/Panel";
 import { ActionButton } from "@/components/ui/Button";
+import { ComplianceAlertsTile } from "./dispatch/ComplianceAlertsTile";
 
 // Dispatch Board — today's trips from the real Trips API (GET /api/trips?date=today)
 // with the metric tiles derived from the same rows.
@@ -33,7 +35,14 @@ function todayHeading(): string {
   });
 }
 
-export default function DispatchBoard({ onOpenTrip }: { onOpenTrip: (id: string) => void }) {
+export default function DispatchBoard({
+  onOpenTrip,
+  onOpenCompliance,
+}: {
+  onOpenTrip: (id: string) => void;
+  /** The alerts tile's click: Compliance for the compliance roles, Drivers otherwise (TodayApp decides). */
+  onOpenCompliance: () => void;
+}) {
   const [rows, setRows] = useState<TripRecord[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   // Draft invoices tile — real count from the Billing API of drafts still to be
@@ -50,6 +59,29 @@ export default function DispatchBoard({ onOpenTrip }: { onOpenTrip: (id: string)
       },
       () => {
         if (active) setDraftInvoices(null);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Compliance alerts tile — GET /api/drivers/hos/alerts/today (DriverRosterAccess). Like the
+  // invoices tile, a failure only greys it.
+  const [alerts, setAlerts] = useState<HosAlertsToday | null>(null);
+  const [alertsFailed, setAlertsFailed] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    getHosAlertsToday().then(
+      (a) => {
+        if (active) {
+          setAlerts(a);
+          setAlertsFailed(false);
+        }
+      },
+      () => {
+        if (active) setAlertsFailed(true);
       },
     );
     return () => {
@@ -156,9 +188,7 @@ export default function DispatchBoard({ onOpenTrip }: { onOpenTrip: (id: string)
             value={driversOnDuty ?? "—"}
             valueColor={statusMeta("ontime").t}
           />
-          {/* Compliance alerts were a pure mock figure — "—" until a real
-              compliance rollup exists (HOS has no backend domain yet). */}
-          <MetricTile icon="▲" iconBg="#D55E00" iconColor="#fff" label="Compliance alerts" value="—" valueColor={colors.textDim} />
+          <ComplianceAlertsTile alerts={alerts} failed={alertsFailed} onOpen={onOpenCompliance} />
           <MetricTile
             icon="◷"
             iconBg="#9C6500"

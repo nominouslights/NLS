@@ -169,6 +169,23 @@ namespace NorthernLink.Drivers.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(32)")
                         .HasColumnName("phone");
 
+                    b.Property<DateTimeOffset?>("PriorRecordsAttestedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("prior_records_attested_at_utc");
+
+                    b.Property<Guid?>("PriorRecordsAttestedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("prior_records_attested_by_user_id");
+
+                    b.Property<DateOnly?>("PriorRecordsCoveredThroughDate")
+                        .HasColumnType("date")
+                        .HasColumnName("prior_records_covered_through_date");
+
+                    b.Property<string>("PriorRecordsNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("prior_records_note");
+
                     b.Property<DateTimeOffset>("RegisteredAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("registered_at_utc");
@@ -193,6 +210,103 @@ namespace NorthernLink.Drivers.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at_utc");
 
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.Property<bool>("WorksForOtherCarriers")
+                        .HasColumnType("boolean")
+                        .HasColumnName("works_for_other_carriers");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId")
+                        .IsUnique()
+                        .HasFilter("user_id IS NOT NULL");
+
+                    b.HasIndex("TenantId", "Name");
+
+                    b.ToTable("drivers", "drivers");
+                });
+
+            modelBuilder.Entity("NorthernLink.Drivers.Domain.Hos.ComplianceFinding", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("ClosedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("closed_at_utc");
+
+                    b.Property<Guid?>("ClosedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("closed_by_user_id");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("description");
+
+                    b.Property<Guid>("DriverId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("driver_id");
+
+                    b.Property<string>("FollowUpNote")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("follow_up_note");
+
+                    b.Property<DateOnly>("LocalDate")
+                        .HasColumnType("date")
+                        .HasColumnName("local_date");
+
+                    b.Property<DateTimeOffset>("OpenedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("opened_at_utc");
+
+                    b.Property<Guid>("OpenedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("opened_by_user_id");
+
+                    b.Property<string>("Rule")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("rule");
+
+                    b.Property<string>("Severity")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("severity");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("source");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
                     b.Property<int>("Version")
                         .IsConcurrencyToken()
                         .HasColumnType("integer")
@@ -200,9 +314,346 @@ namespace NorthernLink.Drivers.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("TenantId", "Name");
+                    b.HasIndex("TenantId", "DriverId", "LocalDate");
 
-                    b.ToTable("drivers", "drivers");
+                    b.ToTable("compliance_findings", "drivers");
+                });
+
+            modelBuilder.Entity("NorthernLink.Drivers.Domain.Hos.DriverOutOfService", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("DeclaredAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("declared_at_utc");
+
+                    b.Property<Guid>("DriverId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("driver_id");
+
+                    b.Property<string>("Evidence")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("evidence");
+
+                    b.Property<string>("LiftReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("lift_reason");
+
+                    b.Property<DateTimeOffset?>("LiftedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lifted_at_utc");
+
+                    b.Property<Guid?>("LiftedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lifted_by_user_id");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("reason");
+
+                    b.Property<DateTimeOffset>("RecordedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("recorded_at_utc");
+
+                    b.Property<Guid>("RecordedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("recorded_by_user_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset?>("UntilUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("until_utc");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "DriverId", "Status");
+
+                    b.ToTable("driver_out_of_service", "drivers");
+                });
+
+            modelBuilder.Entity("NorthernLink.Drivers.Domain.Hos.DutyDay", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("CertifiedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("certified_at_utc");
+
+                    b.Property<Guid?>("CertifiedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("certified_by_user_id");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<Guid>("DriverId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("driver_id");
+
+                    b.Property<int>("LastSequence")
+                        .HasColumnType("integer")
+                        .HasColumnName("last_sequence");
+
+                    b.Property<DateOnly>("LocalDate")
+                        .HasColumnType("date")
+                        .HasColumnName("local_date");
+
+                    b.Property<decimal>("PersonalConveyanceKm")
+                        .HasPrecision(9, 1)
+                        .HasColumnType("numeric(9,1)")
+                        .HasColumnName("personal_conveyance_km");
+
+                    b.Property<bool>("RecertificationRequired")
+                        .HasColumnType("boolean")
+                        .HasColumnName("recertification_required");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "DriverId", "LocalDate")
+                        .IsUnique();
+
+                    b.ToTable("duty_days", "drivers");
+                });
+
+            modelBuilder.Entity("NorthernLink.Drivers.Domain.Hos.EldMalfunctionReport", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("code");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("description");
+
+                    b.Property<Guid>("DriverId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("driver_id");
+
+                    b.Property<string>("DriverName")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("driver_name");
+
+                    b.Property<DateTimeOffset>("NoticedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("noticed_at_utc");
+
+                    b.Property<DateTimeOffset>("ReportedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("reported_at_utc");
+
+                    b.Property<Guid>("ReportedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("reported_by_user_id");
+
+                    b.Property<string>("ResolutionNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("resolution_note");
+
+                    b.Property<DateTimeOffset?>("ResolvedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("resolved_at_utc");
+
+                    b.Property<Guid?>("ResolvedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("resolved_by_user_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<Guid?>("VehicleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("vehicle_id");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "DriverId", "Status");
+
+                    b.ToTable("eld_malfunction_reports", "drivers");
+                });
+
+            modelBuilder.Entity("NorthernLink.Drivers.Domain.Hos.HosException", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("ApprovedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("approved_at_utc");
+
+                    b.Property<Guid?>("ApprovedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("approved_by_user_id");
+
+                    b.Property<DateTimeOffset?>("ClosedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("closed_at_utc");
+
+                    b.Property<Guid?>("ClosedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("closed_by_user_id");
+
+                    b.Property<string>("ClosureNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("closure_note");
+
+                    b.Property<DateTimeOffset>("DeclaredAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("declared_at_utc");
+
+                    b.Property<Guid>("DeclaredByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("declared_by_user_id");
+
+                    b.Property<TimeSpan?>("DeferredOffDuty")
+                        .HasColumnType("interval")
+                        .HasColumnName("deferred_off_duty");
+
+                    b.Property<DateTimeOffset?>("DispatchAcknowledgedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("dispatch_acknowledged_at_utc");
+
+                    b.Property<Guid?>("DispatchAcknowledgedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("dispatch_acknowledged_by_user_id");
+
+                    b.Property<Guid>("DriverId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("driver_id");
+
+                    b.Property<DateTimeOffset>("EffectiveFromUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("effective_from_utc");
+
+                    b.Property<DateTimeOffset?>("EffectiveToUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("effective_to_utc");
+
+                    b.Property<bool>("EldRemarkRecorded")
+                        .HasColumnType("boolean")
+                        .HasColumnName("eld_remark_recorded");
+
+                    b.Property<TimeSpan?>("ExtraDriving")
+                        .HasColumnType("interval")
+                        .HasColumnName("extra_driving");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("kind");
+
+                    b.Property<string>("Location")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("location");
+
+                    b.Property<bool>("NotKnownBeforeDeparture")
+                        .HasColumnType("boolean")
+                        .HasColumnName("not_known_before_departure");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("reason");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid?>("TripId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("trip_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "DriverId", "EffectiveFromUtc");
+
+                    b.ToTable("hos_exceptions", "drivers");
                 });
 
             modelBuilder.Entity("NorthernLink.Drivers.Domain.Hos.HosLogEntry", b =>
@@ -271,6 +722,89 @@ namespace NorthernLink.Drivers.Infrastructure.Persistence.Migrations
                     b.HasIndex("TenantId", "DriverId");
 
                     b.ToTable("hos_log_entries", "drivers");
+                });
+
+            modelBuilder.Entity("NorthernLink.Drivers.Infrastructure.Persistence.ReadModels.ComplianceFindingReadModel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("ClosedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("closed_at_utc");
+
+                    b.Property<Guid?>("ClosedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("closed_by_user_id");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("description");
+
+                    b.Property<Guid>("DriverId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("driver_id");
+
+                    b.Property<string>("FollowUpNote")
+                        .HasColumnType("text")
+                        .HasColumnName("follow_up_note");
+
+                    b.Property<DateOnly>("LocalDate")
+                        .HasColumnType("date")
+                        .HasColumnName("local_date");
+
+                    b.Property<DateTimeOffset>("OpenedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("opened_at_utc");
+
+                    b.Property<Guid>("OpenedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("opened_by_user_id");
+
+                    b.Property<string>("Rule")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("rule");
+
+                    b.Property<string>("Severity")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("severity");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("source");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "DriverId", "LocalDate");
+
+                    b.ToTable("rm_compliance_findings", "drivers");
                 });
 
             modelBuilder.Entity("NorthernLink.Drivers.Infrastructure.Persistence.ReadModels.DriverClearanceReadModel", b =>
@@ -377,6 +911,83 @@ namespace NorthernLink.Drivers.Infrastructure.Persistence.Migrations
                     b.ToTable("rm_driver_credentials", "drivers");
                 });
 
+            modelBuilder.Entity("NorthernLink.Drivers.Infrastructure.Persistence.ReadModels.DriverOutOfServiceReadModel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("DeclaredAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("declared_at_utc");
+
+                    b.Property<Guid>("DriverId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("driver_id");
+
+                    b.Property<DateTimeOffset?>("EffectiveUntilUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("effective_until_utc");
+
+                    b.Property<string>("Evidence")
+                        .HasColumnType("text")
+                        .HasColumnName("evidence");
+
+                    b.Property<string>("LiftReason")
+                        .HasColumnType("text")
+                        .HasColumnName("lift_reason");
+
+                    b.Property<DateTimeOffset?>("LiftedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lifted_at_utc");
+
+                    b.Property<Guid?>("LiftedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lifted_by_user_id");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("reason");
+
+                    b.Property<DateTimeOffset>("RecordedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("recorded_at_utc");
+
+                    b.Property<Guid>("RecordedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("recorded_by_user_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset?>("UntilUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("until_utc");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "DriverId", "Status");
+
+                    b.ToTable("rm_driver_out_of_service", "drivers");
+                });
+
             modelBuilder.Entity("NorthernLink.Drivers.Infrastructure.Persistence.ReadModels.DriverReadModel", b =>
                 {
                     b.Property<Guid>("Id")
@@ -422,6 +1033,22 @@ namespace NorthernLink.Drivers.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("phone");
 
+                    b.Property<DateTimeOffset?>("PriorRecordsAttestedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("prior_records_attested_at_utc");
+
+                    b.Property<Guid?>("PriorRecordsAttestedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("prior_records_attested_by_user_id");
+
+                    b.Property<DateOnly?>("PriorRecordsCoveredThroughDate")
+                        .HasColumnType("date")
+                        .HasColumnName("prior_records_covered_through_date");
+
+                    b.Property<string>("PriorRecordsNote")
+                        .HasColumnType("text")
+                        .HasColumnName("prior_records_note");
+
                     b.Property<DateTimeOffset>("RegisteredAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("registered_at_utc");
@@ -448,13 +1075,306 @@ namespace NorthernLink.Drivers.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at_utc");
 
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.Property<bool>("WorksForOtherCarriers")
+                        .HasColumnType("boolean")
+                        .HasColumnName("works_for_other_carriers");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId")
+                        .IsUnique()
+                        .HasFilter("user_id IS NOT NULL");
+
+                    b.ToTable("rm_drivers", "drivers");
+                });
+
+            modelBuilder.Entity("NorthernLink.Drivers.Infrastructure.Persistence.ReadModels.DutyDayReadModel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Certified")
+                        .HasColumnType("boolean")
+                        .HasColumnName("certified");
+
+                    b.Property<DateTimeOffset?>("CertifiedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("certified_at_utc");
+
+                    b.Property<Guid>("DriverId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("driver_id");
+
+                    b.Property<int>("DrivingMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("driving_minutes");
+
+                    b.Property<int>("EventCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("event_count");
+
+                    b.Property<string>("EventsJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("events");
+
+                    b.Property<string>("LastStatus")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("last_status");
+
+                    b.Property<DateOnly>("LocalDate")
+                        .HasColumnType("date")
+                        .HasColumnName("local_date");
+
+                    b.Property<int>("OffDutyMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("off_duty_minutes");
+
+                    b.Property<int>("OnDutyMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("on_duty_minutes");
+
+                    b.Property<decimal>("PersonalConveyanceKm")
+                        .HasPrecision(9, 1)
+                        .HasColumnType("numeric(9,1)")
+                        .HasColumnName("pc_km");
+
+                    b.Property<bool>("RecertificationRequired")
+                        .HasColumnType("boolean")
+                        .HasColumnName("recertification_required");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.Property<int>("ViolationCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("violation_count");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "DriverId", "LocalDate")
+                        .IsUnique();
+
+                    b.ToTable("rm_duty_days", "drivers");
+                });
+
+            modelBuilder.Entity("NorthernLink.Drivers.Infrastructure.Persistence.ReadModels.EldMalfunctionReportReadModel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("code");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("description");
+
+                    b.Property<Guid>("DriverId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("driver_id");
+
+                    b.Property<string>("DriverName")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("driver_name");
+
+                    b.Property<DateTimeOffset>("NoticedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("noticed_at_utc");
+
+                    b.Property<DateTimeOffset>("ReportedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("reported_at_utc");
+
+                    b.Property<Guid>("ReportedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("reported_by_user_id");
+
+                    b.Property<string>("ResolutionNote")
+                        .HasColumnType("text")
+                        .HasColumnName("resolution_note");
+
+                    b.Property<DateTimeOffset?>("ResolvedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("resolved_at_utc");
+
+                    b.Property<Guid?>("ResolvedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("resolved_by_user_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<Guid?>("VehicleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("vehicle_id");
+
                     b.Property<int>("Version")
                         .HasColumnType("integer")
                         .HasColumnName("version");
 
                     b.HasKey("Id");
 
-                    b.ToTable("rm_drivers", "drivers");
+                    b.HasIndex("TenantId", "DriverId", "Status");
+
+                    b.ToTable("rm_eld_malfunction_reports", "drivers");
+                });
+
+            modelBuilder.Entity("NorthernLink.Drivers.Infrastructure.Persistence.ReadModels.HosExceptionReadModel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Applying")
+                        .HasColumnType("boolean")
+                        .HasColumnName("applying");
+
+                    b.Property<DateTimeOffset?>("ApprovedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("approved_at_utc");
+
+                    b.Property<Guid?>("ApprovedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("approved_by_user_id");
+
+                    b.Property<DateTimeOffset?>("ClosedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("closed_at_utc");
+
+                    b.Property<Guid?>("ClosedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("closed_by_user_id");
+
+                    b.Property<string>("ClosureNote")
+                        .HasColumnType("text")
+                        .HasColumnName("closure_note");
+
+                    b.Property<DateTimeOffset>("DeclaredAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("declared_at_utc");
+
+                    b.Property<Guid>("DeclaredByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("declared_by_user_id");
+
+                    b.Property<int?>("DeferredOffDutyMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("deferred_off_duty_minutes");
+
+                    b.Property<DateTimeOffset?>("DispatchAcknowledgedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("dispatch_acknowledged_at_utc");
+
+                    b.Property<Guid?>("DispatchAcknowledgedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("dispatch_acknowledged_by_user_id");
+
+                    b.Property<Guid>("DriverId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("driver_id");
+
+                    b.Property<DateTimeOffset>("EffectiveFromUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("effective_from_utc");
+
+                    b.Property<DateTimeOffset?>("EffectiveToUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("effective_to_utc");
+
+                    b.Property<bool>("EldRemarkRecorded")
+                        .HasColumnType("boolean")
+                        .HasColumnName("eld_remark_recorded");
+
+                    b.Property<int?>("ExtraDrivingMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("extra_driving_minutes");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("kind");
+
+                    b.Property<string>("Location")
+                        .HasColumnType("text")
+                        .HasColumnName("location");
+
+                    b.Property<bool>("NotKnownBeforeDeparture")
+                        .HasColumnType("boolean")
+                        .HasColumnName("not_known_before_departure");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("reason");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid?>("TripId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("trip_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "DriverId", "EffectiveFromUtc");
+
+                    b.ToTable("rm_hos_exceptions", "drivers");
                 });
 
             modelBuilder.Entity("NorthernLink.Drivers.Infrastructure.Persistence.ReadModels.HosLogEntryReadModel", b =>
@@ -755,6 +1675,68 @@ namespace NorthernLink.Drivers.Infrastructure.Persistence.Migrations
                     b.HasKey("ProjectionName");
 
                     b.ToTable("projection_checkpoints", "drivers");
+                });
+
+            modelBuilder.Entity("NorthernLink.Drivers.Domain.Hos.DutyDay", b =>
+                {
+                    b.OwnsMany("NorthernLink.Drivers.Domain.Hos.DutyEvent", "Events", b1 =>
+                        {
+                            b1.Property<Guid>("DutyDayId");
+
+                            b1.Property<int>("__synthesizedOrdinal")
+                                .ValueGeneratedOnAdd();
+
+                            b1.Property<string>("AmendmentReason");
+
+                            b1.Property<Guid?>("AmendsEventId");
+
+                            b1.Property<DateTimeOffset>("AtUtc");
+
+                            b1.Property<string>("CarrierName");
+
+                            b1.Property<string>("EnteredBy");
+
+                            b1.Property<Guid>("EventId");
+
+                            b1.Property<bool>("IsVoided");
+
+                            b1.Property<string>("Note");
+
+                            b1.Property<decimal?>("OdometerEndKm")
+                                .HasPrecision(9, 1);
+
+                            b1.Property<decimal?>("OdometerStartKm")
+                                .HasPrecision(9, 1);
+
+                            b1.Property<bool>("PcNoPassengersOrCargo");
+
+                            b1.Property<bool>("PcNoTrailer");
+
+                            b1.Property<bool>("PcNoWork");
+
+                            b1.Property<DateTimeOffset>("RecordedAtUtc");
+
+                            b1.Property<Guid?>("RecordedByUserId");
+
+                            b1.Property<int>("Sequence");
+
+                            b1.Property<string>("Source")
+                                .IsRequired();
+
+                            b1.Property<string>("Status")
+                                .IsRequired();
+
+                            b1.HasKey("DutyDayId", "__synthesizedOrdinal");
+
+                            b1.ToTable("duty_days", "drivers");
+
+                            b1.ToJson("events");
+
+                            b1.WithOwner()
+                                .HasForeignKey("DutyDayId");
+                        });
+
+                    b.Navigation("Events");
                 });
 #pragma warning restore 612, 618
         }

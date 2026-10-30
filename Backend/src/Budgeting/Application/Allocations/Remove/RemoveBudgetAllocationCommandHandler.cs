@@ -7,9 +7,9 @@ using NorthernLink.Budgeting.Domain.Periods;
 namespace NorthernLink.Budgeting.Application.Allocations.Remove;
 
 /// <summary>
-/// Handles <see cref="RemoveBudgetAllocationCommand"/>. Same period guards as the set — the
-/// period must exist and allow plan changes — then the line must exist. A retired code is
-/// <em>not</em> a guard here: taking a line off a retired code is exactly what a planner cleaning
+/// Handles <see cref="RemoveBudgetAllocationCommand"/>. Same period guards as create and update — the
+/// period must exist and allow plan changes — then the item must exist in that period (tenant-filtered, so another tenant's item id is NotFound). A retired code is
+/// <em>not</em> a guard here: taking an item off a retired code is exactly what a planner cleaning
 /// up a plan needs to do. No domain event; <c>AppendAuditEntries</c> exempts deletes and writes
 /// the synthetic <c>aggregate-deleted</c> row that drives the projection to drop the read row.
 /// </summary>
@@ -31,7 +31,7 @@ public sealed class RemoveBudgetAllocationCommandHandler(
             return Result.Failure(BudgetAllocationErrors.PeriodNotEditable);
         }
 
-        var allocation = await allocations.GetAsync(command.PeriodId, command.BudgetCodeId, cancellationToken);
+        var allocation = await allocations.GetByIdAsync(command.PeriodId, command.AllocationId, cancellationToken);
         if (allocation is null)
         {
             return Result.Failure(BudgetAllocationErrors.NotFound);

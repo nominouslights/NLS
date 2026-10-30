@@ -11,6 +11,7 @@ using NorthernLink.Trips.Application.Routes.GetRoutes;
 using NorthernLink.Trips.Application.Routes.Update;
 using NorthernLink.Trips.Application.Schedules.AddException;
 using NorthernLink.Trips.Application.Schedules.Create;
+using NorthernLink.Trips.Application.Schedules.GenerateTrips;
 using NorthernLink.Trips.Application.Schedules.GetExceptions;
 using NorthernLink.Trips.Application.Schedules.GetScheduleTemplates;
 using NorthernLink.Trips.Application.Schedules.RemoveException;
@@ -23,8 +24,12 @@ using NorthernLink.Trips.Application.Stops.SetActive;
 using NorthernLink.Trips.Application.Stops.Update;
 using NorthernLink.Trips.Application.Trips;
 using NorthernLink.Trips.Application.Trips.Assign;
+using NorthernLink.Trips.Application.Trips.ChangeRoute;
 using NorthernLink.Trips.Application.Trips.ChangeStatus;
 using NorthernLink.Trips.Application.Trips.CloseWithoutBilling;
+using NorthernLink.Trips.Application.Trips.ConvertToDeadhead;
+using NorthernLink.Trips.Application.Trips.ConvertToPassengerTrip;
+using NorthernLink.Trips.Application.Trips.CorrectDriver;
 using NorthernLink.Trips.Application.Trips.Create;
 using NorthernLink.Trips.Application.Trips.CreateDeadheadReturn;
 using NorthernLink.Trips.Application.Trips.FinishOperations;
@@ -56,34 +61,66 @@ internal static class TripPlanningEndpoints
 {
     public static void MapTripPlanningEndpoints(this IEndpointRouteBuilder app)
     {
-        var trips = app.MapGroup("/api/trips").RequireAuthorization();
-        trips.MapGet("", GetTrips);
-        trips.MapGet("{id:guid}", GetTripById);
-        trips.MapGet("{id:guid}/activity", GetTripActivity);
-        trips.MapPost("", CreateTrip);
-        trips.MapPut("{id:guid}", UpdateTrip);
-        trips.MapPost("{id:guid}/assign", AssignTrip);
-        trips.MapPost("{id:guid}/status", ChangeTripStatus);
-        trips.MapPost("{id:guid}/finish", FinishTripOperations);
-        trips.MapPost("{id:guid}/close-without-billing", CloseTripWithoutBilling);
-        trips.MapPost("{id:guid}/demand", RecordTripDemand);
-        trips.MapPost("{id:guid}/merge-round-trip", MergeRoundTrip);
-        trips.MapPost("{id:guid}/unpair-round-trip", UnpairRoundTrip);
-        trips.MapPost("{id:guid}/deadhead-return", CreateDeadheadReturn);
+        // Two groups on the same "/api/trips" prefix, distinguished by route template. Group
+        // policies are ADDITIVE — a nested group ANDs with its parent — so a driver-facing route
+        // cannot be widened from inside a DispatchAccess group; it needs its own sibling.
+        //
+        // Planning writes: creating, editing, assigning and closing trips is dispatch work.
+        var tripPlanning = app.MapGroup("/api/trips")
+            .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
+        tripPlanning.MapPost("", CreateTrip);
+        tripPlanning.MapPut("{id:guid}", UpdateTrip);
+        tripPlanning.MapPost("{id:guid}/assign", AssignTrip);
+        tripPlanning.MapPost("{id:guid}/finish", FinishTripOperations);
+        tripPlanning.MapPost("{id:guid}/close-without-billing", CloseTripWithoutBilling);
+        // Fix the driver recorded on a finished run (ReadyForBilling/Invoiced/Completed) — a
+        // correction of history with a required reason, never the assign path. Dispatch only.
+        tripPlanning.MapPost("{id:guid}/correct-driver", CorrectTripDriver);
+        tripPlanning.MapPost("{id:guid}/demand", RecordTripDemand);
+        tripPlanning.MapPost("{id:guid}/merge-round-trip", MergeRoundTrip);
+        tripPlanning.MapPost("{id:guid}/unpair-round-trip", UnpairRoundTrip);
+        tripPlanning.MapPost("{id:guid}/deadhead-return", CreateDeadheadReturn);
+        // Route change: preview is a pure read (?routeId=), the POST re-checks and applies to
+        // the trip AND its paired leg in one save. PUT {id} refuses a different routeId.
+        tripPlanning.MapGet("{id:guid}/change-route/preview", PreviewTripRouteChange);
+        tripPlanning.MapPost("{id:guid}/change-route", ChangeTripRoute);
+        // Deadhead conversion: no body, 204. Converting refuses a trip anyone is booked on and
+        // deletes its empty manifest(s); converting back only clears the flag. PUT {id} can no
+        // longer flip isEmptyLeg.
+        tripPlanning.MapPost("{id:guid}/convert-to-deadhead", ConvertTripToDeadhead);
+        tripPlanning.MapPost("{id:guid}/convert-to-passenger-trip", ConvertTripToPassengerTrip);
 
-        var routes = app.MapGroup("/api/trips/routes").RequireAuthorization();
+        // The driver-facing half: reading the board and advancing a trip's status from the cab.
+        //
+        // The policy admits every Driver, and these routes carry no {driverId}, so the policy
+        // alone is not an ownership boundary. Each handler below runs TripOperatorAccess: a
+        // dispatch role sees and acts on everything; a Driver-role caller is resolved to their
+        // own driver row through driver_lookup.user_id (replicated from drivers.driver-changed,
+        // link and unlink included) and gets only trips assigned to that driver — the list is
+        // narrowed, the detail/activity/status routes answer 403 Trips.Trip.NotYourTrip.
+        var tripsOperating = app.MapGroup("/api/trips")
+            .RequireAuthorization(AuthorizationPolicies.DriverAccess);
+        tripsOperating.MapGet("", GetTrips);
+        tripsOperating.MapGet("{id:guid}", GetTripById);
+        tripsOperating.MapGet("{id:guid}/activity", GetTripActivity);
+        tripsOperating.MapPost("{id:guid}/status", ChangeTripStatus);
+
+        var routes = app.MapGroup("/api/trips/routes")
+            .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
         routes.MapGet("", GetRoutes);
         routes.MapPost("", CreateRoute);
         routes.MapPut("{id:guid}", UpdateRoute);
 
-        var stops = app.MapGroup("/api/trips/stops").RequireAuthorization();
+        var stops = app.MapGroup("/api/trips/stops")
+            .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
         stops.MapGet("", GetStops);
         stops.MapPost("", CreateStop);
         stops.MapPut("{id:guid}", UpdateStop);
         stops.MapPost("{id:guid}/activate", ActivateStop);
         stops.MapPost("{id:guid}/deactivate", DeactivateStop);
 
-        var templates = app.MapGroup("/api/trips/schedule-templates").RequireAuthorization();
+        var templates = app.MapGroup("/api/trips/schedule-templates")
+            .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
         templates.MapGet("", GetScheduleTemplates);
         templates.MapPost("", CreateScheduleTemplate);
         templates.MapPut("{id:guid}", UpdateScheduleTemplate);
@@ -93,6 +130,10 @@ internal static class TripPlanningEndpoints
         templates.MapPost("{id:guid}/exceptions", AddScheduleException);
         templates.MapPut("{id:guid}/exceptions/{exceptionId:guid}", UpdateScheduleException);
         templates.MapDelete("{id:guid}/exceptions/{exceptionId:guid}", RemoveScheduleException);
+        // On-demand generation: the same code path as the background worker, driven to a
+        // dispatcher-chosen date. Preview is a pure read (no dry-run flag on the POST).
+        templates.MapGet("{id:guid}/generate/preview", PreviewScheduleTripGeneration); // ?through=yyyy-MM-dd
+        templates.MapPost("{id:guid}/generate", GenerateScheduleTrips);                // body { through }
     }
 
     // ---- Trips ----
@@ -226,7 +267,9 @@ internal static class TripPlanningEndpoints
             request.PoNumber,
             request.DriverId,
             request.VehicleId,
-            request.SeatsMinimum);
+            request.SeatsMinimum,
+            request.OriginProvince,
+            request.DestinationProvince);
 
         var result = await sender.Send(command, cancellationToken);
         return result.IsSuccess
@@ -254,14 +297,85 @@ internal static class TripPlanningEndpoints
             request.Destination,
             request.Stops ?? [],
             request.DistanceKm,
-            request.IsEmptyLeg,
             request.ClientId,
             request.ClientName,
             request.PoNumber,
             request.SeatsCapacity,
-            request.SeatsMinimum);
+            request.SeatsMinimum,
+            request.OriginProvince,
+            request.DestinationProvince);
 
         var result = await sender.Send(command, cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>
+    /// What moving the trip (and its paired leg) onto <paramref name="routeId"/> would do —
+    /// blockers, warnings needing acknowledgement, notices, and each leg's new oriented corridor.
+    /// 200 for any existing trip (problems are blockers in the body); 404 only for an unknown trip.
+    /// </summary>
+    private static async Task<IResult> PreviewTripRouteChange(
+        Guid id, Guid routeId, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(new PreviewTripRouteChangeQuery(id, routeId), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>
+    /// Moves a Scheduled trip and its paired leg onto another catalogue route. 204 on success;
+    /// the first blocker as its error otherwise; 409 <c>Trips.Trip.RouteChangeNeedsAcknowledgement</c>
+    /// when the preview had warnings and <c>acknowledgeWarnings</c> was not true.
+    /// </summary>
+    private static async Task<IResult> ChangeTripRoute(
+        Guid id, ChangeTripRouteRequest request, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(
+            new ChangeTripRouteCommand(id, request.RouteId, request.AcknowledgeWarnings), cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>
+    /// Turns a Scheduled trip nobody is booked on into a deadhead. 204 on success; 404
+    /// <c>Trips.Trip.NotFound</c>; otherwise a 409 naming the first rule that failed (not
+    /// Scheduled, already a deadhead, booking-sourced, demand, a non-empty manifest, imported
+    /// Bookeo bookings, a paired leg already empty) or <c>Trips.Trip.ChangedConcurrently</c>.
+    /// </summary>
+    private static async Task<IResult> ConvertTripToDeadhead(
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(new ConvertTripToDeadheadCommand(id), cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>
+    /// Turns a Scheduled deadhead back into an ordinary trip. 204 on success; 404
+    /// <c>Trips.Trip.NotFound</c>; 409 <c>Trips.Trip.PassengerTripConversionNotScheduled</c>,
+    /// <c>Trips.Trip.NotEmptyLeg</c>, or <c>Trips.Trip.ChangedConcurrently</c>.
+    /// </summary>
+    private static async Task<IResult> ConvertTripToPassengerTrip(
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(new ConvertTripToPassengerTripCommand(id), cancellationToken);
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
@@ -323,6 +437,32 @@ internal static class TripPlanningEndpoints
 
         var result = await sender.Send(
             new CloseTripWithoutBillingCommand(id, request.Reason), cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>
+    /// Corrects the driver on a trip whose run is over. Body <c>{ "driverId": guid, "reason": string }</c>,
+    /// 204 on success; refusals are the usual <c>{ code, message }</c> ProblemDetails mapping. Who
+    /// made the correction comes from the access token inside the handler, never from the body.
+    /// A missing or empty <c>driverId</c> is passed through as <see cref="Guid.Empty"/>, which the
+    /// handler answers with the domain's 400 DriverRequired; 404 DriverNotFound is reserved for an
+    /// id that does not exist in this tenant.
+    /// </summary>
+    private static async Task<IResult> CorrectTripDriver(
+        Guid id,
+        CorrectTripDriverRequest request,
+        ITenantContext tenantContext,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(
+            new CorrectTripDriverCommand(id, request.DriverId ?? Guid.Empty, request.Reason ?? string.Empty),
+            cancellationToken);
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
@@ -720,6 +860,46 @@ internal static class TripPlanningEndpoints
         var result = await sender.Send(new SetScheduleTemplateActiveCommand(id, false), cancellationToken);
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
+
+    /// <summary>
+    /// What a generate through <paramref name="through"/> would create — same guards and
+    /// counts as the POST, nothing persisted. Errors carry the dispatcher-facing message the
+    /// dialog shows verbatim.
+    /// </summary>
+    private static async Task<IResult> PreviewScheduleTripGeneration(
+        Guid id, DateOnly through, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(
+            new PreviewScheduleTripGenerationQuery(tenantId, id, through), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>
+    /// Generates the template's trips from today through the body's date (inclusive), skipping
+    /// occurrences that already exist. 409 (GenerationConflict) when a concurrent run beat this
+    /// one — re-preview and retry.
+    /// </summary>
+    private static async Task<IResult> GenerateScheduleTrips(
+        Guid id,
+        GenerateScheduleTripsRequest request,
+        ITenantContext tenantContext,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(
+            new GenerateScheduleTripsCommand(tenantId, id, request.Through), cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
 }
 
 /// <summary>Body of a successful trip creation (201, with Location header).</summary>
@@ -753,6 +933,15 @@ public sealed record ScheduleExceptionRequest(
     TimeOnly? ReturnDepartureTime,
     string? Note);
 
+/// <summary>
+/// Request body for POST /api/trips/schedule-templates/{id}/generate. <c>through</c> is the
+/// last service date to generate (inclusive, <c>yyyy-MM-dd</c>): from today up to
+/// <see cref="ScheduleTemplate.MaxGenerateAheadDays"/> days ahead. The response is a
+/// <c>ScheduleTripGenerationResult</c>; GET .../generate/preview?through= returns the same
+/// shape without creating anything.
+/// </summary>
+public sealed record GenerateScheduleTripsRequest(DateOnly Through);
+
 /// <summary>Body of a successful stop creation (201, with Location header).</summary>
 public sealed record StopCreatedResponse(Guid Id);
 
@@ -766,8 +955,11 @@ public sealed record CreateDeadheadReturnRequest(Guid? DriverId, Guid? VehicleId
 
 /// <summary>
 /// Request body for POST and PUT /api/trips/stops. <c>StopType</c> takes an enum name
-/// ("Hub", "Community", …) or null. <c>Active</c> is only honoured on PUT (a create is
-/// always active); toggle it afterwards via /activate and /deactivate.
+/// ("Hub", "Community", …) or null. <c>Province</c> accepts a two-letter code or a full
+/// name ("MB", "Manitoba", "Man.") and is stored as the code; anything that is not a Canadian
+/// province or territory is a 400 <c>Trips.Stop.UnknownProvince</c>. A stop outside Manitoba
+/// may be catalogued, but can never be placed on a route. <c>Active</c> is only honoured on
+/// PUT (a create is always active); toggle it afterwards via /activate and /deactivate.
 /// </summary>
 public sealed record StopRequest(
     string? Name,
@@ -790,6 +982,14 @@ public sealed record StopRequest(
 /// unassigned, and the vehicle must be a real fleet vehicle: its unit number and seating
 /// capacity are snapshotted from vehicle_lookup (there is no free-form vehicle unit or
 /// manual capacity on creation).
+/// <para>
+/// Manitoba-only: on a free-form corridor <c>originProvince</c>/<c>destinationProvince</c> and
+/// each stop's <c>province</c> take a two-letter code or a full name and default to "MB" when
+/// omitted; anything outside Manitoba is a 400 <c>Trips.Trip.OutsideOperatingArea</c> whose
+/// message ends "this request must be declined or referred to a partner carrier", and an
+/// unrecognised spelling is a 400 <c>Trips.Trip.UnknownProvince</c>. With <c>routeId</c> the
+/// provinces come from the route and these fields are ignored.
+/// </para>
 /// </summary>
 public sealed record CreateTripRequest(
     DateOnly ServiceDate,
@@ -799,7 +999,9 @@ public sealed record CreateTripRequest(
     Guid? RouteId,
     string? RouteName,
     string? Origin,
+    string? OriginProvince,
     string? Destination,
+    string? DestinationProvince,
     IReadOnlyList<RouteStop>? Stops,
     int DistanceKm,
     TripDirection? Direction,
@@ -811,7 +1013,16 @@ public sealed record CreateTripRequest(
     Guid? VehicleId,
     int? SeatsMinimum);
 
-/// <summary>Request body for PUT /api/trips/{id} — editable only while Scheduled.</summary>
+/// <summary>
+/// Request body for PUT /api/trips/{id} — editable only while Scheduled. <c>routeId</c> must be
+/// the trip's current one (409 <c>Trips.Trip.UseChangeRoute</c> otherwise); re-routing is
+/// POST /api/trips/{id}/change-route. There is no <c>isEmptyLeg</c>: a trip becomes a deadhead
+/// only through POST /api/trips/{id}/convert-to-deadhead (and back through
+/// .../convert-to-passenger-trip). A client still sending the old member is ignored — unknown
+/// JSON members are skipped by the default serializer settings.
+/// <c>originProvince</c>/<c>destinationProvince</c> and per-stop <c>province</c> follow the
+/// create body's rules and apply to free-form trips only (a catalogue trip keeps its snapshot).
+/// </summary>
 public sealed record UpdateTripRequest(
     DateOnly ServiceDate,
     TimeOnly WindowStart,
@@ -820,15 +1031,22 @@ public sealed record UpdateTripRequest(
     Guid? RouteId,
     string? RouteName,
     string? Origin,
+    string? OriginProvince,
     string? Destination,
+    string? DestinationProvince,
     IReadOnlyList<RouteStop>? Stops,
     int DistanceKm,
-    bool IsEmptyLeg,
     Guid? ClientId,
     string? ClientName,
     string? PoNumber,
     int? SeatsCapacity,
     int? SeatsMinimum);
+
+/// <summary>
+/// Request body for POST /api/trips/{id}/change-route. <c>acknowledgeWarnings</c> must be true
+/// when GET .../change-route/preview reported warnings (it may always be sent true).
+/// </summary>
+public sealed record ChangeTripRouteRequest(Guid RouteId, bool AcknowledgeWarnings = false);
 
 /// <summary>
 /// Request body for POST /api/trips/{id}/assign — null driverId unassigns; null vehicleId
@@ -851,6 +1069,13 @@ public sealed record ChangeTripStatusRequest(TripStatus Status, string? Reason);
 /// <summary>Request body for POST /api/trips/{id}/close-without-billing.</summary>
 public sealed record CloseTripWithoutBillingRequest(string Reason);
 
+/// <summary>
+/// Request body for POST /api/trips/{id}/correct-driver. Both members are nullable so a missing
+/// one reaches the handler and gets its proper error (DriverNotFound / DriverCorrectionReasonRequired)
+/// instead of a binding failure. There is deliberately no "who" member — that comes from the token.
+/// </summary>
+public sealed record CorrectTripDriverRequest(Guid? DriverId, string? Reason);
+
 /// <summary>Request body for POST /api/trips/{id}/demand.</summary>
 public sealed record RecordTripDemandRequest(int SeatsConfirmed, bool DemandGuaranteed);
 
@@ -862,7 +1087,11 @@ public sealed record RecordTripDemandRequest(int SeatsConfirmed, bool DemandGuar
 /// </summary>
 public sealed record MergeRoundTripRequest(Guid OtherTripId, bool AllowMismatch = false);
 
-/// <summary>Request body for POST /api/trips/routes. Stops are chosen from the catalog by id (ordered).</summary>
+/// <summary>
+/// Request body for POST /api/trips/routes. Stops are chosen from the catalog by id (ordered).
+/// Every stop must be in Manitoba: a catalog stop elsewhere is a 400
+/// <c>Trips.Route.StopOutsideOperatingArea</c> (same on PUT).
+/// </summary>
 public sealed record CreateRouteRequest(
     string? Name,
     IReadOnlyList<RouteStopRequest>? Stops,

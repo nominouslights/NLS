@@ -26,14 +26,8 @@ import {
 } from "@/lib/api/budgeting";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import ActualTransactionFormModal from "@/components/ActualTransactionFormModal";
-import {
-  EmptyNote,
-  Num,
-  PeriodPicker,
-  Screen,
-  TableHead,
-  periodLabel,
-} from "@/components/screens/shared";
+import { usePeriodHold } from "@/lib/periodHold";
+import { EmptyNote, Num, Screen, TableHead } from "@/components/screens/shared";
 
 // Plan against reality, on real data: GET periods/{id}/rollup for the per-code comparison, GET
 // periods/{id}/actuals for the transactions behind it, and the three writes that maintain them.
@@ -53,21 +47,26 @@ import {
 // Reads are projections: after a write the modal refetches the affected period's transactions
 // until the new VALUES are visible, and only then does this screen refresh the rollup, whose
 // totals read from the same projection.
+//
+// Shows the entered period only (Console, lib/workingPeriod.ts) — there is no picker here; the
+// banner's SWITCH PERIOD is the one way to look at another period, and Console remounts this
+// screen on every switch. The chart fetched here is the ENTERED period's (codes belong to a
+// period); the modal fetches another period's chart itself when a date lands outside this one.
+// A remove takes the period hold, like every other write against the entered period.
 
 export default function ActualsVsBudget({
+  period,
   periods,
-  periodId,
-  onSelectPeriod,
 }: {
+  /** The entered period. */
+  period: BudgetPeriod;
+  /** Every period — the record modal needs them to say which period a date counts in. */
   periods: BudgetPeriod[];
-  periodId: string;
-  onSelectPeriod: (id: string) => void;
 }) {
+  const periodId = period.id;
   /**
-   * The rollup and the transactions behind it, carrying the period they were fetched for. Kept
-   * as one value rather than two so a period change makes both stale at once — and so the
-   * effect below never has to blank them by hand, which is a synchronous setState in an effect
-   * body and the cascading render React warns about.
+   * The rollup and the transactions behind it, carrying the period they were fetched for, so a
+   * late response for another period is recognisably stale.
    */
   const [data, setData] = useState<{
     periodId: string;
@@ -80,8 +79,7 @@ export default function ActualsVsBudget({
   /** Two-click remove: holds the transaction id awaiting its confirming click. */
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
   const [modal, setModal] = useState<{ transaction: ActualTransactionRecord | null } | null>(null);
-
-  const period = periods.find((p) => p.id === periodId) ?? null;
+  usePeriodHold(busy);
 
   const applyError = useCallback((e: unknown) => {
     setError(
@@ -99,9 +97,6 @@ export default function ActualsVsBudget({
    */
   const load = useCallback(
     (isActive: () => boolean = () => true) => {
-      // No period selected: there is nothing to ask the server for, and the screen renders its
-      // "no period" note rather than an empty rollup.
-      if (!periodId) return;
       Promise.all([budgetRollup(periodId), listActualTransactions(periodId)]).then(
         ([rows, transactions]) => {
           if (isActive()) {
@@ -128,10 +123,11 @@ export default function ActualsVsBudget({
     };
   }, [load]);
 
-  // The chart is not period-scoped, so it is fetched once and kept.
+  // The entered period's chart — codes belong to a period, and a new transaction dated inside
+  // this period must be tagged with one of THIS period's codes.
   useEffect(() => {
     let active = true;
-    listBudgetCodes().then(
+    listBudgetCodes(periodId).then(
       (records) => {
         if (active) setCodes(records.map(toBudgetCode));
       },
@@ -142,14 +138,14 @@ export default function ActualsVsBudget({
     return () => {
       active = false;
     };
-  }, [applyError]);
+  }, [periodId, applyError]);
 
   // Data fetched for another period is not this period's data — it is stale, and reads as
   // loading rather than as figures under the wrong heading.
   const loaded = data !== null && data.periodId === periodId;
   const transactions = loaded ? data.transactions : [];
   const rollup = toBudgetRollup(loaded ? data.rows : []);
-  const label = periodLabel(periods, periodId);
+  const label = period.label;
 
   /** Called once a write is visible in the projection: the rollup is what depends on it. */
   function refresh() {
@@ -191,7 +187,6 @@ export default function ActualsVsBudget({
     <Screen
       eyebrow={`Performance · ${label}`}
       title="Actuals vs Budget"
-      right={<PeriodPicker periods={periods} periodId={periodId} onSelect={onSelectPeriod} />}
     >
       {error && (
         <div style={{ marginBottom: 12 }}>
@@ -202,194 +197,187 @@ export default function ActualsVsBudget({
         </div>
       )}
 
-      {period === null ? (
-        <EmptyNote>
-          No budget period selected — create one under Budget Periods, then record what was
-          actually spent against it.
-        </EmptyNote>
-      ) : (
-        <>
-          {/* "…" rather than $0 until the rollup lands: a zero is a figure, and a figure that
-              is about to change is worse than an obvious absence. */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
-              gap: 12,
-              marginBottom: 18,
-            }}
+      <>
+        {/* "…" rather than $0 until the rollup lands: a zero is a figure, and a figure that
+            is about to change is worse than an obvious absence. */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+            gap: 12,
+            marginBottom: 18,
+          }}
+        >
+          <MetricTile
+            icon="◧"
+            iconBg="rgba(31,111,178,.10)"
+            iconColor={colors.blue}
+            label="Planned revenue"
+            value={loaded ? formatCad(rollup.revenue.plannedCad) : "…"}
+            valueColor={colors.headingBright}
+          />
+          <MetricTile
+            icon="◧"
+            iconBg="rgba(31,111,178,.10)"
+            iconColor={colors.blue}
+            label="Actual revenue"
+            value={loaded ? formatCad(rollup.revenue.actualCad) : "…"}
+            valueColor={colors.headingBright}
+          />
+          <MetricTile
+            icon="●"
+            iconBg="rgba(31,111,178,.10)"
+            iconColor={colors.blue}
+            label="Planned expense"
+            value={loaded ? formatCad(rollup.expense.plannedCad) : "…"}
+            valueColor={colors.headingBright}
+          />
+          <MetricTile
+            icon="●"
+            iconBg="rgba(31,111,178,.10)"
+            iconColor={colors.blue}
+            label="Actual expense"
+            value={loaded ? formatCad(rollup.expense.actualCad) : "…"}
+            valueColor={colors.headingBright}
+          />
+        </div>
+
+        {!loaded && !error && <EmptyNote>Loading the rollup…</EmptyNote>}
+
+        {loaded && rollup.empty ? (
+          <EmptyNote>
+            Nothing planned and nothing spent in {label} yet. Plan an item on the Period Dashboard,
+            or record a transaction below.
+          </EmptyNote>
+        ) : (
+          loaded && (
+            <>
+              <RollupSection group={rollup.revenue} />
+              <RollupSection group={rollup.expense} />
+            </>
+          )
+        )}
+
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            margin: "18px 0 10px",
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={sectionLabelStyle}>Transactions</div>
+          <span style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim }}>
+            {transactions.length} recorded in {label}
+          </span>
+          <ActionButton
+            variant="primary"
+            onClick={() => openModal(null)}
+            disabled={busy || codes === null}
+            style={{ marginLeft: "auto" }}
           >
-            <MetricTile
-              icon="◧"
-              iconBg="rgba(31,111,178,.10)"
-              iconColor={colors.blue}
-              label="Planned revenue"
-              value={loaded ? formatCad(rollup.revenue.plannedCad) : "…"}
-              valueColor={colors.headingBright}
-            />
-            <MetricTile
-              icon="◧"
-              iconBg="rgba(31,111,178,.10)"
-              iconColor={colors.blue}
-              label="Actual revenue"
-              value={loaded ? formatCad(rollup.revenue.actualCad) : "…"}
-              valueColor={colors.headingBright}
-            />
-            <MetricTile
-              icon="●"
-              iconBg="rgba(31,111,178,.10)"
-              iconColor={colors.blue}
-              label="Planned expense"
-              value={loaded ? formatCad(rollup.expense.plannedCad) : "…"}
-              valueColor={colors.headingBright}
-            />
-            <MetricTile
-              icon="●"
-              iconBg="rgba(31,111,178,.10)"
-              iconColor={colors.blue}
-              label="Actual expense"
-              value={loaded ? formatCad(rollup.expense.actualCad) : "…"}
-              valueColor={colors.headingBright}
-            />
-          </div>
+            + RECORD TRANSACTION
+          </ActionButton>
+        </div>
 
-          {!loaded && !error && <EmptyNote>Loading the rollup…</EmptyNote>}
-
-          {loaded && rollup.empty ? (
-            <EmptyNote>
-              Nothing planned and nothing spent in {label} yet. Plan a line under Budget Periods,
-              or record a transaction below.
-            </EmptyNote>
-          ) : (
-            loaded && (
-              <>
-                <RollupSection group={rollup.revenue} />
-                <RollupSection group={rollup.expense} />
-              </>
-            )
-          )}
-
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              margin: "18px 0 10px",
-              flexWrap: "wrap",
-            }}
-          >
-            <div style={sectionLabelStyle}>Transactions</div>
-            <span style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim }}>
-              {transactions.length} recorded in {label}
-            </span>
-            <ActionButton
-              variant="primary"
-              onClick={() => openModal(null)}
-              disabled={busy || codes === null}
-              style={{ marginLeft: "auto" }}
-            >
-              + RECORD TRANSACTION
-            </ActionButton>
-          </div>
-
-          {loaded && transactions.length === 0 ? (
-            <EmptyNote>
-              No transactions recorded in {label} yet — record what was actually spent or received,
-              and it rolls up against the plan above.
-            </EmptyNote>
-          ) : (
-            loaded && (
-              <>
-                <TableHead
-                  columns={[{ label: "Date · code" }, { label: "Amount", align: "right" }, { label: "", align: "right" }]}
-                />
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {transactions.map((t) => (
-                    <div
-                      key={t.id}
-                      onClick={() => openModal(t)}
-                      style={{
-                        ...rowSurface(false),
-                        cursor: "pointer",
-                        padding: "11px 14px",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 12,
-                      }}
-                    >
-                      <div style={{ flex: "1 1 auto", minWidth: 0 }}>
-                        <div
-                          style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}
-                        >
-                          {/* The ISO date, not a localized one: new Date("2026-10-05").toLocaleDateString
-                              renders the day before west of UTC, and a ledger row must never
-                              disagree with the date that was typed. */}
-                          <Num>{t.occurredOn}</Num>
-                          <MonoTag>{t.code}</MonoTag>
-                          <span
-                            style={{
-                              fontFamily: fonts.body,
-                              fontWeight: 600,
-                              fontSize: 12.5,
-                              color: colors.textPrimary,
-                            }}
-                          >
-                            {t.name}
-                          </span>
-                          {!t.isCodeActive && <StatusChip kind="off" label="Retired code" />}
-                          {t.source !== "Manual" && (
-                            <StatusChip kind="info" label={ACTUAL_SOURCE_LABELS[t.source]} />
-                          )}
-                        </div>
-                        <div
+        {loaded && transactions.length === 0 ? (
+          <EmptyNote>
+            No transactions recorded in {label} yet — record what was actually spent or received,
+            and it rolls up against the plan above.
+          </EmptyNote>
+        ) : (
+          loaded && (
+            <>
+              <TableHead
+                columns={[{ label: "Date · code" }, { label: "Amount", align: "right" }, { label: "", align: "right" }]}
+              />
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {transactions.map((t) => (
+                  <div
+                    key={t.id}
+                    onClick={() => openModal(t)}
+                    style={{
+                      ...rowSurface(false),
+                      cursor: "pointer",
+                      padding: "11px 14px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                    }}
+                  >
+                    <div style={{ flex: "1 1 auto", minWidth: 0 }}>
+                      <div
+                        style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}
+                      >
+                        {/* The ISO date, not a localized one: new Date("2026-10-05").toLocaleDateString
+                            renders the day before west of UTC, and a ledger row must never
+                            disagree with the date that was typed. */}
+                        <Num>{t.occurredOn}</Num>
+                        <MonoTag>{t.code}</MonoTag>
+                        <span
                           style={{
                             fontFamily: fonts.body,
-                            fontSize: 11.5,
-                            color: colors.textDim,
-                            marginTop: 3,
-                            lineHeight: 1.5,
+                            fontWeight: 600,
+                            fontSize: 12.5,
+                            color: colors.textPrimary,
                           }}
                         >
-                          {t.description}
-                        </div>
-                      </div>
-                      <div style={{ width: 150, textAlign: "right", flex: "none" }}>
-                        <Num size={13.5}>{formatCad(t.amountCad)}</Num>
+                          {t.name}
+                        </span>
+                        {!t.isCodeActive && <StatusChip kind="off" label="Retired code" />}
+                        {t.source !== "Manual" && (
+                          <StatusChip kind="info" label={ACTUAL_SOURCE_LABELS[t.source]} />
+                        )}
                       </div>
                       <div
-                        style={{ width: 150, textAlign: "right", flex: "none" }}
-                        // The row itself opens the editor; a click on the remove cell must not.
-                        // ActionButton's onClick carries no event, so the cell stops the bubble.
-                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          fontFamily: fonts.body,
+                          fontSize: 11.5,
+                          color: colors.textDim,
+                          marginTop: 3,
+                          lineHeight: 1.5,
+                        }}
                       >
-                        <ActionButton
-                          variant="destructive"
-                          disabled={busy}
-                          onClick={() => removeTransaction(t)}
-                          style={{ padding: "5px 10px", fontSize: 12 }}
-                        >
-                          {confirmRemoveId === t.id ? "CONFIRM REMOVE" : "REMOVE"}
-                        </ActionButton>
+                        {t.description}
                       </div>
                     </div>
-                  ))}
-                </div>
-              </>
-            )
-          )}
+                    <div style={{ width: 150, textAlign: "right", flex: "none" }}>
+                      <Num size={13.5}>{formatCad(t.amountCad)}</Num>
+                    </div>
+                    <div
+                      style={{ width: 150, textAlign: "right", flex: "none" }}
+                      // The row itself opens the editor; a click on the remove cell must not.
+                      // ActionButton's onClick carries no event, so the cell stops the bubble.
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <ActionButton
+                        variant="destructive"
+                        disabled={busy}
+                        onClick={() => removeTransaction(t)}
+                        style={{ padding: "5px 10px", fontSize: 12 }}
+                      >
+                        {confirmRemoveId === t.id ? "CONFIRM REMOVE" : "REMOVE"}
+                      </ActionButton>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )
+        )}
 
-          {modal && codes !== null && (
-            <ActualTransactionFormModal
-              periods={periods}
-              openPeriod={period}
-              codes={codes}
-              transaction={modal.transaction}
-              onClose={() => setModal(null)}
-              onSaved={refresh}
-            />
-          )}
-        </>
-      )}
+        {modal && codes !== null && (
+          <ActualTransactionFormModal
+            periods={periods}
+            openPeriod={period}
+            openPeriodCodes={codes}
+            transaction={modal.transaction}
+            onClose={() => setModal(null)}
+            onSaved={refresh}
+          />
+        )}
+      </>
     </Screen>
   );
 }

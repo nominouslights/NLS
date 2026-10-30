@@ -18,4 +18,10 @@
     <ProjectReference Include="..\..\src\Trips\NorthernLink.Trips.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Synthetic Bookeo booking-report exports (fake people, the real 47 headers) for the
+         import parser tests. Never replace these with a real export: it holds customer PII. -->
+    <None Include="TestData\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

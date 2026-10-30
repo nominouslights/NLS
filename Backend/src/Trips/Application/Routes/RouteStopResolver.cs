@@ -1,15 +1,19 @@
 using NorthernLink.Shared.Kernel;
 using NorthernLink.Trips.Application.Abstractions;
 using NorthernLink.Trips.Domain.Routes;
+using NorthernLink.Trips.Domain.Stops;
 
 namespace NorthernLink.Trips.Application.Routes;
 
 /// <summary>
 /// Turns an ordered list of catalog stop references into ordered <see cref="RouteStop"/>
-/// snapshots (name + coordinates), loading them from the same tenant/domain and carrying each
-/// stop's timetable offsets through untouched — the offsets themselves are validated by the
-/// aggregate, which is the only place that can see the whole leg. Fails if any id is missing or
-/// inactive. Shared by the create and update route handlers.
+/// snapshots (name + coordinates + province), loading them from the same tenant/domain and
+/// carrying each stop's timetable offsets through untouched — the offsets themselves are
+/// validated by the aggregate, which is the only place that can see the whole leg. Fails if any
+/// id is missing or inactive. The province is the catalog address's, normalised to its code
+/// (a row written before normalisation may still say "Manitoba"); whether it is inside the
+/// operating area is the aggregate's check, so a Saskatchewan stop resolves fine here and is
+/// refused by <c>Route.Create</c>/<c>Update</c>. Shared by the create and update route handlers.
 /// </summary>
 internal static class RouteStopResolver
 {
@@ -42,6 +46,7 @@ internal static class RouteStopResolver
                 Order = index,
                 Latitude = stop.Coordinate.Latitude,
                 Longitude = stop.Coordinate.Longitude,
+                Province = CanadianProvince.Normalize(stop.Address.Province) ?? stop.Address.Province,
                 OutboundOffsetMinutes = input.OutboundOffsetMinutes,
                 ReturnOffsetMinutes = input.ReturnOffsetMinutes,
             });

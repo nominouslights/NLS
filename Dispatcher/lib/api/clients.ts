@@ -125,17 +125,68 @@ export interface PurchaseOrderRecord {
   poNumber: string;
   issued: string;
   expiry: string | null;
+  /** Authorised value of the PO — null when the client issued it open-ended. */
   amountCad: number | null;
+  /** Per-PO round-trip rate. Null = inherit the contract's
+   *  ratePerRoundTripCad (see poEffectiveTerms — the PO overrides, the
+   *  contract is the fallback). Every trip bills this figure. */
+  roundTripRateCad: number | null;
+  /**
+   * Per-PO one-way rate. **Retained for history; no longer priced.** Billing
+   * charges one full round-trip rate for every group, paired or not, because a
+   * lone leg still deadheads the vehicle back — so neither the invoice
+   * generator (Backend InvoiceDraftBuilder) nor this app's estimator reads it.
+   * The backend deliberately kept the column and its data, so the value is
+   * still round-tripped on every PUT rather than cleared.
+   */
+  oneWayRateCad: number | null;
   note: string | null;
 }
 
-/** POST/PUT /api/clients/{id}/purchase-orders body. */
+/** POST /api/clients/{id}/purchase-orders body. Omit (or null) roundTripRateCad
+ *  to inherit the contract rate. Creating a PO from nothing but a number and a
+ *  date is legitimate — the terms often arrive later — so everything else is
+ *  optional. oneWayRateCad is history-only and no longer priced; the PO form no
+ *  longer offers it, and a create simply sends null. */
 export interface PurchaseOrderInput {
   poNumber: string;
   issued: string;
   expiry?: string | null;
   amountCad?: number | null;
+  roundTripRateCad?: number | null;
+  oneWayRateCad?: number | null;
   note?: string | null;
+}
+
+/**
+ * PUT /api/clients/{id}/purchase-orders/{poId} body. Same fields as
+ * PurchaseOrderInput, but NOTHING is optional — every key must be present, though
+ * a value may be null.
+ *
+ * PUT replaces the whole purchase order, so a key left out is a field cleared.
+ * The backend rejects a missing key with a 400 (UpdatePurchaseOrderRequest's
+ * members are `required`), and this type is the compile-time half of that same
+ * guarantee: a caller that forgets `roundTripRateCad` fails to typecheck instead
+ * of wiping a negotiated rate at runtime. Clearing a term on purpose is an
+ * explicit `null`.
+ *
+ * Why it matters more than it looks: a wiped rate does not error. Pricing falls
+ * back to the contract rate and produces a plausible figure that gets hand-keyed
+ * into QuickBooks — a wrong invoice that looks right.
+ *
+ * `oneWayRateCad` is no longer priced or edited, but it is still REQUIRED here
+ * for exactly this reason: PUT replaces the document, so a form that stopped
+ * sending the key would erase a recorded negotiation the backend chose to keep.
+ * Callers round-trip the existing value unchanged.
+ */
+export interface PurchaseOrderUpdateInput {
+  poNumber: string;
+  issued: string;
+  expiry: string | null;
+  amountCad: number | null;
+  roundTripRateCad: number | null;
+  oneWayRateCad: number | null;
+  note: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -239,10 +290,11 @@ export async function createPurchaseOrder(
   return res.id;
 }
 
+/** PUT is a full replace and every key is required — see PurchaseOrderUpdateInput. */
 export function updatePurchaseOrder(
   clientId: string,
   poId: string,
-  input: PurchaseOrderInput,
+  input: PurchaseOrderUpdateInput,
 ): Promise<void> {
   return request<void>(`/api/clients/${clientId}/purchase-orders/${poId}`, {
     method: "PUT",
@@ -348,6 +400,83 @@ export function contractRateLabel(contract: ActiveContractSummary | ContractReco
     return `${rateFmt.format(contract.ratePerRoundTripCad)} / round trip`;
   }
   return BILLING_MODEL_LABELS[contract.billingModel];
+}
+
+/** The contract's usable round-trip rate, or null — the ONE place the
+ *  "RoundTripRate model with a rate recorded" test is made. Manual billing and
+ *  a RoundTripRate contract with no rate both read as null. */
+export function contractRoundTripRateCad(
+  contract: ActiveContractSummary | ContractRecord | null,
+): number | null {
+  if (!contract || contract.billingModel !== "RoundTripRate") return null;
+  return contract.ratePerRoundTripCad;
+}
+
+// ---------------------------------------------------------------------------
+// Per-PO pricing terms — the PINNED rate resolution, mirrored leg for leg by
+// Backend/src/Billing/Domain/Invoices/InvoiceDraftBuilder.cs:
+//
+//   roundTripRate = po?.roundTripRateCad ?? contractRate
+//
+// ONE rate, because there is no one-way price any more: every priced group
+// bills one full round-trip rate, quantity 1, paired or not (a lone leg still
+// deadheads the vehicle back, so charging half was under-billing). The PO's
+// oneWayRateCad is retained as history and is deliberately NOT read here.
+//
+// It lives HERE, beside the PurchaseOrderRecord it resolves, rather than in
+// lib/billing/accruals.ts — accruals.ts already imports this module, so the
+// reverse would close an import cycle. accruals.ts calls this function; the PO
+// dashboard and the accruals report both render poTermsLabel() off it. One
+// derivation: a rate the report prices from can never be worded differently by
+// the screen that edits it.
+// ---------------------------------------------------------------------------
+
+export interface PoEffectiveTerms {
+  /** Round-trip rate actually used, or null when neither PO nor contract has one.
+   *  The ONLY rate there is — every trip bills it in full. */
+  roundTripRateCad: number | null;
+  /** True when the round-trip rate was inherited from the contract. */
+  roundTripFromContract: boolean;
+}
+
+export function poEffectiveTerms(
+  po: PurchaseOrderRecord | null,
+  contractRateCad: number | null,
+): PoEffectiveTerms {
+  const roundTripRateCad = po?.roundTripRateCad ?? contractRateCad;
+  const roundTripFromContract = po?.roundTripRateCad == null && contractRateCad != null;
+  return { roundTripRateCad, roundTripFromContract };
+}
+
+/**
+ * The EFFECTIVE terms of a PO as one line — never the stored field alone. A
+ * blank rate that silently means "the contract's" is how a pricing bug reaches
+ * an invoice, so an inherited figure prints with the reason it applies:
+ *
+ *   "$1,600 / round trip"
+ *   "$1,450 / round trip (from contract)"
+ *   "No round-trip rate on the PO or contract"
+ *
+ * One figure only: a trip bills the full round-trip rate whether or not its
+ * return leg exists, so a one-way figure here would describe money nothing
+ * charges.
+ */
+export function poTermsLabel(
+  po: PurchaseOrderRecord | null,
+  contractRateCad: number | null,
+): string {
+  const t = poEffectiveTerms(po, contractRateCad);
+  return t.roundTripRateCad == null
+    ? "No round-trip rate on the PO or contract"
+    : `${rateFmt.format(t.roundTripRateCad)} / round trip${t.roundTripFromContract ? " (from contract)" : ""}`;
+}
+
+/** Is `serviceDate` inside the PO's [issued, expiry] window? A PO with no
+ *  expiry is open-ended. Never blocking — the accruals report flags a breach
+ *  and still prices the trip (owner's decision: warn, don't block). */
+export function isWithinPoWindow(po: PurchaseOrderRecord, serviceDate: string): boolean {
+  if (serviceDate < po.issued) return false;
+  return po.expiry === null || serviceDate <= po.expiry;
 }
 
 export function contractStatusKindFor(status: ContractStatus): StatusKind {

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/mock_data.dart';
 import '../theme/nl_theme.dart';
+import '../widgets/legal_links.dart';
 import '../widgets/nl_button.dart';
 import '../widgets/route_text.dart';
 import '../widgets/section_card.dart';
@@ -58,6 +59,8 @@ class _BookTripScreenState extends State<BookTripScreen> {
                 _passengerField(),
                 const SizedBox(height: 14),
                 NLButton(label: 'Find Trips', icon: Icons.search, onPressed: () {}),
+                const SizedBox(height: 10),
+                const LegalConsentText(),
               ],
             ),
           ),

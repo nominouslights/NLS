@@ -1,6 +1,6 @@
 ---
 name: code-map
-description: Machine-maintained index of every file in the Northern Link workspace — use it to locate code instead of exploring with find/grep/ls. Consult whenever you need to answer "where is X", "which file has Y", "find the code for Z", or before starting work in any territory (Backend, Dispatcher, Budgeting, Website, AppHost) — read that territory's reference file first and jump straight to the named paths. Also covers maintaining the map: regenerating it, checking staleness, and the code-indexer agent that refreshes prose notes.
+description: Machine-maintained index of every file in the Northern Link workspace — use it to locate code instead of exploring with find/grep/ls. Consult whenever you need to answer "where is X", "which file has Y", "find the code for Z", or before starting work in any territory (Backend, Dispatcher, Budgeting, DriverField, Website, AppHost) — read that territory's reference file first and jump straight to the named paths. Also covers maintaining the map: regenerating it, checking staleness, and the code-indexer agent that refreshes prose notes.
 ---
 
 # Code Map — locate code without exploring
@@ -14,6 +14,7 @@ and backend work never pays for the frontend map.
 | `Backend/` | `references/backend.md` | backend-dev |
 | `Dispatcher/` | `references/dispatcher.md` | frontend-dev |
 | `Budgeting/` | `references/budgeting.md` | — (copy-of-Dispatcher manifest lives in `Budgeting/CLAUDE.md`, not here) |
+| `DriverField/` | `references/driverfield.md` | Driver Field App, **not** `Backend/src/Drivers/` (that is the domain library). Copy manifest lives in `DriverField/CLAUDE.md` |
 | `Website/`, `AppHost/`, workspace root | `references/website-apphost.md` | — |
 
 Each section is a generated block (`<!-- gen:key -->` markers) plus a notes block

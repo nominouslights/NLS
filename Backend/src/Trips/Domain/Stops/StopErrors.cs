@@ -17,6 +17,15 @@ public static class StopErrors
     public static readonly Error ProvinceRequired = Error.Validation(
         "Trips.Stop.ProvinceRequired", "The stop address needs a province.");
 
+    /// <summary>
+    /// The province is not one of the thirteen Canadian provinces/territories by code, name, or
+    /// usual abbreviation (<c>CanadianProvince.Normalize</c>). A catalog stop may be anywhere in
+    /// Canada — it just cannot be placed on a route outside the operating area.
+    /// </summary>
+    public static Error UnknownProvince(string value) => Error.Validation(
+        "Trips.Stop.UnknownProvince",
+        $"\"{value.Trim()}\" is not a Canadian province or territory — use the two-letter code (MB) or the full name (Manitoba).");
+
     public static readonly Error CountryRequired = Error.Validation(
         "Trips.Stop.CountryRequired", "The stop address needs a country.");
 

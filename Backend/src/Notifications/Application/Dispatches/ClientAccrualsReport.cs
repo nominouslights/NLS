@@ -2,27 +2,62 @@ namespace NorthernLink.Notifications.Application.Dispatches;
 
 /// <summary>
 /// The data for one client accruals-report PDF — a flat, presentation-ready snapshot of a
-/// client's month bucketed by billing state, composed entirely by the dispatcher's screen.
-/// All fields are already-formatted strings (labels, dates, dollar amounts with any "est."
-/// markings baked in); the PDF renderer does no domain lookups of its own — Notifications
-/// holds no trips/billing/clients data by design, same as <see cref="PickupEmailReport"/>.
+/// client's month, leading with the work not yet done, composed entirely by the dispatcher's
+/// screen. All fields are already-formatted strings (labels, dates, dollar amounts with any
+/// "est." markings baked in); the PDF renderer does no domain lookups of its own —
+/// Notifications holds no trips/billing/clients data by design, same as
+/// <see cref="PickupEmailReport"/>.
+/// <para>
+/// <paramref name="Headline"/> and <paramref name="Summary"/> arrive in the order they print,
+/// as do <paramref name="Buckets"/>; the renderer never re-sorts or re-groups, because only
+/// the frontend knows which buckets roll up into which section. Every list may be empty — an
+/// empty month still renders, and a client that sends no headline simply gets no headline
+/// block.
+/// </para>
 /// </summary>
 public sealed record ClientAccrualsReport(
     string ClientName,
     string PeriodLabel,
     string PreparedDate,
     IReadOnlyList<string> Notes,
+    IReadOnlyList<AccrualsHeadlineFigure> Headline,
     IReadOnlyList<AccrualsSummaryRow> Summary,
     IReadOnlyList<AccrualsReportBucket> Buckets,
     IReadOnlyList<AccrualsReconciliationRow> Reconciliation,
     IReadOnlyList<AccrualsInvoiceRow> Invoices);
 
-/// <summary>One bucket's line in the summary table: label, round-trip count, and totals.</summary>
+/// <summary>
+/// One leading figure the report opens with (e.g. upcoming expenses, monies owed).
+/// <paramref name="AmountCad"/> is a pre-formatted CAD amount with any "est." marking already
+/// baked in — the renderer does no arithmetic and adds no tax, since the platform computes
+/// none. <paramref name="Detail"/> is the one-line breakdown printed beneath it, such as
+/// "6 round trips · 2 unpriced".
+/// </summary>
+public sealed record AccrualsHeadlineFigure(
+    string Label,
+    string AmountCad,
+    string Detail);
+
+/// <summary>
+/// One line in the summary table: label, trip count, and <b>one</b> amount.
+/// <para>
+/// <paramref name="AmountCad"/> is a single pre-formatted CAD figure with any estimate
+/// marking baked into the string itself (e.g. <c>"$1,450.00 est."</c>), exactly like every
+/// other amount in this report. There is deliberately no actual-vs-estimated split here: the
+/// renderer has no notion of an estimate, so it cannot get the distinction wrong, and the
+/// frontend — which is the only thing that knows whether a bucket is settled — says so in
+/// the text.
+/// </para>
+/// <paramref name="Emphasis"/> distinguishes a section subtotal row (true — printed as a
+/// heading) from a bucket row nested under it (false — printed indented). The frontend owns
+/// that grouping; the renderer only honours the flag on the rows it is given, so a client that
+/// sends every row unemphasised still gets a flat table.
+/// </summary>
 public sealed record AccrualsSummaryRow(
     string BucketLabel,
     string RoundTrips,
-    string ActualCad,
-    string EstimatedCad);
+    string AmountCad,
+    bool Emphasis);
 
 /// <summary>One billing-state bucket's detail section: its label and per-group rows.</summary>
 public sealed record AccrualsReportBucket(

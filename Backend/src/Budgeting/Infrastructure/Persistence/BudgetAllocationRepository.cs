@@ -7,28 +7,37 @@ namespace NorthernLink.Budgeting.Infrastructure.Persistence;
 /// <summary>Write-side repository over <see cref="BudgetingDbContext"/> (tenant-filtered).</summary>
 internal sealed class BudgetAllocationRepository(BudgetingDbContext context) : IBudgetAllocationRepository
 {
-    // Served by the unique (tenant_id, period_id, budget_code_id) index.
-    public Task<BudgetAllocation?> GetAsync(Guid periodId, Guid budgetCodeId, CancellationToken cancellationToken = default) =>
+    // By primary key; the period predicate keeps a route naming one period from reaching an item
+    // of another, and the tenant query filter (plus RLS) keeps it inside the tenant.
+    public Task<BudgetAllocation?> GetByIdAsync(Guid periodId, Guid allocationId, CancellationToken cancellationToken = default) =>
         context.BudgetAllocations.FirstOrDefaultAsync(
-            a => a.PeriodId == periodId && a.BudgetCodeId == budgetCodeId, cancellationToken);
+            a => a.Id == allocationId && a.PeriodId == periodId, cancellationToken);
 
     // Over the write table, not the read model: the delete-code path asks this in the same
-    // request that would remove the code, and the projection may still be a poll behind. Either
-    // arm is a seek — (tenant_id, budget_code_id) and (tenant_id, code) both have an index.
-    public Task<bool> ExistsForCodeAsync(Guid budgetCodeId, string code, CancellationToken cancellationToken = default) =>
+    // request that would remove the code, and the projection may still be a poll behind. Scoped
+    // to the code's period (codes are per period, and the string repeats across periods); the
+    // (tenant_id, period_id, budget_code_id) index narrows to the period first.
+    public Task<bool> ExistsForCodeAsync(
+        Guid periodId, Guid budgetCodeId, string code, CancellationToken cancellationToken = default) =>
         context.BudgetAllocations.AnyAsync(
-            a => a.BudgetCodeId == budgetCodeId || a.Code == code, cancellationToken);
+            a => a.PeriodId == periodId && (a.BudgetCodeId == budgetCodeId || a.Code == code),
+            cancellationToken);
 
-    // Same id-or-string match as ExistsForCodeAsync, and over the write table for the same
-    // reason: the retirement check runs in the request that would retire the code, and the
-    // projection may still be a poll behind.
-    public async Task<IReadOnlyList<Guid>> GetPeriodIdsForCodeAsync(
-        Guid budgetCodeId, string code, CancellationToken cancellationToken = default) =>
+    // Served by the leading (tenant_id, period_id) columns of the (tenant, period, code) index. Tracked, not
+    // AsNoTracking: the copy handler calls CopyInto on the source lines, and the target lines it
+    // reads back are the same entities a concurrent write in this unit of work would touch.
+    public async Task<IReadOnlyList<BudgetAllocation>> ListForPeriodAsync(
+        Guid periodId, CancellationToken cancellationToken = default) =>
         await context.BudgetAllocations
-            .Where(a => a.BudgetCodeId == budgetCodeId || a.Code == code)
-            .Select(a => a.PeriodId)
-            .Distinct()
+            .Where(a => a.PeriodId == periodId)
             .ToListAsync(cancellationToken);
+
+    // Every period, tenant-filtered (query filter + RLS). Npgsql translates the owned-JSON Any into
+    // an EXISTS over jsonb_to_recordset(vendor_shares) — a scan of the tenant's items, which is
+    // fine for a rare, human-initiated vendor delete over a few hundred items per period.
+    public Task<bool> AnyWithVendorShareAsync(Guid vendorId, CancellationToken cancellationToken = default) =>
+        context.BudgetAllocations.AnyAsync(
+            a => a.VendorShares.Any(share => share.VendorId == vendorId), cancellationToken);
 
     public void Add(BudgetAllocation allocation) => context.BudgetAllocations.Add(allocation);
 

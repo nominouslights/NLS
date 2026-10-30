@@ -33,6 +33,11 @@ const nextConfig: NextConfig = {
   // Next rejects an empty string here — omit the key entirely when unmounted.
   ...(basePath ? { basePath } : {}),
 
+  // basePath is applied by <Link> and the router, but not to a plain <a href>. The legal links
+  // (lib/legal.ts) point at a static file in public/, so they prefix it themselves — this
+  // inlines the build-time value into the client bundle for them. "" when unmounted.
+  env: { BASE_PATH: basePath },
+
   // The browser only ever talks to this app's own origin (:3003); Next proxies /api/* to the
   // API server-side. That is why there is no CORS configuration anywhere in the stack — keep
   // it that way rather than adding a CORS policy to the backend.

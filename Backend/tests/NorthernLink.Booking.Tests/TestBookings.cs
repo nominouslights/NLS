@@ -18,7 +18,8 @@ internal static class TestBookings
         TimeSpan? seatHold = null,
         Guid? customerId = null,
         string customerName = "Doris Spence",
-        DateOnly? serviceDate = null)
+        DateOnly? serviceDate = null,
+        BookingReference? reference = null)
     {
         var passengers = Enumerable.Range(1, passengerCount)
             .Select(i => new BookingPassengerDetails($"Passenger {i}", null, i == 1))
@@ -26,6 +27,7 @@ internal static class TestBookings
 
         return BookingAggregate.Create(
             TenantId,
+            reference ?? BookingReference.Generate(),
             customerId ?? CustomerId,
             customerName,
             CorridorId,

@@ -1,5 +1,6 @@
 using NorthernLink.Budgeting.Application.Codes.SeedStarterSet;
 using NorthernLink.Budgeting.Domain.Codes;
+using NorthernLink.Budgeting.Domain.Periods;
 using Xunit;
 
 namespace NorthernLink.Budgeting.Tests;
@@ -12,16 +13,24 @@ namespace NorthernLink.Budgeting.Tests;
 public class SeedStarterBudgetCodesCommandHandlerTests
 {
     private readonly InMemoryBudgetCodeRepository _repository = new();
+    private readonly InMemoryBudgetPeriodRepository _periods = new();
+
+    /// <summary>The Draft period every code in this class lives in (codes belong to a period).</summary>
+    private readonly BudgetPeriod _period = TestBudgeting.PeriodIn(PeriodState.Draft);
+
+    private BudgetCode Code(string code = "ZBB-CREW-01", BudgetCodeDetails? details = null) =>
+        TestBudgeting.CreateCode(code, details, periodId: _period.Id);
     private readonly SeedStarterBudgetCodesCommandHandler _handler;
 
     public SeedStarterBudgetCodesCommandHandlerTests()
     {
-        _handler = new SeedStarterBudgetCodesCommandHandler(_repository);
+        _periods.Add(_period);
+        _handler = new SeedStarterBudgetCodesCommandHandler(_repository, _periods);
     }
 
     private Task<NorthernLink.Shared.Kernel.Result<int>> SeedAsync() =>
         _handler.Handle(
-            new SeedStarterBudgetCodesCommand(TestBudgeting.TenantId, TestBudgeting.ActorId),
+            new SeedStarterBudgetCodesCommand(TestBudgeting.TenantId, _period.Id, TestBudgeting.ActorId),
             CancellationToken.None);
 
     [Fact]
@@ -52,7 +61,7 @@ public class SeedStarterBudgetCodesCommandHandlerTests
     [Fact]
     public async Task An_existing_hand_made_code_is_kept_and_skipped()
     {
-        var mine = TestBudgeting.CreateCode(
+        var mine = Code(
             "ZBB-FUEL-01", TestBudgeting.CodeDetails(name: "My own fuel code"));
         _repository.Add(mine);
 
@@ -76,10 +85,16 @@ public class SeedStarterBudgetCodesCommandHandlerTests
     }
 
     [Fact]
-    public void The_starter_set_is_flat_so_seeding_needs_no_ordering()
+    public async Task The_starter_set_is_flat_so_seeding_needs_no_ordering()
     {
         // A parent in the seed table would make the single pass order-dependent and could leave a
-        // half-built hierarchy behind on a partial failure.
+        // half-built hierarchy behind on a partial failure. Seed first: asserting over an
+        // unseeded repository is Assert.All over an empty sequence, which passes whatever the
+        // handler does.
+        await SeedAsync();
+
+        Assert.NotEmpty(_repository.Codes);
+        Assert.Equal(StarterBudgetCodes.All.Count, _repository.Codes.Count);
         Assert.All(_repository.Codes, code => Assert.Null(code.ParentCodeId));
     }
 
@@ -97,7 +112,7 @@ public class SeedStarterBudgetCodesCommandHandlerTests
                 ServiceLine = seed.ServiceLine,
                 Description = seed.Description,
             };
-            var result = BudgetCode.Create(TestBudgeting.TenantId, seed.Code, details, actorId: null);
+            var result = BudgetCode.Create(TestBudgeting.TenantId,TestBudgeting.DefaultPeriodId, seed.Code, details, actorId: null);
             Assert.True(result.IsSuccess, $"Starter code {seed.Code} is invalid: {(result.IsFailure ? result.Error.Code : "")}");
         });
 

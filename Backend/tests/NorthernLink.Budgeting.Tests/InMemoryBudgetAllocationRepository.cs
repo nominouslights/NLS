@@ -3,33 +3,52 @@ using NorthernLink.Budgeting.Domain.Allocations;
 
 namespace NorthernLink.Budgeting.Tests;
 
-/// <summary>In-memory fake of the write-side allocation repository for handler tests.</summary>
+/// <summary>
+/// In-memory fake of the write-side allocation repository for handler tests.
+/// <para>
+/// Every read is scoped to <see cref="QueryFilterTenantId"/>, modelling BudgetingDbContext's
+/// tenant query filter (<c>a.TenantId == TenantId</c>, with RLS beneath it) — the
+/// <see cref="InMemoryUserLookupRepository"/> precedent. Without it, a test seeding another
+/// tenant's item would find it here while the real repository never could, and the handlers'
+/// "another tenant's id reads as NotFound" contract would go untested.
+/// </para>
+/// </summary>
 internal sealed class InMemoryBudgetAllocationRepository : IBudgetAllocationRepository
 {
     public List<BudgetAllocation> Allocations { get; } = [];
 
     public int SaveChangesCallCount { get; private set; }
 
-    public Task<BudgetAllocation?> GetAsync(
-        Guid periodId, Guid budgetCodeId, CancellationToken cancellationToken = default) =>
-        Task.FromResult(Allocations.FirstOrDefault(a => a.PeriodId == periodId && a.BudgetCodeId == budgetCodeId));
+    /// <summary>The ambient tenant the real DbContext's query filter would compare against.</summary>
+    public Guid QueryFilterTenantId { get; set; } = TestBudgeting.TenantId;
 
-    // Id OR string, like the real repository's `a.BudgetCodeId == budgetCodeId || a.Code == code`.
+    private IEnumerable<BudgetAllocation> Visible => Allocations.Where(a => a.TenantId == QueryFilterTenantId);
+
+    public Task<BudgetAllocation?> GetByIdAsync(
+        Guid periodId, Guid allocationId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Visible.FirstOrDefault(a => a.Id == allocationId && a.PeriodId == periodId));
+
+    // In the period, by id OR string, like the real repository's
+    // `a.PeriodId == periodId && (a.BudgetCodeId == budgetCodeId || a.Code == code)`.
     // The string half is ordinal because a Postgres varchar equality is: a case-insensitive
     // match here would make the probe look more forgiving than the database it stands in for.
     public Task<bool> ExistsForCodeAsync(
-        Guid budgetCodeId, string code, CancellationToken cancellationToken = default) =>
-        Task.FromResult(Allocations.Any(a =>
-            a.BudgetCodeId == budgetCodeId || string.Equals(a.Code, code, StringComparison.Ordinal)));
+        Guid periodId, Guid budgetCodeId, string code, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Visible.Any(a =>
+            a.PeriodId == periodId
+            && (a.BudgetCodeId == budgetCodeId || string.Equals(a.Code, code, StringComparison.Ordinal))));
 
-    // Same id-or-string match as ExistsForCodeAsync, distinct like the real query's Distinct().
-    public Task<IReadOnlyList<Guid>> GetPeriodIdsForCodeAsync(
-        Guid budgetCodeId, string code, CancellationToken cancellationToken = default) =>
-        Task.FromResult<IReadOnlyList<Guid>>(Allocations
-            .Where(a => a.BudgetCodeId == budgetCodeId || string.Equals(a.Code, code, StringComparison.Ordinal))
-            .Select(a => a.PeriodId)
-            .Distinct()
-            .ToList());
+    // A copy of the list, like the real repository's ToListAsync: the copy handler iterates the
+    // source items while adding to the repository, and a live view would be a mutation-during-
+    // enumeration bug the real thing does not have.
+    public Task<IReadOnlyList<BudgetAllocation>> ListForPeriodAsync(
+        Guid periodId, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<BudgetAllocation>>(
+            Visible.Where(a => a.PeriodId == periodId).ToList());
+
+    // Every period, tenant-filtered — the real repository's jsonb EXISTS over vendor_shares.
+    public Task<bool> AnyWithVendorShareAsync(Guid vendorId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Visible.Any(a => a.VendorShares.Any(share => share.VendorId == vendorId)));
 
     public void Add(BudgetAllocation allocation) => Allocations.Add(allocation);
 

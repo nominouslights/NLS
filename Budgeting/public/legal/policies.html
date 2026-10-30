@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="en-CA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Northern Link App Policies</title>
+<meta name="description" content="Privacy Policy and End User Licence Agreement for Northern Link Shuttle &amp; Cargo apps.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Spectral:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+/* Layout: sticky contents rail on the left at desktop, stacked above the text on phones.
+   Two documents in one page, each a numbered section run, anchored for store submission. */
+:root{
+  --ink:#141b22;
+  --bg:#f6f7f4;
+  --surface:#ffffff;
+  --surface-2:#eef1f4;
+  --navy:#0d3c61;
+  --navy-deep:#09293f;
+  --red:#c8102e;
+  --amber:#8a6000;
+  --amber-bg:#fdf6e0;
+  --muted:#5d6b78;
+  --line:#dbe0e4;
+  --line-strong:#b9c2ca;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ink:#e8ebe6; --bg:#121619; --surface:#1a2024; --surface-2:#222a30;
+    --navy:#7fb3dc; --navy-deep:#9fc4e3; --red:#ff7a8a;
+    --amber:#e0b64a; --amber-bg:#2a2412;
+    --muted:#9aa7b2; --line:#2c353c; --line-strong:#3e4a53;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --ink:#e8ebe6; --bg:#121619; --surface:#1a2024; --surface-2:#222a30;
+  --navy:#7fb3dc; --navy-deep:#9fc4e3; --red:#ff7a8a;
+  --amber:#e0b64a; --amber-bg:#2a2412;
+  --muted:#9aa7b2; --line:#2c353c; --line-strong:#3e4a53;
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:Spectral,Georgia,"Times New Roman",serif;
+  font-size:17px; line-height:1.65;
+}
+h1,h2,h3,.ui{font-family:Archivo,"Helvetica Neue",Arial,sans-serif;text-wrap:balance}
+h1,h2,h3{margin:0;line-height:1.2}
+p,ul,ol{margin:0}
+a{color:var(--navy)}
+:focus-visible{outline:3px solid var(--red);outline-offset:2px;border-radius:2px}
+
+.page{width:100%;max-width:1120px;margin:0 auto;padding-inline:20px;padding-block:clamp(28px,5vw,56px)}
+
+/* masthead */
+.mast{border-bottom:3px solid var(--navy);padding-bottom:22px;margin-bottom:clamp(28px,4vw,44px)}
+.mast .co{
+  font-family:Archivo,sans-serif;font-weight:700;font-size:13px;letter-spacing:2.6px;
+  text-transform:uppercase;color:var(--red);margin-bottom:12px;
+}
+.mast h1{font-size:clamp(30px,5.2vw,46px);font-weight:700;max-width:24ch}
+.mast .sub{margin-top:14px;color:var(--muted);max-width:62ch;font-size:16.5px}
+.dates{
+  display:flex;gap:26px;flex-wrap:wrap;margin-top:20px;
+  font-family:Archivo,sans-serif;font-size:13px;
+}
+.dates div span{display:block;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;color:var(--muted);font-size:11px;margin-bottom:3px}
+.dates div b{font-weight:600;font-size:15px}
+
+/* two-column shell */
+.shell{display:grid;grid-template-columns:232px minmax(0,1fr);gap:clamp(28px,4vw,56px);align-items:start}
+@media (max-width:900px){.shell{grid-template-columns:1fr}}
+
+nav.toc{position:sticky;top:calc(env(safe-area-inset-top, 0px) + 16px);font-family:Archivo,sans-serif}
+@media (max-width:900px){
+  nav.toc{position:static;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:18px 20px}
+}
+nav.toc .grp{font-size:11px;font-weight:700;letter-spacing:1.8px;text-transform:uppercase;color:var(--red);margin:0 0 9px}
+nav.toc .grp+.grp{margin-top:26px}
+nav.toc ol{list-style:none;padding:0;margin:0 0 4px;display:grid;gap:3px}
+nav.toc a{display:block;text-decoration:none;color:var(--muted);font-size:13.5px;line-height:1.4;padding:3px 0}
+nav.toc a:hover{color:var(--ink)}
+
+/* document body */
+.doc+.doc{margin-top:clamp(48px,7vw,86px)}
+.doc>h2{
+  font-size:clamp(23px,3.4vw,31px);font-weight:700;color:var(--navy);
+  padding-bottom:14px;border-bottom:2px solid var(--line-strong);margin-bottom:8px;
+}
+.doc>.lede{color:var(--muted);margin-top:16px;max-width:66ch}
+
+section{margin-top:clamp(26px,3.4vw,38px);scroll-margin-top:24px}
+section>h3{font-size:19.5px;font-weight:600;margin-bottom:12px}
+section>h3 .n{color:var(--red);font-weight:700;margin-right:9px;font-variant-numeric:tabular-nums}
+section p+p,section p+ul,section p+ol,section ul+p,section ol+p,section p+.tw,section .tw+p,section p+.note{margin-top:14px}
+section ul,section ol{padding-left:22px;display:grid;gap:7px}
+section li{max-width:64ch}
+section p{max-width:66ch}
+
+.note{
+  background:var(--amber-bg);border-left:4px solid var(--amber);
+  padding:16px 20px;border-radius:0 5px 5px 0;
+}
+.note b{font-family:Archivo,sans-serif;font-size:14px;letter-spacing:.3px;display:block;margin-bottom:5px;color:var(--amber)}
+.note p{font-size:15.5px;max-width:60ch}
+
+.tw{overflow-x:auto;border:1px solid var(--line);border-radius:6px;background:var(--surface)}
+table{width:100%;border-collapse:collapse;font-family:Archivo,sans-serif;font-size:14.5px;min-width:480px}
+th,td{text-align:left;padding:11px 15px;border-bottom:1px solid var(--line);vertical-align:top}
+thead th{
+  background:var(--surface-2);font-size:11px;font-weight:700;letter-spacing:1.4px;
+  text-transform:uppercase;color:var(--muted);white-space:nowrap;
+}
+tbody tr:last-child td{border-bottom:none}
+td:first-child{font-weight:600}
+
+.contact{
+  background:var(--surface);border:1px solid var(--line);border-radius:7px;
+  padding:20px 22px;margin-top:16px;font-family:Archivo,sans-serif;font-size:15px;
+}
+.contact dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:7px 18px}
+.contact dt{font-size:11px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:var(--muted);padding-top:3px}
+.contact dd{margin:0;font-weight:600;word-break:break-word}
+
+.foot{
+  margin-top:clamp(44px,6vw,72px);padding-top:22px;border-top:2px solid var(--line-strong);
+  font-family:Archivo,sans-serif;font-size:13.5px;color:var(--muted);
+  display:flex;justify-content:space-between;gap:18px;flex-wrap:wrap;
+}
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <header class="mast">
+    <div class="co">Northern Link Shuttle &amp; Cargo</div>
+    <h1>App Policies</h1>
+    <p class="sub">The privacy policy and end user licence agreement covering the Northern Link passenger app, the Northern Link driver app, and the Trip Creator client portal.</p>
+    <div class="dates">
+      <div><span>Effective</span><b>8 October 2026</b></div>
+      <div><span>Last updated</span><b>8 October 2026</b></div>
+      <div><span>Version</span><b>1.0</b></div>
+    </div>
+  </header>
+
+  <div class="shell">
+    <nav class="toc" aria-label="Contents">
+      <p class="grp">Privacy Policy</p>
+      <ol>
+        <li><a href="#p1">1. Who we are</a></li>
+        <li><a href="#p2">2. What this covers</a></li>
+        <li><a href="#p3">3. What we collect</a></li>
+        <li><a href="#p4">4. Why we collect it</a></li>
+        <li><a href="#p5">5. Payments</a></li>
+        <li><a href="#p6">6. Location</a></li>
+        <li><a href="#p7">7. Who we share with</a></li>
+        <li><a href="#p8">8. Where data is stored</a></li>
+        <li><a href="#p9">9. How long we keep it</a></li>
+        <li><a href="#p10">10. Client passenger lists</a></li>
+        <li><a href="#p11">11. Children and youth</a></li>
+        <li><a href="#p12">12. Your rights</a></li>
+        <li><a href="#p13">13. Security</a></li>
+        <li><a href="#p14">14. What we don't do</a></li>
+        <li><a href="#p15">15. Changes</a></li>
+      </ol>
+      <p class="grp">Licence Agreement</p>
+      <ol>
+        <li><a href="#e1">1. This agreement</a></li>
+        <li><a href="#e2">2. Licence granted</a></li>
+        <li><a href="#e3">3. What you may not do</a></li>
+        <li><a href="#e4">4. Your account</a></li>
+        <li><a href="#e5">5. Bookings and fares</a></li>
+        <li><a href="#e6">6. Driver app terms</a></li>
+        <li><a href="#e7">7. Availability</a></li>
+        <li><a href="#e8">8. Our content</a></li>
+        <li><a href="#e9">9. Ending this licence</a></li>
+        <li><a href="#e10">10. No warranty</a></li>
+        <li><a href="#e11">11. Limit of liability</a></li>
+        <li><a href="#e12">12. Indemnity</a></li>
+        <li><a href="#e13">13. Apple App Store</a></li>
+        <li><a href="#e14">14. Governing law</a></li>
+        <li><a href="#e15">15. Contact</a></li>
+      </ol>
+    </nav>
+
+    <main>
+
+      <!-- ===================== PRIVACY POLICY ===================== -->
+      <article class="doc" id="privacy">
+        <h2>Privacy Policy</h2>
+        <p class="lede">We are a small shuttle and freight operator in northern Manitoba. We collect the information needed to carry you safely, to bill correctly, and to meet the records we are legally required to keep as a licensed carrier. Nothing more. We do not sell personal information, and we do not use it for advertising.</p>
+
+        <section id="p1">
+          <h3><span class="n">1</span>Who we are, and who to contact</h3>
+          <p>Northern Link Shuttle &amp; Cargo is a sole proprietorship based in Leaf Rapids, Manitoba, Canada, operating scheduled passenger service, charters and parcel freight in northern Manitoba.</p>
+          <p>Emelio Campbell, the owner, is the person accountable for personal information under this policy. Any question, access request or complaint about privacy comes to him directly.</p>
+          <div class="contact">
+            <dl>
+              <dt>Privacy contact</dt><dd>Emelio Campbell, Owner</dd>
+              <dt>Email</dt><dd>emelio.campbell@northernlinkshuttleandcargo.com</dd>
+              <dt>Phone</dt><dd>(204) 441-7724</dd>
+              <dt>Location</dt><dd>Leaf Rapids, Manitoba, Canada</dd>
+            </dl>
+          </div>
+        </section>
+
+        <section id="p2">
+          <h3><span class="n">2</span>What this policy covers</h3>
+          <p>This policy applies to three pieces of software and to the booking records behind them:</p>
+          <ul>
+            <li><b>The Northern Link passenger app</b> (iOS and Android), used by members of the public to view the schedule, book seats and parcels, pay, and follow a shuttle in progress.</li>
+            <li><b>The Northern Link driver app</b> (Android tablet), used by our own drivers to complete trip inspections, manage manifests, record hours and report defects.</li>
+            <li><b>The Trip Creator client portal</b> (web), used by corporate and institutional clients to request trips and view their own trip history and invoices.</li>
+          </ul>
+          <p>It also covers bookings taken by phone, text or email, because those records sit in the same system.</p>
+        </section>
+
+        <section id="p3">
+          <h3><span class="n">3</span>What we collect</h3>
+          <p>What we hold depends on which app you use and how you travel with us.</p>
+          <div class="tw">
+            <table>
+              <thead><tr><th scope="col">Where</th><th scope="col">Information</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td>Passenger app</td>
+                  <td>Name, phone number, email address. Your bookings — route, date, pickup point, fare paid, and any parcel you send with its description and weight. Your messages to us. Device push notification token, if you turn notifications on. Basic app diagnostics such as crash reports.</td>
+                </tr>
+                <tr>
+                  <td>Driver app</td>
+                  <td>Driver name and employee record. Vehicle location while on duty. Hours of service — clock in and out, breaks, driving and on-duty time. Completed trip inspection reports and the photographs attached to them. Defect and incident reports. Odometer and fuel entries. Earnings and hours shown on a pay statement. Copies of licence class, abstracts and certifications held on file.</td>
+                </tr>
+                <tr>
+                  <td>Client portal</td>
+                  <td>Client organisation details and the names, job titles, phone numbers and email addresses of its booking, billing and operations contacts. Trip requests and history. Invoices and payment status. Passenger lists the client uploads — see section 10.</td>
+                </tr>
+                <tr>
+                  <td>All bookings</td>
+                  <td>Any accessibility need, mobility aid requirement or travel instruction you choose to tell us, so we can carry you properly. You are never required to give a reason.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>We do not ask for and do not want your government identification numbers, your date of birth, your banking details or any health information. If you send us something we have not asked for, we will delete it.</p>
+        </section>
+
+        <section id="p4">
+          <h3><span class="n">4</span>Why we collect it</h3>
+          <ul>
+            <li><b>To carry you.</b> We need a name to put on a manifest, a phone number to reach you if a run changes, and a pickup point to collect you from.</li>
+            <li><b>To take payment and issue receipts.</b></li>
+            <li><b>To tell you what is happening.</b> Booking confirmations, departure and arrival notices, and warnings about weather or road closures on Highway 391.</li>
+            <li><b>To operate safely.</b> Trip inspections, hours of service and journey check-ins exist so that a vehicle on a remote highway is roadworthy and someone always knows where it is.</li>
+            <li><b>To meet the law.</b> As a licensed carrier holding a Manitoba Safety Fitness Certificate, we are required to create and keep specific records and to produce them to a peace officer or auditor on request. Section 9 sets out how long each is kept.</li>
+          </ul>
+          <p>We rely on your consent for anything beyond these purposes, and you can withdraw it at any time. Withdrawing consent for notifications will not affect your bookings.</p>
+        </section>
+
+        <section id="p5">
+          <h3><span class="n">5</span>Payments</h3>
+          <p>Card payments in the passenger app are processed by <b>Square</b>, including Apple Pay and Google Pay where your device supports them. Your card number, expiry and security code go directly to Square and are handled under their security standards.</p>
+          <p><b>We never see or store your full card number.</b> What we receive back is a record that a payment succeeded, the amount, and the last four digits so you and we can identify the transaction on a statement.</p>
+          <p>If you pay by e-transfer or cash, no card information exists at all. We keep only the record of the amount received and the booking it applies to.</p>
+        </section>
+
+        <section id="p6">
+          <h3><span class="n">6</span>Location information</h3>
+          <p>There are two different kinds of location data in our system and they are worth separating clearly.</p>
+          <p><b>The vehicle's location.</b> While a trip is running, the driver app broadcasts the position of the shuttle. This is what lets you see on a map how far away your ride is, and it is what lets us find a vehicle that has stopped reporting on a remote stretch of road. It is the vehicle being tracked, not you.</p>
+          <p><b>The driver's location while on duty.</b> For our drivers, vehicle position during a shift is also a record of where that driver was. We collect it because it is the backbone of journey management on a 322 km run with patchy cell coverage, and because it supports the hours of service and trip records we are required to keep. It is recorded only while a driver is on duty and the app is in a working state. It is not collected on personal time, and it is not used to monitor anyone off shift.</p>
+          <p><b>The passenger app does not need your location.</b> It will ask for location permission only if you choose a feature that uses it, and declining does not stop you booking, paying or travelling. You can withdraw the permission in your device settings at any time.</p>
+        </section>
+
+        <section id="p7">
+          <h3><span class="n">7</span>Who we share information with</h3>
+          <p>We share personal information only with service providers who help us run the service, and only what each one needs to do its job. They are not permitted to use it for anything else.</p>
+          <div class="tw">
+            <table>
+              <thead><tr><th scope="col">Provider</th><th scope="col">What it does</th><th scope="col">What it sees</th></tr></thead>
+              <tbody>
+                <tr><td>Square</td><td>Card payment processing</td><td>Card details, amount, name</td></tr>
+                <tr><td>Twilio</td><td>Text message notifications</td><td>Phone number, message content</td></tr>
+                <tr><td>SendGrid</td><td>Email delivery</td><td>Email address, message content</td></tr>
+                <tr><td>Firebase Cloud Messaging</td><td>Push notifications</td><td>Device token, message content</td></tr>
+                <tr><td>Google Maps Platform</td><td>Mapping, routing, estimated arrival times</td><td>Vehicle position, route points</td></tr>
+                <tr><td>Cloud hosting and storage</td><td>Running the service; storing manifests, inspections and photographs</td><td>Stored data, encrypted in transit and at rest</td></tr>
+                <tr><td>Authentication provider</td><td>Sign-in and account security</td><td>Email address, sign-in events</td></tr>
+                <tr><td>Accounting software</td><td>Invoicing and bookkeeping</td><td>Billing contact details, invoice amounts</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>Beyond those providers, we disclose personal information only where we are required or permitted by law — for example, producing driver records, hours of service or trip inspection reports to a peace officer or to Manitoba Motor Carrier during a roadside inspection or facility audit, or responding to a lawful demand, subpoena or court order.</p>
+          <p>We may also disclose what is necessary to protect someone's safety in an emergency, such as giving a passenger manifest to emergency services after a collision.</p>
+        </section>
+
+        <section id="p8">
+          <h3><span class="n">8</span>Where information is stored</h3>
+          <p>Our records are kept on servers operated by our cloud hosting providers, located in Canada and the United States. Several of the service providers listed above are United States companies.</p>
+          <p>This means your information may be stored or processed outside Canada, and while it is in another country it may be accessible to that country's courts, law enforcement and national security authorities under that country's laws. We use providers that commit to protecting it under contract, but we cannot override those laws.</p>
+          <p>Our business records, as required of a licensed carrier, are kept at our chief place of business in Manitoba and can be produced there.</p>
+        </section>
+
+        <section id="p9">
+          <h3><span class="n">9</span>How long we keep it</h3>
+          <p>Some of these periods are our own choice. Others are minimums set by Manitoba's regulations for a licensed carrier, and we cannot delete those records earlier even if asked.</p>
+          <div class="tw">
+            <table>
+              <thead><tr><th scope="col">Record</th><th scope="col">Kept for</th><th scope="col">Why</th></tr></thead>
+              <tbody>
+                <tr><td>Your account and contact details</td><td>While your account is active, then 12 months</td><td>Our choice</td></tr>
+                <tr><td>Booking and fare history</td><td>7 years</td><td>Tax and accounting records</td></tr>
+                <tr><td>Bills of lading and freight documents</td><td>At least 6 months; we keep 2 years</td><td>Required; supports hours of service records</td></tr>
+                <tr><td>Trip inspection reports</td><td>6 months minimum</td><td>Required of a licensed carrier</td></tr>
+                <tr><td>Driver hours of service records</td><td>Term of employment and beyond</td><td>Required; subject to audit</td></tr>
+                <tr><td>Driver records, abstracts, convictions, training</td><td>2 years, and longer where required</td><td>Required of a licensed carrier</td></tr>
+                <tr><td>Accident and incident files</td><td>2 years minimum; longer where a claim is open</td><td>Required; insurance and legal</td></tr>
+                <tr><td>Text and email notification logs</td><td>12 months</td><td>Our choice; dispute resolution</td></tr>
+                <tr><td>App diagnostics and crash reports</td><td>90 days</td><td>Our choice</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>When a retention period ends, records are deleted or destroyed securely.</p>
+        </section>
+
+        <section id="p10">
+          <h3><span class="n">10</span>Passenger lists uploaded by clients</h3>
+          <p>Corporate and institutional clients using the Trip Creator portal upload lists of the people they are sending on a trip. We hold that information to build the manifest and carry those passengers.</p>
+          <p>If you appear on such a list, it was given to us by the organisation arranging your travel, not collected from you. That organisation is responsible for having the authority to share it with us, and for telling you that it has. We use it only to carry you and to keep the manifest records we are required to keep, and we will answer an access request from you directly.</p>
+          <div class="note">
+            <b>If a client uploads a list to us</b>
+            <p>You are responsible for ensuring you may lawfully share those names and contact details with us, and for informing the people on the list. Please upload only what the trip requires — a name is enough.</p>
+          </div>
+        </section>
+
+        <section id="p11">
+          <h3><span class="n">11</span>Children and young people</h3>
+          <p>Our apps are not designed for or directed at children, and we do not knowingly create accounts for anyone under 18. An account must be held by an adult.</p>
+          <p>Young people do travel with us, and our conditions of carriage govern that: passengers under 12 must travel with an adult, and passengers aged 12 to 17 may travel only with a signed consent form from a parent or guardian. Where we hold a young person's name on a manifest or a consent form, it was provided by their parent, guardian or school, and we use it only to carry them safely and to keep the manifest.</p>
+          <p>If you believe a child has created an account or given us information directly, contact us and we will delete it.</p>
+        </section>
+
+        <section id="p12">
+          <h3><span class="n">12</span>Your rights</h3>
+          <p>Under Canada's <i>Personal Information Protection and Electronic Documents Act</i>, you may:</p>
+          <ul>
+            <li>Ask what personal information we hold about you and how we have used and disclosed it.</li>
+            <li>Get a copy of it.</li>
+            <li>Have it corrected if it is wrong.</li>
+            <li>Withdraw consent, subject to the records we are legally required to keep and to any booking already in progress.</li>
+            <li>Ask us to delete what we are not required to keep.</li>
+            <li>Complain about how we have handled it.</li>
+          </ul>
+          <p>Email or phone us using the contact details in section 1. We will respond within 30 days. There is no charge for a reasonable request. We may need to verify who you are before releasing information, which protects you as much as us.</p>
+          <p>If you are not satisfied with our response, you can complain to the Office of the Privacy Commissioner of Canada at <a href="https://www.priv.gc.ca">priv.gc.ca</a>.</p>
+        </section>
+
+        <section id="p13">
+          <h3><span class="n">13</span>Security</h3>
+          <p>Information travels encrypted between the apps and our servers, and is stored encrypted. Accounts require a password, and access to operational records is limited to people who need it to do their work — a driver sees the manifest for their own trips, not the whole customer base.</p>
+          <p>We are a small operation and we do not pretend to run a security department. What we do is keep the amount of information we hold small, keep card data out of our hands entirely, and use established providers for the parts that matter most. If a breach ever occurs that creates a real risk of significant harm to you, we will tell you and report it as the law requires.</p>
+        </section>
+
+        <section id="p14">
+          <h3><span class="n">14</span>What we don't do</h3>
+          <ul>
+            <li>We do not sell, rent or trade personal information. Not to anyone, for any price.</li>
+            <li>We do not use it for advertising, and we carry no third-party advertising or analytics trackers for ad targeting.</li>
+            <li>We do not track you across other apps or websites.</li>
+            <li>We do not build profiles of you, and we make no automated decisions about you.</li>
+            <li>We do not share your travel history with your employer, unless your employer booked and paid for that specific trip.</li>
+          </ul>
+        </section>
+
+        <section id="p15">
+          <h3><span class="n">15</span>Changes to this policy</h3>
+          <p>If we change this policy we will update the date at the top of this page and raise the version number. If a change materially affects how we handle your information, we will tell you in the app or by email before it takes effect. Continuing to use the apps after that means you accept the updated policy.</p>
+        </section>
+      </article>
+
+      <!-- ===================== EULA ===================== -->
+      <article class="doc" id="eula">
+        <h2>End User Licence Agreement</h2>
+        <p class="lede">Plain terms for using our apps. This is a licence to use software, not a contract of carriage — the fares, cancellation rules and baggage limits for an actual trip live in our Terms and Conditions of Carriage, which apply when you travel.</p>
+
+        <section id="e1">
+          <h3><span class="n">1</span>This agreement</h3>
+          <p>This agreement is between you and Northern Link Shuttle &amp; Cargo, a sole proprietorship in Leaf Rapids, Manitoba ("Northern Link", "we", "us"). It governs your use of the Northern Link passenger app, the Northern Link driver app, and the Trip Creator client portal, together with any updates to them (the "Apps").</p>
+          <p>By installing or using an App you accept this agreement. If you do not accept it, do not use the Apps.</p>
+          <p>This agreement is with us, not with Apple, Google, or whoever operates the store you downloaded from.</p>
+        </section>
+
+        <section id="e2">
+          <h3><span class="n">2</span>The licence we grant you</h3>
+          <p>We grant you a personal, limited, non-exclusive, non-transferable, revocable licence to install and use the Apps on devices you own or control, for the purposes they are built for: booking and managing travel and freight with us, or, for our drivers and clients, carrying out the work the relevant App supports.</p>
+          <p>We keep ownership of the Apps. You are being licensed to use them, not sold them.</p>
+        </section>
+
+        <section id="e3">
+          <h3><span class="n">3</span>What you may not do</h3>
+          <ul>
+            <li>Copy, modify, translate or create derivative works of the Apps.</li>
+            <li>Reverse engineer, decompile or disassemble them, except to the extent the law says you may do so despite this clause.</li>
+            <li>Rent, lease, lend, sell, sublicense or redistribute them.</li>
+            <li>Remove or obscure any copyright or ownership notice.</li>
+            <li>Use automated means to scrape, bulk-download or interfere with the Apps or our servers.</li>
+            <li>Attempt to access another person's account or any part of the system you have not been given access to.</li>
+            <li>Use the Apps to make fraudulent bookings, to harass anyone, or for any unlawful purpose.</li>
+            <li>Use them in a way that interferes with the safe operation of a vehicle.</li>
+          </ul>
+        </section>
+
+        <section id="e4">
+          <h3><span class="n">4</span>Your account</h3>
+          <p>You need an account to book. You must give accurate information, keep it current, and keep your password to yourself. You are responsible for what happens under your account.</p>
+          <p>You must be 18 or older to hold an account. If you are booking for someone else, including a young person, you are responsible for the accuracy of what you enter and for the obligations in our conditions of carriage that apply to that passenger.</p>
+          <p>Tell us promptly if you think someone else has got into your account.</p>
+        </section>
+
+        <section id="e5">
+          <h3><span class="n">5</span>Bookings, fares and cancellations</h3>
+          <p>A booking made in an App is a request until we confirm it. Confirmation arrives by notification, text or email.</p>
+          <p>Fares, cargo charges, minimum passenger requirements, cancellation rules and baggage limits are set out in our Terms and Conditions of Carriage, which govern the trip itself and form part of your agreement with us when you book. Posted fares include GST.</p>
+          <div class="note">
+            <b>Scheduled runs depend on demand and on the road</b>
+            <p>A scheduled run may not go ahead if too few seats are booked, and any run may be delayed or cancelled because of weather, road conditions or a mechanical problem. We will tell you as early as we can and you will not be charged for a run we cancel. We are not able to cover onward costs such as missed appointments or connections — section 11 explains the limit.</p>
+          </div>
+          <p>Card payments are processed by Square. Refunds, where our conditions of carriage provide for one, are returned by the same method you paid.</p>
+        </section>
+
+        <section id="e6">
+          <h3><span class="n">6</span>Additional terms for the driver app</h3>
+          <p>The driver app is issued to our drivers for work. If that is you:</p>
+          <ul>
+            <li>Use it only for Northern Link work, and only on a device we have authorised.</li>
+            <li>Complete trip inspections, manifests and hours of service records honestly and at the time. These are legal records of a licensed carrier, and a false entry is a serious matter — for you and for the business.</li>
+            <li>Do not operate the app while the vehicle is in motion.</li>
+            <li>Understand that vehicle position, duty hours and the records you enter are collected while you are on duty, for the reasons set out in section 6 of the privacy policy.</li>
+            <li>Keep passenger information confidential, and do not copy it out of the app.</li>
+            <li>Your access ends when your employment or contract with us ends.</li>
+          </ul>
+          <p>Nothing in this agreement replaces or limits your rights as an employee under Manitoba employment standards or workplace safety and health law.</p>
+        </section>
+
+        <section id="e7">
+          <h3><span class="n">7</span>Availability, and what the Apps are not</h3>
+          <p>We will try to keep the Apps working, but we do not promise they will always be available, uninterrupted or error-free. We may change, suspend or withdraw features, and we may stop supporting older versions or older devices.</p>
+          <p>Where the Apps show a vehicle's position or an estimated arrival time, that is our best information at that moment and not a guarantee. Mapping, routing and weather information comes from third parties and can be wrong or out of date. Cell coverage on the routes we run is incomplete, and an App may be unable to update for long stretches.</p>
+          <p><b>Do not rely on an App in an emergency.</b> Call us on (204) 441-7724, or emergency services, as the situation requires.</p>
+          <p>You are responsible for your own device, your data charges and your network connection.</p>
+        </section>
+
+        <section id="e8">
+          <h3><span class="n">8</span>Our content and your content</h3>
+          <p>The Apps, their design, and the Northern Link name and marks belong to us. Nothing here gives you a right to use our name or branding.</p>
+          <p>Anything you enter — booking details, messages, photographs attached to an inspection — remains yours. You grant us the licence we need to store it, process it and use it to provide the service and to keep the records described in the privacy policy. If you send us a suggestion for improving the Apps, we may act on it without owing you anything.</p>
+        </section>
+
+        <section id="e9">
+          <h3><span class="n">9</span>Ending this licence</h3>
+          <p>You may stop using the Apps and delete them at any time. Ask us and we will close your account, subject to any booking in progress and to the records we are required to keep.</p>
+          <p>We may suspend or end your access if you breach this agreement, if we reasonably believe you are using an App fraudulently or unsafely, or if we discontinue the App. Where circumstances allow, we will tell you first.</p>
+          <p>Ending the licence does not cancel a trip you have already booked and paid for, or relieve either of us of anything already owed.</p>
+        </section>
+
+        <section id="e10">
+          <h3><span class="n">10</span>No warranty</h3>
+          <p>The Apps are provided "as is" and "as available". To the fullest extent the law allows, we make no warranties of any kind about them, express or implied, including implied warranties of merchantability, fitness for a particular purpose, accuracy, or non-infringement.</p>
+          <p>Some jurisdictions do not allow the exclusion of certain warranties. Where that is the case, the exclusions above apply only to the extent permitted, and nothing in this agreement limits rights you have under consumer protection law that cannot be waived.</p>
+        </section>
+
+        <section id="e11">
+          <h3><span class="n">11</span>Limit of our liability</h3>
+          <p>To the fullest extent the law allows, we are not liable for indirect, incidental, special or consequential loss arising from your use of the Apps — including lost profits, lost data, missed appointments, missed connections, or costs you incur because a run was delayed or cancelled or because information shown in an App was inaccurate.</p>
+          <p>Our total liability to you arising from the Apps is limited to the greater of the amount you paid us for the affected booking, or fifty Canadian dollars.</p>
+          <p>This section limits our liability for the <b>software</b>. It does not limit our liability for the carriage itself — if we injure you or damage your property while carrying you, our conditions of carriage and the applicable law govern that, and nothing here reduces it. Nor does it exclude liability that cannot lawfully be excluded, including for death or personal injury caused by our negligence.</p>
+        </section>
+
+        <section id="e12">
+          <h3><span class="n">12</span>Indemnity</h3>
+          <p>You agree to cover our reasonable losses and legal costs arising from your breach of this agreement, your unlawful use of the Apps, or your use of another person's account.</p>
+          <p>If you are a client uploading passenger lists through the Trip Creator portal, this includes claims arising from your not having the authority to share that information with us.</p>
+        </section>
+
+        <section id="e13">
+          <h3><span class="n">13</span>If you downloaded from the Apple App Store</h3>
+          <p>These terms apply in addition to everything above, and Apple requires them.</p>
+          <ul>
+            <li>This agreement is between you and Northern Link only. Apple is not a party to it.</li>
+            <li>Apple has no obligation to provide any maintenance or support for the App.</li>
+            <li>If the App fails to conform to any applicable warranty, you may notify Apple and Apple will refund the purchase price, if any. To the maximum extent permitted by law, Apple has no other warranty obligation at all with respect to the App.</li>
+            <li>We, not Apple, are responsible for addressing any claim by you or a third party relating to the App — including product liability claims, any claim that the App fails to conform to a legal requirement, and claims arising under consumer protection or similar legislation.</li>
+            <li>We, not Apple, are responsible for investigating, defending, settling and discharging any third-party claim that the App infringes that party's intellectual property rights.</li>
+            <li>You represent that you are not located in a country subject to a United States Government embargo or designated as a terrorist-supporting country, and that you are not on any United States Government list of prohibited or restricted parties.</li>
+            <li>You must comply with any applicable third-party terms of agreement when using the App.</li>
+            <li>Apple and its subsidiaries are third-party beneficiaries of this agreement and may enforce its terms against you.</li>
+            <li>Our contact details for any question, complaint or claim about the App are in section 15.</li>
+          </ul>
+        </section>
+
+        <section id="e14">
+          <h3><span class="n">14</span>Governing law</h3>
+          <p>This agreement is governed by the laws of the Province of Manitoba and the laws of Canada that apply in it. You and we agree to the exclusive jurisdiction of the courts of Manitoba, without affecting any right you have to bring a claim where you live if consumer protection law gives you that right.</p>
+          <p>If a provision of this agreement is found unenforceable, the rest stays in force. Our not enforcing a term on one occasion does not waive it.</p>
+          <p>We may update this agreement. We will change the date and version at the top of this page, and tell you in the App or by email before a material change takes effect. Continuing to use the Apps after that means you accept the change.</p>
+        </section>
+
+        <section id="e15">
+          <h3><span class="n">15</span>Contact</h3>
+          <div class="contact">
+            <dl>
+              <dt>Business</dt><dd>Northern Link Shuttle &amp; Cargo</dd>
+              <dt>Owner</dt><dd>Emelio Campbell</dd>
+              <dt>Email</dt><dd>emelio.campbell@northernlinkshuttleandcargo.com</dd>
+              <dt>Phone</dt><dd>(204) 441-7724</dd>
+              <dt>Location</dt><dd>Leaf Rapids, Manitoba, Canada</dd>
+            </dl>
+          </div>
+        </section>
+      </article>
+
+      <div class="foot">
+        <div>&copy; 2026 Northern Link Shuttle &amp; Cargo &middot; Leaf Rapids, Manitoba</div>
+        <div>Version 1.0 &middot; Effective 8 October 2026</div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+</body>
+</html>

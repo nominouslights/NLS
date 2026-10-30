@@ -13,6 +13,10 @@ export type InspectionResultWire = "Pass" | "PassWithDefects" | "Fail";
 export type InspectionType = "PreTrip" | "PostTrip";
 export type InspectionSourceWire = "DriverApp" | "Dispatcher";
 export type DefectSeverityWire = "Minor" | "Major" | "OutOfService";
+/** NL-PTI-01's tri-state answer for one checklist row (Fleet `ChecklistItemState`).
+ *  Serialised as the enum NAME, not its ordinal — the backend maps it with
+ *  `HasConversion<string>()` and `ToString()`s it into the response. */
+export type ChecklistItemStateWire = "Ok" | "Defect" | "NotApplicable";
 export type InspectionWeather = "Clear" | "Cloudy" | "Rain" | "Snow" | "Fog" | "ExtremeCold";
 export type InspectionRoadCondition = "Dry" | "Wet" | "Icy" | "SnowCovered" | "Muddy";
 export type InspectionVisibility = "Good" | "Reduced" | "Poor";
@@ -21,13 +25,25 @@ export type InspectionFuelLevel = "Full" | "ThreeQuarters" | "Half" | "Quarter";
 export interface InspectionChecklistItemWire {
   group: string | null;
   item: string;
+  /** "Not a defect" — TRUE for a NotApplicable row as well as an Ok one. */
   passed: boolean;
+  /** The backend sends its EffectiveState, so a row stored before the tri-state
+   *  existed still reports "Ok"/"Defect" rather than null. Typed nullable anyway:
+   *  a client must never assume a field it did not itself write. */
+  state: ChecklistItemStateWire | null;
+  note: string | null;
 }
 
 export interface InspectionDefectWire {
   item: string;
   severity: DefectSeverityWire;
   note: string | null;
+  /** The ACTIVE work order this defect is attached to; null when none (a
+   *  completed or cancelled work order no longer holds it). */
+  workOrderId: string | null;
+  /** A `DefectResolutionReasonWire` name; with `resolvedAtUtc`, null while open. */
+  resolutionReason: DefectResolutionReasonWire | null;
+  resolvedAtUtc: string | null;
 }
 
 export interface VehicleInspection {
@@ -42,6 +58,9 @@ export interface VehicleInspection {
   enteredBy: string | null;
   performedAt: string;
   odometerKm: number | null;
+  /** Where the inspection was done — a municipality or highway description
+   *  (Man. Reg. 95/2008 s.12(1)). Null on records entered before the field existed. */
+  location: string | null;
   result: InspectionResultWire;
   checklist: InspectionChecklistItemWire[];
   defects: InspectionDefectWire[];
@@ -62,6 +81,13 @@ export interface VehicleInspection {
   fuelCostCad: number | null;
   generatedWorkOrderId: string | null;
   createdAtUtc: string;
+  // NL-PTI-01 sign-offs. The carrier acknowledgement trio is populated only on a
+  // report that was signed off, which only a `Fail` can be; `certificationStatement`
+  // is the §10 attestation sentence as it read on the day the driver signed it.
+  carrierAcknowledgedBy: string | null;
+  carrierAcknowledgedAtUtc: string | null;
+  carrierAcknowledgementNote: string | null;
+  certificationStatement: string | null;
 }
 
 /** GET /api/fleet/inspections — filter by unit and/or trip number. */
@@ -71,6 +97,20 @@ export function listInspections(params?: { unit?: string; tripNumber?: string })
   if (params?.tripNumber) q.set("tripNumber", params.tripNumber);
   const qs = q.toString();
   return request<VehicleInspection[]>(`/api/fleet/inspections${qs ? `?${qs}` : ""}`);
+}
+
+/** Longest inspection location the API accepts (`InspectionInput.location`). */
+export const INSPECTION_LOCATION_MAX = 200;
+
+/**
+ * Whether the Location field must be filled before saving. Required on every new
+ * inspection (Man. Reg. 95/2008 s.12(1) — the report names where it was done) and on
+ * an amend of a record that already has one, so a saved location is never erased.
+ * An amend of an older record stored before the field existed may stay blank —
+ * nobody can know now where that inspection happened.
+ */
+export function inspectionLocationRequired(existing: Pick<VehicleInspection, "location"> | null | undefined): boolean {
+  return existing == null || (existing.location ?? "").trim() !== "";
 }
 
 /** POST /api/fleet/inspections body. `source` defaults to Dispatcher server-side;
@@ -86,7 +126,21 @@ export interface InspectionInput {
   enteredBy?: string | null;
   performedAt?: string;
   odometerKm?: number | null;
-  checklist: { group?: string | null; item: string; passed: boolean }[];
+  /** Inspection location (town or highway), max 200 chars. Required by the UI on a
+   *  new inspection; nullable on the wire so an amend of an older record without
+   *  one still goes through. */
+  location?: string | null;
+  /** `state` and `note` are the NL-PTI-01 tri-state answer and its free-text note,
+   *  and both are optional: a row that supplies `state` has its `passed` re-derived
+   *  server-side (`passed == state != "Defect"`), so the two can never be sent out
+   *  of step. A caller that omits `state` keeps the older passed-only behaviour. */
+  checklist: {
+    group?: string | null;
+    item: string;
+    passed: boolean;
+    state?: ChecklistItemStateWire | null;
+    note?: string | null;
+  }[];
   /** `recurrenceOfInspectionId` is the one pointer the wire may set on a defect:
    *  the Re-report path, where a dispatcher knows a cleared fault is back and
    *  does not want to wait for the next DVIR. Resolution fields are deliberately
@@ -107,6 +161,9 @@ export interface InspectionInput {
   // Post-trip
   issues?: string[];
   attestations?: boolean[];
+  /** The §10 certification sentence the driver signed, stored verbatim with the
+   *  record so a reprint years later shows the wording that was actually certified. */
+  certificationStatement?: string | null;
   driverSignatureName?: string | null;
   certifiedAt?: string | null;
   fuelAdded?: boolean;
@@ -147,8 +204,11 @@ export function deleteInspection(id: string): Promise<void> {
 // reportedAt first within each). Do not re-sort them.
 // ---------------------------------------------------------------------------
 
+/** `RepairedUnderWorkOrder` and `NoFaultFound` are stamped ONLY by work-order
+ *  completion — a dispatcher never picks them on the resolve endpoint. */
 export type DefectResolutionReasonWire =
-  | "RepairedUnderWorkOrder" | "PreviouslyRepaired" | "ReportedInError" | "AcceptedMonitoring";
+  | "RepairedUnderWorkOrder" | "PreviouslyRepaired" | "ReportedInError" | "AcceptedMonitoring"
+  | "NoFaultFound";
 
 /** The earlier, already-cleared report of the same fault this defect supersedes.
  *  Derived per read on the backend by matching `item` on the same vehicle with a
@@ -176,8 +236,10 @@ export interface VehicleDefectWire {
   item: string;
   severity: DefectSeverityWire;
   note: string | null;
-  // Repair underway — the inspection's work order, whatever its status. Present
-  // on open and resolved rows alike; a cancelled work order still shows here.
+  // Per DEFECT: the open work order it is attached to, else the work order that
+  // resolved it, else (work orders from before per-defect links) the work order
+  // its inspection generated — whatever that work order's status. A per-defect
+  // work order releases its defects on cancel, so it no longer shows here.
   workOrderId: string | null;
   workOrderNumber: string | null;
   workOrderStatus: string | null;
@@ -209,6 +271,25 @@ export function resolveInspectionDefect(
   body: { item: string; reason: DefectResolutionReasonWire; note?: string | null; resolvedBy?: string | null },
 ): Promise<void> {
   return request<void>(`/api/fleet/inspections/${inspectionId}/defects/resolve`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/** POST /api/fleet/inspections/{id}/carrier-acknowledgement — signs the NL-PTI-01
+ *  carrier acknowledgement line: the carrier's representative confirming they were
+ *  shown a report carrying a Major or Out-of-Service defect. One per report and
+ *  FINAL — a second call answers 409. 404 for an unknown inspection, 400 when the
+ *  report is not a `Fail` or the name is blank.
+ *
+ *  `acknowledgedBy` is client-supplied like `enteredBy`/`resolvedBy`, but unlike
+ *  those two it has NO "Dispatch" fallback: the name IS the signature, so an empty
+ *  one is rejected. The timestamp is stamped server-side, never sent. */
+export function acknowledgeInspectionCarrier(
+  inspectionId: string,
+  body: { acknowledgedBy: string; note?: string | null },
+): Promise<void> {
+  return request<void>(`/api/fleet/inspections/${inspectionId}/carrier-acknowledgement`, {
     method: "POST",
     body: JSON.stringify(body),
   });
@@ -358,6 +439,39 @@ export async function addServiceRecord(vehicleId: string, input: {
   return res.id;
 }
 
+/** What the mechanic found for one defect line, recorded at completion.
+ *  Repaired and NoFaultFound resolve the defect permanently; Deferred leaves it
+ *  OPEN and releases it for a later work order (needs a note; never allowed on
+ *  an OutOfService defect). */
+export type DefectRepairOutcomeWire = "Repaired" | "NoFaultFound" | "Deferred";
+
+/** One defect a work order was raised against (`WorkOrderDefectLineResponse`),
+ *  keyed by `(inspectionId, item)`. Severity and note are the snapshot taken
+ *  when the work order was created; `outcome` is null until it completes. */
+export interface WorkOrderDefectLineWire {
+  inspectionId: string;
+  item: string;
+  severity: DefectSeverityWire;
+  note: string | null;
+  outcome: DefectRepairOutcomeWire | null;
+  outcomeNote: string | null;
+}
+
+/** A defect reference. There is no defect id: a defect is addressed by its
+ *  inspection and item. */
+export interface DefectRefWire {
+  inspectionId: string;
+  item: string;
+}
+
+/** One `defectOutcomes` entry on the complete body. */
+export interface DefectOutcomeInputWire {
+  inspectionId: string;
+  item: string;
+  outcome: DefectRepairOutcomeWire;
+  note?: string | null;
+}
+
 export interface WorkOrderWire {
   id: string;
   vehicleId: string;
@@ -379,6 +493,8 @@ export interface WorkOrderWire {
   authorizedLimitCad: number | null;
   budgetCode: string | null;
   dateRequiredOrOos: string | null;
+  /** The per-defect link — empty on manual and pre-link work orders. */
+  defects: WorkOrderDefectLineWire[];
 }
 
 export function listVehicleWorkOrders(vehicleId: string): Promise<WorkOrderWire[]> {
@@ -403,7 +519,12 @@ export async function createWorkOrder(input: {
   authorizedLimitCad?: number | null;
   budgetCode?: string | null;
   dateRequiredOrOos?: string | null;
+  /** Older whole-inspection form: attaches EVERY open, unattached defect of that
+   *  inspection. New callers send `defects`; the server attaches the union. */
   inspectionId?: string | null;
+  /** Each must be open, unattached and on this vehicle — else 409
+   *  `Fleet.Inspection.DefectAlreadyOnWorkOrder` / 400 `Fleet.Inspection.VehicleMismatch`. */
+  defects?: DefectRefWire[];
 }): Promise<string> {
   const res = await request<{ id: string }>("/api/fleet/work-orders", { method: "POST", body: JSON.stringify(input) });
   return res.id;
@@ -425,6 +546,8 @@ export async function completeWorkOrder(id: string, input: {
   laborHours?: number | null;
   costCad?: number | null;
   notes?: string | null;
+  /** Exactly one per defect line when the work order has lines; omit when it has none. */
+  defectOutcomes?: DefectOutcomeInputWire[];
 }): Promise<string> {
   const res = await request<{ id: string }>(`/api/fleet/work-orders/${id}/complete`, {
     method: "POST",

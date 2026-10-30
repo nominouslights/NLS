@@ -20,6 +20,12 @@ public sealed class PurchaseOrderConfiguration : IEntityTypeConfiguration<Purcha
         builder.Property(p => p.Issued).HasColumnName("issued");
         builder.Property(p => p.Expiry).HasColumnName("expiry");
         builder.Property(p => p.AmountCad).HasColumnName("amount_cad").HasColumnType("numeric(12,2)");
+        builder.Property(p => p.RoundTripRateCad)
+            .HasColumnName("round_trip_rate_cad")
+            .HasColumnType("numeric(12,2)");
+        builder.Property(p => p.OneWayRateCad)
+            .HasColumnName("one_way_rate_cad")
+            .HasColumnType("numeric(12,2)");
         builder.Property(p => p.Note).HasColumnName("note").HasMaxLength(1000);
         builder.Property(p => p.CreatedAtUtc).HasColumnName("created_at_utc");
         builder.Property(p => p.UpdatedAtUtc).HasColumnName("updated_at_utc");

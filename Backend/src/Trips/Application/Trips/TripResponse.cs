@@ -9,6 +9,11 @@ namespace NorthernLink.Trips.Application.Trips;
 /// <see cref="CompletedAtUtc"/> is when the money arrived. For a client trip they are days or
 /// weeks apart — anything showing "when did this trip finish" wants the former.
 /// </para>
+/// <para>
+/// <see cref="OriginProvince"/>/<see cref="DestinationProvince"/> are two-letter province codes
+/// and are always "MB" on a stored trip — the Manitoba-only rule refuses anything else at
+/// creation — so a client can show them without a null check.
+/// </para>
 /// </summary>
 public sealed record TripResponse(
     Guid Id,
@@ -20,7 +25,9 @@ public sealed record TripResponse(
     Guid? RouteId,
     string RouteName,
     string Origin,
+    string OriginProvince,
     string Destination,
+    string DestinationProvince,
     IReadOnlyList<TripStopResponse> Stops,
     int DistanceKm,
     Guid? ScheduleTemplateId,
@@ -71,10 +78,12 @@ public sealed record TripBillingResponse(
 /// <summary>
 /// One ordered stop on a trip's route snapshot. <see cref="StopId"/> and the coordinates come
 /// from the catalog stop the route was built from and are null for legacy free-text stops.
-/// The two offsets are the stop's timetable entry (minutes after the leg's departure); the
-/// caller picks the one matching the trip's <c>Direction</c> — <see cref="ReturnOffsetMinutes"/>
-/// for an Inbound leg, <see cref="OutboundOffsetMinutes"/> otherwise — and adds it to
-/// <c>WindowStart</c> to get the time this trip reaches this stop.
+/// <see cref="Province"/> is the stop's two-letter province code, never null ("MB" for a
+/// snapshot written before provinces were recorded). The two offsets are the stop's timetable
+/// entry (minutes after the leg's departure); the caller picks the one matching the trip's
+/// <c>Direction</c> — <see cref="ReturnOffsetMinutes"/> for an Inbound leg,
+/// <see cref="OutboundOffsetMinutes"/> otherwise — and adds it to <c>WindowStart</c> to get the
+/// time this trip reaches this stop.
 /// </summary>
 public sealed record TripStopResponse(
     string Name,
@@ -82,5 +91,6 @@ public sealed record TripStopResponse(
     Guid? StopId,
     double? Latitude,
     double? Longitude,
+    string Province,
     int? OutboundOffsetMinutes,
     int? ReturnOffsetMinutes);

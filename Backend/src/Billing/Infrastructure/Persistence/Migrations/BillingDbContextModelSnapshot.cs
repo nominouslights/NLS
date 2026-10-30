@@ -299,6 +299,57 @@ namespace NorthernLink.Billing.Infrastructure.Persistence.Migrations
                     b.ToTable("invoices", "billing");
                 });
 
+            modelBuilder.Entity("NorthernLink.Billing.Domain.PurchaseOrders.PurchaseOrderSnapshot", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<decimal?>("AmountCad")
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("amount_cad");
+
+                    b.Property<Guid>("ClientId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("client_id");
+
+                    b.Property<DateOnly?>("Expiry")
+                        .HasColumnType("date")
+                        .HasColumnName("expiry");
+
+                    b.Property<DateOnly>("Issued")
+                        .HasColumnType("date")
+                        .HasColumnName("issued");
+
+                    b.Property<decimal?>("OneWayRateCad")
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("one_way_rate_cad");
+
+                    b.Property<string>("PoNumber")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("po_number");
+
+                    b.Property<decimal?>("RoundTripRateCad")
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("round_trip_rate_cad");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "ClientId", "PoNumber");
+
+                    b.ToTable("purchase_order_snapshots", "billing");
+                });
+
             modelBuilder.Entity("NorthernLink.Billing.Infrastructure.Persistence.ReadModels.InvoiceReadModel", b =>
                 {
                     b.Property<Guid>("Id")

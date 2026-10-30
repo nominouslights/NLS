@@ -7,6 +7,7 @@ import { DetailRow, Panel, SectionLabel } from "@/components/ui/Panel";
 import { StatusChip, MonoTag } from "@/components/ui/Chip";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import ProfileForm from "@/components/ProfileForm";
+import LegalLinks from "@/components/LegalLinks";
 import { getClaims } from "@/lib/auth";
 import { updateMyProfile, type MyProfile } from "@/lib/api/identity";
 import { BUDGET_ROLES, hasBudgetAccess } from "@/lib/roles";
@@ -190,10 +191,7 @@ export default function Settings({
 
       {tab === "Connectors" && (
         <Panel>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 11 }}>
-            <SectionLabel>QuickBooks Online</SectionLabel>
-            <StatusChip kind="off" label="Stage 6.1" />
-          </div>
+          <SectionLabel>QuickBooks Online</SectionLabel>
           <div
             style={{
               fontFamily: fonts.body,
@@ -202,12 +200,23 @@ export default function Settings({
               lineHeight: 1.65,
             }}
           >
-            Actuals will be reconciled from QuickBooks, which stays read-only from the platform&rsquo;s
-            side. This platform remains the source of truth for budget codes, and every
-            transaction is tagged at creation rather than reconciled after the fact.
+            The QuickBooks connection has its own screen — QuickBooks, under Performance on the
+            rail — where it is connected, reconnected and disconnected. Access is read-only: the
+            platform reads expenses from QuickBooks and never writes to it.
           </div>
         </Panel>
       )}
+
+      {/* Outside the tabs on purpose: the policies stay one click away whichever tab is open. */}
+      <div
+        style={{
+          marginTop: 18,
+          paddingTop: 10,
+          borderTop: `1px solid ${colors.border}`,
+        }}
+      >
+        <LegalLinks align="left" />
+      </div>
     </Screen>
   );
 }

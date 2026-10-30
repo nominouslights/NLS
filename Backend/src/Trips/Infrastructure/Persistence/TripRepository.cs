@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using NorthernLink.Trips.Application.Abstractions;
+using NorthernLink.Trips.Domain.Manifests;
 using NorthernLink.Trips.Domain.Trips;
 
 namespace NorthernLink.Trips.Infrastructure.Persistence;
@@ -73,6 +74,89 @@ internal sealed class TripRepository(TripsDbContext context) : ITripRepository
         }
     }
 
+    public async Task<IReadOnlySet<(DateOnly ServiceDate, TripDirection Direction)>> GetGeneratedOccurrenceKeysAsync(
+        Guid templateId,
+        DateOnly from,
+        DateOnly toExclusive,
+        CancellationToken cancellationToken = default)
+    {
+        var existing = await context.Trips
+            .AsNoTracking()
+            .Where(t => t.ScheduleTemplateId == templateId
+                && t.ServiceDate >= from
+                && t.ServiceDate < toExclusive
+                && t.Direction != null)
+            .Select(t => new { t.ServiceDate, t.Direction })
+            .ToListAsync(cancellationToken);
+
+        return existing
+            .Select(t => (t.ServiceDate, t.Direction!.Value))
+            .ToHashSet();
+    }
+
+    public async Task<bool> TryAddGeneratedAsync(IReadOnlyList<Trip> trips, CancellationToken cancellationToken = default)
+    {
+        foreach (var trip in trips)
+        {
+            context.Trips.Add(trip);
+        }
+
+        try
+        {
+            // One transaction per template: every new leg (plus its journal/snapshot/outbox
+            // rows) commits together, or nothing does.
+            await context.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateException exception) when (
+            exception.InnerException is Npgsql.PostgresException { SqlState: "23505" })
+        {
+            // The (tenant, template, service date, direction) unique index rejected one of
+            // the legs — a concurrent run got there first. Same cleanup as the booking-day
+            // path: detach every pending insert and drop the unsaved events.
+            foreach (var entry in context.ChangeTracker.Entries()
+                .Where(e => e.State == EntityState.Added)
+                .ToList())
+            {
+                entry.State = EntityState.Detached;
+            }
+
+            foreach (var trip in trips)
+            {
+                trip.ClearDomainEvents();
+            }
+
+            return false;
+        }
+    }
+
     public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
         context.SaveChangesAsync(cancellationToken);
+
+    public async Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await context.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // The transaction rolled back. Drop everything the tracker still holds (aggregates
+            // plus the journal/snapshot/outbox rows the audit pipeline staged) — the same
+            // cleanup BookeoImportRepository does — so a later save in this scope can't
+            // resurrect the half-applied change.
+            foreach (var entry in context.ChangeTracker.Entries().ToList())
+            {
+                if (entry.Entity is Shared.Kernel.AggregateRoot aggregate)
+                {
+                    aggregate.ClearDomainEvents();
+                }
+
+                entry.State = EntityState.Detached;
+            }
+
+            return false;
+        }
+    }
 }

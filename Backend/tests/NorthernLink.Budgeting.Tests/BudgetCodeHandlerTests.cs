@@ -3,6 +3,7 @@ using NorthernLink.Budgeting.Application.Codes.SetActive;
 using NorthernLink.Budgeting.Application.Codes.Update;
 using NorthernLink.Budgeting.Application.Integration;
 using NorthernLink.Budgeting.Domain.Codes;
+using NorthernLink.Budgeting.Domain.Periods;
 using NorthernLink.Shared.Kernel;
 using Xunit;
 
@@ -13,22 +14,31 @@ public class BudgetCodeHandlerTests
 {
     private readonly InMemoryBudgetCodeRepository _repository = new();
     private readonly InMemoryUserLookupRepository _users = new();
+    private readonly InMemoryCostCentreRepository _costCentres = new();
+    private readonly InMemoryBudgetPeriodRepository _periods = new();
+
+    /// <summary>The Draft period every code in this class lives in (codes belong to a period).</summary>
+    private readonly BudgetPeriod _period = TestBudgeting.PeriodIn(PeriodState.Draft);
+
+    private BudgetCode Code(string code = "ZBB-CREW-01", BudgetCodeDetails? details = null) =>
+        TestBudgeting.CreateCode(code, details, periodId: _period.Id);
     private readonly CreateBudgetCodeCommandHandler _create;
     private readonly UpdateBudgetCodeCommandHandler _update;
     private readonly SetBudgetCodeActiveCommandHandler _setActive;
 
     public BudgetCodeHandlerTests()
     {
-        _create = new CreateBudgetCodeCommandHandler(_repository, _users);
-        _update = new UpdateBudgetCodeCommandHandler(_repository, _users);
-        // Nothing in this class plans or spends against a code, so the retirement rule's three
-        // collaborators are all empty and every retire here is unblocked. The rule's own arms
-        // live in BudgetCodeRetirementRuleTests.
+        _periods.Add(_period);
+        _create = new CreateBudgetCodeCommandHandler(_repository, _periods, _users, _costCentres);
+        _update = new UpdateBudgetCodeCommandHandler(_repository, _periods, _users, _costCentres);
+        // Nothing in this class plans or spends against a code, so the retirement rule's
+        // allocation and actuals collaborators are empty and every retire here is unblocked. The
+        // rule's own arms live in BudgetCodeRetirementRuleTests.
         _setActive = new SetBudgetCodeActiveCommandHandler(
             _repository,
             new InMemoryBudgetAllocationRepository(),
             new InMemoryActualTransactionRepository(),
-            new InMemoryBudgetPeriodRepository());
+            _periods);
     }
 
     private Guid AddUser(string email = "planner@northernlink.ca")
@@ -48,7 +58,7 @@ public class BudgetCodeHandlerTests
     private Task<Result<Guid>> CreateAsync(string code, BudgetCodeDetails? details = null) =>
         _create.Handle(
             new CreateBudgetCodeCommand(
-                TestBudgeting.TenantId, code, details ?? TestBudgeting.CodeDetails(), TestBudgeting.ActorId),
+                TestBudgeting.TenantId, _period.Id, code, details ?? TestBudgeting.CodeDetails(), TestBudgeting.ActorId),
             CancellationToken.None);
 
     // --- Creation and uniqueness ----------------------------------------------------------------
@@ -75,7 +85,7 @@ public class BudgetCodeHandlerTests
     [Fact]
     public async Task A_duplicate_code_is_rejected()
     {
-        _repository.Add(TestBudgeting.CreateCode("ZBB-CREW-01"));
+        _repository.Add(Code("ZBB-CREW-01"));
 
         var result = await CreateAsync("ZBB-CREW-01");
 
@@ -88,7 +98,7 @@ public class BudgetCodeHandlerTests
     public async Task A_code_differing_only_in_case_or_whitespace_is_a_duplicate()
     {
         // Two codes a reader could not tell apart on a report are the same code.
-        _repository.Add(TestBudgeting.CreateCode("ZBB-CREW-01"));
+        _repository.Add(Code("ZBB-CREW-01"));
 
         var result = await CreateAsync("  zbb-crew-01 ");
 
@@ -101,7 +111,7 @@ public class BudgetCodeHandlerTests
     {
         // Domain validation runs before every cross-row lookup, so a bad payload never reaches
         // the duplicate, parent or owner checks.
-        _repository.Add(TestBudgeting.CreateCode("ZBB-CREW-01"));
+        _repository.Add(Code("ZBB-CREW-01"));
 
         var result = await CreateAsync("ZBB-CREW-01", TestBudgeting.CodeDetails(name: ""));
 
@@ -112,7 +122,7 @@ public class BudgetCodeHandlerTests
     [Fact]
     public async Task A_different_code_succeeds_alongside_an_existing_one()
     {
-        _repository.Add(TestBudgeting.CreateCode("ZBB-CREW-01"));
+        _repository.Add(Code("ZBB-CREW-01"));
 
         var result = await CreateAsync("ZBB-FUEL-01");
 
@@ -159,7 +169,7 @@ public class BudgetCodeHandlerTests
     [Fact]
     public async Task A_top_level_parent_is_accepted()
     {
-        var parent = TestBudgeting.CreateCode("ZBB-REV");
+        var parent = Code("ZBB-REV");
         _repository.Add(parent);
 
         var result = await CreateAsync("ZBB-CREW-01", TestBudgeting.CodeDetails(parentCodeId: parent.Id));
@@ -182,8 +192,8 @@ public class BudgetCodeHandlerTests
     public async Task A_parent_that_already_has_a_parent_is_rejected()
     {
         // The hierarchy is one level deep, guarded from above.
-        var grandparent = TestBudgeting.CreateCode("ZBB-REV");
-        var parent = TestBudgeting.CreateCode(
+        var grandparent = Code("ZBB-REV");
+        var parent = Code(
             "ZBB-REV-SUB", TestBudgeting.CodeDetails(parentCodeId: grandparent.Id));
         _repository.Add(grandparent);
         _repository.Add(parent);
@@ -197,12 +207,12 @@ public class BudgetCodeHandlerTests
     [Fact]
     public async Task A_code_cannot_be_its_own_parent()
     {
-        var code = TestBudgeting.CreateCode("ZBB-CREW-01");
+        var code = Code("ZBB-CREW-01");
         _repository.Add(code);
 
         var result = await _update.Handle(
             new UpdateBudgetCodeCommand(
-                TestBudgeting.TenantId, code.Id,
+                TestBudgeting.TenantId, _period.Id, code.Id,
                 TestBudgeting.CodeDetails(parentCodeId: code.Id), TestBudgeting.ActorId),
             CancellationToken.None);
 
@@ -215,9 +225,9 @@ public class BudgetCodeHandlerTests
     {
         // The hierarchy guarded from below. Without this a planner builds two levels bottom-up:
         // give A a child B, then give A a parent.
-        var top = TestBudgeting.CreateCode("ZBB-REV");
-        var middle = TestBudgeting.CreateCode("ZBB-CREW-01");
-        var child = TestBudgeting.CreateCode(
+        var top = Code("ZBB-REV");
+        var middle = Code("ZBB-CREW-01");
+        var child = Code(
             "ZBB-CREW-02", TestBudgeting.CodeDetails(parentCodeId: middle.Id));
         _repository.Add(top);
         _repository.Add(middle);
@@ -225,7 +235,7 @@ public class BudgetCodeHandlerTests
 
         var result = await _update.Handle(
             new UpdateBudgetCodeCommand(
-                TestBudgeting.TenantId, middle.Id,
+                TestBudgeting.TenantId, _period.Id, middle.Id,
                 TestBudgeting.CodeDetails(parentCodeId: top.Id), TestBudgeting.ActorId),
             CancellationToken.None);
 
@@ -239,14 +249,14 @@ public class BudgetCodeHandlerTests
     {
         // The children rule fires only when an update *sets* a parent. Renaming a parent is
         // ordinary editing and must not be blocked by it.
-        var parent = TestBudgeting.CreateCode("ZBB-REV");
-        var child = TestBudgeting.CreateCode("ZBB-CREW-01", TestBudgeting.CodeDetails(parentCodeId: parent.Id));
+        var parent = Code("ZBB-REV");
+        var child = Code("ZBB-CREW-01", TestBudgeting.CodeDetails(parentCodeId: parent.Id));
         _repository.Add(parent);
         _repository.Add(child);
 
         var result = await _update.Handle(
             new UpdateBudgetCodeCommand(
-                TestBudgeting.TenantId, parent.Id,
+                TestBudgeting.TenantId, _period.Id, parent.Id,
                 TestBudgeting.CodeDetails(name: "Revenue rollup"), TestBudgeting.ActorId),
             CancellationToken.None);
 
@@ -259,12 +269,12 @@ public class BudgetCodeHandlerTests
     [Fact]
     public async Task Update_applies_the_new_details_and_saves()
     {
-        var code = TestBudgeting.CreateCode();
+        var code = Code();
         _repository.Add(code);
 
         var result = await _update.Handle(
             new UpdateBudgetCodeCommand(
-                TestBudgeting.TenantId, code.Id,
+                TestBudgeting.TenantId, _period.Id, code.Id,
                 TestBudgeting.CodeDetails(name: "Renamed"), TestBudgeting.ActorId),
             CancellationToken.None);
 
@@ -279,7 +289,7 @@ public class BudgetCodeHandlerTests
     {
         var result = await _update.Handle(
             new UpdateBudgetCodeCommand(
-                TestBudgeting.TenantId, Guid.NewGuid(), TestBudgeting.CodeDetails(), TestBudgeting.ActorId),
+                TestBudgeting.TenantId, _period.Id, Guid.NewGuid(), TestBudgeting.CodeDetails(), TestBudgeting.ActorId),
             CancellationToken.None);
 
         Assert.True(result.IsFailure);
@@ -290,12 +300,12 @@ public class BudgetCodeHandlerTests
     [Fact]
     public async Task Update_with_invalid_details_does_not_save()
     {
-        var code = TestBudgeting.CreateCode();
+        var code = Code();
         _repository.Add(code);
 
         var result = await _update.Handle(
             new UpdateBudgetCodeCommand(
-                TestBudgeting.TenantId, code.Id,
+                TestBudgeting.TenantId, _period.Id, code.Id,
                 TestBudgeting.CodeDetails(description: new string('x', BudgetCode.DescriptionMaxLength + 1)),
                 TestBudgeting.ActorId),
             CancellationToken.None);
@@ -308,11 +318,11 @@ public class BudgetCodeHandlerTests
     [Fact]
     public async Task Deactivate_retires_the_code_without_removing_it()
     {
-        var code = TestBudgeting.CreateCode();
+        var code = Code();
         _repository.Add(code);
 
         var result = await _setActive.Handle(
-            new SetBudgetCodeActiveCommand(TestBudgeting.TenantId, code.Id, false, TestBudgeting.ActorId),
+            new SetBudgetCodeActiveCommand(TestBudgeting.TenantId, _period.Id, code.Id, false, TestBudgeting.ActorId),
             CancellationToken.None);
 
         Assert.True(result.IsSuccess);
@@ -325,13 +335,13 @@ public class BudgetCodeHandlerTests
     {
         // No cascade, by design: retirement is a statement about one code's availability, and
         // silently retiring a branch would hide codes the planner never touched.
-        var parent = TestBudgeting.CreateCode("ZBB-REV");
-        var child = TestBudgeting.CreateCode("ZBB-CREW-01", TestBudgeting.CodeDetails(parentCodeId: parent.Id));
+        var parent = Code("ZBB-REV");
+        var child = Code("ZBB-CREW-01", TestBudgeting.CodeDetails(parentCodeId: parent.Id));
         _repository.Add(parent);
         _repository.Add(child);
 
         await _setActive.Handle(
-            new SetBudgetCodeActiveCommand(TestBudgeting.TenantId, parent.Id, false, TestBudgeting.ActorId),
+            new SetBudgetCodeActiveCommand(TestBudgeting.TenantId, _period.Id, parent.Id, false, TestBudgeting.ActorId),
             CancellationToken.None);
 
         Assert.False(parent.IsActive);
@@ -341,12 +351,12 @@ public class BudgetCodeHandlerTests
     [Fact]
     public async Task Deactivating_an_already_inactive_code_still_succeeds()
     {
-        var code = TestBudgeting.CreateCode();
+        var code = Code();
         code.SetActive(false, TestBudgeting.ActorId);
         _repository.Add(code);
 
         var result = await _setActive.Handle(
-            new SetBudgetCodeActiveCommand(TestBudgeting.TenantId, code.Id, false, TestBudgeting.ActorId),
+            new SetBudgetCodeActiveCommand(TestBudgeting.TenantId, _period.Id, code.Id, false, TestBudgeting.ActorId),
             CancellationToken.None);
 
         Assert.True(result.IsSuccess);
@@ -357,7 +367,7 @@ public class BudgetCodeHandlerTests
     public async Task SetActive_on_an_unknown_id_reports_not_found()
     {
         var result = await _setActive.Handle(
-            new SetBudgetCodeActiveCommand(TestBudgeting.TenantId, Guid.NewGuid(), false, TestBudgeting.ActorId),
+            new SetBudgetCodeActiveCommand(TestBudgeting.TenantId, _period.Id, Guid.NewGuid(), false, TestBudgeting.ActorId),
             CancellationToken.None);
 
         Assert.True(result.IsFailure);

@@ -16,6 +16,10 @@ public sealed class DriverReadModel
 {
     public Guid Id { get; set; }
     public Guid TenantId { get; set; }
+
+    /// <summary>The linked Identity account, or null. Backs <c>GET /api/drivers/me</c>.</summary>
+    public Guid? UserId { get; set; }
+
     public string Name { get; set; } = null!;
     public string? Phone { get; set; }
     public string LicenceClass { get; set; } = null!;
@@ -37,6 +41,13 @@ public sealed class DriverReadModel
     public string? LatestDutyStatus { get; set; }
     public decimal? LatestDrivingHours { get; set; }
     public DateOnly? LatestHosDate { get; set; }
+
+    // The prior-records attestation, copied from the aggregate.
+    public DateOnly? PriorRecordsCoveredThroughDate { get; set; }
+    public DateTimeOffset? PriorRecordsAttestedAtUtc { get; set; }
+    public Guid? PriorRecordsAttestedByUserId { get; set; }
+    public string? PriorRecordsNote { get; set; }
+    public bool WorksForOtherCarriers { get; set; }
 }
 
 /// <summary>
@@ -53,7 +64,14 @@ public sealed class DriverReadModelConfiguration : IEntityTypeConfiguration<Driv
 
         builder.Property(d => d.Id).HasColumnName("id");
         builder.Property(d => d.TenantId).HasColumnName("tenant_id");
+        builder.Property(d => d.UserId).HasColumnName("user_id");
         builder.Property(d => d.Name).HasColumnName("name");
+
+        // Mirrors the write table's partial unique index: rm_drivers is what GET /api/drivers/me
+        // queries, so a duplicate here would make "me" ambiguous even if the aggregate were sound.
+        builder.HasIndex(d => d.UserId)
+            .IsUnique()
+            .HasFilter("user_id IS NOT NULL");
         builder.Property(d => d.Phone).HasColumnName("phone");
         builder.Property(d => d.LicenceClass).HasColumnName("licence_class");
         builder.Property(d => d.LicenceExpiry).HasColumnName("licence_expiry");
@@ -68,5 +86,10 @@ public sealed class DriverReadModelConfiguration : IEntityTypeConfiguration<Driv
         builder.Property(d => d.LatestDutyStatus).HasColumnName("latest_duty_status");
         builder.Property(d => d.LatestDrivingHours).HasColumnName("latest_driving_hours");
         builder.Property(d => d.LatestHosDate).HasColumnName("latest_hos_date");
+        builder.Property(d => d.PriorRecordsCoveredThroughDate).HasColumnName("prior_records_covered_through_date");
+        builder.Property(d => d.PriorRecordsAttestedAtUtc).HasColumnName("prior_records_attested_at_utc");
+        builder.Property(d => d.PriorRecordsAttestedByUserId).HasColumnName("prior_records_attested_by_user_id");
+        builder.Property(d => d.PriorRecordsNote).HasColumnName("prior_records_note");
+        builder.Property(d => d.WorksForOtherCarriers).HasColumnName("works_for_other_carriers");
     }
 }

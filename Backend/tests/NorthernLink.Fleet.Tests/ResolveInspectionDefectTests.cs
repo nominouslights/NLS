@@ -1,5 +1,6 @@
 using NorthernLink.Fleet.Domain.Inspections;
 using NorthernLink.Fleet.Domain.Inspections.Events;
+using NorthernLink.Shared.Kernel;
 using Xunit;
 
 namespace NorthernLink.Fleet.Tests;
@@ -71,6 +72,26 @@ public class ResolveInspectionDefectTests
         var brakes = inspection.Defects.Single();
         Assert.Equal(DefectResolutionReason.PreviouslyRepaired, brakes.ResolutionReason);
         Assert.Equal("Dispatch", brakes.ResolvedBy);
+    }
+
+    [Theory]
+    [InlineData(DefectResolutionReason.RepairedUnderWorkOrder)]
+    [InlineData(DefectResolutionReason.NoFaultFound)]
+    public void Resolving_by_hand_with_a_work_order_only_reason_is_rejected(DefectResolutionReason reason)
+    {
+        var inspection = TestInspections.PreTrip(defects: [Defect("Brakes")]);
+        inspection.ClearDomainEvents();
+
+        var result = inspection.ResolveDefect("Brakes", reason, "claimed fixed", "Dispatch", ResolvedAt);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(InspectionErrors.ResolutionReasonReservedForWorkOrder, result.Error);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+
+        var brakes = inspection.Defects.Single();
+        Assert.False(brakes.IsResolved);
+        Assert.Null(brakes.ResolutionReason);
+        Assert.Empty(inspection.DomainEvents);
     }
 
     [Fact]

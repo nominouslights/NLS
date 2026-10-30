@@ -93,6 +93,30 @@ public class EnterInspectionTests
     }
 
     [Fact]
+    public void A_not_applicable_checklist_row_is_persisted_rather_than_dropped()
+    {
+        // Before the tri-state, a row could only be true or false, so an N/A answer on the paper
+        // form was flattened into one of them on submit and the "does not apply" fact was lost.
+        var inspection = TestInspections.PreTrip(checklistItems: [
+            TestInspections.ChecklistItem(item: "Tires", state: ChecklistItemState.Ok),
+            TestInspections.ChecklistItem(
+                item: "Wheelchair lift",
+                state: ChecklistItemState.NotApplicable,
+                note: "Unit has no lift fitted"),
+        ]);
+
+        Assert.Equal(2, inspection.ChecklistItems.Count);
+
+        var lift = inspection.ChecklistItems.Single(i => i.Item == "Wheelchair lift");
+        Assert.Equal(ChecklistItemState.NotApplicable, lift.State);
+        Assert.Equal("Unit has no lift fitted", lift.Note);
+
+        // …and it is not a defect, so the derived result is untouched by it.
+        Assert.True(lift.Passed);
+        Assert.Equal(InspectionResult.Pass, inspection.Result);
+    }
+
+    [Fact]
     public void A_post_trip_out_of_service_defect_derives_a_failed_inspection()
     {
         var inspection = TestInspections.PostTrip(defects: [TestInspections.Defect(InspectionDefectSeverity.OutOfService)]);

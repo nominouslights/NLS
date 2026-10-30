@@ -1,14 +1,13 @@
 // MOCK DATA — only the domains with NO backend yet remain here: communities,
-// HOS logs & driver leave (no HOS domain), the Fleet/Maintenance preview
-// arrays (fleet, DTC alerts, parts, fuel stats), and incidents.
-// Trips, drivers, clients/contracts/POs, invoices, riders, and preventive
-// maintenance all come from the real APIs in lib/api/.
+// driver leave (no leave domain), the Fleet/Maintenance preview arrays (fleet,
+// DTC alerts, parts, fuel stats), and incidents.
+// Trips, drivers (incl. hours of service), clients/contracts/POs, invoices,
+// riders, and preventive maintenance all come from the real APIs in lib/api/.
 import type {
   DriverLeave,
   DtcAlert,
   FleetVehicle,
   FuelRouteStat,
-  HosLogEntry,
   Incident,
   PartItem,
 } from "./types";
@@ -35,36 +34,8 @@ export const driverLeaves: DriverLeave[] = [
 
 // The driver roster now comes from the real Drivers API (lib/api/drivers.ts).
 
-// Driver credentials now come from the real Drivers API (lib/api/drivers.ts) —
-// the old mock array is gone. HOS logs below stay mock (no backend HOS domain).
-
-// Hours-of-Service logs — MOCK ONLY, keyed by driverId. Mixes Driver-App
-// (electronic) and Manual (paper backup) entries, per the same source split the
-// Fleet DVIR prototype uses. Manual rows carry an enteredBy dispatcher name.
-export const hosLogs: HosLogEntry[] = [
-  // 1 — D. Chartrand
-  { id: "HOS-2001", driverId: 1, date: "2026-07-16", duty: "Driving", onDutyH: 9.5, drivingH: 8, offDutyH: 10, source: "Driver App" },
-  { id: "HOS-2002", driverId: 1, date: "2026-07-15", duty: "On Duty", onDutyH: 6, drivingH: 4.5, offDutyH: 12, source: "Driver App" },
-  { id: "HOS-2003", driverId: 1, date: "2026-07-14", duty: "On Duty", onDutyH: 8, drivingH: 6, offDutyH: 10, source: "Manual (paper backup)", enteredBy: "Dispatch — L. Moose", note: "App offline in Leaf Rapids — logged on paper" },
-  // 2 — M. Okimaw
-  { id: "HOS-2010", driverId: 2, date: "2026-07-16", duty: "On Duty", onDutyH: 6, drivingH: 4.5, offDutyH: 12, source: "Driver App" },
-  // 3 — K. Beardy
-  { id: "HOS-2020", driverId: 3, date: "2026-07-17", duty: "Driving", onDutyH: 10, drivingH: 8.5, offDutyH: 9.5, source: "Driver App" },
-  { id: "HOS-2021", driverId: 3, date: "2026-07-16", duty: "Driving", onDutyH: 9, drivingH: 7, offDutyH: 11, source: "Driver App" },
-  { id: "HOS-2022", driverId: 3, date: "2026-07-15", duty: "On Duty", onDutyH: 5, drivingH: 3, offDutyH: 13, source: "Manual (paper backup)", enteredBy: "Dispatch — L. Moose" },
-  // 4 — J. Spence
-  { id: "HOS-2030", driverId: 4, date: "2026-07-16", duty: "Off Duty", onDutyH: 0, drivingH: 0, offDutyH: 24, source: "Driver App" },
-  { id: "HOS-2031", driverId: 4, date: "2026-07-14", duty: "On Duty", onDutyH: 7, drivingH: 5, offDutyH: 11, source: "Driver App" },
-  { id: "HOS-2032", driverId: 4, date: "2026-07-13", duty: "Driving", onDutyH: 9, drivingH: 7.5, offDutyH: 10, source: "Manual (paper backup)", enteredBy: "Dispatch — R. Sinclair" },
-  // 5 — T. Miller
-  { id: "HOS-2040", driverId: 5, date: "2026-07-16", duty: "On Duty", onDutyH: 8, drivingH: 6, offDutyH: 11, source: "Driver App" },
-  { id: "HOS-2041", driverId: 5, date: "2026-07-15", duty: "Driving", onDutyH: 9.5, drivingH: 8, offDutyH: 10, source: "Manual (paper backup)", enteredBy: "Dispatch — R. Sinclair", note: "Contractor paper log submitted" },
-  // 6 — R. Flett
-  { id: "HOS-2050", driverId: 6, date: "2026-07-16", duty: "On Duty", onDutyH: 8.5, drivingH: 6.5, offDutyH: 10, source: "Driver App" },
-  { id: "HOS-2051", driverId: 6, date: "2026-07-15", duty: "Driving", onDutyH: 9, drivingH: 7, offDutyH: 10.5, source: "Driver App" },
-];
-
-// Client clearances now come from the real Drivers API (lib/api/drivers.ts).
+// Driver credentials, client clearances and hours of service (the duty-event
+// ledger) all come from the real Drivers API (lib/api/drivers.ts, lib/api/hos.ts).
 
 export const fleet: FleetVehicle[] = [
   {

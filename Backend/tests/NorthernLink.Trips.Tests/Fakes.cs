@@ -1,6 +1,9 @@
+using NorthernLink.Shared.Kernel;
+using NorthernLink.Shared.Tenancy;
 using NorthernLink.Trips.Application.Abstractions;
 using NorthernLink.Trips.Application.Integration;
 using NorthernLink.Trips.Application.Schedules;
+using NorthernLink.Trips.Application.Trips;
 using NorthernLink.Trips.Domain.Manifests;
 using NorthernLink.Trips.Domain.Riders;
 using NorthernLink.Trips.Domain.Routes;
@@ -61,11 +64,85 @@ internal sealed class FakeTripRepository : ITripRepository
         return Task.FromResult(true);
     }
 
+    public Task<IReadOnlySet<(DateOnly ServiceDate, TripDirection Direction)>> GetGeneratedOccurrenceKeysAsync(
+        Guid templateId, DateOnly from, DateOnly toExclusive, CancellationToken cancellationToken = default)
+    {
+        IReadOnlySet<(DateOnly ServiceDate, TripDirection Direction)> keys = Trips
+            .Where(t => t.ScheduleTemplateId == templateId
+                && t.ServiceDate >= from
+                && t.ServiceDate < toExclusive
+                && t.Direction is not null)
+            .Select(t => (t.ServiceDate, t.Direction!.Value))
+            .ToHashSet();
+        return Task.FromResult(keys);
+    }
+
+    /// <summary>
+    /// Mirrors the (tenant, template, service date, direction) unique index: a collision with
+    /// an existing trip OR between two trips in the batch rejects the whole batch with false
+    /// (events cleared, nothing added) — the real save is one transaction.
+    /// </summary>
+    public Task<bool> TryAddGeneratedAsync(IReadOnlyList<Trip> trips, CancellationToken cancellationToken = default)
+    {
+        var claimed = Trips
+            .Where(t => t.Direction is not null)
+            .Select(t => (t.TenantId, t.ScheduleTemplateId, t.ServiceDate, t.Direction!.Value))
+            .ToHashSet();
+
+        var collides = trips.Any(t =>
+            t.Direction is null
+            || !claimed.Add((t.TenantId, t.ScheduleTemplateId, t.ServiceDate, t.Direction.Value)));
+        if (collides)
+        {
+            foreach (var trip in trips)
+            {
+                trip.ClearDomainEvents();
+            }
+
+            return Task.FromResult(false);
+        }
+
+        Trips.AddRange(trips);
+        SaveCount++;
+        return Task.FromResult(true);
+    }
+
     public Task SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         SaveCount++;
         return Task.CompletedTask;
     }
+
+    /// <summary>Set true to make the next <see cref="TrySaveChangesAsync"/> lose an optimistic-concurrency race.</summary>
+    public bool SimulateConcurrencyConflict { get; set; }
+
+    public Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        if (SimulateConcurrencyConflict)
+        {
+            return Task.FromResult(false);
+        }
+
+        SaveCount++;
+        return Task.FromResult(true);
+    }
+}
+
+/// <summary>Sequential trip numbers, shared by every handler test that mints one.</summary>
+internal sealed class FakeTripNumberGenerator : ITripNumberGenerator
+{
+    private int _next = 5000;
+
+    public Task<string> NextAsync(Guid tenantId, CancellationToken cancellationToken = default) =>
+        Task.FromResult($"TR-{++_next}");
+}
+
+/// <summary>Deterministic clock for the generation handlers' "today".</summary>
+internal sealed class FakeClock(DateTimeOffset now) : TimeProvider
+{
+    public DateTimeOffset UtcNow { get; set; } = now;
+
+    public override DateTimeOffset GetUtcNow() => UtcNow;
 }
 
 /// <summary>
@@ -132,8 +209,17 @@ internal sealed class FakeDriverLookupRepository : IDriverLookupRepository
 {
     public List<DriverLookup> Drivers { get; } = [];
 
+    /// <summary>How many times a caller was resolved to a driver — the dispatch short-circuit must keep this at 0.</summary>
+    public int UserLookups { get; private set; }
+
     public Task<DriverLookup?> GetAsync(Guid driverId, CancellationToken cancellationToken = default) =>
         Task.FromResult(Drivers.FirstOrDefault(d => d.DriverId == driverId));
+
+    public Task<DriverLookup?> GetByUserIdAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        UserLookups++;
+        return Task.FromResult(Drivers.FirstOrDefault(d => d.UserId == userId));
+    }
 
     public Task UpsertAsync(DriverLookup driver, CancellationToken cancellationToken = default)
     {
@@ -143,12 +229,57 @@ internal sealed class FakeDriverLookupRepository : IDriverLookupRepository
     }
 }
 
+/// <summary>
+/// The signed-in caller as a domain library sees it. <see cref="Dispatcher"/> is the default
+/// for handler tests that are not about the identity gate — a dispatch role short-circuits
+/// the caller-owns-this-trip check, so those tests exercise exactly what they did before.
+/// </summary>
+internal sealed class FakeCurrentActor(Guid? userId, params string[] roles) : ICurrentActor
+{
+    public static readonly Guid DispatcherUserId = Guid.Parse("00000000-0000-0000-0000-00000000aa01");
+
+    public static FakeCurrentActor Dispatcher => new(DispatcherUserId, Shared.Kernel.Roles.Dispatcher);
+
+    public static FakeCurrentActor Driver(Guid userId) => new(userId, Shared.Kernel.Roles.Driver);
+
+    public Guid? UserId => userId;
+
+    /// <summary>The token's email claim — null unless a test sets it.</summary>
+    public string? Email { get; init; }
+
+    public IReadOnlyCollection<string> Roles => roles;
+}
+
+/// <summary>Trip read side that records the filter it was handed and returns a canned page.</summary>
+internal sealed class FakeTripReadService : ITripReadService
+{
+    public List<TripResponse> Trips { get; } = [];
+
+    public TripFilter? LastFilter { get; private set; }
+
+    public Task<(IReadOnlyList<TripResponse> Items, int TotalCount)> GetTripsAsync(
+        TripFilter filter, CancellationToken cancellationToken = default)
+    {
+        LastFilter = filter;
+        IReadOnlyList<TripResponse> items = Trips
+            .Where(t => filter.DriverId is null || t.DriverId == filter.DriverId)
+            .ToList();
+        return Task.FromResult((items, items.Count));
+    }
+
+    public Task<TripResponse?> GetTripAsync(Guid tripId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Trips.FirstOrDefault(t => t.Id == tripId));
+}
+
 internal sealed class FakeVehicleLookupRepository : IVehicleLookupRepository
 {
     public List<VehicleLookup> Vehicles { get; } = [];
 
     public Task<VehicleLookup?> GetAsync(Guid vehicleId, CancellationToken cancellationToken = default) =>
         Task.FromResult(Vehicles.FirstOrDefault(v => v.VehicleId == vehicleId));
+
+    public Task<VehicleLookup?> GetByUnitNumberAsync(string unitNumber, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Vehicles.FirstOrDefault(v => v.UnitNumber == unitNumber));
 
     public Task UpsertAsync(VehicleLookup vehicle, CancellationToken cancellationToken = default)
     {
@@ -283,6 +414,26 @@ internal sealed class FakeTripManifestRepository : ITripManifestRepository
 
     public Task<TripManifest?> GetByIdAsync(Guid manifestId, CancellationToken cancellationToken = default) =>
         Task.FromResult(Manifests.FirstOrDefault(m => m.Id == manifestId));
+
+    public Task<TripManifest?> GetForTripAsync(
+        Guid? manifestId, string tripNumber, CancellationToken cancellationToken = default) =>
+        Task.FromResult(manifestId is { } id
+            ? Manifests.FirstOrDefault(m => m.Id == id)
+            : Manifests.Where(m => m.TripNumber == tripNumber).OrderBy(m => m.CreatedAtUtc).FirstOrDefault());
+
+    public Task<IReadOnlyList<TripManifest>> GetByTripNumberAsync(
+        string tripNumber, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<TripManifest>>(
+            Manifests.Where(m => m.TripNumber == tripNumber).OrderBy(m => m.CreatedAtUtc).ToList());
+
+    /// <summary>Manifests handed to <see cref="Remove"/> — dropped from <see cref="Manifests"/> at once (the fake has no unit of work).</summary>
+    public List<TripManifest> Removed { get; } = [];
+
+    public void Remove(TripManifest manifest)
+    {
+        Removed.Add(manifest);
+        Manifests.Remove(manifest);
+    }
 
     public Task SaveChangesAsync(CancellationToken cancellationToken = default)
     {

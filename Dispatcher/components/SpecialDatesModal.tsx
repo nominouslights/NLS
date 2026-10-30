@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { colors, fonts, statusMeta } from "@/lib/theme";
-import { ApiError } from "@/lib/api";
+import { ApiError, timeInputValue } from "@/lib/api";
 import {
   createScheduleException,
   deleteScheduleException,
@@ -60,10 +60,15 @@ function kindBadge(kind: ScheduleExceptionKind): { c: string; bt: string; t: str
   }
 }
 
-/** "HH:mm:ss" (wire) → "HH:mm" (time input value). */
-function toInputTime(wire: string | null): string {
-  return wire ? wire.slice(0, 5) : "";
-}
+/**
+ * "HH:mm:ss" (wire) → "HH:mm" (time input value).
+ *
+ * Delegates to the shared formatter rather than slicing. This screen had solved the blank-time-
+ * input problem locally while the schedule-template and trip editors still had it, so the fix
+ * existed here and nowhere else. One implementation now, in lib/api/trips.ts, next to the
+ * display formatter it must not be confused with — and it pads, which a slice does not.
+ */
+const toInputTime = timeInputValue;
 
 function monthRange(year: number, month: number): { from: string; to: string } {
   const pad = (n: number) => String(n).padStart(2, "0");

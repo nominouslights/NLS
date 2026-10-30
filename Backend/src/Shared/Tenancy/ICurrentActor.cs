@@ -15,9 +15,9 @@ namespace NorthernLink.Shared.Tenancy;
 /// token, server-side, and the caller cannot influence it.
 /// </para>
 /// <para>
-/// Both properties are null for background work (the projection and outbox workers have no
-/// principal) and for unauthenticated flows such as login. Callers must treat "no actor" as
-/// normal rather than an error.
+/// <see cref="UserId"/> and <see cref="Email"/> are null — and <see cref="Roles"/> empty — for
+/// background work (the projection and outbox workers have no principal) and for unauthenticated
+/// flows such as login. Callers must treat "no actor" as normal rather than an error.
 /// </para>
 /// </summary>
 public interface ICurrentActor
@@ -31,4 +31,18 @@ public interface ICurrentActor
     /// value through a replica, so a future rename does not leave stale copies behind.
     /// </summary>
     string? Email { get; }
+
+    /// <summary>
+    /// The roles from the access token's <c>role</c> claims (today always exactly one — a user
+    /// carries a single role). Exposed so a domain library can answer "is this caller dispatch
+    /// staff, or a driver acting on their own record?" without reaching for
+    /// <c>HttpContext</c>, which it cannot see.
+    /// <para>
+    /// Compare these <b>ordinally</b> — <c>OwnRecordAccess.HoldsAnyRole</c> does. Do not route
+    /// comparisons through <c>ClaimsPrincipal.IsInRole</c>, which is case-insensitive and would
+    /// admit a "driver" that <c>User.Create</c> is written to reject outright.
+    /// </para>
+    /// <para>Empty, never null, when there is no authenticated principal.</para>
+    /// </summary>
+    IReadOnlyCollection<string> Roles { get; }
 }

@@ -25,5 +25,6 @@ public static class WorkOrderResponseMapper
         workOrder.ShopId,
         workOrder.AuthorizedLimitCad,
         workOrder.BudgetCode,
-        workOrder.DateRequiredOrOos);
+        workOrder.DateRequiredOrOos,
+        workOrder.Defects.Select(WorkOrderDefectLineResponse.From).ToList());
 }

@@ -5,8 +5,9 @@ import { colors, fonts } from "@/lib/theme";
 import { ApiError } from "@/lib/api";
 import {
   createPurchaseOrder,
+  poTermsLabel,
   updatePurchaseOrder,
-  type PurchaseOrderInput,
+  type PurchaseOrderUpdateInput,
   type PurchaseOrderRecord,
 } from "@/lib/api/clients";
 import { ModalShell } from "@/components/ui/ModalShell";
@@ -17,21 +18,45 @@ import { ActionButton } from "@/components/ui/Button";
 // /api/clients/{id}/purchase-orders (Clients module). Expiry is optional; the
 // expiry chips on the PO dashboard are derived client-side from it
 // (docStatusFor thresholds), never stored.
+//
+// A PO carries its own PRICING TERMS — now exactly ONE rate, the round trip. A
+// blank round-trip rate inherits the contract's. Because a blank field that
+// silently means "something else" is how a pricing bug reaches an invoice, this
+// form previews the EFFECTIVE terms live, in the same words the PO dashboard and
+// the accruals report use (poTermsLabel — lib/api/clients.ts).
+//
+// THE ONE-WAY RATE IS NO LONGER EDITED HERE. Every trip bills the full
+// round-trip rate (a lone leg still deadheads the vehicle back), so a live box
+// that changes no invoice is exactly the confusion the owner asked us to remove.
+// The stored figure is NOT discarded, though: PUT is a full-document replace, so
+// omitting the key would erase a recorded negotiation the backend deliberately
+// kept. The existing value is round-tripped in the payload unchanged, and a new
+// PO simply sends null.
+
+/** A rate box's value as a number, or null when blank. NaN reads as invalid and
+ *  is caught on submit. */
+function rateValue(raw: string): number | null {
+  return raw === "" ? null : Number(raw);
+}
 
 export default function PoFormModal({
   clientId,
   clientName,
+  contractRateCad,
   existing,
   onClose,
   onSaved,
 }: {
   clientId: string;
   clientName: string;
+  /** The active contract's round-trip rate — the fallback a blank PO rate
+   *  inherits, shown live in the effective-terms preview. */
+  contractRateCad: number | null;
   /** When set, edits this PO (PUT); otherwise creates (POST). */
   existing?: PurchaseOrderRecord | null;
   onClose: () => void;
   /** The saved PO id + the submitted body (for refetchUntil predicates). */
-  onSaved: (poId: string, input: PurchaseOrderInput) => void;
+  onSaved: (poId: string, input: PurchaseOrderUpdateInput) => void;
 }) {
   const editing = existing != null;
 
@@ -40,9 +65,31 @@ export default function PoFormModal({
   const [expiry, setExpiry] = useState(existing?.expiry ?? "");
   const [noExpiry, setNoExpiry] = useState(editing ? existing.expiry == null : false);
   const [amount, setAmount] = useState(existing?.amountCad != null ? String(existing.amountCad) : "");
+  const [roundTripRate, setRoundTripRate] = useState(
+    existing?.roundTripRateCad != null ? String(existing.roundTripRateCad) : "",
+  );
   const [note, setNote] = useState(existing?.note ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // What this PO will actually price at, recomputed as the boxes are typed in.
+  const roundTripNum = rateValue(roundTripRate);
+  // History only — never edited here, never priced, always sent back unchanged.
+  const retainedOneWayRateCad = existing?.oneWayRateCad ?? null;
+  const termsPreview = poTermsLabel(
+    {
+      id: "",
+      clientId,
+      poNumber,
+      issued,
+      expiry: null,
+      amountCad: null,
+      roundTripRateCad: roundTripNum != null && Number.isFinite(roundTripNum) ? roundTripNum : null,
+      oneWayRateCad: retainedOneWayRateCad,
+      note: null,
+    },
+    contractRateCad,
+  );
 
   async function submit() {
     if (busy) return;
@@ -53,12 +100,24 @@ export default function PoFormModal({
     if (amountNum != null && (Number.isNaN(amountNum) || amountNum < 0)) {
       return setError("The amount must be a non-negative number (CAD), or left blank.");
     }
+    if (roundTripNum != null && (Number.isNaN(roundTripNum) || roundTripNum < 0)) {
+      return setError(
+        "The round-trip rate must be a non-negative number (CAD), or left blank to inherit the contract rate.",
+      );
+    }
 
-    const input: PurchaseOrderInput = {
+    // Every key is set explicitly, null included — PUT is a full replace and the
+    // backend rejects a missing key, so an omitted field is never how a rate is
+    // cleared here. PurchaseOrderUpdateInput is what makes that a compile error.
+    // oneWayRateCad is the retained figure, resent byte-for-byte: the field is
+    // gone from the UI, not from the record.
+    const input: PurchaseOrderUpdateInput = {
       poNumber: poNumber.trim(),
       issued,
       expiry: noExpiry ? null : expiry,
       amountCad: amountNum,
+      roundTripRateCad: roundTripNum,
+      oneWayRateCad: retainedOneWayRateCad,
       note: note.trim() || null,
     };
 
@@ -100,6 +159,48 @@ export default function PoFormModal({
         <DateField label="Issued" value={issued} onChange={setIssued} />
         <DateField label="Expiry" value={expiry} onChange={setExpiry} disabled={noExpiry} />
       </div>
+      {/* pricing terms — one rate, optional, inheriting the contract when blank */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
+        <NumberField
+          label="Round-trip rate (CAD, optional)"
+          value={roundTripRate}
+          onChange={setRoundTripRate}
+          min={0}
+          step={0.01}
+          placeholder={contractRateCad != null ? `${contractRateCad} (contract)` : "no contract rate"}
+        />
+      </div>
+      <div
+        style={{
+          marginTop: 10,
+          padding: "9px 12px",
+          background: colors.cardBgActive,
+          border: `1px solid ${colors.borderSubtle}`,
+          borderRadius: 8,
+        }}
+      >
+        <div
+          style={{
+            fontFamily: fonts.semiCondensed,
+            fontWeight: 600,
+            fontSize: 10,
+            letterSpacing: ".08em",
+            textTransform: "uppercase",
+            color: colors.textDim,
+          }}
+        >
+          Will bill at
+        </div>
+        <div style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.textPrimary, marginTop: 3 }}>
+          {termsPreview}
+        </div>
+        <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim, marginTop: 4, lineHeight: 1.5 }}>
+          Leave the rate blank to inherit the contract rate. Every trip on this PO bills the full
+          round-trip rate, whether or not the return leg is scheduled — the vehicle comes back
+          either way. Rates are quoted tax-inclusive — taxes are applied in QuickBooks.
+        </div>
+      </div>
+
       <div style={{ marginTop: 14 }}>
         <TextField label="Note (optional)" value={note} onChange={setNote} placeholder="Crew shuttle — annual" />
       </div>

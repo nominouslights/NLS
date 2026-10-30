@@ -151,6 +151,9 @@ public class SendClientAccrualsEmailCommandHandlerTests
         {
             Assert.Equal("Accruals report — Vale Manitoba Operations — August 2026", email.Subject);
             Assert.Contains("accruals report for Vale Manitoba Operations", email.HtmlBody);
+            Assert.Contains("work still to come and what is owing", email.HtmlBody);
+            Assert.Contains("Upcoming expenses", email.HtmlBody);
+            Assert.Contains("Estimated amounts are marked and are not invoices", email.HtmlBody);
             var attachment = Assert.Single(email.Attachments!);
             Assert.Equal("accruals-report-august-2026.pdf", attachment.Name);
             Assert.Equal("application/pdf", attachment.ContentType);

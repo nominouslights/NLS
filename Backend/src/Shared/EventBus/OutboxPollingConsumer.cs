@@ -45,9 +45,10 @@ public sealed class OutboxPollingConsumer<TDbContext>(
     where TDbContext : ModuleDbContext
 {
     // Schema names come from our own routing-key convention (IntegrationEvents.<Domain>
-    // namespaces), but they are interpolated into SQL, so validate defensively anyway.
+    // namespaces) or from an explicit OnProducedBy list, but they are interpolated into SQL, so
+    // validate defensively anyway.
     private readonly IReadOnlyDictionary<string, string[]> _routingKeysBySchema =
-        GroupBySchema(subscriptions.RoutingKeys);
+        Validated(subscriptions.RoutingKeysBySchema);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -287,12 +288,8 @@ public sealed class OutboxPollingConsumer<TDbContext>(
 
     private static string Truncate(string error) => error.Length <= 1024 ? error : error[..1024];
 
-    private static IReadOnlyDictionary<string, string[]> GroupBySchema(IReadOnlyCollection<string> routingKeys)
+    private static IReadOnlyDictionary<string, string[]> Validated(IReadOnlyDictionary<string, string[]> bySchema)
     {
-        var bySchema = routingKeys
-            .GroupBy(key => key[..key.IndexOf('.')])
-            .ToDictionary(group => group.Key, group => group.ToArray());
-
         foreach (var schema in bySchema.Keys)
         {
             if (schema.Length == 0 || !schema.All(c => c is >= 'a' and <= 'z' or '_'))

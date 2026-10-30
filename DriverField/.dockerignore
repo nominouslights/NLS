@@ -1,0 +1,19 @@
+# Everything the image builds from scratch or must never contain.
+node_modules
+.next
+out
+*.tsbuildinfo
+
+.git
+.github
+.claude
+.vscode
+.idea
+
+.env
+.env.*
+
+Dockerfile
+.dockerignore
+README.md
+CLAUDE.md

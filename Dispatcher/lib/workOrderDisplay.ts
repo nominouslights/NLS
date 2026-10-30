@@ -1,5 +1,6 @@
 import type { StatusKind } from "./theme";
 import type {
+  DefectRepairOutcomeWire,
   DefectResolutionReasonWire,
   DefectSeverityWire,
   InspectionResultWire,
@@ -64,15 +65,52 @@ export const DEFECT_WO_KIND: Record<WorkOrderStatusWire, StatusKind> = {
   Cancelled: "off",
 };
 
-/** Why a defect stopped being an open fault. RepairedUnderWorkOrder is stamped
- *  by work-order completion, never chosen by hand — it is here because it comes
- *  back on resolved rows. */
+/** Why a defect stopped being an open fault. RepairedUnderWorkOrder and
+ *  NoFaultFound are stamped by work-order completion, never chosen by hand —
+ *  they are here because they come back on resolved rows. */
 export const DEFECT_RESOLUTION_LABEL: Record<DefectResolutionReasonWire, string> = {
   RepairedUnderWorkOrder: "Repaired under work order",
   PreviouslyRepaired: "Previously repaired",
   ReportedInError: "Reported in error",
   AcceptedMonitoring: "Accepted, monitoring",
+  NoFaultFound: "No fault found under work order",
 };
+
+/** Every resolution is a cleared defect, so every reason is teal (the label
+ *  says which). NoFaultFound takes the same ○ as its work-order outcome, so the
+ *  defect row and the work-order card read alike. */
+export const DEFECT_RESOLUTION_META: Record<DefectResolutionReasonWire, { kind: StatusKind; glyph?: string }> = {
+  RepairedUnderWorkOrder: { kind: "ontime" },
+  PreviouslyRepaired: { kind: "ontime" },
+  ReportedInError: { kind: "ontime" },
+  AcceptedMonitoring: { kind: "ontime" },
+  NoFaultFound: { kind: "ontime", glyph: "○" },
+};
+
+/** What the mechanic found for one defect line, as the dispatcher reads it. */
+export const DEFECT_OUTCOME_LABEL: Record<DefectRepairOutcomeWire, string> = {
+  Repaired: "Repaired",
+  NoFaultFound: "No fault found",
+  Deferred: "Deferred",
+};
+
+/** Outcome → chip colour + glyph. Repaired and No fault found both clear the
+ *  defect (teal) and are told apart by glyph — ✓ against ○ (U+25CB, "nothing
+ *  there"). Deferred leaves the defect open: gold ◐ (the caution default). */
+export const DEFECT_OUTCOME_META: Record<DefectRepairOutcomeWire, { kind: StatusKind; glyph: string }> = {
+  Repaired: { kind: "ontime", glyph: "✓" },
+  NoFaultFound: { kind: "ontime", glyph: "○" },
+  Deferred: { kind: "soon", glyph: "◐" },
+};
+
+/** Plain-language consequence of each outcome, shown beside the select. */
+export const DEFECT_OUTCOME_HELP: Record<DefectRepairOutcomeWire, string> = {
+  Repaired: "Clears the defect permanently.",
+  NoFaultFound: "Clears the defect permanently — inspected, nothing wrong.",
+  Deferred: "Leaves the defect open for a later work order. Needs a note.",
+};
+
+export const DEFECT_OUTCOMES: DefectRepairOutcomeWire[] = ["Repaired", "NoFaultFound", "Deferred"];
 
 export const OPEN_WIRE_STATUSES: WorkOrderStatusWire[] = ["Open", "InProgress", "AwaitingParts"];
 
@@ -140,6 +178,11 @@ export function toPrintableWorkOrder(w: WorkOrderWire, unit: string): WorkOrder 
     authorizedLimitCad: w.authorizedLimitCad ?? undefined,
     budgetCode: w.budgetCode ?? undefined,
     dateRequiredOrOos: w.dateRequiredOrOos?.slice(0, 10),
+    defectLines: (w.defects ?? []).map((d) => ({
+      item: d.item,
+      severity: DEFECT_SEVERITY_LABEL[d.severity] ?? d.severity,
+      note: d.note ?? undefined,
+    })),
   };
 }
 

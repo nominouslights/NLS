@@ -1,14 +1,11 @@
 using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Trips.Application.Abstractions;
-using NorthernLink.Trips.Domain.Routes;
 using NorthernLink.Trips.Domain.Trips;
 
 namespace NorthernLink.Trips.Application.Trips.Update;
 
-public sealed class UpdateTripCommandHandler(
-    ITripRepository tripRepository,
-    IRouteRepository routeRepository)
+public sealed class UpdateTripCommandHandler(ITripRepository tripRepository)
     : ICommandHandler<UpdateTripCommand>
 {
     public async Task<Result> Handle(UpdateTripCommand command, CancellationToken cancellationToken)
@@ -19,27 +16,35 @@ public sealed class UpdateTripCommandHandler(
             return Result.Failure(TripErrors.NotFound);
         }
 
-        Guid? routeId = null;
+        // A different route goes through ChangeTripRouteCommand, which also moves the paired
+        // leg and checks passengers and cargo first. Rejected here before anything else so the
+        // caller learns the right endpoint rather than a validation error about corridor text.
+        if (command.RouteId != trip.RouteId)
+        {
+            return Result.Failure(TripErrors.UseChangeRoute);
+        }
+
         var routeName = command.RouteName ?? string.Empty;
         var origin = command.Origin ?? string.Empty;
+        var originProvince = command.OriginProvince;
         var destination = command.Destination ?? string.Empty;
+        var destinationProvince = command.DestinationProvince;
         var stops = command.Stops;
         var distanceKm = command.DistanceKm;
 
-        if (command.RouteId is { } requestedRouteId)
+        if (trip.RouteId is not null)
         {
-            var route = await routeRepository.GetByIdAsync(requestedRouteId, cancellationToken);
-            if (route is null)
-            {
-                return Result.Failure(RouteErrors.NotFound);
-            }
-
-            routeId = route.Id;
-            routeName = route.Name;
-            origin = route.Origin;
-            destination = route.Destination;
-            stops = route.Stops;
-            distanceKm = route.DistanceKm;
+            // Same catalogue route: keep the trip's own snapshot. The Dispatcher's edit form
+            // always re-sends the current routeId, so re-snapshotting the catalogue here would
+            // flip an Inbound leg to outbound order and pull in later catalogue edits on an
+            // unrelated change (a PO number, a time).
+            routeName = trip.RouteName;
+            origin = trip.Origin;
+            originProvince = trip.OriginProvince;
+            destination = trip.Destination;
+            destinationProvince = trip.DestinationProvince;
+            stops = trip.Stops;
+            distanceKm = trip.DistanceKm;
         }
 
         var result = trip.Update(
@@ -47,18 +52,19 @@ public sealed class UpdateTripCommandHandler(
             command.WindowStart,
             command.WindowEnd,
             command.ServiceType,
-            routeId,
+            trip.RouteId,
             routeName,
             origin,
             destination,
             stops,
             distanceKm,
-            command.IsEmptyLeg,
             command.ClientId,
             command.ClientName,
             command.PoNumber,
             command.SeatsCapacity,
-            command.SeatsMinimum);
+            command.SeatsMinimum,
+            originProvince,
+            destinationProvince);
 
         if (result.IsFailure)
         {

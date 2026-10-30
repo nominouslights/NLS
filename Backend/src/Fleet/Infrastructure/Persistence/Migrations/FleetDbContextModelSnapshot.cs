@@ -109,6 +109,25 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                         .HasColumnType("boolean[]")
                         .HasColumnName("attestations");
 
+                    b.Property<DateTimeOffset?>("CarrierAcknowledgedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("carrier_acknowledged_at_utc");
+
+                    b.Property<string>("CarrierAcknowledgedBy")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("carrier_acknowledged_by");
+
+                    b.Property<string>("CarrierAcknowledgementNote")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("carrier_acknowledgement_note");
+
+                    b.Property<string>("CertificationStatement")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("certification_statement");
+
                     b.Property<DateTimeOffset?>("CertifiedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("certified_at");
@@ -158,6 +177,11 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("text[]")
                         .HasColumnName("issues");
+
+                    b.Property<string>("Location")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("location");
 
                     b.Property<Guid?>("ManifestId")
                         .HasColumnType("uuid")
@@ -1336,6 +1360,22 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                         .HasColumnType("boolean[]")
                         .HasColumnName("attestations");
 
+                    b.Property<DateTimeOffset?>("CarrierAcknowledgedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("carrier_acknowledged_at_utc");
+
+                    b.Property<string>("CarrierAcknowledgedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("carrier_acknowledged_by");
+
+                    b.Property<string>("CarrierAcknowledgementNote")
+                        .HasColumnType("text")
+                        .HasColumnName("carrier_acknowledgement_note");
+
+                    b.Property<string>("CertificationStatement")
+                        .HasColumnType("text")
+                        .HasColumnName("certification_statement");
+
                     b.Property<DateTimeOffset?>("CertifiedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("certified_at");
@@ -1381,6 +1421,10 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("text[]")
                         .HasColumnName("issues");
+
+                    b.Property<string>("Location")
+                        .HasColumnType("text")
+                        .HasColumnName("location");
 
                     b.Property<Guid?>("ManifestId")
                         .HasColumnType("uuid")
@@ -1920,7 +1964,11 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                             b1.Property<string>("Item")
                                 .IsRequired();
 
+                            b1.Property<string>("Note");
+
                             b1.Property<bool>("Passed");
+
+                            b1.Property<string>("State");
 
                             b1.HasKey("VehicleInspectionId", "__synthesizedOrdinal");
 
@@ -1958,6 +2006,8 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
 
                             b1.Property<string>("Severity")
                                 .IsRequired();
+
+                            b1.Property<Guid?>("WorkOrderId");
 
                             b1.HasKey("VehicleInspectionId", "__synthesizedOrdinal");
 
@@ -2098,6 +2148,42 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                     b.Navigation("PartsUsed");
                 });
 
+            modelBuilder.Entity("NorthernLink.Fleet.Domain.WorkOrders.WorkOrder", b =>
+                {
+                    b.OwnsMany("NorthernLink.Fleet.Domain.WorkOrders.WorkOrderDefectLine", "Defects", b1 =>
+                        {
+                            b1.Property<Guid>("WorkOrderId");
+
+                            b1.Property<int>("__synthesizedOrdinal")
+                                .ValueGeneratedOnAdd();
+
+                            b1.Property<Guid>("InspectionId");
+
+                            b1.Property<string>("Item")
+                                .IsRequired();
+
+                            b1.Property<string>("Note");
+
+                            b1.Property<string>("Outcome");
+
+                            b1.Property<string>("OutcomeNote");
+
+                            b1.Property<string>("Severity")
+                                .IsRequired();
+
+                            b1.HasKey("WorkOrderId", "__synthesizedOrdinal");
+
+                            b1.ToTable("work_orders", "fleet");
+
+                            b1.ToJson("defects");
+
+                            b1.WithOwner()
+                                .HasForeignKey("WorkOrderId");
+                        });
+
+                    b.Navigation("Defects");
+                });
+
             modelBuilder.Entity("NorthernLink.Fleet.Infrastructure.Persistence.ReadModels.MaintenancePlanReadModel", b =>
                 {
                     b.OwnsMany("NorthernLink.Fleet.Domain.Maintenance.MaintenanceItem", "Items", b1 =>
@@ -2236,7 +2322,11 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                             b1.Property<string>("Item")
                                 .IsRequired();
 
+                            b1.Property<string>("Note");
+
                             b1.Property<bool>("Passed");
+
+                            b1.Property<string>("State");
 
                             b1.HasKey("VehicleInspectionReadModelId", "__synthesizedOrdinal");
 
@@ -2275,6 +2365,8 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                             b1.Property<string>("Severity")
                                 .IsRequired();
 
+                            b1.Property<Guid?>("WorkOrderId");
+
                             b1.HasKey("VehicleInspectionReadModelId", "__synthesizedOrdinal");
 
                             b1.ToTable("rm_vehicle_inspections", "fleet");
@@ -2286,6 +2378,42 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
                         });
 
                     b.Navigation("ChecklistItems");
+
+                    b.Navigation("Defects");
+                });
+
+            modelBuilder.Entity("NorthernLink.Fleet.Infrastructure.Persistence.ReadModels.WorkOrderReadModel", b =>
+                {
+                    b.OwnsMany("NorthernLink.Fleet.Domain.WorkOrders.WorkOrderDefectLine", "Defects", b1 =>
+                        {
+                            b1.Property<Guid>("WorkOrderReadModelId");
+
+                            b1.Property<int>("__synthesizedOrdinal")
+                                .ValueGeneratedOnAdd();
+
+                            b1.Property<Guid>("InspectionId");
+
+                            b1.Property<string>("Item")
+                                .IsRequired();
+
+                            b1.Property<string>("Note");
+
+                            b1.Property<string>("Outcome");
+
+                            b1.Property<string>("OutcomeNote");
+
+                            b1.Property<string>("Severity")
+                                .IsRequired();
+
+                            b1.HasKey("WorkOrderReadModelId", "__synthesizedOrdinal");
+
+                            b1.ToTable("rm_work_orders", "fleet");
+
+                            b1.ToJson("defects");
+
+                            b1.WithOwner()
+                                .HasForeignKey("WorkOrderReadModelId");
+                        });
 
                     b.Navigation("Defects");
                 });

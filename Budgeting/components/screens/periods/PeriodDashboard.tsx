@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { colors, fonts, statusMeta } from "@/lib/theme";
 import type { BudgetCode, BudgetCodeCategory, BudgetPeriod } from "@/lib/types";
 import { StatusChip } from "@/components/ui/Chip";
@@ -11,23 +11,37 @@ import { formatCad, formatUtcDate } from "@/lib/api/format";
 import { formatDeltaCad } from "@/lib/money";
 import { ApiError } from "@/lib/api/transport";
 import {
+  allocationCandidates,
+  assignmentState,
   canEditAllocations,
+  copyBudgetAllocations,
   coverage,
   getBudgetPeriod,
+  leftToAssignCad,
   listBudgetAllocations,
   listBudgetCodes,
-  hasPlannedAmounts,
+  getCostCentreRollup,
+  getVendorRollup,
+  listVendors,
+  sumCad,
+  type CostCentreRollup,
+  type VendorRecord,
+  type VendorRollup,
   listBudgetPeriods,
   nextTransition,
+  planBalanced,
   planningProgress,
   refetchUntil,
-  removeBudgetAllocation,
+  priorityBreakdown,
+  removeBudgetItem,
   stateAfter,
   toBudgetCode,
   transitionBudgetPeriod,
-  zbbBalance,
-  zbbBalanceDisplay,
+  unjustifiedLines,
+  ASSIGNMENT_KINDS,
+  ASSIGNMENT_LABELS,
   PERIOD_STATE_LABELS,
+  type BudgetAllocationCopyResult,
   type BudgetAllocationRecord,
   type BudgetPeriodRecord,
   type ChecklistStep,
@@ -35,38 +49,53 @@ import {
   type PeriodTransitionAction,
 } from "@/lib/api/budgeting";
 import { ErrorNotice } from "@/components/ErrorNotice";
-import BudgetAllocationFormModal from "@/components/BudgetAllocationFormModal";
-import { EmptyNote, Num } from "@/components/screens/shared";
+import BudgetItemFormModal from "@/components/BudgetItemFormModal";
+import PriorityBreakdown from "@/components/screens/periods/PriorityBreakdown";
+import CostCentreBreakdown from "@/components/screens/periods/CostCentreBreakdown";
+import VendorBreakdown from "@/components/screens/periods/VendorBreakdown";
+import { EmptyNote } from "@/components/screens/shared";
+import { usePeriodHold } from "@/lib/periodHold";
 import LifecycleStepper from "@/components/screens/periods/LifecycleStepper";
 import PlanningChecklist from "@/components/screens/periods/PlanningChecklist";
+import CopyFromPeriodPanel from "@/components/screens/periods/CopyFromPeriodPanel";
 import AllocationSection from "@/components/screens/periods/AllocationSection";
 
-// Period mode of the Budget Periods screen: one period filling the whole content area — where it
-// stands in its lifecycle, what is planned against it, whether the plan balances, and the two
-// things a planner does here: set lines, and move the period forward. Owns its own fetch of the
-// period's lines and the chart (both needed for coverage and the picker), mounted per period by
-// key from BudgetPeriods so every confirm and modal resets when a different period is opened.
+// The body of the Period Dashboard: the entered period, where it stands in its lifecycle, what
+// is planned against it, and the two things a planner does here — add budget items, and move the
+// period forward. Owns its own fetch of the period's budget items and of the period's OWN chart of
+// codes (periods/{id}/codes — codes belong to a period; both are needed for coverage and the
+// picker). When the period has no active code of a category, that section points to Budget Codes
+// (copy from another period, the starter set, or a new code) instead of opening an empty picker. Console remounts it (a Fragment keyed by the entered period's id)
+// on every switch, so no confirm, modal or fetch outlives the period it was for.
 //
-// It used to be the right-hand pane of a 38%/1fr grid, which is why it drew itself on the tinted
-// detailBg with left-only padding; at full width that tint is its own bordered surface, padded
-// evenly, sitting on the screen's mainBg.
+// While a transition, a removal or a copy is in flight (`busy`), the dashboard holds the period
+// (lib/periodHold.ts): SWITCH PERIOD and + NEW PERIOD refuse until the request settles, so its
+// result — or its error — lands on the period the planner is still looking at. Every confirm
+// names the period it acts on.
 //
 // Two eventual-consistency rules, both inherited from the codes screen: after a transition,
-// refetch the period until it reports the expected state; after a line changes, refetch the lines
+// refetch the period until it reports the expected state; after an item changes, refetch the items
 // until the new VALUES are visible (not merely the row — on edit the row was always there). Only
 // then is the period list refreshed, because its totals read from the same projection.
 //
-// Lines are editable in Draft and Open only (BudgetPeriod.AllowsPlanChanges). Everywhere else the
-// controls are absent and one note names the state, so "I can't add a line" reads as the rule it
+// Items are editable in Draft and Open only (BudgetPeriod.AllowsPlanChanges). Everywhere else the
+// controls are absent and one note names the state, so "I can't add an item" reads as the rule it
 // is rather than as a bug.
 
-/** What the confirming click will do — shown under the button while it awaits confirmation. */
-const TRANSITION_NOTES: Record<PeriodTransitionAction, string> = {
-  finalize:
-    "Finalizing signs the plan off. Its lines become read-only until the period is opened.",
-  open: "Opening starts the live period. Lines can be adjusted again while it is open.",
-  "begin-review": "Beginning review freezes the plan. Lines become read-only for the review.",
-  close: "Closing is final. The period and its plan stay read-only, and there is no step after it.",
+/**
+ * What the confirming click will do — shown under the button while it awaits confirmation, and
+ * naming the period, so a confirm can never be mistaken for one about another period. The button
+ * labels themselves come from nextTransition and are pinned by budgeting.test.ts.
+ */
+const TRANSITION_NOTES: Record<PeriodTransitionAction, (label: string) => string> = {
+  finalize: (label) =>
+    `Finalizing signs ${label}'s plan off. Its items become read-only until the period is opened.`,
+  open: (label) =>
+    `Opening starts ${label} as the live period. Items can be adjusted again while it is open.`,
+  "begin-review": (label) =>
+    `Beginning review freezes ${label}'s plan. Items become read-only for the review.`,
+  close: (label) =>
+    `Closing ${label} is final. The period and its plan stay read-only, and there is no step after it.`,
 };
 
 const TRANSITION_VARIANTS: Record<PeriodTransitionAction, "primary" | "success" | "amber"> = {
@@ -76,29 +105,71 @@ const TRANSITION_VARIANTS: Record<PeriodTransitionAction, "primary" | "success" 
   close: "primary",
 };
 
+/**
+ * The one confirm in flight, as a discriminated union rather than three independent booleans
+ * that each had to remember to reset the other two. Copy made a fourth mutually-exclusive
+ * confirm, at which point "one at a time" had to become structural instead of a convention
+ * maintained by hand at every call site.
+ */
+type PendingConfirm =
+  | { kind: "transition" }
+  | { kind: "remove"; itemId: string }
+  | { kind: "copy" }
+  | null;
+
 export default function PeriodDashboard({
   period,
+  periods,
   onPeriodsRefreshed,
+  onOpenCodes,
 }: {
   period: BudgetPeriod;
-  /** Console's applyLoaded: replaces the list while preserving the selection. */
+  /** The whole list, for the copy panel's source picker. Threaded from Console via BudgetPeriods. */
+  periods: BudgetPeriod[];
+  /** Console's applyLoaded: replaces the list (the entered period is derived from it). */
   onPeriodsRefreshed: (records: BudgetPeriodRecord[]) => void;
+  /** Go to Budget Codes for this same period — where an empty chart is filled. */
+  onOpenCodes: () => void;
 }) {
   const periodId = period.id;
 
   // null = still loading.
   const [lines, setLines] = useState<BudgetAllocationRecord[] | null>(null);
   const [codes, setCodes] = useState<BudgetCode[] | null>(null);
+  /** The server's planned-expense rollup by cost centre; null while loading. */
+  const [rollup, setRollup] = useState<CostCentreRollup | null>(null);
+  const [rollupError, setRollupError] = useState<string | null>(null);
+  /** The server's planned-expense rollup by vendor; null while loading. */
+  const [vendorRollup, setVendorRollup] = useState<VendorRollup | null>(null);
+  const [vendorRollupError, setVendorRollupError] = useState<string | null>(null);
+  /**
+   * The tenant's vendor register, retired included, for the item modal's vendor picker. null
+   * while loading or after a failed load — the modal then offers only an item's own vendors, and
+   * a failure never blocks the plan.
+   */
+  const [vendors, setVendors] = useState<VendorRecord[] | null>(null);
+  /**
+   * Bumped by every register request and every register pushed up from the item modal; a load
+   * whose number is no longer current is stale and is dropped, so `vendors` never regresses (the
+   * cost-centre pattern on Budget Codes).
+   */
+  const vendorsSeq = useRef(0);
+  /** Cleared on unmount, so a register read still in flight never sets state afterwards. */
+  const mounted = useRef(true);
   const [error, setError] = useState<{ message: string; code: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  /** Two-click transition: the first click flips the label, the second sends the command. */
-  const [confirmTransition, setConfirmTransition] = useState(false);
-  /** Two-click remove: holds the code id awaiting confirmation. */
-  const [confirmRemoveCodeId, setConfirmRemoveCodeId] = useState<string | null>(null);
+  /** Two-click confirms — transition, remove and copy — exactly one of which can be pending. */
+  const [confirm, setConfirm] = useState<PendingConfirm>(null);
   const [modal, setModal] = useState<{
     category: BudgetCodeCategory;
-    line: BudgetAllocationRecord | null;
+    item: BudgetAllocationRecord | null;
+    /** "+ ITEM" on a code header preselects that code. */
+    presetCodeId: string | null;
   } | null>(null);
+
+  // busy covers transition, remove and copy — every request this component makes against the
+  // period. The item modal takes its own hold for its save.
+  usePeriodHold(busy);
 
   const applyError = useCallback((e: unknown) => {
     setError(
@@ -125,7 +196,7 @@ export default function PeriodDashboard({
           }
         },
       );
-      listBudgetCodes().then(
+      listBudgetCodes(periodId).then(
         (records) => {
           if (isActive()) setCodes(records.map(toBudgetCode));
         },
@@ -148,6 +219,102 @@ export default function PeriodDashboard({
     };
   }, [load]);
 
+  // The vendor register is tenant-wide and edited on its own screen, so a copy loaded with the
+  // dashboard goes stale: a vendor retired, deleted or restored meanwhile would still be offered
+  // (or withheld) by the picker and misjudged by the pre-submit register check. So it is read on
+  // mount AND again every time the item modal opens; an inline create in the modal pushes its own
+  // fresh read up (acceptVendors). Sequenced, so a slower older read never lands on a newer one.
+  // Until the refresh lands the modal shows the previous copy — the server's check is the one
+  // that counts either way.
+  const loadVendors = useCallback(() => {
+    const request = ++vendorsSeq.current;
+    listVendors(true).then(
+      (records) => {
+        if (mounted.current && request === vendorsSeq.current) setVendors(records);
+      },
+      () => {
+        // Not the plan's error: the picker keeps the copy it has (or, with none, degrades to the
+        // item's own vendors and says so).
+      },
+    );
+  }, []);
+
+  useEffect(() => {
+    mounted.current = true;
+    loadVendors();
+    return () => {
+      mounted.current = false;
+    };
+  }, [loadVendors]);
+
+  /** The register the item modal read after an inline create — newer than any load in flight. */
+  const acceptVendors = useCallback((records: VendorRecord[]) => {
+    vendorsSeq.current += 1;
+    setVendors(records);
+  }, []);
+
+  // The by-cost-centre rollup follows the items: it is refetched whenever a fresh items list lands
+  // (initial load, and after every save, remove and copy — each of which already waited for its
+  // own change to be visible). The rollup is a separate read, so it is retried until its total
+  // agrees with the expense items just loaded. A failure stays inside the panel; it never blocks
+  // the plan.
+  useEffect(() => {
+    if (lines === null) return;
+    let active = true;
+    const expected = sumCad(lines.filter((l) => l.category === "Expense").map((l) => l.amountCad));
+    refetchUntil(
+      () => getCostCentreRollup(periodId),
+      (r) => r.totalPlannedExpenseCad === expected,
+    ).then(
+      (r) => {
+        if (active) {
+          setRollup(r);
+          setRollupError(null);
+        }
+      },
+      (e) => {
+        if (active) {
+          setRollupError(
+            e instanceof ApiError ? e.message : "The cost-centre rollup could not be loaded.",
+          );
+        }
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [periodId, lines]);
+
+  // The by-vendor rollup, on exactly the cost-centre rollup's terms: refetched whenever a fresh
+  // items list lands, retried until its total agrees with the loaded expense items, and a failure
+  // stays inside its own panel.
+  useEffect(() => {
+    if (lines === null) return;
+    let active = true;
+    const expected = sumCad(lines.filter((l) => l.category === "Expense").map((l) => l.amountCad));
+    refetchUntil(
+      () => getVendorRollup(periodId),
+      (r) => r.totalPlannedExpenseCad === expected,
+    ).then(
+      (r) => {
+        if (active) {
+          setVendorRollup(r);
+          setVendorRollupError(null);
+        }
+      },
+      (e) => {
+        if (active) {
+          setVendorRollupError(
+            e instanceof ApiError ? e.message : "The vendor rollup could not be loaded.",
+          );
+        }
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [periodId, lines]);
+
   const editable = canEditAllocations(period.state);
   const stateLabel = PERIOD_STATE_LABELS[period.state];
   const transition = nextTransition(period.state);
@@ -155,28 +322,54 @@ export default function PeriodDashboard({
 
   const steps = planningProgress(period, lines ?? [], codes ?? []);
   const lifecycleSteps = steps.filter((s): s is LifecycleStep => s.group === "lifecycle");
-  const checklistSteps = steps.filter((s): s is ChecklistStep => s.group !== "lifecycle");
+  const checklistSteps = steps.filter((s): s is ChecklistStep => s.group === "checklist");
 
-  // Until the lines arrive, "is anything planned?" is answered from the period's own totals, so
-  // the banner does not flash "Nothing planned yet" at a period that plainly has a plan.
-  const anythingPlanned = lines === null ? hasPlannedAmounts(period) : lines.length > 0;
-  const balance = zbbBalance(period);
-  const balanceDisplay = zbbBalanceDisplay(balance, anythingPlanned);
-  const balanceMeta = statusMeta(balanceDisplay.kind);
-  const balanced = balance.state === "balanced" && anythingPlanned;
+  // Left to assign, not "net": under zero-based budgeting $0 is the target, not the neutral
+  // case. Classified off the period's own server totals (assignmentState), so the tile is right
+  // before the lines fetch lands — and so an empty period reads "Nothing planned yet" rather
+  // than claiming everything is assigned.
+  const assignment = assignmentState(period);
+  const assignmentMeta = statusMeta(ASSIGNMENT_KINDS[assignment]);
+  const left = leftToAssignCad(period);
+  const unargued = unjustifiedLines(lines ?? []).length;
   const revenueCoverage = coverage(lines ?? [], codes ?? [], "Revenue");
   const expenseCoverage = coverage(lines ?? [], codes ?? [], "Expense");
+
+  // Finalize warns but never blocks — the rule that transitions are not gated on plan
+  // completeness is unchanged, and the button below is never disabled because of this.
+  const finalizeConcerns: string[] = [];
+  if (!planBalanced(period)) {
+    finalizeConcerns.push(
+      assignment === "empty"
+        ? "Nothing is planned in this period yet."
+        : assignment === "over"
+          ? `${formatDeltaCad(left)} more is assigned than this period plans to earn.`
+          : `${formatDeltaCad(left)} is still unassigned. Zero-based budgeting balances to exactly $0 — every dollar of planned revenue needs a job.`,
+    );
+  }
+  if (unargued > 0) {
+    finalizeConcerns.push(
+      `${unargued} ${unargued === 1 ? "item" : "items"} still ${unargued === 1 ? "carries" : "carry"} no justification — copied from an earlier period and not yet argued.`,
+    );
+  }
+  const finalizeWarning = transition?.action === "finalize" && finalizeConcerns.length > 0;
+  const warningKind = planBalanced(period) ? "soon" : ASSIGNMENT_KINDS[assignment];
+  const warningLabel = planBalanced(period) ? "Unargued items" : ASSIGNMENT_LABELS[assignment];
+
+  // The by-priority breakdown is summed CLIENT-SIDE from the loaded items — it answers "what would
+  // I cut first?", which the server does not total. The headline tiles above it stay the server's
+  // own totals (period.plannedRevenue / plannedExpense) and are never re-derived from these items.
+  const expenseByPriority = priorityBreakdown((lines ?? []).filter((l) => l.category === "Expense"));
 
   const refreshPeriods = () => listBudgetPeriods().then(onPeriodsRefreshed, applyError);
 
   async function runTransition() {
     if (!transition || busy) return;
-    if (!confirmTransition) {
-      setConfirmTransition(true);
-      setConfirmRemoveCodeId(null);
+    if (confirm?.kind !== "transition") {
+      setConfirm({ kind: "transition" });
       return;
     }
-    setConfirmTransition(false);
+    setConfirm(null);
     setBusy(true);
     setError(null);
     try {
@@ -195,21 +388,20 @@ export default function PeriodDashboard({
     }
   }
 
-  async function removeLine(line: BudgetAllocationRecord) {
+  async function removeItem(item: BudgetAllocationRecord) {
     if (busy) return;
-    if (confirmRemoveCodeId !== line.budgetCodeId) {
-      setConfirmRemoveCodeId(line.budgetCodeId);
-      setConfirmTransition(false);
+    if (confirm?.kind !== "remove" || confirm.itemId !== item.id) {
+      setConfirm({ kind: "remove", itemId: item.id });
       return;
     }
-    setConfirmRemoveCodeId(null);
+    setConfirm(null);
     setBusy(true);
     setError(null);
     try {
-      await removeBudgetAllocation(periodId, line.budgetCodeId);
+      await removeBudgetItem(periodId, item.id);
       const rows = await refetchUntil(
         () => listBudgetAllocations(periodId),
-        (rows) => !rows.some((r) => r.budgetCodeId === line.budgetCodeId),
+        (rows) => !rows.some((r) => r.id === item.id),
       );
       setLines(rows);
       onPeriodsRefreshed(await listBudgetPeriods());
@@ -220,10 +412,49 @@ export default function PeriodDashboard({
     }
   }
 
-  function openModal(category: BudgetCodeCategory, line: BudgetAllocationRecord | null) {
-    setConfirmTransition(false);
-    setConfirmRemoveCodeId(null);
-    setModal({ category, line });
+  /**
+   * Seed this period's plan from an earlier one. Returns the server's counts for the panel to
+   * report, or null when the request was refused — in which case the banner above already
+   * carries the server's own message (CopySourceRequired / CopySourceIsTarget /
+   * CopySourceNotFound / Period.NotFound / PeriodNotEditable), which names the rule.
+   */
+  async function runCopy(sourcePeriodId: string): Promise<BudgetAllocationCopyResult | null> {
+    if (busy) return null;
+    const before = lines?.length ?? 0;
+    setConfirm(null);
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await copyBudgetAllocations(periodId, { sourcePeriodId });
+      // Skip the refetch entirely when nothing was copied. A bulk write needs a COUNT predicate,
+      // and "at least `copied` more rows" can never be satisfied by a successful no-op — the
+      // button would hang until the retry loop gave up on a request that worked perfectly.
+      if (result.copied > 0) {
+        const rows = await refetchUntil(
+          () => listBudgetAllocations(periodId),
+          (rows) => rows.length >= before + result.copied,
+        );
+        setLines(rows);
+        // The tiles read the server's own totals, so the period list has to follow the lines.
+        onPeriodsRefreshed(await listBudgetPeriods());
+      }
+      return result;
+    } catch (e) {
+      applyError(e);
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openModal(
+    category: BudgetCodeCategory,
+    item: BudgetAllocationRecord | null,
+    presetCodeId: string | null = null,
+  ) {
+    setConfirm(null);
+    setModal({ category, item, presetCodeId });
+    loadVendors();
   }
 
   function handleSaved(rows: BudgetAllocationRecord[]) {
@@ -233,15 +464,7 @@ export default function PeriodDashboard({
   }
 
   return (
-    <div
-      style={{
-        marginTop: 14,
-        padding: "18px 20px 20px",
-        background: colors.detailBg,
-        border: `1px solid ${colors.border}`,
-        borderRadius: 12,
-      }}
-    >
+    <div>
       {/* Header: label, dates, state chip, the one forward action. */}
       <div
         style={{
@@ -275,35 +498,58 @@ export default function PeriodDashboard({
             onClick={runTransition}
             disabled={busy}
           >
-            {busy ? "WORKING…" : confirmTransition ? transition.confirmLabel : transition.label}
+            {busy
+              ? "WORKING…"
+              : confirm?.kind === "transition"
+                ? transition.confirmLabel
+                : transition.label}
           </ActionButton>
         )}
       </div>
 
-      {confirmTransition && transition && (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            marginBottom: 12,
-            fontFamily: fonts.body,
-            fontSize: 11.5,
-            color: colors.textSecondary,
-            lineHeight: 1.6,
-          }}
-        >
-          <span style={{ flex: "1 1 auto" }}>
-            {TRANSITION_NOTES[transition.action]} Forward only — there is no step back. Click{" "}
-            {transition.confirmLabel} to proceed.
-            {/* Warn, never block: an unbalanced plan can still be signed off, deliberately, and
-                the checklist plus this sentence are what make that a choice rather than an
-                accident. */}
-            {transition.action === "finalize" &&
-              !balanced &&
-              ` This plan does not balance — ${balanceDisplay.headline}. Finalizing is allowed anyway; the plan is signed off exactly as it stands.`}
-          </span>
-          <ActionButton onClick={() => setConfirmTransition(false)}>CANCEL</ActionButton>
+      {confirm?.kind === "transition" && transition && (
+        <div style={{ marginBottom: 12 }}>
+          {/* Finalizing an incomplete plan is allowed — the server does not gate transitions on
+              plan completeness and neither does this screen. The warning is led by a StatusChip
+              so it is never colour alone, and the button above stays enabled throughout. */}
+          {finalizeWarning && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 10,
+                marginBottom: 8,
+                fontFamily: fonts.body,
+                fontSize: 11.5,
+                color: colors.textSecondary,
+                lineHeight: 1.6,
+              }}
+            >
+              <StatusChip kind={warningKind} label={warningLabel} />
+              <span style={{ flex: "1 1 auto" }}>
+                {finalizeConcerns.join(" ")} You can finalize anyway — nothing here blocks it.
+              </span>
+            </div>
+          )}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              fontFamily: fonts.body,
+              fontSize: 11.5,
+              color: colors.textSecondary,
+              lineHeight: 1.6,
+            }}
+          >
+            <span style={{ flex: "1 1 auto" }}>
+              {TRANSITION_NOTES[transition.action](period.label)} Click {transition.confirmLabel}{" "}
+              to move {period.label} from {stateLabel} to{" "}
+              {PERIOD_STATE_LABELS[stateAfter(transition.action)]} — forward only, there is no step
+              back.
+            </span>
+            <ActionButton onClick={() => setConfirm(null)}>CANCEL</ActionButton>
+          </div>
         </div>
       )}
 
@@ -315,31 +561,6 @@ export default function PeriodDashboard({
           </div>
         </div>
       )}
-
-      {/* The zero-based verdict, and the loudest thing on the screen after the period's own name.
-          Colour is the fourth channel and never the only one: the chip carries StatusMeta's
-          glyph, the headline writes the state and its figure out in words, and the total beside
-          it writes its own + or − through formatDeltaCad. */}
-      <Panel style={{ margin: "10px 0 12px" }} borderColor={balanceMeta.bd}>
-        <SectionLabel>ZBB balance</SectionLabel>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <StatusChip kind={balanceDisplay.kind} label={balanceDisplay.headline} />
-          <Num size={14} weight={600} color={balanceMeta.t}>
-            {formatDeltaCad(balance.amount)}
-          </Num>
-          <span
-            style={{
-              flex: "1 1 260px",
-              fontFamily: fonts.body,
-              fontSize: 11.5,
-              color: colors.textSecondary,
-              lineHeight: 1.6,
-            }}
-          >
-            {balanceDisplay.note}
-          </span>
-        </div>
-      </Panel>
 
       <Panel style={{ margin: "10px 0 12px" }}>
         <SectionLabel>Lifecycle</SectionLabel>
@@ -370,6 +591,18 @@ export default function PeriodDashboard({
           value={formatCad(period.plannedExpense)}
           valueColor={colors.headingBright}
         />
+        {/* Left to assign — the headline of a zero-based plan, third so the row reads as the
+            arithmetic: revenue → expense → what is left. Glyph + written state + a signed
+            figure + the tinted border: four channels, and the colour is never the only one. */}
+        <MetricTile
+          icon={assignmentMeta.g}
+          iconBg={assignmentMeta.bg}
+          iconColor={assignmentMeta.t}
+          label={`Left to assign · ${ASSIGNMENT_LABELS[assignment]}`}
+          value={formatDeltaCad(left)}
+          valueColor={assignmentMeta.t}
+          borderColor={assignmentMeta.bd}
+        />
         <MetricTile
           icon="◧"
           iconBg="rgba(31,111,178,.10)"
@@ -394,11 +627,42 @@ export default function PeriodDashboard({
         </div>
       )}
 
+      {loaded && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+            gap: 12,
+            alignItems: "start",
+            marginBottom: 14,
+          }}
+        >
+          <PriorityBreakdown title="Expense by priority" buckets={expenseByPriority} />
+          <CostCentreBreakdown rollup={rollup} error={rollupError} />
+          <VendorBreakdown rollup={vendorRollup} error={vendorRollupError} />
+        </div>
+      )}
+
+      {/* Zero-based step 5: a fresh plan each period, seeded from an earlier one rather than
+          rebuilt line by line. Only while the period accepts plan changes — the same rule the
+          server enforces on the copy's TARGET. */}
+      {loaded && editable && (
+        <CopyFromPeriodPanel
+          period={period}
+          periods={periods}
+          busy={busy}
+          confirming={confirm?.kind === "copy"}
+          onRequestConfirm={() => setConfirm({ kind: "copy" })}
+          onCancelConfirm={() => setConfirm(null)}
+          onCopy={runCopy}
+        />
+      )}
+
       {!editable && (
         <div style={{ marginBottom: 14 }}>
           <EmptyNote>
-            This period is {stateLabel}; its plan is read-only. Lines can change only while the
-            period is Draft or Open.
+            This period is {stateLabel}; its plan is read-only. Budget items can be added, changed
+            or removed only while the period is Draft or Open.
           </EmptyNote>
         </div>
       )}
@@ -409,37 +673,48 @@ export default function PeriodDashboard({
         <>
           <AllocationSection
             category="Revenue"
-            lines={lines.filter((l) => l.category === "Revenue")}
+            periodLabel={period.label}
+            items={lines.filter((l) => l.category === "Revenue")}
+            activeCodeCount={allocationCandidates(codes, "Revenue").length}
+            onOpenCodes={onOpenCodes}
             editable={editable}
             busy={busy}
-            confirmRemoveCodeId={confirmRemoveCodeId}
+            confirmRemoveItemId={confirm?.kind === "remove" ? confirm.itemId : null}
             onAdd={() => openModal("Revenue", null)}
-            onEdit={(line) => openModal("Revenue", line)}
-            onRemove={removeLine}
+            onAddToCode={(codeId) => openModal("Revenue", null, codeId)}
+            onEdit={(item) => openModal("Revenue", item)}
+            onRemove={removeItem}
           />
           <AllocationSection
             category="Expense"
-            lines={lines.filter((l) => l.category === "Expense")}
+            periodLabel={period.label}
+            items={lines.filter((l) => l.category === "Expense")}
+            activeCodeCount={allocationCandidates(codes, "Expense").length}
+            onOpenCodes={onOpenCodes}
             editable={editable}
             busy={busy}
-            confirmRemoveCodeId={confirmRemoveCodeId}
+            confirmRemoveItemId={confirm?.kind === "remove" ? confirm.itemId : null}
             onAdd={() => openModal("Expense", null)}
-            onEdit={(line) => openModal("Expense", line)}
-            onRemove={removeLine}
+            onAddToCode={(codeId) => openModal("Expense", null, codeId)}
+            onEdit={(item) => openModal("Expense", item)}
+            onRemove={removeItem}
           />
         </>
       )}
 
       {modal && loaded && (
-        <BudgetAllocationFormModal
+        <BudgetItemFormModal
           periodId={periodId}
           periodLabel={period.label}
           category={modal.category}
           codes={codes}
-          lines={lines}
-          line={modal.line}
+          item={modal.item}
+          presetCodeId={modal.presetCodeId}
+          onOpenCodes={onOpenCodes}
           onClose={() => setModal(null)}
           onSaved={handleSaved}
+          vendors={vendors}
+          onVendorsChanged={acceptVendors}
         />
       )}
     </div>

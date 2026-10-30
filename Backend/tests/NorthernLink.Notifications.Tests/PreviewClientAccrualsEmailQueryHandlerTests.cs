@@ -1,3 +1,4 @@
+using NorthernLink.Notifications.Application.Dispatches;
 using NorthernLink.Notifications.Application.Dispatches.PreviewClientAccrualsEmail;
 using NorthernLink.Notifications.Application.Dispatches.SendClientAccrualsEmail;
 using NorthernLink.Notifications.Domain;
@@ -22,12 +23,13 @@ public class PreviewClientAccrualsEmailQueryHandlerTests
     private static PreviewClientAccrualsEmailQuery Query(
         Guid? clientId = null,
         string clientName = "Vale Manitoba Operations",
-        IReadOnlyList<AccrualsRecipientInput>? recipients = null) => new(
+        IReadOnlyList<AccrualsRecipientInput>? recipients = null,
+        ClientAccrualsReport? report = null) => new(
         TestNotifications.TenantId,
         clientId ?? ClientId,
         clientName,
         NotificationServiceType.ContractCrew,
-        TestNotifications.SampleAccrualsReport(),
+        report ?? TestNotifications.SampleAccrualsReport(),
         recipients ?? [new AccrualsRecipientInput("dana@example.com", "Dana Reyes")]);
 
     [Fact]
@@ -81,9 +83,34 @@ public class PreviewClientAccrualsEmailQueryHandlerTests
         var response = result.Value;
         Assert.Equal("Accruals report — Vale Manitoba Operations — August 2026", response.Subject);
         Assert.Contains("accruals report for Vale Manitoba Operations", response.HtmlBody);
+
+        // The covering note leads with the report's own headline figures, and keeps the
+        // estimates-are-not-invoices caveat.
+        Assert.Contains("work still to come and what is owing", response.HtmlBody);
+        Assert.Contains("Upcoming expenses", response.HtmlBody);
+        Assert.Contains("Monies owed", response.HtmlBody);
+        Assert.Contains("Estimated amounts are marked and are not invoices", response.HtmlBody);
         Assert.DoesNotContain("<p>", response.TextBody);
         Assert.Equal(Convert.ToBase64String(new byte[] { 1, 2, 3 }), response.PdfBase64);
         Assert.Single(_reportPdf.Built);
+    }
+
+    /// <summary>
+    /// Backward compatibility: a report posted with no headline figures still gets a covering
+    /// note that names the two leading sections, rather than an empty list or a stale "by
+    /// billing state" line.
+    /// </summary>
+    [Fact]
+    public async Task Covering_note_names_the_leading_sections_when_the_report_has_no_headline()
+    {
+        var report = TestNotifications.SampleAccrualsReport() with { Headline = [] };
+
+        var result = await Handler().Handle(Query(report: report), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Contains("Upcoming expenses — work scheduled but not yet done.", result.Value.HtmlBody);
+        Assert.Contains("Monies owed — work invoiced or ready for billing.", result.Value.HtmlBody);
+        Assert.Contains("Estimated amounts are marked and are not invoices", result.Value.HtmlBody);
     }
 
     [Fact]

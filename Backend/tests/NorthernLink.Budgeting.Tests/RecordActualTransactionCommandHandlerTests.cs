@@ -21,10 +21,13 @@ public class RecordActualTransactionCommandHandlerTests
     private readonly RecordActualTransactionCommandHandler _handler;
 
     private readonly BudgetPeriod _draft = TestBudgeting.CreatePeriod();
-    private readonly BudgetCode _code = TestBudgeting.CreateCode("ZBB-FUEL-01");
+    private readonly BudgetCode _code;
 
     public RecordActualTransactionCommandHandlerTests()
     {
+        // Codes belong to a period: the code a transaction is tagged with must be one of the
+        // period covering its date, so the fixture's code lives in the fixture's period.
+        _code = TestBudgeting.CreateCode("ZBB-FUEL-01", periodId: _draft.Id);
         _handler = new RecordActualTransactionCommandHandler(_transactions, _periods, _codes);
         _periods.Add(_draft);
         _codes.Add(_code);
@@ -175,12 +178,15 @@ public class RecordActualTransactionCommandHandlerTests
         // exactly what the review is reading. If this ever starts failing, someone has copied
         // AllowsPlanChanges across.
         var periods = new InMemoryBudgetPeriodRepository();
-        periods.Add(TestBudgeting.PeriodIn(state));
+        var period = TestBudgeting.PeriodIn(state);
+        periods.Add(period);
+        var code = TestBudgeting.CreateCode("ZBB-FUEL-01", periodId: period.Id);
+        _codes.Add(code);
         var handler = new RecordActualTransactionCommandHandler(_transactions, periods, _codes);
 
         var result = await handler.Handle(
             new RecordActualTransactionCommand(
-                TestBudgeting.TenantId, _code.Id, 480.50m, TestBudgeting.InsideDefaultPeriod,
+                TestBudgeting.TenantId, code.Id, 480.50m, TestBudgeting.InsideDefaultPeriod,
                 "Late invoice for the period.", TestBudgeting.ActorId),
             CancellationToken.None);
 
@@ -203,9 +209,30 @@ public class RecordActualTransactionCommandHandlerTests
     }
 
     [Fact]
+    public async Task A_code_of_another_period_is_not_found_in_the_period_covering_the_date()
+    {
+        // Codes belong to a period, and a transaction counts in the period its date falls in. A
+        // Q3 code on a Q4 date would put spend on Q4's rollup against Q3's chart, so it is
+        // refused — even when the string matches a code the covering period also has.
+        var q3 = TestBudgeting.CreatePeriod(PeriodGranularity.Quarter, 2026, 3);
+        _periods.Add(q3);
+        var q3Fuel = TestBudgeting.CreateCode("ZBB-FUEL-01", periodId: q3.Id);
+        _codes.Add(q3Fuel);
+
+        var result = await RecordAsync(codeId: q3Fuel.Id, occurredOn: TestBudgeting.InsideDefaultPeriod);
+
+        Assert.Equal(BudgetCodeErrors.NotFound, result.Error);
+        Assert.Empty(_transactions.Transactions);
+        Assert.Equal(0, _transactions.SaveChangesCallCount);
+
+        // The same code on a date inside its own period is fine.
+        Assert.True((await RecordAsync(codeId: q3Fuel.Id, occurredOn: new DateOnly(2026, 8, 14))).IsSuccess);
+    }
+
+    [Fact]
     public async Task A_retired_code_takes_no_new_spend()
     {
-        var retired = TestBudgeting.CreateCode("ZBB-OLD-01");
+        var retired = TestBudgeting.CreateCode("ZBB-OLD-01", periodId: _draft.Id);
         Assert.True(retired.SetActive(false, TestBudgeting.ActorId).IsSuccess);
         _codes.Add(retired);
 

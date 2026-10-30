@@ -12,7 +12,9 @@ namespace NorthernLink.Booking.Domain.Bookings;
 /// creation (created-at + the policy's seat-hold window): an Unconfirmed booking reserves
 /// seats only while the hold is live; an expired hold stays listed but stops reserving —
 /// derived per read, never flipped by a worker. Payment method/status are plain recorded
-/// fields in this batch (no processor integration).
+/// fields in this batch (no processor integration). <see cref="Reference"/> is the
+/// customer-facing identifier (printed on passes) — supplied by the create handler, which
+/// owns uniqueness, and never changed afterwards.
 /// </summary>
 public sealed class Booking : AggregateRoot, ITenantScoped
 {
@@ -21,6 +23,7 @@ public sealed class Booking : AggregateRoot, ITenantScoped
     private Booking()
     {
         // EF Core materialization only.
+        Reference = null!;
         CustomerName = null!;
         CorridorName = null!;
         Pickup = null!;
@@ -28,6 +31,10 @@ public sealed class Booking : AggregateRoot, ITenantScoped
     }
 
     public Guid TenantId { get; private set; }
+
+    /// <summary>Immutable human-readable reference (NL-XXXXXX), unique per tenant.</summary>
+    public BookingReference Reference { get; private set; }
+
     public Guid CustomerId { get; private set; }
 
     /// <summary>Customer name snapshot at booking time — display without a join.</summary>
@@ -56,6 +63,7 @@ public sealed class Booking : AggregateRoot, ITenantScoped
 
     public static Result<Booking> Create(
         Guid tenantId,
+        BookingReference reference,
         Guid customerId,
         string customerName,
         Guid corridorId,
@@ -78,6 +86,7 @@ public sealed class Booking : AggregateRoot, ITenantScoped
         var booking = new Booking
         {
             TenantId = tenantId,
+            Reference = reference,
             CustomerId = customerId,
             CustomerName = customerName.Trim(),
             CorridorId = corridorId,

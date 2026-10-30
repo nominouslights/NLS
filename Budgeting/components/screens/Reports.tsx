@@ -6,7 +6,7 @@ import { StatusChip } from "@/components/ui/Chip";
 import { formatCad } from "@/lib/api/format";
 import type { BudgetPeriod } from "@/lib/types";
 import { budgetCodes, variance, varianceKind } from "@/lib/data";
-import { MockTag, Num, Screen, periodLabel } from "@/components/screens/shared";
+import { MockTag, Num, Screen } from "@/components/screens/shared";
 
 // Placeholder report cards. The first one is real enough to be worth building now: revenue mix
 // against the Rider Express service-mix benchmark in the architecture reference (Section 5.3),
@@ -21,24 +21,19 @@ const MIX_BENCHMARK: { code: string; low: number; high: number }[] = [
   { code: "ZBB-COMM-01", low: 2, high: 5 },
 ];
 
-export default function Reports({
-  periods,
-  periodId,
-}: {
-  periods: BudgetPeriod[];
-  periodId: string;
-}) {
+/** Reports on the entered period only (Console, lib/workingPeriod.ts). */
+export default function Reports({ period }: { period: BudgetPeriod }) {
   const revenueCodes = new Set(
     budgetCodes.filter((c) => c.category === "Revenue").map((c) => c.code),
   );
   // The mock variance rows carry the same planned/actual pair the removed `actuals` array did,
   // so the revenue mix reads them instead. This card stays mock until it is rebuilt on the
   // rollup endpoint — see lib/data.ts.
-  const revenueLines = variance.filter((v) => v.periodId === periodId && revenueCodes.has(v.code));
+  const revenueLines = variance.filter((v) => v.periodId === period.id && revenueCodes.has(v.code));
   const totalRevenue = revenueLines.reduce((sum, r) => sum + r.actual, 0);
 
   return (
-    <Screen eyebrow={`Performance · ${periodLabel(periods, periodId)}`} title="Reports" right={<MockTag />}>
+    <Screen eyebrow={`Performance · ${period.label}`} title="Reports" right={<MockTag />}>
       <Panel style={{ marginBottom: 12 }}>
         <SectionLabel>Revenue mix vs. benchmark</SectionLabel>
         <div

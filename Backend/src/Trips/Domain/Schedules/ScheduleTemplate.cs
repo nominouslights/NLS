@@ -6,18 +6,28 @@ namespace NorthernLink.Trips.Domain.Schedules;
 
 /// <summary>
 /// A weekly recurring service pattern over a route ("Alamos crew shuttle, Mon–Fri
-/// 06:30 out / 17:30 back"). The generation worker expands active templates
-/// <see cref="GenerationHorizonDays"/> days ahead into concrete trips: one Outbound leg
-/// per matching day, plus — when <see cref="ReturnDepartureTime"/> is set — an Inbound
-/// return leg, the pair sharing a RoundTripKey (<c>{templateId:N}:{yyyyMMdd}</c>) that
-/// Billing later prices as one round trip. Client identity is a snapshot (id + name from
-/// client_lookup), not a reference — editing a template only affects trips not yet
-/// generated. Deactivate stops future generation; existing trips are untouched.
+/// 06:30 out / 17:30 back"). The generation worker keeps active templates expanded
+/// <see cref="GenerationHorizonDays"/> days ahead into concrete trips, and a dispatcher
+/// can generate further ahead on demand — through any date up to
+/// <see cref="MaxGenerateAheadDays"/> from today — so next month's trips exist for the
+/// client accruals report: one Outbound leg per matching day, plus — when
+/// <see cref="ReturnDepartureTime"/> is set — an Inbound return leg, the pair sharing a
+/// RoundTripKey (<c>{templateId:N}:{yyyyMMdd}</c>) that Billing later prices as one round
+/// trip. Client identity is a snapshot (id + name from client_lookup), not a reference —
+/// editing a template only affects trips not yet generated. Deactivate stops future
+/// generation; existing trips are untouched.
 /// </summary>
 public sealed class ScheduleTemplate : AggregateRoot, ITenantScoped
 {
     public const int MaxHorizonDays = 60;
     public const int DefaultHorizonDays = 7;
+
+    /// <summary>
+    /// The furthest a dispatcher may generate on demand: <c>through</c> can be at most this
+    /// many days after today (a year, leap-year-safe). A limit on the request, not a stored
+    /// setting — the template itself carries no on-demand state.
+    /// </summary>
+    public const int MaxGenerateAheadDays = 366;
 
     private readonly List<ScheduleException> _exceptions = [];
 

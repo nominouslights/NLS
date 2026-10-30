@@ -5,6 +5,25 @@
 // about a bucket, a pairing, or a dollar. Sibling of tripDetail.ts, and shaped
 // so an email payload mapper (Part B) can be added here without reshaping it.
 //
+// What a month's report covers — CARRY FORWARD. The report for a month is every
+// trip of the client whose serviceDate falls inside the month, PLUS every
+// earlier trip that is not yet completed: ReadyForBilling, Invoiced, InProgress
+// or Scheduled (ACCRUAL_OPEN_STATUSES). An amount still owing from August is
+// still owed in September, so it belongs in September's Monies owed headline.
+// Completed (= paid), Cancelled and WrittenOff trips before the month are closed
+// and stay out, and later months never come in. The rule is enforced HERE
+// (isCarriedForwardTrip), not only by the screen's fetch, and carried trips go
+// through the SAME sort, partition, grouping, claim rule and split-PO check as
+// the month's own — so a round trip straddling the month boundary is one group,
+// priced once, and an invoice line is still claimed at most once. A carried
+// group is marked (AccrualGroup.carriedForward, groupDateText) on every output
+// — as a plain tag, never a status colour, and never as an age or a due date:
+// this report does no AR aging (netTermsDays is informational only).
+//
+// Four buckets: Paid, Invoiced, Ready for billing, Scheduled. "Scheduled" holds
+// every Scheduled and InProgress trip regardless of date — scheduled and
+// upcoming are the same thing, by the owner's decision.
+//
 // Ground rules, in order of how much they bite:
 //   - The money-bearing unit is a ROUND-TRIP GROUP, and what defines the group
 //     depends on whether the work has been billed yet:
@@ -16,7 +35,7 @@
 //         into two groups that each resolve to that one line and each claim its
 //         full amount — the bucket total doubles. Group by line and the report
 //         mirrors the invoice by construction.
-//       * UNBILLED (ready / scheduled / upcoming) → roundTripKey, falling back
+//       * UNBILLED (ready / scheduled) → roundTripKey, falling back
 //         to the trip's own id. There is no line yet, so the trip records are
 //         the only pairing signal there is; an unpaired leg stays unpaired
 //         rather than being guessed into a pair.
@@ -25,11 +44,52 @@
 //     claimed at most ONCE per report — so a line can never be counted twice,
 //     even if its legs somehow land in different buckets. Missing invoice →
 //     "amount unavailable", excluded from totals.
-//   - Estimates (ready / scheduled / upcoming) are 1 × the contract's
-//     round-trip rate for a PAIRED group only, marked " est." everywhere. An
-//     unpaired leg is never estimated — the backend prices complete round trips
-//     only, so a half-rate would print a number no invoice will ever contain.
-//     Manual billing / no contract / no rate → no estimates, one banner note.
+//   - Estimates (ready / scheduled) MIRROR the invoice generator leg
+//     for leg — Backend/src/Billing/Domain/Invoices/InvoiceDraftBuilder.cs is
+//     the authority, and this file's job is to agree with it. Rates are
+//     PER PURCHASE ORDER, with the contract as the fallback, and there is now
+//     exactly ONE rate — the round trip:
+//
+//         contractRate  = contract.ratePerRoundTripCad (RoundTripRate model)
+//         group by (EFFECTIVE PO number, roundTripKey)
+//           effective PO  = trip.poNumber ?? contract.defaultPoNumber
+//           roundTripRate = po?.roundTripRateCad ?? contractRate
+//           legs of this roundTripKey on MORE THAN ONE PO → not priced, flagged
+//           else Outbound leg AND Inbound leg → 1 × roundTripRate
+//           else                              → 1 × roundTripRate, flagged
+//
+//     The resolution itself is poEffectiveTerms() in lib/api/clients.ts, beside
+//     the PurchaseOrderRecord it resolves, so the PO dashboard that edits a rate
+//     and the report that prices from it can never diverge.
+//       * EVERY priced group bills one full round-trip rate, once. A lone leg
+//         still requires the vehicle to come back empty, so it costs a full run
+//         — charging half was under-billing, and the one-way price is retired
+//         (po.oneWayRateCad survives as history and is never read here). The
+//         group is priced ONCE, never per leg: two legs sharing a direction are
+//         a data anomaly, and pricing each would multiply one run's charge.
+//       * ANY unpaired group — a lone leg, two same-direction legs, a
+//         direction-less leg — still bills the full rate and carries the
+//         `unpaired` flag, so the full charge is never silent.
+//       * The SPLIT-PO check runs FIRST, before the pairing test, exactly as the
+//         builder does: a roundTripKey whose legs sit on more than one PO is not
+//         priced AT ALL on either worksheet, because full-rate-per-group would
+//         bill one run twice. (The backend has no null amount, so it emits a
+//         zero-amount line carrying the flag; here the amount is genuinely null
+//         and reads "needs a decision" — never "$0.00 of work". Same meaning,
+//         honest rendering.) Note the ordering bites: a 3-leg key with a
+//         complete pair on one PO still stays unpriced on BOTH worksheets.
+//       * a group whose legs carry NO roundTripKey is never picked up by the
+//         draft builder at all (it filters on `RoundTripKey is not null`) and
+//         becomes a hand-keyed manual line. That one is genuinely unpriceable,
+//         so it stays unpriced with the "manual" note rather than guessed.
+//     Pricing a lone leg is the honest estimate, not a rounding liberty: an
+//     earlier version of this comment claimed the backend prices complete round
+//     trips only, and that wrong fact is why lone legs went unpriced for months.
+//     Manual billing / no contract / no rate on either the PO or the contract →
+//     no estimate for that group, one banner note.
+//   - PO warnings never block, by the owner's decision: a trip outside its PO's
+//     [issued, expiry] window and a PO whose committed + upcoming work exceeds
+//     its authorised value are both flagged and still counted.
 //   - No tax appears anywhere in this report. The platform never computes or
 //     displays a tax amount — QuickBooks Online owns all tax calculation — so
 //     every amount here, estimated or invoiced, is a bare line total in CAD.
@@ -42,8 +102,24 @@ import {
   type InvoiceLineRecord,
 } from "@/lib/api/billing";
 import type { AccrualsEmailReport } from "@/lib/api/notifications";
-import { contractRateLabel, type ClientRecord } from "@/lib/api/clients";
-import { corridorLabel, sortTrips, type TripRecord } from "@/lib/api/trips";
+import {
+  contractRateLabel,
+  contractRoundTripRateCad,
+  isWithinPoWindow,
+  poEffectiveTerms,
+  poTermsLabel,
+  type ClientRecord,
+  type PurchaseOrderRecord,
+} from "@/lib/api/clients";
+import {
+  corridorLabel,
+  shortDateLabel,
+  sortTrips,
+  type TripListParams,
+  type TripPage,
+  type TripRecord,
+  type TripStatus,
+} from "@/lib/api/trips";
 import { periodLabel, type Period } from "@/lib/period";
 import type { StatusKind } from "@/lib/theme";
 
@@ -51,16 +127,25 @@ import type { StatusKind } from "@/lib/theme";
 // Buckets
 // ---------------------------------------------------------------------------
 
-export type AccrualBucketId = "paid" | "invoiced" | "ready" | "scheduled" | "upcoming";
+export type AccrualBucketId = "paid" | "invoiced" | "ready" | "scheduled";
 
-/** Fixed rendering order — settled money first, furthest-out accrual last. */
-export const ACCRUAL_BUCKET_ORDER: AccrualBucketId[] = [
-  "paid",
-  "invoiced",
-  "ready",
-  "scheduled",
-  "upcoming",
-];
+/**
+ * Fixed bucket order — and NOT merely a display order, so do not reorder it to
+ * change what the report leads with. It is the CLAIM order for the claimedLines
+ * set below: buckets are built in this sequence, so when one invoice line's legs
+ * land in two different buckets the earlier bucket carries the money and the
+ * later row says "counted with the paired leg". Reordering these four ids
+ * silently moves dollars from one bucket to another and breaks nothing loudly.
+ * (Only the billed buckets — paid, invoiced — ever claim a line; estimate
+ * buckets never do. That is why folding the old "upcoming" bucket into
+ * "scheduled" moved no billed dollar.)
+ *
+ * Presentation order lives in ACCRUAL_SECTION_ORDER instead — a parallel view
+ * over these same bucket objects, which is what the screen and the sheets lead
+ * with. report.buckets stays in THIS order for the claim rule, the summary
+ * table, accrualTotals, and the empty-report check.
+ */
+export const ACCRUAL_BUCKET_ORDER: AccrualBucketId[] = ["paid", "invoiced", "ready", "scheduled"];
 
 /** Chip kind + label + one-line explainer per bucket. The kind pairs a colour
  *  with StatusChip's glyph and this label — colour never stands alone. */
@@ -70,18 +155,17 @@ export const ACCRUAL_BUCKET_META: Record<
 > = {
   paid: { label: "Paid", kind: "ontime", hint: "Payment received — amounts are the issued invoice lines" },
   invoiced: { label: "Invoiced", kind: "info", hint: "Billed, awaiting payment — amounts are the issued invoice lines" },
-  ready: { label: "Ready for billing", kind: "soon", hint: "Run complete, not yet invoiced — amounts are contract-rate estimates" },
-  scheduled: { label: "Scheduled", kind: "info", hint: "Run due or under way — amounts are contract-rate estimates" },
-  upcoming: { label: "Upcoming", kind: "off", hint: "Scheduled after today — amounts are contract-rate estimates" },
+  ready: { label: "Ready for billing", kind: "soon", hint: "Run complete, not yet invoiced — amounts are PO-rate estimates" },
+  scheduled: { label: "Scheduled", kind: "info", hint: "Run not yet complete — amounts are PO-rate estimates" },
 };
 
 /**
  * Which accrual bucket a trip belongs to, or null for the reconciliation
- * section (Cancelled / WrittenOff — never counted as accruals). `today` splits
- * Scheduled: a service date after today is genuinely upcoming, on/before today
- * it is a run that should already be under way, counted with InProgress.
+ * section (Cancelled / WrittenOff — never counted as accruals). Scheduled and
+ * InProgress are one bucket regardless of the service date: a run not yet
+ * complete is the same thing whether it is due next week or under way today.
  */
-export function accrualBucketFor(t: TripRecord, today: string): AccrualBucketId | null {
+export function accrualBucketFor(t: TripRecord): AccrualBucketId | null {
   switch (t.status) {
     case "Completed":
       return "paid"; // Completed = payment arrived, for client trips
@@ -90,14 +174,98 @@ export function accrualBucketFor(t: TripRecord, today: string): AccrualBucketId 
     case "ReadyForBilling":
       return "ready"; // OnWorksheet drafts stay here — a draft is not an invoice
     case "InProgress":
-      return "scheduled";
     case "Scheduled":
-      return t.serviceDate > today ? "upcoming" : "scheduled";
+      return "scheduled";
     case "Cancelled":
     case "WrittenOff":
       return null;
     default:
       return t.status satisfies never;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Carry forward — earlier trips that are not yet completed
+// ---------------------------------------------------------------------------
+
+/**
+ * The statuses that keep an EARLIER trip on this month's report: everything
+ * that has not yet reached Completed (paid). Cancelled and WrittenOff are closed
+ * too and never carry. The screen fetches exactly these (one listTrips call per
+ * status), and the builder re-applies the rule, so it lives in one place.
+ *
+ * The ORDER matters: it is lifecycle order, the forward-only path through the
+ * open statuses in the backend's Trip.CanTransition (Scheduled → InProgress →
+ * ReadyForBilling → Invoiced, with Scheduled/InProgress → ReadyForBilling jumps;
+ * Invoiced → ReadyForBilling is deliberately absent). fetchCarriedTrips queries
+ * one status at a time in this order, so a trip that moves between two queries
+ * always lands in a status queried LATER and is still caught.
+ */
+export const ACCRUAL_OPEN_STATUSES: readonly TripStatus[] = [
+  "Scheduled",
+  "InProgress",
+  "ReadyForBilling",
+  "Invoiced",
+];
+
+/** Is this status "not yet completed" — i.e. would an earlier trip carry? */
+export function isOpenAccrualStatus(status: TripStatus): boolean {
+  return ACCRUAL_OPEN_STATUSES.includes(status);
+}
+
+/** Does this trip carry into `period`'s report: dated BEFORE the period (never
+ *  after it) and still open. ISO dates compare correctly as strings. */
+export function isCarriedForwardTrip(t: TripRecord, period: Period): boolean {
+  return t.serviceDate < period.start && isOpenAccrualStatus(t.status);
+}
+
+/** The last day the carry-forward fetch covers — the day before period.start,
+ *  as an ISO date (the trips list's `to` bound is inclusive). */
+export function carryForwardThrough(period: Pick<Period, "start">): string {
+  const [y, m, d] = period.start.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10);
+}
+
+/**
+ * The carry-forward fetch: every trip of the client dated before the period
+ * that is not yet completed. The trips list takes `to` without `from`
+ * (open-ended back) and ONE exact status, so this is one UNPAGED call per
+ * ACCRUAL_OPEN_STATUSES entry, `to` = carryForwardThrough(period).
+ *
+ * The calls run ONE AT A TIME in lifecycle order (ACCRUAL_OPEN_STATUSES), not
+ * in parallel. Transitions inside the open set only move forward, so a trip
+ * that changes status between two calls lands in a status a LATER call asks
+ * for — it can come back twice, never zero times. Parallel calls could run in
+ * any order on the server, and a trip moving ReadyForBilling → Invoiced after
+ * the Invoiced query but before the ReadyForBilling one would vanish from both
+ * while the result still looked complete. Results are deduped by id, last write
+ * wins (= the later status); the builder dedupes too. A trip LEAVING the open
+ * set mid-fetch (Completed/WrittenOff/Cancelled) is rightly dropped; the only
+ * way back in (Completed → Invoiced, a payment confirmation cleared in error)
+ * no query order can catch, and is accepted as a snapshot.
+ *
+ * The calls fail as ONE group: any rejection → null, never a partial list. A
+ * partial set would understate what is owed while looking complete, so the
+ * caller degrades to the month only and says so (carriedTripsUnavailable).
+ *
+ * `list` is injected (the screen passes listTrips) so the request shape and the
+ * fail-together rule are testable without a network.
+ */
+export async function fetchCarriedTrips(
+  list: (params: TripListParams) => Promise<TripPage>,
+  args: { clientId: string; period: Pick<Period, "start"> },
+): Promise<TripRecord[] | null> {
+  const to = carryForwardThrough(args.period);
+  try {
+    const byId = new Map<string, TripRecord>();
+    // Sequential on purpose — see the doc comment. Never Promise.all here.
+    for (const status of ACCRUAL_OPEN_STATUSES) {
+      const p = await list({ to, clientId: args.clientId, status });
+      for (const t of p.items) byId.set(t.id, t); // later call = later status, so the last write wins
+    }
+    return [...byId.values()];
+  } catch {
+    return null;
   }
 }
 
@@ -110,33 +278,121 @@ export type AccrualAmountSource = "invoice" | "estimate";
 /** Why a group carries no amount — rendered as colour + glyph + text, never
  *  colour alone. Null amountNote with null amountCad means the banner notes
  *  explain it (manual billing / no contract / no rate on the contract). */
-export type AccrualAmountNote = "unavailable" | "unpaired" | "counted";
+export type AccrualAmountNote = "unavailable" | "manual" | "counted";
 
 export const AMOUNT_NOTE_META: Record<AccrualAmountNote, { kind: StatusKind; label: string }> = {
   unavailable: { kind: "over", label: "Amount unavailable" },
-  unpaired: { kind: "soon", label: "Unpaired — not estimated" },
+  // No roundTripKey on any leg: InvoiceDraftBuilder never claims these, so they
+  // reach an invoice only as a hand-keyed line. Estimating one would print a
+  // figure no generated invoice will ever contain.
+  manual: { kind: "soon", label: "Manual line — not estimated" },
   // Only reachable when one invoice line's legs land in different buckets: the
   // first bucket carries the money, this row says so rather than repeating it.
+  // PRICED, just elsewhere — so never part of unpricedCount (isUnpricedGroup).
   counted: { kind: "info", label: "Counted with the paired leg" },
+};
+
+/**
+ * A caveat on the group's pricing — deliberately separate from amountNote,
+ * which answers "why is there no amount at all". Two of the three sit beside a
+ * real figure (`unpaired`, `deadhead`); `splitPo` is the one case where the
+ * flag IS the amount cell, because the run is deliberately not priced. Keeping
+ * them one type is what lets every consumer word the caveat identically.
+ */
+export type AccrualAmountFlag = "unpaired" | "splitPo" | "deadhead";
+
+/**
+ * Labels are the INVOICE's words, sentence-cased — the backend's review-flag
+ * constants (InvoiceDraftBuilder), which the generated invoice line carries:
+ *   UnpairedGroupFlag         "full round trip — legs did not pair, review"
+ *   SplitPurchaseOrderFlag    "round-trip legs on different POs — not priced, needs a decision"
+ *   DeadheadReturnFlag        "round trip incl. deadhead return — discount optional"
+ *   OutsidePurchaseOrderWindowFlag  "outside PO window — review"   (PO_FLAG_META)
+ *   PurchaseOrderValueExceededFlag  "PO value exceeded — review"   (commitment label)
+ * The report mirrors the invoice by construction, so a client must never see
+ * this report and that invoice describe one condition in two different phrasings.
+ * Changing a label here without changing the backend constant (or the reverse) is
+ * the drift this note exists to prevent — and note that SplitPurchaseOrderFlag
+ * kept its NAME while its wording changed, so only the STRING can be trusted.
+ */
+export const AMOUNT_FLAG_META: Record<AccrualAmountFlag, { kind: StatusKind; label: string }> = {
+  // The group's legs did not pair into outbound + inbound — a lone leg, a
+  // missing direction, or two legs sharing one. It bills one FULL round-trip
+  // rate anyway (the vehicle deadheads back either way), and this says so.
+  unpaired: { kind: "soon", label: "Full round trip — legs did not pair, review" },
+  // The legs of one roundTripKey sit on DIFFERENT purchase orders. A round trip
+  // must be a single PO (owner's decision), and full-rate-per-group would bill
+  // the same run on both worksheets — so neither side is priced and someone
+  // decides the figure by hand. The strongest flag, hence it wins.
+  splitPo: {
+    kind: "over",
+    label: "Round-trip legs on different POs — not priced, needs a decision",
+  },
+  // A complete pair one of whose legs ran empty by design. Full rate, but the
+  // worksheet line is editable and a discount is the dispatcher's call.
+  deadhead: { kind: "soon", label: "Round trip incl. deadhead return — discount optional" },
+};
+
+/** A PO-level warning on a group. Never blocking, never a reason an amount is
+ *  missing — the group is still priced and still counted. Colour + glyph +
+ *  text, like every other status in the console, and the invoice's own words. */
+export type AccrualPoFlag = "outsideWindow";
+
+export const PO_FLAG_META: Record<AccrualPoFlag, { kind: StatusKind; label: string }> = {
+  outsideWindow: { kind: "over", label: "Outside PO window — review" },
 };
 
 /** One money-bearing row: a round-trip pair, or a lone leg. */
 export interface AccrualGroup {
   /** `line:<lineId>` for billed groups (the invoice line is the unit);
-   *  roundTripKey, or the lone trip's own id, for unbilled ones. */
+   *  `po:<effective PO>|<roundTripKey or the lone trip's own id>` for unbilled
+   *  ones — the PO is part of the key because it is part of the price. */
   key: string;
-  /** Legs in service order — two for a matched pair, one otherwise. */
+  /** The EFFECTIVE PO number that priced this group:
+   *  trip.poNumber ?? contract.defaultPoNumber, or null when neither exists. */
+  poNumber: string | null;
+  /** True when poNumber came from the contract default rather than the trips. */
+  poFromContractDefault: boolean;
+  /** PO-level warnings — additive, never blocking (see PO_FLAG_META). */
+  poFlags: AccrualPoFlag[];
+  /** Legs in service order — two for a matched pair, one or more otherwise. */
   legs: TripRecord[];
-  /** Both legs of the round trip landed in this bucket. */
+  /** A complete round trip by InvoiceDraftBuilder's test: an Outbound leg AND
+   *  an Inbound one are both present. Never merely a leg count — three legs or
+   *  two same-direction legs are not a pair. Unpaired no longer changes the
+   *  price (it is still one full round trip), only the flag. */
   paired: boolean;
-  /** Dollars attributed to this group; null = unpriced (see amountNote). */
+  /** Dollars attributed to this group; null = no figure on THIS row — unpriced
+   *  unless amountNote is "counted" (see isUnpricedGroup, amountNote and
+   *  amountFlag — a split-PO group is null-with-a-flag, deliberately, because
+   *  "$0.00" would read to a client as work performed for free). */
   amountCad: number | null;
   amountSource: AccrualAmountSource | null;
   amountNote: AccrualAmountNote | null;
+  /** A caveat on the pricing (unpaired / split-PO / deadhead). Rendered as
+   *  colour + glyph + text — beside the figure when there is one, and INSTEAD
+   *  of it for a split-PO group, which is the one flag carrying no amount. */
+  amountFlag: AccrualAmountFlag | null;
   /** Issued invoice reference (QBO number once entered, worksheet number until). */
   invoiceNumber: string | null;
   /** Draft worksheet already claiming the group — shown as "On worksheet …". */
   onWorksheetNumber: string | null;
+  /** True when the group's first leg (service order) is dated before the
+   *  report's period — work from an earlier month, not yet completed, carried
+   *  in. A plain marker (groupDateText), never a status colour or an age. */
+  carriedForward: boolean;
+}
+
+/**
+ * Is this group UNPRICED — no figure on it and none anywhere else in the
+ * report? The ONE definition every "unpriced" count derives from (bucket →
+ * section → accrualTotals → tally detail, "Not priced", the email's trips cell
+ * and the sheet's Unpriced column). A "counted" group has a null amount too,
+ * but it is priced: its invoice line's money is carried by an earlier bucket
+ * in claim order, and its own cell says "Counted with the paired leg".
+ */
+export function isUnpricedGroup(g: Pick<AccrualGroup, "amountCad" | "amountNote">): boolean {
+  return g.amountCad === null && g.amountNote !== "counted";
 }
 
 export interface AccrualBucket {
@@ -144,36 +400,171 @@ export interface AccrualBucket {
   label: string;
   kind: StatusKind;
   groups: AccrualGroup[];
-  /** Sum of real invoice-line dollars in this bucket. */
+  /** Sum of real invoice-line dollars in this bucket. Kept split from
+   *  `estimatedCad` in the MODEL although every OUTPUT now prints one merged
+   *  Amount: the split is what decides the " est." marking and the
+   *  "incl. $X est." sub-line, so merging it here would lose both. */
   actualCad: number;
-  /** Sum of contract-rate estimates in this bucket (always shown " est."). */
+  /** Sum of PO-rate estimates in this bucket (always shown " est."). */
   estimatedCad: number;
-  /** Groups carrying no amount at all. */
+  /** Groups with no price anywhere (isUnpricedGroup) — including a split-PO
+   *  group, which is unpriced ON PURPOSE and still needs a decision. NOT a
+   *  "counted" group: its line's money is already in an earlier bucket. */
   unpricedCount: number;
+  /** Groups carried in from earlier months. Their money is already INSIDE
+   *  actualCad / estimatedCad — this count only feeds the detail line. */
+  carriedForwardCount: number;
+}
+
+// ---------------------------------------------------------------------------
+// Sections — the PRESENTATION grouping over the same four buckets. Two headline
+// questions lead the report ("what is coming" / "what do I owe"), and settled
+// money closes it on one line. No dollar moves between buckets to make this
+// happen: a section simply holds references to the bucket objects it covers.
+// ---------------------------------------------------------------------------
+
+export type AccrualSectionId = "upcoming" | "owed" | "settled";
+
+/** Reading order of the report: not-yet-done work first, then monies owed,
+ *  then the settled closing line. Safe to reorder — unlike
+ *  ACCRUAL_BUCKET_ORDER, nothing about money attribution depends on it. */
+export const ACCRUAL_SECTION_ORDER: AccrualSectionId[] = ["upcoming", "owed", "settled"];
+
+export const ACCRUAL_SECTION_META: Record<
+  AccrualSectionId,
+  {
+    label: string;
+    hint: string;
+    kind: StatusKind;
+    /** Member buckets, in the order they render inside the section. */
+    buckets: AccrualBucketId[];
+    /** Does this section print per-trip detail tables? */
+    detail: boolean;
+  }
+> = {
+  upcoming: {
+    label: "Upcoming work — not yet done",
+    kind: "soon",
+    hint: "Scheduled or under-way trips not yet complete — amounts are PO-rate estimates",
+    buckets: ["scheduled"],
+    detail: true,
+  },
+  owed: {
+    label: "Monies owed",
+    kind: "info",
+    hint: "Work already performed — issued invoices plus runs not yet billed, earlier months included",
+    buckets: ["ready", "invoiced"],
+    detail: true,
+  },
+  settled: {
+    label: "Settled this month",
+    kind: "ontime",
+    hint: "Payment received — no further action",
+    buckets: ["paid"],
+    // One closing summary line, no per-trip table: settled work still has to
+    // reconcile the month, but it is not what the report is for.
+    detail: false,
+  },
+};
+
+export interface AccrualSection {
+  id: AccrualSectionId;
+  label: string;
+  hint: string;
+  kind: StatusKind;
+  /** The member buckets, in ACCRUAL_SECTION_META order — the SAME objects as
+   *  report.buckets, not copies. */
+  buckets: AccrualBucket[];
+  groupCount: number;
+  actualCad: number;
+  estimatedCad: number;
+  unpricedCount: number;
+  /** Sum of the member buckets' carriedForwardCount. */
+  carriedForwardCount: number;
+  detail: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Purchase-order authorisation — the payoff for the upcoming-expenses headline:
+// what each PO authorises against what this period's work draws down on it.
+// THIS period's work only: groups carried in from earlier months are left out,
+// so "invoiced in this period" and "upcoming" stay literally true.
+// Money already invoiced plus work not yet billed, per PO, so a PO about to be
+// overspent is visible BEFORE the run happens rather than at invoice time.
+// A breach warns; it never blocks (owner's decision).
+// ---------------------------------------------------------------------------
+
+export interface AccrualPoCommitment {
+  /** The effective PO number the groups were priced under. */
+  poNumber: string | null;
+  /** The matching PurchaseOrderRecord, or null — the number came from a trip /
+   *  the contract default but no PO record was found (or POs failed to load). */
+  po: PurchaseOrderRecord | null;
+  /** Authorised value of the PO — null when unrecorded, so no overage test. */
+  amountCad: number | null;
+  /** Real invoice dollars in this period's buckets (invoiced + paid). */
+  invoicedCad: number;
+  /** Estimated dollars for this period's work not yet billed (ready + scheduled). */
+  upcomingCad: number;
+  /** invoicedCad + upcomingCad. */
+  committedCad: number;
+  /** committedCad − amountCad, only when positive. Null = within the PO value. */
+  overageCad: number | null;
+  /** amountCad − committedCad when the PO value is known and not exceeded. */
+  remainingCad: number | null;
+  /** The effective terms this PO priced at, as one line (poTermsLabel). */
+  termsLabel: string;
+  /** Chip kind + label — colour never stands alone. */
+  kind: StatusKind;
+  label: string;
 }
 
 export interface AccrualsReport {
   client: ClientRecord;
   period: Period;
-  /** The local operational day the scheduled/upcoming split was made against. */
+  /** The local operational day the report was prepared (its "Prepared" date). */
   today: string;
-  /** All five buckets in ACCRUAL_BUCKET_ORDER — empty buckets included. */
+  /** All four buckets in ACCRUAL_BUCKET_ORDER — empty buckets included. This is
+   *  the claim order and the summary table; read `sections` to render. */
   buckets: AccrualBucket[];
-  /** Cancelled trips with reasons — reconciliation, never counted as accruals. */
+  /** The same buckets grouped for reading, in ACCRUAL_SECTION_ORDER. */
+  sections: AccrualSection[];
+  /** Cancelled trips with reasons — reconciliation, never counted as accruals.
+   *  This month's only (earlier cancelled trips are closed and never carry). */
   cancelled: TripRecord[];
-  /** Written-off groups with reasons + lost amounts — reconciliation. */
+  /** Written-off groups with reasons + lost amounts — reconciliation, this
+   *  month's only. */
   writtenOff: AccrualGroup[];
-  /** The fetched invoices behind the real amounts. */
+  /** The fetched invoices behind the real amounts — those of every trip on the
+   *  report, carried-forward trips included. */
   invoices: InvoiceDetailRecord[];
-  /** Degradation banners: manual billing, missing rate, failed fetches, unpaired legs. */
+  /** One row per PO this period's work was priced under, in PO-number order
+   *  (a no-PO row last), carried-forward groups excluded. Rendered by the
+   *  screen and the printed sheet; the
+   *  overage warnings also ride `notes`, so all four consumers carry them. */
+  poCommitments: AccrualPoCommitment[];
+  /** Degradation banners: manual billing, missing rate, failed fetches,
+   *  unpaired full-rate groups, split-PO pairs, trips outside their PO window,
+   *  POs over their authorised value, and no-key groups left for a manual line.
+   *  Warnings ONLY — every output renders them as one (gold badge on screen,
+   *  the .warn box on the sheet), so the plain carried-forward count is NOT
+   *  here: read accrualsCarriedForwardNote for that. */
   notes: string[];
+  /** Groups carried in from earlier months — the sum of the buckets'
+   *  carriedForwardCount, held once so no output recounts it. */
+  carriedForwardCount: number;
+  /** True when the carry-forward fetch failed. Its banner rides `notes`; this
+   *  flag is what the empty-state and header wording branch on, so a month
+   *  with no trips of its own never reads as a nil statement while earlier
+   *  months' money is unknown. */
+  carriedTripsUnavailable: boolean;
 }
 
 /** Footer wording shared by the screen, the printed sheet, and the clipboard. */
 export const ACCRUALS_TAX_NOTE =
   "All amounts CAD. Taxes are applied in QuickBooks; this report contains none.";
 export const ACCRUALS_ESTIMATE_NOTE =
-  "Amounts marked “est.” are contract-rate estimates, not invoices — issued invoice amounts govern.";
+  "Amounts marked “est.” are estimates at the purchase order’s rates (the contract rate where a PO records none), not invoices — issued invoice amounts govern.";
 
 // ---------------------------------------------------------------------------
 // Assembly
@@ -187,21 +578,38 @@ export const ACCRUALS_ESTIMATE_NOTE =
  * the grouping key wherever a leg resolves to one — see the header note: the
  * line pairs legs that roundTripKey often does not, and grouping billed legs
  * any other way double-counts the line's amount. Legs with no resolvable line
- * (and every unbilled trip) fall back to roundTripKey, then to their own id.
+ * (and every unbilled trip) key on (EFFECTIVE PO, roundTripKey ?? own id): the
+ * PO is part of the key because it is part of the price, and that is exactly
+ * what implements "a round trip must be a single PO" — legs on two POs land in
+ * two groups, which the estimator's split check then leaves unpriced on both.
  */
 function groupTrips(
   sorted: TripRecord[],
   lineByTripId: Map<string, InvoiceLineRecord> | null,
+  effectivePo: (t: TripRecord) => string | null,
 ): { key: string; legs: TripRecord[] }[] {
   const byKey = new Map<string, TripRecord[]>();
   for (const t of sorted) {
     const line = lineByTripId?.get(t.id);
-    const key = line ? `line:${line.lineId}` : (t.roundTripKey ?? t.id);
+    const key = line
+      ? `line:${line.lineId}`
+      : `po:${effectivePo(t) ?? ""}|${t.roundTripKey ?? t.id}`;
     const legs = byKey.get(key);
     if (legs) legs.push(t);
     else byKey.set(key, [t]);
   }
   return [...byKey.entries()].map(([key, legs]) => ({ key, legs }));
+}
+
+/**
+ * Is this group a complete round trip? InvoiceDraftBuilder's exact test: one
+ * Outbound leg AND one Inbound leg must both be present. Leg COUNT is not the
+ * test — two legs in the same direction are not a pair. It no longer changes
+ * the PRICE (every group bills one full round-trip rate either way), only
+ * whether the group carries the unpaired review flag.
+ */
+function isRoundTripPair(legs: TripRecord[]): boolean {
+  return legs.some((l) => l.direction === "Outbound") && legs.some((l) => l.direction === "Inbound");
 }
 
 /** The issued-invoice reference for a group of legs — the QBO number once the
@@ -216,16 +624,43 @@ function issuedRef(legs: TripRecord[]): string | null {
 export function buildAccrualsReport(args: {
   client: ClientRecord;
   period: Period;
-  /** From todayIso() — passed in so the derivation stays pure and testable. */
+  /** From todayIso() — the Prepared date. Passed in so the derivation stays
+   *  pure and testable; it no longer decides any bucket. */
   today: string;
   /** Every trip for the client in the period (listTrips unpaged = complete). */
   trips: TripRecord[];
+  /** The client's trips dated BEFORE the period that are not yet completed
+   *  (ACCRUAL_OPEN_STATUSES). Re-filtered here with isCarriedForwardTrip, so a
+   *  stray Completed / Cancelled / later-month trip can never carry in. */
+  carriedTrips?: TripRecord[];
+  /** True when the carry-forward fetch failed. The report degrades to this
+   *  month only, with a banner — it never reads as "nothing carried forward". */
+  carriedTripsUnavailable?: boolean;
   /** Successfully fetched invoice details for the billing.invoiceIds the trips
-   *  reference. A referenced id missing here reads as a failed fetch — the
-   *  affected amounts degrade to "unavailable", never to a guess. */
+   *  (month + carried) reference. A referenced id missing here reads as a
+   *  failed fetch — the affected amounts degrade to "unavailable", never to a
+   *  guess. */
   invoices: InvoiceDetailRecord[];
+  /** Every PO on file for the client (listPurchaseOrders). Their rates override
+   *  the contract rate; an empty list prices exactly as it did before per-PO
+   *  terms existed, at the contract rate. */
+  purchaseOrders: PurchaseOrderRecord[];
+  /** True when the PO fetch failed. Pricing degrades to the contract rate and
+   *  one banner says so — a failed PO fetch never blanks the report. */
+  purchaseOrdersUnavailable?: boolean;
 }): AccrualsReport {
-  const { client, period, today, invoices } = args;
+  const { client, period, today, invoices, purchaseOrders } = args;
+
+  // Month trips plus the carried-forward ones, deduped by id (month copy wins).
+  // ONE list from here on: one sort, one partition, one grouping, one claim
+  // rule — which is what makes a round trip straddling the month boundary a
+  // single group priced once, rather than one half in each report.
+  const tripsById = new Map<string, TripRecord>();
+  for (const t of args.trips) if (!tripsById.has(t.id)) tripsById.set(t.id, t);
+  for (const t of args.carriedTrips ?? []) {
+    if (isCarriedForwardTrip(t, period) && !tripsById.has(t.id)) tripsById.set(t.id, t);
+  }
+  const isCarried = (legs: TripRecord[]): boolean => legs[0].serviceDate < period.start;
 
   // Real amounts resolve trip → invoice line. A trip is claimed by at most one
   // line (the backend rejects double-invoicing), so first-hit is authoritative.
@@ -239,23 +674,33 @@ export function buildAccrualsReport(args: {
     }
   }
 
-  // Estimation is possible only under a per-round-trip contract with a rate.
+  // Rate resolution: the PO overrides, the contract is the fallback.
   const contract = client.activeContract;
-  const rate = contract?.billingModel === "RoundTripRate" ? contract.ratePerRoundTripCad : null;
+  const contractRate = contractRoundTripRateCad(contract);
+  const poByNumber = new Map(purchaseOrders.map((p) => [p.poNumber, p] as const));
 
-  // Partition the month into buckets + the two reconciliation lists.
-  const sorted = sortTrips(args.trips);
+  /** The effective PO number of a trip — trip.poNumber, else the contract
+   *  default. ONE definition, because it decides both the grouping key and the
+   *  rate, and those two must never disagree. */
+  const effectivePo = (t: TripRecord): string | null =>
+    t.poNumber ?? contract?.defaultPoNumber ?? null;
+  const poRecord = (poNumber: string | null): PurchaseOrderRecord | null =>
+    poNumber ? poByNumber.get(poNumber) ?? null : null;
+
+  // Partition into buckets + the two reconciliation lists. Carried trips are
+  // open by construction, so they only ever reach a bucket — the
+  // reconciliation lists stay this month's.
+  const sorted = sortTrips([...tripsById.values()]);
   const byBucket: Record<AccrualBucketId, TripRecord[]> = {
     paid: [],
     invoiced: [],
     ready: [],
     scheduled: [],
-    upcoming: [],
   };
   const cancelled: TripRecord[] = [];
   const writtenOffTrips: TripRecord[] = [];
   for (const t of sorted) {
-    const bucket = accrualBucketFor(t, today);
+    const bucket = accrualBucketFor(t);
     if (bucket) byBucket[bucket].push(t);
     else if (t.status === "Cancelled") cancelled.push(t);
     else writtenOffTrips.push(t);
@@ -271,7 +716,7 @@ export function buildAccrualsReport(args: {
   const claimedLines = new Set<string>();
   function invoiceAmount(legs: TripRecord[]): Pick<
     AccrualGroup,
-    "amountCad" | "amountSource" | "amountNote"
+    "amountCad" | "amountSource" | "amountNote" | "amountFlag"
   > {
     const lines = new Map<string, InvoiceLineRecord>();
     let countedElsewhere = false;
@@ -286,42 +731,110 @@ export function buildAccrualsReport(args: {
     }
     if (lines.size === 0) {
       return countedElsewhere
-        ? { amountCad: null, amountSource: null, amountNote: "counted" }
-        : { amountCad: null, amountSource: null, amountNote: "unavailable" };
+        ? { amountCad: null, amountSource: null, amountNote: "counted", amountFlag: null }
+        : { amountCad: null, amountSource: null, amountNote: "unavailable", amountFlag: null };
     }
     let sum = 0;
     for (const [lineId, line] of lines) {
       claimedLines.add(lineId);
       sum += line.amountCad;
     }
-    return { amountCad: sum, amountSource: "invoice", amountNote: null };
+    return { amountCad: sum, amountSource: "invoice", amountNote: null, amountFlag: null };
   }
 
-  // Estimate a PAIRED group at 1 × rate; never price an unpaired leg. With no
-  // usable rate nothing is estimated and one banner note explains every "—".
-  function estimateAmount(paired: boolean): Pick<
-    AccrualGroup,
-    "amountCad" | "amountSource" | "amountNote"
-  > {
-    if (rate === null) return { amountCad: null, amountSource: null, amountNote: null };
-    if (!paired) return { amountCad: null, amountSource: null, amountNote: "unpaired" };
-    return { amountCad: rate, amountSource: "estimate", amountNote: null };
+  // "A round trip must be a single PO": which POs does each roundTripKey's
+  // unbilled work sit on? More than one and EVERY group carrying that key is a
+  // split — paired or not, which is why this is tested before the pairing test.
+  // Computed over ALL unbilled trips, not per bucket, because the two legs
+  // routinely straddle buckets (one still Scheduled, its return already
+  // ReadyForBilling) and the split is a property of the round trip, not a bucket.
+  const posByRoundTripKey = new Map<string, Set<string>>();
+  for (const t of [...byBucket.ready, ...byBucket.scheduled]) {
+    if (!t.roundTripKey) continue;
+    const seen = posByRoundTripKey.get(t.roundTripKey) ?? new Set<string>();
+    seen.add(effectivePo(t) ?? "");
+    posByRoundTripKey.set(t.roundTripKey, seen);
+  }
+  function isSplitPo(legs: TripRecord[]): boolean {
+    const key = legs[0].roundTripKey;
+    if (!key) return false;
+    return (posByRoundTripKey.get(key)?.size ?? 0) > 1;
+  }
+
+  /**
+   * Estimate a group exactly the way InvoiceDraftBuilder.Build would price it,
+   * at the EFFECTIVE rate of the group's PO (poEffectiveTerms — the PO
+   * overrides, the contract rate is the fallback). ONE line per group, quantity
+   * 1, never per leg. The branch ORDER is the builder's and matters:
+   *   - no roundTripKey anywhere  → the draft builder never claims it, so it can
+   *                                 only become a manual line: unpriced, noted;
+   *   - SPLIT PO (checked BEFORE pairing, as the builder does) → not priced at
+   *                                 all, on either worksheet, flagged
+   *                                 "needs a decision". A key with a complete
+   *                                 pair on one PO and a stray leg on another
+   *                                 stays unpriced on both — that is the
+   *                                 ordering's whole point;
+   *   - no usable rate            → nothing estimated, one banner note explains;
+   *   - Outbound AND Inbound leg  → 1 × the round-trip rate (deadhead-flagged
+   *                                 when a leg ran empty);
+   *   - anything else             → 1 × the round-trip rate, unpaired-flagged.
+   */
+  function estimateAmount(
+    legs: TripRecord[],
+    paired: boolean,
+    poNumber: string | null,
+  ): Pick<AccrualGroup, "amountCad" | "amountSource" | "amountNote" | "amountFlag"> {
+    if (!legs.some((l) => l.roundTripKey)) {
+      return { amountCad: null, amountSource: null, amountNote: "manual", amountFlag: null };
+    }
+    if (isSplitPo(legs)) {
+      // Deliberately unpriced: pricing the full rate here AND on the other PO's
+      // worksheet would bill one run twice, and the owner would rather see no
+      // figure than a wrong one. The row stays visible and counted as unpriced.
+      return { amountCad: null, amountSource: null, amountNote: null, amountFlag: "splitPo" };
+    }
+    const rate = poEffectiveTerms(poRecord(poNumber), contractRate).roundTripRateCad;
+    if (rate === null) {
+      return { amountCad: null, amountSource: null, amountNote: null, amountFlag: null };
+    }
+    return {
+      amountCad: rate,
+      amountSource: "estimate",
+      amountNote: null,
+      amountFlag: !paired ? "unpaired" : legs.some((l) => l.isEmptyLeg) ? "deadhead" : null,
+    };
+  }
+
+  /** Finish one group: the PO facts, then the money. `realAmounts` picks the
+   *  invoice-line path (billed work) over the estimator (unbilled work). */
+  function finishGroup(key: string, legs: TripRecord[], realAmounts: boolean): AccrualGroup {
+    const paired = isRoundTripPair(legs);
+    const poNumber = effectivePo(legs[0]);
+    const po = poRecord(poNumber);
+    const onWorksheet = legs.find((l) => l.billing?.state === "OnWorksheet")?.billing ?? null;
+    // Warn, never block: a leg outside the PO's [issued, expiry] window is still
+    // priced and still counted — it just says so.
+    const poFlags: AccrualPoFlag[] =
+      po && legs.some((l) => !isWithinPoWindow(po, l.serviceDate)) ? ["outsideWindow"] : [];
+    return {
+      key,
+      legs,
+      paired,
+      poNumber,
+      poFromContractDefault: legs[0].poNumber == null && poNumber !== null,
+      poFlags,
+      ...(realAmounts ? invoiceAmount(legs) : estimateAmount(legs, paired, poNumber)),
+      invoiceNumber: realAmounts ? issuedRef(legs) : null,
+      onWorksheetNumber: onWorksheet?.invoiceNumber ?? null,
+      carriedForward: isCarried(legs),
+    };
   }
 
   function buildGroups(bucket: AccrualBucketId, trips: TripRecord[]): AccrualGroup[] {
     const realAmounts = bucket === "paid" || bucket === "invoiced";
-    return groupTrips(trips, realAmounts ? lineByTripId : null).map(({ key, legs }) => {
-      const paired = legs.length >= 2;
-      const onWorksheet = legs.find((l) => l.billing?.state === "OnWorksheet")?.billing ?? null;
-      return {
-        key,
-        legs,
-        paired,
-        ...(realAmounts ? invoiceAmount(legs) : estimateAmount(paired)),
-        invoiceNumber: realAmounts ? issuedRef(legs) : null,
-        onWorksheetNumber: onWorksheet?.invoiceNumber ?? null,
-      };
-    });
+    return groupTrips(trips, realAmounts ? lineByTripId : null, effectivePo).map(({ key, legs }) =>
+      finishGroup(key, legs, realAmounts),
+    );
   }
 
   const buckets: AccrualBucket[] = ACCRUAL_BUCKET_ORDER.map((id) => {
@@ -333,23 +846,108 @@ export function buildAccrualsReport(args: {
       groups,
       actualCad: groups.reduce((s, g) => s + (g.amountSource === "invoice" ? g.amountCad ?? 0 : 0), 0),
       estimatedCad: groups.reduce((s, g) => s + (g.amountSource === "estimate" ? g.amountCad ?? 0 : 0), 0),
-      unpricedCount: groups.filter((g) => g.amountCad === null).length,
+      unpricedCount: groups.filter(isUnpricedGroup).length,
+      carriedForwardCount: groups.filter((g) => g.carriedForward).length,
     };
   });
 
   // Written-off groups carry their real (lost) amounts + reasons — shown in
   // reconciliation only, never in bucket totals.
-  const writtenOff = groupTrips(writtenOffTrips, lineByTripId).map(({ key, legs }) => ({
-    key,
-    legs,
-    paired: legs.length >= 2,
-    ...invoiceAmount(legs),
-    invoiceNumber: issuedRef(legs),
+  const writtenOff = groupTrips(writtenOffTrips, lineByTripId, effectivePo).map(({ key, legs }) => ({
+    ...finishGroup(key, legs, true),
+    // Reconciliation only — a written-off group is never "on a worksheet".
     onWorksheetNumber: null,
   }));
 
-  // Degradation banners — each explains a class of "—" or "unavailable" rows.
+  // ---- purchase-order authorisation --------------------------------------
+  // What each PO authorises against what this period's work draws down on it.
+  // Invoiced dollars are real invoice-line money (invoiced + paid); upcoming is
+  // the estimate for work not yet billed. Reconciliation (cancelled /
+  // written-off) is excluded — it is not accruing against the PO.
+  // Carried-forward groups are excluded too, deliberately: this block and its
+  // overage banner say "invoiced in this period" and "upcoming", and an
+  // August invoice still awaiting payment is neither. Their money is still in
+  // the buckets, sections and headlines (Monies owed) — only this draw-down
+  // view is limited to the period's own work.
+  const commitmentRows = new Map<
+    string,
+    { poNumber: string | null; invoicedCad: number; upcomingCad: number }
+  >();
+  for (const b of buckets) {
+    for (const g of b.groups) {
+      if (g.carriedForward) continue;
+      const key = g.poNumber ?? "";
+      const row = commitmentRows.get(key) ?? { poNumber: g.poNumber, invoicedCad: 0, upcomingCad: 0 };
+      if (g.amountSource === "invoice") row.invoicedCad += g.amountCad ?? 0;
+      else if (g.amountSource === "estimate") row.upcomingCad += g.amountCad ?? 0;
+      commitmentRows.set(key, row);
+    }
+  }
+  const poCommitments: AccrualPoCommitment[] = [...commitmentRows.values()]
+    .sort((a, b) => {
+      if (a.poNumber === b.poNumber) return 0;
+      if (a.poNumber === null) return 1; // work with no PO at all sorts last
+      if (b.poNumber === null) return -1;
+      return a.poNumber.localeCompare(b.poNumber);
+    })
+    .map((row) => {
+      const po = poRecord(row.poNumber);
+      const amountCad = po?.amountCad ?? null;
+      const committedCad = row.invoicedCad + row.upcomingCad;
+      const over = amountCad !== null && committedCad > amountCad;
+      const overageCad = over ? committedCad - amountCad! : null;
+      const remainingCad = amountCad !== null && !over ? amountCad - committedCad : null;
+      return {
+        poNumber: row.poNumber,
+        po,
+        amountCad,
+        invoicedCad: row.invoicedCad,
+        upcomingCad: row.upcomingCad,
+        committedCad,
+        overageCad,
+        remainingCad,
+        termsLabel: poTermsLabel(po, contractRate),
+        kind: over ? "over" : amountCad === null ? "off" : "ontime",
+        // The invoice's words again ("PO value exceeded — review"), plus the
+        // figure the invoice line has no room for.
+        label:
+          overageCad !== null
+            ? `PO value exceeded — review · over by ${formatInvoiceCad(overageCad)}`
+            : remainingCad !== null
+              ? `${formatInvoiceCad(remainingCad)} left of ${formatInvoiceCad(amountCad!)}`
+              : "No PO value recorded",
+      } satisfies AccrualPoCommitment;
+    });
+
+  // Degradation banners — each explains a class of "—" or "unavailable" rows,
+  // or a PO warning. Nothing here blocks anything: the report is the warning.
   const notes: string[] = [];
+  // The owner's headline question first: is upcoming work about to exceed what a
+  // purchase order actually authorises?
+  for (const c of poCommitments) {
+    if (c.overageCad === null) continue;
+    notes.push(
+      `Purchase order ${c.poNumber} is over its authorised value: ` +
+        `${formatInvoiceCad(c.amountCad!)} authorised · ` +
+        `${formatInvoiceCad(c.invoicedCad)} invoiced in this period · ` +
+        `${formatInvoiceCad(c.upcomingCad)} upcoming · ` +
+        `${formatInvoiceCad(c.overageCad)} over. Warning only — nothing is blocked.`,
+    );
+  }
+  if (args.carriedTripsUnavailable) {
+    notes.push(
+      "Open trips from earlier months could not be loaded — this report shows this month's trips only, so amounts still owing from earlier months are missing.",
+    );
+  }
+  // The count of carried groups is deliberately NOT a note: notes render as
+  // warnings everywhere, and carry-forward is normal behaviour, not a warn
+  // state. It rides report.carriedForwardCount (accrualsCarriedForwardNote).
+  const carriedForwardCount = buckets.reduce((s, b) => s + b.carriedForwardCount, 0);
+  if (args.purchaseOrdersUnavailable) {
+    notes.push(
+      "Purchase orders could not be loaded — estimates fall back to the contract round-trip rate, so a PO carrying its own rates is not reflected and PO values are not checked.",
+    );
+  }
   if (!contract) {
     notes.push("No active contract on file — unbilled trips are listed without estimated amounts.");
   } else if (contract.billingModel === "Manual") {
@@ -361,32 +959,221 @@ export function buildAccrualsReport(args: {
       "The active contract has no round-trip rate recorded — unbilled trips are listed without estimated amounts.",
     );
   }
+  // …but a PO can price work the contract cannot: say so rather than letting the
+  // banner above read as "nothing on this report is estimated". Read off the
+  // priced GROUPS, not poCommitments: those exclude carried-forward work, and a
+  // carried run priced at its PO's own rate is still an estimate on this
+  // report. With no contract rate, every estimate came from a PO rate.
+  const allGroups = buckets.flatMap((b) => b.groups);
+  if (contractRate === null && allGroups.some((g) => g.amountSource === "estimate")) {
+    notes.push(
+      "Some purchase orders record their own round-trip rate — trips priced under those POs are still estimated, from the PO rather than the contract.",
+    );
+  }
   if (missingInvoiceIds.size > 0) {
     const n = missingInvoiceIds.size;
     notes.push(
       `${n} referenced invoice${n === 1 ? "" : "s"} could not be loaded — affected amounts show as unavailable and are excluded from totals.`,
     );
   }
-  const unpairedCount = buckets.reduce(
-    (s, b) => s + b.groups.filter((g) => g.amountNote === "unpaired").length,
-    0,
-  );
+  const unpairedCount = allGroups.filter((g) => g.amountFlag === "unpaired").length;
   if (unpairedCount > 0) {
     notes.push(
-      `${unpairedCount} unpaired leg${unpairedCount === 1 ? "" : "s"} not estimated — the contract prices complete round trips only, so a half-trip figure would never match an invoice.`,
+      `${unpairedCount} group${unpairedCount === 1 ? "" : "s"} of trips ${unpairedCount === 1 ? "does" : "do"} not pair an outbound leg with an inbound one — each is estimated at ONE FULL round-trip rate and flagged for review, exactly as the invoice will bill it: a lone leg still brings the vehicle back empty, so it costs a full run.`,
     );
   }
+  const splitPoCount = allGroups.filter((g) => g.amountFlag === "splitPo").length;
+  if (splitPoCount > 0) {
+    notes.push(
+      `${splitPoCount} group${splitPoCount === 1 ? "" : "s"} of legs share a round trip with a leg on a DIFFERENT purchase order — a round trip must sit on one PO, so neither side is priced (pricing both would bill one run twice) and each is flagged as needing a decision. Nothing is blocked; re-issue the legs under one PO to bill them as a round trip.`,
+    );
+  }
+  const outsideWindow = allGroups.filter((g) => g.poFlags.includes("outsideWindow"));
+  if (outsideWindow.length > 0) {
+    const pos = [...new Set(outsideWindow.map((g) => g.poNumber).filter((p): p is string => p !== null))];
+    notes.push(
+      `${outsideWindow.length} group${outsideWindow.length === 1 ? "" : "s"} of trips fall outside the issued → expiry window of the purchase order that prices them (${pos.join(", ")}) — priced and counted anyway, flagged for review.`,
+    );
+  }
+  const manualCount = buckets.reduce(
+    (s, b) => s + b.groups.filter((g) => g.amountNote === "manual").length,
+    0,
+  );
+  if (manualCount > 0) {
+    notes.push(
+      `${manualCount} trip${manualCount === 1 ? "" : "s"} ${manualCount === 1 ? "carries" : "carry"} no round-trip key (ad-hoc, charter or cargo work) — invoicing picks ${manualCount === 1 ? "it" : "them"} up as a manual line, so no amount is estimated here.`,
+    );
+  }
+
+  const sections: AccrualSection[] = ACCRUAL_SECTION_ORDER.map((id) => {
+    const meta = ACCRUAL_SECTION_META[id];
+    // The SAME bucket objects report.buckets holds — a section is a view, so no
+    // dollar can differ between the two readings of the month.
+    const members = meta.buckets.map((bid) => buckets.find((b) => b.id === bid)!);
+    return {
+      id,
+      label: meta.label,
+      hint: meta.hint,
+      kind: meta.kind,
+      buckets: members,
+      detail: meta.detail,
+      groupCount: members.reduce((s, b) => s + b.groups.length, 0),
+      actualCad: members.reduce((s, b) => s + b.actualCad, 0),
+      estimatedCad: members.reduce((s, b) => s + b.estimatedCad, 0),
+      unpricedCount: members.reduce((s, b) => s + b.unpricedCount, 0),
+      carriedForwardCount: members.reduce((s, b) => s + b.carriedForwardCount, 0),
+    };
+  });
 
   return {
     client,
     period,
     today,
     buckets,
+    sections,
     cancelled,
     writtenOff,
     invoices: [...invoices].sort((a, b) => a.invoiceNumber.localeCompare(b.invoiceNumber)),
+    poCommitments,
     notes,
+    carriedForwardCount,
+    carriedTripsUnavailable: args.carriedTripsUnavailable === true,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Per-PO draft preview — the SAME grouping and rate resolution as the estimator
+// above, over the billable-trip rows the Billing generate-draft dialog already
+// fetches. It lives here, not in the dialog, because draft generation now
+// produces one worksheet PER PURCHASE ORDER: if the dialog re-derived "which POs
+// and how much each", its preview could promise a different split from the one
+// this file prices and the backend's InvoiceDraftBuilder creates.
+// ---------------------------------------------------------------------------
+
+/** The minimum a leg must carry to be grouped and priced. Both TripRecord and
+ *  BillableTripRecord satisfy it structurally, so neither module has to convert. */
+export interface PricedLeg {
+  id: string;
+  poNumber: string | null;
+  roundTripKey: string | null;
+  direction: "Outbound" | "Inbound" | null;
+}
+
+/** One prospective worksheet: the PO, the terms it prices at, and what it would
+ *  draft. `poNumber: null` is the real "No PO" worksheet — work with no trip PO
+ *  and no contract default still bills, and must read as such, never be hidden. */
+export interface PoDraftPreview {
+  poNumber: string | null;
+  /** Money-bearing groups: a paired round trip, or a lone leg. Each bills ONE
+   *  full round-trip rate — the field name is the unit, not the pairing. */
+  roundTrips: number;
+  legCount: number;
+  pairedCount: number;
+  /** Groups that did not pair — still billed one full round-trip rate, flagged
+   *  for review on the generated line. */
+  unpairedCount: number;
+  /** Groups whose roundTripKey straddles two POs: NOT priced on either
+   *  worksheet, flagged as needing a decision (InvoiceDraftBuilder emits a
+   *  zero-amount line for them, and pricing them here would promise money the
+   *  generated draft will not contain). */
+  splitCount: number;
+  /** Legs with no roundTripKey: the draft builder leaves them to a manual line,
+   *  so they are counted but never estimated (same rule as the estimator). */
+  manualLegCount: number;
+  estimatedCad: number;
+  /** True when a group could not be priced at all (no rate on PO or contract). */
+  unpriced: boolean;
+  /** The PO's effective terms as one line (poTermsLabel). */
+  termsLabel: string;
+}
+
+export function previewDraftsByPo(args: {
+  legs: PricedLeg[];
+  /** The client's active contract — the default PO and the fallback rate. */
+  contract: ClientRecord["activeContract"];
+  purchaseOrders: PurchaseOrderRecord[];
+}): PoDraftPreview[] {
+  const { legs, contract, purchaseOrders } = args;
+  const contractRate = contractRoundTripRateCad(contract);
+  const poByNumber = new Map(purchaseOrders.map((p) => [p.poNumber, p] as const));
+  const effectivePo = (l: PricedLeg): string | null =>
+    l.poNumber ?? contract?.defaultPoNumber ?? null;
+
+  // Same key as the estimator: (effective PO, roundTripKey ?? own id).
+  const groups = new Map<string, { poNumber: string | null; legs: PricedLeg[] }>();
+  for (const l of legs) {
+    const po = effectivePo(l);
+    const key = `po:${po ?? ""}|${l.roundTripKey ?? l.id}`;
+    const g = groups.get(key);
+    if (g) g.legs.push(l);
+    else groups.set(key, { poNumber: po, legs: [l] });
+  }
+
+  // …and the same split-PO rule, checked first: a roundTripKey whose legs sit
+  // on more than one PO is priced on neither worksheet.
+  const posByKey = new Map<string, Set<string>>();
+  for (const l of legs) {
+    if (!l.roundTripKey) continue;
+    const seen = posByKey.get(l.roundTripKey) ?? new Set<string>();
+    seen.add(effectivePo(l) ?? "");
+    posByKey.set(l.roundTripKey, seen);
+  }
+  const isSplit = (g: { legs: PricedLeg[] }): boolean => {
+    const key = g.legs[0].roundTripKey;
+    return key ? (posByKey.get(key)?.size ?? 0) > 1 : false;
+  };
+
+  const byPo = new Map<string, PoDraftPreview>();
+  for (const g of groups.values()) {
+    const key = g.poNumber ?? "";
+    const po = g.poNumber ? poByNumber.get(g.poNumber) ?? null : null;
+    const row =
+      byPo.get(key) ??
+      ({
+        poNumber: g.poNumber,
+        roundTrips: 0,
+        legCount: 0,
+        pairedCount: 0,
+        unpairedCount: 0,
+        splitCount: 0,
+        manualLegCount: 0,
+        estimatedCad: 0,
+        unpriced: false,
+        termsLabel: poTermsLabel(po, contractRate),
+      } satisfies PoDraftPreview);
+    row.legCount += g.legs.length;
+    // No roundTripKey anywhere → InvoiceDraftBuilder never claims it; it can
+    // only reach an invoice as a hand-keyed manual line.
+    if (!g.legs.some((l) => l.roundTripKey)) {
+      row.manualLegCount += g.legs.length;
+      byPo.set(key, row);
+      continue;
+    }
+    row.roundTrips += 1;
+    // Split first, exactly as the builder orders it: a straddling key is not
+    // priced on this worksheet or the other one.
+    if (isSplit(g)) {
+      row.splitCount += 1;
+      byPo.set(key, row);
+      continue;
+    }
+    const paired =
+      g.legs.some((l) => l.direction === "Outbound") && g.legs.some((l) => l.direction === "Inbound");
+    // One full round-trip rate per group, paired or not.
+    const rate = poEffectiveTerms(po, contractRate).roundTripRateCad;
+    if (paired) row.pairedCount += 1;
+    else row.unpairedCount += 1;
+    if (rate === null) row.unpriced = true;
+    else row.estimatedCad += rate;
+    byPo.set(key, row);
+  }
+
+  return [...byPo.values()].sort((a, b) => {
+    if (a.poNumber === b.poNumber) return 0;
+    if (a.poNumber === null) return 1; // the No-PO worksheet sorts last
+    if (b.poNumber === null) return -1;
+    return a.poNumber.localeCompare(b.poNumber);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -400,7 +1187,50 @@ export interface AccrualTotals {
   unpricedCount: number;
 }
 
-/** Whole-report totals across the five buckets (reconciliation excluded). */
+/**
+ * Is there nothing at all on this report — no group in any bucket (carried-
+ * forward groups included) and no reconciliation row? The ONE empty test, read
+ * by the screen and the printed sheet alike, so a month with no trips of its
+ * own but open work carried in from earlier months still renders its sections
+ * everywhere rather than printing a nil statement over money still owed.
+ */
+export function accrualsReportIsEmpty(report: AccrualsReport): boolean {
+  return (
+    report.buckets.every((b) => b.groups.length === 0) &&
+    report.cancelled.length === 0 &&
+    report.writtenOff.length === 0
+  );
+}
+
+/**
+ * The empty-report sentence for the colourless outputs (printed sheet,
+ * clipboard) — or null when the report is not empty. When the carry-forward
+ * fetch failed it is NOT a nil statement: this month has nothing of its own,
+ * but what is still owed from earlier months is unknown, and it says so.
+ */
+export function accrualsEmptyText(report: AccrualsReport): string | null {
+  if (!accrualsReportIsEmpty(report)) return null;
+  return report.carriedTripsUnavailable
+    ? "No trips for this client in the period. Open trips from earlier months could not be loaded, so this is NOT a nil statement — amounts still owing from earlier months are unknown."
+    : "No trips for this client in the period.";
+}
+
+/**
+ * The informational carried-forward sentence — or null when nothing carried
+ * in. Kept OUT of report.notes on purpose: notes render as warnings, and
+ * carry-forward is the report working as designed. The screen shows it as
+ * muted text and the sheet and clipboard as a plain line; the email leaves it
+ * out, its rows and tally lines already marking the work.
+ */
+export function accrualsCarriedForwardNote(report: AccrualsReport): string | null {
+  const n = report.carriedForwardCount;
+  if (n === 0) return null;
+  return n === 1
+    ? "1 trip from an earlier month is not yet completed and is carried into this report."
+    : `${n} trips from earlier months are not yet completed and are carried into this report.`;
+}
+
+/** Whole-report totals across the four buckets (reconciliation excluded). */
 export function accrualTotals(report: AccrualsReport): AccrualTotals {
   return report.buckets.reduce<AccrualTotals>(
     (acc, b) => ({
@@ -413,7 +1243,149 @@ export function accrualTotals(report: AccrualsReport): AccrualTotals {
   );
 }
 
-/** "$450.00" / "$450.00 est." — null when unpriced (render amountNote or "—"). */
+// ---------------------------------------------------------------------------
+// Headline figures — the two numbers the report now leads with. Derived HERE so
+// the screen's tiles, the printed sheet, the clipboard export and the emailed
+// PDF all print the same strings; a consumer that formatted its own could drift
+// by a rounding or an " est." marking, which is exactly the class of bug the
+// one-derivation rule exists to prevent.
+// ---------------------------------------------------------------------------
+
+export interface AccrualHeadline {
+  /** The section the figure summarises (upcoming / owed). */
+  id: AccrualSectionId;
+  label: string;
+  /** Kind for the StatusChip/badge — colour never travels without this label. */
+  kind: StatusKind;
+  /** Pre-formatted money: "$1,350.00", "$1,350.00 est.", or "Not priced". */
+  amountCad: string;
+  /** "3 trips · incl. $450.00 est. · 1 unpriced" */
+  detail: string;
+}
+
+/**
+ * The four numbers any tally line needs — a section, a bucket, or the whole
+ * report. ONE pair of formatters reads it, which is what lets the screen, the
+ * printed sheet, the clipboard and the emailed PDF all print one merged Amount
+ * column without any of them re-deriving the " est." marking.
+ */
+export interface AccrualTallyInput {
+  count: number;
+  actualCad: number;
+  estimatedCad: number;
+  unpricedCount: number;
+  /** Groups carried in from earlier months — already inside the counts and
+   *  amounts above; this only adds "N from earlier months" to the line.
+   *  Optional so a whole-report tally that does not care can omit it. */
+  carriedForwardCount?: number;
+}
+
+/** Tally as one line — "5 trips · 2 from earlier months · incl. $450.00 est. ·
+ *  1 unpriced".
+ *  There is ONE amount column everywhere now, so this sub-line is where a
+ *  bucket that mixes billed and estimated money keeps the split recoverable:
+ *  the merged figure alone would hide it. "Trips", not "round trips" — an
+ *  unpaired group is one trip billed as a round trip, and calling it a round
+ *  trip is the wording the owner asked us to drop. */
+export function accrualTallyDetail(t: AccrualTallyInput): string {
+  const parts = [`${t.count} trip${t.count === 1 ? "" : "s"}`];
+  const carried = t.carriedForwardCount ?? 0;
+  if (carried > 0) parts.push(`${carried} from ${carried === 1 ? "an earlier month" : "earlier months"}`);
+  // Only when the figure itself is NOT already marked wholly estimated —
+  // otherwise the subline would repeat what the amount already says.
+  if (t.estimatedCad > 0 && t.actualCad > 0) {
+    parts.push(`incl. ${formatInvoiceCad(t.estimatedCad)} est.`);
+  }
+  if (t.unpricedCount > 0) parts.push(`${t.unpricedCount} unpriced`);
+  return parts.join(" · ");
+}
+
+/** The ONE merged amount: billed plus estimated as a single figure, carrying
+ *  " est." when all of it is an estimate. Nothing priced at all reads "Not
+ *  priced" rather than a false $0.00 (manual billing / no contract / no rate /
+ *  a split-PO group awaiting a decision — the banner notes say which). A tally
+ *  whose only rows are "counted with the paired leg" is NOT unpriced — that
+ *  money is carried by an earlier bucket — so it reads a true "$0.00". */
+export function accrualTallyAmountLabel(t: AccrualTallyInput): string {
+  const total = t.actualCad + t.estimatedCad;
+  if (total === 0 && t.unpricedCount > 0) return "Not priced";
+  return t.actualCad === 0 && t.estimatedCad > 0
+    ? `${formatInvoiceCad(total)} est.`
+    : formatInvoiceCad(total);
+}
+
+function sectionTally(section: AccrualSection): AccrualTallyInput {
+  return {
+    count: section.groupCount,
+    actualCad: section.actualCad,
+    estimatedCad: section.estimatedCad,
+    unpricedCount: section.unpricedCount,
+    carriedForwardCount: section.carriedForwardCount,
+  };
+}
+
+function bucketTally(bucket: AccrualBucket): AccrualTallyInput {
+  return {
+    count: bucket.groups.length,
+    actualCad: bucket.actualCad,
+    estimatedCad: bucket.estimatedCad,
+    unpricedCount: bucket.unpricedCount,
+    carriedForwardCount: bucket.carriedForwardCount,
+  };
+}
+
+/** "3 trips · incl. $450.00 est. · 1 unpriced" for a section. */
+export function accrualSectionDetail(section: AccrualSection): string {
+  return accrualTallyDetail(sectionTally(section));
+}
+
+/** The section's single Amount figure. */
+export function accrualSectionAmountLabel(section: AccrualSection): string {
+  return accrualTallyAmountLabel(sectionTally(section));
+}
+
+/** "2 trips · incl. $450.00 est." for one bucket's footer tally. */
+export function accrualBucketDetail(bucket: AccrualBucket): string {
+  return accrualTallyDetail(bucketTally(bucket));
+}
+
+/** The bucket's single Amount figure. */
+export function accrualBucketAmountLabel(bucket: AccrualBucket): string {
+  return accrualTallyAmountLabel(bucketTally(bucket));
+}
+
+/** Wording for each headline — deliberately the owner's two questions, not the
+ *  section labels: "what is this going to cost me" and "what do I still owe". */
+const HEADLINE_LABELS: Record<"upcoming" | "owed", string> = {
+  upcoming: "Upcoming expenses",
+  owed: "Monies owed",
+};
+
+/** The two leading figures, upcoming first. `settled` is not a headline — it is
+ *  the closing line. */
+export function accrualHeadlines(report: AccrualsReport): AccrualHeadline[] {
+  return report.sections
+    .filter((s): s is AccrualSection & { id: "upcoming" | "owed" } => s.id !== "settled")
+    .map((s) => ({
+      id: s.id,
+      label: HEADLINE_LABELS[s.id],
+      kind: s.kind,
+      amountCad: accrualSectionAmountLabel(s),
+      detail: accrualSectionDetail(s),
+    }));
+}
+
+/** The settled closing line — "Settled this month · 4 trips · $1,800.00".
+ *  One line, by design: no per-trip detail table (see ACCRUAL_SECTION_META). */
+export function accrualSettledLine(report: AccrualsReport): string {
+  const settled = report.sections.find((s) => s.id === "settled");
+  if (!settled) return "";
+  return `${settled.label} · ${accrualSectionDetail(settled)} · ${accrualSectionAmountLabel(settled)}`;
+}
+
+/** "$450.00" / "$450.00 est." — null when the group carries no figure of its
+ *  own (render amountFlag / amountNote or "—"; a "counted" group is null here
+ *  but NOT unpriced — see isUnpricedGroup). */
 export function groupAmountLabel(g: AccrualGroup): string | null {
   if (g.amountCad === null) return null;
   return g.amountSource === "estimate"
@@ -426,6 +1398,57 @@ export function groupRefLabel(g: AccrualGroup): string {
   if (g.invoiceNumber) return g.invoiceNumber;
   if (g.onWorksheetNumber) return `On worksheet ${g.onWorksheetNumber}`;
   return "—";
+}
+
+/** PO column: the EFFECTIVE PO that priced the group — "PO-9", or
+ *  "PO-9 (contract default)" when the trips carry none of their own, or "No PO".
+ *  Per-PO terms make the PO a pricing fact, so every consumer prints which PO
+ *  priced the row, not merely the string stamped on the first leg. */
+export function groupPoLabel(g: AccrualGroup): string {
+  if (g.poNumber === null) return "No PO";
+  return g.poFromContractDefault ? `${g.poNumber} (contract default)` : g.poNumber;
+}
+
+/** PO cell for the colourless outputs (clipboard, print, emailed PDF): the
+ *  label plus any PO warning spelled out in words. */
+export function groupPoText(g: AccrualGroup): string {
+  const flags = g.poFlags.map((f) => PO_FLAG_META[f].label);
+  return flags.length > 0 ? `${groupPoLabel(g)} (${flags.join("; ")})` : groupPoLabel(g);
+}
+
+/** One PO's draw-down as a line — "$96,000.00 authorised · $80,000.00 invoiced
+ *  in this period · $20,000.00 upcoming". The chip label beside it carries the
+ *  remaining/overage figure (commitment.label), so colour never stands alone. */
+export function poCommitmentDetail(c: AccrualPoCommitment): string {
+  return [
+    c.amountCad === null ? "No authorised value recorded" : `${formatInvoiceCad(c.amountCad)} authorised`,
+    `${formatInvoiceCad(c.invoicedCad)} invoiced in this period`,
+    `${formatInvoiceCad(c.upcomingCad)} upcoming`,
+  ].join(" · ");
+}
+
+/** Plain-text wording of the carried-forward marker — ONE string, so the
+ *  clipboard, the printed sheet and the emailed PDF word it identically. */
+export const CARRIED_FORWARD_LABEL = "from an earlier month";
+
+/** Date cell for the colourless outputs (clipboard, print, emailed PDF): the
+ *  first leg's ISO service date, plus " · from an earlier month" on a group
+ *  carried in. A plain fact about the date — never an age or a due date. */
+export function groupDateText(g: AccrualGroup): string {
+  const date = g.legs[0].serviceDate;
+  return g.carriedForward ? `${date} · ${CARRIED_FORWARD_LABEL}` : date;
+}
+
+/** Date cell for the SCREEN: the short weekday/month/day label, plus the year
+ *  on a carried group only ("Tue Sep 8, 2026"). The carry-forward fetch has no
+ *  lower date bound, so a carried trip can be from any earlier year — without
+ *  the year, last October's open trip would read as this October's. This
+ *  month's rows stay short. The year comes off the bare ISO string, never via a
+ *  Date (a UTC-midnight parse would shift it a day west of Greenwich). */
+export function groupScreenDateLabel(g: AccrualGroup): string {
+  const date = g.legs[0].serviceDate;
+  const short = shortDateLabel(date);
+  return g.carriedForward ? `${short}, ${date.slice(0, 4)}` : short;
 }
 
 /** Route line for a group — the first leg's corridor (a pair mirrors it). */
@@ -450,8 +1473,18 @@ function groupTripsText(g: AccrualGroup): string {
 // referenced. Same shape idea as invoiceClipboardText.
 // ---------------------------------------------------------------------------
 
+/** Plain-text amount for the clipboard / the emailed PDF: the figure plus any
+ *  pricing caveat in words (those outputs have no colour to lean on), or the
+ *  spelled-out reason there is no figure. A split-PO group has a flag and NO
+ *  figure — it prints the flag alone ("needs a decision"), never "$0.00",
+ *  which a client would read as work performed for free. */
 function plainAmount(g: AccrualGroup): string {
-  return groupAmountLabel(g) ?? (g.amountNote ? AMOUNT_NOTE_META[g.amountNote].label : "—");
+  const label = groupAmountLabel(g);
+  if (label !== null) {
+    return g.amountFlag ? `${label} (${AMOUNT_FLAG_META[g.amountFlag].label})` : label;
+  }
+  if (g.amountFlag) return AMOUNT_FLAG_META[g.amountFlag].label;
+  return g.amountNote ? AMOUNT_NOTE_META[g.amountNote].label : "—";
 }
 
 export function accrualsClipboardText(report: AccrualsReport): string {
@@ -462,29 +1495,66 @@ export function accrualsClipboardText(report: AccrualsReport): string {
   const contract = report.client.activeContract;
   out.push(`Contract: ${contract ? contractRateLabel(contract) : "No active contract"}`);
   for (const note of report.notes) out.push(`Note: ${note}`);
+  // Informational, not a warning — so no "Note:" prefix.
+  const carriedNote = accrualsCarriedForwardNote(report);
+  if (carriedNote) out.push(carriedNote);
+  const emptyText = accrualsEmptyText(report);
+  if (emptyText) out.push(emptyText);
 
-  for (const b of report.buckets) {
-    out.push("");
-    const tally = [
-      `${b.groups.length} round trip${b.groups.length === 1 ? "" : "s"}`,
-      `actual ${formatInvoiceCad(b.actualCad)}`,
-      `estimated ${formatInvoiceCad(b.estimatedCad)}`,
-    ];
-    if (b.unpricedCount > 0) tally.push(`${b.unpricedCount} unpriced`);
-    out.push(`${b.label.toUpperCase()} — ${tally.join(" · ")}`);
-    if (b.groups.length === 0) continue;
-    out.push(["Date", "Trips", "Route", "PO", "Ref", "Amount (CAD)"].join("\t"));
-    for (const g of b.groups) {
+  // The two questions the report answers, first — then the sections in reading
+  // order, upcoming work ahead of monies owed.
+  out.push("");
+  for (const h of accrualHeadlines(report)) {
+    out.push([h.label.toUpperCase(), h.amountCad, h.detail].join("\t"));
+  }
+
+  // What each PO authorises against what this month draws down on it — the
+  // reason the upcoming figure above is worth having.
+  out.push("");
+  out.push("PURCHASE ORDERS — AUTHORISED VALUE VS THIS MONTH'S WORK");
+  if (report.poCommitments.length === 0) {
+    out.push("No purchase-order work in this period.");
+  } else {
+    out.push(["PO", "Terms", "Authorised", "Invoiced", "Upcoming", "Status"].join("\t"));
+    for (const c of report.poCommitments) {
       out.push(
         [
-          g.legs[0].serviceDate,
-          groupTripsText(g),
-          groupRouteLabel(g),
-          g.legs[0].poNumber ?? "—",
-          groupRefLabel(g),
-          plainAmount(g),
+          c.poNumber ?? "No PO",
+          c.termsLabel,
+          c.amountCad === null ? "—" : formatInvoiceCad(c.amountCad),
+          formatInvoiceCad(c.invoicedCad),
+          formatInvoiceCad(c.upcomingCad),
+          c.label,
         ].join("\t"),
       );
+    }
+  }
+
+  for (const section of report.sections) {
+    out.push("");
+    out.push(
+      `${section.label.toUpperCase()} — ${accrualSectionDetail(section)} · ${accrualSectionAmountLabel(section)}`,
+    );
+    // The settled section closes the month on that one line: no per-trip table.
+    if (!section.detail) continue;
+    for (const b of section.buckets) {
+      // ONE amount, like every other output — the estimated share stays
+      // recoverable in the detail line's "incl. $X est.".
+      out.push(`${b.label} — ${accrualBucketDetail(b)} · ${accrualBucketAmountLabel(b)}`);
+      if (b.groups.length === 0) continue;
+      out.push(["Date", "Trips", "Route", "PO", "Ref", "Amount (CAD)"].join("\t"));
+      for (const g of b.groups) {
+        out.push(
+          [
+            groupDateText(g),
+            groupTripsText(g),
+            groupRouteLabel(g),
+            groupPoText(g),
+            groupRefLabel(g),
+            plainAmount(g),
+          ].join("\t"),
+        );
+      }
     }
   }
 
@@ -507,7 +1577,7 @@ export function accrualsClipboardText(report: AccrualsReport): string {
   out.push("");
   out.push("INVOICES REFERENCED");
   if (report.invoices.length === 0) {
-    out.push("No issued invoices are referenced by this period's trips.");
+    out.push("No issued invoices are referenced by the trips on this report.");
   } else {
     out.push(["Invoice", "QBO #", "Status", "Invoice period", "Total (CAD)"].join("\t"));
     for (const inv of report.invoices) {
@@ -539,36 +1609,67 @@ export function accrualsClipboardText(report: AccrualsReport): string {
 // about an amount or an " est." marking.
 // ---------------------------------------------------------------------------
 
+/** "3" / "3 (1 unpriced)" — the wire summary row has no unpriced column.
+ *  The wire field is still called `roundTrips` (the backend kept the name to
+ *  avoid an unrelated contract break) although the emailed PDF's header now
+ *  reads "Trips". */
+function tripsCell(groupCount: number, unpricedCount: number): string {
+  return unpricedCount > 0 ? `${groupCount} (${unpricedCount} unpriced)` : String(groupCount);
+}
+
 export function accrualsEmailPayload(report: AccrualsReport): AccrualsEmailReport {
   return {
     clientName: report.client.name,
     periodLabel: periodLabel(report.period),
     preparedDate: report.today,
     // Degradation banners only — the backend PDF bakes its own tax/estimate
-    // disclaimer banner, so sending ours here would print it twice.
+    // disclaimer banner, so sending ours here would print it twice. The
+    // carried-forward count is not a degradation, so it stays out: each row
+    // reads "from an earlier month" and the tally lines count them.
     notes: report.notes,
-    // All five buckets, zeros included — the summary is the complete position.
-    // Unpriced counts ride the round-trips cell (the wire row has no column).
-    summary: report.buckets.map((b) => ({
-      bucketLabel: b.label,
-      roundTrips:
-        b.unpricedCount > 0
-          ? `${b.groups.length} (${b.unpricedCount} unpriced)`
-          : String(b.groups.length),
-      actualCad: formatInvoiceCad(b.actualCad),
-      estimatedCad: b.estimatedCad > 0 ? `${formatInvoiceCad(b.estimatedCad)} est.` : "—",
+    // The two leading figures — upcoming expenses first, then monies owed. The
+    // backend renders them above the summary; a client that sends none still
+    // renders (the block is simply skipped), which is what makes this additive.
+    headline: accrualHeadlines(report).map((h) => ({
+      label: h.label,
+      amountCad: h.amountCad,
+      detail: h.detail,
     })),
-    // Detail sections for the non-empty buckets only, like the printed sheet —
-    // the summary above already carries every zero.
-    buckets: report.buckets
+    // Summary in SECTION order: a subtotal row per section (emphasis true) with
+    // its buckets nested under it (emphasis false). Still all four buckets and
+    // every zero, so the summary remains the complete position of the month.
+    // Unpriced counts ride the trips cell (the wire row has no column).
+    // ONE amount per row: the backend's AccrualsSummaryRow has a single
+    // AmountCad, with the " est." marking baked into the string, so the
+    // renderer never has to know which kind of money it is holding.
+    summary: report.sections.flatMap((section) => [
+      {
+        bucketLabel: section.label,
+        roundTrips: tripsCell(section.groupCount, section.unpricedCount),
+        amountCad: accrualSectionAmountLabel(section),
+        emphasis: true,
+      },
+      ...section.buckets.map((b) => ({
+        bucketLabel: b.label,
+        roundTrips: tripsCell(b.groups.length, b.unpricedCount),
+        amountCad: accrualBucketAmountLabel(b),
+        emphasis: false,
+      })),
+    ]),
+    // Detail tables for the non-empty buckets of the detail-bearing sections
+    // only, in section order — the settled section is one summary row above and
+    // carries no per-trip table at all, and the summary already has every zero.
+    buckets: report.sections
+      .filter((s) => s.detail)
+      .flatMap((s) => s.buckets)
       .filter((b) => b.groups.length > 0)
       .map((b) => ({
         label: b.label,
         rows: b.groups.map((g) => ({
-          date: g.legs[0].serviceDate,
+          date: groupDateText(g),
           tripNumbers: groupTripsText(g),
           route: groupRouteLabel(g),
-          poNumber: g.legs[0].poNumber ?? "—",
+          poNumber: groupPoText(g),
           reference: groupRefLabel(g),
           amountCad: plainAmount(g),
         })),

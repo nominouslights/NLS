@@ -78,6 +78,16 @@ export default function Footer() {
           <span style={bodyStyle(13.5, colors.footerTextDim)}>
             Class 4 licensed drivers · NSC-compliant fleet
           </span>
+          {/* Plain <a>, not next/link: the policy document is a static file in public/legal/,
+              not an app route. No basePath is configured, so root-relative paths are correct. */}
+          <nav aria-label="Legal" style={{ display: "flex", flexWrap: "wrap", gap: 18 }}>
+            <a href="/legal/policies.html#privacy" style={bodyStyle(13.5, colors.footerText)}>
+              Privacy Policy
+            </a>
+            <a href="/legal/policies.html#eula" style={bodyStyle(13.5, colors.footerText)}>
+              Licence Agreement (EULA)
+            </a>
+          </nav>
         </div>
       </div>
     </footer>

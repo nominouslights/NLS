@@ -48,7 +48,7 @@ internal sealed class CustomerReadService(BookingDbContext context) : ICustomerR
         return customer is null ? null : ToResponse(customer);
     }
 
-    private static CustomerResponse ToResponse(Customer customer) => new(
+    internal static CustomerResponse ToResponse(Customer customer) => new(
         customer.Id,
         customer.Name,
         customer.Phone,
@@ -61,9 +61,32 @@ internal sealed class CustomerReadService(BookingDbContext context) : ICustomerR
         value.Replace(@"\", @"\\").Replace("%", @"\%").Replace("_", @"\_");
 }
 
-/// <summary>Read side for bookings — the day panel's full list and the month's seat rows.</summary>
+/// <summary>Read side for bookings — the detail screen, the day panel's full list and the month's seat rows.</summary>
 internal sealed class BookingReadService(BookingDbContext context) : IBookingReadService
 {
+    public async Task<BookingDetailResponse?> GetByIdAsync(Guid bookingId, CancellationToken cancellationToken = default)
+    {
+        var booking = await context.Bookings
+            .AsNoTracking()
+            .Include(b => b.Passengers)
+            .FirstOrDefaultAsync(b => b.Id == bookingId, cancellationToken);
+
+        if (booking is null)
+        {
+            return null;
+        }
+
+        // Two reads rather than a join: the customer row is optional in the contract and the
+        // booking must never be withheld because its roster row went missing.
+        var customer = await context.Customers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Id == booking.CustomerId, cancellationToken);
+
+        return new BookingDetailResponse(
+            ToResponse(booking, DateTimeOffset.UtcNow),
+            customer is null ? null : CustomerReadService.ToResponse(customer));
+    }
+
     public async Task<IReadOnlyList<BookingResponse>> GetForDateAsync(
         Guid corridorId, DateOnly serviceDate, CancellationToken cancellationToken = default)
     {
@@ -110,6 +133,7 @@ internal sealed class BookingReadService(BookingDbContext context) : IBookingRea
 
     private static BookingResponse ToResponse(Domain.Bookings.Booking booking, DateTimeOffset now) => new(
         booking.Id,
+        booking.Reference.Value,
         booking.CustomerId,
         booking.CustomerName,
         booking.CorridorId,

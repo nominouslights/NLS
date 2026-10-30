@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using NorthernLink.Trips.Application.Abstractions;
 using NorthernLink.Trips.Application.Routes;
+using NorthernLink.Trips.Domain.Stops;
 using NorthernLink.Trips.Infrastructure.Persistence.ReadModels;
 
 namespace NorthernLink.Trips.Infrastructure.Persistence;
@@ -24,10 +25,14 @@ internal sealed class RouteReadService(TripsDbContext context) : IRouteReadServi
                 stop.Order,
                 stop.Latitude,
                 stop.Longitude,
+                stop.EffectiveProvince,
                 stop.OutboundOffsetMinutes,
                 stop.ReturnOffsetMinutes)).ToList(),
             r.Origin,
+            // Derived from the snapshot like Origin/Destination, not stored on rm_routes.
+            r.Stops.OrderBy(stop => stop.Order).FirstOrDefault()?.EffectiveProvince ?? CanadianProvince.Manitoba,
             r.Destination,
+            r.Stops.OrderBy(stop => stop.Order).LastOrDefault()?.EffectiveProvince ?? CanadianProvince.Manitoba,
             r.DistanceKm,
             r.EstimatedDurationMinutes,
             r.RequiredLicenceClass,

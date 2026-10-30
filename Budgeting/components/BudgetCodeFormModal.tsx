@@ -13,7 +13,6 @@ import { ApiError } from "@/lib/api/transport";
 import {
   budgetCodeFormatError,
   costCentreApplies,
-  costCentreSuggestions,
   createBudgetCode,
   listBudgetCodes,
   normalizeBudgetCode,
@@ -26,10 +25,19 @@ import {
   TAX_TREATMENT_LABELS,
   type BudgetCodeRecord,
   type BudgetOwnerOption,
+  type CostCentreRecord,
 } from "@/lib/api/budgeting";
+import {
+  budgetCodeCostCentreError,
+  costCentreOptions,
+  normalizeCostCentreCode,
+} from "@/lib/costCentres";
+import CostCentreFormModal, { type CostCentreApi } from "@/components/CostCentreFormModal";
+import { StatusChip } from "@/components/ui/Chip";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { SelectField, TextAreaField, TextField } from "@/components/ui/Field";
 import { ActionButton } from "@/components/ui/Button";
+import { usePeriodHold } from "@/lib/periodHold";
 
 // Create-and-edit modal for a budget code, following BudgetPeriodFormModal: one useState per
 // field, server-side validation is authoritative, and a 409 or 400 surfaces as the backend's own
@@ -47,6 +55,18 @@ import { ActionButton } from "@/components/ui/Button";
 //   3. **A revenue code has no cost centre.** A cost centre attributes cost, so the field is
 //      absent rather than disabled when the category is Revenue, and a value stored before the
 //      rule existed is cleared on save. `costCentreApplies` is the mirror of the server's rule.
+//   4. **An expense code's cost centre comes from the register.** The field is a picker of the
+//      tenant's ACTIVE cost centres (BudgetCodeCostCentreRule refuses anything else with
+//      CostCentreNotFound / CostCentreRetired). The one exception the server makes is an
+//      UNCHANGED value, so a code already carrying a retired or unregistered string keeps it
+//      selectable and marked (lib/costCentres costCentreOptions). "+ New cost centre…" opens the
+//      register's own create modal on top of this one and selects what it creates.
+//
+// Every code belongs to a period, so the modal writes to that period's chart
+// (periods/{periodId}/codes) and says which one in its eyebrow. The parent picker is fed that
+// same period's chart — a parent from another period is refused server-side (ParentNotFound). The
+// save holds the period (lib/periodHold.ts) and the modal ignores ✕ and CANCEL while it runs,
+// exactly as the budget-item modal does.
 
 const CATEGORY_OPTIONS: { value: BudgetCodeCategory; label: string }[] = [
   { value: "Revenue", label: "Revenue" },
@@ -54,6 +74,21 @@ const CATEGORY_OPTIONS: { value: BudgetCodeCategory; label: string }[] = [
 ];
 
 const NONE = "";
+/** The picker option that opens the inline create modal instead of selecting anything. */
+const NEW_COST_CENTRE = "__new_cost_centre__";
+
+/** The requests the modal makes. A prop so the component test can inject vi.fn()s. */
+export interface BudgetCodeApi {
+  create: typeof createBudgetCode;
+  update: typeof updateBudgetCode;
+  list: typeof listBudgetCodes;
+}
+
+const DEFAULT_API: BudgetCodeApi = {
+  create: createBudgetCode,
+  update: updateBudgetCode,
+  list: listBudgetCodes,
+};
 
 /** Builds a "— None —" first option for the optional enum pickers. */
 function optionalOptions<T extends string>(labels: Record<T, string>) {
@@ -70,21 +105,44 @@ const REVIEW_FREQUENCY_OPTIONS = (
 ).map((value) => ({ value, label: REVIEW_FREQUENCY_LABELS[value] }));
 
 export default function BudgetCodeFormModal({
+  periodId,
+  periodLabel,
   code,
   allCodes,
   owners,
+  costCentres,
+  onCostCentresChanged,
   onClose,
   onSaved,
+  api = DEFAULT_API,
+  costCentreApi,
 }: {
+  /** The period whose chart this code belongs to — the entered period. */
+  periodId: string;
+  periodLabel: string;
   /** null → create mode; a code → edit mode (its code string is fixed). */
   code: BudgetCode | null;
-  /** Every code, for the parent picker (filtered by parentCandidates) and the cost-centre
-   *  suggestions (costCentreSuggestions — one canonical spelling per existing cost centre). */
+  /** This period's whole chart, for the parent picker. Filtered by parentCandidates. */
   allCodes: BudgetCode[];
   owners: BudgetOwnerOption[];
+  /**
+   * The tenant's cost-centre register, retired entries included (the picker offers the active
+   * ones and needs the retired ones to name a kept value); null while loading or after a failed
+   * load — the picker then offers only the code's current value.
+   */
+  costCentres: CostCentreRecord[] | null;
+  /**
+   * The fresh register after an inline create, so the caller's copy follows. Passing it is a
+   * promise to hand that (or a newer) register back down: from then on the caller's register is
+   * trusted over anything created here (mergeRegister).
+   */
+  onCostCentresChanged?: (records: CostCentreRecord[]) => void;
   onClose: () => void;
   /** Fresh list (already reflecting the change) plus the affected code's id. */
   onSaved: (records: BudgetCodeRecord[], id: string) => void;
+  api?: BudgetCodeApi;
+  /** Passed to the inline cost-centre modal; a test seam. */
+  costCentreApi?: CostCentreApi;
 }) {
   const editing = code !== null;
 
@@ -103,6 +161,21 @@ export default function BudgetCodeFormModal({
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * ONLY the entries created inline in this modal — never the register snapshot that came back
+   * with them — each paired with the caller's register as it stood at the create. They bridge
+   * the gap until the caller's register catches up; see mergeRegister for when they stop counting.
+   */
+  const [createdHere, setCreatedHere] = useState<InlineCreated[]>([]);
+  // Derived, never copied once at mount: the caller's listCostCentres runs in parallel with the
+  // modal opening and may resolve AFTER it, and the picker must follow when it does.
+  const register = mergeRegister(costCentres, createdHere, onCostCentresChanged !== undefined);
+  const [creatingCostCentre, setCreatingCostCentre] = useState(false);
+  usePeriodHold(busy);
+  /** Inert while saving, so a result can never land on a modal that is gone. */
+  const close = () => {
+    if (!busy) onClose();
+  };
 
   const normalized = normalizeBudgetCode(codeText);
   const codeError = editing ? null : budgetCodeFormatError(codeText);
@@ -115,9 +188,35 @@ export default function BudgetCodeFormModal({
     })),
   ];
 
-  // Existing cost centres, offered through a native <datalist> so a new code can reuse a spelling
-  // rather than start a near-duplicate group on the Budget Codes screen. Still free text.
-  const costCentreOptions = costCentreSuggestions(allCodes);
+  // The code's stored value, kept selectable when it is retired or unregistered — the server
+  // accepts an unchanged value unconditionally (BudgetCodeCostCentreRule).
+  const ccOptions = costCentreOptions(register ?? [], code?.costCentre ?? null);
+  const ccSelected = ccOptions.find((o) => o.value === normalizeCostCentreCode(costCentre)) ?? null;
+  const costCentreSelectOptions = [
+    { value: NONE, label: "— No cost centre —" },
+    ...ccOptions.map((o) => ({ value: o.value, label: o.label })),
+    { value: NEW_COST_CENTRE, label: "+ New cost centre…" },
+  ];
+
+  function pickCostCentre(value: string) {
+    if (value === NEW_COST_CENTRE) {
+      setCreatingCostCentre(true);
+      return;
+    }
+    setCostCentre(value);
+  }
+
+  function handleCostCentreCreated(records: CostCentreRecord[], id: string) {
+    onCostCentresChanged?.(records);
+    const created = records.find((r) => r.id === id);
+    if (created) {
+      setCreatedHere((prev) => [
+        ...prev.filter((c) => c.record.id !== created.id),
+        { record: created, against: costCentres },
+      ]);
+      setCostCentre(created.code);
+    }
+  }
 
   const ownerOptions = [
     { value: NONE, label: "— Unassigned —" },
@@ -131,6 +230,16 @@ export default function BudgetCodeFormModal({
     // The server re-checks all of it and its answer is the one that counts.
     if (!editing && codeError) return setError(codeError);
     if (!name.trim()) return setError("Enter a name for the code.");
+    // BudgetCodeCostCentreRule, caught before the round trip — only when the register loaded
+    // (without it there is nothing to check against, and the server decides).
+    if (costCentreApplies(category) && register !== null) {
+      const ccError = budgetCodeCostCentreError(
+        costCentre,
+        normalizeCostCentreCode(code?.costCentre) || null,
+        register,
+      );
+      if (ccError) return setError(ccError);
+    }
 
     setBusy(true);
     setError(null);
@@ -143,8 +252,9 @@ export default function BudgetCodeFormModal({
       category,
       serviceLine: (serviceLine || null) as BudgetServiceLine | null,
       // Revenue codes never carry a cost centre (BudgetCode.Validate rejects one). Sending null
-      // rather than the hidden state also clears a value stored before this rule existed.
-      costCentre: costCentreApplies(category) ? costCentre.trim() || null : null,
+      // rather than the hidden state also clears a value stored before this rule existed. Never
+      // re-cased: cost-centre codes match case-sensitively.
+      costCentre: costCentreApplies(category) ? normalizeCostCentreCode(costCentre) || null : null,
       parentCodeId: parentCodeId || null,
       glAccountCode: glAccountCode.trim() || null,
       taxTreatment: (taxTreatment || null) as BudgetTaxTreatment | null,
@@ -156,15 +266,15 @@ export default function BudgetCodeFormModal({
       let id: string;
       if (editing) {
         id = code.id;
-        await updateBudgetCode(id, details);
+        await api.update(periodId, id, details);
       } else {
-        id = await createBudgetCode({ code: normalized, ...details });
+        id = await api.create(periodId, { code: normalized, ...details });
       }
 
       // The read side is a projection and trails the write by well under a second — refetch until
       // the change is visible rather than assuming it already is. On edit that means waiting for
       // the new name, not merely for the row to exist: the row was always there.
-      const records = await refetchUntil(listBudgetCodes, (rows) =>
+      const records = await refetchUntil(() => api.list(periodId), (rows) =>
         editing
           ? rows.some((r) => r.id === id && r.name === details.name)
           : rows.some((r) => r.id === id),
@@ -182,15 +292,18 @@ export default function BudgetCodeFormModal({
   }
 
   return (
+    <>
     <ModalShell
-      eyebrow="Planning · Budget Codes"
+      eyebrow={`Budget Codes · ${periodLabel}`}
       title={editing ? `Edit ${code.code}` : "New Budget Code"}
-      onClose={onClose}
+      onClose={close}
       error={error}
       maxWidth={680}
       footer={
         <>
-          <ActionButton onClick={onClose}>CANCEL</ActionButton>
+          <ActionButton onClick={close} disabled={busy}>
+            CANCEL
+          </ActionButton>
           <ActionButton variant="primary" onClick={submit} disabled={busy}>
             {busy ? "SAVING…" : editing ? "SAVE CHANGES" : "CREATE CODE"}
           </ActionButton>
@@ -279,22 +392,39 @@ export default function BudgetCodeFormModal({
         {/* A cost centre attributes cost, so a revenue code never has one — the field is not
             offered at all, and GL account code simply takes the first column. */}
         {costCentreApplies(category) && (
-          <>
-            <TextField
+          <div>
+            <SelectField
               label="Cost centre"
-              value={costCentre}
-              onChange={setCostCentre}
-              maxLength={32}
-              placeholder="OPS-01"
-              hint="Optional — pick an existing one to keep groups together"
-              list="budget-code-cost-centres"
+              value={ccSelected?.value ?? NONE}
+              onChange={pickCostCentre}
+              options={costCentreSelectOptions}
+              hint={register === null ? "Optional — the register did not load" : "Optional — from the register"}
             />
-            <datalist id="budget-code-cost-centres">
-              {costCentreOptions.map((cc) => (
-                <option key={cc} value={cc} />
-              ))}
-            </datalist>
-          </>
+            {ccSelected && ccSelected.status !== "active" && (
+              <div
+                data-testid="cost-centre-kept"
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 8,
+                  marginTop: 6,
+                  fontFamily: fonts.body,
+                  fontSize: 11.5,
+                  color: colors.textSecondary,
+                  lineHeight: 1.5,
+                }}
+              >
+                <StatusChip
+                  kind="off"
+                  label={ccSelected.status === "retired" ? "Retired" : "Not in register"}
+                />
+                <span>
+                  Kept because it is this code&apos;s current cost centre — saving it unchanged is
+                  allowed, but once changed it cannot be chosen again.
+                </span>
+              </div>
+            )}
+          </div>
         )}
         <TextField
           label="GL account code"
@@ -347,7 +477,52 @@ export default function BudgetCodeFormModal({
         allocation each period, not here, because it is the period decision that changes.
       </div>
     </ModalShell>
+    {/* A sibling, not a child: the shell's backdrop-filter would otherwise contain the nested
+        fixed overlay inside this card. Rendered later, so it stacks on top. */}
+    {creatingCostCentre && (
+      <CostCentreFormModal
+        entry={null}
+        register={register ?? []}
+        owners={owners}
+        eyebrow={`Cost Centres · for ${editing ? code.code : "a new budget code"}`}
+        onClose={() => setCreatingCostCentre(false)}
+        onSaved={handleCostCentreCreated}
+        api={costCentreApi}
+      />
+    )}
+    </>
   );
+}
+
+/** An entry created inline here, with the caller's register (by identity) at the moment of the create. */
+type InlineCreated = { record: CostCentreRecord; against: CostCentreRecord[] | null };
+
+/**
+ * The caller's register plus the inline-created entries it does not have yet (matched by id; the
+ * caller's copy wins otherwise), in register (code, ordinal) order.
+ *
+ * When the caller takes registers up (`callerTracks` — it passed onCostCentresChanged), an inline
+ * entry counts only while the caller's register is still the very array it held at the create.
+ * Any other array is newer than the create — the pushed-up register itself, or a load or refresh
+ * that followed it — and is trusted fully, so an entry created here and since deleted elsewhere
+ * is NOT re-added. A caller that never takes the register up has nothing newer to offer, so its
+ * inline entries are kept for the modal's life. null only when the register has not loaded and
+ * nothing counts from here.
+ */
+function mergeRegister(
+  fromProp: CostCentreRecord[] | null,
+  createdHere: InlineCreated[],
+  callerTracks: boolean,
+): CostCentreRecord[] | null {
+  const pending = createdHere
+    .filter((c) => !callerTracks || c.against === fromProp)
+    .map((c) => c.record);
+  if (pending.length === 0) return fromProp;
+  if (fromProp === null) return pending;
+  const known = new Set(fromProp.map((c) => c.id));
+  const extra = pending.filter((c) => !known.has(c.id));
+  if (extra.length === 0) return fromProp;
+  return [...fromProp, ...extra].sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
 }
 
 /** The modal's two-column row, matching BudgetPeriodFormModal's grid. */

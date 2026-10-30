@@ -15,6 +15,7 @@ public sealed class BudgetCodeConfiguration : IEntityTypeConfiguration<BudgetCod
         builder.Property(c => c.Id).HasColumnName("id").ValueGeneratedNever();
 
         builder.Property(c => c.TenantId).HasColumnName("tenant_id");
+        builder.Property(c => c.PeriodId).HasColumnName("period_id");
 
         builder.Property(c => c.Code)
             .HasColumnName("code")
@@ -70,13 +71,20 @@ public sealed class BudgetCodeConfiguration : IEntityTypeConfiguration<BudgetCod
         // Race backstop for the create handler's duplicate check: a double-click can slip two
         // identical codes past the read-then-write check, and this index kills the second insert.
         // Case is not part of the comparison here because Code is stored already upper-cased.
-        builder.HasIndex(c => new { c.TenantId, c.Code }).IsUnique();
+        // Unique per PERIOD: each period owns its chart, so FUEL exists once in every period.
+        // The leading (tenant_id, period_id) columns also serve every per-period chart load, so
+        // no separate (tenant_id, period_id) index is needed.
+        builder.HasIndex(c => new { c.TenantId, c.PeriodId, c.Code }).IsUnique();
 
         // Serves HasChildrenAsync, which both the update and the delete handler call to enforce
         // the one-level hierarchy. No navigation property and no foreign key: two budget codes
         // are two aggregates, and relational links are reserved for entities inside one
         // aggregate boundary.
         builder.HasIndex(c => new { c.TenantId, c.ParentCodeId });
+
+        // Serves AnyWithCostCentreAsync — the cost-centre register's delete guard, which asks
+        // across every period whether any code still carries the string.
+        builder.HasIndex(c => new { c.TenantId, c.CostCentre });
 
         // DomainEvents ignore + Version concurrency token come from ModuleDbContext's
         // central aggregate conventions.

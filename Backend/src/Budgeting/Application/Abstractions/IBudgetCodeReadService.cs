@@ -9,8 +9,8 @@ namespace NorthernLink.Budgeting.Application.Abstractions;
 public interface IBudgetCodeReadService
 {
     /// <summary>
-    /// The tenant's whole chart of codes, ordered by code. Inactive codes are included:
-    /// retiring a code hides it from new allocations, not from the chart it still explains.
+    /// One period's whole chart of codes, ordered by code. Inactive codes are included: retiring
+    /// a code hides it from new items, not from the chart it still explains.
     /// </summary>
-    Task<IReadOnlyList<BudgetCodeResponse>> GetCodesAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<BudgetCodeResponse>> GetCodesAsync(Guid periodId, CancellationToken cancellationToken = default);
 }

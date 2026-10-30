@@ -18,11 +18,14 @@ public sealed record TripDraft(
 
 /// <summary>
 /// The pure heart of trip generation — no clock, no database, fully unit-testable.
-/// Expands a template over its generation horizon (today inclusive) per its
-/// <see cref="ScheduleRecurrenceKind"/> — weekly days, an every-N-days interval, or
-/// clamped monthly days — emitting an Outbound leg per matching date plus an Inbound
+/// Expands a template over an explicit window <c>[windowStart, windowEndExclusive)</c>
+/// per its <see cref="ScheduleRecurrenceKind"/> — weekly days, an every-N-days interval,
+/// or clamped monthly days — emitting an Outbound leg per matching date plus an Inbound
 /// return leg when the template has a return departure, the pair sharing a RoundTripKey
-/// (<c>{templateId:N}:{yyyyMMdd}</c>).
+/// (<c>{templateId:N}:{yyyyMMdd}</c>). The worker's window is the template's own
+/// horizon (<c>[today, today + GenerationHorizonDays)</c>, the 3-argument overload); a
+/// dispatcher generating on demand supplies a wider one, up to
+/// <see cref="ScheduleTemplate.MaxGenerateAheadDays"/> ahead.
 /// <para>
 /// The template's dated <see cref="ScheduleTemplate.Exceptions"/> are applied first:
 /// a Skip removes the whole occurrence (both legs of a pair, including a next-day
@@ -41,17 +44,23 @@ public sealed record TripDraft(
 /// </summary>
 public static class TripGenerator
 {
+    /// <summary>The worker's window: the template's own horizon from <paramref name="today"/>.</summary>
     public static IReadOnlyList<TripDraft> Generate(
         ScheduleTemplate template,
         IReadOnlySet<(DateOnly ServiceDate, TripDirection Direction)> existingOccurrences,
-        DateOnly today)
+        DateOnly today) =>
+        Generate(template, existingOccurrences, today, today.AddDays(template.GenerationHorizonDays));
+
+    public static IReadOnlyList<TripDraft> Generate(
+        ScheduleTemplate template,
+        IReadOnlySet<(DateOnly ServiceDate, TripDirection Direction)> existingOccurrences,
+        DateOnly windowStart,
+        DateOnly windowEndExclusive)
     {
         if (!template.Active)
         {
             return [];
         }
-
-        var windowEndExclusive = today.AddDays(template.GenerationHorizonDays);
 
         // At most one exception per date (an aggregate invariant), so a plain dictionary.
         var exceptionsByDate = template.Exceptions.ToDictionary(e => e.Date);
@@ -59,7 +68,7 @@ public static class TripGenerator
         // Occurrence dates = recurrence dates − Skip dates ∪ in-window ExtraRun dates.
         // The SortedSet both dedupes an extra run landing on a recurrence date and keeps
         // the drafts in ascending date order.
-        var occurrenceDates = new SortedSet<DateOnly>(MatchingDates(template, today));
+        var occurrenceDates = new SortedSet<DateOnly>(MatchingDates(template, windowStart, windowEndExclusive));
         foreach (var exception in template.Exceptions)
         {
             switch (exception.Kind)
@@ -69,7 +78,7 @@ public static class TripGenerator
                     break;
 
                 case ScheduleExceptionKind.ExtraRun
-                    when exception.Date >= today && exception.Date < windowEndExclusive:
+                    when exception.Date >= windowStart && exception.Date < windowEndExclusive:
                     occurrenceDates.Add(exception.Date);
                     break;
             }
@@ -148,19 +157,18 @@ public static class TripGenerator
     }
 
     /// <summary>
-    /// The service dates a template fires on within its horizon window
-    /// <c>[today, today + GenerationHorizonDays)</c>, in ascending order with no duplicates.
-    /// The branch matches <see cref="ScheduleTemplate.RecurrenceKind"/>; misconfigured
-    /// templates (which validation prevents) simply yield nothing.
+    /// The service dates a template fires on within <c>[windowStart, windowEndExclusive)</c>,
+    /// in ascending order with no duplicates. The branch matches
+    /// <see cref="ScheduleTemplate.RecurrenceKind"/>; misconfigured templates (which
+    /// validation prevents) simply yield nothing.
     /// </summary>
-    private static IEnumerable<DateOnly> MatchingDates(ScheduleTemplate template, DateOnly today)
+    private static IEnumerable<DateOnly> MatchingDates(
+        ScheduleTemplate template, DateOnly windowStart, DateOnly windowEndExclusive)
     {
-        var windowEndExclusive = today.AddDays(template.GenerationHorizonDays);
-
         switch (template.RecurrenceKind)
         {
             case ScheduleRecurrenceKind.DaysOfWeek:
-                for (var date = today; date < windowEndExclusive; date = date.AddDays(1))
+                for (var date = windowStart; date < windowEndExclusive; date = date.AddDays(1))
                 {
                     if (template.DaysOfWeek.Contains(date.DayOfWeek))
                     {
@@ -173,7 +181,7 @@ public static class TripGenerator
             case ScheduleRecurrenceKind.EveryNDays:
                 if (template.IntervalDays is { } interval and > 0 && template.AnchorDate is { } anchor)
                 {
-                    for (var date = today; date < windowEndExclusive; date = date.AddDays(1))
+                    for (var date = windowStart; date < windowEndExclusive; date = date.AddDays(1))
                     {
                         if (date >= anchor && (date.DayNumber - anchor.DayNumber) % interval == 0)
                         {
@@ -187,11 +195,12 @@ public static class TripGenerator
             case ScheduleRecurrenceKind.MonthlyDays:
                 if (template.DaysOfMonth.Count > 0)
                 {
-                    // Walk each month the window touches; a day > the month's length clamps to
-                    // month-end (31 → 28/29/30), so two configured days can land on the same
-                    // date — the HashSet keeps each service date to a single occurrence.
+                    // Walk each month the window touches, from the first of the window's
+                    // opening month; a day > the month's length clamps to month-end
+                    // (31 → 28/29/30), so two configured days can land on the same date —
+                    // the HashSet keeps each service date to a single occurrence.
                     var emitted = new HashSet<DateOnly>();
-                    for (var month = new DateOnly(today.Year, today.Month, 1);
+                    for (var month = new DateOnly(windowStart.Year, windowStart.Month, 1);
                          month < windowEndExclusive;
                          month = month.AddMonths(1))
                     {
@@ -199,7 +208,7 @@ public static class TripGenerator
                         foreach (var configuredDay in template.DaysOfMonth)
                         {
                             var date = new DateOnly(month.Year, month.Month, Math.Min(configuredDay, daysInMonth));
-                            if (date >= today && date < windowEndExclusive && emitted.Add(date))
+                            if (date >= windowStart && date < windowEndExclusive && emitted.Add(date))
                             {
                                 yield return date;
                             }

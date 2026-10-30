@@ -151,6 +151,10 @@ export interface BookingPassengerInput {
 
 export interface BookingRecord {
   id: string;
+  /** Immutable human-readable reference, "NL-7K3M2Q" (NL- + 6 chars from an
+   *  alphabet with no I/L/O/U/0/1). Allocated at creation; what a traveller
+   *  quotes and what a printed/emailed pass carries. */
+  reference: string;
   customerId: string;
   customerName: string;
   corridorId: string;
@@ -196,6 +200,19 @@ export function getDayDetail(date: string, corridorId: string): Promise<DayDetai
   return request<DayDetail>(
     `/api/booking/days/${date}?corridorId=${encodeURIComponent(corridorId)}`,
   );
+}
+
+/** GET /api/booking/bookings/{id} → the booking plus its customer row
+ *  (BookingDetailResponse). customer is null only if the customer row is gone.
+ *  404 Booking.Booking.NotFound for an unknown id — and for another tenant's
+ *  booking, which the tenant query filter makes read as absent. */
+export interface BookingDetailRecord {
+  booking: BookingRecord;
+  customer: CustomerRecord | null;
+}
+
+export function getBooking(id: string): Promise<BookingDetailRecord> {
+  return request<BookingDetailRecord>(`/api/booking/bookings/${encodeURIComponent(id)}`);
 }
 
 /** POST /api/booking/bookings body (≥1 passenger). */
@@ -367,6 +384,18 @@ export const PAYMENT_STATUS_LABELS: Record<BookingPaymentStatus, string> = {
   Unpaid: "Unpaid",
   Paid: "Paid",
 };
+
+/** Payment status chip — orthogonal to the booking status, and shown beside it,
+ *  so it carries its own `$` glyph: Paid shares teal with Confirmed and Unpaid
+ *  shares gold with Unconfirmed, and the glyph is what tells the two chips
+ *  apart at a glance. An extra icon, never a new colour (StatusChip's `glyph`). */
+export function paymentStatusChip(status: BookingPaymentStatus): { kind: StatusKind; label: string; glyph: string } {
+  return {
+    kind: status === "Paid" ? "ontime" : "soon",
+    label: PAYMENT_STATUS_LABELS[status],
+    glyph: "$",
+  };
+}
 
 /** "Pickup → Dropoff" line for booking rows (stop name, else address detail). */
 export function locationLabel(loc: BookingLocation): string {

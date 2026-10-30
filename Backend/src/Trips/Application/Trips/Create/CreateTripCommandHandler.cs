@@ -20,7 +20,9 @@ public sealed class CreateTripCommandHandler(
         Guid? routeId = null;
         var routeName = command.RouteName ?? string.Empty;
         var origin = command.Origin ?? string.Empty;
+        var originProvince = command.OriginProvince;
         var destination = command.Destination ?? string.Empty;
+        var destinationProvince = command.DestinationProvince;
         var stops = command.Stops;
         var distanceKm = command.DistanceKm;
 
@@ -35,7 +37,9 @@ public sealed class CreateTripCommandHandler(
             routeId = route.Id;
             routeName = route.Name;
             origin = route.Origin;
+            originProvince = route.OriginProvince;
             destination = route.Destination;
+            destinationProvince = route.DestinationProvince;
             stops = route.Stops;
             distanceKm = route.DistanceKm;
         }
@@ -106,7 +110,9 @@ public sealed class CreateTripCommandHandler(
             vehicleId,
             vehicle.UnitNumber,
             vehicle.SeatingCapacity,
-            command.SeatsMinimum);
+            command.SeatsMinimum,
+            originProvince,
+            destinationProvince);
 
         if (tripResult.IsFailure)
         {

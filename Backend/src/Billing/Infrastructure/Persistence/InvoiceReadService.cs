@@ -37,6 +37,25 @@ internal sealed class InvoiceReadService(BillingDbContext context) : IInvoiceRea
         return invoices.Select(ToResponse).ToList();
     }
 
+    public async Task<IReadOnlyDictionary<string, decimal>> GetInvoicedTotalsByPoNumberAsync(
+        Guid clientId,
+        CancellationToken cancellationToken = default)
+    {
+        var voidStatus = InvoiceStatus.Void.ToString();
+
+        var rows = await context.InvoiceReadModels
+            .AsNoTracking()
+            .Where(i => i.ClientId == clientId && i.PoNumber != null && i.Status != voidStatus)
+            .Select(i => new { i.PoNumber, i.TotalCad })
+            .ToListAsync(cancellationToken);
+
+        // Grouped in memory with an ordinal-ignore-case comparer: Postgres would fold case with
+        // its own collation rules, and the builder matches PO numbers case-insensitively too.
+        return rows
+            .GroupBy(r => r.PoNumber!.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => Math.Round(g.Sum(r => r.TotalCad), 2), StringComparer.OrdinalIgnoreCase);
+    }
+
     private static InvoiceSummaryResponse ToResponse(InvoiceReadModel i)
     {
         return new InvoiceSummaryResponse(

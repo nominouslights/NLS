@@ -1,0 +1,411 @@
+"use client";
+
+import { colors, fonts } from "@/lib/theme";
+import { gap, type } from "@/lib/tablet";
+import { Panel } from "@/components/ui/Panel";
+import { TouchButton } from "@/components/ui-tablet/TouchButton";
+import { StatusBanner } from "@/components/ui-tablet/StatusBanner";
+import { CardRow, FieldLine, Heading, MockTag, TabletChip } from "../shared";
+import { checkStepId, defectStepId, NEW_DEFECTS_STEP_ID } from "@/lib/inspectionSteps";
+import {
+  locationError,
+  normalizeLocation,
+  severityGlyph,
+  severityKind,
+  type InspectionResultName,
+} from "@/lib/inspectionGate";
+import { NL_PTI_01_CERTIFICATION, type InspectionSubGroup } from "@/lib/inspectionForm";
+import type { DraftDefect } from "@/lib/inspectionStore";
+import type { CheckState, DvirSubmission, InspectionMode, NewDefectDraft } from "@/lib/types";
+
+// APP-LOCAL. The last step: everything the driver is about to attest to, then the attestation.
+//
+// On a post-trip (NL-PTI-01 rev 4) it also lists the "New defects since the pre-trip" answer and
+// each new defect, and Certify waits on newDefectsProblem as well as on the checklist.
+//
+// THE ONLY SCROLLING SURFACE IN THE FLOW. WizardFrame deliberately has no scroll container —
+// a driver must never be able to leave part of a single question off screen — but up to 64 rows
+// of review is reference material being re-read, not a question being answered, so it owns its
+// own overflow here rather than pushing one into the frame.
+//
+// It carries the remaining seam admissions on screen as well as in the payload comment, because
+// a compliance screen that looks authoritative in a demo is the failure mode this app's MockTag
+// convention exists to prevent.
+//
+// ONE BANNER WAS DELETED AND MUST NOT COME BACK: "N/A items will be omitted from the
+// submission". It was true while ChecklistItemInput.Passed was a bare bool; ChecklistItemState
+// landed, every row now travels with `state` and `note`, and nothing is dropped. Re-adding it
+// would make the screen lie in the opposite direction, which is no better.
+//
+// THE ATTESTATION IS NL_PTI_01_CERTIFICATION, VERBATIM, FROM THE COPIED CATALOGUE. It is the
+// sentence the driver signs and the string the backend stores as
+// VehicleInspection.CertificationStatement — "what was actually signed". Retyping or shortening
+// it here would put a different sentence on the tablet than on the console and the paper form.
+
+const RESULT_META: Record<InspectionResultName, { kind: "ontime" | "soon" | "over"; label: string }> =
+  {
+    Pass: { kind: "ontime", label: "Pass" },
+    PassWithDefects: { kind: "soon", label: "Pass with defects" },
+    Fail: { kind: "over", label: "Fail" },
+  };
+
+const ANSWER_META: Record<CheckState, { kind: "ontime" | "over" | "off"; label: string }> = {
+  pass: { kind: "ontime", label: "Pass" },
+  defect: { kind: "over", label: "Defect" },
+  na: { kind: "off", label: "N/A" },
+};
+
+export function ReviewStep({
+  mode,
+  unit,
+  groups,
+  odometerKm,
+  location,
+  answers,
+  notes,
+  defects,
+  result,
+  unansweredCount,
+  ungradedCount,
+  newDefects,
+  recent,
+  storageFailed,
+  submitError,
+  onGoToStep,
+  onSubmit,
+}: {
+  mode: InspectionMode;
+  unit: string;
+  /** Already narrowed to this unit and mode by itemsFor() — the caller does that once. */
+  groups: InspectionSubGroup[];
+  odometerKm: number | null;
+  /** Raw, as typed. Shown trimmed — the value that will be sent. */
+  location: string;
+  answers: Record<string, CheckState>;
+  notes: Record<string, string>;
+  defects: Record<string, DraftDefect>;
+  result: InspectionResultName;
+  unansweredCount: number;
+  ungradedCount: number;
+  /**
+   * POST-TRIP ONLY (NL-PTI-01 rev 4) — null on a pre-trip. The No/Yes answer, every entered new
+   * defect, display labels for their item keys, and the first thing blocking Certify (from
+   * newDefectsProblem), or null.
+   */
+  newDefects: {
+    found: boolean | null;
+    defects: NewDefectDraft[];
+    labels: ReadonlyMap<string, string>;
+    problem: string | null;
+  } | null;
+  recent: DvirSubmission[];
+  storageFailed: boolean;
+  /** Set when the queue rejected the capture. The draft is still on the device. */
+  submitError: string | null;
+  onGoToStep: (stepId: string) => void;
+  onSubmit: () => void;
+}) {
+  const rm = RESULT_META[result];
+  const locError = locationError(location);
+  const shownLocation = normalizeLocation(location);
+  const newDefectsProblem = newDefects?.problem ?? null;
+  const complete =
+    unansweredCount === 0 &&
+    ungradedCount === 0 &&
+    odometerKm !== null &&
+    locError === null &&
+    newDefectsProblem === null;
+
+  const blockedReason =
+    odometerKm === null
+      ? "Enter the odometer reading first — an inspection cannot be certified without it."
+      : locError !== null
+        ? locError
+        : unansweredCount > 0
+          ? `${unansweredCount} item(s) still unanswered — an inspection cannot be certified with blanks.`
+          : ungradedCount > 0
+            ? `${ungradedCount} defect(s) have no severity — a defect without one cannot be graded.`
+            : (newDefectsProblem ?? "");
+
+  return (
+    <div style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingBottom: gap.page }}>
+      {submitError ? (
+        <StatusBanner kind="over" title="This inspection was not captured.">
+          {submitError} Your answers are still on this device — tap{" "}
+          <strong>Certify &amp; submit</strong> again. Nothing has been recorded, so do not
+          re-answer the checklist.
+        </StatusBanner>
+      ) : null}
+
+      {storageFailed ? (
+        <StatusBanner kind="soon" title="This draft is not being saved on this device.">
+          Local storage is unavailable, so your answers survive navigation but not a reload.
+          Finish and certify in this session rather than coming back to it.
+        </StatusBanner>
+      ) : null}
+
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: gap.row,
+          flexWrap: "wrap",
+          marginBottom: gap.row,
+        }}
+      >
+        <div
+          style={{
+            fontFamily: fonts.condensed,
+            fontWeight: 700,
+            fontSize: 34,
+            lineHeight: 1.1,
+            color: colors.headingBright,
+          }}
+        >
+          {mode === "PreTrip" ? "Pre-trip" : "Post-trip"} review · {unit}
+        </div>
+        <TabletChip kind={rm.kind} label={rm.label} />
+        <span
+          style={{
+            fontFamily: fonts.mono,
+            fontSize: type.value,
+            fontVariantNumeric: "tabular-nums",
+            color: colors.textSecondary,
+          }}
+        >
+          {odometerKm === null ? "— km" : `${odometerKm.toLocaleString("en-CA")} km`}
+        </span>
+        <TouchButton variant="secondary" onClick={() => onGoToStep("odometer")}>
+          Change
+        </TouchButton>
+      </div>
+
+      {/* The location, on its own row: it is free text up to 200 characters and would wrap the
+          title row above. Same Change target — it is collected on the header step. */}
+      <CardRow>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <FieldLine
+            label="Location (town or highway)"
+            value={shownLocation ?? "Not entered — required"}
+          />
+        </div>
+        <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 10 }}>
+          {locError !== null ? <TabletChip kind="soon" label="Required" /> : null}
+          <TouchButton variant="secondary" onClick={() => onGoToStep("odometer")}>
+            Change
+          </TouchButton>
+        </div>
+      </CardRow>
+
+      {/* A plain Unicode apostrophe, not &rsquo;: `title` is a string prop, so relying on JSX
+          entity decoding in an attribute is a trap worth not setting. */}
+      <StatusBanner kind="off" title="The overall result is the server’s to decide.">
+        The <strong>{rm.label}</strong> shown above is worked out on this device from the defects
+        below, mirroring the backend&rsquo;s own rule (no defects → Pass; only minor defects →
+        Pass with defects; any major or out-of-service defect → Fail). It is{" "}
+        <strong>not sent</strong> — the server derives it, so the two can never disagree.
+      </StatusBanner>
+
+      {result === "Fail" ? (
+        <StatusBanner kind="over" title="A failing defect does not take the vehicle out of service here.">
+          {unit}&rsquo;s out-of-service flag is the server&rsquo;s, and nothing in this build
+          writes it — so the Trips screen&rsquo;s vehicle-status rule will keep reading{" "}
+          <strong>no open failure</strong> even after you certify this. Boarding is blocked on
+          this device, and that is all. Call dispatch.
+        </StatusBanner>
+      ) : null}
+
+      {groups.map((group) => (
+        <div key={group.key}>
+          <Heading>
+            Area {group.area} · {group.title}
+          </Heading>
+          {group.items.map((item) => {
+            // Keyed on the catalogue's `key` throughout — the wire value, and the same string
+            // answers, notes and defects are addressed by.
+            const answer = answers[item.key] ?? null;
+            const meta = answer ? ANSWER_META[answer] : null;
+            const defect = answer === "defect" ? defects[item.key] : undefined;
+            const note = (notes[item.key] ?? "").trim();
+
+            return (
+              <CardRow key={item.key}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <FieldLine
+                    label={item.label}
+                    value={
+                      defect
+                        ? `${defect.note.trim() || "no fault note"}${note ? ` · ${note}` : ""}`
+                        : note || item.checkFor
+                    }
+                  />
+                </div>
+                <div
+                  style={{
+                    flex: "none",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                  }}
+                >
+                  {meta ? (
+                    <TabletChip kind={meta.kind} label={meta.label} />
+                  ) : (
+                    <TabletChip kind="off" label="Not answered" />
+                  )}
+                  {defect ? (
+                    defect.severity ? (
+                      <TabletChip
+                        kind={severityKind(defect.severity)}
+                        glyph={severityGlyph(defect.severity)}
+                        label={defect.severity}
+                      />
+                    ) : (
+                      <TabletChip kind="off" label="No severity" />
+                    )
+                  ) : null}
+                  <TouchButton
+                    variant="secondary"
+                    onClick={() =>
+                      onGoToStep(defect ? defectStepId(item.key) : checkStepId(item.key))
+                    }
+                  >
+                    Change
+                  </TouchButton>
+                </div>
+              </CardRow>
+            );
+          })}
+        </div>
+      ))}
+
+      {newDefects ? (
+        <div>
+          {/* NL-PTI-01 rev 4. The answer is shown even when it is No, because "no new defects"
+              is a statement the driver is certifying, not the absence of a section. Rows entered
+              and then answered No are NOT shown — they are not part of what is being certified
+              and will not be sent. */}
+          <Heading>New defects since the pre-trip</Heading>
+          <CardRow>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <FieldLine
+                label="Any defect found after the pre-trip?"
+                value={
+                  newDefects.found === null
+                    ? "Not answered — required"
+                    : newDefects.found
+                      ? `Yes — ${newDefects.defects.length} new defect(s)`
+                      : "No"
+                }
+              />
+            </div>
+            <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 10 }}>
+              {newDefects.found === null ? (
+                <TabletChip kind="off" label="Not answered" />
+              ) : newDefects.found ? (
+                <TabletChip kind="over" label="Yes" />
+              ) : (
+                <TabletChip kind="ontime" label="No" />
+              )}
+              <TouchButton variant="secondary" onClick={() => onGoToStep(NEW_DEFECTS_STEP_ID)}>
+                Change
+              </TouchButton>
+            </div>
+          </CardRow>
+          {newDefects.found === true
+            ? newDefects.defects.map((d, i) => (
+                <CardRow key={i}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <FieldLine
+                      label={
+                        d.itemKey === ""
+                          ? `New defect ${i + 1} · item not picked`
+                          : `New defect ${i + 1} · ${newDefects.labels.get(d.itemKey) ?? d.itemKey}`
+                      }
+                      value={d.note.trim() || "No note — required"}
+                    />
+                  </div>
+                  <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 10 }}>
+                    {d.severity ? (
+                      <TabletChip
+                        kind={severityKind(d.severity)}
+                        glyph={severityGlyph(d.severity)}
+                        label={d.severity}
+                      />
+                    ) : (
+                      <TabletChip kind="off" label="No severity" />
+                    )}
+                    <TouchButton
+                      variant="secondary"
+                      onClick={() => onGoToStep(NEW_DEFECTS_STEP_ID)}
+                    >
+                      Change
+                    </TouchButton>
+                  </div>
+                </CardRow>
+              ))
+            : null}
+        </div>
+      ) : null}
+
+      <Heading>Certify</Heading>
+      <Panel style={{ padding: "18px 20px" }}>
+        <div
+          style={{
+            fontFamily: fonts.body,
+            fontSize: type.label,
+            color: colors.textSecondary,
+            lineHeight: 1.6,
+          }}
+        >
+          {NL_PTI_01_CERTIFICATION}
+        </div>
+        <div style={{ display: "flex", gap: 12, marginTop: 16, flexWrap: "wrap" }}>
+          <TouchButton onClick={onSubmit} disabled={!complete} disabledReason={blockedReason}>
+            Certify &amp; submit
+          </TouchButton>
+          <TouchButton
+            variant="secondary"
+            disabled
+            disabledReason="No attachment endpoint exists for inspections or defects on the backend yet."
+          >
+            Attach photo
+          </TouchButton>
+        </div>
+        {complete ? null : (
+          <div
+            style={{
+              fontFamily: fonts.body,
+              fontSize: 15,
+              color: colors.textDim,
+              marginTop: 12,
+              lineHeight: 1.55,
+            }}
+          >
+            {blockedReason}
+          </div>
+        )}
+      </Panel>
+
+      <Heading right={<MockTag />}>Recent inspections</Heading>
+      {recent.map((s) => (
+        <CardRow key={s.id}>
+          <div style={{ flex: "none", width: 180 }}>
+            <span style={{ fontFamily: fonts.mono, fontSize: 15, color: colors.textDim }}>
+              {s.performedAt.slice(0, 16).replace("T", " ")}
+            </span>
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <FieldLine
+              label={`${s.type} · ${s.unit}`}
+              value={`${s.odometerKm.toLocaleString("en-CA")} km${s.defects.length > 0 ? ` · ${s.defects.length} defect(s)` : ""}`}
+            />
+          </div>
+          <div style={{ flex: "none" }}>
+            <TabletChip kind={s.rk} label={s.result} />
+          </div>
+        </CardRow>
+      ))}
+    </div>
+  );
+}

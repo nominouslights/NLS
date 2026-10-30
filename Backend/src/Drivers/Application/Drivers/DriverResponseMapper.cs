@@ -17,6 +17,7 @@ public static class DriverResponseMapper
         decimal? latestDrivingHours,
         DateOnly? latestHosDate) => new(
         driver.Id,
+        driver.UserId,
         driver.Name,
         driver.Phone,
         driver.LicenceClass,
@@ -30,5 +31,8 @@ public static class DriverResponseMapper
         latestDrivingHours,
         latestHosDate,
         driver.RegisteredAtUtc,
-        driver.UpdatedAtUtc);
+        driver.UpdatedAtUtc,
+        driver.PriorRecordsCoveredThroughDate,
+        driver.PriorRecordsAttestedAtUtc,
+        driver.WorksForOtherCarriers);
 }

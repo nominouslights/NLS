@@ -42,6 +42,40 @@ public static class ScheduleTemplateErrors
         "Trips.ScheduleTemplate.ReturnNextDayRequiresReturnDeparture",
         "Return next day only applies when a return departure time is set.");
 
+    // ---- On-demand generation (messages are shown verbatim in the Generate Trips dialog) ----
+
+    public static readonly Error TemplateInactive = Error.Validation(
+        "Trips.ScheduleTemplate.TemplateInactive",
+        "This template is inactive, so it cannot generate trips. Activate it first.");
+
+    public static readonly Error InvalidGenerationWindow = Error.Validation(
+        "Trips.ScheduleTemplate.InvalidGenerationWindow",
+        $"Choose a date from today up to {ScheduleTemplate.MaxGenerateAheadDays} days ahead.");
+
+    public static readonly Error RouteMissing = Error.Validation(
+        "Trips.ScheduleTemplate.RouteMissing",
+        "This template's route no longer exists. Edit the template and choose a route.");
+
+    public static readonly Error NoDefaultDriver = Error.Validation(
+        "Trips.ScheduleTemplate.NoDefaultDriver",
+        "This template has no default driver. A trip is never created unassigned — set one on the template first.");
+
+    public static readonly Error DefaultDriverUnavailable = Error.Validation(
+        "Trips.ScheduleTemplate.DefaultDriverUnavailable",
+        "This template's default driver is no longer an active driver. Choose another driver on the template.");
+
+    public static readonly Error NoDefaultVehicle = Error.Validation(
+        "Trips.ScheduleTemplate.NoDefaultVehicle",
+        "This template has no default vehicle unit. A trip is never created unassigned — set one on the template first.");
+
+    public static readonly Error DefaultVehicleUnavailable = Error.Validation(
+        "Trips.ScheduleTemplate.DefaultVehicleUnavailable",
+        "This template's default vehicle unit is not an active fleet vehicle. Choose another unit on the template.");
+
+    public static readonly Error GenerationConflict = Error.Conflict(
+        "Trips.ScheduleTemplate.GenerationConflict",
+        "Another generation for this template just ran — reopen the preview and try again.");
+
     // ---- Schedule exceptions (special dates) ----
 
     public static readonly Error ExceptionNotFound = Error.NotFound(

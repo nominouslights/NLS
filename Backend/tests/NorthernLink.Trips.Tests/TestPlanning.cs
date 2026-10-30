@@ -1,4 +1,5 @@
 using NorthernLink.Shared.Kernel;
+using NorthernLink.Trips.Application.Integration;
 using NorthernLink.Trips.Domain.Manifests;
 using NorthernLink.Trips.Domain.Routes;
 using NorthernLink.Trips.Domain.Schedules;
@@ -50,12 +51,14 @@ internal static class TestPlanning
         IReadOnlyList<int>? daysOfMonth = null,
         TripServiceType serviceType = TripServiceType.ContractCrew,
         int? seatsCapacity = 12,
-        int? seatsMinimum = null)
+        int? seatsMinimum = null,
+        Guid? defaultDriverId = null,
+        string? defaultVehicleUnit = VehicleUnit)
     {
         var result = CreateTemplateResult(
             daysOfWeek, departureTime, returnDepartureTime, returnNextDay, generationHorizonDays,
             routeId, recurrenceKind, intervalDays, anchorDate, daysOfMonth,
-            serviceType, seatsCapacity, seatsMinimum);
+            serviceType, seatsCapacity, seatsMinimum, defaultDriverId, defaultVehicleUnit);
         var template = result.Value;
 
         if (!active)
@@ -83,7 +86,9 @@ internal static class TestPlanning
         IReadOnlyList<int>? daysOfMonth = null,
         TripServiceType serviceType = TripServiceType.ContractCrew,
         int? seatsCapacity = 12,
-        int? seatsMinimum = null) =>
+        int? seatsMinimum = null,
+        Guid? defaultDriverId = null,
+        string? defaultVehicleUnit = VehicleUnit) =>
         ScheduleTemplate.Create(
             TenantId,
             "Alamos crew shuttle",
@@ -101,9 +106,38 @@ internal static class TestPlanning
             returnNextDay: returnNextDay,
             seatsCapacity: seatsCapacity,
             seatsMinimum: seatsMinimum,
-            defaultVehicleUnit: "U-04",
-            defaultDriverId: null,
+            defaultVehicleUnit: defaultVehicleUnit,
+            defaultDriverId: defaultDriverId,
             generationHorizonDays: generationHorizonDays);
+
+    /// <summary>
+    /// The baseline driver as an Active driver_lookup row — what a template's default driver
+    /// resolves to. <paramref name="userId"/> links it to a signed-in account for the identity
+    /// gate tests; <paramref name="driverId"/> mints a second driver.
+    /// </summary>
+    public static DriverLookup ActiveDriver(
+        string status = DriverLookup.ActiveStatus, Guid? userId = null, Guid? driverId = null) => new()
+    {
+        DriverId = driverId ?? DriverId,
+        TenantId = TenantId,
+        Name = DriverName,
+        LicenceClass = "Class 4",
+        Status = status,
+        UserId = userId,
+        UpdatedAtUtc = DateTimeOffset.UtcNow,
+    };
+
+    /// <summary>The baseline unit as a vehicle_lookup row; <paramref name="seats"/> is what generated trips snapshot.</summary>
+    public static VehicleLookup ActiveVehicle(int seats = 12, string status = VehicleLookup.ActiveStatus) => new()
+    {
+        VehicleId = VehicleId,
+        TenantId = TenantId,
+        UnitNumber = VehicleUnit,
+        Status = status,
+        RequiredLicenceClass = "Class 4",
+        SeatingCapacity = seats,
+        UpdatedAtUtc = DateTimeOffset.UtcNow,
+    };
 
     /// <summary>
     /// A valid scheduled trip; override the arguments a test cares about. Null
@@ -127,7 +161,10 @@ internal static class TestPlanning
         string origin = "Thompson",
         string destination = "Lynn Lake",
         bool isEmptyLeg = false,
-        TripServiceType serviceType = TripServiceType.ContractCrew) =>
+        TripServiceType serviceType = TripServiceType.ContractCrew,
+        string? originProvince = null,
+        string? destinationProvince = null,
+        IReadOnlyList<RouteStop>? stops = null) =>
         Trip.Schedule(
             tenantId ?? TenantId,
             tripNumber,
@@ -139,7 +176,7 @@ internal static class TestPlanning
             routeName: "Thompson ↔ Lynn Lake",
             origin: origin,
             destination: destination,
-            stops: Stops(),
+            stops: stops ?? Stops(),
             distanceKm: 320,
             scheduleTemplateId: scheduleTemplateId,
             roundTripKey: roundTripKey,
@@ -153,7 +190,9 @@ internal static class TestPlanning
             vehicleId: vehicleId ?? VehicleId,
             vehicleUnit: vehicleUnit ?? VehicleUnit,
             seatsCapacity: seatsCapacity,
-            seatsMinimum: null);
+            seatsMinimum: null,
+            originProvince: originProvince,
+            destinationProvince: destinationProvince);
 
     /// <summary>Deadhead return with the baseline assignment driving the unit back.</summary>
     public static Result<Trip> DeadheadReturn(this Trip source, string tripNumber) =>

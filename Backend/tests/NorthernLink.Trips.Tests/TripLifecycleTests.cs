@@ -431,7 +431,7 @@ public class TripLifecycleTests
         var result = trip.Update(
             trip.ServiceDate, trip.WindowStart, trip.WindowEnd, trip.ServiceType,
             trip.RouteId, trip.RouteName, trip.Origin, trip.Destination, trip.Stops,
-            trip.DistanceKm, trip.IsEmptyLeg, trip.ClientId, trip.ClientName,
+            trip.DistanceKm, trip.ClientId, trip.ClientName,
             trip.PoNumber, trip.SeatsCapacity, trip.SeatsMinimum);
 
         Assert.True(result.IsFailure);
@@ -539,7 +539,7 @@ public class TripLifecycleTests
         trip.Update(
             trip.ServiceDate, trip.WindowStart, trip.WindowEnd, trip.ServiceType,
             trip.RouteId, trip.RouteName, trip.Origin, trip.Destination, trip.Stops,
-            trip.DistanceKm, trip.IsEmptyLeg, trip.ClientId, trip.ClientName,
+            trip.DistanceKm, trip.ClientId, trip.ClientName,
             trip.PoNumber, seatsCapacity, trip.SeatsMinimum);
 
     [Fact]

@@ -10,10 +10,16 @@ namespace NorthernLink.Drivers.Application.Drivers;
 /// duty string) and <paramref name="LatestDrivingHours"/> are the same kind of roster
 /// rollup from the driver's newest HOS entry — the roster's duty chip and "HOS left"
 /// column read them without a per-driver HOS call. All three are null until the first
-/// HOS entry.
+/// HOS entry. <paramref name="UserId"/> is the Identity account linked to this roster row, or
+/// null when nobody can sign in as this driver — the Dispatch Console reads it to show whether a
+/// driver has Field App access, and it is what <c>GET /api/drivers/me</c> resolves against.
+/// <paramref name="PriorRecordsCoveredThroughDate"/> / <paramref name="PriorRecordsAttestedAtUtc"/>
+/// are the compliance officer's prior-records attestation (null until one exists) and
+/// <paramref name="WorksForOtherCarriers"/> the flag declared with it.
 /// </summary>
 public sealed record DriverResponse(
     Guid Id,
+    Guid? UserId,
     string Name,
     string? Phone,
     string LicenceClass,
@@ -27,4 +33,7 @@ public sealed record DriverResponse(
     decimal? LatestDrivingHours,
     DateOnly? LatestHosDate,
     DateTimeOffset RegisteredAtUtc,
-    DateTimeOffset UpdatedAtUtc);
+    DateTimeOffset UpdatedAtUtc,
+    DateOnly? PriorRecordsCoveredThroughDate = null,
+    DateTimeOffset? PriorRecordsAttestedAtUtc = null,
+    bool WorksForOtherCarriers = false);

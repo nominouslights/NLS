@@ -34,6 +34,11 @@ public sealed class EmailDispatchConfiguration : IEntityTypeConfiguration<EmailD
         builder.Property(d => d.ClientId).HasColumnName("client_id");
         builder.Property(d => d.ClientName).HasColumnName("client_name").HasMaxLength(200);
 
+        // Booking-passes anchor (null for trip pickup and client accruals sends). The
+        // reference is a 9-char NL-XXXXXX today; 16 leaves room without inviting free text.
+        builder.Property(d => d.BookingId).HasColumnName("booking_id");
+        builder.Property(d => d.BookingReference).HasColumnName("booking_reference").HasMaxLength(16);
+
         builder.Property(d => d.Status)
             .HasColumnName("status")
             .HasConversion<string>()

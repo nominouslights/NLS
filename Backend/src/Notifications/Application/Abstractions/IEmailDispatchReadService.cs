@@ -17,4 +17,9 @@ public interface IEmailDispatchReadService
     Task<IReadOnlyList<EmailDispatchResponse>> GetForClientAsync(
         Guid clientId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Every booking-passes dispatch recorded against a community booking, newest first.</summary>
+    Task<IReadOnlyList<EmailDispatchResponse>> GetForBookingAsync(
+        Guid bookingId,
+        CancellationToken cancellationToken = default);
 }

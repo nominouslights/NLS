@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using NorthernLink.Shared.Persistence;
 using NorthernLink.Shared.Tenancy;
 using NorthernLink.Notifications.Application;
+using NorthernLink.Notifications.Application.Integration;
 using NorthernLink.Notifications.Domain.Dispatches;
 using NorthernLink.Notifications.Domain.Templates;
 using NorthernLink.Notifications.Infrastructure.Persistence.ReadModels;
@@ -32,6 +33,10 @@ public sealed class NotificationsDbContext(
 
     public DbSet<EmailDispatchReadModel> EmailDispatchReadModels => Set<EmailDispatchReadModel>();
 
+    // The user replica (identity.user-changed → notifications.user_lookup): the compliance
+    // alerts' audience. Plain keyed rows, no audit pipeline.
+    public DbSet<UserLookup> UserLookups => Set<UserLookup>();
+
     protected override void ConfigureModule(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfiguration(new EmailTemplateConfiguration());
@@ -40,6 +45,8 @@ public sealed class NotificationsDbContext(
         modelBuilder.ApplyConfiguration(new EmailTemplateReadModelConfiguration());
         modelBuilder.ApplyConfiguration(new EmailDispatchReadModelConfiguration());
 
+        modelBuilder.ApplyConfiguration(new UserLookupConfiguration());
+
         // Tenant isolation, API half. Never remove: RLS is the backstop, not the substitute.
         modelBuilder.Entity<EmailTemplate>().HasQueryFilter(t => t.TenantId == TenantId);
         modelBuilder.Entity<EmailDispatch>().HasQueryFilter(d => d.TenantId == TenantId);
@@ -47,5 +54,9 @@ public sealed class NotificationsDbContext(
         // Same tenant filter on the read models — the retained API half of dual enforcement.
         modelBuilder.Entity<EmailTemplateReadModel>().HasQueryFilter(t => t.TenantId == TenantId);
         modelBuilder.Entity<EmailDispatchReadModel>().HasQueryFilter(d => d.TenantId == TenantId);
+
+        // And on the replica. UserLookupRepository bypasses this deliberately on both its
+        // members (handler path, explicit tenant predicate) — see its remarks.
+        modelBuilder.Entity<UserLookup>().HasQueryFilter(u => u.TenantId == TenantId);
     }
 }

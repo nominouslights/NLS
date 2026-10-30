@@ -30,14 +30,17 @@ import { SectionLabel } from "@/components/ui/Panel";
 // iframe — template HTML is untrusted and must never touch the console.
 
 // Notification service types = the Clients ones plus Notifications-only
-// purposes (CommunityBookingAtRisk — the override template for the automatic
-// "trip at risk" email when a community booking day reverts).
-const SERVICE_TYPE_OPTIONS = (
-  Object.keys(NOTIFICATION_SERVICE_TYPE_LABELS) as NotificationServiceType[]
-).map((v) => ({
-  value: v,
-  label: NOTIFICATION_SERVICE_TYPE_LABELS[v],
-}));
+// purposes. CommunityBookingAtRisk IS a template target (the override template
+// for the automatic "trip at risk" email when a community booking day
+// reverts); CommunityBookingPasses is NOT — the passes email has a built-in
+// composer and no template, so offering it here would save a template nothing
+// ever reads.
+const SERVICE_TYPE_OPTIONS = (Object.keys(NOTIFICATION_SERVICE_TYPE_LABELS) as NotificationServiceType[])
+  .filter((v) => v !== "CommunityBookingPasses")
+  .map((v) => ({
+    value: v,
+    label: NOTIFICATION_SERVICE_TYPE_LABELS[v],
+  }));
 
 export default function EmailTemplateModal({
   existing,

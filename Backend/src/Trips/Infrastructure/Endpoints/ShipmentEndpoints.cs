@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Shared.Tenancy;
 using NorthernLink.Trips.Application.Abstractions;
@@ -38,7 +39,12 @@ public static class ShipmentEndpoints
 {
     public static IEndpointRouteBuilder MapShipmentEndpoints(this IEndpointRouteBuilder app)
     {
-        var shipments = app.MapGroup("/api/trips/shipments").RequireAuthorization();
+        // DispatchAccess: shipment registration, routing and billing are dispatch work. The
+        // driver-facing half of cargo (scanning a pickup or a drop from the cab) does not exist
+        // yet — when it does it gets its own sibling group carrying DriverAccess, plus a
+        // caller-owns-this-trip check, rather than this group being widened.
+        var shipments = app.MapGroup("/api/trips/shipments")
+            .RequireAuthorization(AuthorizationPolicies.DispatchAccess);
 
         shipments.MapGet("", GetShipments);
         shipments.MapGet("{id:guid}", GetShipmentById);

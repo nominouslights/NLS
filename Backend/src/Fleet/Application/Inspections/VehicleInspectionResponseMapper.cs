@@ -21,11 +21,12 @@ public static class VehicleInspectionResponseMapper
         inspection.ChecklistItems.Select(item => new InspectionChecklistItemResponse(
             item.Group,
             item.Item,
-            item.Passed)).ToList(),
-        inspection.Defects.Select(defect => new InspectionDefectResponse(
-            defect.Item,
-            defect.Severity.ToString(),
-            defect.Note)).ToList(),
+            item.Passed,
+            // EffectiveState, not State: a pre-NL-PTI-01 row has no State, and resolving that
+            // fallback here rather than in four client apps is the whole point of the property.
+            item.EffectiveState.ToString(),
+            item.Note)).ToList(),
+        inspection.Defects.Select(InspectionDefectResponse.From).ToList(),
         inspection.Weather.Select(w => w.ToString()).ToList(),
         inspection.TemperatureC,
         inspection.RoadConditions.Select(r => r.ToString()).ToList(),
@@ -40,5 +41,10 @@ public static class VehicleInspectionResponseMapper
         inspection.FuelLitres,
         inspection.FuelCostCad,
         inspection.GeneratedWorkOrderId,
-        inspection.CreatedAtUtc);
+        inspection.CreatedAtUtc,
+        inspection.CarrierAcknowledgedBy,
+        inspection.CarrierAcknowledgedAtUtc,
+        inspection.CarrierAcknowledgementNote,
+        inspection.CertificationStatement,
+        inspection.Location);
 }

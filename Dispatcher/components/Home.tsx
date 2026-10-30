@@ -2,12 +2,13 @@
 
 import type { CSSProperties } from "react";
 import { chipStyle, colors, fonts, statusMeta } from "@/lib/theme";
-import { APPS, appBadge, canUseApp, type AppDef, type InternalApp } from "@/lib/apps";
+import { APPS, appBadge, canUseApp, screensFor, type AppDef, type InternalApp } from "@/lib/apps";
 import { getClaims, logout } from "@/lib/auth";
 import { useToday } from "@/lib/useToday";
 import { PageHeader, Panel } from "@/components/ui/Panel";
 import { ActionButton } from "@/components/ui/Button";
 import { StatusChip } from "@/components/ui/Chip";
+import LegalLinks from "@/components/LegalLinks";
 
 // Home — the launcher. One tile per app from the manifest (lib/apps.ts), gated by role as a UX
 // gate only (the API policies are the boundary). A tile the role may not use is rendered
@@ -62,6 +63,8 @@ export default function Home({
             <Tile key={app.id} app={app} role={role} onOpenApp={onOpenApp} />
           ))}
         </div>
+
+        <LegalLinks style={{ marginTop: 28 }} />
       </div>
     </div>
   );
@@ -88,7 +91,10 @@ function Tile({
       ? { text: "Not configured", title: "Set NEXT_PUBLIC_BUDGETING_URL at build time" }
       : null;
 
-  const meta = app.kind === "internal" ? app.screens.map((s) => s.label).join(" · ") : app.hint;
+  // An open tile lists only the screens this role will find inside (Compliance is narrower than
+  // its app); a locked one lists the whole app, since none of it is theirs anyway.
+  const meta =
+    app.kind === "internal" ? (allowed ? screensFor(app, role) : app.screens).map((s) => s.label).join(" · ") : app.hint;
   const badge = app.kind === "internal" ? appBadge(app) : undefined;
 
   // Real <button>/<a> elements: keyboard access and focus for free. UA styles reset here; the

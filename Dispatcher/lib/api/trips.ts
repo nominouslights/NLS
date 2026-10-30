@@ -172,7 +172,9 @@ export interface TripInput {
   seatsMinimum?: number | null;
 }
 
-/** PUT /api/trips/{id} body (UpdateTripRequest) — editable only while Scheduled. */
+/** PUT /api/trips/{id} body (UpdateTripRequest) — editable only while Scheduled.
+ *  No isEmptyLeg: the server ignores it here. A trip becomes a deadhead only
+ *  through convertTripToDeadhead (and back through convertTripToPassengerTrip). */
 export interface TripUpdateInput {
   serviceDate: string;
   windowStart: string;
@@ -184,7 +186,6 @@ export interface TripUpdateInput {
   destination?: string | null;
   stops?: TripStop[] | null;
   distanceKm: number;
-  isEmptyLeg: boolean;
   clientId?: string | null;
   clientName?: string | null;
   poNumber?: string | null;
@@ -328,6 +329,206 @@ export function unpairRoundTrip(id: string): Promise<void> {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Driver correction — fixes who actually drove a FINISHED trip, with a reason
+// that lands in the activity log. Live trips use REASSIGN (assignTrip) instead.
+// ---------------------------------------------------------------------------
+
+/** Longest correction reason the server accepts — mirrors the C# constant
+ *  `Trip.MaxReasonLength` (Backend/src/Trips/Domain/Trips/Trip.cs); over it the
+ *  server returns DriverCorrectionReasonTooLong. Change both together. */
+export const DRIVER_CORRECTION_REASON_MAX = 500;
+
+/** POST /api/trips/{id}/correct-driver → 204. The new driver may be any driver
+ *  on record, including Inactive/Deactivated ones. Errors (server message shown
+ *  verbatim): DriverCorrectionReasonRequired / DriverCorrectionReasonTooLong
+ *  (400), DriverCorrectionNotAllowed / UseReassign / DriverUnchanged (409),
+ *  Trips.Trip.DriverNotFound (404), trip not found (404). */
+export function correctTripDriver(id: string, driverId: string, reason: string): Promise<void> {
+  return request<void>(`/api/trips/${id}/correct-driver`, {
+    method: "POST",
+    body: JSON.stringify({ driverId, reason }),
+  });
+}
+
+/** UI mirror of the C# `Trip.DriverCorrectionAllowedFor`
+ *  (Backend/src/Trips/Domain/Trips/Trip.cs) — where the server allows a driver
+ *  correction: a finished trip (ReadyForBilling, Invoiced, Completed).
+ *  Scheduled/InProgress use REASSIGN; Cancelled/WrittenOff are never corrected.
+ *  Change both together. */
+export function canCorrectDriver(t: Pick<TripRecord, "status">): boolean {
+  return t.status === "ReadyForBilling" || t.status === "Invoiced" || t.status === "Completed";
+}
+
+// ---------------------------------------------------------------------------
+// Deadhead conversion — a Scheduled trip nobody is booked on can be turned into
+// an empty repositioning run, and back. Both take no body and return 204.
+// ---------------------------------------------------------------------------
+
+/** POST /api/trips/{id}/convert-to-deadhead → 204. 409s (each with the server's
+ *  own message): DeadheadConversionNotScheduled, AlreadyEmptyLeg,
+ *  DeadheadConversionBookingSourced, DeadheadConversionHasDemand,
+ *  DeadheadConversionManifestNotEmpty, DeadheadConversionHasExternalBookings,
+ *  RoundTripBothLegsEmpty, ChangedConcurrently. On success the server deletes the
+ *  trip's empty manifest record(s) and clears its manifestId. */
+export function convertTripToDeadhead(id: string): Promise<void> {
+  return request<void>(`/api/trips/${id}/convert-to-deadhead`, {
+    method: "POST",
+  });
+}
+
+/** POST /api/trips/{id}/convert-to-passenger-trip → 204. 409s:
+ *  PassengerTripConversionNotScheduled, NotEmptyLeg, ChangedConcurrently. */
+export function convertTripToPassengerTrip(id: string): Promise<void> {
+  return request<void>(`/api/trips/${id}/convert-to-passenger-trip`, {
+    method: "POST",
+  });
+}
+
+function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+/**
+ * Why CONVERT TO DEADHEAD is not offered, or null when it is — the part of the
+ * server's rule the client can see, in the server's order. Null for a trip the
+ * button never shows on (not Scheduled, or already a deadhead).
+ *
+ * The server stays the final authority: it also refuses a trip confirmed from a
+ * community booking day (TripRecord does not carry bookingDayId), imported
+ * Bookeo bookings placed on the trip, a manifest found by trip number but not
+ * linked, and a paired leg that is not on the loaded page. Its 409 message is
+ * shown when any of those bite.
+ *
+ * @param manifest the trip's linked manifest, or null when it has none (or it
+ *   failed to load — the server re-checks).
+ * @param partner the other leg of the round trip when it is on the page, else null.
+ * @param loading the linked manifest is still being fetched.
+ */
+export function deadheadConversionBlockReason(
+  trip: TripRecord,
+  manifest: TripManifest | null,
+  partner: TripRecord | null,
+  loading: boolean,
+): string | null {
+  if (trip.status !== "Scheduled" || trip.isEmptyLeg) return null;
+
+  if (trip.demandGuaranteed) {
+    return trip.seatsConfirmed > 0
+      ? `gift-a-seat pledge and ${plural(trip.seatsConfirmed, "seat")} confirmed`
+      : "gift-a-seat pledge on this trip";
+  }
+  if (trip.seatsConfirmed > 0) return `${plural(trip.seatsConfirmed, "seat")} confirmed`;
+
+  if (loading) return "checking the manifest…";
+  if (manifest) {
+    const pax = manifest.passengers.length;
+    const cargo = manifest.cargo.length;
+    if (pax > 0 || cargo > 0) {
+      const listed = [pax > 0 ? plural(pax, "passenger") : null, cargo > 0 ? plural(cargo, "cargo item") : null]
+        .filter(Boolean)
+        .join(" and ");
+      return `manifest lists ${listed}`;
+    }
+  }
+
+  if (partner && partner.id !== trip.id && partner.isEmptyLeg) {
+    return `paired leg ${partner.tripNumber} is already a deadhead`;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Change route — moves a Scheduled trip (and its paired leg, reversed for that
+// leg's direction) onto another catalogue route. PUT /api/trips/{id} refuses a
+// different routeId (409 Trips.Trip.UseChangeRoute); this pair is the only way.
+// ---------------------------------------------------------------------------
+
+/** Mirrors TripRouteChangePartnerResponse — the paired leg that always moves too. */
+export interface TripRouteChangePartner {
+  tripId: string;
+  tripNumber: string;
+  status: TripStatus;
+  direction: TripDirection | null;
+}
+
+/** Mirrors TripRouteChangeLegResponse — one leg now vs. after the change. The
+ *  new* corridor fields are null when the target route does not exist;
+ *  willChange is false for a paired leg already on the target route. Times are
+ *  TimeOnly ("06:30:00"); newWindowEnd stays null for an open-ended window. */
+export interface TripRouteChangeLeg {
+  tripId: string;
+  tripNumber: string;
+  isRequestedTrip: boolean;
+  status: TripStatus;
+  direction: TripDirection | null;
+  willChange: boolean;
+  currentRouteName: string;
+  currentOrigin: string;
+  currentDestination: string;
+  currentDistanceKm: number;
+  newOrigin: string | null;
+  newDestination: string | null;
+  newDistanceKm: number | null;
+  newStops: TripStop[] | null;
+  windowStart: string;
+  currentWindowEnd: string | null;
+  newWindowEnd: string | null;
+}
+
+/** Mirrors TripRouteChangeFindingResponse — a blocker, warning or notice.
+ *  tripId/tripNumber name the leg it concerns (null = the request as a whole);
+ *  count is set for countable warnings (passengers, shipment legs). */
+export interface TripRouteChangeFinding {
+  code: string;
+  message: string;
+  tripId: string | null;
+  tripNumber: string | null;
+  count: number | null;
+}
+
+/** Mirrors TripRouteChangePreviewResponse. Always 200 for an existing trip:
+ *  problems arrive as blockers (same codes/messages the POST would return).
+ *  requiresAcknowledgement is true exactly when warnings is non-empty. */
+export interface TripRouteChangePreview {
+  tripId: string;
+  tripNumber: string;
+  currentRouteId: string | null;
+  currentRouteName: string;
+  newRouteId: string;
+  newRouteName: string | null;
+  canChange: boolean;
+  requiresAcknowledgement: boolean;
+  partner: TripRouteChangePartner | null;
+  legs: TripRouteChangeLeg[];
+  blockers: TripRouteChangeFinding[];
+  warnings: TripRouteChangeFinding[];
+  notices: TripRouteChangeFinding[];
+}
+
+/** POST /api/trips/{id}/change-route body (ChangeTripRouteRequest). */
+export interface ChangeTripRouteInput {
+  routeId: string;
+  acknowledgeWarnings: boolean;
+}
+
+/** GET /api/trips/{id}/change-route/preview?routeId= → what the change would do,
+ *  nothing persisted. 404 Trips.Trip.NotFound for an unknown trip. */
+export function previewTripRouteChange(tripId: string, routeId: string): Promise<TripRouteChangePreview> {
+  const q = new URLSearchParams({ routeId });
+  return request<TripRouteChangePreview>(`/api/trips/${tripId}/change-route/preview?${q.toString()}`);
+}
+
+/** POST /api/trips/{id}/change-route → 204. Errors use the standard {code,message}
+ *  body: the first blocker as its error, or 409
+ *  Trips.Trip.RouteChangeNeedsAcknowledgement when warnings were not acknowledged. */
+export function changeTripRoute(tripId: string, input: ChangeTripRouteInput): Promise<void> {
+  return request<void>(`/api/trips/${tripId}/change-route`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
 /** POST /api/trips/{id}/deadhead-return → { id } (same created-id shape as
  *  createTrip) — creates the reversed empty repositioning leg, already paired
  *  to this trip as its return. */
@@ -401,9 +602,13 @@ export function updateRoute(id: string, input: RouteInput & { active: boolean })
 }
 
 // ---------------------------------------------------------------------------
-// Schedule templates — a backend worker generates trips from ACTIVE templates
-// (~every 30 min, GenerationHorizonDays ahead, default 7). Template edits
-// affect not-yet-generated trips only.
+// Schedule templates — trips materialize from ACTIVE templates two ways that
+// share one backend code path: a worker keeps the near horizon topped up
+// (~every 30 min, GenerationHorizonDays ahead, default 7), and a dispatcher
+// can generate further ahead on demand — up to 12 months — through the
+// preview/generate pair below (idempotent: occurrences that already exist are
+// skipped). Template edits and Special Dates affect not-yet-generated dates
+// only; a trip that already exists is fixed and is edited/cancelled from Trips.
 // ---------------------------------------------------------------------------
 
 export type DayName =
@@ -539,6 +744,41 @@ export function updateScheduleTemplate(id: string, input: ScheduleTemplateInput)
 export function setScheduleTemplateActive(id: string, active: boolean): Promise<void> {
   return request<void>(`/api/trips/schedule-templates/${id}/${active ? "activate" : "deactivate"}`, {
     method: "POST",
+  });
+}
+
+/** Mirrors ScheduleTripGenerationResult (Trips module). Dates are "yyyy-MM-dd";
+ *  `through` is inclusive. From the preview, `tripCount` is how many trips WOULD
+ *  be created; from generate, how many WERE. `alreadyExisted` counts occurrences
+ *  in the window the template had already materialized (skipped, never touched).
+ *  `outbound`/`inbound` split `tripCount` by direction (inbound is 0 for a
+ *  one-way template); first/last service date are null when `tripCount` is 0. */
+export interface ScheduleTripGenerationResult {
+  from: string;
+  through: string;
+  tripCount: number;
+  alreadyExisted: number;
+  outbound: number;
+  inbound: number;
+  firstServiceDate: string | null;
+  lastServiceDate: string | null;
+}
+
+/** GET {id}/generate/preview?through=yyyy-MM-dd — runs every generation guard
+ *  (inactive template, window, route, default driver/vehicle) and counts, but
+ *  never persists. Errors arrive as ApiError with the same codes generate uses. */
+export function previewScheduleTripGeneration(id: string, through: string): Promise<ScheduleTripGenerationResult> {
+  const qs = new URLSearchParams({ through });
+  return request<ScheduleTripGenerationResult>(`/api/trips/schedule-templates/${id}/generate/preview?${qs}`);
+}
+
+/** POST {id}/generate { through } — materializes every missing occurrence from
+ *  today (UTC, the worker's convention) through the date inclusive. 409
+ *  GenerationConflict means another run landed first: re-preview and retry. */
+export function generateScheduleTrips(id: string, through: string): Promise<ScheduleTripGenerationResult> {
+  return request<ScheduleTripGenerationResult>(`/api/trips/schedule-templates/${id}/generate`, {
+    method: "POST",
+    body: JSON.stringify({ through }),
   });
 }
 
@@ -828,7 +1068,28 @@ export function corridorLabel(t: { stops: TripStop[]; origin: string; destinatio
   return stopNames(t).join("  →  ");
 }
 
-/** "06:30:00" → "6:30 AM" (12-hour; tolerates "06:30" input). */
+/**
+ * "06:30:00" → "06:30", the ONLY format `<input type="time">` accepts.
+ *
+ * Seeding a time input with `hhmm()` renders it BLANK: the browser rejects "6:30 AM" as a value
+ * and shows nothing, so editing a schedule template or a trip looked like it had no times set —
+ * and saving then wrote the empty box back over a time that was there. Display and input are two
+ * different formats; `hhmm` is for reading, this is for editing. They live side by side so the
+ * next person sees both.
+ *
+ * Returns "" for null/unparseable, which is what an empty time input expects (not "—").
+ */
+export function timeInputValue(time: string | null | undefined): string {
+  if (!time) return "";
+  const [h, m] = time.split(":");
+  const hour = Number(h);
+  const minute = Number(m ?? "0");
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return "";
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+/** "06:30:00" → "6:30 AM" (12-hour; tolerates "06:30" input). For DISPLAY only — a
+ *  `<input type="time">` cannot render this, see {@link timeInputValue}. */
 export function hhmm(time: string | null): string {
   if (!time) return "—";
   const [h, m] = time.split(":");
@@ -849,20 +1110,51 @@ export function seatsLabel(t: TripRecord): string {
   return t.seatsCapacity != null ? `${t.seatsConfirmed} / ${t.seatsCapacity}` : String(t.seatsConfirmed);
 }
 
-/** True when the driver holds an unexpired clearance for the trip's client.
- *  Matching is by client name (the backend stores clearance clientName as free
- *  text); clearance checks are a UI-side warning in v1, never a hard block. */
+/** True when the driver held a clearance for the trip's client in force on
+ *  `asOf` (yyyy-MM-dd, default today). Live assignment checks today; a finished
+ *  trip (detail panel, driver correction) checks its own serviceDate — see
+ *  `clearanceAsOf`.
+ *
+ *  A clearance records its EXPIRY but not when it took effect: `grantedAtUtc`
+ *  is when the row was entered (DriverClearance.cs sets it to UtcNow), so a
+ *  long-held clearance keyed in last week would wrongly read as "not yet
+ *  granted" on an older trip. For an as-of date in the PAST the start is
+ *  therefore unknown and ignored — cleared when the client matches and it had
+ *  not expired by asOf. For today (or later) the entry date is a fair floor and
+ *  still applies. Matching is by client name (the backend stores clearance
+ *  clientName as free text); clearance checks are a UI-side warning in v1,
+ *  never a hard block. */
 export function hasClearanceFor(
   clearances: DriverClearanceRecord[],
   clientName: string | null,
+  asOf: string = todayIso(),
 ): boolean {
   if (!clientName) return true; // no client on the trip — nothing to clear
-  const today = todayIso();
-  return clearances.some(
-    (c) =>
-      c.clientName.trim().toLowerCase() === clientName.trim().toLowerCase() &&
-      (c.expiry === null || c.expiry >= today),
-  );
+  const historical = asOf < todayIso();
+  return clearances.some((c) => {
+    if (c.clientName.trim().toLowerCase() !== clientName.trim().toLowerCase()) return false;
+    if (c.expiry !== null && c.expiry < asOf) return false;
+    if (historical) return true; // start date unknown — expiry is the only evidence
+    const granted = localIsoDate(c.grantedAtUtc);
+    return granted === null || granted <= asOf;
+  });
+}
+
+/** The date a trip's driver clearance is judged on: a FINISHED trip (the same
+ *  set `canCorrectDriver` allows — ReadyForBilling, Invoiced, Completed) is
+ *  judged on its own serviceDate, exactly as CORRECT DRIVER does; a live trip
+ *  (and Cancelled / WrittenOff) on today. */
+export function clearanceAsOf(t: Pick<TripRecord, "status" | "serviceDate">): string {
+  return canCorrectDriver(t) ? t.serviceDate : todayIso();
+}
+
+/** A UTC instant's local calendar date (yyyy-MM-dd); null when absent/unparseable. */
+function localIsoDate(utc: string | null | undefined): string | null {
+  if (!utc) return null;
+  const d = new Date(utc);
+  if (Number.isNaN(d.getTime())) return null;
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
 /** Local-time ISO date (yyyy-MM-dd) — service dates are local operational days. */
@@ -927,6 +1219,11 @@ export interface ManifestPassenger {
   fareAmountCad: number | null;
   farePaymentMethod: FarePaymentMethod | null;
   farePaidAtUtc: string | null;
+  /** "bookeo:<booking number>" on a row the Bookeo import wrote, null on a row
+   *  a person entered (PassengerResponse.ExternalRef). Send it back UNCHANGED on
+   *  a manifest create/PUT — it is how a re-import recognises its own rows (the
+   *  backend's name-based carry-over is only a fallback). New rows send null. */
+  externalRef: string | null;
 }
 
 export interface ManifestCargo {
@@ -1005,7 +1302,19 @@ export interface TripActivityEntry {
   /** Kebab-case event type, e.g. "trip-scheduled", "trip-manifest-updated". */
   eventType: string;
   source: ManifestSource | null;
+  /** Who entered it — manifest events, and trip events too since driver correction. */
   enteredBy: string | null;
+  /** Free-text reason the actor gave (e.g. a driver correction). Optional on the wire. */
+  reason?: string | null;
+  /** Server-written one-line detail, e.g. "Driver: Old → New". Optional on the wire. */
+  detail?: string | null;
+}
+
+/** The entry's reason, trimmed, when it has a non-blank one — for ANY event
+ *  type (not gated to a particular event), else null. */
+export function tripActivityReason(e: Pick<TripActivityEntry, "reason">): string | null {
+  const r = e.reason?.trim();
+  return r ? r : null;
 }
 
 export function listTripActivity(id: string): Promise<TripActivityEntry[]> {

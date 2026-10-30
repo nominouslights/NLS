@@ -15,6 +15,7 @@ using NorthernLink.Booking.Application.Bookings;
 using NorthernLink.Booking.Application.Bookings.Cancel;
 using NorthernLink.Booking.Application.Bookings.Confirm;
 using NorthernLink.Booking.Application.Bookings.Create;
+using NorthernLink.Booking.Application.Bookings.GetById;
 using NorthernLink.Booking.Application.Bookings.Update;
 using NorthernLink.Booking.Application.Calendar.GetDay;
 using NorthernLink.Booking.Application.Calendar.GetMonth;
@@ -89,6 +90,7 @@ public static class BookingServiceCollectionExtensions
         services.AddScoped<IQueryHandler<SearchCustomersQuery, IReadOnlyList<CustomerResponse>>, SearchCustomersQueryHandler>();
         services.AddScoped<IQueryHandler<GetCustomerByIdQuery, CustomerResponse>, GetCustomerByIdQueryHandler>();
         services.AddScoped<ICommandHandler<CreateBookingCommand, Guid>, CreateBookingCommandHandler>();
+        services.AddScoped<IQueryHandler<GetBookingByIdQuery, BookingDetailResponse>, GetBookingByIdQueryHandler>();
         services.AddScoped<ICommandHandler<UpdateBookingCommand>, UpdateBookingCommandHandler>();
         services.AddScoped<ICommandHandler<ConfirmBookingCommand>, ConfirmBookingCommandHandler>();
         services.AddScoped<ICommandHandler<CancelBookingCommand>, CancelBookingCommandHandler>();

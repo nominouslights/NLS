@@ -14,6 +14,14 @@ public static class InspectionErrors
     public static readonly Error DriverRequired = Error.Validation(
         "Fleet.Inspection.DriverRequired", "The driver who performed the inspection is required.");
 
+    /// <summary>
+    /// The inspection location (municipality or highway description, M.R. 95/2008 s.12(1)) is
+    /// over the column's limit. Measured after trimming, so surrounding whitespace never counts.
+    /// </summary>
+    public static readonly Error LocationTooLong = Error.Validation(
+        "Fleet.Inspection.LocationTooLong",
+        $"The inspection location cannot exceed {VehicleInspection.LocationMaxLength} characters.");
+
     public static readonly Error WorkOrderAlreadyGenerated = Error.Conflict(
         "Fleet.Inspection.WorkOrderAlreadyGenerated",
         "A work order was already generated from this inspection.");
@@ -32,6 +40,70 @@ public static class InspectionErrors
         "Fleet.Inspection.DefectAlreadyResolved", "That defect has already been resolved.");
 
     /// <summary>
+    /// <see cref="DefectResolutionReason.RepairedUnderWorkOrder"/> and
+    /// <see cref="DefectResolutionReason.NoFaultFound"/> assert that a mechanic touched the truck
+    /// under a work order, so only work-order completion may set them. A dispatcher clearing a
+    /// defect by hand picks one of the other reasons.
+    /// </summary>
+    public static readonly Error ResolutionReasonReservedForWorkOrder = Error.Validation(
+        "Fleet.Inspection.ResolutionReasonReservedForWorkOrder",
+        "That resolution reason is set only by completing a work order — choose another reason to resolve the defect by hand.");
+
+    /// <summary>
+    /// A defect is on at most one active work order. Attaching it to a second one is refused
+    /// until the first completes (and defers it) or is cancelled.
+    /// </summary>
+    public static readonly Error DefectAlreadyOnWorkOrder = Error.Conflict(
+        "Fleet.Inspection.DefectAlreadyOnWorkOrder",
+        "That defect is already on an open work order.");
+
+    /// <summary>
+    /// A create request naming an inspection (the legacy whole-inspection form, with or without
+    /// explicit defects) found nothing to attach: every defect is resolved or already on a work
+    /// order — typically a double-submit. Refused so it never creates an empty, unlinked
+    /// inspection-sourced work order whose completion resolves nothing.
+    /// </summary>
+    public static readonly Error NoOpenDefectsToAttach = Error.Conflict(
+        "Fleet.Inspection.NoOpenDefectsToAttach",
+        "Every defect on this inspection is already resolved or on a work order.");
+
+    /// <summary>
+    /// A work order may only take defects reported against its own vehicle. An inspection with
+    /// no vehicle link (legacy, unit-only) matches when its unit equals the vehicle's unit
+    /// number — the same rule the defects panel uses to list it under that vehicle.
+    /// </summary>
+    public static readonly Error VehicleMismatch = Error.Validation(
+        "Fleet.Inspection.VehicleMismatch",
+        "That inspection was not recorded against this work order's vehicle.");
+
+    /// <summary>
+    /// Deleting an inspection while one of its defects is on an open work order would leave the
+    /// work order pointing at nothing. Complete or cancel the work order first.
+    /// </summary>
+    public static readonly Error DefectOnActiveWorkOrder = Error.Conflict(
+        "Fleet.Inspection.DefectOnActiveWorkOrder",
+        "A defect on this inspection is on an open work order — complete or cancel it first.");
+
+    /// <summary>
+    /// An amendment left out (or renamed) a defect that is on an open work order. Same code as
+    /// <see cref="DefectOnActiveWorkOrder"/> — it is the same conflict, reached by amending
+    /// rather than deleting — but the message names the item so the dispatcher knows which row
+    /// to put back, or which work order to complete, cancel, or defer it from first.
+    /// </summary>
+    public static Error AttachedDefectCannotBeDropped(string item) => Error.Conflict(
+        DefectOnActiveWorkOrder.Code,
+        $"The defect \"{item.Trim()}\" is on an open work order and cannot be removed from this inspection — complete or cancel the work order, or defer the defect, first.");
+
+    /// <summary>
+    /// An amendment would move this inspection to another vehicle (a different vehicle link, or
+    /// a different unit on a unit-only record) while one of its defects is on an open work
+    /// order — leaving that work order on one truck repairing another truck's defect.
+    /// </summary>
+    public static readonly Error VehicleChangeWithDefectOnActiveWorkOrder = Error.Conflict(
+        "Fleet.Inspection.VehicleChangeWithDefectOnActiveWorkOrder",
+        "This inspection cannot be moved to another vehicle while one of its defects is on an open work order — complete or cancel the work order, or defer the defect, first.");
+
+    /// <summary>
     /// Two defects on one inspection share an item. <c>Item</c> is the addressing key for
     /// resolution, so a duplicate would make both rows resolve together — rejected on entry and
     /// on amendment rather than left to corrupt the maintenance record.
@@ -39,6 +111,30 @@ public static class InspectionErrors
     public static readonly Error DuplicateDefectItem = Error.Validation(
         "Fleet.Inspection.DuplicateDefectItem",
         "Each defect on an inspection must name a different item.");
+
+    /// <summary>
+    /// The carrier acknowledgement line of NL-PTI-01 is only meaningful on a failed report: it is
+    /// the evidence that a Major/OutOfService defect was escalated to and seen by the carrier.
+    /// Allowing it on a clean report would let the field be stamped everywhere and so mean
+    /// nothing anywhere.
+    /// </summary>
+    public static readonly Error CarrierAcknowledgementNotRequired = Error.Validation(
+        "Fleet.Inspection.CarrierAcknowledgementNotRequired",
+        "Only a failed inspection carries a carrier acknowledgement.");
+
+    /// <summary>
+    /// The acknowledgement is a signature: stamping it twice would overwrite who signed and
+    /// when. A second call fails rather than re-stamping, exactly as <c>ResolveDefect</c> and
+    /// <c>LinkWorkOrder</c> do.
+    /// </summary>
+    public static readonly Error CarrierAlreadyAcknowledged = Error.Conflict(
+        "Fleet.Inspection.CarrierAlreadyAcknowledged",
+        "This inspection has already been acknowledged by the carrier.");
+
+    /// <summary>A signature with no name on it is not a signature.</summary>
+    public static readonly Error CarrierAcknowledgerRequired = Error.Validation(
+        "Fleet.Inspection.CarrierAcknowledgerRequired",
+        "The name of the carrier representative acknowledging the report is required.");
 
     /// <summary>
     /// A trip already has an inspection of this half (one pre-trip and one post-trip per trip is

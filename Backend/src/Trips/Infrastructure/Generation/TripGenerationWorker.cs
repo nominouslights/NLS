@@ -2,29 +2,27 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Npgsql;
 using NorthernLink.Shared.Tenancy;
-using NorthernLink.Trips.Application.Abstractions;
 using NorthernLink.Trips.Application.Schedules.GenerateTrips;
-using NorthernLink.Trips.Domain.Manifests;
-using NorthernLink.Trips.Domain.Routes;
-using NorthernLink.Trips.Domain.Trips;
+using NorthernLink.Trips.Domain.Schedules;
 using NorthernLink.Trips.Infrastructure.Persistence;
 
 namespace NorthernLink.Trips.Infrastructure.Generation;
 
 /// <summary>
-/// Materializes upcoming trips from active schedule templates. Each pass has two
-/// tenancy modes, mirroring <c>ProjectionWorker</c>: the template enumeration spans
+/// Keeps every active schedule template's own horizon materialized into trips. Each pass
+/// has two tenancy modes, mirroring <c>ProjectionWorker</c>: the template enumeration spans
 /// tenants on a pinned connection opted into the tables' system RLS policy
 /// (<c>app.is_system</c>), then each template is expanded in its own scope under the
 /// template's tenant pushed as the ambient tenant — so the trips (and their audit
 /// journal/outbox rows) are written through the normal tenant-scoped pipeline, exactly
-/// as if a dispatcher had created them. One transaction (SaveChanges) per template;
-/// idempotency comes from <c>TripGenerator</c> skipping already-materialized occurrence
-/// keys, backstopped by the unique index on (tenant, template, service date, direction)
-/// — a concurrent duplicate simply fails that template's save and is retried next pass.
-/// Failures are logged and never kill the host.
+/// as if a dispatcher had created them. The expansion itself is
+/// <see cref="ScheduleTripMaterializer"/>, the same code path the on-demand generate
+/// endpoint drives to a dispatcher-chosen date; here it runs to the template's horizon.
+/// One transaction (SaveChanges) per template; idempotency comes from the materializer
+/// skipping already-materialized occurrence keys, backstopped by the unique index on
+/// (tenant, template, service date, direction) — a concurrent duplicate simply fails that
+/// template's save and is retried next pass. Failures are logged and never kill the host.
 /// </summary>
 internal sealed class TripGenerationWorker(
     IServiceScopeFactory scopeFactory,
@@ -110,18 +108,6 @@ internal sealed class TripGenerationWorker(
             {
                 throw;
             }
-            catch (DbUpdateException exception) when (
-                exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
-            {
-                // Unique-index race with a concurrent pass — the occurrence already
-                // exists; this template converges on the next pass. Only the 23505 case:
-                // any other save failure is a real error and falls through to the generic
-                // catch below.
-                logger.LogWarning(
-                    exception,
-                    "Trip generation for template {TemplateId} hit an existing occurrence; will reconcile next pass",
-                    template.TemplateId);
-            }
             catch (Exception exception)
             {
                 logger.LogError(
@@ -137,172 +123,47 @@ internal sealed class TripGenerationWorker(
         using var scope = scopeFactory.CreateScope();
         using (AmbientTenant.Push(tenantId))
         {
-            // Resolved inside the push so the context captures the tenant (query filters,
-            // stamping) and the RLS session variable is set at connection open.
-            var context = scope.ServiceProvider.GetRequiredService<TripsDbContext>();
-            var tripNumberGenerator = scope.ServiceProvider.GetRequiredService<ITripNumberGenerator>();
-
-            var template = await context.ScheduleTemplates
-                .AsNoTracking()
-                .Include(t => t.Exceptions)
-                .FirstOrDefaultAsync(t => t.Id == templateId, cancellationToken);
-            if (template is null || !template.Active)
-            {
-                return;
-            }
-
-            var route = await context.Routes
-                .AsNoTracking()
-                .FirstOrDefaultAsync(r => r.Id == template.RouteId, cancellationToken);
-            if (route is null)
-            {
-                logger.LogWarning(
-                    "Template {TemplateId} references missing route {RouteId}; skipping generation",
-                    template.Id, template.RouteId);
-                return;
-            }
+            // Resolved inside the push so the materializer's DbContext captures the tenant
+            // (query filters, stamping) and the RLS session variable is set at connection open.
+            var materializer = scope.ServiceProvider.GetRequiredService<ScheduleTripMaterializer>();
 
             var today = DateOnly.FromDateTime(DateTime.UtcNow.Date);
-            var horizonEnd = today.AddDays(template.GenerationHorizonDays);
 
-            var existing = await context.Trips
-                .AsNoTracking()
-                .Where(t => t.ScheduleTemplateId == template.Id
-                    && t.ServiceDate >= today
-                    && t.ServiceDate < horizonEnd
-                    && t.Direction != null)
-                .Select(t => new { t.ServiceDate, t.Direction })
-                .ToListAsync(cancellationToken);
-
-            var existingKeys = existing
-                .Select(t => (t.ServiceDate, t.Direction!.Value))
-                .ToHashSet();
-
-            var drafts = TripGenerator.Generate(template, existingKeys, today);
-            if (drafts.Count == 0)
+            // through: null ⇒ the template's own horizon. A template that can't materialize
+            // (no default driver/unit, or they are inactive) stays paused with a warning until
+            // a dispatcher fixes it — the same guard the on-demand endpoint shows verbatim.
+            var plan = await materializer.PlanAsync(templateId, today, through: null, cancellationToken);
+            if (plan.IsFailure)
             {
-                return;
-            }
-
-            // A trip is never created unassigned, so a template can only materialize when
-            // its defaults resolve to a real, Active driver and fleet vehicle. A template
-            // that can't (no default set, driver deactivated, unit renamed or not in the
-            // fleet) is skipped with a warning until a dispatcher fixes it — a paused
-            // template beats another ghost-unit board (the "U-99" cleanup of Aug 2026).
-            if (template.DefaultDriverId is not { } defaultDriverId)
-            {
-                logger.LogWarning(
-                    "Template {TemplateId} ({TemplateName}) has no default driver; a trip is never created unassigned — skipping generation until one is set",
-                    template.Id, template.Name);
-                return;
-            }
-
-            var driver = await context.DriverLookups
-                .AsNoTracking()
-                .FirstOrDefaultAsync(d => d.DriverId == defaultDriverId, cancellationToken);
-            if (driver is not { IsActive: true })
-            {
-                logger.LogWarning(
-                    "Template {TemplateId} ({TemplateName}) default driver {DriverId} is missing or inactive; skipping generation",
-                    template.Id, template.Name, defaultDriverId);
-                return;
-            }
-
-            if (string.IsNullOrWhiteSpace(template.DefaultVehicleUnit))
-            {
-                logger.LogWarning(
-                    "Template {TemplateId} ({TemplateName}) has no default vehicle unit; a trip is never created unassigned — skipping generation until one is set",
-                    template.Id, template.Name);
-                return;
-            }
-
-            var vehicle = await context.VehicleLookups
-                .AsNoTracking()
-                .FirstOrDefaultAsync(v => v.UnitNumber == template.DefaultVehicleUnit, cancellationToken);
-            if (vehicle is not { IsActive: true })
-            {
-                logger.LogWarning(
-                    "Template {TemplateId} ({TemplateName}) default vehicle unit {UnitNumber} is not an Active fleet vehicle; skipping generation",
-                    template.Id, template.Name, template.DefaultVehicleUnit);
-                return;
-            }
-
-            var outboundStops = route.Stops.OrderBy(s => s.Order).ToList();
-            // Only Order is re-sequenced: both timetable offsets stay attached to their own stop,
-            // because the leg's TripDirection — not the position in the list — decides which one
-            // applies. Swapping them here would double-reverse the return timetable.
-            var returnStops = outboundStops
-                .AsEnumerable()
-                .Reverse()
-                .Select((stop, index) => new RouteStop
-                {
-                    StopId = stop.StopId,
-                    Name = stop.Name,
-                    Order = index,
-                    Latitude = stop.Latitude,
-                    Longitude = stop.Longitude,
-                    OutboundOffsetMinutes = stop.OutboundOffsetMinutes,
-                    ReturnOffsetMinutes = stop.ReturnOffsetMinutes,
-                })
-                .ToList();
-
-            var added = 0;
-            foreach (var draft in drafts)
-            {
-                var outbound = draft.Direction == TripDirection.Outbound;
-                var tripNumber = await tripNumberGenerator.NextAsync(tenantId, cancellationToken);
-
-                var tripResult = Trip.Schedule(
-                    tenantId,
-                    tripNumber,
-                    draft.ServiceDate,
-                    draft.DepartureTime,
-                    draft.DepartureTime.Add(route.EstimatedDuration),
-                    template.ServiceType,
-                    route.Id,
-                    route.Name,
-                    outbound ? route.Origin : route.Destination,
-                    outbound ? route.Destination : route.Origin,
-                    outbound ? outboundStops : returnStops,
-                    route.DistanceKm,
-                    template.Id,
-                    draft.RoundTripKey,
-                    draft.Direction,
-                    isEmptyLeg: false,
-                    template.ClientId,
-                    template.ClientName,
-                    poNumber: null,
-                    driver.DriverId,
-                    driver.Name,
-                    vehicle.VehicleId,
-                    vehicle.UnitNumber,
-                    // The fleet vehicle's capacity is server-authoritative, exactly as on
-                    // ad-hoc creation — the template's manual figure no longer applies.
-                    // Cargo services carry goods, not passengers: their trips have no seats.
-                    template.ServiceType.IsCargoService() ? null : vehicle.SeatingCapacity,
-                    template.SeatsMinimum);
-
-                if (tripResult.IsFailure)
+                // NotFound/TemplateInactive: deactivated between enumeration and now — silent.
+                if (plan.Error != ScheduleTemplateErrors.NotFound
+                    && plan.Error != ScheduleTemplateErrors.TemplateInactive)
                 {
                     logger.LogWarning(
-                        "Template {TemplateId}: draft for {ServiceDate}/{Direction} rejected: {Error}",
-                        template.Id, draft.ServiceDate, draft.Direction, tripResult.Error.Code);
-                    continue;
+                        "Template {TemplateId} skipped: {ErrorCode} — {ErrorMessage}",
+                        templateId, plan.Error.Code, plan.Error.Message);
                 }
 
-                context.Trips.Add(tripResult.Value);
-                added++;
+                return;
             }
 
-            if (added > 0)
+            var applied = await materializer.ApplyAsync(tenantId, plan.Value, cancellationToken);
+            if (applied.IsFailure)
             {
-                // Per-template transaction: all of this template's new legs (plus their
-                // journal/snapshot/outbox rows) commit together.
-                await context.SaveChangesAsync(cancellationToken);
+                // GenerationConflict is the unique-index race with a concurrent run — the
+                // occurrence already exists; this template converges on the next pass. Any
+                // other failure is a rejected draft, which skips the whole template.
+                logger.LogWarning(
+                    "Trip generation for template {TemplateId} failed: {ErrorCode} — {ErrorMessage}; will reconcile next pass",
+                    templateId, applied.Error.Code, applied.Error.Message);
+                return;
+            }
 
+            if (applied.Value.TripCount > 0)
+            {
                 logger.LogInformation(
                     "Generated {Count} trip(s) from template {TemplateId} ({TemplateName}) for tenant {TenantId}",
-                    added, template.Id, template.Name, tenantId);
+                    applied.Value.TripCount, templateId, plan.Value.Template.Name, tenantId);
             }
         }
     }

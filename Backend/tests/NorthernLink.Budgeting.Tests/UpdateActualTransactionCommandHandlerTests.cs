@@ -21,12 +21,15 @@ public class UpdateActualTransactionCommandHandlerTests
     private readonly UpdateActualTransactionCommandHandler _handler;
 
     private readonly BudgetPeriod _draft = TestBudgeting.CreatePeriod();
-    private readonly BudgetCode _fuel = TestBudgeting.CreateCode("ZBB-FUEL-01");
-    private readonly BudgetCode _maintenance = TestBudgeting.CreateCode("ZBB-MAINT-01");
+    private readonly BudgetCode _fuel;
+    private readonly BudgetCode _maintenance;
     private readonly ActualTransaction _transaction;
 
     public UpdateActualTransactionCommandHandlerTests()
     {
+        // Codes belong to a period; the fixture's codes live in the period covering its date.
+        _fuel = TestBudgeting.CreateCode("ZBB-FUEL-01", periodId: _draft.Id);
+        _maintenance = TestBudgeting.CreateCode("ZBB-MAINT-01", periodId: _draft.Id);
         _handler = new UpdateActualTransactionCommandHandler(_transactions, _periods, _codes);
         _periods.Add(_draft);
         _codes.Add(_fuel);
@@ -82,13 +85,23 @@ public class UpdateActualTransactionCommandHandlerTests
     [Fact]
     public async Task Moving_the_date_is_how_a_transaction_moves_between_periods()
     {
+        // Codes belong to a period, so a move between periods is also a re-tag onto the new
+        // period's code. Keeping Q4's code on a Q1 date is refused: Q1's rollup would otherwise
+        // carry spend against Q4's chart.
         var q1 = TestBudgeting.CreatePeriod(PeriodGranularity.Quarter, 2027, 1);
         _periods.Add(q1);
+        var q1Fuel = TestBudgeting.CreateCode("ZBB-FUEL-01", periodId: q1.Id);
+        _codes.Add(q1Fuel);
 
-        var result = await UpdateAsync(occurredOn: new DateOnly(2027, 2, 3));
+        var kept = await UpdateAsync(occurredOn: new DateOnly(2027, 2, 3));
+        Assert.Equal(BudgetCodeErrors.NotFound, kept.Error);
+        Assert.Equal(TestBudgeting.InsideDefaultPeriod, _transaction.OccurredOn);
+
+        var result = await UpdateAsync(codeId: q1Fuel.Id, occurredOn: new DateOnly(2027, 2, 3));
 
         Assert.True(result.IsSuccess);
         Assert.Equal(new DateOnly(2027, 2, 3), _transaction.OccurredOn);
+        Assert.Equal(q1Fuel.Id, _transaction.BudgetCodeId);
     }
 
     // --- Guards ---
@@ -205,17 +218,23 @@ public class UpdateActualTransactionCommandHandlerTests
         // Precisely when it matters: a review is the moment someone is looking closely enough to
         // find the error. Only the plan is frozen by the lifecycle.
         var periods = new InMemoryBudgetPeriodRepository();
-        periods.Add(TestBudgeting.PeriodIn(state));
+        var period = TestBudgeting.PeriodIn(state);
+        periods.Add(period);
+        var fuel = TestBudgeting.CreateCode("ZBB-FUEL-01", periodId: period.Id);
+        _codes.Add(fuel);
+        var transaction = TestBudgeting.CreateActual(
+            fuel.Id, fuel.Code, 480.50m, TestBudgeting.InsideDefaultPeriod, "Diesel.", actorId: TestBudgeting.ActorId);
+        _transactions.Add(transaction);
         var handler = new UpdateActualTransactionCommandHandler(_transactions, periods, _codes);
 
         var result = await handler.Handle(
             new UpdateActualTransactionCommand(
-                TestBudgeting.TenantId, _transaction.Id, _fuel.Id, 512.00m,
+                TestBudgeting.TenantId, transaction.Id, fuel.Id, 512.00m,
                 TestBudgeting.InsideDefaultPeriod, "Corrected during review.", TestBudgeting.ActorId),
             CancellationToken.None);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal(512.00m, _transaction.AmountCad);
+        Assert.Equal(512.00m, transaction.AmountCad);
         Assert.Equal(1, _transactions.SaveChangesCallCount);
     }
 }

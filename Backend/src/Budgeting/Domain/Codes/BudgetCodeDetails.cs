@@ -34,14 +34,17 @@ public sealed record BudgetCodeDetails
     public BudgetServiceLine? ServiceLine { get; init; }
 
     /// <summary>
-    /// Internal cost centre. Degenerate for a sole proprietorship — Northern Link has exactly
-    /// one — and carried now because an NLBC tenant with departments will need it.
+    /// Internal cost centre (an organisational unit or base), carried as the register entry's
+    /// <em>code string</em> — the cross-period join key, like the budget code's own string. It
+    /// must name an entry of the tenant's cost-centre register (<c>CostCentre</c>); that check
+    /// needs the register, so it runs in the application layer (<c>BudgetCodeCostCentreRule</c>),
+    /// not here. Not allowed on a Revenue code.
     /// </summary>
     public string? CostCentre { get; init; }
 
     /// <summary>
     /// Optional parent for one-level rollup reporting. Validated in the application layer
-    /// (<c>BudgetCodeParentRule</c>), not here: the aggregate cannot see the tenant's other codes.
+    /// (<c>BudgetCodeParentRule</c>), not here: the aggregate cannot see the period's other codes, and the parent must be one of them.
     /// </summary>
     public Guid? ParentCodeId { get; init; }
 

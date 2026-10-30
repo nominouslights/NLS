@@ -39,7 +39,12 @@ internal sealed class VehicleInspectionProjection : FleetProjection<VehicleInspe
         row.FuelLevel = source.FuelLevel;
         row.Issues = [.. source.Issues];
         row.Attestations = [.. source.Attestations];
+        row.CertificationStatement = source.CertificationStatement;
+        row.Location = source.Location;
         row.DriverSignatureName = source.DriverSignatureName;
+        row.CarrierAcknowledgedBy = source.CarrierAcknowledgedBy;
+        row.CarrierAcknowledgedAtUtc = source.CarrierAcknowledgedAtUtc;
+        row.CarrierAcknowledgementNote = source.CarrierAcknowledgementNote;
         row.CertifiedAt = source.CertifiedAt;
         row.FuelAdded = source.FuelAdded;
         row.FuelLitres = source.FuelLitres;

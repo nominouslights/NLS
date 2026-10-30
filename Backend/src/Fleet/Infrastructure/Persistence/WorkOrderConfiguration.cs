@@ -48,6 +48,8 @@ public sealed class WorkOrderConfiguration : IEntityTypeConfiguration<WorkOrder>
         builder.Property(w => w.BudgetCode).HasColumnName("budget_code").HasMaxLength(64);
         builder.Property(w => w.DateRequiredOrOos).HasColumnName("date_required_or_oos");
 
+        WorkOrderDefectLineMapping.MapDefects(builder, w => w.Defects);
+
         builder.HasIndex(w => new { w.TenantId, w.Number }).IsUnique();
         builder.HasIndex(w => new { w.TenantId, w.VehicleId });
     }

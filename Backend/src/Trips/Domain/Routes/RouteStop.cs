@@ -1,11 +1,14 @@
+using NorthernLink.Trips.Domain.Manifests;
+
 namespace NorthernLink.Trips.Domain.Routes;
 
 /// <summary>
 /// One ordered stop on a route, from origin (lowest <see cref="Order"/>) to destination
 /// (highest). Persisted as jsonb on the owning aggregate — stops are pure values with no
 /// identity of their own. When built from the catalog it snapshots the referencing
-/// <see cref="Stop"/>'s id and coordinates; legacy free-text stops leave those null and
-/// degrade gracefully (no pin on the map).
+/// <see cref="Stop"/>'s id, coordinates and province; legacy free-text stops leave the id and
+/// coordinates null and degrade gracefully (no pin on the map), and a null province reads as
+/// Manitoba.
 /// </summary>
 public sealed record RouteStop
 {
@@ -21,6 +24,19 @@ public sealed record RouteStop
     public double? Latitude { get; init; }
 
     public double? Longitude { get; init; }
+
+    /// <summary>
+    /// The stop's province/territory as a <see cref="Stops.CanadianProvince"/> code, copied
+    /// from the catalog stop's address by the route-stop resolver, or supplied per stop on a
+    /// free-form trip. Null on jsonb rows written before the Manitoba-only rule and means
+    /// Manitoba (<see cref="EffectiveProvince"/>); every write since stamps the code explicitly.
+    /// The operating-area gate (<c>OperatingArea</c>) refuses any route or trip whose stop
+    /// lies outside Manitoba.
+    /// </summary>
+    public string? Province { get; init; }
+
+    /// <summary>The province this stop counts as: <see cref="Province"/>, or Manitoba when none was recorded.</summary>
+    public string EffectiveProvince => Province ?? Stops.CanadianProvince.Manitoba;
 
     /// <summary>
     /// Timetable: minutes after the OUTBOUND leg's departure that the vehicle reaches this
@@ -43,4 +59,27 @@ public sealed record RouteStop
     /// unchanged rather than swapping them.
     /// </remarks>
     public int? ReturnOffsetMinutes { get; init; }
+
+    /// <summary>
+    /// The stop list run backwards — the one reversal every return leg uses (inbound
+    /// generation, deadhead returns, the Bookeo import, re-routing an Inbound trip). Stops are
+    /// taken in descending <see cref="Order"/> and only <see cref="Order"/> is re-sequenced
+    /// 0..n-1: both timetable offsets stay attached to their own stop, because the leg's
+    /// <see cref="TripDirection"/> (not the list position) selects which one applies —
+    /// swapping them would double-reverse the return timetable.
+    /// </summary>
+    public static List<RouteStop> Reversed(IEnumerable<RouteStop> stops) =>
+        [.. stops
+            .OrderByDescending(stop => stop.Order)
+            .Select((stop, index) => stop with { Order = index })];
+
+    /// <summary>
+    /// <paramref name="stops"/> oriented for a leg: <see cref="Reversed"/> for
+    /// <see cref="TripDirection.Inbound"/>, otherwise (Outbound or an unpaired trip with no
+    /// direction) the outbound order, ascending by <see cref="Order"/>.
+    /// </summary>
+    public static List<RouteStop> OrientedFor(IEnumerable<RouteStop> stops, TripDirection? direction) =>
+        direction == TripDirection.Inbound
+            ? Reversed(stops)
+            : [.. stops.OrderBy(stop => stop.Order)];
 }

@@ -50,5 +50,6 @@ internal sealed class WorkOrderReadService(FleetDbContext context) : IWorkOrderR
         w.ShopId,
         w.AuthorizedLimitCad,
         w.BudgetCode,
-        w.DateRequiredOrOos);
+        w.DateRequiredOrOos,
+        w.Defects.Select(WorkOrderDefectLineResponse.From).ToList());
 }

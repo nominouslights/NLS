@@ -8,6 +8,7 @@ import {
   createScheduleTemplate,
   DAY_SHORT,
   hhmm,
+  timeInputValue,
   isCargoService,
   listRoutes,
   listScheduleTemplates,
@@ -38,13 +39,16 @@ import { CorridorStepper } from "@/components/ui/CorridorStepper";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { StopFormModal } from "@/components/StopFormModal";
 import SpecialDatesModal from "@/components/SpecialDatesModal";
+import GenerateTripsModal from "@/components/GenerateTripsModal";
 import { DateField, FieldLabel, NumberField, SelectField, TextField, TimeField } from "@/components/ui/Field";
 
 // Routes & Schedules — corridor routes and recurring schedule templates from
 // the real Trips API (GET /api/trips/routes, /api/trips/schedule-templates).
 // The weekly grid is derived client-side from template daysOfWeek + departure
-// times; a backend worker materializes trips from ACTIVE templates ~every
-// 30 min, GenerationHorizonDays ahead.
+// times. Trips materialize from ACTIVE templates two ways: a backend worker
+// keeps the near horizon topped up (~every 30 min, GenerationHorizonDays
+// ahead), and GENERATE TRIPS (GenerateTripsModal, auto-opened after a new
+// template is saved) generates up to 12 months ahead on demand.
 
 type Selection = { kind: "route" | "template"; id: string };
 
@@ -689,9 +693,11 @@ function TemplateFormModal({
   );
   const [anchorDate, setAnchorDate] = useState(existing?.anchorDate ?? "");
   const [daysOfMonth, setDaysOfMonth] = useState<number[]>(existing?.daysOfMonth ?? []);
-  const [departure, setDeparture] = useState(existing ? hhmm(existing.departureTime) : "");
+  // timeInputValue, never hhmm: these seed <input type="time">, which renders BLANK for a
+  // 12-hour string, so editing a template showed no times and saving wiped them.
+  const [departure, setDeparture] = useState(timeInputValue(existing?.departureTime));
   const [returnDeparture, setReturnDeparture] = useState(
-    existing?.returnDepartureTime ? hhmm(existing.returnDepartureTime) : "",
+    timeInputValue(existing?.returnDepartureTime),
   );
   const [returnNextDay, setReturnNextDay] = useState(existing?.returnNextDay ?? false);
   const [seatsCapacity, setSeatsCapacity] = useState(existing?.seatsCapacity != null ? String(existing.seatsCapacity) : "");
@@ -1051,6 +1057,7 @@ export default function RoutesSchedules({
   const [sel, setSel] = useState<Selection | null>(null);
   const [modal, setModal] = useState<null | "newRoute" | "editRoute" | "newTemplate" | "editTemplate">(null);
   const [specialDatesFor, setSpecialDatesFor] = useState<ScheduleTemplateRecord | null>(null);
+  const [generateFor, setGenerateFor] = useState<ScheduleTemplateRecord | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -1128,6 +1135,9 @@ export default function RoutesSchedules({
       const fresh = await refetchUntil(listScheduleTemplates, (rows) => rows.some((x) => x.id === newId));
       setTemplates(fresh);
       setSel({ kind: "template", id: newId });
+      // The form modal closes as the Generate Trips dialog opens — a new
+      // template's future trips only exist once someone generates them.
+      setGenerateFor(fresh.find((x) => x.id === newId) ?? null);
     }
   }
 
@@ -1191,6 +1201,7 @@ export default function RoutesSchedules({
           onOpenTrip={onOpenTrip}
         />
       )}
+      {generateFor && <GenerateTripsModal template={generateFor} onClose={() => setGenerateFor(null)} />}
     </div>
   );
 
@@ -1532,7 +1543,7 @@ export default function RoutesSchedules({
                     }
                     valueStyle={{ fontFamily: fonts.mono }}
                   />
-                  <DetailRow label="Generation horizon" value={`${template.generationHorizonDays} days ahead`} />
+                  <DetailRow label="Auto-generate horizon" value={`${template.generationHorizonDays} days ahead`} />
                 </div>
               </Panel>
               <Panel>
@@ -1582,14 +1593,16 @@ export default function RoutesSchedules({
                 marginBottom: 16,
               }}
             >
-              Edits apply to <strong style={{ color: colors.textPrimary }}>future generated trips only</strong>. Deactivating stops new
-              trips from generating — already-generated trips stay on the board.
+              Edits and Special Dates apply to <strong style={{ color: colors.textPrimary }}>dates not yet generated</strong>. Trips
+              that already exist — from GENERATE TRIPS or the background worker — are unchanged; cancel or edit those from Trips.
+              Deactivating stops new trips from generating; already-generated trips stay on the board.
             </div>
 
             <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
-              <ActionButton variant="primary" onClick={() => setModal("editTemplate")}>
-                EDIT TEMPLATE
+              <ActionButton variant="primary" onClick={() => setGenerateFor(template)} disabled={busy}>
+                GENERATE TRIPS
               </ActionButton>
+              <ActionButton onClick={() => setModal("editTemplate")}>EDIT TEMPLATE</ActionButton>
               <ActionButton onClick={() => setSpecialDatesFor(template)}>SPECIAL DATES</ActionButton>
               <ActionButton
                 variant={template.active ? "destructive" : "success"}
@@ -1606,8 +1619,9 @@ export default function RoutesSchedules({
           <Panel>
             <SectionLabel>Nothing selected</SectionLabel>
             <div style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textMuted, lineHeight: 1.6 }}>
-              Create a corridor route, then add a schedule template — the generation worker will materialize upcoming
-              trips onto the Dispatch Board automatically.
+              Create a corridor route, then add a schedule template. GENERATE TRIPS materializes its trips up to 12
+              months ahead (the background worker keeps the next few days topped up on its own); future trips then
+              show in Reports → Client Accruals as upcoming estimates.
             </div>
           </Panel>
         )}

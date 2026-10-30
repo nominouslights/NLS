@@ -1,0 +1,24 @@
+#!/bin/sh
+# Runs every test suite before a push. Enabled per clone with:
+#
+#   git config core.hooksPath .githooks
+#
+# CI builds and pushes images with no test gate, by the owner's decision — this hook is the only
+# thing standing between a red suite and main. Measured at ~25s warm, which is why it blocks
+# rather than merely reminding. If it is ever wrong (a stale DigitalOcean Trusted Sources entry
+# will fail the backend integration tests, not your code), `git push --no-verify` is the escape.
+
+root=$(git rev-parse --show-toplevel) || exit 0
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "pre-push: node is not on PATH — skipping tests. Run 'node run-tests.mjs' by hand."
+  exit 0
+fi
+
+if ! node "$root/run-tests.mjs"; then
+  echo ""
+  echo "pre-push: tests did not pass — push aborted."
+  echo "  re-run with output:  node run-tests.mjs --verbose"
+  echo "  push anyway:         git push --no-verify"
+  exit 1
+fi

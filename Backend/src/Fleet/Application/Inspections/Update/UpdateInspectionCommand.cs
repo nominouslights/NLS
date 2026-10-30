@@ -34,4 +34,6 @@ public sealed record UpdateInspectionCommand(
     DateTimeOffset? CertifiedAt,
     bool FuelAdded,
     decimal? FuelLitres,
-    decimal? FuelCostCad) : ICommand;
+    decimal? FuelCostCad,
+    string? CertificationStatement = null,
+    string? Location = null) : ICommand;

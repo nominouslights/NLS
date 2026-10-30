@@ -18,11 +18,14 @@ using NorthernLink.Budgeting.Application.Actuals.GetRollup;
 using NorthernLink.Budgeting.Application.Actuals.Record;
 using NorthernLink.Budgeting.Application.Actuals.Update;
 using NorthernLink.Budgeting.Application.Allocations;
+using NorthernLink.Budgeting.Application.Allocations.CopyFromPeriod;
 using NorthernLink.Budgeting.Application.Allocations.GetAllocations;
 using NorthernLink.Budgeting.Application.Allocations.Remove;
-using NorthernLink.Budgeting.Application.Allocations.Set;
+using NorthernLink.Budgeting.Application.Allocations.Create;
+using NorthernLink.Budgeting.Application.Allocations.Update;
 using NorthernLink.Budgeting.Application.Integration;
 using NorthernLink.Budgeting.Application.Codes;
+using NorthernLink.Budgeting.Application.Codes.CopyFromPeriod;
 using NorthernLink.Budgeting.Application.Codes.Create;
 using NorthernLink.Budgeting.Application.Codes.Delete;
 using NorthernLink.Budgeting.Application.Codes.GetCodes;
@@ -30,13 +33,35 @@ using NorthernLink.Budgeting.Application.Codes.GetOwnerCandidates;
 using NorthernLink.Budgeting.Application.Codes.SeedStarterSet;
 using NorthernLink.Budgeting.Application.Codes.SetActive;
 using NorthernLink.Budgeting.Application.Codes.Update;
+using NorthernLink.Budgeting.Application.CostCentres;
+using NorthernLink.Budgeting.Application.CostCentres.Create;
+using NorthernLink.Budgeting.Application.CostCentres.Delete;
+using NorthernLink.Budgeting.Application.CostCentres.GetCostCentreById;
+using NorthernLink.Budgeting.Application.CostCentres.GetCostCentres;
+using NorthernLink.Budgeting.Application.CostCentres.GetPlannedRollup;
+using NorthernLink.Budgeting.Application.CostCentres.SetActive;
+using NorthernLink.Budgeting.Application.CostCentres.Update;
 using NorthernLink.Budgeting.Application.Periods;
 using NorthernLink.Budgeting.Application.Periods.Create;
 using NorthernLink.Budgeting.Application.Periods.GetPeriodById;
 using NorthernLink.Budgeting.Application.Periods.GetPeriods;
 using NorthernLink.Budgeting.Application.Periods.Transition;
+using NorthernLink.Budgeting.Application.Qbo;
+using NorthernLink.Budgeting.Application.Qbo.Authorize;
+using NorthernLink.Budgeting.Application.Qbo.Complete;
+using NorthernLink.Budgeting.Application.Qbo.Disconnect;
+using NorthernLink.Budgeting.Application.Qbo.GetConnection;
+using NorthernLink.Budgeting.Application.Vendors;
+using NorthernLink.Budgeting.Application.Vendors.Create;
+using NorthernLink.Budgeting.Application.Vendors.Delete;
+using NorthernLink.Budgeting.Application.Vendors.GetVendorById;
+using NorthernLink.Budgeting.Application.Vendors.GetPlannedRollup;
+using NorthernLink.Budgeting.Application.Vendors.GetVendors;
+using NorthernLink.Budgeting.Application.Vendors.SetActive;
+using NorthernLink.Budgeting.Application.Vendors.Update;
 using NorthernLink.Budgeting.Infrastructure.Persistence;
 using NorthernLink.Budgeting.Infrastructure.Persistence.Projections;
+using NorthernLink.Budgeting.Infrastructure.Qbo;
 
 namespace NorthernLink.Budgeting.Infrastructure;
 
@@ -82,12 +107,42 @@ public static class BudgetingServiceCollectionExtensions
         services.AddScoped<IActualTransactionReadService, ActualTransactionReadService>();
         services.AddScoped<IBudgetRollupReadService, BudgetRollupReadService>();
         services.AddScoped<IUserLookupRepository, UserLookupRepository>();
+        services.AddScoped<IVendorRepository, VendorRepository>();
+        services.AddScoped<IVendorReadService, VendorReadService>();
+        services.AddScoped<ICostCentreRepository, CostCentreRepository>();
+        services.AddScoped<ICostCentreReadService, CostCentreReadService>();
 
         // Allocation lines and actual transactions both reference codes by id and by string, so
         // "is this code in use" is a real question with a real answer — the delete-code path
-        // refuses with 409 InUse the moment any period has planned against the code or any spend
-        // has been recorded on it.
+        // refuses with 409 InUse the moment any item of the code's own period has planned against
+        // it or any spend dated inside that period has been recorded on it.
         services.AddScoped<IBudgetCodeUsageProbe, BudgetCodeUsageProbe>();
+
+        // A vendor is "in use" while any budget item in any period carries a vendor share for it;
+        // the register's delete path refuses with 409 Budgeting.Vendor.InUse then.
+        services.AddScoped<IVendorUsageProbe, AllocationVendorUsageProbe>();
+        // A cost centre is "in use" while any budget code in any period carries its code string;
+        // the register's delete path refuses with 409 Budgeting.CostCentre.InUse then.
+        services.AddScoped<ICostCentreUsageProbe, BudgetCodeCostCentreUsageProbe>();
+
+        // QuickBooks Online — a read-only connection this module owns (owner decision 2026-10-08).
+        // Options are non-secret and config-bound, with working defaults when the section is absent.
+        // The client id, client secret and vault key are environment variables read at the moment
+        // of use (QboSecrets), never here: registration must need no environment.
+        var qboOptions = configuration.GetSection(QboOptions.SectionName).Get<QboOptions>() ?? new QboOptions();
+        services.AddSingleton(qboOptions);
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddSingleton<IQboTokenProtector>(_ => new AesGcmQboTokenProtector());
+        services.AddHttpClient<IQboAuthClient, IntuitOAuthClient>(client => client.Timeout = TimeSpan.FromSeconds(30));
+        services.AddHttpClient<IQboAccountingClient, QboAccountingClient>(client =>
+        {
+            client.BaseAddress = new Uri(qboOptions.ApiBaseUrl);
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+        services.AddScoped<IQboConnectionRepository, QboConnectionRepository>();
+        services.AddScoped<IQboOAuthStateStore, QboOAuthStateStore>();
+        services.AddScoped<IQboTokenVault, PostgresQboTokenVault>();
+        services.AddScoped<IQboTokenStore, QboTokenStore>();
 
         // 3. Command/query handlers — registered explicitly, one line per handler.
         services.AddScoped<ICommandHandler<CreateBudgetPeriodCommand, Guid>, CreateBudgetPeriodCommandHandler>();
@@ -99,16 +154,37 @@ public static class BudgetingServiceCollectionExtensions
         services.AddScoped<ICommandHandler<SetBudgetCodeActiveCommand>, SetBudgetCodeActiveCommandHandler>();
         services.AddScoped<ICommandHandler<DeleteBudgetCodeCommand>, DeleteBudgetCodeCommandHandler>();
         services.AddScoped<ICommandHandler<SeedStarterBudgetCodesCommand, int>, SeedStarterBudgetCodesCommandHandler>();
+        services.AddScoped<ICommandHandler<CopyBudgetCodesCommand, BudgetCodeCopyResult>, CopyBudgetCodesCommandHandler>();
         services.AddScoped<IQueryHandler<GetBudgetCodesQuery, IReadOnlyList<BudgetCodeResponse>>, GetBudgetCodesQueryHandler>();
         services.AddScoped<IQueryHandler<GetBudgetOwnerCandidatesQuery, IReadOnlyList<BudgetOwnerOptionResponse>>, GetBudgetOwnerCandidatesQueryHandler>();
-        services.AddScoped<ICommandHandler<SetBudgetAllocationCommand, BudgetAllocationSetResult>, SetBudgetAllocationCommandHandler>();
+        services.AddScoped<ICommandHandler<CreateBudgetAllocationCommand, Guid>, CreateBudgetAllocationCommandHandler>();
+        services.AddScoped<ICommandHandler<UpdateBudgetAllocationCommand>, UpdateBudgetAllocationCommandHandler>();
         services.AddScoped<ICommandHandler<RemoveBudgetAllocationCommand>, RemoveBudgetAllocationCommandHandler>();
+        services.AddScoped<ICommandHandler<CopyBudgetAllocationsCommand, BudgetAllocationCopyResult>, CopyBudgetAllocationsCommandHandler>();
         services.AddScoped<IQueryHandler<GetBudgetAllocationsQuery, IReadOnlyList<BudgetAllocationResponse>>, GetBudgetAllocationsQueryHandler>();
         services.AddScoped<ICommandHandler<RecordActualTransactionCommand, Guid>, RecordActualTransactionCommandHandler>();
         services.AddScoped<ICommandHandler<UpdateActualTransactionCommand>, UpdateActualTransactionCommandHandler>();
         services.AddScoped<ICommandHandler<DeleteActualTransactionCommand>, DeleteActualTransactionCommandHandler>();
         services.AddScoped<IQueryHandler<GetActualTransactionsQuery, IReadOnlyList<ActualTransactionResponse>>, GetActualTransactionsQueryHandler>();
         services.AddScoped<IQueryHandler<GetBudgetRollupQuery, IReadOnlyList<BudgetRollupRowResponse>>, GetBudgetRollupQueryHandler>();
+        services.AddScoped<ICommandHandler<CreateVendorCommand, Guid>, CreateVendorCommandHandler>();
+        services.AddScoped<ICommandHandler<UpdateVendorCommand>, UpdateVendorCommandHandler>();
+        services.AddScoped<ICommandHandler<SetVendorActiveCommand>, SetVendorActiveCommandHandler>();
+        services.AddScoped<ICommandHandler<DeleteVendorCommand>, DeleteVendorCommandHandler>();
+        services.AddScoped<IQueryHandler<GetVendorsQuery, IReadOnlyList<VendorResponse>>, GetVendorsQueryHandler>();
+        services.AddScoped<IQueryHandler<GetVendorByIdQuery, VendorResponse>, GetVendorByIdQueryHandler>();
+        services.AddScoped<IQueryHandler<GetVendorRollupQuery, VendorRollupResponse>, GetVendorRollupQueryHandler>();
+        services.AddScoped<ICommandHandler<CreateCostCentreCommand, Guid>, CreateCostCentreCommandHandler>();
+        services.AddScoped<ICommandHandler<UpdateCostCentreCommand>, UpdateCostCentreCommandHandler>();
+        services.AddScoped<ICommandHandler<SetCostCentreActiveCommand>, SetCostCentreActiveCommandHandler>();
+        services.AddScoped<ICommandHandler<DeleteCostCentreCommand>, DeleteCostCentreCommandHandler>();
+        services.AddScoped<IQueryHandler<GetCostCentresQuery, IReadOnlyList<CostCentreResponse>>, GetCostCentresQueryHandler>();
+        services.AddScoped<IQueryHandler<GetCostCentreByIdQuery, CostCentreResponse>, GetCostCentreByIdQueryHandler>();
+        services.AddScoped<IQueryHandler<GetCostCentreRollupQuery, CostCentreRollupResponse>, GetCostCentreRollupQueryHandler>();
+        services.AddScoped<IQueryHandler<GetQboConnectionQuery, QboConnectionResponse>, GetQboConnectionQueryHandler>();
+        services.AddScoped<ICommandHandler<StartQboAuthorizationCommand, string>, StartQboAuthorizationCommandHandler>();
+        services.AddScoped<ICommandHandler<CompleteQboConnectionCommand>, CompleteQboConnectionCommandHandler>();
+        services.AddScoped<ICommandHandler<DisconnectQboCommand>, DisconnectQboCommandHandler>();
 
         // 4. Integration event consumers — the Identity replica that keeps user_lookup current,
         //    so a budget code can name an accountable owner and its created_by/modified_by
@@ -129,7 +205,10 @@ public static class BudgetingServiceCollectionExtensions
             .Project(new BudgetPeriodProjection())
             .Project(new BudgetCodeProjection())
             .Project(new BudgetAllocationProjection())
-            .Project(new ActualTransactionProjection()));
+            .Project(new ActualTransactionProjection())
+            .Project(new VendorProjection())
+            .Project(new CostCentreProjection())
+            .Project(new QboConnectionProjection()));
 
         return services;
     }

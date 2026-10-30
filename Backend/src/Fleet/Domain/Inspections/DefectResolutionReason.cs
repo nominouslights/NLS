@@ -19,4 +19,11 @@ public enum DefectResolutionReason
 
     /// <summary>Real, known, and deliberately being run with — watched rather than repaired.</summary>
     AcceptedMonitoring,
+
+    /// <summary>
+    /// Set only by work-order completion: a mechanic inspected the reported fault under a work
+    /// order and found nothing wrong. Distinct from <see cref="ReportedInError"/>, which is a
+    /// dispatcher's call made without anyone touching the truck.
+    /// </summary>
+    NoFaultFound,
 }

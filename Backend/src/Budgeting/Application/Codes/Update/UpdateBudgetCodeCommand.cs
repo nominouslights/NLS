@@ -10,6 +10,7 @@ namespace NorthernLink.Budgeting.Application.Codes.Update;
 /// </summary>
 public sealed record UpdateBudgetCodeCommand(
     Guid TenantId,
+    Guid PeriodId,
     Guid BudgetCodeId,
     BudgetCodeDetails Details,
     Guid? ActorId) : ICommand;

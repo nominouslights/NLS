@@ -74,7 +74,7 @@ export default function BudgetPeriodFormModal({
 
   return (
     <ModalShell
-      eyebrow="Planning · Budget Periods"
+      eyebrow="Planning · New period"
       title="New Period"
       onClose={onClose}
       error={error}
@@ -134,8 +134,8 @@ export default function BudgetPeriodFormModal({
           color: colors.textDim,
         }}
       >
-        New periods start as drafts. Zero-based means allocations are entered fresh — nothing
-        carries forward from an earlier period.
+        New periods start as drafts. Creating one takes you into it — you can seed its plan from
+        an earlier period there.
       </div>
     </ModalShell>
   );

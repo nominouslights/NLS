@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { colors, fonts } from "@/lib/theme";
 import type { BudgetCode, BudgetPeriod } from "@/lib/types";
 import { ApiError } from "@/lib/api/transport";
@@ -10,9 +10,11 @@ import {
   actualDateError,
   actualDescriptionError,
   listActualTransactions,
+  listBudgetCodes,
   periodCovering,
   recordActualTransaction,
   refetchUntil,
+  toBudgetCode,
   updateActualTransaction,
   ACTUAL_DESCRIPTION_MAX_LENGTH,
   type ActualTransactionRecord,
@@ -21,12 +23,14 @@ import { ModalShell } from "@/components/ui/ModalShell";
 import { DateField, NumberField, SelectField, TextAreaField } from "@/components/ui/Field";
 import { ActionButton } from "@/components/ui/Button";
 import { StatusChip } from "@/components/ui/Chip";
+import { usePeriodHold } from "@/lib/periodHold";
 
-// Record-or-correct modal for one actual transaction, opened from Actuals vs Budget. Follows
-// BudgetAllocationFormModal: one useState per field, the server's validation is authoritative,
-// and a 400 or 409 surfaces as the backend's own message in the banner.
+// Record-or-correct modal for one actual transaction, opened from Actuals vs Budget. One
+// useState per field, the server's validation is authoritative, and a 400/404/409 surfaces as
+// the backend's own message in the banner. Its save takes the period hold (usePeriodHold), like
+// BudgetItemFormModal's.
 //
-// Two server rules this form makes visible rather than letting the user discover by 409:
+// Three server rules this form makes visible rather than letting the user discover by refusal:
 //
 //   1. **The date must fall inside an existing budget period.** The period is derived from the
 //      date and never stored, so a date in no period would be a row the period-driven console
@@ -36,6 +40,13 @@ import { StatusChip } from "@/components/ui/Chip";
 //   2. **New spend cannot go on a retired code, but an existing row on one stays correctable.**
 //      That asymmetry is the server's (actualCodeCandidates documents both handlers), and it is
 //      why editing keeps the row's own code selectable however long ago it was retired.
+//   3. **The code must belong to the period covering the date.** Codes are per period; the
+//      handlers look the code up in the covering period and answer 404 Budgeting.Code.NotFound
+//      for any other period's code, even one with the same string. So the picker offers the
+//      COVERING period's chart: the entered period's comes in as a prop, any other period's is
+//      fetched here when the date moves into it. On such a move the selection follows the code
+//      STRING (the cross-period identity) if that period has an active code of it, and otherwise
+//      empties so the user re-picks — never silently keeps an id the server will refuse.
 //
 // There is no period field and no tax field, and neither is an omission: the date decides the
 // period, and the platform never computes tax.
@@ -46,7 +57,7 @@ import { StatusChip } from "@/components/ui/Chip";
 export default function ActualTransactionFormModal({
   periods,
   openPeriod,
-  codes,
+  openPeriodCodes,
   transaction,
   onClose,
   onSaved,
@@ -55,8 +66,8 @@ export default function ActualTransactionFormModal({
   periods: BudgetPeriod[];
   /** The period the screen is showing — the default date comes from it. */
   openPeriod: BudgetPeriod;
-  /** The whole chart; filtered by actualCodeCandidates. */
-  codes: BudgetCode[];
+  /** The open period's chart (codes are per period); filtered by actualCodeCandidates. */
+  openPeriodCodes: BudgetCode[];
   /** null → record a new transaction; a row → correct it. */
   transaction: ActualTransactionRecord | null;
   onClose: () => void;
@@ -64,9 +75,15 @@ export default function ActualTransactionFormModal({
   onSaved: () => void;
 }) {
   const editing = transaction !== null;
-  const candidates = actualCodeCandidates(codes, transaction?.budgetCodeId ?? null);
+  const initialCandidates = actualCodeCandidates(openPeriodCodes, transaction?.budgetCodeId ?? null);
 
-  const [codeId, setCodeId] = useState(transaction?.budgetCodeId ?? candidates[0]?.id ?? "");
+  const [codeId, setCodeId] = useState(
+    transaction?.budgetCodeId ?? initialCandidates[0]?.id ?? "",
+  );
+  /** The string of the code last picked — what the selection follows into another period. */
+  const [codeString, setCodeString] = useState(
+    transaction?.code ?? initialCandidates[0]?.code ?? "",
+  );
   const [amount, setAmount] = useState(transaction ? String(transaction.amountCad) : "");
   const [occurredOn, setOccurredOn] = useState(
     transaction?.occurredOn ?? defaultDate(openPeriod),
@@ -74,14 +91,54 @@ export default function ActualTransactionFormModal({
   const [description, setDescription] = useState(transaction?.description ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Other periods' charts, fetched on demand when the date moves into them; null = failed. */
+  const [charts, setCharts] = useState<Record<string, BudgetCode[] | null>>({});
+  usePeriodHold(busy);
+
+  // Live answer to "where does this land?", from the same rule the server applies.
+  const covering = periodCovering(periods, occurredOn);
+  const coveringId = covering?.id ?? null;
+  const needsFetch = coveringId !== null && coveringId !== openPeriod.id && !(coveringId in charts);
+
+  useEffect(() => {
+    if (!needsFetch || coveringId === null) return;
+    let active = true;
+    listBudgetCodes(coveringId).then(
+      (records) => {
+        if (active) setCharts((prev) => ({ ...prev, [coveringId]: records.map(toBudgetCode) }));
+      },
+      () => {
+        if (active) setCharts((prev) => ({ ...prev, [coveringId]: null }));
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [needsFetch, coveringId]);
+
+  // The covering period's chart: undefined while loading, null when it failed to load.
+  const chart: BudgetCode[] | null | undefined =
+    coveringId === null || coveringId === openPeriod.id ? openPeriodCodes : charts[coveringId];
+  const chartLoading = chart === undefined;
+  const candidates = chart ? actualCodeCandidates(chart, transaction?.budgetCodeId ?? null) : [];
+
+  // Derived, never synced in an effect: the picked id if this chart has it, else this chart's
+  // active code with the same string, else nothing (the user re-picks).
+  const effectiveCodeId = candidates.some((c) => c.id === codeId)
+    ? codeId
+    : (candidates.find((c) => c.active && c.code === codeString)?.id ?? "");
+  const followedByString = effectiveCodeId !== "" && effectiveCodeId !== codeId;
 
   const codeOptions = candidates.map((c) => ({
     value: c.id,
     label: `${c.code} · ${c.name}${c.active ? "" : " (retired)"}`,
   }));
-  const selectedCode = codes.find((c) => c.id === codeId) ?? null;
-  // Live answer to "where does this land?", from the same rule the server applies.
-  const covering = periodCovering(periods, occurredOn);
+  const selectedCode = candidates.find((c) => c.id === effectiveCodeId) ?? null;
+
+  function pickCode(id: string) {
+    setCodeId(id);
+    setCodeString(candidates.find((c) => c.id === id)?.code ?? "");
+  }
 
   async function submit() {
     if (busy) return;
@@ -89,11 +146,16 @@ export default function ActualTransactionFormModal({
     // Mirrors of the server's checks, so the common mistakes are caught without a round trip.
     // The server re-checks all of it — it sees periods and codes this client may not have
     // refetched — and its answer is the one that counts.
-    if (!codeId) return setError("Add an active budget code before recording a transaction.");
-    const amountProblem = actualAmountError(amount);
-    if (amountProblem) return setError(amountProblem);
     const dateProblem = actualDateError(occurredOn, periods);
     if (dateProblem) return setError(dateProblem);
+    if (chartLoading) return;
+    if (!effectiveCodeId) {
+      return setError(
+        `Pick a budget code from ${covering?.label ?? "the period"}'s chart — codes belong to a period, and the date decides which one.`,
+      );
+    }
+    const amountProblem = actualAmountError(amount);
+    if (amountProblem) return setError(amountProblem);
     const descriptionProblem = actualDescriptionError(description);
     if (descriptionProblem) return setError(descriptionProblem);
 
@@ -107,7 +169,8 @@ export default function ActualTransactionFormModal({
     setError(null);
 
     try {
-      const body = { budgetCodeId: codeId, amountCad, occurredOn, description: trimmed };
+      const budgetCodeId = effectiveCodeId;
+      const body = { budgetCodeId, amountCad, occurredOn, description: trimmed };
       let id: string;
       if (editing) {
         await updateActualTransaction(transaction.id, body);
@@ -127,7 +190,7 @@ export default function ActualTransactionFormModal({
           rows.some(
             (r) =>
               r.id === id &&
-              r.budgetCodeId === codeId &&
+              r.budgetCodeId === budgetCodeId &&
               r.amountCad === amountCad &&
               r.occurredOn === occurredOn &&
               r.description === trimmed,
@@ -152,23 +215,36 @@ export default function ActualTransactionFormModal({
       maxWidth={620}
       footer={
         <>
-          <ActionButton onClick={onClose}>CANCEL</ActionButton>
+          <ActionButton onClick={onClose} disabled={busy}>
+            CANCEL
+          </ActionButton>
           <ActionButton
             variant="primary"
             onClick={submit}
-            disabled={busy || candidates.length === 0}
+            disabled={busy || chartLoading || candidates.length === 0}
           >
             {busy ? "SAVING…" : editing ? "SAVE CHANGES" : "RECORD TRANSACTION"}
           </ActionButton>
         </>
       }
     >
-      {candidates.length > 0 ? (
+      {chartLoading ? (
+        <Note>Loading {covering?.label ?? "the period"}&apos;s budget codes…</Note>
+      ) : chart === null ? (
+        <Note>
+          {covering?.label ?? "That period"}&apos;s budget codes could not be loaded. Change the
+          date back, or close this form and try again.
+        </Note>
+      ) : candidates.length > 0 ? (
         <SelectField
-          label="Budget code"
-          value={codeId}
-          onChange={setCodeId}
-          options={codeOptions}
+          label={covering ? `Budget code · ${covering.label}` : "Budget code"}
+          value={effectiveCodeId}
+          onChange={pickCode}
+          options={
+            effectiveCodeId === ""
+              ? [{ value: "", label: "— Pick a code —" }, ...codeOptions]
+              : codeOptions
+          }
           hint={
             editing
               ? "Moving a transaction to another code is how a miscoded expense is fixed"
@@ -177,8 +253,21 @@ export default function ActualTransactionFormModal({
         />
       ) : (
         <Note>
-          There are no budget codes yet. Add one under Budget Codes before recording what was
-          spent, so the figure has something to roll up to.
+          {covering?.label ?? "This period"} has no active budget codes yet. Add one under Budget
+          Codes (in that period) before recording what was spent, so the figure has something to
+          roll up to.
+        </Note>
+      )}
+
+      {covering && covering.id !== openPeriod.id && !chartLoading && chart !== null && (
+        <Note>
+          This date counts in {covering.label}, not {openPeriod.label}, so the code comes from{" "}
+          {covering.label}&apos;s own chart
+          {followedByString
+            ? ` — its own ${codeString} (same code string, a different row) has been picked.`
+            : codeString && effectiveCodeId === ""
+              ? ` — it has no active ${codeString}, so pick a code.`
+              : "."}
         </Note>
       )}
 
@@ -254,7 +343,7 @@ function defaultDate(period: BudgetPeriod): string {
   return period.startsOn <= today && today <= period.endsOn ? today : period.endsOn;
 }
 
-/** A quiet explanatory line, matching BudgetAllocationFormModal's trailing note. */
+/** A quiet explanatory line under a field. */
 function Note({ children }: { children: React.ReactNode }) {
   return (
     <div

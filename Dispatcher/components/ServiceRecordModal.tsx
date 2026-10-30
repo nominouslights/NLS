@@ -1,36 +1,66 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { colors, fonts } from "@/lib/theme";
 import type { ServiceCategory } from "@/lib/types";
 import { addService } from "@/lib/maintenanceStore";
-import { ApiError } from "@/lib/api";
-import { completeWorkOrder } from "@/lib/api/maintenance";
+import { ApiError, changeVehicleStatus, statusLabelFor, type VehicleStatus } from "@/lib/api";
+import {
+  completeWorkOrder,
+  listVehicleDefects,
+  type DefectOutcomeInputWire,
+  type VehicleDefectWire,
+  type WorkOrderDefectLineWire,
+} from "@/lib/api/maintenance";
 import { CATEGORY_WIRE } from "@/lib/workOrderDisplay";
+import {
+  currentSeverityOf,
+  defectKeyOf,
+  remainingBlockingDefects,
+  validateDefectOutcomes,
+  type DefectOutcomeDraft,
+} from "@/lib/workOrderCompletion";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { NumberField, SelectField, TextAreaField, TextField } from "@/components/ui/Field";
 import { ActionButton } from "@/components/ui/Button";
+import { StatusChip } from "@/components/ui/Chip";
+import DefectOutcomesSection from "@/components/fleet/DefectOutcomesSection";
 
 const CATEGORIES: ServiceCategory[] = ["Preventive", "Repair", "Inspection Fix", "Recall"];
+
+/** Statuses from which a completed repair may OFFER a return to service. */
+const OFFLINE_STATUSES: VehicleStatus[] = ["OutOfService", "InMaintenance"];
 
 // Log a service record — WHO did the job, WHAT was changed, WHY it was changed.
 // When opened from a work order (closeWorkOrder), the live API completes that
 // work order and creates the resolving service record in one call; standalone
 // (Service History tab), it writes to the mock store as before.
+//
+// A work order raised against defects also records one outcome per defect.
+// Completion NEVER changes the vehicle's status: when the truck is out of
+// service / in maintenance and no Major or Out-of-Service defect is left open,
+// the modal OFFERS "Return to service" — a dispatcher's click, never automatic.
 
 export default function ServiceRecordModal({
   unit,
   odometerKm,
   closeWorkOrder,
+  vehicle,
+  onVehicleChanged,
   onClose,
   onSaved,
 }: {
   unit: string;
   odometerKm: number;
-  closeWorkOrder?: { id: string; number: string; title: string };
+  closeWorkOrder?: { id: string; number: string; title: string; defects?: WorkOrderDefectLineWire[] };
+  /** The vehicle being serviced — only needed for the return-to-service offer. */
+  vehicle?: { id: string; status: VehicleStatus };
+  /** Called after the offer changed the vehicle's status, so the parent refetches it. */
+  onVehicleChanged?: () => void;
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const lines = closeWorkOrder?.defects ?? [];
   const [performedBy, setPerformedBy] = useState("");
   const [category, setCategory] = useState<ServiceCategory>(closeWorkOrder ? "Repair" : "Preventive");
   const [odo, setOdo] = useState(String(odometerKm));
@@ -39,8 +69,48 @@ export default function ServiceRecordModal({
   const [parts, setParts] = useState("");
   const [laborHours, setLaborHours] = useState("");
   const [cost, setCost] = useState("");
+  const [drafts, setDrafts] = useState<DefectOutcomeDraft[]>(() =>
+    lines.map((l) => ({ inspectionId: l.inspectionId, item: l.item, outcome: null, note: "" })),
+  );
+  const [outcomeIssues, setOutcomeIssues] = useState<Map<string, string>>(new Map());
+  // The vehicle's defects, for each line's CURRENT severity — an inspection
+  // amended after the work order was raised can move a defect into or out of
+  // Out-of-Service, and the server judges Deferred on the current one. Null
+  // while loading or if unavailable: the line's snapshot is used instead.
+  const [currentDefects, setCurrentDefects] = useState<VehicleDefectWire[] | null>(null);
+  const hasLines = lines.length > 0;
+  const vehicleId = vehicle?.id;
+
+  useEffect(() => {
+    if (!hasLines || !vehicleId) return;
+    let active = true;
+    listVehicleDefects(vehicleId, true).then(
+      (rows) => {
+        if (!active) return;
+        setCurrentDefects(rows);
+        // A Deferred picked against the snapshot that the current severity now
+        // forbids goes back to "choose" — never silently swapped for another.
+        setDrafts((prev) =>
+          prev.map((d) => {
+            const line = lines.find((l) => defectKeyOf(l) === defectKeyOf(d));
+            return d.outcome === "Deferred" && line && currentSeverityOf(line, rows) === "OutOfService"
+              ? { ...d, outcome: null }
+              : d;
+          }),
+        );
+      },
+      (e) => console.error("Defects unavailable for the current-severity check:", e),
+    );
+    return () => {
+      active = false;
+    };
+    // `lines` comes from the work order being closed, fixed for the modal's life.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasLines, vehicleId]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set once the work order is completed and the return-to-service offer applies.
+  const [offer, setOffer] = useState<{ status: VehicleStatus } | null>(null);
 
   async function submit() {
     if (busy) return;
@@ -49,6 +119,19 @@ export default function ServiceRecordModal({
     if (!who) return setError("Enter who performed the service.");
     if (itemsChanged.length === 0) return setError("List at least one item that was changed.");
     if (!reason.trim()) return setError("Enter the reason the work was done.");
+
+    let defectOutcomes: DefectOutcomeInputWire[] = [];
+    if (lines.length > 0) {
+      const checked = validateDefectOutcomes(lines, drafts, currentDefects);
+      if (!checked.ok) {
+        setOutcomeIssues(new Map(checked.issues.map((i) => [defectKeyOf(i), i.message])));
+        return setError(
+          `Every defect needs an outcome — ${checked.issues.length} still to fix in “Defect outcomes”.`,
+        );
+      }
+      setOutcomeIssues(new Map());
+      defectOutcomes = checked.defectOutcomes;
+    }
 
     const partsUsed = parts
       .split("\n")
@@ -69,29 +152,93 @@ export default function ServiceRecordModal({
           partsUsed,
           laborHours: laborHours ? parseFloat(laborHours) : null,
           costCad: cost ? parseFloat(cost) : null,
+          // Omitted (not []) when the work order has no defect lines.
+          ...(defectOutcomes.length ? { defectOutcomes } : {}),
         });
       } catch (e) {
         setBusy(false);
         setError(e instanceof ApiError ? e.message : "Failed to complete the work order — please try again.");
         return;
       }
-    } else {
-      addService({
-        unit,
-        date: new Date().toISOString().slice(0, 10),
-        performedBy: who,
-        category,
-        odometerKm: parseInt(odo, 10) || odometerKm,
-        itemsChanged,
-        reason: reason.trim(),
-        partsUsed,
-        laborHours: laborHours ? parseFloat(laborHours) : undefined,
-        costCad: cost ? parseFloat(cost) : undefined,
-      });
+
+      onSaved();
+      if (vehicle && OFFLINE_STATUSES.includes(vehicle.status)) {
+        // Fail-soft: if the defect list cannot be read, no offer is made — the
+        // Overview tab's own "return to service" action is always there.
+        try {
+          const open = await listVehicleDefects(vehicle.id);
+          if (remainingBlockingDefects(open, defectOutcomes).length === 0) {
+            setBusy(false);
+            setOffer({ status: vehicle.status });
+            return;
+          }
+        } catch (e) {
+          console.error("Defects unavailable for the return-to-service check:", e);
+        }
+      }
+      onClose();
+      return;
     }
 
+    addService({
+      unit,
+      date: new Date().toISOString().slice(0, 10),
+      performedBy: who,
+      category,
+      odometerKm: parseInt(odo, 10) || odometerKm,
+      itemsChanged,
+      reason: reason.trim(),
+      partsUsed,
+      laborHours: laborHours ? parseFloat(laborHours) : undefined,
+      costCad: cost ? parseFloat(cost) : undefined,
+    });
     onSaved();
     onClose();
+  }
+
+  async function returnToService() {
+    if (busy || !vehicle) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await changeVehicleStatus(vehicle.id, "Active");
+      onVehicleChanged?.();
+      onClose();
+    } catch (e) {
+      setBusy(false);
+      setError(e instanceof ApiError ? e.message : "Failed to return the vehicle to service — please try again.");
+    }
+  }
+
+  if (offer && closeWorkOrder) {
+    return (
+      <ModalShell
+        eyebrow={`Fleet & Maintenance · ${unit} · Work orders`}
+        title="Return to Service?"
+        onClose={onClose}
+        error={error}
+        maxWidth={520}
+        footer={
+          <>
+            <ActionButton onClick={onClose} disabled={busy}>
+              KEEP {statusLabelFor(offer.status).toUpperCase()}
+            </ActionButton>
+            <ActionButton variant="success" onClick={returnToService} disabled={busy}>
+              {busy ? "UPDATING…" : "RETURN TO SERVICE"}
+            </ActionButton>
+          </>
+        }
+      >
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+          <StatusChip kind="ontime" label={`${closeWorkOrder.number} completed`} />
+          <StatusChip kind="ontime" label="No Major or Out-of-Service defects open" />
+        </div>
+        <div style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textSecondary, lineHeight: 1.55 }}>
+          {unit} is still <b>{statusLabelFor(offer.status).toLowerCase()}</b>. Completing a work order never
+          changes a vehicle&apos;s status on its own — return it to service only once the repairs are certified.
+        </div>
+      </ModalShell>
+    );
   }
 
   return (
@@ -116,6 +263,16 @@ export default function ServiceRecordModal({
           Closing <span style={{ fontFamily: fonts.mono, color: colors.skyBlue }}>{closeWorkOrder.number}</span>
           {closeWorkOrder.title ? ` — ${closeWorkOrder.title}` : ""}.
         </div>
+      )}
+      {lines.length > 0 && (
+        <DefectOutcomesSection
+          lines={lines}
+          drafts={drafts}
+          onChange={setDrafts}
+          issues={outcomeIssues}
+          currentDefects={currentDefects}
+          disabled={busy}
+        />
       )}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
         <TextField

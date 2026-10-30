@@ -4,6 +4,8 @@ using NorthernLink.Clients.Domain.Clients;
 using NorthernLink.Clients.Domain.Clients.Events;
 using NorthernLink.Clients.Domain.Contracts;
 using NorthernLink.Clients.Domain.Contracts.Events;
+using NorthernLink.Clients.Domain.PurchaseOrders;
+using NorthernLink.Clients.Domain.PurchaseOrders.Events;
 using Xunit;
 
 namespace NorthernLink.Clients.Tests;
@@ -114,6 +116,71 @@ public class ClientsIntegrationEventMapperTests
 
         var integrationEvent = Assert.IsType<ContractChangedIntegrationEvent>(result);
         Assert.Equal("Terminated", integrationEvent.Status);
+    }
+
+    [Fact]
+    public void Purchase_order_created_maps_to_a_full_po_snapshot_including_its_own_rates()
+    {
+        var clientId = Guid.NewGuid();
+        var purchaseOrder = PurchaseOrder.Create(
+            TestClients.TenantId,
+            clientId,
+            "PO-88231",
+            new DateOnly(2026, 1, 15),
+            new DateOnly(2026, 12, 31),
+            250_000m,
+            roundTripRateCad: 305m,
+            oneWayRateCad: 180m,
+            note: "Crew change coverage").Value;
+
+        var result = _mapper.Map(
+            new PurchaseOrderCreatedDomainEvent(purchaseOrder.Id, clientId, TestClients.TenantId), purchaseOrder);
+
+        var integrationEvent = Assert.IsType<PurchaseOrderChangedIntegrationEvent>(result);
+        Assert.Equal(purchaseOrder.Id, integrationEvent.PurchaseOrderId);
+        Assert.Equal(TestClients.TenantId, integrationEvent.TenantId);
+        Assert.Equal(clientId, integrationEvent.ClientId);
+        Assert.Equal("PO-88231", integrationEvent.PoNumber);
+        Assert.Equal(new DateOnly(2026, 1, 15), integrationEvent.Issued);
+        Assert.Equal(new DateOnly(2026, 12, 31), integrationEvent.Expiry);
+        Assert.Equal(250_000m, integrationEvent.AmountCad);
+        Assert.Equal(305m, integrationEvent.RoundTripRateCad);
+        Assert.Equal(180m, integrationEvent.OneWayRateCad);
+    }
+
+    [Fact]
+    public void Purchase_order_updated_maps_with_the_amended_rates()
+    {
+        var purchaseOrder = PurchaseOrder.Create(
+            TestClients.TenantId, Guid.NewGuid(), "PO-88231", new DateOnly(2026, 1, 15),
+            null, 250_000m, 305m, 180m, null).Value;
+        Assert.True(purchaseOrder
+            .Update("PO-88231", new DateOnly(2026, 1, 15), null, 250_000m, 400m, null, null)
+            .IsSuccess);
+
+        var result = _mapper.Map(
+            new PurchaseOrderUpdatedDomainEvent(purchaseOrder.Id, purchaseOrder.ClientId, TestClients.TenantId),
+            purchaseOrder);
+
+        var integrationEvent = Assert.IsType<PurchaseOrderChangedIntegrationEvent>(result);
+        Assert.Equal(400m, integrationEvent.RoundTripRateCad);
+        Assert.Null(integrationEvent.OneWayRateCad);
+    }
+
+    [Fact]
+    public void Purchase_order_deleted_maps_to_the_removal_event_so_a_replica_can_drop_its_row()
+    {
+        var purchaseOrder = PurchaseOrder.Create(
+            TestClients.TenantId, Guid.NewGuid(), "PO-88231", new DateOnly(2026, 1, 15),
+            null, null, null, null, null).Value;
+
+        var result = _mapper.Map(
+            new PurchaseOrderDeletedDomainEvent(purchaseOrder.Id, purchaseOrder.ClientId, TestClients.TenantId),
+            purchaseOrder);
+
+        var integrationEvent = Assert.IsType<PurchaseOrderDeletedIntegrationEvent>(result);
+        Assert.Equal(purchaseOrder.Id, integrationEvent.PurchaseOrderId);
+        Assert.Equal(TestClients.TenantId, integrationEvent.TenantId);
     }
 
     [Fact]

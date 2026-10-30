@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { colors, fonts, rowSurface, SERVICE_SHORT, statusMeta, svcMeta } from "@/lib/theme";
 import {
+  acknowledgeInspectionCarrier,
   ApiError,
   deleteInspection,
   getTripManifest,
@@ -14,15 +15,20 @@ import {
 } from "@/lib/api";
 import {
   assignTrip,
+  canCorrectDriver,
   canPairRoundTrip,
   changeTripStatus,
+  clearanceAsOf,
   closeTripWithoutBilling,
+  convertTripToDeadhead,
+  convertTripToPassengerTrip,
   corridorLabel,
   createTrip,
+  deadheadConversionBlockReason,
   finishTripOperations,
   getTrip,
   hasClearanceFor,
-  hhmm,
+  timeInputValue,
   isCargoService,
   isOpenTrip,
   isOperationallyClosed,
@@ -49,18 +55,16 @@ import {
   type TripUpdateInput,
 } from "@/lib/api/trips";
 import { isShipmentOpen, listShipments, shipmentLegChip, type ShipmentRecord } from "@/lib/api/shipments";
-import {
-  listDrivers,
-  listDriverClearances,
-  type DriverClearanceRecord,
-  type DriverRecord,
-} from "@/lib/api/drivers";
+import { listDriverClearances } from "@/lib/api/drivers";
+import { useDriverRoster } from "@/lib/useDriverRoster";
+import { activityEntryView } from "@/lib/tripActivity";
 import { listVehicles, type Vehicle } from "@/lib/api/fleet";
 import { contractRateLabel, getClient, type ActiveContractSummary } from "@/lib/api/clients";
 // Leg-direction glyph + label — the one place that mapping lives (Billing.tsx
 // renders candidate/invoice legs from the same helper).
 import { directionMeta } from "@/lib/api/billing";
 import { printTripManifest } from "@/lib/documents/tripManifestPdf";
+import { printDriverPackage } from "@/lib/documents/driverPackagePdf";
 import { ServiceChip, StatusBadge, StatusChip } from "@/components/ui/Chip";
 import { CorridorStepper } from "@/components/ui/CorridorStepper";
 import { Panel, SectionLabel, DetailRow } from "@/components/ui/Panel";
@@ -73,6 +77,9 @@ import { periodContaining, periodContains, periodLabel, type Period } from "@/li
 import ManifestEditorModal from "@/components/ManifestEditorModal";
 import TripInspectionModal from "@/components/TripInspectionModal";
 import SendPickupEmailModal from "@/components/SendPickupEmailModal";
+import ChangeRouteModal from "@/components/ChangeRouteModal";
+import CorrectDriverModal from "@/components/CorrectDriverModal";
+import ConvertToDeadheadModal from "@/components/ConvertToDeadheadModal";
 import DefectsPanel from "@/components/fleet/DefectsPanel";
 
 /** Label attributed to dispatcher-entered manifests/inspections (no user id yet). */
@@ -118,33 +125,6 @@ function fmtUtcDateTime(iso: string | null): string {
   });
 }
 
-// Friendly labels for the kebab-case audit event types (GET /activity). Unknown
-// types fall back to their de-kebabed form.
-const EVENT_LABELS: Record<string, string> = {
-  "trip-scheduled": "Trip scheduled",
-  "trip-assigned": "Driver / vehicle assigned",
-  "trip-driver-assigned": "Driver assigned",
-  "trip-vehicle-assigned": "Vehicle assigned",
-  "trip-started": "Trip started",
-  "trip-completed": "Trip completed",
-  "trip-cancelled": "Trip cancelled",
-  "trip-demand-recorded": "Demand recorded",
-  "trip-manifest-linked": "Manifest linked",
-  "trip-manifest-created": "Manifest created",
-  "trip-manifest-updated": "Manifest updated",
-};
-
-/** "Who did what" line for one audit entry (source + event). */
-function activityLabel(e: TripActivityEntry): string {
-  const who =
-    e.source === "App"
-      ? "Driver App"
-      : e.source === "Dispatcher"
-        ? `Dispatcher${e.enteredBy ? ` (${e.enteredBy})` : ""}`
-        : null;
-  const action = EVENT_LABELS[e.eventType] ?? e.eventType.replace(/-/g, " ");
-  return who ? `${who} · ${action}` : action;
-}
 
 // ---------------------------------------------------------------------------
 // Pre-data states (Drivers.tsx conventions)
@@ -225,41 +205,14 @@ function AssignModal({
   onClose: () => void;
   onSaved: (driverId: string | null, vehicleId: string | null) => Promise<void>;
 }) {
-  const [roster, setRoster] = useState<{ driver: DriverRecord; cleared: boolean }[] | null>(null);
-  const [rosterError, setRosterError] = useState<string | null>(null);
+  // Active drivers, clearance judged as of today (live assignment). A failed
+  // clearance fetch degrades to "no clearances on file" (warn), never a block.
+  const { roster, error: rosterError } = useDriverRoster({ clientName: trip.clientName, include: "active" });
   const [driverId, setDriverId] = useState<string | null>(trip.driverId);
   const [vehicles, setVehicles] = useState<Vehicle[] | null>(null);
   const [vehicleId, setVehicleId] = useState<string>(trip.vehicleId ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const drivers = (await listDrivers()).filter((d) => d.status === "Active");
-        // Clearance check needs each driver's clearances — small roster, so a
-        // parallel fan-out is fine. A failed clearance fetch degrades to
-        // "no clearances on file" (warn) rather than blocking the modal.
-        const clearances = await Promise.all(
-          drivers.map((d) => listDriverClearances(d.id).catch(() => [] as DriverClearanceRecord[])),
-        );
-        if (active) {
-          setRoster(
-            drivers.map((driver, i) => ({
-              driver,
-              cleared: hasClearanceFor(clearances[i], trip.clientName),
-            })),
-          );
-        }
-      } catch (e) {
-        if (active) setRosterError(e instanceof ApiError ? e.message : "Failed to load drivers.");
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [trip.clientName]);
 
   // Active vehicles for the assignable-vehicle dropdown. The current vehicle is
   // merged in even if it is no longer Active, so it still shows selected.
@@ -443,8 +396,9 @@ function EditTripModal({
   onSaved: (input: TripUpdateInput) => Promise<void>;
 }) {
   const [serviceDate, setServiceDate] = useState(trip.serviceDate);
-  const [windowStart, setWindowStart] = useState(hhmm(trip.windowStart));
-  const [windowEnd, setWindowEnd] = useState(trip.windowEnd ? hhmm(trip.windowEnd) : "");
+  // timeInputValue, never hhmm — hhmm is for display and renders a time input blank.
+  const [windowStart, setWindowStart] = useState(timeInputValue(trip.windowStart));
+  const [windowEnd, setWindowEnd] = useState(timeInputValue(trip.windowEnd));
   const [distanceKm, setDistanceKm] = useState(String(trip.distanceKm));
   const [poNumber, setPoNumber] = useState(trip.poNumber ?? "");
   const [seatsCapacity, setSeatsCapacity] = useState(trip.seatsCapacity != null ? String(trip.seatsCapacity) : "");
@@ -485,7 +439,6 @@ function EditTripModal({
       destination: trip.destination,
       stops: trip.stops,
       distanceKm: km,
-      isEmptyLeg: trip.isEmptyLeg,
       clientId: trip.clientId,
       clientName: trip.clientName,
       poNumber: poNumber.trim() || null,
@@ -577,8 +530,9 @@ function EditTripModal({
         )}
       </div>
       <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim, marginTop: 14, lineHeight: 1.5 }}>
-        Corridor, service type, and client come from the trip&rsquo;s route/client snapshot and are not editable here.
-        Trips are editable only while Scheduled — the backend rejects edits after departure.
+        Service type and client come from the trip&rsquo;s client snapshot and are not editable here. The corridor comes
+        from the route — to move this trip onto another route, use CHANGE ROUTE. Trips are editable only while
+        Scheduled — the backend rejects edits after departure.
       </div>
     </ModalShell>
   );
@@ -613,12 +567,13 @@ function CreateReturnModal({
   onCreated: (input: TripInput) => Promise<void>;
 }) {
   const [serviceDate, setServiceDate] = useState(trip.serviceDate);
-  const [windowStart, setWindowStart] = useState(hhmm(trip.windowEnd ?? trip.windowStart));
+  // The return leg departs when the outbound one ends. timeInputValue, never hhmm.
+  const [windowStart, setWindowStart] = useState(timeInputValue(trip.windowEnd ?? trip.windowStart));
   const [windowEnd, setWindowEnd] = useState("");
   const [isEmptyLeg, setIsEmptyLeg] = useState(false);
 
-  const [roster, setRoster] = useState<{ driver: DriverRecord; cleared: boolean }[] | null>(null);
-  const [rosterError, setRosterError] = useState<string | null>(null);
+  // Same roster as REASSIGN — Active drivers, clearance as of today.
+  const { roster, error: rosterError } = useDriverRoster({ clientName: trip.clientName, include: "active" });
   const [driverId, setDriverId] = useState<string | null>(trip.driverId);
   const [vehicles, setVehicles] = useState<Vehicle[] | null>(null);
   const [vehicleId, setVehicleId] = useState<string>(trip.vehicleId ?? "");
@@ -628,26 +583,6 @@ function CreateReturnModal({
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const drivers = (await listDrivers()).filter((d) => d.status === "Active");
-        const clearances = await Promise.all(
-          drivers.map((d) => listDriverClearances(d.id).catch(() => [] as DriverClearanceRecord[])),
-        );
-        if (active) {
-          setRoster(drivers.map((driver, i) => ({ driver, cleared: hasClearanceFor(clearances[i], trip.clientName) })));
-        }
-      } catch (e) {
-        if (active) setRosterError(e instanceof ApiError ? e.message : "Failed to load drivers.");
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [trip.clientName]);
 
   useEffect(() => {
     let active = true;
@@ -1068,6 +1003,61 @@ function UnpairRoundTripModal({
 }
 
 // ---------------------------------------------------------------------------
+// Convert back — POST /convert-to-passenger-trip only flips the flag, but the
+// en-route and post-trip gates come back with it, so it gets a short confirm.
+// ---------------------------------------------------------------------------
+
+function ConvertToPassengerTripModal({
+  trip,
+  onClose,
+  onConfirmed,
+}: {
+  trip: TripRecord;
+  onClose: () => void;
+  onConfirmed: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onConfirmed();
+      onClose();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Failed to convert the trip — please try again.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ModalShell
+      eyebrow={`Operations · ${trip.tripNumber} · ${corridorLabel(trip)}`}
+      title="Convert to Passenger Trip"
+      onClose={onClose}
+      error={error}
+      maxWidth={480}
+      footer={
+        <>
+          <ActionButton onClick={onClose}>KEEP AS DEADHEAD</ActionButton>
+          <ActionButton variant="primary" onClick={submit} disabled={busy}>
+            {busy ? "CONVERTING…" : "CONVERT TO PASSENGER TRIP"}
+          </ActionButton>
+        </>
+      }
+    >
+      <div style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textSecondary, lineHeight: 1.6 }}>
+        {trip.tripNumber} becomes an ordinary trip again. A manifest can be recorded for it, and it will need{" "}
+        {isCargoService(trip.serviceType) ? "an assigned shipment" : "a passenger manifest"} to start and a post-trip
+        inspection to finish.
+      </div>
+    </ModalShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Cancel modal — POST /status with an optional reason.
 // ---------------------------------------------------------------------------
 
@@ -1252,6 +1242,107 @@ function RemoveInspectionModal({
 }
 
 // ---------------------------------------------------------------------------
+// Carrier acknowledgement (Form NL-PTI-01) — the carrier's representative
+// confirming they were shown a report carrying a Major defect. One per report and
+// FINAL, so there is no un-acknowledge. The name is the signature and has no
+// "Dispatch" fallback, which is why this asks for it rather than assuming it.
+// ---------------------------------------------------------------------------
+
+function AcknowledgeCarrierModal({
+  trip,
+  inspection,
+  onClose,
+  onConfirmed,
+}: {
+  trip: TripRecord;
+  inspection: VehicleInspection;
+  onClose: () => void;
+  onConfirmed: () => Promise<void>;
+}) {
+  const [name, setName] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    if (busy) return;
+    if (!name.trim()) {
+      setError("Enter the name of the carrier representative — the name is the signature.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await acknowledgeInspectionCarrier(inspection.id, {
+        acknowledgedBy: name.trim(),
+        note: note.trim() || null,
+      });
+      await onConfirmed();
+      onClose();
+    } catch (e) {
+      setError(
+        e instanceof ApiError && e.code === "Fleet.Inspection.CarrierAlreadyAcknowledged"
+          ? "This report was already acknowledged — the acknowledgement is final and cannot be re-signed."
+          : e instanceof ApiError
+            ? e.message
+            : "Failed to record the acknowledgement — please try again.",
+      );
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ModalShell
+      eyebrow={`Fleet · ${trip.tripNumber} · Carrier acknowledgement`}
+      title="Acknowledge Inspection Report"
+      onClose={onClose}
+      error={error}
+      maxWidth={520}
+      footer={
+        <>
+          <ActionButton onClick={onClose}>CANCEL</ActionButton>
+          <ActionButton variant="primary" onClick={submit} disabled={busy}>
+            {busy ? "SIGNING…" : "ACKNOWLEDGE"}
+          </ActionButton>
+        </>
+      }
+    >
+      <div style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textSecondary, lineHeight: 1.6, marginBottom: 14 }}>
+        Records that the carrier&apos;s representative was shown the{" "}
+        {inspection.type === "PostTrip" ? "post-trip" : "pre-trip"} report{" "}
+        {inspection.driverName} recorded on {fmtUtcDateTime(inspection.performedAt)}. One per report, and final — there
+        is no un-acknowledge.
+      </div>
+      <div style={{ display: "grid", gap: 12 }}>
+        <TextField
+          label="Carrier representative"
+          value={name}
+          onChange={setName}
+          placeholder="Full name of the person signing"
+        />
+        <TextAreaField label="Note (optional)" value={note} onChange={setNote} rows={2} />
+      </div>
+    </ModalShell>
+  );
+}
+
+/** The header's action buttons (+ NEW TRIP, IMPORT FROM BOOKEO) share one look. */
+const headerButtonStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 7,
+  padding: "8px 15px",
+  borderRadius: 8,
+  background: colors.blue,
+  color: "#FFFFFF",
+  fontFamily: fonts.condensed,
+  fontWeight: 700,
+  fontSize: 13.5,
+  letterSpacing: ".04em",
+  cursor: "pointer",
+};
+
+// ---------------------------------------------------------------------------
 // Screen
 // ---------------------------------------------------------------------------
 
@@ -1259,6 +1350,8 @@ export default function Trips({
   selectedId,
   setSelectedId,
   onNewTrip,
+  onImportBookeo = null,
+  refreshKey = 0,
   period,
   setPeriod,
   page,
@@ -1267,6 +1360,10 @@ export default function Trips({
   selectedId: string | null;
   setSelectedId: (id: string | null) => void;
   onNewTrip: () => void;
+  /** Opens the Bookeo booking-report import; null hides the button. */
+  onImportBookeo?: (() => void) | null;
+  /** Bumped by Console when trips were written elsewhere (a Bookeo import) — refetch. */
+  refreshKey?: number;
   /** Period and page live in Console so they survive navigating away and back. */
   period: Period;
   setPeriod: (next: Period) => void;
@@ -1286,7 +1383,9 @@ export default function Trips({
   const [extraTrip, setExtraTrip] = useState<TripRecord | null>(null);
 
   // Per-selected-trip auxiliary data, keyed by trip id (Drivers.tsx pattern).
-  const [clearanceState, setClearanceState] = useState<{ tripId: string; cleared: boolean } | null>(null);
+  const [clearanceState, setClearanceState] = useState<{ tripId: string; asOf: string; cleared: boolean } | null>(
+    null,
+  );
   const [contractState, setContractState] = useState<{ tripId: string; contract: ActiveContractSummary | null } | null>(null);
   const [manifestState, setManifestState] = useState<{ tripId: string; manifest: TripManifest | null } | null>(null);
   const [inspectionsState, setInspectionsState] = useState<{ tripId: string; rows: VehicleInspection[] } | null>(null);
@@ -1298,10 +1397,14 @@ export default function Trips({
   const [modal, setModal] = useState<
     | null
     | "assign"
+    | "correctDriver"
     | "edit"
     | "createReturn"
     | "pairRoundTrip"
     | "unpairRoundTrip"
+    | "convertToDeadhead"
+    | "convertToPassengerTrip"
+    | "changeRoute"
     | "cancel"
     | "closeWithoutBilling"
     | "manifest"
@@ -1312,11 +1415,16 @@ export default function Trips({
   const [inspectionType, setInspectionType] = useState<"PreTrip" | "PostTrip" | null>(null);
   const [editingInspection, setEditingInspection] = useState<VehicleInspection | null>(null);
   const [removingInspection, setRemovingInspection] = useState<VehicleInspection | null>(null);
+  /** The Fail report whose carrier acknowledgement line is being signed. */
+  const [acknowledgingInspection, setAcknowledgingInspection] = useState<VehicleInspection | null>(null);
   // Bumped whenever something that could change this vehicle's defect list
   // lands — a DVIR entered or removed, or a different unit assigned.
   const [defectsRefresh, setDefectsRefresh] = useState(0);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  /** After CHANGE ROUTE: the follow-up strip offering a fresh pickup email and
+   *  a driver-package reprint (both now carry stale times/stops). Keyed by trip. */
+  const [routeChangedFor, setRouteChangedFor] = useState<{ tripId: string; routeName: string | null } | null>(null);
 
   const periodStart = period.start;
   const periodEnd = period.end;
@@ -1335,7 +1443,9 @@ export default function Trips({
       page,
       pageSize: PAGE_SIZE,
     });
-  }, [periodStart, periodEnd, filter, svcFilter, showCancelled, page]);
+    // refreshKey carries no value into the query — a change just means "fetch again".
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periodStart, periodEnd, filter, svcFilter, showCancelled, page, refreshKey]);
 
   const applyPage = useCallback(
     (fresh: Awaited<ReturnType<typeof fetchList>>) => {
@@ -1456,6 +1566,9 @@ export default function Trips({
   const tripDriverId = t?.driverId ?? null;
   const tripClientId = t?.clientId ?? null;
   const tripClientName = t?.clientName ?? null;
+  // Finished trips are judged on their serviceDate (same rule as CORRECT DRIVER);
+  // live trips on today.
+  const tripClearanceAsOf = t ? clearanceAsOf(t) : null;
   const tripManifestId = t?.manifestId ?? null;
   const tripIsCargo = !!t && isCargoService(t.serviceType);
   // No synchronous setState here: the aux states are keyed by tripId, so a
@@ -1476,10 +1589,15 @@ export default function Trips({
       );
     }
 
-    if (tripDriverId && tripClientName) {
+    if (tripDriverId && tripClientName && tripClearanceAsOf) {
       listDriverClearances(tripDriverId).then(
         (rows2) => {
-          if (active) setClearanceState({ tripId, cleared: hasClearanceFor(rows2, tripClientName) });
+          if (active)
+            setClearanceState({
+              tripId,
+              asOf: tripClearanceAsOf,
+              cleared: hasClearanceFor(rows2, tripClientName, tripClearanceAsOf),
+            });
         },
         () => undefined, // clearance check is best-effort — render falls back to "checking…"/"—"
       );
@@ -1534,7 +1652,7 @@ export default function Trips({
     return () => {
       active = false;
     };
-  }, [tripId, tripNumber, tripDriverId, tripClientId, tripClientName, tripManifestId, tripIsCargo]);
+  }, [tripId, tripNumber, tripDriverId, tripClientId, tripClientName, tripClearanceAsOf, tripManifestId, tripIsCargo]);
 
   async function runAction(fn: () => Promise<void>) {
     if (busy) return;
@@ -1566,6 +1684,14 @@ export default function Trips({
     await assignTrip(id, driverId, vehicleId);
     await reloadUntil(id, (trip) => trip !== undefined && trip.driverId === driverId && trip.vehicleId === vehicleId);
     setDefectsRefresh((n) => n + 1);
+  }
+
+  /** CORRECT DRIVER — the POST already succeeded (the modal owns it); poll until
+   *  the trip reads back with the new driver, then refresh the activity log so
+   *  the correction and its reason show. Mirrors onRouteChanged. */
+  async function onDriverCorrected(id: string, driverId: string) {
+    await reloadUntil(id, (trip) => trip !== undefined && trip.driverId === driverId);
+    await refreshActivity(id);
   }
 
   async function onEditSaved(id: string, input: TripUpdateInput) {
@@ -1601,6 +1727,58 @@ export default function Trips({
   async function onRoundTripUnpaired(id: string) {
     await unpairRoundTrip(id);
     await reloadUntil(id, (trip) => trip !== undefined && trip.roundTripKey === null);
+  }
+
+  /** CONVERT TO DEADHEAD — the server deletes the trip's empty manifest
+   *  record(s) and clears its manifestId, so the panel's manifest goes too, and
+   *  the timeline picks up the conversion. Mirrors onRoundTripUnpaired. */
+  async function onConvertedToDeadhead(id: string) {
+    await convertTripToDeadhead(id);
+    await reloadUntil(id, (trip) => trip?.isEmptyLeg === true);
+    setManifestState({ tripId: id, manifest: null });
+    await refreshActivity(id);
+  }
+
+  /** CONVERT TO PASSENGER TRIP — only the flag flips; there is no manifest to
+   *  restore (conversion deleted it), so the panel offers ADD MANIFEST again. */
+  async function onConvertedToPassengerTrip(id: string) {
+    await convertTripToPassengerTrip(id);
+    await reloadUntil(id, (trip) => trip?.isEmptyLeg === false);
+    setManifestState({ tripId: id, manifest: null });
+    await refreshActivity(id);
+  }
+
+  /** Re-read the audit timeline after a mutation. Best-effort. */
+  async function refreshActivity(id: string) {
+    try {
+      const fresh = await listTripActivity(id);
+      setActivityState({ tripId: id, rows: fresh });
+    } catch {
+      // Audit timeline is best-effort.
+    }
+  }
+
+  /** CHANGE ROUTE — the POST already succeeded (the modal owns it); poll this leg
+   *  until it reads back on the new route, then refresh what the change rewrote:
+   *  the page (which carries the paired leg when it is on it), the manifest's
+   *  route name and the activity timeline. Mirrors onRoundTripUnpaired. */
+  async function onRouteChanged(id: string, manifestId: string | null, newRouteId: string, routeName: string | null) {
+    await reloadUntil(id, (trip) => trip !== undefined && trip.routeId === newRouteId);
+    if (manifestId) {
+      try {
+        const m = await getTripManifest(manifestId);
+        setManifestState({ tripId: id, manifest: m });
+      } catch {
+        // Non-fatal — the keyed effect will refetch on the next render.
+      }
+    }
+    try {
+      const fresh = await listTripActivity(id);
+      setActivityState({ tripId: id, rows: fresh });
+    } catch {
+      // Audit timeline is best-effort.
+    }
+    setRouteChangedFor({ tripId: id, routeName });
   }
 
   /** After a manifest create/edit: wait for the trip to carry a manifestId, then
@@ -1751,24 +1929,15 @@ export default function Trips({
             Trips
           </h1>
         </div>
-        <div
-          onClick={onNewTrip}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 7,
-            padding: "8px 15px",
-            borderRadius: 8,
-            background: colors.blue,
-            color: "#FFFFFF",
-            fontFamily: fonts.condensed,
-            fontWeight: 700,
-            fontSize: 13.5,
-            letterSpacing: ".04em",
-            cursor: "pointer",
-          }}
-        >
-          <span style={{ fontSize: 15, lineHeight: 1 }}>+</span> NEW TRIP
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {onImportBookeo && (
+            <div onClick={onImportBookeo} style={headerButtonStyle}>
+              <span style={{ fontSize: 15, lineHeight: 1 }}>⭱</span> IMPORT FROM BOOKEO
+            </div>
+          )}
+          <div onClick={onNewTrip} style={headerButtonStyle}>
+            <span style={{ fontSize: 15, lineHeight: 1 }}>+</span> NEW TRIP
+          </div>
         </div>
       </div>
       <div style={{ marginBottom: 10 }}>
@@ -1883,7 +2052,11 @@ export default function Trips({
   // ---- loaded ----
 
   const chip = t ? tripChip(t) : null;
-  const clearance = t && clearanceState?.tripId === t.id ? clearanceState.cleared : null;
+  // Keyed by trip AND as-of date: a status change that finishes the trip moves
+  // the as-of date, and the old verdict must not show while the new one loads.
+  const clearance =
+    t && clearanceState?.tripId === t.id && clearanceState.asOf === tripClearanceAsOf ? clearanceState.cleared : null;
+  const clearanceDay = t && canCorrectDriver(t) ? ` on ${shortDateLabel(t.serviceDate)}` : "";
   const contract = t && contractState?.tripId === t.id ? contractState.contract : null;
   const manifest = t && manifestState?.tripId === t.id ? manifestState.manifest : null;
   const inspections = t && inspectionsState?.tripId === t.id ? inspectionsState.rows : [];
@@ -1891,6 +2064,14 @@ export default function Trips({
   // it's safe to gate the ENTER buttons on the one-each-per-trip guard.
   const hasPreTrip = inspections.some((i) => i.type === "PreTrip");
   const hasPostTrip = inspections.some((i) => i.type === "PostTrip");
+  // The inspection the driver package prints. A plain `find` on purpose:
+  // there is at most ONE pre-trip per trip (that is exactly what the ENTER
+  // button above is gated on), so sorting and taking the latest would invent a
+  // multiplicity the system does not have. `null` here is a real answer — the
+  // package prints a blank NL-PTI-01 for it. The post-trip is deliberately not
+  // in the package: the driver files it on the tablet, and the paper package
+  // carries an en-route defect report in its place.
+  const preTripInspection = inspections.find((i) => i.type === "PreTrip") ?? null;
   const activity = t && activityState?.tripId === t.id ? activityState.rows : [];
 
   // Manifest may be present on the trip (manifestId) but not yet fetched into
@@ -1909,6 +2090,26 @@ export default function Trips({
   const canSendPickupEmail = !!t && manifest !== null && manifest.passengers.length > 0 && t.status !== "Cancelled";
   // Shipments on the selected cargo trip (null = still loading).
   const tripShipments = t && tripShipmentsState?.tripId === t.id ? tripShipmentsState.rows : null;
+  // A CARGO trip whose shipments have not arrived yet. The driver package would
+  // print with an empty freight block and nobody would know it was incomplete,
+  // so the button waits instead — which also keeps its click handler
+  // synchronous (an await there would lose the pop-up gesture). A passenger
+  // trip never fetches shipments, so it is never pending.
+  const cargoShipmentsPending = tripIsCargo && tripShipments === null;
+  /** PRINT / REPRINT DRIVER PACKAGE. Must stay SYNCHRONOUS — see the button's
+   *  comment below: an await before window.open loses the pop-up gesture. */
+  const printPackage = () => {
+    if (!t) return;
+    printDriverPackage({
+      trip: t,
+      manifest,
+      preTrip: preTripInspection,
+      // Shipments only ride cargo/grocery trips, and the fetch above is guarded
+      // to match — a passenger trip's incidental cargo is already on the
+      // manifest's §3, so [] here is correct and the freight block omits itself.
+      shipments: tripIsCargo ? (tripShipments ?? []) : [],
+    });
+  };
   // START gate: a driver, then the service-specific half of the backend
   // en-route guard — passenger runs need a linked manifest with ≥1 passenger,
   // Cargo/Grocery runs need ≥1 LIVE assigned shipment instead (cancelled or
@@ -1958,6 +2159,15 @@ export default function Trips({
     t && t.roundTripKey !== null
       ? ((rows ?? []).find((r) => r.id !== t.id && r.roundTripKey === t.roundTripKey) ?? null)
       : null;
+
+  // CONVERT TO DEADHEAD gate — the client-visible half of the server's "nobody is
+  // booked on it" rule. The linked manifest is "loading" until the keyed fetch
+  // lands; a failed fetch reads as no manifest and the server re-checks.
+  const manifestLoading = !!t && t.manifestId !== null && manifestState?.tripId !== t.id;
+  const deadheadBlockReason = t ? deadheadConversionBlockReason(t, manifest, pairedSibling, manifestLoading) : null;
+  // A deadhead without a manifest has none by design (the server refuses one),
+  // so the manifest panel says so instead of offering ADD MANIFEST.
+  const deadheadWithoutManifest = !!t && t.isEmptyLeg && t.manifestId === null;
 
   // Timeline — operational steps first (run finished = operationsFinishedAtUtc),
   // then the billing-driven ones. "Completed" is the paid/final step only:
@@ -2185,9 +2395,12 @@ export default function Trips({
                         ) : clearance === null ? (
                           "checking…"
                         ) : clearance ? (
-                          <StatusChip kind="ontime" label={`${t.clientName} clearance on file`} />
+                          <StatusChip
+                            kind="ontime"
+                            label={clearanceDay ? `${t.clientName} clearance${clearanceDay}` : `${t.clientName} clearance on file`}
+                          />
                         ) : (
-                          <StatusChip kind="soon" label={`No ${t.clientName} clearance`} />
+                          <StatusChip kind="soon" label={`No ${t.clientName} clearance${clearanceDay}`} />
                         )
                       }
                     />
@@ -2264,6 +2477,8 @@ export default function Trips({
                       value={
                         t.manifestId ? (
                           <StatusChip kind="ontime" label={`${manifestPaxCount} passenger${manifestPaxCount === 1 ? "" : "s"}`} />
+                        ) : deadheadWithoutManifest ? (
+                          <StatusChip kind="off" label="Deadhead — no manifest" />
                         ) : (
                           <StatusChip kind="off" label={tripIsCargo ? "No manifest — not required" : "No manifest yet"} />
                         )
@@ -2272,7 +2487,7 @@ export default function Trips({
                     {/* Editable while Scheduled/InProgress/ReadyForBilling (fares
                         get recorded just after the run); view-only from Invoiced
                         onward (cancelled trips show nothing). */}
-                    {manifestEditable ? (
+                    {manifestEditable && !deadheadWithoutManifest ? (
                       <div style={{ marginTop: 2 }}>
                         {t.manifestId && !manifest ? (
                           <span style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textDim }}>Loading manifest…</span>
@@ -2372,6 +2587,28 @@ export default function Trips({
                             {insp.odometerKm != null ? ` · ${insp.odometerKm.toLocaleString("en-CA")} km` : ""}
                             {` · ${fmtUtcDateTime(insp.performedAt)}`}
                           </span>
+                          {/* NL-PTI-01 carrier acknowledgement — only a Fail report
+                              is acknowledged, and only once. Stays available after
+                              the run: the carrier rep signs when they see it. */}
+                          {insp.result === "Fail" &&
+                            (insp.carrierAcknowledgedBy ? (
+                              <>
+                                <StatusChip kind="ontime" label="Carrier acknowledged" />
+                                <span style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim }}>
+                                  {insp.carrierAcknowledgedBy}
+                                  {insp.carrierAcknowledgedAtUtc
+                                    ? ` · ${fmtUtcDateTime(insp.carrierAcknowledgedAtUtc)}`
+                                    : ""}
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <StatusChip kind="soon" label="Carrier acknowledgement due" />
+                                <ActionButton onClick={() => setAcknowledgingInspection(insp)}>
+                                  ACKNOWLEDGE (CARRIER)
+                                </ActionButton>
+                              </>
+                            ))}
                           {/* Edit / remove only while the run hasn't happened yet. */}
                           {!isOperationallyClosed(t) && (
                             <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
@@ -2518,14 +2755,23 @@ export default function Trips({
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
                       {activity.map((ev, i) => {
-                        const isManifest = ev.aggregateType === "trip-manifest";
+                        // Manifest events already name their author in the label
+                        // (Dispatcher (name)); trip events get a "by" line instead.
+                        // Null reason/detail/enteredBy → that line is just omitted.
+                        const { isManifest, label, detail, reason, by } = activityEntryView(ev);
+                        const sub = { fontFamily: fonts.body, fontSize: 11.5, color: colors.textMuted, lineHeight: 1.45 };
                         return (
-                          <div key={`${ev.eventType}-${ev.occurredAtUtc}-${i}`} style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                          <div key={`${ev.eventType}-${ev.occurredAtUtc}-${i}`} style={{ display: "flex", alignItems: "flex-start", gap: 9 }}>
                             {/* colour + glyph + label — never colour alone */}
                             <StatusBadge kind={isManifest ? "info" : "ontime"} size={14} />
-                            <span style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textSecondary, flex: 1 }}>
-                              {activityLabel(ev)}
-                            </span>
+                            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+                              <span style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textSecondary }}>
+                                {label}
+                              </span>
+                              {detail && <span style={sub}>{detail}</span>}
+                              {reason && <span style={sub}>Reason: {reason}</span>}
+                              {by && <span style={{ ...sub, color: colors.textDim }}>by {by}</span>}
+                            </div>
                             <span style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textDim }}>
                               {fmtUtcDateTime(ev.occurredAtUtc)}
                             </span>
@@ -2537,6 +2783,27 @@ export default function Trips({
                 )}
               </Panel>
 
+              {routeChangedFor?.tripId === t.id && (
+                <Panel borderColor="rgba(0,158,115,.4)">
+                  <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 9 }}>
+                    <StatusChip
+                      kind="ontime"
+                      label={`Route changed${routeChangedFor.routeName ? ` to ${routeChangedFor.routeName}` : ""}`}
+                    />
+                    <span style={{ fontFamily: fonts.body, fontSize: 12.5, color: colors.textMuted, flex: 1, minWidth: 220 }}>
+                      Times and stops moved. Anything already sent or printed for this trip is out of date.
+                    </span>
+                    {canSendPickupEmail && (
+                      <ActionButton onClick={() => setModal("sendEmail")}>SEND PICKUP EMAIL</ActionButton>
+                    )}
+                    <ActionButton disabled={cargoShipmentsPending} onClick={printPackage}>
+                      {cargoShipmentsPending ? "LOADING…" : "REPRINT DRIVER PACKAGE"}
+                    </ActionButton>
+                    <ActionButton onClick={() => setRouteChangedFor(null)}>DISMISS</ActionButton>
+                  </div>
+                </Panel>
+              )}
+
               {/* actions */}
               <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 9 }}>
                 {(t.status === "Invoiced" || t.status === "Completed" || t.status === "WrittenOff") && (
@@ -2547,8 +2814,27 @@ export default function Trips({
                     EDIT TRIP
                   </ActionButton>
                 )}
+                {t.status === "Scheduled" && (
+                  <ActionButton onClick={() => setModal("changeRoute")}>CHANGE ROUTE</ActionButton>
+                )}
+                {t.status === "Scheduled" &&
+                  (t.isEmptyLeg ? (
+                    <ActionButton onClick={() => setModal("convertToPassengerTrip")}>CONVERT TO PASSENGER TRIP</ActionButton>
+                  ) : manifestLoading ? (
+                    <ActionButton disabled>CONVERT TO DEADHEAD</ActionButton>
+                  ) : deadheadBlockReason ? (
+                    // Pre-gated like START below; the server stays the final authority.
+                    <StatusChip kind="soon" label={`Can't convert to deadhead — ${deadheadBlockReason}`} />
+                  ) : (
+                    <ActionButton onClick={() => setModal("convertToDeadhead")}>CONVERT TO DEADHEAD</ActionButton>
+                  ))}
                 {(t.status === "Scheduled" || t.status === "InProgress") && (
                   <ActionButton onClick={() => setModal("assign")}>REASSIGN</ActionButton>
+                )}
+                {/* Finished trips: REASSIGN is gone, but the record can still be
+                    corrected — with a reason that lands in the activity log. */}
+                {canCorrectDriver(t) && (
+                  <ActionButton onClick={() => setModal("correctDriver")}>CORRECT DRIVER</ActionButton>
                 )}
                 {!t.isEmptyLeg && canPairRoundTrip(t) && (
                   <ActionButton onClick={() => setModal("createReturn")}>CREATE RETURN</ActionButton>
@@ -2594,10 +2880,32 @@ export default function Trips({
                     CLOSE WITHOUT BILLING
                   </ActionButton>
                 )}
-                {/* Always printable: the loaded manifest when one exists, else the
-                    blank NL-TM-01 form (printTripManifest handles null). */}
-                <ActionButton onClick={() => printTripManifest(manifest)}>
-                  {manifest ? "PRINT TRIP MANIFEST" : "PRINT BLANK MANIFEST"}
+                {/* Printable whenever a manifest can exist: the loaded manifest
+                    when one exists, else the blank NL-TM-01 form
+                    (printTripManifest handles null). A deadhead without a
+                    manifest gets no blank one — it carries no passengers. */}
+                {!deadheadWithoutManifest && (
+                  <ActionButton onClick={() => printTripManifest(manifest)}>
+                    {manifest ? "PRINT TRIP MANIFEST" : "PRINT BLANK MANIFEST"}
+                  </ActionButton>
+                )}
+                {/* The whole driver package: cover + manifest + itinerary +
+                    pre-trip + en-route defect report, each part
+                    blank-form-printed when it has no record — except a
+                    deadhead's, which leaves the manifest out and says
+                    "Deadhead — no passengers carried" on the cover. Deliberately NOT gated on tripEditable — a
+                    closed trip's records can still be viewed and printed, and
+                    downloading the package after the fact is the audit case.
+                    The label is fixed (unlike the manifest button's
+                    filled/blank pair) because every part prints, filled or blank.
+
+                    onClick is SYNCHRONOUS and must stay that way:
+                    openPrintDocument calls window.open, and after an await
+                    Safari and Firefox no longer treat it as a user gesture and
+                    block the tab silently. Everything it reads is already in
+                    state. */}
+                <ActionButton disabled={cargoShipmentsPending} onClick={printPackage}>
+                  {cargoShipmentsPending ? "LOADING…" : "PRINT DRIVER PACKAGE"}
                 </ActionButton>
                 {(t.status === "Scheduled" || t.status === "InProgress") && (
                   <ActionButton variant="destructive" onClick={() => setModal("cancel")}>
@@ -2611,6 +2919,13 @@ export default function Trips({
                   trip={t}
                   onClose={() => setModal(null)}
                   onSaved={(driverId, vehicleId) => onAssignSaved(t.id, driverId, vehicleId)}
+                />
+              )}
+              {modal === "correctDriver" && (
+                <CorrectDriverModal
+                  trip={t}
+                  onClose={() => setModal(null)}
+                  onCorrected={(driverId) => onDriverCorrected(t.id, driverId)}
                 />
               )}
               {modal === "createReturn" && (
@@ -2636,6 +2951,21 @@ export default function Trips({
                   onConfirmed={() => onRoundTripUnpaired(t.id)}
                 />
               )}
+              {modal === "convertToDeadhead" && (
+                <ConvertToDeadheadModal
+                  trip={t}
+                  partner={pairedSibling}
+                  onClose={() => setModal(null)}
+                  onConfirmed={() => onConvertedToDeadhead(t.id)}
+                />
+              )}
+              {modal === "convertToPassengerTrip" && (
+                <ConvertToPassengerTripModal
+                  trip={t}
+                  onClose={() => setModal(null)}
+                  onConfirmed={() => onConvertedToPassengerTrip(t.id)}
+                />
+              )}
               {modal === "manifest" && (
                 <ManifestEditorModal
                   trip={t}
@@ -2654,6 +2984,7 @@ export default function Trips({
                   trip={t}
                   type={editingInspection ? editingInspection.type : inspectionType!}
                   existing={editingInspection ?? undefined}
+                  preTrip={preTripInspection}
                   enteredBy={DISPATCHER_LABEL}
                   onClose={() => {
                     setInspectionType(null);
@@ -2674,6 +3005,21 @@ export default function Trips({
                   inspection={removingInspection}
                   onClose={() => setRemovingInspection(null)}
                   onConfirmed={() => onInspectionRemoved(t.id, t.tripNumber, removingInspection)}
+                />
+              )}
+              {acknowledgingInspection && (
+                <AcknowledgeCarrierModal
+                  trip={t}
+                  inspection={acknowledgingInspection}
+                  onClose={() => setAcknowledgingInspection(null)}
+                  onConfirmed={() => onInspectionSaved(t.id, t.tripNumber, false)}
+                />
+              )}
+              {modal === "changeRoute" && (
+                <ChangeRouteModal
+                  trip={t}
+                  onClose={() => setModal(null)}
+                  onChanged={(newRouteId, routeName) => onRouteChanged(t.id, t.manifestId, newRouteId, routeName)}
                 />
               )}
               {modal === "edit" && (

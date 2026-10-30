@@ -23,6 +23,18 @@ public sealed record InspectionDefect
     public DateTimeOffset? ResolvedAtUtc { get; init; }
     public Guid? ResolvedByWorkOrderId { get; init; }
 
+    /// <summary>
+    /// The ACTIVE work order this defect is attached to, or null. Set when a work order is
+    /// created with this defect on it; cleared when that work order resolves it (the id moves to
+    /// <see cref="ResolvedByWorkOrderId"/>), defers it, or is cancelled. So a non-null value
+    /// always means "on a work order that is still open" — a defect is on at most one.
+    ///
+    /// Not a resolution field: a defect resolved by hand while its work order is still open
+    /// keeps this until that work order completes or is cancelled. Absent from every jsonb row
+    /// written before per-defect links existed, which reads back as null — no data migration.
+    /// </summary>
+    public Guid? WorkOrderId { get; init; }
+
     /// <summary>Set when a dispatcher re-reports a defect that was resolved on an earlier inspection.</summary>
     public Guid? RecurrenceOfInspectionId { get; init; }
 

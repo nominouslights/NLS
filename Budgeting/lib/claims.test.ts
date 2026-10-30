@@ -86,3 +86,69 @@ describe("decodeAccessToken", () => {
     expect(claims?.exp).toBe(0);
   });
 });
+
+// Every test above builds its own payload, so on its own this file only proves the decoder is
+// self-consistent — it would stay green if the backend renamed a claim, while every real user
+// hit the access-denied screen. These pin the claim NAMES to the backend's, the way
+// roles.test.ts pins BUDGET_ROLES to Roles.BudgetAccess.
+
+describe("claim names, mirrored from JwtAccessTokenIssuer", () => {
+  // Mirror of the constants in
+  // Backend/src/Identity/Infrastructure/Auth/JwtAccessTokenIssuer.cs:
+  //   RoleClaimType = "role", TenantIdClaimType = "tenant_id", TenantTypeClaimType = "tenant_type"
+  // (sub and email come from JwtRegisteredClaimNames). If those constants change, these fail
+  // first — which is the point, because claims.ts reads the literals directly.
+  const CLAIM_NAMES = {
+    role: "role",
+    tenantId: "tenant_id",
+    tenantType: "tenant_type",
+  } as const;
+
+  it("reads the role from RoleClaimType's exact literal", () => {
+    const token = tokenFor({ ...FULL_PAYLOAD, [CLAIM_NAMES.role]: "Accountant" });
+
+    expect(decodeAccessToken(token)?.role).toBe("Accountant");
+  });
+
+  it("does not read a role from the plural 'roles' key", () => {
+    // The specific rename this guards: JwtAccessTokenIssuer deliberately stamps the short,
+    // singular "role" (with MapInboundClaims = false). Were it ever to emit "roles" instead —
+    // the shape most JWT libraries default to — the decoder would fall through to "" and
+    // hasBudgetAccess would reject an Owner. A green suite must not be able to hide that.
+    const token = tokenFor({
+      sub: FULL_PAYLOAD.sub,
+      email: FULL_PAYLOAD.email,
+      roles: "Owner",
+      tenant_id: FULL_PAYLOAD.tenant_id,
+      tenant_type: FULL_PAYLOAD.tenant_type,
+      exp: FULL_PAYLOAD.exp,
+    });
+
+    expect(decodeAccessToken(token)?.role).toBe("");
+  });
+
+  it("does not read the tenant from any other key", () => {
+    const token = tokenFor({
+      sub: FULL_PAYLOAD.sub,
+      email: FULL_PAYLOAD.email,
+      role: "Owner",
+      tenantId: FULL_PAYLOAD.tenant_id,
+      tenant_type_name: "Internal",
+      exp: FULL_PAYLOAD.exp,
+    });
+
+    expect(decodeAccessToken(token)?.tenantId).toBe("");
+    expect(decodeAccessToken(token)?.tenantType).toBe("");
+  });
+
+  it("uses snake_case tenant keys, not camelCase", () => {
+    const token = tokenFor({
+      ...FULL_PAYLOAD,
+      [CLAIM_NAMES.tenantId]: "00000000-0000-0000-0000-0000000000aa",
+      [CLAIM_NAMES.tenantType]: "Internal",
+    });
+
+    expect(decodeAccessToken(token)?.tenantId).toBe("00000000-0000-0000-0000-0000000000aa");
+    expect(decodeAccessToken(token)?.tenantType).toBe("Internal");
+  });
+});

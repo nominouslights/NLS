@@ -23,6 +23,12 @@ internal sealed class WorkOrderRepository(FleetDbContext context) : IWorkOrderRe
     public Task<bool> VehicleExistsAsync(Guid vehicleId, CancellationToken cancellationToken = default) =>
         context.Vehicles.AnyAsync(v => v.Id == vehicleId, cancellationToken);
 
+    public Task<string?> FindVehicleUnitNumberAsync(Guid vehicleId, CancellationToken cancellationToken = default) =>
+        context.Vehicles
+            .Where(v => v.Id == vehicleId)
+            .Select(v => (string?)v.UnitNumber)
+            .FirstOrDefaultAsync(cancellationToken);
+
     public void Add(WorkOrder workOrder) => context.WorkOrders.Add(workOrder);
 
     public async Task<int> NextSequenceAsync(Guid tenantId, CancellationToken cancellationToken = default)

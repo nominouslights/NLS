@@ -1,6 +1,7 @@
 using NorthernLink.Shared.Kernel;
 using NorthernLink.Budgeting.Application.Abstractions;
 using NorthernLink.Budgeting.Domain.Actuals;
+using NorthernLink.Budgeting.Domain.Periods;
 
 namespace NorthernLink.Budgeting.Application.Actuals;
 
@@ -23,12 +24,20 @@ namespace NorthernLink.Budgeting.Application.Actuals;
 /// one, so within a tenant a date is covered at most once by construction. Re-deriving that here
 /// would be a second, weaker copy of a rule already enforced where periods are made.
 /// </para>
+/// <para>
+/// <b>It returns the covering period, because codes belong to one.</b> Each period owns its chart
+/// and the code string is only the cross-period identity, so the handlers look the transaction's
+/// code up <em>in this period</em>: a Q3 code on a December transaction is refused as
+/// <c>Budgeting.Code.NotFound</c> ("not found in this period"), and moving a transaction's date
+/// into another period means re-tagging it with that period's code. Without this, a period's
+/// rollup could carry spend against another period's chart.
+/// </para>
 /// </summary>
 public static class CoveringPeriodRule
 {
     /// <summary>
-    /// Success when one of the tenant's periods contains <paramref name="occurredOn"/> in its
-    /// inclusive StartsOn..EndsOn range; otherwise
+    /// The tenant's period that contains <paramref name="occurredOn"/> in its inclusive
+    /// StartsOn..EndsOn range; otherwise
     /// <see cref="ActualTransactionErrors.NoPeriodCoversDate"/>.
     /// <para>
     /// Reads every period of the tenant rather than asking the database for the covering one: a
@@ -36,18 +45,19 @@ public static class CoveringPeriodRule
     /// the overlap check already loads on every period create.
     /// </para>
     /// </summary>
-    public static async Task<Result> ValidateAsync(
+    public static async Task<Result<BudgetPeriod>> ValidateAsync(
         IBudgetPeriodRepository periods,
         DateOnly occurredOn,
         CancellationToken cancellationToken)
     {
         var all = await periods.GetAllAsync(cancellationToken);
 
-        // BudgetPeriod.Covers, not an inline comparison: the retirement rule maps transaction
-        // dates onto periods too, and two copies of "inclusive on both ends" would eventually
-        // disagree about a boundary day.
-        return all.Any(period => period.Covers(occurredOn))
-            ? Result.Success()
-            : Result.Failure(ActualTransactionErrors.NoPeriodCoversDate);
+        // BudgetPeriod.Covers, not an inline comparison: the read side maps transaction dates
+        // onto periods too, and two copies of "inclusive on both ends" would eventually disagree
+        // about a boundary day.
+        var covering = all.FirstOrDefault(period => period.Covers(occurredOn));
+        return covering is not null
+            ? Result.Success(covering)
+            : Result.Failure<BudgetPeriod>(ActualTransactionErrors.NoPeriodCoversDate);
     }
 }

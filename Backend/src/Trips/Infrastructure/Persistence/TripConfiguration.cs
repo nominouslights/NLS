@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using NorthernLink.Trips.Domain.Stops;
 using NorthernLink.Trips.Domain.Trips;
 
 namespace NorthernLink.Trips.Infrastructure.Persistence;
@@ -33,10 +34,22 @@ public sealed class TripConfiguration : IEntityTypeConfiguration<Trip>
         builder.Property(t => t.RouteName).HasColumnName("route_name").HasMaxLength(200);
         builder.Property(t => t.Origin).HasColumnName("origin").HasMaxLength(200);
         builder.Property(t => t.Destination).HasColumnName("destination").HasMaxLength(200);
+        // Province codes, NOT NULL DEFAULT 'MB': rows written before the Manitoba-only rule are
+        // Manitoba by definition (no vehicle has ever crossed the border), so the default is the
+        // backfill. Stop provinces live inside the stops jsonb (null = MB) and need no column.
+        builder.Property(t => t.OriginProvince)
+            .HasColumnName("origin_province")
+            .HasMaxLength(2)
+            .HasDefaultValue(CanadianProvince.Manitoba);
+        builder.Property(t => t.DestinationProvince)
+            .HasColumnName("destination_province")
+            .HasMaxLength(2)
+            .HasDefaultValue(CanadianProvince.Manitoba);
         builder.OwnsMany(t => t.Stops, stop => stop.ToJson("stops"));
         builder.Property(t => t.DistanceKm).HasColumnName("distance_km");
 
         builder.Property(t => t.BookingDayId).HasColumnName("booking_day_id");
+        builder.Property(t => t.ImportSource).HasColumnName("import_source").HasMaxLength(32);
         builder.Property(t => t.ScheduleTemplateId).HasColumnName("schedule_template_id");
         builder.Property(t => t.RoundTripKey).HasColumnName("round_trip_key").HasMaxLength(64);
         builder.Property(t => t.Direction)
@@ -75,6 +88,7 @@ public sealed class TripConfiguration : IEntityTypeConfiguration<Trip>
 
         builder.Ignore(t => t.IsOperationallyClosed);
         builder.Ignore(t => t.IsFinal);
+        builder.Ignore(t => t.IsCreatedByBookeoImport);
 
         builder.HasIndex(t => new { t.TenantId, t.TripNumber }).IsUnique();
         builder.HasIndex(t => new { t.TenantId, t.ScheduleTemplateId, t.ServiceDate, t.Direction }).IsUnique();

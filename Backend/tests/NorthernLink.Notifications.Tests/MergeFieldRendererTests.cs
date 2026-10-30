@@ -7,20 +7,15 @@ namespace NorthernLink.Notifications.Tests;
 /// <summary>Merge-field substitution, HTML encoding of values, and the text fallback.</summary>
 public class MergeFieldRendererTests
 {
-    private static readonly Dictionary<string, string> Values = new(StringComparer.Ordinal)
-    {
-        [MergeFields.PassengerName] = "Alex Moody",
-        [MergeFields.TripDate] = "Tuesday, August 4, 2026",
-        [MergeFields.PickupTime] = "8:30 AM",
-        [MergeFields.DropoffTime] = "11:15 AM",
-        [MergeFields.Route] = "Thompson – Lynn Lake",
-        [MergeFields.PickupStop] = "Thompson Terminal",
-        [MergeFields.PickupAddress] = "12 Station Rd, Thompson, MB R8N 0A1",
-        [MergeFields.DropoffStop] = "Lynn Lake Co-op",
-        [MergeFields.DropoffStopAddress] = "5 Co-op Lane, Lynn Lake, MB R0B 0W0",
-        [MergeFields.TripNumber] = "NL-1042",
-        [MergeFields.ClientName] = "Marcel Colomb First Nation",
-    };
+    /// <summary>
+    /// Values for every canonical token, derived from <see cref="MergeFields.All"/> rather than
+    /// hand-listed. A hand-listed dictionary is what let <c>SeatsNeeded</c> ship missing from
+    /// <see cref="MergeFieldRenderer.SampleValues"/>: the old "every canonical token" test looped
+    /// its own 11-entry list, so the 12th token was never rendered by anything.
+    /// </summary>
+    private static readonly Dictionary<string, string> Values =
+        MergeFields.All.ToDictionary(
+            token => token, token => $"value-for-{token}", StringComparer.Ordinal);
 
     [Fact]
     public void Every_canonical_token_substitutes_in_html()
@@ -29,12 +24,52 @@ public class MergeFieldRendererTests
 
         var rendered = MergeFieldRenderer.RenderHtml(template, Values);
 
-        foreach (var value in Values.Values)
+        foreach (var token in MergeFields.All)
         {
-            Assert.Contains(System.Net.WebUtility.HtmlEncode(value), rendered);
+            Assert.Contains(System.Net.WebUtility.HtmlEncode(Values[token]), rendered);
         }
 
         Assert.DoesNotContain("{{", rendered);
+    }
+
+    [Fact]
+    public void The_preview_sample_data_covers_every_canonical_token()
+    {
+        // The preview endpoint renders with SampleValues when the caller supplies none
+        // (PreviewEmailTemplateQueryHandler). A token missing from that dictionary renders as an
+        // empty string — Substitute never leaks the raw token — so the dispatcher previews a
+        // blank hole and has no way to tell it from a token that is genuinely empty. Looping the
+        // production list is the point: a new MergeFields constant with no sample fails here.
+        var missing = MergeFields.All
+            .Where(token => !MergeFieldRenderer.SampleValues.ContainsKey(token))
+            .ToList();
+
+        Assert.True(
+            missing.Count == 0,
+            $"MergeFieldRenderer.SampleValues has no sample for: {string.Join(", ", missing)}.");
+
+        var unknown = MergeFieldRenderer.SampleValues.Keys
+            .Where(token => !MergeFields.All.Contains(token, StringComparer.Ordinal))
+            .ToList();
+
+        Assert.True(
+            unknown.Count == 0,
+            $"MergeFieldRenderer.SampleValues carries tokens that are not canonical: {string.Join(", ", unknown)}.");
+
+        Assert.All(MergeFieldRenderer.SampleValues.Values, value => Assert.False(string.IsNullOrWhiteSpace(value)));
+    }
+
+    [Fact]
+    public void A_preview_with_no_caller_values_renders_no_blank_holes()
+    {
+        // The end-to-end shape of the same bug: {{SeatsNeeded}} on the CommunityBookingAtRisk
+        // template used to preview as "Trip at risk —  seat(s) needed".
+        var template = string.Join(" | ", MergeFields.All.Select(token => $"{{{{{token}}}}}"));
+
+        var rendered = MergeFieldRenderer.RenderHtml(template, MergeFieldRenderer.SampleValues);
+
+        Assert.DoesNotContain("{{", rendered);
+        Assert.All(rendered.Split('|'), segment => Assert.False(string.IsNullOrWhiteSpace(segment)));
     }
 
     [Fact]
@@ -42,7 +77,7 @@ public class MergeFieldRendererTests
     {
         var rendered = MergeFieldRenderer.RenderHtml("Hi {{ PassengerName }}!", Values);
 
-        Assert.Equal("Hi Alex Moody!", rendered);
+        Assert.Equal($"Hi {Values[MergeFields.PassengerName]}!", rendered);
     }
 
     [Fact]
@@ -73,7 +108,7 @@ public class MergeFieldRendererTests
     {
         var subject = MergeFieldRenderer.RenderSubject("Pickup {{Route}}", Values);
 
-        Assert.Equal("Pickup Thompson – Lynn Lake", subject);
+        Assert.Equal($"Pickup {Values[MergeFields.Route]}", subject);
     }
 
     [Fact]
