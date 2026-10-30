@@ -8,16 +8,16 @@ using Xunit;
 namespace NorthernLink.Budgeting.Tests;
 
 /// <summary>
-/// A budget code can only be retired once every period that uses it is Closed — and since codes
-/// belong to a period, "every period that uses it" is the code's own period: its items, and the
-/// transactions dated inside it. Mostly driven through <see cref="SetBudgetCodeActiveCommandHandler"/>
+/// A budget code cannot be retired while its own period uses it — its items, or the transactions
+/// dated inside it — and the refusal names which: items can be removed first, spend cannot be got
+/// round at all. Mostly driven through <see cref="SetBudgetCodeActiveCommandHandler"/>
 /// rather than the rule class directly, because the rule only matters as the answer that endpoint
 /// gives — including the parts the handler owns: the Draft/Open gate, the retire direction only,
 /// and only on a real transition.
 /// <para>
 /// The arm most easily missed is a code referenced by a transaction and no item at all; it has
-/// its own section below. The section on frozen periods pins the strict intersection of the
-/// close-gated rule with the Draft/Open chart gate, which awaits an owner decision.
+/// its own section below. The section on frozen periods pins that the Draft/Open chart gate answers
+/// first, which awaits an owner decision.
 /// </para>
 /// </summary>
 public class BudgetCodeRetirementRuleTests
@@ -133,7 +133,7 @@ public class BudgetCodeRetirementRuleTests
 
         var result = await RetireAsync(period, code.Id);
 
-        Assert.True(result.IsFailure);
+        Assert.Equal(BudgetCodeErrors.RetirementBlockedByItems(period.Label), result.Error);
         Assert.Equal("Budgeting.Code.PeriodNotClosed", result.Error.Code);
         Assert.Equal(ErrorType.Conflict, result.Error.Type);
         Assert.True(code.IsActive);
@@ -178,7 +178,7 @@ public class BudgetCodeRetirementRuleTests
 
         var result = await RetireAsync(period, code.Id);
 
-        Assert.True(result.IsFailure);
+        Assert.Equal(BudgetCodeErrors.RetirementBlockedBySpend(period.Label), result.Error);
         Assert.Equal("Budgeting.Code.PeriodNotClosed", result.Error.Code);
         Assert.Empty(_allocations.Allocations);
         Assert.True(code.IsActive);
@@ -202,9 +202,9 @@ public class BudgetCodeRetirementRuleTests
     [InlineData(PeriodState.Closed)]
     public async Task Outside_Draft_and_Open_the_chart_gate_refuses_before_the_rule_runs(PeriodState state)
     {
-        // The strict intersection of the two rules, pinned so that relaxing either is a visible
-        // decision: a Closed period would satisfy the retirement rule, but its chart is frozen, so
-        // a code its own period uses can never be retired. See BudgetCodeRetirementRule.
+        // Pinned so that relaxing the chart gate for retirement is a visible decision (an open
+        // owner question): today a frozen period's codes cannot be retired at all, used or not.
+        // See BudgetCodeRetirementRule.
         var (period, code) = Chart(state);
         Plan(period, code);
 
@@ -212,22 +212,6 @@ public class BudgetCodeRetirementRuleTests
 
         Assert.Equal(BudgetCodeErrors.PeriodNotEditable, result.Error);
         Assert.True(code.IsActive);
-    }
-
-    [Fact]
-    public async Task The_rule_itself_releases_a_code_whose_period_is_closed()
-    {
-        // Called directly: the handler never reaches it for a Closed period (above), but the
-        // rule's own answer is defined, so relaxing the chart gate for retirement needs no change
-        // here.
-        var (period, code) = Chart(PeriodState.Closed);
-        Plan(period, code);
-        Spend(code, period.StartsOn);
-
-        var result = await BudgetCodeRetirementRule.ValidateAsync(
-            _allocations, _actuals, _periods, period.Id, code.Id, code.Code, CancellationToken.None);
-
-        Assert.True(result.IsSuccess);
     }
 
     [Fact]
@@ -239,41 +223,48 @@ public class BudgetCodeRetirementRuleTests
         Assert.Equal(BudgetPeriodErrors.NotFound, result.Error);
     }
 
-    // --- The message is the user-facing copy ---
+    // --- The message is the user-facing copy, and names the remedy that actually works ---
 
     [Fact]
-    public async Task The_message_names_the_blocking_period_by_label()
+    public async Task Items_alone_tell_the_user_to_remove_them_first()
     {
-        // "a period is not closed" leaves the user hunting; "FY2026 Q4 is still open" does not.
         var (period, code) = Chart(PeriodState.Open);
         Plan(period, code);
 
+        var message = (await RetireAsync(period, code.Id)).Error.Message;
+
+        Assert.Equal(
+            "FY2026 Q4 has budget items on this code. Remove its items first, then retire the code — a planned line has to keep resolving to a live code.",
+            message);
+        Assert.DoesNotContain("close", message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Spend_says_the_code_cannot_be_retired()
+    {
+        var (period, code) = Chart(PeriodState.Open);
+        Spend(code, period.StartsOn);
+
+        var message = (await RetireAsync(period, code.Id)).Error.Message;
+
+        Assert.Equal(
+            "This budget code has spend recorded in FY2026 Q4. A code with spend recorded in its period cannot be retired — its transactions have to keep resolving to a live code.",
+            message);
+        Assert.DoesNotContain("close", message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Spend_wins_over_items_when_both_apply()
+    {
+        // Removing the items would not free the code, so naming them would send the user down a
+        // path that ends in the spend refusal anyway.
+        var (period, code) = Chart(PeriodState.Draft);
+        Plan(period, code);
+        Spend(code, period.EndsOn);
+
         var result = await RetireAsync(period, code.Id);
 
-        Assert.Contains("FY2026 Q4", result.Error.Message, StringComparison.Ordinal);
-        Assert.Contains("every period that uses it is closed", result.Error.Message, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Several_labels_are_all_named_in_the_order_given()
-    {
-        var message = BudgetCodeErrors.PeriodNotClosed(["FY2026 Q3", "FY2026 Q4"]).Message;
-
-        Assert.True(
-            message.IndexOf("FY2026 Q3", StringComparison.Ordinal)
-            < message.IndexOf("FY2026 Q4", StringComparison.Ordinal),
-            message);
-    }
-
-    [Fact]
-    public void A_long_list_of_labels_is_capped_and_summarized()
-    {
-        var message = BudgetCodeErrors.PeriodNotClosed(
-            ["FY2026 Q1", "FY2026 Q2", "FY2026 Q3", "FY2026 Q4", "FY2027 Q1"]).Message;
-
-        Assert.Contains("FY2026 Q1", message, StringComparison.Ordinal);
-        Assert.Contains("2 more periods", message, StringComparison.Ordinal);
-        Assert.DoesNotContain("FY2027 Q1", message, StringComparison.Ordinal);
+        Assert.Equal(BudgetCodeErrors.RetirementBlockedBySpend(period.Label), result.Error);
     }
 
     // --- Direction and idempotence: the handler's half of the rule ---

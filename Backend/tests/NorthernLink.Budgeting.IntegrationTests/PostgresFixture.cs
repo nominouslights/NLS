@@ -171,8 +171,10 @@ public sealed class PostgresFixture : IAsyncLifetime
             .Project(new BudgetPeriodProjection())
             .Project(new BudgetCodeProjection())
             .Project(new BudgetAllocationProjection())
+            .Project(new ActualTransactionProjection())
             .Project(new VendorProjection())
             .Project(new CostCentreProjection())
+            .Project(new QboConnectionProjection())
             .Build();
 
     private static ServiceProvider BuildProjectionServices(string connectionString)

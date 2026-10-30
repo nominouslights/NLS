@@ -122,9 +122,11 @@ public static class BudgetingEndpoints
         // deleted. DELETE exists only for a code created in error and never referenced —
         // IBudgetCodeUsageProbe turns it into a 409 otherwise.
         //
-        // deactivate additionally answers 409 Budgeting.Code.PeriodNotClosed while any period
-        // using the code is not yet Closed (BudgetCodeRetirementRule); activate carries no such
-        // check — restoring a code takes nothing away from anyone.
+        // deactivate additionally answers 409 Budgeting.Code.PeriodNotClosed (code kept for
+        // contract stability) while the code's own period uses it: the message says to remove the
+        // items first, or that a code with spend recorded in its period cannot be retired
+        // (BudgetCodeRetirementRule); activate carries no such check — restoring a code takes
+        // nothing away from anyone.
         //
         // No collision between the literal segments (starter-set, copy) and the id routes: the
         // literals are POST-only with one segment after "codes", and every {codeId} carries the

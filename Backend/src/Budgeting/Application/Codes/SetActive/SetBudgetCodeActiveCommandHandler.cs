@@ -9,11 +9,10 @@ namespace NorthernLink.Budgeting.Application.Codes.SetActive;
 /// Handles <see cref="SetBudgetCodeActiveCommand"/>. Idempotent: asking for the state a code is
 /// already in changes nothing and still succeeds, so a repeated click is not an error.
 /// <para>
-/// <b>Retiring is guarded; restoring is not.</b> A code can only be retired once every period
-/// that uses it is Closed — see <see cref="BudgetCodeRetirementRule"/> for the rule, and for how
-/// it composes with the Draft/Open requirement below (a code its own period uses cannot be
-/// retired at all). Restoring a code takes nothing away from anyone, so the <c>activate</c>
-/// direction carries no check at all.
+/// <b>Retiring is guarded; restoring is not.</b> A code cannot be retired while its own period
+/// uses it — items must be removed first, and a code with spend recorded in its period cannot be
+/// retired at all; see <see cref="BudgetCodeRetirementRule"/>. Restoring a code takes nothing
+/// away from anyone, so the <c>activate</c> direction carries no check at all.
 /// </para>
 /// <para>
 /// The guard runs only on an actual transition to retired, not on every retire request. Asking a

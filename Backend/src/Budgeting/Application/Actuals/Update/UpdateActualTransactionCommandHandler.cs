@@ -27,9 +27,9 @@ namespace NorthernLink.Budgeting.Application.Actuals.Update;
 /// unfixable without restoring a code the tenant has deliberately taken out of use.
 /// </para>
 /// <para>
-/// <c>BudgetCodeRetirementRule</c> makes that situation rarer — a code cannot be retired while a
-/// period using it is still open — but not impossible, because actuals stay editable in a Closed
-/// period by design, and a Closed period is precisely where a code is free to be retired.
+/// <c>BudgetCodeRetirementRule</c> makes that situation rare — a code with spend recorded in its
+/// period cannot be retired at all — but not impossible: a code retired before that rule existed
+/// can still carry transactions, and the narrowing costs nothing to keep for them.
 /// </para>
 /// <para>
 /// As on the record path, the period's <em>state</em> is deliberately never consulted: a closed
