@@ -51,8 +51,8 @@ import { usePeriodHold } from "@/lib/periodHold";
 // There is no period field and no tax field, and neither is an omission: the date decides the
 // period, and the platform never computes tax.
 //
-// The whole-dollar check is this app's convention rather than the server's rule — see
-// actualAmountError.
+// Amounts may carry cents (numeric(12,2)); a third decimal place is refused here rather than
+// rounded by the server — see actualAmountError.
 
 export default function ActualTransactionFormModal({
   periods,
@@ -134,6 +134,17 @@ export default function ActualTransactionFormModal({
     label: `${c.code} · ${c.name}${c.active ? "" : " (retired)"}`,
   }));
   const selectedCode = candidates.find((c) => c.id === effectiveCodeId) ?? null;
+  // The row the user actually picked, from whichever chart it came from — when the selection has
+  // followed its string into another period, this is what the followed row is compared against.
+  const pickedCode =
+    [openPeriodCodes, ...Object.values(charts)]
+      .flatMap((c) => c ?? [])
+      .find((c) => c.id === codeId) ?? null;
+  const followedDiffers =
+    followedByString &&
+    selectedCode !== null &&
+    pickedCode !== null &&
+    (pickedCode.name !== selectedCode.name || pickedCode.category !== selectedCode.category);
 
   function pickCode(id: string) {
     setCodeId(id);
@@ -264,7 +275,11 @@ export default function ActualTransactionFormModal({
           This date counts in {covering.label}, not {openPeriod.label}, so the code comes from{" "}
           {covering.label}&apos;s own chart
           {followedByString
-            ? ` — its own ${codeString} (same code string, a different row) has been picked.`
+            ? ` — its own ${codeString} (same code string, a different row) has been picked.${
+                followedDiffers && selectedCode && pickedCode
+                  ? ` In ${covering.label} it is “${selectedCode.name}” (${selectedCode.category.toLowerCase()}), not “${pickedCode.name}” (${pickedCode.category.toLowerCase()}) — check it is still the right code.`
+                  : ""
+              }`
             : codeString && effectiveCodeId === ""
               ? ` — it has no active ${codeString}, so pick a code.`
               : "."}
@@ -288,9 +303,9 @@ export default function ActualTransactionFormModal({
           value={amount}
           onChange={setAmount}
           min={0}
-          step={1}
-          placeholder="0"
-          hint="Whole dollars — always positive; the code's category says which side of the ledger it lands on"
+          step={0.01}
+          placeholder="0.00"
+          hint="To the cent — always positive; the code's category says which side of the ledger it lands on"
         />
       </div>
 

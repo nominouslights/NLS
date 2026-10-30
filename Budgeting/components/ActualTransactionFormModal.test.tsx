@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { BudgetCodeRecord } from "@/lib/api/budgeting";
+import type { ActualTransactionRecord, BudgetCodeRecord } from "@/lib/api/budgeting";
 import { toBudgetCode } from "@/lib/api/budgeting";
 import type { BudgetPeriod } from "@/lib/types";
 
@@ -147,5 +147,93 @@ describe("ActualTransactionFormModal — codes come from the covering period", (
       description: "Diesel",
     });
     expect(api.listActualTransactions).toHaveBeenCalledWith("p-q4");
+  });
+});
+
+describe("ActualTransactionFormModal — the code note when the string is followed", () => {
+  it("says so when the same code string in the other period has a different name or category", async () => {
+    api.listBudgetCodes.mockResolvedValue([
+      { ...code("q4-fuel", "FUEL"), name: "Fuel and lubricants", category: "Revenue" },
+    ]);
+    renderModal();
+    fireEvent.change(dateInput(), { target: { value: "2026-11-02" } });
+
+    await waitFor(() => expect(codeSelect().value).toBe("q4-fuel"));
+    expect(
+      screen.getByText(
+        /In Q4 2026 it is “Fuel and lubricants” \(revenue\), not “Name FUEL” \(expense\) — check it is still the right code\./,
+      ),
+    ).toBeTruthy();
+  });
+
+  it("adds nothing when the followed row has the same name and category", async () => {
+    api.listBudgetCodes.mockResolvedValue([code("q4-fuel", "FUEL")]);
+    renderModal();
+    fireEvent.change(dateInput(), { target: { value: "2026-11-02" } });
+
+    await waitFor(() => expect(codeSelect().value).toBe("q4-fuel"));
+    expect(screen.queryByText(/check it is still the right code/)).toBeNull();
+  });
+});
+
+// UpdateActualTransactionCommandHandler refuses only a MOVE onto a retired code
+// (actualCodeCandidates): a row already on one stays correctable in place.
+describe("ActualTransactionFormModal — a row on a retired code is corrected in place", () => {
+  const RETIRED = code("q3-old", "OLDFUEL", false);
+  const CHART = [...Q3_CODES, toBudgetCode(RETIRED)];
+  const row: ActualTransactionRecord = {
+    id: "t-9",
+    budgetCodeId: "q3-old",
+    code: "OLDFUEL",
+    name: "Name OLDFUEL",
+    category: "Expense",
+    serviceLine: null,
+    isCodeActive: false,
+    amountCad: 120,
+    occurredOn: "2026-08-15",
+    description: "Diesel, typo",
+    source: "Manual",
+    externalReference: null,
+    createdBy: null,
+    createdByEmail: null,
+    modifiedBy: null,
+    modifiedByEmail: null,
+    createdAtUtc: "2026-08-15T00:00:00Z",
+    updatedAtUtc: "2026-08-15T00:00:00Z",
+  };
+
+  it("keeps the retired code selected, explains it, and saves a cents correction against it", async () => {
+    api.updateActualTransaction.mockResolvedValue(undefined);
+    api.listActualTransactions.mockResolvedValue([
+      { ...row, amountCad: 120.45, description: "Diesel, invoice 4471" },
+    ]);
+    const onSaved = vi.fn();
+    render(
+      <ActualTransactionFormModal
+        periods={[Q3, Q4]}
+        openPeriod={Q3}
+        openPeriodCodes={CHART}
+        transaction={row}
+        onClose={() => {}}
+        onSaved={onSaved}
+      />,
+    );
+
+    expect(codeSelect().value).toBe("q3-old");
+    expect(screen.getByText(/This code was retired after the transaction was recorded/)).toBeTruthy();
+    // The retired code is offered only because this row sits on it.
+    expect(Array.from(codeSelect().options).map((o) => o.value)).toEqual(["q3-fuel", "q3-wage", "q3-old"]);
+
+    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "120.45" } });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Diesel, invoice 4471" } });
+    fireEvent.click(screen.getByText("SAVE CHANGES"));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(api.updateActualTransaction).toHaveBeenCalledWith("t-9", {
+      budgetCodeId: "q3-old",
+      amountCad: 120.45,
+      occurredOn: "2026-08-15",
+      description: "Diesel, invoice 4471",
+    });
   });
 });

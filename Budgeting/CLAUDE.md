@@ -211,8 +211,10 @@ storage tests, which need `sessionStorage`):
   For actuals: `periodCovering` / `actualDateError` against `CoveringPeriodRule` +
   `BudgetPeriod.Covers`, `actualCodeCandidates` against the *asymmetric* retired check (refused
   outright when recording, refused only for a move **onto** a retired code when correcting), and
-  `actualAmountError` / `actualDescriptionError` against `ActualTransaction.Validate`.
-  `toBudgetRollup` / `rollupDeltaPct` mirror no server rule — the rollup ships no band — so what
+  `actualAmountError` / `actualDescriptionError` against `ActualTransaction.Validate` (cents
+  accepted; a third decimal place refused rather than left for `ActualTransaction.Round`).
+  `toBudgetRollup` (summed in cents via `sumCad`, pinned with `$0.10 + $0.20` and a `$3.03`
+  plan against a `$3` actual) / `rollupDeltaPct` mirror no server rule — the rollup ships no band — so what
   is pinned there is the console's own half: the category split, the per-side totals, and both
   outer-join arms (a code with actuals but no plan reports *no baseline*, never an infinite
   overrun; a code with a plan but no actuals reports a plain −100%). And the codes list's grouping
@@ -263,13 +265,24 @@ storage tests, which need `sessionStorage`):
   selected code's group open and locked while the others start collapsed, "· 2 spellings" for
   `Fleet` / `FLEET`, Revenue last, a header click toggling its group, the fallback selection never
   tagged "· selected", a search opening and locking every group with "n of total" counts, the
-  "selected but not in these results" line and the no-match note, a refused delete (`InUse`)
-  keeping the selection, and a `PeriodNotClosed` retire refusal shown verbatim.
+  "selected but not in these results" line and the no-match note, a group keeping its
+  whole-group label ("Fleet", "· 2 spellings", "1 of 3") when a search leaves only its minority
+  spelling, a retired code found by the screen-level search, a refused delete (`InUse`)
+  keeping the selection, `PeriodNotClosed` and `PeriodNotEditable` refusals shown verbatim, and
+  the retire confirm naming what blocks a retire (items to remove first, recorded spend) while
+  keeping "the server may still refuse".
 - `components/ActualTransactionFormModal.test.tsx` — the per-period code rule: a date inside the
   entered period uses its chart with no fetch; a date in another period fetches **that** period's
   chart, offers only its rows, and follows the code string onto its own row; with no active code
   of that string the selection empties and the save is refused client-side; the POST carries the
-  covering period's code id and the post-save refetch reads the covering period's transactions.
+  covering period's code id and the post-save refetch reads the covering period's transactions;
+  when the followed row's name or category differs from the picked one the note says so; and a
+  row on a retired code opens on that code, explains it, and saves a cents correction against it
+  in place.
+- `components/screens/ActualsVsBudget.test.tsx` — the rollup and the entered period's chart load
+  under one error state: a chart failure stays shown after the rollup succeeds, RECORD is
+  disabled with a note saying why, a row click opens nothing, and RETRY refetches the chart; and
+  a `$3.03` plan against a `$3` actual prints `$3.03` / `$3` / `−$0.03`.
 - `components/screens/codes/CopyCodesPanel.test.tsx` — `vi.fn()` props: last period (a Closed
   one) is pre-selected, the first click only asks to confirm, the confirm note names both
   periods, the second click copies from the chosen source and shows the outcome summary, a
@@ -294,7 +307,8 @@ storage tests, which need `sessionStorage`):
   authorize URL, 503 `NotConfigured` shown verbatim with no navigation, DISCONNECT needing two
   clicks (then a refetch), CANCEL, and a failed load with RETRY.
 - `lib/money.test.ts` — `formatDeltaCad` / `formatDeltaPct` always write the sign out, so a
-  signed figure never rests on colour; `formatCadPrecise` prints cents only when there are cents
+  signed figure never rests on colour; `formatDeltaCad` prints cents to the cent (`−$0.30`, never
+  `−$0.3`) and never signs float residue; `formatCadPrecise` prints cents only when there are cents
   (the copied `formatCad` is whole-dollar and would print a `$3.03` item as `$3`).
 - `lib/workingPeriod.test.ts` — the "enter a period" contract, which mirrors no server rule (the
   backend scopes by route id and has no idea which period a tab is in): `suggestedPeriodId`
@@ -558,9 +572,11 @@ it are not guessable from the form, and all five are the server's:
   means re-picking the code.
 - **Expenses are positive amounts on expense codes.** The code's category says which side of the
   ledger a figure lands on, so the minus sign has no second job and a negative amount is refused
-  (`Budgeting.Actual.AmountNegative`). The console also enters actuals in **whole dollars**
-  (`actualAmountError`) — a console rule, not the server's: budget items dropped it when they
-  gained a cost build-up, actuals kept it because the rollup renders through `formatCad`.
+  (`Budgeting.Actual.AmountNegative`). Amounts are `numeric(12,2)` and may carry cents — the
+  whole-dollar rule this console used to impose is gone, as it is for budget items. The one
+  console-only rule (`actualAmountError`): more than two decimal places is refused rather than
+  sent, because the server would round it. Actuals vs Budget prints every figure through
+  `formatCadPrecise` and `formatDeltaCad`, and `toBudgetRollup` totals in cents (`sumCad`).
 - **Actuals are not frozen by the period lifecycle.** A closed period still takes and still
   corrects transactions, deliberately: an invoice dated the 30th lands on the 6th, and a closed
   period's actuals are exactly what a review is reading. Only the *plan* is frozen.
@@ -710,7 +726,7 @@ reports and future QuickBooks actuals will join on it.
 | `POST /api/budgeting/periods/{id}/codes` | 201 `{ id }` |
 | `PUT /api/budgeting/periods/{id}/codes/{codeId}` | 204; no `code` in the body — see below |
 | `POST /api/budgeting/periods/{id}/codes/{codeId}/activate\|deactivate` | 204 |
-| `DELETE /api/budgeting/periods/{id}/codes/{codeId}` | narrow; 409 when the code has children, or `Budgeting.Code.InUse` when this period has items on it |
+| `DELETE /api/budgeting/periods/{id}/codes/{codeId}` | narrow; 409 when the code has children, or `Budgeting.Code.InUse` when this period has items on it **or** spend dated inside this period is recorded against it |
 | `POST /api/budgeting/periods/{id}/codes/starter-set` | idempotent per period; 200 `{ created }` |
 | `POST /api/budgeting/periods/{id}/codes/copy` | body `{ sourcePeriodId }` → 200 `{ copied, skippedExisting, skippedRetired, sourceCodeCount }` (the first three sum to the fourth); 400 `CopySourceRequired` / `CopySourceIsTarget`, then the target's 404 `Budgeting.Period.NotFound` / 409 `PeriodNotEditable`, then 404 `CopySourceNotFound` (the **source**) |
 | `GET /api/budgeting/codes/owners` | the owner picker's options, from the user replica — **tenant-wide**, since it lists people, not codes |
@@ -1045,7 +1061,7 @@ Not used here on purpose: axe-core / pa11y / Lighthouse. They catch the automata
   migration `AddBudgetAllocations`), and with it `AllocationBudgetCodeUsageProbe` replaced
   `NeverReferencedBudgetCodeUsageProbe`, so `DELETE periods/{id}/codes/{codeId}` answers 409
   `Budgeting.Code.InUse` for a code with items in its period (codes are per period now, so the
-  probe is too).
+  probe is too) — and, since actuals shipped, for one with spend dated in its period.
 - ~~The `ActualTransaction` table and its RLS policies~~ — **shipped**
   (`budgeting.actual_transactions` + `rm_actual_transactions`, migration `AddActualTransactions`),
   with the five routes above and `BudgetCodeRetirementRule` alongside them. Still open:

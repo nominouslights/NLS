@@ -82,6 +82,7 @@ import type { BudgetCode, BudgetCodeCategory, BudgetPeriod, PeriodState } from "
 // all — and they still live beside the last mock array. The rollup tests below assert that the
 // percentage this file computes lands in the band the Variance screen would show for it.
 import { varianceKind, varianceLabel } from "@/lib/data";
+import { formatCadPrecise, formatDeltaCad } from "@/lib/money";
 
 // Shared fixtures for the period and allocation helpers below.
 
@@ -1985,6 +1986,24 @@ describe("toBudgetRollup", () => {
     expect(rollup.expense.deltaCad).toBe(-39_000);
   });
 
+  it("sums in cents, so cents-bearing rows total exactly and print to the cent", () => {
+    // Planned figures carry cents now (quantity × unit cost); a float sum of $0.10 + $0.20 is
+    // $0.30000000000000004 and would print beside its rows as a disagreement.
+    const cents = toBudgetRollup([
+      { ...rollupRow("EXP-A", "Expense", 0.1, 0), deltaCad: -0.1 },
+      { ...rollupRow("EXP-B", "Expense", 0.2, 0), deltaCad: -0.2 },
+      { ...rollupRow("EXP-C", "Expense", 3.03, 3), deltaCad: -0.03 },
+    ]);
+
+    expect(cents.expense.plannedCad).toBe(3.33);
+    expect(cents.expense.actualCad).toBe(3);
+    expect(cents.expense.deltaCad).toBe(-0.33);
+    // What the screen prints for those figures (formatCadPrecise / formatDeltaCad).
+    expect(formatCadPrecise(cents.expense.plannedCad)).toBe("$3.33");
+    expect(formatCadPrecise(cents.expense.actualCad)).toBe("$3");
+    expect(formatDeltaCad(cents.expense.deltaCad)).toBe("−$0.33");
+  });
+
   it("reports an empty rollup, which is the screen's empty state", () => {
     expect(toBudgetRollup([]).empty).toBe(true);
     expect(toBudgetRollup(rows).empty).toBe(false);
@@ -2101,11 +2120,12 @@ describe("actualCodeCandidates", () => {
 });
 
 // actualAmountError / actualDescriptionError mirror ActualTransaction.Validate (AmountRequired /
-// AmountNegative / AmountTooLarge / DescriptionRequired / DescriptionTooLong). The whole-dollar
-// rule is this app's own, stricter than the server's (budget items dropped it; actuals kept it).
+// AmountNegative / AmountTooLarge / DescriptionRequired / DescriptionTooLong). Cents are
+// accepted (numeric(12,2)); the one console-only rule is refusing a third decimal place, which
+// the server would otherwise round away (ActualTransaction.Round).
 
 describe("actualAmountError", () => {
-  it.each(["0", "1", "139400", " 250 "])("accepts %j", (text) => {
+  it.each(["0", "1", "139400", " 250 ", "12.50", "3.03", "0.29", "1.1"])("accepts %j", (text) => {
     expect(actualAmountError(text)).toBeNull();
   });
 
@@ -2113,8 +2133,8 @@ describe("actualAmountError", () => {
     expect(actualAmountError(text)).toBe("Enter an amount.");
   });
 
-  it("refuses cents — the app enters whole dollars", () => {
-    expect(actualAmountError("12.50")).toContain("whole dollars");
+  it.each(["12.505", "1.005", "0.001"])("refuses more than two decimal places in %j", (text) => {
+    expect(actualAmountError(text)).toContain("at most two decimal places");
   });
 
   it("refuses a negative amount, naming the convention that replaces the minus sign", () => {

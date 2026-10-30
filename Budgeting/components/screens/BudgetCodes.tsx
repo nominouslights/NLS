@@ -651,12 +651,12 @@ export default function BudgetCodes({
                 {confirmingRetire && (
                   <ConfirmNote>
                     Retiring {selected.code} in {period.label} changes {period.label}&apos;s chart
-                    only — other periods keep their own {selected.code}. Items already planned on
-                    it here stay and still count, but no item in {period.label} can be added to it
-                    or changed on it until it is restored. The server may still refuse — for
-                    instance until the periods using the code have closed — and its reason is
-                    shown above as given. Click CONFIRM RETIRE to proceed; selecting another code
-                    cancels.
+                    only — other periods keep their own {selected.code}. A retired code stays
+                    listed but takes no new items until it is restored. It can be retired only
+                    while nothing in {period.label} uses it: budget items planned on it here have
+                    to be removed first, and a code with spend recorded in {period.label} cannot
+                    be retired. The server may still refuse, and its reason is shown above as
+                    given. Click CONFIRM RETIRE to proceed; selecting another code cancels.
                   </ConfirmNote>
                 )}
 

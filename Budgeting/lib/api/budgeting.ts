@@ -2341,12 +2341,11 @@ export const ACTUAL_SOURCE_LABELS: Record<ActualTransactionSource, string> = {
 
 /**
  * Client-side check of the amount text before a round trip, mirroring ActualTransaction.Validate
- * (AmountRequired / AmountNegative / AmountTooLarge), with one rule stricter than the server's:
- * actuals are entered in whole dollars, because the rollup and the transaction list render
- * through formatCad at 0 dp and a silently-rounded entry is worse than a refused one. (Budget
- * items dropped that rule when they gained a quantity × unit-cost build-up; actuals have no
- * build-up and kept it — lifting it means moving this screen onto formatCadPrecise too.) The
- * server re-checks and its answer is the one that counts.
+ * (AmountRequired / AmountNegative / AmountTooLarge). Amounts are numeric(12,2) and may carry
+ * cents — a transaction is copied off an invoice, and an invoice lands on cents. The one rule
+ * stricter than the server's: more than two decimal places is refused rather than sent, because
+ * the server would round it (ActualTransaction.Round) and a silently-rounded entry is worse than
+ * a refused one. The server re-checks and its answer is the one that counts.
  *
  * "Negative" is worth its own message rather than a generic one: the server refuses a minus sign
  * because the code's category — not the sign — says which side of the ledger a figure lands on,
@@ -2356,10 +2355,10 @@ export function actualAmountError(text: string): string | null {
   if (text.trim() === "") return "Enter an amount.";
   const n = Number(text);
   if (!Number.isFinite(n)) return "Enter an amount.";
-  if (!Number.isInteger(n)) return "Enter whole dollars — no cents.";
   if (n < 0) {
     return "The amount cannot be negative — record an expense as a positive amount on an expense code.";
   }
+  if (toHundredths(n) / 100 !== n) return "Enter the amount to the cent — at most two decimal places.";
   if (n > ACTUAL_AMOUNT_MAX) return "The amount is too large.";
   return null;
 }
@@ -2464,9 +2463,11 @@ export function toBudgetRollup(rows: BudgetRollupRowRecord[]): BudgetRollup {
     return {
       category,
       rows: groupRows,
-      plannedCad: groupRows.reduce((sum, r) => sum + r.plannedCad, 0),
-      actualCad: groupRows.reduce((sum, r) => sum + r.actualCad, 0),
-      deltaCad: groupRows.reduce((sum, r) => sum + r.deltaCad, 0),
+      // Summed in integer cents (sumCad): planned figures carry cents now, and a float sum
+      // would print $0.30000000000000004 beside the rows it totals.
+      plannedCad: sumCad(groupRows.map((r) => r.plannedCad)),
+      actualCad: sumCad(groupRows.map((r) => r.actualCad)),
+      deltaCad: sumCad(groupRows.map((r) => r.deltaCad)),
     };
   };
 

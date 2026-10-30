@@ -15,6 +15,20 @@ describe("formatDeltaCad", () => {
     expect(formatDeltaCad(delta)).toBe(expected);
   });
 
+  it.each<[number, string]>([
+    [-0.03, "−$0.03"],
+    [-0.3, "−$0.30"],
+    [0.1 + 0.2, "+$0.30"],
+    [1234.5, "+$1,234.50"],
+  ])("prints a cents-bearing delta %d to the cent as %s", (delta, expected) => {
+    expect(formatDeltaCad(delta)).toBe(expected);
+  });
+
+  it("never signs float residue that rounds to zero cents", () => {
+    expect(formatDeltaCad(1e-9)).toBe("$0");
+    expect(formatDeltaCad(-1e-9)).toBe("$0");
+  });
+
   it("prints zero unsigned", () => {
     expect(formatDeltaCad(0)).toBe("$0");
   });

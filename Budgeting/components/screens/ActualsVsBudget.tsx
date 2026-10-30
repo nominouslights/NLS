@@ -5,10 +5,9 @@ import { colors, fonts, rowSurface } from "@/lib/theme";
 import { MonoTag, StatusChip } from "@/components/ui/Chip";
 import { ActionButton } from "@/components/ui/Button";
 import { MetricTile } from "@/components/ui/MetricTile";
-import { formatCad } from "@/lib/api/format";
 import type { BudgetCode, BudgetPeriod } from "@/lib/types";
 import { varianceKind, varianceLabel } from "@/lib/data";
-import { formatDeltaCad } from "@/lib/money";
+import { formatCadPrecise, formatDeltaCad } from "@/lib/money";
 import { ApiError } from "@/lib/api/transport";
 import {
   budgetRollup,
@@ -44,6 +43,10 @@ import { EmptyNote, Num, Screen, TableHead } from "@/components/screens/shared";
 // Every delta is written with its sign (formatDeltaCad) and carries the band's chip — glyph and
 // words — so the direction survives a grayscale print and any colour-vision deficiency.
 //
+// Every figure prints through formatCadPrecise and every client-side total is summed in cents
+// (toBudgetRollup → sumCad): planned items and actuals both carry cents, and a $3.03 plan beside
+// a $3 actual must not read "$3 · $3 · −$0.03".
+//
 // Reads are projections: after a write the modal refetches the affected period's transactions
 // until the new VALUES are visible, and only then does this screen refresh the rollup, whose
 // totals read from the same projection.
@@ -74,6 +77,8 @@ export default function ActualsVsBudget({
     transactions: ActualTransactionRecord[];
   } | null>(null);
   const [codes, setCodes] = useState<BudgetCode[] | null>(null);
+  /** The last chart fetch failed — with codes still null, recording and correcting are blocked. */
+  const [codesFailed, setCodesFailed] = useState(false);
   const [error, setError] = useState<{ message: string; code: string } | null>(null);
   const [busy, setBusy] = useState(false);
   /** Two-click remove: holds the transaction id awaiting its confirming click. */
@@ -90,27 +95,40 @@ export default function ActualsVsBudget({
   }, []);
 
   /**
-   * The period's two reads, together. then-callbacks per the Stops.tsx lint idiom; isActive
-   * guards a late resolve on unmount, and the fetched period travels with the result so a
-   * response that lands after the picker moved on is recognisably stale rather than shown under
-   * the wrong period's name.
+   * The period's reads, together: the rollup and its transactions, and the entered period's
+   * chart — codes belong to a period, and a new transaction dated inside this period must be
+   * tagged with one of THIS period's codes. One load, one error state, so RETRY refetches all of
+   * it and one read's success never wipes the other's failure. The two settle independently: a
+   * chart that fails still lets the rollup show, and the record button says why it is disabled.
+   *
+   * then-callbacks per the Stops.tsx lint idiom; isActive guards a late resolve on unmount, and
+   * the fetched period travels with the result so a response that lands after the picker moved
+   * on is recognisably stale rather than shown under the wrong period's name.
    */
   const load = useCallback(
     (isActive: () => boolean = () => true) => {
-      Promise.all([budgetRollup(periodId), listActualTransactions(periodId)]).then(
-        ([rows, transactions]) => {
-          if (isActive()) {
-            setData({ periodId, rows, transactions });
-            setError(null);
-          }
-        },
-        (e) => {
-          if (isActive()) {
-            setData({ periodId, rows: [], transactions: [] });
-            applyError(e);
-          }
-        },
-      );
+      Promise.allSettled([
+        Promise.all([budgetRollup(periodId), listActualTransactions(periodId)]),
+        listBudgetCodes(periodId),
+      ]).then(([reads, chart]) => {
+        if (!isActive()) return;
+        if (reads.status === "fulfilled") {
+          const [rows, transactions] = reads.value;
+          setData({ periodId, rows, transactions });
+        } else {
+          setData({ periodId, rows: [], transactions: [] });
+        }
+        if (chart.status === "fulfilled") {
+          setCodes(chart.value.map(toBudgetCode));
+          setCodesFailed(false);
+        } else {
+          // A chart already loaded stays usable; the flag only matters while codes is null.
+          setCodesFailed(true);
+        }
+        if (reads.status === "rejected") applyError(reads.reason);
+        else if (chart.status === "rejected") applyError(chart.reason);
+        else setError(null);
+      });
     },
     [periodId, applyError],
   );
@@ -123,29 +141,14 @@ export default function ActualsVsBudget({
     };
   }, [load]);
 
-  // The entered period's chart — codes belong to a period, and a new transaction dated inside
-  // this period must be tagged with one of THIS period's codes.
-  useEffect(() => {
-    let active = true;
-    listBudgetCodes(periodId).then(
-      (records) => {
-        if (active) setCodes(records.map(toBudgetCode));
-      },
-      (e) => {
-        if (active) applyError(e);
-      },
-    );
-    return () => {
-      active = false;
-    };
-  }, [periodId, applyError]);
-
   // Data fetched for another period is not this period's data — it is stale, and reads as
   // loading rather than as figures under the wrong heading.
   const loaded = data !== null && data.periodId === periodId;
   const transactions = loaded ? data.transactions : [];
   const rollup = toBudgetRollup(loaded ? data.rows : []);
   const label = period.label;
+  /** No chart to pick from: the load failed and nothing loaded before it. */
+  const codesUnavailable = codes === null && codesFailed;
 
   /** Called once a write is visible in the projection: the rollup is what depends on it. */
   function refresh() {
@@ -179,6 +182,8 @@ export default function ActualsVsBudget({
   }
 
   function openModal(transaction: ActualTransactionRecord | null) {
+    // Without a chart the form has nothing to offer; the note by the record button says so.
+    if (codes === null) return;
     setConfirmRemoveId(null);
     setModal({ transaction });
   }
@@ -213,7 +218,7 @@ export default function ActualsVsBudget({
             iconBg="rgba(31,111,178,.10)"
             iconColor={colors.blue}
             label="Planned revenue"
-            value={loaded ? formatCad(rollup.revenue.plannedCad) : "…"}
+            value={loaded ? formatCadPrecise(rollup.revenue.plannedCad) : "…"}
             valueColor={colors.headingBright}
           />
           <MetricTile
@@ -221,7 +226,7 @@ export default function ActualsVsBudget({
             iconBg="rgba(31,111,178,.10)"
             iconColor={colors.blue}
             label="Actual revenue"
-            value={loaded ? formatCad(rollup.revenue.actualCad) : "…"}
+            value={loaded ? formatCadPrecise(rollup.revenue.actualCad) : "…"}
             valueColor={colors.headingBright}
           />
           <MetricTile
@@ -229,7 +234,7 @@ export default function ActualsVsBudget({
             iconBg="rgba(31,111,178,.10)"
             iconColor={colors.blue}
             label="Planned expense"
-            value={loaded ? formatCad(rollup.expense.plannedCad) : "…"}
+            value={loaded ? formatCadPrecise(rollup.expense.plannedCad) : "…"}
             valueColor={colors.headingBright}
           />
           <MetricTile
@@ -237,7 +242,7 @@ export default function ActualsVsBudget({
             iconBg="rgba(31,111,178,.10)"
             iconColor={colors.blue}
             label="Actual expense"
-            value={loaded ? formatCad(rollup.expense.actualCad) : "…"}
+            value={loaded ? formatCadPrecise(rollup.expense.actualCad) : "…"}
             valueColor={colors.headingBright}
           />
         </div>
@@ -280,6 +285,12 @@ export default function ActualsVsBudget({
             + RECORD TRANSACTION
           </ActionButton>
         </div>
+        {codesUnavailable && (
+          <EmptyNote>
+            {label}&apos;s budget codes could not be loaded, so transactions cannot be recorded or
+            corrected yet — RETRY above loads them again.
+          </EmptyNote>
+        )}
 
         {loaded && transactions.length === 0 ? (
           <EmptyNote>
@@ -299,7 +310,7 @@ export default function ActualsVsBudget({
                     onClick={() => openModal(t)}
                     style={{
                       ...rowSurface(false),
-                      cursor: "pointer",
+                      cursor: codes === null ? "default" : "pointer",
                       padding: "11px 14px",
                       display: "flex",
                       alignItems: "center",
@@ -343,7 +354,7 @@ export default function ActualsVsBudget({
                       </div>
                     </div>
                     <div style={{ width: 150, textAlign: "right", flex: "none" }}>
-                      <Num size={13.5}>{formatCad(t.amountCad)}</Num>
+                      <Num size={13.5}>{formatCadPrecise(t.amountCad)}</Num>
                     </div>
                     <div
                       style={{ width: 150, textAlign: "right", flex: "none" }}
@@ -404,8 +415,8 @@ function RollupSection({ group }: { group: BudgetRollupGroup }) {
       >
         <div style={sectionLabelStyle}>{revenue ? "Revenue codes" : "Expense codes"}</div>
         <span style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim }}>
-          {group.rows.length} · planned {formatCad(group.plannedCad)} · actual{" "}
-          {formatCad(group.actualCad)}
+          {group.rows.length} · planned {formatCadPrecise(group.plannedCad)} · actual{" "}
+          {formatCadPrecise(group.actualCad)}
         </span>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 8, marginLeft: "auto" }}>
           <StatusChip kind={varianceKind(pct)} label={varianceLabel(pct)} />
@@ -463,10 +474,10 @@ function RollupSection({ group }: { group: BudgetRollupGroup }) {
                     </div>
                   </div>
                   <div style={{ width: 150, textAlign: "right", flex: "none" }}>
-                    <Num>{formatCad(r.plannedCad)}</Num>
+                    <Num>{formatCadPrecise(r.plannedCad)}</Num>
                   </div>
                   <div style={{ width: 150, textAlign: "right", flex: "none" }}>
-                    <Num>{formatCad(r.actualCad)}</Num>
+                    <Num>{formatCadPrecise(r.actualCad)}</Num>
                   </div>
                   <div style={{ width: 150, textAlign: "right", flex: "none" }}>
                     <Num>{formatDeltaCad(r.deltaCad)}</Num>

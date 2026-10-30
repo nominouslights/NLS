@@ -223,6 +223,61 @@ describe("BudgetCodes screen — grouped by cost centre", () => {
     expect(screen.getByText(/No code or name matches/)).toBeTruthy();
   });
 
+  it("keeps a group's whole-group label while a search narrows it to a minority spelling", async () => {
+    renderChart("c-rent");
+    await screen.findAllByText("Hangar rent");
+
+    // TIRES is the one code spelled "FLEET"; the group is still labelled by its most common
+    // spelling, still says it has two, and counts against the whole group.
+    fireEvent.change(screen.getByPlaceholderText("Code or name"), { target: { value: "tires" } });
+    const fleet = header("Fleet");
+    expect(fleet).toBeDefined();
+    expect(fleet.textContent).toContain("· 2 spellings");
+    expect(fleet.textContent).toContain("1 of 3");
+    // The only matching code's own spelling never becomes the label.
+    expect(header("FLEET")).toBeUndefined();
+  });
+
+  it("finds a retired code in the screen-level search", async () => {
+    api.listBudgetCodes.mockResolvedValue([
+      ...CODES,
+      { ...code("c-oil", "OIL", "Engine oil", "Expense", "Fleet"), isActive: false },
+    ]);
+    api.listBudgetOwnerCandidates.mockResolvedValue([]);
+    api.listCostCentres.mockResolvedValue([]);
+    render(<BudgetCodes period={PERIOD} periods={[PERIOD]} selId="c-rent" onSelect={vi.fn()} />);
+    await screen.findAllByText("Hangar rent");
+
+    fireEvent.change(screen.getByPlaceholderText("Code or name"), { target: { value: "engine" } });
+    expect(screen.getByText("Engine oil")).toBeTruthy();
+    expect(screen.getByText("Retired")).toBeTruthy();
+    expect(header("Fleet").textContent).toContain("1 of 4");
+  });
+
+  it("shows a refused write's PeriodNotEditable message verbatim", async () => {
+    renderChart("c-rent");
+    await screen.findAllByText("Hangar rent");
+    const message = "A period's budget codes can only be changed while the period is Draft or Open.";
+    api.deleteBudgetCode.mockRejectedValue(new ApiError("Budgeting.Code.PeriodNotEditable", message, 409));
+
+    fireEvent.click(screen.getByText("DELETE"));
+    fireEvent.click(screen.getByText("CONFIRM DELETE"));
+
+    expect(await screen.findByText(message)).toBeTruthy();
+  });
+
+  it("says in the retire confirm what blocks a retire, without promising it", async () => {
+    renderChart("c-rent");
+    await screen.findAllByText("Hangar rent");
+
+    fireEvent.click(screen.getByText("RETIRE"));
+    const note = screen.getByText(/Retiring RENT in Q4 2026 changes Q4 2026's chart only/);
+    expect(note.textContent).toContain("budget items planned on it here have to be removed first");
+    expect(note.textContent).toContain("a code with spend recorded in Q4 2026 cannot be retired");
+    expect(note.textContent).toContain("The server may still refuse");
+    expect(note.textContent).not.toContain("still count");
+  });
+
   it("keeps the selection when a delete is refused, and shows the server's message", async () => {
     const onSelect = renderChart("c-rent");
     await screen.findAllByText("Hangar rent");
