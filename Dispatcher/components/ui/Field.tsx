@@ -57,6 +57,7 @@ export function TextField({
   disabled = false,
   type = "text",
   autoComplete,
+  list,
 }: {
   label: string;
   value: string;
@@ -68,6 +69,7 @@ export function TextField({
   disabled?: boolean;
   type?: "text" | "email" | "password";
   autoComplete?: string;
+  list?: string;
 }) {
   return (
     <div>
@@ -75,6 +77,7 @@ export function TextField({
       <input
         type={type}
         autoComplete={autoComplete}
+        list={list}
         className="nl-input"
         value={value}
         maxLength={maxLength}

@@ -13,6 +13,7 @@ import { ApiError } from "@/lib/api/transport";
 import {
   budgetCodeFormatError,
   costCentreApplies,
+  costCentreSuggestions,
   createBudgetCode,
   listBudgetCodes,
   normalizeBudgetCode,
@@ -77,7 +78,8 @@ export default function BudgetCodeFormModal({
 }: {
   /** null → create mode; a code → edit mode (its code string is fixed). */
   code: BudgetCode | null;
-  /** Every code, for the parent picker. Filtered by parentCandidates. */
+  /** Every code, for the parent picker (filtered by parentCandidates) and the cost-centre
+   *  suggestions (costCentreSuggestions — one canonical spelling per existing cost centre). */
   allCodes: BudgetCode[];
   owners: BudgetOwnerOption[];
   onClose: () => void;
@@ -112,6 +114,10 @@ export default function BudgetCodeFormModal({
       label: `${c.code} · ${c.name}`,
     })),
   ];
+
+  // Existing cost centres, offered through a native <datalist> so a new code can reuse a spelling
+  // rather than start a near-duplicate group on the Budget Codes screen. Still free text.
+  const costCentreOptions = costCentreSuggestions(allCodes);
 
   const ownerOptions = [
     { value: NONE, label: "— Unassigned —" },
@@ -273,14 +279,22 @@ export default function BudgetCodeFormModal({
         {/* A cost centre attributes cost, so a revenue code never has one — the field is not
             offered at all, and GL account code simply takes the first column. */}
         {costCentreApplies(category) && (
-          <TextField
-            label="Cost centre"
-            value={costCentre}
-            onChange={setCostCentre}
-            maxLength={32}
-            placeholder="OPS-01"
-            hint="Optional"
-          />
+          <>
+            <TextField
+              label="Cost centre"
+              value={costCentre}
+              onChange={setCostCentre}
+              maxLength={32}
+              placeholder="OPS-01"
+              hint="Optional — pick an existing one to keep groups together"
+              list="budget-code-cost-centres"
+            />
+            <datalist id="budget-code-cost-centres">
+              {costCentreOptions.map((cc) => (
+                <option key={cc} value={cc} />
+              ))}
+            </datalist>
+          </>
         )}
         <TextField
           label="GL account code"

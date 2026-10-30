@@ -9,10 +9,14 @@ import {
   allocationJustificationError,
   budgetCodeCategoryKind,
   budgetCodeFormatError,
+  budgetCodeGroupKey,
   canEditAllocations,
   costCentreApplies,
+  costCentreSuggestions,
   coverage,
+  groupBudgetCodesByCostCentre,
   hasPlannedAmounts,
+  matchesBudgetCodeQuery,
   nextTransition,
   normalizeBudgetCode,
   ownerLabel,
@@ -435,6 +439,192 @@ describe("costCentreApplies", () => {
 
   it("does not apply to a revenue code — the server rejects the combination", () => {
     expect(costCentreApplies("Revenue")).toBe(false);
+  });
+});
+
+// The grouping helpers mirror no server rule except through costCentreApplies: a revenue code
+// never carries a cost centre (BudgetCodeErrors.CostCentreNotAllowedForRevenue), so revenue codes
+// get their own bucket. Everything else here is display — case-folding groups spellings, it never
+// rewrites what the server stored.
+
+describe("budgetCodeGroupKey", () => {
+  it("puts a revenue code in the revenue bucket, even with a stray cost centre", () => {
+    expect(budgetCodeGroupKey({ category: "Revenue", costCentre: null })).toBe("category:Revenue");
+    expect(budgetCodeGroupKey({ category: "Revenue", costCentre: "OPS-01" })).toBe(
+      "category:Revenue",
+    );
+  });
+
+  it("puts an expense code without a cost centre in the no-cost-centre group", () => {
+    expect(budgetCodeGroupKey({ category: "Expense", costCentre: null })).toBe("none");
+    expect(budgetCodeGroupKey({ category: "Expense", costCentre: "   " })).toBe("none");
+  });
+
+  it("gives spellings that differ only in case the same key", () => {
+    expect(budgetCodeGroupKey({ category: "Expense", costCentre: "Ops-01" })).toBe(
+      budgetCodeGroupKey({ category: "Expense", costCentre: "OPS-01" }),
+    );
+  });
+
+  it("does not let a cost centre spelled 'Revenue' collide with the revenue bucket", () => {
+    expect(budgetCodeGroupKey({ category: "Expense", costCentre: "Revenue" })).not.toBe(
+      budgetCodeGroupKey({ category: "Revenue", costCentre: null }),
+    );
+  });
+});
+
+describe("groupBudgetCodesByCostCentre", () => {
+  it("orders named cost centres A–Z, then no cost centre, then revenue", () => {
+    const groups = groupBudgetCodesByCostCentre([
+      makeCode("rev", "Revenue"),
+      makeCode("bare"),
+      { ...makeCode("z"), costCentre: "Zeta" },
+      { ...makeCode("a"), costCentre: "alpha" },
+    ]);
+    expect(groups.map((g) => g.label)).toEqual(["alpha", "Zeta", "No cost centre", "Revenue"]);
+    expect(groups.map((g) => g.kind)).toEqual([
+      "costCentre",
+      "costCentre",
+      "noCostCentre",
+      "category",
+    ]);
+  });
+
+  it("sorts numbered cost centres numerically, so CC-2 comes before CC-10", () => {
+    const groups = groupBudgetCodesByCostCentre([
+      { ...makeCode("ten"), costCentre: "CC-10" },
+      { ...makeCode("two"), costCentre: "CC-2" },
+    ]);
+    expect(groups.map((g) => g.label)).toEqual(["CC-2", "CC-10"]);
+  });
+
+  it("skips empty groups, and returns nothing for no codes", () => {
+    expect(groupBudgetCodesByCostCentre([])).toEqual([]);
+    const groups = groupBudgetCodesByCostCentre([makeCode("bare")]);
+    expect(groups.map((g) => g.key)).toEqual(["none"]);
+  });
+
+  it("keeps the server's order within a group", () => {
+    const groups = groupBudgetCodesByCostCentre([
+      { ...makeCode("c"), costCentre: "Fleet" },
+      { ...makeCode("a"), costCentre: "Fleet" },
+      { ...makeCode("b"), costCentre: "Fleet" },
+    ]);
+    expect(groups[0].codes.map((c) => c.id)).toEqual(["c", "a", "b"]);
+  });
+
+  it("labels a merged group with its most common spelling and lists every variant", () => {
+    const groups = groupBudgetCodesByCostCentre([
+      { ...makeCode("one"), costCentre: "fleet" },
+      { ...makeCode("two"), costCentre: "Fleet" },
+      { ...makeCode("three"), costCentre: "Fleet" },
+      { ...makeCode("four"), costCentre: "FLEET" },
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].label).toBe("Fleet");
+    expect([...groups[0].spellings].sort()).toEqual(["FLEET", "Fleet", "fleet"]);
+    expect(groups[0].codes).toHaveLength(4);
+  });
+
+  it("breaks an equal-count spelling tie by code-point order, whatever the input order", () => {
+    const fleet = (id: string, costCentre: string) => ({ ...makeCode(id), costCentre });
+    const forward = groupBudgetCodesByCostCentre([
+      fleet("a", "Fleet"),
+      fleet("b", "Fleet"),
+      fleet("c", "FLEET"),
+      fleet("d", "FLEET"),
+    ]);
+    const reversed = groupBudgetCodesByCostCentre([
+      fleet("d", "FLEET"),
+      fleet("c", "FLEET"),
+      fleet("b", "Fleet"),
+      fleet("a", "Fleet"),
+    ]);
+    // Upper-case letters precede lower-case ones in code-point order.
+    expect(forward[0].label).toBe("FLEET");
+    expect(reversed[0].label).toBe("FLEET");
+    expect(forward[0].spellings).toEqual(["FLEET", "Fleet"]);
+  });
+
+  it("includes retired codes in their group", () => {
+    const groups = groupBudgetCodesByCostCentre([
+      { ...makeCode("old", "Expense", false), costCentre: "Fleet" },
+    ]);
+    expect(groups[0].codes.map((c) => c.id)).toEqual(["old"]);
+  });
+
+  it("agrees with budgetCodeGroupKey for every code it places", () => {
+    const codes = [
+      makeCode("rev", "Revenue"),
+      makeCode("bare"),
+      { ...makeCode("f"), costCentre: "fleet" },
+      { ...makeCode("g"), costCentre: "FLEET" },
+    ];
+    for (const group of groupBudgetCodesByCostCentre(codes)) {
+      for (const code of group.codes) expect(budgetCodeGroupKey(code)).toBe(group.key);
+    }
+  });
+});
+
+describe("matchesBudgetCodeQuery", () => {
+  const fuel = {
+    ...makeCode("zbb-fuel-01"),
+    name: "Diesel and gasoline",
+    description: "Pump fuel for the fleet",
+    costCentre: "Fleet",
+  };
+
+  it("matches everything when the query is blank or whitespace", () => {
+    expect(matchesBudgetCodeQuery(fuel, "")).toBe(true);
+    expect(matchesBudgetCodeQuery(fuel, "   ")).toBe(true);
+  });
+
+  it("matches the code case-insensitively", () => {
+    expect(matchesBudgetCodeQuery(fuel, "zbb-fuel")).toBe(true);
+    expect(matchesBudgetCodeQuery(fuel, " ZBB-FUEL-01 ")).toBe(true);
+  });
+
+  it("matches a substring of the name", () => {
+    expect(matchesBudgetCodeQuery(fuel, "gasol")).toBe(true);
+  });
+
+  it("matches a retired code — uniqueness counts it, so the planner must see it", () => {
+    const retired = { ...fuel, active: false };
+    expect(matchesBudgetCodeQuery(retired, "fuel")).toBe(true);
+  });
+
+  it("does not match on the cost centre or the description", () => {
+    expect(matchesBudgetCodeQuery(fuel, "fleet")).toBe(false);
+    expect(matchesBudgetCodeQuery(fuel, "pump")).toBe(false);
+  });
+});
+
+describe("costCentreSuggestions", () => {
+  it("offers each cost centre once, in its canonical spelling, A–Z", () => {
+    expect(
+      costCentreSuggestions([
+        { ...makeCode("a"), costCentre: "Ops" },
+        { ...makeCode("b"), costCentre: "fleet" },
+        { ...makeCode("c"), costCentre: "Fleet" },
+        { ...makeCode("d"), costCentre: "Fleet" },
+      ]),
+    ).toEqual(["Fleet", "Ops"]);
+  });
+
+  it("never offers a revenue code's value or a blank", () => {
+    expect(
+      costCentreSuggestions([
+        { ...makeCode("rev", "Revenue"), costCentre: "Sales" },
+        { ...makeCode("blank"), costCentre: "  " },
+        makeCode("bare"),
+      ]),
+    ).toEqual([]);
+  });
+
+  it("is empty for a chart where no code has a cost centre, like the starter set", () => {
+    expect(costCentreSuggestions([makeCode("a"), makeCode("b"), makeCode("r", "Revenue")])).toEqual(
+      [],
+    );
   });
 });
 

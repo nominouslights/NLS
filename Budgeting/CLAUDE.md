@@ -146,6 +146,11 @@ it. Seven files, and only two need a DOM:
   `toBudgetCode`'s `isActive` → `active` rename, `toBudgetPeriod`'s two totals, `coverage`,
   `zbbBalance` / `zbbBalanceDisplay` / `hasPlannedAmounts` (all three arms plus the empty plan)
   and `planningProgress` (the dashboard's checklist and stepper derive from one tested function).
+  The codes list's grouping helpers — `budgetCodeGroupKey`, `groupBudgetCodesByCostCentre`,
+  `matchesBudgetCodeQuery`, `costCentreSuggestions` — mirror no server rule except through
+  `costCentreApplies` (revenue codes get their own bucket); what is pinned is the case-folded key,
+  the bucket order, numeric-aware sorting, the most-common-spelling label, search on code/name
+  only with retired codes included, and that every code lands in the group its key names.
 - `lib/money.test.ts` — `formatDeltaCad` / `formatDeltaPct` always write the sign out, so a
   signed figure never rests on colour.
 
@@ -397,6 +402,25 @@ guessable from the form:
   the category is Revenue, and the detail panel hides the row. `costCentreApplies` in
   `lib/api/budgeting.ts` is the single mirror both screens read.
 
+**The codes list is grouped by cost centre, with a search box.** `groupBudgetCodesByCostCentre`
+groups on the **case-folded** cost centre (`trim().toLocaleUpperCase("en-CA")`), because a cost
+centre is one thing however it was capitalized: `Fleet` and `FLEET` share one group, labelled with
+the most common exact spelling (ties by code-point order, so `FLEET` beats `Fleet`), and the header reads "· N spellings" so the
+drift is shown rather than silently merged — the server keeps the exact strings, nothing here
+rewrites them. Order: named cost centres A–Z (numeric-aware, so `OPS-2` before `OPS-10`), then
+"No cost centre" (expense codes still to be filed), then a Revenue bucket — routed by
+`costCentreApplies`, not a hard-coded category, so a stray cost centre on a revenue row still lands
+there. Keys are prefixed (`cc:<FOLDED>`, `none`, `category:<Category>`) so a cost centre typed as
+"Revenue" cannot collide with the bucket. **All groups start collapsed; the selected code's group
+is always open** (derived from the selection, never set in an effect, so the detail pane always
+matches a visible card; the fallback selection is the first card of the first group); **typing a
+search opens every group.** The search matches code or name only, case-insensitively, and
+**includes retired codes**, because the unique code index counts them — a planner must see one
+before trying to recreate it. Open/closed state is component state only; nothing persists. The
+form's cost-centre field offers the existing spellings through a native `<datalist>`
+(`costCentreSuggestions`), which is what makes spellings converge. On the starter set no code has
+a cost centre, so the screen shows just "No cost centre" and "Revenue" until planners fill them in.
+
 `serviceLine`'s six revenue members are **byte-identical to the backend's `TripServiceType`**
 (`ContractCrew, Community, Nihb, Charter, Cargo, Grocery`) so Stage 6.2's revenue-mix report joins
 on the string Trips and Billing already emit. `budgeting.test.ts` pins those six spellings; do not
@@ -519,9 +543,16 @@ Not used here on purpose: axe-core / pa11y / Lighthouse. They catch the automata
   contracts, POs and work orders) against this chart. They are unrelated strings today, not
   replicas of these rows; wiring them together is a cross-module story and needs an integration
   event, not a project reference.
-- Filtering the codes list — it is small enough to render whole. (~~Hiding retired codes from
+- ~~Filtering the codes list~~ — done: grouped by case-folded cost centre, with a code/name
+  search that includes retired codes (because uniqueness does). (~~Hiding retired codes from
   the allocations picker~~ — done: `allocationCandidates` offers only active codes of the
   section's category that are not already planned.)
+- Codes-list grouping follow-ups, none started: a managed cost-centre list (or a foreign key)
+  instead of free text; a distinct-values endpoint for cost centres; server-side case-folding or a
+  migration that merges existing spellings; per-user persistence of which groups are open; search
+  on cost centre, description or GL account code; a shared collapsible `ui/` component (Dispatcher
+  first — the header is screen-local until a second screen needs it); a service-line view of the
+  list; a toggle to hide retired codes; a cost-centre filter on the allocation and actuals pickers.
 - CI/CD and the OVHcloud deployment target — there is no `.github/` anywhere in this repo yet;
   that is a platform-wide story covering every app at once.
 - OIDC/OpenIddict; the `SuperUser` claim from architecture Section 6.1.

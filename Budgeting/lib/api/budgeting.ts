@@ -771,6 +771,139 @@ export function costCentreApplies(category: BudgetCodeCategory): boolean {
   return category === "Expense";
 }
 
+// ---------------------------------------------------------------------------
+// Grouping the codes list by cost centre. Display-only helpers: they mirror no server rule
+// except through costCentreApplies (a revenue code never carries a cost centre, so revenue codes
+// get a bucket of their own rather than "No cost centre"). The server stores cost centres as the
+// exact strings typed — nothing here normalizes or merges what is stored.
+// ---------------------------------------------------------------------------
+
+export type BudgetCodeGroupKind = "costCentre" | "noCostCentre" | "category";
+
+export interface BudgetCodeGroup {
+  /** "cc:<FOLDED>" | "none" | "category:<Category>" — prefixed so a cost centre typed as
+   *  "Revenue" can never collide with the Revenue bucket. */
+  key: string;
+  kind: BudgetCodeGroupKind;
+  /** Most common exact spelling (ties by code-point order, so `FLEET` beats `Fleet`), "No cost
+   *  centre", or the category name. Deterministic, never input-order dependent. */
+  label: string;
+  /** Distinct exact spellings merged into this group, label first ([] for the buckets). */
+  spellings: string[];
+  /** Server order preserved. */
+  codes: BudgetCode[];
+}
+
+const NO_COST_CENTRE_KEY = "none";
+
+/** A cost centre is one thing however it was capitalized: `Fleet` and `FLEET` share a group. */
+function foldCostCentre(costCentre: string): string {
+  return costCentre.trim().toLocaleUpperCase("en-CA");
+}
+
+/** The trimmed cost centre a code is grouped by, or null when it has none / it does not apply. */
+function groupingCostCentre(code: Pick<BudgetCode, "category" | "costCentre">): string | null {
+  if (!costCentreApplies(code.category)) return null;
+  const trimmed = code.costCentre?.trim() ?? "";
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/** The key of the group a code lands in — the screen uses it to open the selected code's group. */
+export function budgetCodeGroupKey(code: Pick<BudgetCode, "category" | "costCentre">): string {
+  if (!costCentreApplies(code.category)) return `category:${code.category}`;
+  const costCentre = groupingCostCentre(code);
+  return costCentre === null ? NO_COST_CENTRE_KEY : `cc:${foldCostCentre(costCentre)}`;
+}
+
+const labelCollator = new Intl.Collator("en-CA", { sensitivity: "base", numeric: true });
+
+/**
+ * Codes grouped by case-folded cost centre: named cost centres A–Z (numeric-aware, so OPS-2 sorts
+ * before OPS-10), then "No cost centre" (expense codes without one — the to-do pile), then one
+ * bucket per category a cost centre does not apply to (Revenue). Empty groups are skipped; within
+ * a group the input order (the server's, by code) is kept. Retired codes are grouped like any other.
+ */
+export function groupBudgetCodesByCostCentre(codes: BudgetCode[]): BudgetCodeGroup[] {
+  const named = new Map<string, { codes: BudgetCode[]; counts: Map<string, number> }>();
+  const none: BudgetCode[] = [];
+  const categories = new Map<string, BudgetCode[]>();
+
+  for (const code of codes) {
+    const key = budgetCodeGroupKey(code);
+    if (key === NO_COST_CENTRE_KEY) {
+      none.push(code);
+    } else if (key.startsWith("category:")) {
+      const bucket = categories.get(code.category) ?? [];
+      bucket.push(code);
+      categories.set(code.category, bucket);
+    } else {
+      const spelling = groupingCostCentre(code)!;
+      const entry = named.get(key) ?? { codes: [], counts: new Map<string, number>() };
+      entry.codes.push(code);
+      entry.counts.set(spelling, (entry.counts.get(spelling) ?? 0) + 1);
+      named.set(key, entry);
+    }
+  }
+
+  const namedGroups: BudgetCodeGroup[] = [...named].map(([key, entry]) => {
+    const spellings = [...entry.counts]
+      .sort(([a, an], [b, bn]) => bn - an || (a < b ? -1 : a > b ? 1 : 0))
+      .map(([spelling]) => spelling);
+    return { key, kind: "costCentre", label: spellings[0], spellings, codes: entry.codes };
+  });
+  namedGroups.sort(
+    (a, b) => labelCollator.compare(a.label, b.label) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0),
+  );
+
+  const groups = namedGroups;
+  if (none.length > 0) {
+    groups.push({
+      key: NO_COST_CENTRE_KEY,
+      kind: "noCostCentre",
+      label: "No cost centre",
+      spellings: [],
+      codes: none,
+    });
+  }
+  for (const category of [...categories.keys()].sort()) {
+    groups.push({
+      key: `category:${category}`,
+      kind: "category",
+      label: category,
+      spellings: [],
+      codes: categories.get(category)!,
+    });
+  }
+  return groups;
+}
+
+/**
+ * The codes-list search: a trimmed, case-insensitive substring of the code or the name — nothing
+ * else. Retired codes are not filtered out on purpose: the server's uniqueness check counts them,
+ * so a planner has to see a retired code before trying to recreate it.
+ */
+export function matchesBudgetCodeQuery(
+  code: Pick<BudgetCode, "code" | "name">,
+  query: string,
+): boolean {
+  const q = query.trim().toLocaleLowerCase("en-CA");
+  if (q.length === 0) return true;
+  return (
+    code.code.toLocaleLowerCase("en-CA").includes(q) ||
+    code.name.toLocaleLowerCase("en-CA").includes(q)
+  );
+}
+
+/**
+ * The cost-centre form field's suggestions: each existing cost centre once, in the spelling its
+ * group is labelled with, A–Z. Offering the canonical spelling is what makes spellings converge.
+ */
+export function costCentreSuggestions(codes: BudgetCode[]): string[] {
+  return groupBudgetCodesByCostCentre(codes)
+    .filter((g) => g.kind === "costCentre")
+    .map((g) => g.label);
+}
+
 /**
  * Category → status kind, here rather than in the screen for the same reason as periodKind: the
  * mapping is decided once, next to the data, so every screen agrees. Revenue is money coming in
