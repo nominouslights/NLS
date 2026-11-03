@@ -24,8 +24,10 @@ public sealed record RouteResponse(
 /// the snapshotted coordinates when built from the stop catalog; all three are null for
 /// legacy free-text stops. <see cref="Province"/> is the stop's two-letter province code and
 /// is never null — a snapshot written before provinces were recorded reads as "MB", the
-/// only province a route may run in. The two offsets are the stop's timetable entry — minutes
-/// after the respective leg's departure — and are null throughout on a route with no timetable.
+/// only province a route may run in. The four offsets are the stop's timetable entry — minutes
+/// after the respective leg's departure that the vehicle reaches (arrival) and leaves
+/// (departure) the stop — and are null throughout on a route with no timetable; a null arrival
+/// on a timed leg means the same as the departure.
 /// </summary>
 public sealed record RouteStopResponse(
     Guid? StopId,
@@ -34,5 +36,7 @@ public sealed record RouteStopResponse(
     double? Latitude,
     double? Longitude,
     string Province,
-    int? OutboundOffsetMinutes,
-    int? ReturnOffsetMinutes);
+    int? OutboundDepartureOffsetMinutes,
+    int? OutboundArrivalOffsetMinutes,
+    int? ReturnDepartureOffsetMinutes,
+    int? ReturnArrivalOffsetMinutes);

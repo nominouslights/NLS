@@ -26,8 +26,10 @@ internal sealed class RouteReadService(TripsDbContext context) : IRouteReadServi
                 stop.Latitude,
                 stop.Longitude,
                 stop.EffectiveProvince,
-                stop.OutboundOffsetMinutes,
-                stop.ReturnOffsetMinutes)).ToList(),
+                OutboundDepartureOffsetMinutes: stop.OutboundDepartureOffsetMinutes,
+                OutboundArrivalOffsetMinutes: stop.OutboundArrivalOffsetMinutes,
+                ReturnDepartureOffsetMinutes: stop.ReturnDepartureOffsetMinutes,
+                ReturnArrivalOffsetMinutes: stop.ReturnArrivalOffsetMinutes)).ToList(),
             r.Origin,
             // Derived from the snapshot like Origin/Destination, not stored on rm_routes.
             r.Stops.OrderBy(stop => stop.Order).FirstOrDefault()?.EffectiveProvince ?? CanadianProvince.Manitoba,

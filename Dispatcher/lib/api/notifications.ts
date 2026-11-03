@@ -87,9 +87,9 @@ export interface SendRecipientInput {
   dropoffStop?: string | null;
   pickupAddress?: string | null;
   dropoffStopAddress?: string | null;
-  /** This passenger's OWN {{PickupTime}}/{{DropoffTime}} — resolved from the route
-   *  timetable and their boarding stop, so a mid-corridor passenger is told when the
-   *  vehicle reaches them rather than when it left the origin. Omit (undefined) to fall
+  /** This passenger's OWN {{PickupTime}}/{{DropoffTime}} — the scheduled departure from
+   *  their boarding stop and arrival at their alighting stop, so a mid-corridor passenger is
+   *  told when the vehicle leaves them rather than when it left the origin. Omit (undefined) to fall
    *  back to the request's trip-level times; an empty string would not, so prefer
    *  undefined over "". */
   pickupTime?: string;
@@ -530,8 +530,11 @@ export function svcForNotificationServiceType(serviceType: NotificationServiceTy
 export const MERGE_FIELDS: { token: string; description: string }[] = [
   { token: "{{PassengerName}}", description: "Passenger's name from the manifest" },
   { token: "{{TripDate}}", description: "Trip service date" },
-  { token: "{{PickupTime}}", description: "Departure window start" },
-  { token: "{{DropoffTime}}", description: "Dropoff / arrival time (trip window end)" },
+  {
+    token: "{{PickupTime}}",
+    description: "Departure time at the passenger's pickup stop (trip departure when the route has no timetable)",
+  },
+  { token: "{{DropoffTime}}", description: "Arrival time at the drop-off stop (trip window end when untimed)" },
   { token: "{{Route}}", description: "Route / corridor name" },
   { token: "{{PickupStop}}", description: "Passenger's pickup stop (falls back to trip origin)" },
   { token: "{{PickupAddress}}", description: "The passenger's pickup stop street address" },

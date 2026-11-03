@@ -127,19 +127,19 @@ public class CreateRouteCommandHandlerTests
 
         var result = await Handler.Handle(
             Command([
-                new RouteStopInput(thompson, OutboundOffsetMinutes: 0, ReturnOffsetMinutes: 235),
-                new RouteStopInput(leafRapids, OutboundOffsetMinutes: 95, ReturnOffsetMinutes: 85),
-                new RouteStopInput(lynnLake, OutboundOffsetMinutes: 240, ReturnOffsetMinutes: 0),
+                new RouteStopInput(thompson, OutboundDepartureOffsetMinutes: 0, ReturnDepartureOffsetMinutes: 235),
+                new RouteStopInput(leafRapids, OutboundDepartureOffsetMinutes: 95, ReturnDepartureOffsetMinutes: 85),
+                new RouteStopInput(lynnLake, OutboundDepartureOffsetMinutes: 240, ReturnDepartureOffsetMinutes: 0),
             ]),
             CancellationToken.None);
 
         Assert.True(result.IsSuccess);
 
         var ordered = _routes.Added!.Stops.OrderBy(s => s.Order).ToList();
-        Assert.Equal([0, 95, 240], ordered.Select(s => s.OutboundOffsetMinutes));
+        Assert.Equal([0, 95, 240], ordered.Select(s => s.OutboundDepartureOffsetMinutes));
 
         // The return's zero sits on the last stop — it starts where the outbound ended.
-        Assert.Equal([235, 85, 0], ordered.Select(s => s.ReturnOffsetMinutes));
+        Assert.Equal([235, 85, 0], ordered.Select(s => s.ReturnDepartureOffsetMinutes));
     }
 
     [Fact]
@@ -153,8 +153,8 @@ public class CreateRouteCommandHandlerTests
         Assert.True(result.IsSuccess);
         Assert.All(_routes.Added!.Stops, stop =>
         {
-            Assert.Null(stop.OutboundOffsetMinutes);
-            Assert.Null(stop.ReturnOffsetMinutes);
+            Assert.Null(stop.OutboundDepartureOffsetMinutes);
+            Assert.Null(stop.ReturnDepartureOffsetMinutes);
         });
     }
 
@@ -165,14 +165,14 @@ public class CreateRouteCommandHandlerTests
 
         var result = await Handler.Handle(
             Command([
-                new RouteStopInput(thompson, OutboundOffsetMinutes: 0),
-                new RouteStopInput(leafRapids, OutboundOffsetMinutes: 95),
-                new RouteStopInput(lynnLake, OutboundOffsetMinutes: 240),
+                new RouteStopInput(thompson, OutboundDepartureOffsetMinutes: 0),
+                new RouteStopInput(leafRapids, OutboundDepartureOffsetMinutes: 95),
+                new RouteStopInput(lynnLake, OutboundDepartureOffsetMinutes: 240),
             ]),
             CancellationToken.None);
 
         Assert.True(result.IsSuccess);
-        Assert.All(_routes.Added!.Stops, stop => Assert.Null(stop.ReturnOffsetMinutes));
+        Assert.All(_routes.Added!.Stops, stop => Assert.Null(stop.ReturnDepartureOffsetMinutes));
     }
 
     [Fact]
@@ -184,9 +184,9 @@ public class CreateRouteCommandHandlerTests
         // tell a mid-corridor passenger to be ready 95 minutes early.
         var result = await Handler.Handle(
             Command([
-                new RouteStopInput(thompson, OutboundOffsetMinutes: 0),
+                new RouteStopInput(thompson, OutboundDepartureOffsetMinutes: 0),
                 new RouteStopInput(leafRapids),
-                new RouteStopInput(lynnLake, OutboundOffsetMinutes: 240),
+                new RouteStopInput(lynnLake, OutboundDepartureOffsetMinutes: 240),
             ]),
             CancellationToken.None);
 
@@ -202,9 +202,9 @@ public class CreateRouteCommandHandlerTests
 
         var result = await Handler.Handle(
             Command([
-                new RouteStopInput(thompson, OutboundOffsetMinutes: 30),
-                new RouteStopInput(leafRapids, OutboundOffsetMinutes: 95),
-                new RouteStopInput(lynnLake, OutboundOffsetMinutes: 240),
+                new RouteStopInput(thompson, OutboundDepartureOffsetMinutes: 30),
+                new RouteStopInput(leafRapids, OutboundDepartureOffsetMinutes: 95),
+                new RouteStopInput(lynnLake, OutboundDepartureOffsetMinutes: 240),
             ]),
             CancellationToken.None);
 
@@ -219,9 +219,9 @@ public class CreateRouteCommandHandlerTests
 
         var result = await Handler.Handle(
             Command([
-                new RouteStopInput(thompson, OutboundOffsetMinutes: 0),
-                new RouteStopInput(leafRapids, OutboundOffsetMinutes: 240),
-                new RouteStopInput(lynnLake, OutboundOffsetMinutes: 95),
+                new RouteStopInput(thompson, OutboundDepartureOffsetMinutes: 0),
+                new RouteStopInput(leafRapids, OutboundDepartureOffsetMinutes: 240),
+                new RouteStopInput(lynnLake, OutboundDepartureOffsetMinutes: 95),
             ]),
             CancellationToken.None);
 
@@ -238,13 +238,156 @@ public class CreateRouteCommandHandlerTests
         // belongs on the last stop. Rejected, though the same numbers are a valid outbound.
         var result = await Handler.Handle(
             Command([
-                new RouteStopInput(thompson, ReturnOffsetMinutes: 0),
-                new RouteStopInput(leafRapids, ReturnOffsetMinutes: 85),
-                new RouteStopInput(lynnLake, ReturnOffsetMinutes: 235),
+                new RouteStopInput(thompson, ReturnDepartureOffsetMinutes: 0),
+                new RouteStopInput(leafRapids, ReturnDepartureOffsetMinutes: 85),
+                new RouteStopInput(lynnLake, ReturnDepartureOffsetMinutes: 235),
             ]),
             CancellationToken.None);
 
         Assert.True(result.IsFailure);
         Assert.Equal(RouteErrors.TimetableMustStartAtZero, result.Error);
+    }
+
+    // ---- Arrivals: optional per stop, null = arrives when it departs ----
+
+    [Fact]
+    public async Task Arrival_offsets_are_snapshotted()
+    {
+        var (thompson, leafRapids, lynnLake) = SeedCorridor();
+
+        var result = await Handler.Handle(
+            Command([
+                new RouteStopInput(thompson, 0, 235, OutboundArrivalOffsetMinutes: null, ReturnArrivalOffsetMinutes: 230),
+                new RouteStopInput(leafRapids, 95, 85, OutboundArrivalOffsetMinutes: 90, ReturnArrivalOffsetMinutes: 80),
+                new RouteStopInput(lynnLake, 240, 0, OutboundArrivalOffsetMinutes: 240, ReturnArrivalOffsetMinutes: 0),
+            ]),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        var ordered = _routes.Added!.Stops.OrderBy(s => s.Order).ToList();
+        Assert.Equal([null, 90, 240], ordered.Select(s => s.OutboundArrivalOffsetMinutes));
+        Assert.Equal([230, 80, 0], ordered.Select(s => s.ReturnArrivalOffsetMinutes));
+        Assert.Equal([0, 95, 240], ordered.Select(s => s.OutboundDepartureOffsetMinutes));
+    }
+
+    [Fact]
+    public async Task An_arrival_on_an_untimed_leg_is_rejected()
+    {
+        var (thompson, leafRapids, lynnLake) = SeedCorridor();
+
+        var result = await Handler.Handle(
+            Command([
+                new RouteStopInput(thompson),
+                new RouteStopInput(leafRapids, OutboundArrivalOffsetMinutes: 90),
+                new RouteStopInput(lynnLake),
+            ]),
+            CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(RouteErrors.ArrivalWithoutTimetable, result.Error);
+        Assert.Null(_routes.Added);
+    }
+
+    [Fact]
+    public async Task The_origin_cannot_have_an_arrival_other_than_zero()
+    {
+        var (thompson, leafRapids, lynnLake) = SeedCorridor();
+
+        var result = await Handler.Handle(
+            Command([
+                new RouteStopInput(thompson, OutboundDepartureOffsetMinutes: 0, OutboundArrivalOffsetMinutes: 5),
+                new RouteStopInput(leafRapids, OutboundDepartureOffsetMinutes: 95),
+                new RouteStopInput(lynnLake, OutboundDepartureOffsetMinutes: 240),
+            ]),
+            CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(RouteErrors.ArrivalAtOrigin, result.Error);
+    }
+
+    [Fact]
+    public async Task An_arrival_after_its_own_departure_is_rejected()
+    {
+        var (thompson, leafRapids, lynnLake) = SeedCorridor();
+
+        var result = await Handler.Handle(
+            Command([
+                new RouteStopInput(thompson, OutboundDepartureOffsetMinutes: 0),
+                new RouteStopInput(leafRapids, OutboundDepartureOffsetMinutes: 95, OutboundArrivalOffsetMinutes: 100),
+                new RouteStopInput(lynnLake, OutboundDepartureOffsetMinutes: 240),
+            ]),
+            CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(RouteErrors.ArrivalAfterDeparture, result.Error);
+    }
+
+    [Fact]
+    public async Task An_arrival_before_the_previous_departure_is_rejected()
+    {
+        var (thompson, leafRapids, lynnLake) = SeedCorridor();
+
+        // Reaching Lynn Lake at 95 — the minute it left Leaf Rapids — is not after that departure.
+        var result = await Handler.Handle(
+            Command([
+                new RouteStopInput(thompson, OutboundDepartureOffsetMinutes: 0),
+                new RouteStopInput(leafRapids, OutboundDepartureOffsetMinutes: 95),
+                new RouteStopInput(lynnLake, OutboundDepartureOffsetMinutes: 240, OutboundArrivalOffsetMinutes: 95),
+            ]),
+            CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(RouteErrors.ArrivalBeforePreviousDeparture, result.Error);
+    }
+
+    [Fact]
+    public async Task A_null_arrival_is_allowed_anywhere()
+    {
+        var (thompson, leafRapids, lynnLake) = SeedCorridor();
+
+        // Only the destination has an arrival; the origin and the middle stop leave theirs empty.
+        var result = await Handler.Handle(
+            Command([
+                new RouteStopInput(thompson, OutboundDepartureOffsetMinutes: 0),
+                new RouteStopInput(leafRapids, OutboundDepartureOffsetMinutes: 95),
+                new RouteStopInput(lynnLake, OutboundDepartureOffsetMinutes: 240, OutboundArrivalOffsetMinutes: 235),
+            ]),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        var ordered = _routes.Added!.Stops.OrderBy(s => s.Order).ToList();
+        Assert.Equal([null, null, 235], ordered.Select(s => s.OutboundArrivalOffsetMinutes));
+    }
+
+    [Fact]
+    public async Task The_return_leg_arrival_rules_run_backwards()
+    {
+        var (thompson, leafRapids, lynnLake) = SeedCorridor();
+
+        // On the return, Lynn Lake is the origin and Leaf Rapids follows it: an arrival of 0 at
+        // Leaf Rapids is not after Lynn Lake's departure (0), though it would be fine read forwards.
+        var result = await Handler.Handle(
+            Command([
+                new RouteStopInput(thompson, ReturnDepartureOffsetMinutes: 235, ReturnArrivalOffsetMinutes: 230),
+                new RouteStopInput(leafRapids, ReturnDepartureOffsetMinutes: 85, ReturnArrivalOffsetMinutes: 0),
+                new RouteStopInput(lynnLake, ReturnDepartureOffsetMinutes: 0),
+            ]),
+            CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(RouteErrors.ArrivalBeforePreviousDeparture, result.Error);
+
+        // The same leg with a valid arrival at Leaf Rapids is accepted, and an arrival on the
+        // return's origin (the last stop) is checked as the origin.
+        var origin = await Handler.Handle(
+            Command([
+                new RouteStopInput(thompson, ReturnDepartureOffsetMinutes: 235, ReturnArrivalOffsetMinutes: 230),
+                new RouteStopInput(leafRapids, ReturnDepartureOffsetMinutes: 85, ReturnArrivalOffsetMinutes: 80),
+                new RouteStopInput(lynnLake, ReturnDepartureOffsetMinutes: 0, ReturnArrivalOffsetMinutes: 10),
+            ]),
+            CancellationToken.None);
+
+        Assert.True(origin.IsFailure);
+        Assert.Equal(RouteErrors.ArrivalAtOrigin, origin.Error);
     }
 }

@@ -39,32 +39,51 @@ public sealed record RouteStop
     public string EffectiveProvince => Province ?? Stops.CanadianProvince.Manitoba;
 
     /// <summary>
-    /// Timetable: minutes after the OUTBOUND leg's departure that the vehicle reaches this
-    /// stop. The outbound leg runs in ascending <see cref="Order"/>, so the first stop is 0.
-    /// Null on every stop when the route has no outbound timetable (the pre-timetable
-    /// default) — a leg's offsets are all-or-nothing, never partially filled.
+    /// Timetable: minutes after the OUTBOUND leg's departure that the vehicle LEAVES this stop
+    /// — the stop's pickup time. The outbound leg runs in ascending <see cref="Order"/>, so the
+    /// first stop is 0. Null on every stop when the route has no outbound timetable (the
+    /// pre-timetable default) — a leg's departure offsets are all-or-nothing, never partially
+    /// filled. The last stop's departure is the run's end (the route form writes its arrival
+    /// into it). Stored under the jsonb key <c>OutboundOffsetMinutes</c>, its name from before
+    /// arrivals existed, so existing rows read unchanged.
     /// </summary>
-    public int? OutboundOffsetMinutes { get; init; }
+    public int? OutboundDepartureOffsetMinutes { get; init; }
 
     /// <summary>
-    /// Timetable: minutes after the RETURN leg's departure. The return runs the stops in
-    /// reverse, so the <em>last</em> stop by <see cref="Order"/> is the return's 0 and offsets
-    /// grow as <see cref="Order"/> descends. Null throughout when the route has no return
-    /// timetable.
+    /// Timetable: minutes after the OUTBOUND leg's departure that the vehicle REACHES this stop
+    /// — the stop's drop-off time. Null means "arrives when it departs" (zero dwell), which is
+    /// what every row written before arrivals existed means; otherwise it lies after the
+    /// previous stop's departure and no later than this stop's own departure.
+    /// </summary>
+    public int? OutboundArrivalOffsetMinutes { get; init; }
+
+    /// <summary>
+    /// Timetable: minutes after the RETURN leg's departure that the vehicle leaves this stop —
+    /// the return pickup time. The return runs the stops in reverse, so the <em>last</em> stop
+    /// by <see cref="Order"/> is the return's 0 and offsets grow as <see cref="Order"/>
+    /// descends. Null throughout when the route has no return timetable. Stored under the
+    /// jsonb key <c>ReturnOffsetMinutes</c>.
     /// </summary>
     /// <remarks>
-    /// Both offsets stay attached to their stop for the whole life of the snapshot — including
-    /// onto trips, where the leg's <c>TripDirection</c> selects which one applies. That is why
-    /// reversing a stop list (inbound generation, deadhead returns) copies both through
-    /// unchanged rather than swapping them.
+    /// All four offsets stay attached to their stop for the whole life of the snapshot —
+    /// including onto trips, where the leg's <c>TripDirection</c> selects which pair applies.
+    /// That is why reversing a stop list (inbound generation, deadhead returns) copies them
+    /// through unchanged rather than swapping them.
     /// </remarks>
-    public int? ReturnOffsetMinutes { get; init; }
+    public int? ReturnDepartureOffsetMinutes { get; init; }
+
+    /// <summary>
+    /// Timetable: minutes after the RETURN leg's departure that the vehicle reaches this stop —
+    /// the return drop-off time. Null means the same as <see cref="ReturnDepartureOffsetMinutes"/>
+    /// (zero dwell).
+    /// </summary>
+    public int? ReturnArrivalOffsetMinutes { get; init; }
 
     /// <summary>
     /// The stop list run backwards — the one reversal every return leg uses (inbound
     /// generation, deadhead returns, the Bookeo import, re-routing an Inbound trip). Stops are
     /// taken in descending <see cref="Order"/> and only <see cref="Order"/> is re-sequenced
-    /// 0..n-1: both timetable offsets stay attached to their own stop, because the leg's
+    /// 0..n-1: every timetable offset stays attached to its own stop, because the leg's
     /// <see cref="TripDirection"/> (not the list position) selects which one applies —
     /// swapping them would double-reverse the return timetable.
     /// </summary>

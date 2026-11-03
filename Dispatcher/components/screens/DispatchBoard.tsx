@@ -17,6 +17,7 @@ import {
 import { listInvoices } from "@/lib/api/billing";
 import { getHosAlertsToday, type HosAlertsToday } from "@/lib/api/hos";
 import { statusShort } from "@/lib/format";
+import { departuresLine } from "@/lib/timetable";
 import { MetricTile } from "@/components/ui/MetricTile";
 import { ServiceChip, StatusChip } from "@/components/ui/Chip";
 import { Panel, SectionLabel } from "@/components/ui/Panel";
@@ -286,6 +287,7 @@ export default function DispatchBoard({
                 const sc = svcMeta(svc);
                 const chip = tripChip(t);
                 const open = isOpenTrip(t);
+                const runLine = departuresLine(t);
                 return (
                   <div
                     key={t.id}
@@ -323,6 +325,24 @@ export default function DispatchBoard({
                       >
                         {corridorLabel(t)}
                       </div>
+                      {/* The run's stop times (each departure, the last stop's arrival), read
+                          off the trip — only on a timetabled leg; an untimed one adds nothing. */}
+                      {runLine && (
+                        <div
+                          title={runLine}
+                          style={{
+                            fontFamily: fonts.mono,
+                            fontSize: 10,
+                            color: colors.textSecondary,
+                            marginTop: 2,
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
+                        >
+                          {runLine}
+                        </div>
+                      )}
                       <div
                         style={{
                           fontFamily: fonts.mono,

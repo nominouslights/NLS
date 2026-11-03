@@ -45,12 +45,23 @@ export interface TripStop {
   stopId?: string;
   latitude?: number;
   longitude?: number;
-  /** Timetable: minutes after the OUTBOUND leg's departure that the vehicle reaches
-   *  this stop. Null/absent on a route with no outbound timetable. */
-  outboundOffsetMinutes?: number | null;
-  /** Timetable: minutes after the RETURN leg's departure. The return runs the corridor
-   *  backwards, so the LAST stop by order is its zero. */
-  returnOffsetMinutes?: number | null;
+  /** Timetable, OUTBOUND leg: minutes after the leg's departure that the vehicle LEAVES this
+   *  stop — a passenger's pickup time. Null/absent on a route with no outbound timetable. */
+  outboundDepartureOffsetMinutes?: number | null;
+  /** Timetable, OUTBOUND leg: minutes after departure that the vehicle REACHES this stop — a
+   *  passenger's drop-off time. Null = arrives when it departs (zero dwell). */
+  outboundArrivalOffsetMinutes?: number | null;
+  /** Timetable, RETURN leg departure offset. The return runs the corridor backwards, so the
+   *  LAST stop by order is its zero. */
+  returnDepartureOffsetMinutes?: number | null;
+  /** Timetable, RETURN leg arrival offset. Null = same as its departure. */
+  returnArrivalOffsetMinutes?: number | null;
+  /** Clock time ("HH:MM:SS") the vehicle reaches this stop on THIS trip, resolved by the API
+   *  from the trip's own window start and direction. Null on an untimed leg; absent on route
+   *  stops (RouteRecord.stops), which have no departure to resolve against. */
+  scheduledArrival?: string | null;
+  /** Clock time ("HH:MM:SS") the vehicle leaves this stop on THIS trip. Same rules. */
+  scheduledDeparture?: string | null;
 }
 
 /** Mirrors TripResponse — list and detail share the same shape. */
@@ -558,15 +569,19 @@ export interface RouteRecord {
   updatedAtUtc: string;
 }
 
-/** One stop in a create/update route body, in corridor order. The two offsets are that
- *  stop's timetable entry — minutes after the respective leg's departure. Omit both on
- *  every stop for a route with no timetable; within one leg the backend requires
- *  all-or-nothing, starting at 0 and increasing along that leg's direction of travel
- *  (the return leg travels the list backwards, so its zero is the LAST stop). */
+/** One stop in a create/update route body, in corridor order. The four offsets are that
+ *  stop's timetable entry — minutes after the respective leg's departure. Send nulls on
+ *  every stop for a leg with no timetable. Within one leg the backend requires departures
+ *  all-or-nothing, starting at 0 and strictly increasing along that leg's direction of travel
+ *  (the return leg travels the list backwards, so its zero is the LAST stop). An arrival is
+ *  optional (null = same as departure), at most the stop's own departure, and later than the
+ *  previous stop's departure; the leg's first stop has none. */
 export interface RouteStopInput {
   stopId: string;
-  outboundOffsetMinutes?: number | null;
-  returnOffsetMinutes?: number | null;
+  outboundDepartureOffsetMinutes?: number | null;
+  outboundArrivalOffsetMinutes?: number | null;
+  returnDepartureOffsetMinutes?: number | null;
+  returnArrivalOffsetMinutes?: number | null;
 }
 
 /** POST /api/trips/routes body (CreateRouteRequest). Stops are selected from the

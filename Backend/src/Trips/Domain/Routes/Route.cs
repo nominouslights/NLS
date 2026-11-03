@@ -151,47 +151,77 @@ public sealed class Route : AggregateRoot, ITenantScoped
         // ascending Order, the return in descending (the last stop is where the return starts).
         var ordered = stops.OrderBy(stop => stop.Order).ToList();
 
-        var outbound = ValidateLeg([.. ordered.Select(stop => stop.OutboundOffsetMinutes)]);
+        var outbound = ValidateLeg([.. ordered.Select(stop =>
+            (stop.OutboundArrivalOffsetMinutes, stop.OutboundDepartureOffsetMinutes))]);
         if (outbound.IsFailure)
         {
             return Result.Failure<List<RouteStop>>(outbound.Error);
         }
 
-        var inbound = ValidateLeg([.. ordered.AsEnumerable().Reverse().Select(stop => stop.ReturnOffsetMinutes)]);
+        var inbound = ValidateLeg([.. ordered.AsEnumerable().Reverse().Select(stop =>
+            (stop.ReturnArrivalOffsetMinutes, stop.ReturnDepartureOffsetMinutes))]);
         return inbound.IsFailure
             ? Result.Failure<List<RouteStop>>(inbound.Error)
             : area;
     }
 
     /// <summary>
-    /// Validates one leg's offsets, given in that leg's travel order. A leg is all-or-nothing:
-    /// either every stop is untimed (no timetable — the pre-timetable default) or every stop is
-    /// timed, starting at 0 and strictly increasing. A partial table is rejected rather than
-    /// silently half-applied, because a stop with no time falls back to the trip's departure
-    /// and would quietly tell a passenger the wrong hour.
+    /// Validates one leg's (arrival, departure) offsets, given in that leg's travel order.
+    /// Departures are all-or-nothing: either every stop is untimed (no timetable — the
+    /// pre-timetable default) or every stop is timed, starting at 0 and strictly increasing. A
+    /// partial table is rejected rather than silently half-applied, because a stop with no time
+    /// falls back to the trip's departure and would quietly tell a passenger the wrong hour.
+    /// Arrivals are optional per stop (null = arrives when it departs), but one that is set must
+    /// sit on a timed leg, be zero at the leg's first stop, come after the previous stop's
+    /// departure and no later than its own stop's departure.
     /// </summary>
-    private static Result ValidateLeg(IReadOnlyList<int?> offsetsInTravelOrder)
+    private static Result ValidateLeg(IReadOnlyList<(int? Arrival, int? Departure)> leg)
     {
-        if (offsetsInTravelOrder.All(offset => offset is null))
+        if (leg.All(stop => stop.Departure is null))
         {
-            return Result.Success();
+            return leg.Any(stop => stop.Arrival is not null)
+                ? Result.Failure(RouteErrors.ArrivalWithoutTimetable)
+                : Result.Success();
         }
 
-        if (offsetsInTravelOrder.Any(offset => offset is null))
+        if (leg.Any(stop => stop.Departure is null))
         {
             return Result.Failure(RouteErrors.PartialTimetable);
         }
 
-        if (offsetsInTravelOrder[0] != 0)
+        if (leg[0].Departure != 0)
         {
             return Result.Failure(RouteErrors.TimetableMustStartAtZero);
         }
 
-        for (var index = 1; index < offsetsInTravelOrder.Count; index++)
+        for (var index = 1; index < leg.Count; index++)
         {
-            if (offsetsInTravelOrder[index] <= offsetsInTravelOrder[index - 1])
+            if (leg[index].Departure <= leg[index - 1].Departure)
             {
                 return Result.Failure(RouteErrors.TimetableNotIncreasing);
+            }
+        }
+
+        if (leg[0].Arrival is not null and not 0)
+        {
+            return Result.Failure(RouteErrors.ArrivalAtOrigin);
+        }
+
+        for (var index = 1; index < leg.Count; index++)
+        {
+            if (leg[index].Arrival is not { } arrival)
+            {
+                continue;
+            }
+
+            if (arrival > leg[index].Departure)
+            {
+                return Result.Failure(RouteErrors.ArrivalAfterDeparture);
+            }
+
+            if (arrival <= leg[index - 1].Departure)
+            {
+                return Result.Failure(RouteErrors.ArrivalBeforePreviousDeparture);
             }
         }
 
@@ -214,8 +244,10 @@ public sealed class Route : AggregateRoot, ITenantScoped
                 Latitude = stop.Latitude,
                 Longitude = stop.Longitude,
                 Province = stop.Province,
-                OutboundOffsetMinutes = stop.OutboundOffsetMinutes,
-                ReturnOffsetMinutes = stop.ReturnOffsetMinutes,
+                OutboundDepartureOffsetMinutes = stop.OutboundDepartureOffsetMinutes,
+                OutboundArrivalOffsetMinutes = stop.OutboundArrivalOffsetMinutes,
+                ReturnDepartureOffsetMinutes = stop.ReturnDepartureOffsetMinutes,
+                ReturnArrivalOffsetMinutes = stop.ReturnArrivalOffsetMinutes,
             })];
 
     private static string? Normalize(string? value) =>

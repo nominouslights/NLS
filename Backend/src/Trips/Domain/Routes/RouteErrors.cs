@@ -53,4 +53,20 @@ public static class RouteErrors
     public static readonly Error TimetableNotIncreasing = Error.Validation(
         "Trips.Route.TimetableNotIncreasing",
         "A leg's timetable must increase at every stop along the direction of travel.");
+
+    public static readonly Error ArrivalWithoutTimetable = Error.Validation(
+        "Trips.Route.ArrivalWithoutTimetable",
+        "A leg with no departure times cannot carry arrival times — set the leg's departures first, or clear its arrivals.");
+
+    public static readonly Error ArrivalAtOrigin = Error.Validation(
+        "Trips.Route.ArrivalAtOrigin",
+        "A leg's first stop is where the leg starts — its arrival must be empty or zero minutes.");
+
+    public static readonly Error ArrivalAfterDeparture = Error.Validation(
+        "Trips.Route.ArrivalAfterDeparture",
+        "A stop's arrival cannot be later than its own departure on the same leg.");
+
+    public static readonly Error ArrivalBeforePreviousDeparture = Error.Validation(
+        "Trips.Route.ArrivalBeforePreviousDeparture",
+        "A stop's arrival must come after the previous stop's departure along the direction of travel.");
 }

@@ -19,7 +19,7 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
 #pragma warning disable 612, 618
             modelBuilder
                 .HasDefaultSchema("trips")
-                .HasAnnotation("ProductVersion", "10.0.0")
+                .HasAnnotation("ProductVersion", "10.0.13")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -2702,7 +2702,9 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
 
                             b1.ToTable("bookeo_bookings", "trips");
 
-                            b1.ToJson("passengers");
+                            b1
+                                .ToJson("passengers")
+                                .HasColumnType("jsonb");
 
                             b1.WithOwner()
                                 .HasForeignKey("BookeoBookingId");
@@ -2739,7 +2741,9 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
 
                             b1.ToTable("trip_manifests", "trips");
 
-                            b1.ToJson("cargo");
+                            b1
+                                .ToJson("cargo")
+                                .HasColumnType("jsonb");
 
                             b1.WithOwner()
                                 .HasForeignKey("TripManifestId");
@@ -2786,7 +2790,9 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
 
                             b1.ToTable("trip_manifests", "trips");
 
-                            b1.ToJson("passengers");
+                            b1
+                                .ToJson("passengers")
+                                .HasColumnType("jsonb");
 
                             b1.WithOwner()
                                 .HasForeignKey("TripManifestId");
@@ -2815,11 +2821,17 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
 
                             b1.Property<int>("Order");
 
-                            b1.Property<int?>("OutboundOffsetMinutes");
+                            b1.Property<int?>("OutboundArrivalOffsetMinutes");
+
+                            b1.Property<int?>("OutboundDepartureOffsetMinutes")
+                                .HasJsonPropertyName("OutboundOffsetMinutes");
 
                             b1.Property<string>("Province");
 
-                            b1.Property<int?>("ReturnOffsetMinutes");
+                            b1.Property<int?>("ReturnArrivalOffsetMinutes");
+
+                            b1.Property<int?>("ReturnDepartureOffsetMinutes")
+                                .HasJsonPropertyName("ReturnOffsetMinutes");
 
                             b1.Property<Guid?>("StopId");
 
@@ -2827,7 +2839,9 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
 
                             b1.ToTable("routes", "trips");
 
-                            b1.ToJson("stops");
+                            b1
+                                .ToJson("stops")
+                                .HasColumnType("jsonb");
 
                             b1.WithOwner()
                                 .HasForeignKey("RouteId");
@@ -2943,11 +2957,17 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
 
                             b1.Property<int>("Order");
 
-                            b1.Property<int?>("OutboundOffsetMinutes");
+                            b1.Property<int?>("OutboundArrivalOffsetMinutes");
+
+                            b1.Property<int?>("OutboundDepartureOffsetMinutes")
+                                .HasJsonPropertyName("OutboundOffsetMinutes");
 
                             b1.Property<string>("Province");
 
-                            b1.Property<int?>("ReturnOffsetMinutes");
+                            b1.Property<int?>("ReturnArrivalOffsetMinutes");
+
+                            b1.Property<int?>("ReturnDepartureOffsetMinutes")
+                                .HasJsonPropertyName("ReturnOffsetMinutes");
 
                             b1.Property<Guid?>("StopId");
 
@@ -2955,7 +2975,9 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
 
                             b1.ToTable("trips", "trips");
 
-                            b1.ToJson("stops");
+                            b1
+                                .ToJson("stops")
+                                .HasColumnType("jsonb");
 
                             b1.WithOwner()
                                 .HasForeignKey("TripId");
@@ -2982,11 +3004,17 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
 
                             b1.Property<int>("Order");
 
-                            b1.Property<int?>("OutboundOffsetMinutes");
+                            b1.Property<int?>("OutboundArrivalOffsetMinutes");
+
+                            b1.Property<int?>("OutboundDepartureOffsetMinutes")
+                                .HasJsonPropertyName("OutboundOffsetMinutes");
 
                             b1.Property<string>("Province");
 
-                            b1.Property<int?>("ReturnOffsetMinutes");
+                            b1.Property<int?>("ReturnArrivalOffsetMinutes");
+
+                            b1.Property<int?>("ReturnDepartureOffsetMinutes")
+                                .HasJsonPropertyName("ReturnOffsetMinutes");
 
                             b1.Property<Guid?>("StopId");
 
@@ -2994,7 +3022,9 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
 
                             b1.ToTable("rm_routes", "trips");
 
-                            b1.ToJson("stops");
+                            b1
+                                .ToJson("stops")
+                                .HasColumnType("jsonb");
 
                             b1.WithOwner()
                                 .HasForeignKey("RouteReadModelId");
@@ -3031,7 +3061,9 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
 
                             b1.ToTable("rm_trip_manifests", "trips");
 
-                            b1.ToJson("cargo");
+                            b1
+                                .ToJson("cargo")
+                                .HasColumnType("jsonb");
 
                             b1.WithOwner()
                                 .HasForeignKey("TripManifestReadModelId");
@@ -3078,7 +3110,9 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
 
                             b1.ToTable("rm_trip_manifests", "trips");
 
-                            b1.ToJson("passengers");
+                            b1
+                                .ToJson("passengers")
+                                .HasColumnType("jsonb");
 
                             b1.WithOwner()
                                 .HasForeignKey("TripManifestReadModelId");
@@ -3107,11 +3141,17 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
 
                             b1.Property<int>("Order");
 
-                            b1.Property<int?>("OutboundOffsetMinutes");
+                            b1.Property<int?>("OutboundArrivalOffsetMinutes");
+
+                            b1.Property<int?>("OutboundDepartureOffsetMinutes")
+                                .HasJsonPropertyName("OutboundOffsetMinutes");
 
                             b1.Property<string>("Province");
 
-                            b1.Property<int?>("ReturnOffsetMinutes");
+                            b1.Property<int?>("ReturnArrivalOffsetMinutes");
+
+                            b1.Property<int?>("ReturnDepartureOffsetMinutes")
+                                .HasJsonPropertyName("ReturnOffsetMinutes");
 
                             b1.Property<Guid?>("StopId");
 
@@ -3119,7 +3159,9 @@ namespace NorthernLink.Trips.Infrastructure.Persistence.Migrations
 
                             b1.ToTable("rm_trips", "trips");
 
-                            b1.ToJson("stops");
+                            b1
+                                .ToJson("stops")
+                                .HasColumnType("jsonb");
 
                             b1.WithOwner()
                                 .HasForeignKey("TripReadModelId");

@@ -1,6 +1,7 @@
 using NorthernLink.Trips.Application.Abstractions;
 using NorthernLink.Trips.Application.Integration;
 using NorthernLink.Trips.Application.Trips.Create;
+using NorthernLink.Trips.Domain.Manifests;
 using NorthernLink.Trips.Domain.Routes;
 using NorthernLink.Trips.Domain.Trips;
 using Xunit;
@@ -165,6 +166,37 @@ public class CreateTripCommandHandlerTests
         Assert.Equal("U-12", trip.VehicleUnit);
         // The fleet vehicle's capacity is server-authoritative — no manual figure exists.
         Assert.Equal(24, trip.SeatsCapacity);
+    }
+
+    [Fact]
+    public async Task An_inbound_trip_on_a_route_gets_reversed_stops_and_swapped_endpoints()
+    {
+        var (driverId, vehicleId) = AddActiveAssignment();
+        var route = TestRouteChange.CreateRoute("Thompson", "Leaf Rapids", "Lynn Lake");
+        _routes.Add(route);
+
+        var result = await Handler.Handle(
+            Command(driverId: driverId, vehicleId: vehicleId) with
+            {
+                RouteId = route.Id,
+                WindowStart = new TimeOnly(16, 0),
+                WindowEnd = new TimeOnly(17, 45),
+                Direction = TripDirection.Inbound,
+            },
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        var trip = Assert.Single(_trips.Trips);
+        Assert.Equal(("Lynn Lake", "Thompson"), (trip.Origin, trip.Destination));
+        Assert.Equal(
+            ["Lynn Lake", "Leaf Rapids", "Thompson"],
+            trip.Stops.OrderBy(s => s.Order).Select(s => s.Name));
+
+        // Oriented this way, the return column ascends along Order — so the leg is timed.
+        var times = StopTimetable.Resolve(trip.Stops, trip.WindowStart, trip.Direction);
+        Assert.Equal(
+            [new TimeOnly(16, 0), new TimeOnly(16, 40), new TimeOnly(17, 20)],
+            times.Select(t => t.Departure!.Value));
     }
 
     private sealed class FakeTripNumberGenerator : ITripNumberGenerator

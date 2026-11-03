@@ -45,7 +45,7 @@ public class TripChangeRouteTests
         Assert.Equal("Thompson", trip.Destination);
         Assert.Equal(["Flin Flon", "Snow Lake", "Thompson"], Names(trip));
         // Offsets stay attached to their own stop; Inbound selects the return one (0 first).
-        Assert.Equal([0, 40, 80], trip.Stops.OrderBy(s => s.Order).Select(s => s.ReturnOffsetMinutes!.Value));
+        Assert.Equal([0, 40, 80], trip.Stops.OrderBy(s => s.Order).Select(s => s.ReturnDepartureOffsetMinutes!.Value));
         Assert.Equal(new TimeOnly(17, 45), trip.WindowEnd); // 16:00 + 105 min
     }
 

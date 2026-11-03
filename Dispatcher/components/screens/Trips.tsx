@@ -63,6 +63,7 @@ import { contractRateLabel, getClient, type ActiveContractSummary } from "@/lib/
 // Leg-direction glyph + label — the one place that mapping lives (Billing.tsx
 // renders candidate/invoice legs from the same helper).
 import { directionMeta } from "@/lib/api/billing";
+import { hasTimetable, stopTimetable } from "@/lib/timetable";
 import { printTripManifest } from "@/lib/documents/tripManifestPdf";
 import { printDriverPackage } from "@/lib/documents/driverPackagePdf";
 import { ServiceChip, StatusBadge, StatusChip } from "@/components/ui/Chip";
@@ -539,6 +540,65 @@ function EditTripModal({
 }
 
 // ---------------------------------------------------------------------------
+// Stop timetable — the detail pane's per-stop Arrive / Depart, read off the
+// trip's stored stop times (resolved by the API from the trip's own window start
+// and direction). No arithmetic here; see lib/timetable.ts.
+// ---------------------------------------------------------------------------
+
+function TripStopTimetable({ trip }: { trip: TripRecord }) {
+  if (!hasTimetable(trip)) {
+    return (
+      <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim, margin: "-6px 0 14px 2px" }}>
+        No timetable on this route — the trip window is the only scheduled time
+      </div>
+    );
+  }
+  const rows = stopTimetable(trip);
+  const head = {
+    fontFamily: fonts.body,
+    fontSize: 10.5,
+    fontWeight: 600,
+    color: colors.textMuted,
+    letterSpacing: 0.3,
+    textAlign: "left",
+    padding: "0 10px 5px 0",
+  } as const;
+  const cell = { fontFamily: fonts.mono, fontSize: 12, color: colors.textSecondary, padding: "3px 10px 3px 0" } as const;
+  const dash = <span style={{ color: colors.textFaint }}>—</span>;
+  return (
+    <div
+      style={{
+        padding: "10px 16px",
+        background: colors.cardBg,
+        border: `1px solid ${colors.borderSubtle}`,
+        borderRadius: 10,
+        boxShadow: colors.shadowCard,
+        margin: "-6px 0 14px",
+      }}
+    >
+      <table style={{ borderCollapse: "collapse" }}>
+        <thead>
+          <tr>
+            <th style={head}>STOP</th>
+            <th style={head}>ARRIVE</th>
+            <th style={head}>DEPART</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr key={`${row.name}-${i}`}>
+              <td style={{ ...cell, fontFamily: fonts.body, fontWeight: 600, paddingRight: 18 }}>{row.name}</td>
+              <td style={cell}>{row.arrive ?? dash}</td>
+              <td style={cell}>{row.depart ?? dash}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Create Return modal — POST /api/trips (reversed corridor, free-form so the
 // route snapshot doesn't win over the reversal) followed by POST
 // /merge-round-trip(allowMismatch: true). Two existing endpoints composed
@@ -549,8 +609,9 @@ function EditTripModal({
 // ---------------------------------------------------------------------------
 
 /** Reverses a trip's stop list for the return leg: only Order is re-sequenced
- *  0..n-1 — both timetable offsets stay attached to their own stop (mirrors
- *  Trip.CreateDeadheadReturn's server-side reversal). */
+ *  0..n-1 — all four timetable offsets stay attached to their own stop (mirrors
+ *  Trip.CreateDeadheadReturn's server-side reversal). The leg's direction picks
+ *  which pair applies, which is why CreateReturnModal sends the opposite one. */
 function reversedTripStops(stops: TripStop[]): TripStop[] {
   return [...stops]
     .sort((a, b) => b.order - a.order)
@@ -625,7 +686,11 @@ function CreateReturnModal({
       destination: trip.origin,
       stops: reversedTripStops(trip.stops),
       distanceKm: trip.distanceKm,
-      direction: null,
+      // The reversed stops are timed from the RETURN offsets, so the leg must say it runs
+      // Inbound — a null direction reads the outbound pair, which on a reversed list is
+      // never ascending and leaves the return untimed. Returning an Inbound trip runs
+      // the corridor the outbound way again.
+      direction: trip.direction === "Inbound" ? "Outbound" : "Inbound",
       isEmptyLeg,
       clientId: trip.clientId,
       clientName: trip.clientName,
@@ -2365,6 +2430,7 @@ export default function Trips({
               </div>
 
               <CorridorStepper stops={stopNames(t)} />
+              <TripStopTimetable trip={t} />
 
               {actionError && (
                 <Panel borderColor="rgba(213,94,0,.4)" style={{ marginBottom: 12 }}>

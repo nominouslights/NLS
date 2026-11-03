@@ -13,7 +13,7 @@ import {
 } from "@/lib/api/trips";
 import { listContacts, type ClientContactRecord } from "@/lib/api/clients";
 import { listStops, stopAddressLine, type StopRecord } from "@/lib/api/stops";
-import { stopTimeOnTrip } from "@/lib/timetable";
+import { recipientTimes } from "@/lib/timetable";
 import {
   dispatchChip,
   isEmailContact,
@@ -159,19 +159,14 @@ export default function SendPickupEmailModal({
     [stopMap],
   );
 
-  // Each passenger's own times, off the route timetable snapshotted onto this trip. On a
+  // Each passenger's own times, read off the trip's stored per-stop times: pickup = the
+  // DEPARTURE from their boarding stop, drop-off = the ARRIVAL at their alighting stop. On a
   // corridor run the vehicle departs the origin long before it reaches a mid-route stop, so a
   // single trip-level time would tell most of the manifest the wrong hour. Null — no timetable,
   // or a stop that isn't on this trip — falls back to the trip-level time, which is exactly what
   // every passenger got before timetables existed.
-  const pickupTimeFor = useCallback(
-    (p: ManifestPassenger) => stopTimeOnTrip(trip, p.pickupStopId, p.pickupStopName),
-    [trip],
-  );
-  const dropoffTimeFor = useCallback(
-    (p: ManifestPassenger) => stopTimeOnTrip(trip, p.dropoffStopId, p.dropoffStopName),
-    [trip],
-  );
+  const pickupTimeFor = useCallback((p: ManifestPassenger) => recipientTimes(trip, p).pickup, [trip]);
+  const dropoffTimeFor = useCallback((p: ManifestPassenger) => recipientTimes(trip, p).dropoff, [trip]);
 
   /** Real merge values for one passenger — mirrors the backend MergeFields set. */
   const mergeValues = useCallback(
@@ -460,10 +455,11 @@ export default function SendPickupEmailModal({
                   }}
                   title={
                     pickupTimeFor(p)
-                      ? "From the route timetable, for this passenger's pickup stop"
+                      ? "Scheduled departure from this passenger's pickup stop"
                       : "No timetable for this stop — falls back to the trip's departure time"
                   }
                 >
+                  {"dep "}
                   {hhmm(pickupTimeFor(p) ?? trip.windowStart)}
                   {" · "}
                   {p.pickupStopName ?? trip.origin}
