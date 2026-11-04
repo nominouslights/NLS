@@ -151,12 +151,21 @@ internal static class TripPlanningEndpoints
     /// <paramref name="page"/>/<paramref name="pageSize"/> returns every match in the same
     /// envelope — callers that need a whole set (a dispatch day, a driver's history) are
     /// never silently truncated by a default page size.
+    /// <para>
+    /// <paramref name="statuses"/> is a comma-separated list of exact <see cref="TripStatus"/>
+    /// names (<c>?statuses=Scheduled,InProgress,ReadyForBilling,Invoiced</c>) matched in one
+    /// query; it is the alternative to <paramref name="status"/>, never a companion — sending
+    /// both is 400 <c>Trips.Trip.ConflictingStatusFilters</c>, an empty list 400
+    /// <c>Trips.Trip.EmptyStatusesFilter</c>, an unknown name 400
+    /// <c>Trips.Trip.InvalidStatusFilter</c>.
+    /// </para>
     /// </summary>
     private static async Task<IResult> GetTrips(
         DateOnly? date,
         DateOnly? from,
         DateOnly? to,
         string? status,
+        string? statuses,
         TripServiceType? serviceType,
         Guid? clientId,
         Guid? driverId,
@@ -174,19 +183,13 @@ internal static class TripPlanningEndpoints
             return Results.Unauthorized();
         }
 
-        // Matched against the member NAMES, not parsed. Enum.TryParse happily accepts "2"
-        // (and IsDefined then confirms it, since 2 is a defined ordinal) — so ?status=2 would
-        // still bind by position, and inserting a member would silently repoint every such
-        // caller at a different status. Only the spelled-out name gets through.
-        TripStatus? parsedStatus = null;
-        if (!string.IsNullOrWhiteSpace(status))
+        // ?status=Scheduled (one) or ?statuses=Scheduled,InProgress (a set, one IN, one
+        // snapshot) — never both. Matched against the member NAMES, not parsed: Enum.TryParse
+        // happily accepts "2", which would bind by position. TripStatusFilter.Parse owns the rules.
+        var statusFilter = TripStatusFilter.Parse(status, statuses);
+        if (statusFilter.IsFailure)
         {
-            if (!Enum.GetNames<TripStatus>().Contains(status, StringComparer.Ordinal))
-            {
-                return EndpointResults.Problem(TripErrors.InvalidStatusFilter);
-            }
-
-            parsedStatus = Enum.Parse<TripStatus>(status);
+            return EndpointResults.Problem(statusFilter.Error);
         }
 
         // Clamped rather than rejected — an out-of-range page is a navigation artifact
@@ -205,7 +208,7 @@ internal static class TripPlanningEndpoints
             date,
             from,
             to,
-            parsedStatus,
+            statusFilter.Value.Status,
             serviceType,
             clientId,
             driverId,
@@ -213,7 +216,8 @@ internal static class TripPlanningEndpoints
             assignedOnly ?? false,
             excludeCancelled ?? false,
             normalizedPage,
-            normalizedPageSize);
+            normalizedPageSize,
+            statusFilter.Value.Statuses);
 
         var result = await sender.Query(new GetTripsQuery(tenantId, filter), cancellationToken);
         return result.IsSuccess

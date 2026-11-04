@@ -40,6 +40,15 @@ internal sealed class TripReadService(TripsDbContext context) : ITripReadService
             query = query.Where(t => t.Status == statusName);
         }
 
+        // One IN (Npgsql: = ANY(@names)) inside the same statement as every other predicate, so
+        // the set is read as one snapshot — never stitched from per-status queries between which
+        // a trip can move (finish, invoice, reopen) and be counted twice or not at all.
+        if (filter.Statuses is { } statuses)
+        {
+            var statusNames = statuses.Select(s => s.ToString()).Distinct().ToList();
+            query = query.Where(t => statusNames.Contains(t.Status));
+        }
+
         if (filter.ServiceType is { } serviceType)
         {
             var serviceTypeName = serviceType.ToString();
