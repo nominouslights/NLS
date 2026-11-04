@@ -109,6 +109,32 @@ public static class BudgetCodeErrors
         "Budgeting.Code.InUse",
         "This budget code is referenced by budget allocations or actual transactions and cannot be deleted. Retire it instead — a retired code stays listed so existing rows keep resolving.");
 
+    // --- Retirement refused because the code's own period uses it (BudgetCodeRetirementRule).
+    // Both share the code Budgeting.Code.PeriodNotClosed, kept from when the remedy was "close the
+    // period" so the console's handling (it shows the message verbatim) needs no change; the two
+    // messages name the remedy that actually works under the current rules. Built at call time
+    // because the period label is not known until the rule has run. ---
+
+    /// <summary>
+    /// Retirement refused because budget items of the code's period are planned on it. The way out
+    /// is to remove those items — the plan is editable in Draft and Open, the only states in which
+    /// a code can be retired at all.
+    /// </summary>
+    public static Error RetirementBlockedByItems(string periodLabel) => Error.Conflict(
+        "Budgeting.Code.PeriodNotClosed",
+        $"{periodLabel} has budget items on this code. Remove its items first, then retire the code — a planned line has to keep resolving to a live code.");
+
+    /// <summary>
+    /// Retirement refused because spend dated inside the code's period is recorded against it.
+    /// Recorded spend is a fact, not a plan line, so the message offers no remedy: the period never
+    /// becomes retirable later because its chart freezes outside Draft and Open, and correcting a
+    /// miscoded transaction (re-pointing or deleting it) is a ledger fix, not a retirement path
+    /// worth advertising. Said plainly rather than pointing at a remedy that fails.
+    /// </summary>
+    public static Error RetirementBlockedBySpend(string periodLabel) => Error.Conflict(
+        "Budgeting.Code.PeriodNotClosed",
+        $"This budget code has spend recorded in {periodLabel}. A code with spend recorded in its period cannot be retired — its transactions have to keep resolving to a live code.");
+
     // --- The chart follows the period lifecycle. A Conflict, like the allocation guard it
     // mirrors: the request was well-formed, the period is not in a state to accept it. ---
 

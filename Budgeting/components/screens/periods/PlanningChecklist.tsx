@@ -7,7 +7,7 @@ import type { ChecklistStep } from "@/lib/api/budgeting";
 
 // "Where am I in the zero-based plan?" — the four checklist rows from planningProgress, which
 // maps them onto the steps of zero-based budgeting (see that function's comment; step 4, track
-// all month, deliberately has no row because actuals are still mock).
+// all month, deliberately has no row — spend is tracked on Actuals vs Budget, not checked off).
 //
 // Transitions are not gated on any of these — finalizing an empty plan is allowed server-side —
 // so this is what makes an incomplete plan visible instead. Every row is chip (glyph + written

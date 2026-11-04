@@ -19,7 +19,7 @@ namespace NorthernLink.Budgeting.Infrastructure.Persistence.Migrations
 #pragma warning disable 612, 618
             modelBuilder
                 .HasDefaultSchema("budgeting")
-                .HasAnnotation("ProductVersion", "10.0.0")
+                .HasAnnotation("ProductVersion", "10.0.13")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -94,6 +94,86 @@ namespace NorthernLink.Budgeting.Infrastructure.Persistence.Migrations
                     b.HasIndex("TenantId", "ExpiresAtUtc");
 
                     b.ToTable("qbo_oauth_states", "budgeting");
+                });
+
+            modelBuilder.Entity("NorthernLink.Budgeting.Domain.Actuals.ActualTransaction", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<decimal>("AmountCad")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("amount_cad");
+
+                    b.Property<Guid>("BudgetCodeId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("budget_code_id");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("description");
+
+                    b.Property<string>("ExternalReference")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("external_reference");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("modified_by");
+
+                    b.Property<DateOnly>("OccurredOn")
+                        .HasColumnType("date")
+                        .HasColumnName("occurred_on");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("source");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "BudgetCodeId");
+
+                    b.HasIndex("TenantId", "OccurredOn");
+
+                    b.HasIndex("TenantId", "Source", "ExternalReference")
+                        .IsUnique()
+                        .HasFilter("external_reference IS NOT NULL");
+
+                    b.ToTable("actual_transactions", "budgeting");
                 });
 
             modelBuilder.Entity("NorthernLink.Budgeting.Domain.Allocations.BudgetAllocation", b =>
@@ -732,6 +812,82 @@ namespace NorthernLink.Budgeting.Infrastructure.Persistence.Migrations
                     b.HasIndex("TenantId", "StartedAtUtc");
 
                     b.ToTable("qbo_sync_runs", "budgeting");
+                });
+
+            modelBuilder.Entity("NorthernLink.Budgeting.Infrastructure.Persistence.ReadModels.ActualTransactionReadModel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<decimal>("AmountCad")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("amount_cad");
+
+                    b.Property<Guid>("BudgetCodeId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("budget_code_id");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("description");
+
+                    b.Property<string>("ExternalReference")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("external_reference");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("modified_by");
+
+                    b.Property<DateOnly>("OccurredOn")
+                        .HasColumnType("date")
+                        .HasColumnName("occurred_on");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("source");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "BudgetCodeId");
+
+                    b.HasIndex("TenantId", "OccurredOn");
+
+                    b.ToTable("rm_actual_transactions", "budgeting");
                 });
 
             modelBuilder.Entity("NorthernLink.Budgeting.Infrastructure.Persistence.ReadModels.BudgetAllocationReadModel", b =>
@@ -1550,7 +1706,9 @@ namespace NorthernLink.Budgeting.Infrastructure.Persistence.Migrations
 
                             b1.ToTable("budget_allocations", "budgeting");
 
-                            b1.ToJson("vendor_shares");
+                            b1
+                                .ToJson("vendor_shares")
+                                .HasColumnType("jsonb");
 
                             b1.WithOwner()
                                 .HasForeignKey("BudgetAllocationId");
@@ -1577,7 +1735,9 @@ namespace NorthernLink.Budgeting.Infrastructure.Persistence.Migrations
 
                             b1.ToTable("rm_budget_allocations", "budgeting");
 
-                            b1.ToJson("vendor_shares");
+                            b1
+                                .ToJson("vendor_shares")
+                                .HasColumnType("jsonb");
 
                             b1.WithOwner()
                                 .HasForeignKey("BudgetAllocationReadModelId");

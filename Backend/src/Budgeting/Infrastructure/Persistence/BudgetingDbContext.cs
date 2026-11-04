@@ -3,6 +3,7 @@ using NorthernLink.Shared.Persistence;
 using NorthernLink.Shared.Tenancy;
 using NorthernLink.Budgeting.Application;
 using NorthernLink.Budgeting.Application.Integration;
+using NorthernLink.Budgeting.Domain.Actuals;
 using NorthernLink.Budgeting.Domain.Allocations;
 using NorthernLink.Budgeting.Domain.Codes;
 using NorthernLink.Budgeting.Domain.CostCentres;
@@ -32,6 +33,7 @@ public sealed class BudgetingDbContext(
     public DbSet<BudgetPeriod> BudgetPeriods => Set<BudgetPeriod>();
     public DbSet<BudgetCode> BudgetCodes => Set<BudgetCode>();
     public DbSet<BudgetAllocation> BudgetAllocations => Set<BudgetAllocation>();
+    public DbSet<ActualTransaction> ActualTransactions => Set<ActualTransaction>();
     public DbSet<Vendor> Vendors => Set<Vendor>();
     public DbSet<CostCentre> CostCentres => Set<CostCentre>();
     public DbSet<QboConnection> QboConnections => Set<QboConnection>();
@@ -41,6 +43,7 @@ public sealed class BudgetingDbContext(
     public DbSet<BudgetPeriodReadModel> BudgetPeriodReadModels => Set<BudgetPeriodReadModel>();
     public DbSet<BudgetCodeReadModel> BudgetCodeReadModels => Set<BudgetCodeReadModel>();
     public DbSet<BudgetAllocationReadModel> BudgetAllocationReadModels => Set<BudgetAllocationReadModel>();
+    public DbSet<ActualTransactionReadModel> ActualTransactionReadModels => Set<ActualTransactionReadModel>();
     public DbSet<VendorReadModel> VendorReadModels => Set<VendorReadModel>();
     public DbSet<CostCentreReadModel> CostCentreReadModels => Set<CostCentreReadModel>();
     public DbSet<QboConnectionReadModel> QboConnectionReadModels => Set<QboConnectionReadModel>();
@@ -64,6 +67,9 @@ public sealed class BudgetingDbContext(
         modelBuilder.ApplyConfiguration(new BudgetCodeReadModelConfiguration());
         modelBuilder.ApplyConfiguration(new BudgetAllocationConfiguration());
         modelBuilder.ApplyConfiguration(new BudgetAllocationReadModelConfiguration());
+        modelBuilder.ApplyConfiguration(new ActualTransactionConfiguration());
+        modelBuilder.ApplyConfiguration(new ActualTransactionReadModelConfiguration());
+
         modelBuilder.ApplyConfiguration(new VendorConfiguration());
         modelBuilder.ApplyConfiguration(new VendorReadModelConfiguration());
         modelBuilder.ApplyConfiguration(new CostCentreConfiguration());
@@ -81,6 +87,8 @@ public sealed class BudgetingDbContext(
         modelBuilder.Entity<BudgetPeriod>().HasQueryFilter(p => p.TenantId == TenantId);
         modelBuilder.Entity<BudgetCode>().HasQueryFilter(c => c.TenantId == TenantId);
         modelBuilder.Entity<BudgetAllocation>().HasQueryFilter(a => a.TenantId == TenantId);
+        modelBuilder.Entity<ActualTransaction>().HasQueryFilter(t => t.TenantId == TenantId);
+
         modelBuilder.Entity<Vendor>().HasQueryFilter(v => v.TenantId == TenantId);
         modelBuilder.Entity<CostCentre>().HasQueryFilter(c => c.TenantId == TenantId);
         modelBuilder.Entity<QboConnection>().HasQueryFilter(c => c.TenantId == TenantId);
@@ -89,6 +97,8 @@ public sealed class BudgetingDbContext(
         modelBuilder.Entity<BudgetPeriodReadModel>().HasQueryFilter(p => p.TenantId == TenantId);
         modelBuilder.Entity<BudgetCodeReadModel>().HasQueryFilter(c => c.TenantId == TenantId);
         modelBuilder.Entity<BudgetAllocationReadModel>().HasQueryFilter(a => a.TenantId == TenantId);
+        modelBuilder.Entity<ActualTransactionReadModel>().HasQueryFilter(t => t.TenantId == TenantId);
+
         modelBuilder.Entity<VendorReadModel>().HasQueryFilter(v => v.TenantId == TenantId);
         modelBuilder.Entity<CostCentreReadModel>().HasQueryFilter(c => c.TenantId == TenantId);
         modelBuilder.Entity<QboConnectionReadModel>().HasQueryFilter(c => c.TenantId == TenantId);

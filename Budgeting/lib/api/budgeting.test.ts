@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  actualAmountError,
+  actualCodeCandidates,
+  actualDateError,
+  actualDescriptionError,
+  budgetCodeGroupKey,
+  groupBudgetCodesByCostCentre,
+  matchesBudgetCodeQuery,
+  periodCovering,
+  rollupDeltaPct,
+  toBudgetRollup,
+  ACTUAL_DESCRIPTION_MAX_LENGTH,
+  type BudgetRollupRowRecord,
   allocationCandidates,
   assignmentState,
   budgetItemError,
@@ -66,6 +78,11 @@ import {
 } from "./budgeting";
 import { VENDOR_SHARE_MESSAGES, vendorSharesMustSumMessage } from "@/lib/vendorShares";
 import type { BudgetCode, BudgetCodeCategory, BudgetPeriod, PeriodState } from "@/lib/types";
+// The variance bands are the console's, not the server's — the rollup endpoint ships no band at
+// all — and they still live beside the last mock array. The rollup tests below assert that the
+// percentage this file computes lands in the band the Variance screen would show for it.
+import { varianceKind, varianceLabel } from "@/lib/data";
+import { formatCadPrecise, formatDeltaCad } from "@/lib/money";
 
 // Shared fixtures for the period and allocation helpers below.
 
@@ -519,6 +536,158 @@ describe("costCentreApplies", () => {
 
   it("does not apply to a revenue code — the server rejects the combination", () => {
     expect(costCentreApplies("Revenue")).toBe(false);
+  });
+});
+
+describe("budgetCodeGroupKey", () => {
+  it("puts a revenue code in the revenue bucket, even with a stray cost centre", () => {
+    expect(budgetCodeGroupKey({ category: "Revenue", costCentre: null })).toBe("category:Revenue");
+    expect(budgetCodeGroupKey({ category: "Revenue", costCentre: "OPS-01" })).toBe(
+      "category:Revenue",
+    );
+  });
+
+  it("puts an expense code without a cost centre in the no-cost-centre group", () => {
+    expect(budgetCodeGroupKey({ category: "Expense", costCentre: null })).toBe("none");
+    expect(budgetCodeGroupKey({ category: "Expense", costCentre: "   " })).toBe("none");
+  });
+
+  it("gives spellings that differ only in case the same key", () => {
+    expect(budgetCodeGroupKey({ category: "Expense", costCentre: "Ops-01" })).toBe(
+      budgetCodeGroupKey({ category: "Expense", costCentre: "OPS-01" }),
+    );
+  });
+
+  it("does not let a cost centre spelled 'Revenue' collide with the revenue bucket", () => {
+    expect(budgetCodeGroupKey({ category: "Expense", costCentre: "Revenue" })).not.toBe(
+      budgetCodeGroupKey({ category: "Revenue", costCentre: null }),
+    );
+  });
+});
+
+describe("groupBudgetCodesByCostCentre", () => {
+  it("orders named cost centres A–Z, then no cost centre, then revenue", () => {
+    const groups = groupBudgetCodesByCostCentre([
+      makeCode("rev", "Revenue"),
+      makeCode("bare"),
+      { ...makeCode("z"), costCentre: "Zeta" },
+      { ...makeCode("a"), costCentre: "alpha" },
+    ]);
+    expect(groups.map((g) => g.label)).toEqual(["alpha", "Zeta", "No cost centre", "Revenue"]);
+    expect(groups.map((g) => g.kind)).toEqual([
+      "costCentre",
+      "costCentre",
+      "noCostCentre",
+      "category",
+    ]);
+  });
+
+  it("sorts numbered cost centres numerically, so CC-2 comes before CC-10", () => {
+    const groups = groupBudgetCodesByCostCentre([
+      { ...makeCode("ten"), costCentre: "CC-10" },
+      { ...makeCode("two"), costCentre: "CC-2" },
+    ]);
+    expect(groups.map((g) => g.label)).toEqual(["CC-2", "CC-10"]);
+  });
+
+  it("skips empty groups, and returns nothing for no codes", () => {
+    expect(groupBudgetCodesByCostCentre([])).toEqual([]);
+    const groups = groupBudgetCodesByCostCentre([makeCode("bare")]);
+    expect(groups.map((g) => g.key)).toEqual(["none"]);
+  });
+
+  it("keeps the server's order within a group", () => {
+    const groups = groupBudgetCodesByCostCentre([
+      { ...makeCode("c"), costCentre: "Fleet" },
+      { ...makeCode("a"), costCentre: "Fleet" },
+      { ...makeCode("b"), costCentre: "Fleet" },
+    ]);
+    expect(groups[0].codes.map((c) => c.id)).toEqual(["c", "a", "b"]);
+  });
+
+  it("labels a merged group with its most common spelling and lists every variant", () => {
+    const groups = groupBudgetCodesByCostCentre([
+      { ...makeCode("one"), costCentre: "fleet" },
+      { ...makeCode("two"), costCentre: "Fleet" },
+      { ...makeCode("three"), costCentre: "Fleet" },
+      { ...makeCode("four"), costCentre: "FLEET" },
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].label).toBe("Fleet");
+    expect([...groups[0].spellings].sort()).toEqual(["FLEET", "Fleet", "fleet"]);
+    expect(groups[0].codes).toHaveLength(4);
+  });
+
+  it("breaks an equal-count spelling tie by code-point order, whatever the input order", () => {
+    const fleet = (id: string, costCentre: string) => ({ ...makeCode(id), costCentre });
+    const forward = groupBudgetCodesByCostCentre([
+      fleet("a", "Fleet"),
+      fleet("b", "Fleet"),
+      fleet("c", "FLEET"),
+      fleet("d", "FLEET"),
+    ]);
+    const reversed = groupBudgetCodesByCostCentre([
+      fleet("d", "FLEET"),
+      fleet("c", "FLEET"),
+      fleet("b", "Fleet"),
+      fleet("a", "Fleet"),
+    ]);
+    // Upper-case letters precede lower-case ones in code-point order.
+    expect(forward[0].label).toBe("FLEET");
+    expect(reversed[0].label).toBe("FLEET");
+    expect(forward[0].spellings).toEqual(["FLEET", "Fleet"]);
+  });
+
+  it("includes retired codes in their group", () => {
+    const groups = groupBudgetCodesByCostCentre([
+      { ...makeCode("old", "Expense", false), costCentre: "Fleet" },
+    ]);
+    expect(groups[0].codes.map((c) => c.id)).toEqual(["old"]);
+  });
+
+  it("agrees with budgetCodeGroupKey for every code it places", () => {
+    const codes = [
+      makeCode("rev", "Revenue"),
+      makeCode("bare"),
+      { ...makeCode("f"), costCentre: "fleet" },
+      { ...makeCode("g"), costCentre: "FLEET" },
+    ];
+    for (const group of groupBudgetCodesByCostCentre(codes)) {
+      for (const code of group.codes) expect(budgetCodeGroupKey(code)).toBe(group.key);
+    }
+  });
+});
+
+describe("matchesBudgetCodeQuery", () => {
+  const fuel = {
+    ...makeCode("zbb-fuel-01"),
+    name: "Diesel and gasoline",
+    description: "Pump fuel for the fleet",
+    costCentre: "Fleet",
+  };
+
+  it("matches everything when the query is blank or whitespace", () => {
+    expect(matchesBudgetCodeQuery(fuel, "")).toBe(true);
+    expect(matchesBudgetCodeQuery(fuel, "   ")).toBe(true);
+  });
+
+  it("matches the code case-insensitively", () => {
+    expect(matchesBudgetCodeQuery(fuel, "zbb-fuel")).toBe(true);
+    expect(matchesBudgetCodeQuery(fuel, " ZBB-FUEL-01 ")).toBe(true);
+  });
+
+  it("matches a substring of the name", () => {
+    expect(matchesBudgetCodeQuery(fuel, "gasol")).toBe(true);
+  });
+
+  it("matches a retired code — uniqueness counts it, so the planner must see it", () => {
+    const retired = { ...fuel, active: false };
+    expect(matchesBudgetCodeQuery(retired, "fuel")).toBe(true);
+  });
+
+  it("does not match on the cost centre or the description", () => {
+    expect(matchesBudgetCodeQuery(fuel, "fleet")).toBe(false);
+    expect(matchesBudgetCodeQuery(fuel, "pump")).toBe(false);
   });
 });
 
@@ -1752,5 +1921,246 @@ describe("vendor shares in the item draft and the refetch predicate", () => {
     expect(itemReflects({ ...row, vendorShares: [], vendor: null }, "item-1", { ...input, vendorShares: [], vendor: "Alamos" })).toBe(false);
     // Kept (null): whatever shares the row carries are the ones kept — nothing to wait for.
     expect(itemReflects(row, "item-1", { ...input, vendorShares: null })).toBe(true);
+  });
+});
+
+const rollupRow = (
+  code: string,
+  category: BudgetCodeCategory,
+  plannedCad: number,
+  actualCad: number,
+): BudgetRollupRowRecord => ({
+  budgetCodeId: `id-${code}`,
+  code,
+  name: `Code ${code}`,
+  category,
+  plannedCad,
+  actualCad,
+  // As the server computes it (BudgetRollupBuilder.ToRow): actual − planned, plainly.
+  deltaCad: actualCad - plannedCad,
+});
+
+// toBudgetRollup / rollupDeltaPct: the console's half of the rollup. The server ships both sides
+// of the outer join (BudgetRollupBuilder.Build) and no band at all, so what is pinned here is
+// the grouping, the per-category totals, and the percentage that feeds varianceKind's bands.
+
+describe("toBudgetRollup", () => {
+  const rows = [
+    rollupRow("REV-A", "Revenue", 100_000, 90_000),
+    rollupRow("REV-B", "Revenue", 0, 12_000),
+    rollupRow("EXP-A", "Expense", 40_000, 0),
+    rollupRow("EXP-B", "Expense", 10_000, 11_000),
+  ];
+
+  it("splits the rows by category and never sums the two sides together", () => {
+    const rollup = toBudgetRollup(rows);
+
+    expect(rollup.revenue.rows.map((r) => r.code)).toEqual(["REV-A", "REV-B"]);
+    expect(rollup.expense.rows.map((r) => r.code)).toEqual(["EXP-A", "EXP-B"]);
+    expect(rollup.revenue.plannedCad).toBe(100_000);
+    expect(rollup.revenue.actualCad).toBe(102_000);
+    expect(rollup.expense.plannedCad).toBe(50_000);
+    expect(rollup.expense.actualCad).toBe(11_000);
+  });
+
+  it("keeps a code spent against but never planned — the row zero-based budgeting exists to surface", () => {
+    const unplanned = toBudgetRollup(rows).revenue.rows.find((r) => r.code === "REV-B");
+
+    expect(unplanned).toBeDefined();
+    expect(unplanned!.plannedCad).toBe(0);
+    expect(unplanned!.deltaCad).toBe(12_000);
+  });
+
+  it("keeps a code planned but never spent against", () => {
+    const unspent = toBudgetRollup(rows).expense.rows.find((r) => r.code === "EXP-A");
+
+    expect(unspent).toBeDefined();
+    expect(unspent!.actualCad).toBe(0);
+    expect(unspent!.deltaCad).toBe(-40_000);
+  });
+
+  it("totals each side from the rows' own deltas, so a total cannot disagree with its column", () => {
+    const rollup = toBudgetRollup(rows);
+
+    expect(rollup.revenue.deltaCad).toBe(2_000);
+    expect(rollup.expense.deltaCad).toBe(-39_000);
+  });
+
+  it("sums in cents, so cents-bearing rows total exactly and print to the cent", () => {
+    // Planned figures carry cents now (quantity × unit cost); a float sum of $0.10 + $0.20 is
+    // $0.30000000000000004 and would print beside its rows as a disagreement.
+    const cents = toBudgetRollup([
+      { ...rollupRow("EXP-A", "Expense", 0.1, 0), deltaCad: -0.1 },
+      { ...rollupRow("EXP-B", "Expense", 0.2, 0), deltaCad: -0.2 },
+      { ...rollupRow("EXP-C", "Expense", 3.03, 3), deltaCad: -0.03 },
+    ]);
+
+    expect(cents.expense.plannedCad).toBe(3.33);
+    expect(cents.expense.actualCad).toBe(3);
+    expect(cents.expense.deltaCad).toBe(-0.33);
+    // What the screen prints for those figures (formatCadPrecise / formatDeltaCad).
+    expect(formatCadPrecise(cents.expense.plannedCad)).toBe("$3.33");
+    expect(formatCadPrecise(cents.expense.actualCad)).toBe("$3");
+    expect(formatDeltaCad(cents.expense.deltaCad)).toBe("−$0.33");
+  });
+
+  it("reports an empty rollup, which is the screen's empty state", () => {
+    expect(toBudgetRollup([]).empty).toBe(true);
+    expect(toBudgetRollup(rows).empty).toBe(false);
+  });
+});
+
+describe("rollupDeltaPct", () => {
+  it("has no baseline for a code with actuals but no plan", () => {
+    // planned 0 is not an infinite overrun — varianceKind(null) is the "off" band, "No baseline".
+    expect(rollupDeltaPct(rollupRow("REV-B", "Revenue", 0, 12_000))).toBeNull();
+    expect(varianceKind(rollupDeltaPct(rollupRow("REV-B", "Revenue", 0, 12_000)))).toBe("off");
+    expect(varianceLabel(null)).toBe("No baseline");
+  });
+
+  it("reports a plain −100% for a code with a plan but no actuals", () => {
+    expect(rollupDeltaPct(rollupRow("EXP-A", "Expense", 40_000, 0))).toBe(-100);
+    expect(varianceKind(-100)).toBe("over");
+  });
+
+  it("is the signed delta as a share of what was planned", () => {
+    expect(rollupDeltaPct(rollupRow("EXP-B", "Expense", 10_000, 11_000))).toBeCloseTo(10, 10);
+    expect(rollupDeltaPct(rollupRow("REV-A", "Revenue", 100_000, 90_000))).toBeCloseTo(-10, 10);
+  });
+});
+
+// periodCovering / actualDateError mirror CoveringPeriodRule.ValidateAsync and
+// BudgetPeriod.Covers (inclusive on both ends). A transaction whose date falls in no period is
+// refused rather than stored orphaned, and the form says so before the round trip.
+
+describe("periodCovering", () => {
+  const q4 = period("Open");
+  const q1 = {
+    ...period("Draft"),
+    id: "period-q1",
+    label: "FY2027 Q1",
+    startsOn: "2027-01-01",
+    endsOn: "2027-03-31",
+  };
+  const periods = [q4, q1];
+
+  it("includes both end days — BudgetPeriod.Covers is inclusive", () => {
+    expect(periodCovering(periods, "2026-10-01")?.id).toBe(q4.id);
+    expect(periodCovering(periods, "2026-12-31")?.id).toBe(q4.id);
+  });
+
+  it("finds the period a date falls inside", () => {
+    expect(periodCovering(periods, "2026-11-15")?.id).toBe(q4.id);
+    expect(periodCovering(periods, "2027-02-02")?.id).toBe(q1.id);
+  });
+
+  it("returns null for a date in the gap between periods, and for no date at all", () => {
+    expect(periodCovering(periods, "2025-12-31")).toBeNull();
+    expect(periodCovering(periods, "")).toBeNull();
+  });
+});
+
+describe("actualDateError", () => {
+  const periods = [period("Open")];
+
+  it("accepts a date inside a period", () => {
+    expect(actualDateError("2026-11-15", periods)).toBeNull();
+  });
+
+  it("requires a date", () => {
+    expect(actualDateError("", periods)).toContain("Enter the date");
+  });
+
+  it("refuses a date no period covers, naming the way out", () => {
+    // Mirrors ActualTransactionErrors.NoPeriodCoversDate — the server's own 409 message is
+    // shown verbatim when it still comes back; this is the same rule, said sooner.
+    const problem = actualDateError("2030-01-01", periods);
+
+    expect(problem).toContain("No budget period covers that date");
+    expect(problem).toContain("Create the period first");
+  });
+});
+
+// actualCodeCandidates mirrors the asymmetry between the two handlers:
+// RecordActualTransactionCommandHandler refuses a retired code outright
+// (ActualTransactionErrors.CodeRetired), while UpdateActualTransactionCommandHandler refuses
+// only a move ONTO one — so a row already sitting on a retired code stays correctable in place.
+
+describe("actualCodeCandidates", () => {
+  const codes = [
+    makeCode("rev-a", "Revenue"),
+    makeCode("exp-a", "Expense"),
+    makeCode("exp-retired", "Expense", false),
+    makeCode("rev-retired", "Revenue", false),
+  ];
+
+  it("offers only active codes for a new transaction, both categories", () => {
+    expect(actualCodeCandidates(codes, null).map((c) => c.id)).toEqual(["rev-a", "exp-a"]);
+  });
+
+  it("keeps the edited row's own code selectable even once it is retired", () => {
+    expect(actualCodeCandidates(codes, "exp-retired").map((c) => c.id)).toEqual([
+      "rev-a",
+      "exp-a",
+      "exp-retired",
+    ]);
+  });
+
+  it("still offers no other retired code while editing — a move onto one is refused", () => {
+    expect(actualCodeCandidates(codes, "exp-retired").map((c) => c.id)).not.toContain(
+      "rev-retired",
+    );
+  });
+
+  it("preserves the chart's order", () => {
+    const reversed = [...codes].reverse();
+
+    expect(actualCodeCandidates(reversed, null).map((c) => c.id)).toEqual(["exp-a", "rev-a"]);
+  });
+});
+
+// actualAmountError / actualDescriptionError mirror ActualTransaction.Validate (AmountRequired /
+// AmountNegative / AmountTooLarge / DescriptionRequired / DescriptionTooLong). Cents are
+// accepted (numeric(12,2)); the one console-only rule is refusing a third decimal place, which
+// the server would otherwise round away (ActualTransaction.Round).
+
+describe("actualAmountError", () => {
+  it.each(["0", "1", "139400", " 250 ", "12.50", "3.03", "0.29", "1.1"])("accepts %j", (text) => {
+    expect(actualAmountError(text)).toBeNull();
+  });
+
+  it.each(["", "   ", "abc"])("requires an amount for %j", (text) => {
+    expect(actualAmountError(text)).toBe("Enter an amount.");
+  });
+
+  it.each(["12.505", "1.005", "0.001"])("refuses more than two decimal places in %j", (text) => {
+    expect(actualAmountError(text)).toContain("at most two decimal places");
+  });
+
+  it("refuses a negative amount, naming the convention that replaces the minus sign", () => {
+    // ActualTransactionErrors.AmountNegative: an expense is a positive amount on an expense
+    // code, so the sign has no second job to do.
+    expect(actualAmountError("-1")).toContain("positive amount on an expense code");
+  });
+
+  it("refuses an amount beyond decimal(12,2)", () => {
+    expect(actualAmountError("1000000000")).toContain("too large");
+  });
+});
+
+describe("actualDescriptionError", () => {
+  it("accepts a description", () => {
+    expect(actualDescriptionError("Fuel, Norman Wells depot, invoice 4471")).toBeNull();
+  });
+
+  it.each(["", "   "])("requires one for %j", (text) => {
+    expect(actualDescriptionError(text)).toContain("what this transaction was for");
+  });
+
+  it("accepts exactly the maximum and refuses one more", () => {
+    expect(actualDescriptionError("x".repeat(ACTUAL_DESCRIPTION_MAX_LENGTH))).toBeNull();
+    expect(actualDescriptionError("x".repeat(ACTUAL_DESCRIPTION_MAX_LENGTH + 1))).toContain(
+      "300 characters or fewer",
+    );
   });
 });

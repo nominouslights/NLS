@@ -1194,9 +1194,11 @@ export function coverage(
 //                               sum of its items — nothing is "set")
 //   3. Subtract to reach zero → "Every dollar assigned"  ← the row this file
 //                               existed without for too long
-//   4. Track all month        → NO ROW. Actuals are still mock (lib/data.ts);
-//                               a row that could never turn green is worse
-//                               than an honest gap.
+//   4. Track all month        → NO ROW. Actuals are real now, but tracking is
+//                               a separate screen (Actuals vs Budget), not
+//                               a planning step; a row that is never "done"
+//                               while a period runs is worse than an honest
+//                               gap.
 //   5. New budget each period → the lifecycle stepper plus the copy panel
 //
 // "Every item argued" is the fifth row and belongs to step 2: a copied item
@@ -1681,6 +1683,135 @@ export function costCentreApplies(category: BudgetCodeCategory): boolean {
   return category === "Expense";
 }
 
+// ---------------------------------------------------------------------------
+// Grouping the codes list by cost centre. Display-only helpers: they mirror no server rule
+// except through costCentreApplies (a revenue code never carries a cost centre, so revenue codes
+// get a bucket of their own rather than "No cost centre"). The server stores cost centres as the
+// exact strings typed — nothing here normalizes or merges what is stored.
+//
+// The grouping key is still the code's own free-text `costCentre` string, case-folded — NOT the
+// tenant-wide cost-centre register (lib/costCentres.ts). The register is what the code form
+// picks from, but a code may still carry a retired or unregistered value (kept unchanged by
+// BudgetCodeCostCentreRule), and the codes list must group every row it shows. Grouping by the
+// register (parent/child nesting, register names as labels) is a follow-up.
+// ---------------------------------------------------------------------------
+
+export type BudgetCodeGroupKind = "costCentre" | "noCostCentre" | "category";
+
+export interface BudgetCodeGroup {
+  /** "cc:<FOLDED>" | "none" | "category:<Category>" — prefixed so a cost centre typed as
+   *  "Revenue" can never collide with the Revenue bucket. */
+  key: string;
+  kind: BudgetCodeGroupKind;
+  /** Most common exact spelling (ties by code-point order, so `FLEET` beats `Fleet`), "No cost
+   *  centre", or the category name. Deterministic, never input-order dependent. */
+  label: string;
+  /** Distinct exact spellings merged into this group, label first ([] for the buckets). */
+  spellings: string[];
+  /** Server order preserved. */
+  codes: BudgetCode[];
+}
+
+const NO_COST_CENTRE_KEY = "none";
+
+/** A cost centre is one thing however it was capitalized: `Fleet` and `FLEET` share a group. */
+function foldCostCentre(costCentre: string): string {
+  return costCentre.trim().toLocaleUpperCase("en-CA");
+}
+
+/** The trimmed cost centre a code is grouped by, or null when it has none / it does not apply. */
+function groupingCostCentre(code: Pick<BudgetCode, "category" | "costCentre">): string | null {
+  if (!costCentreApplies(code.category)) return null;
+  const trimmed = code.costCentre?.trim() ?? "";
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/** The key of the group a code lands in — the screen uses it to open the selected code's group. */
+export function budgetCodeGroupKey(code: Pick<BudgetCode, "category" | "costCentre">): string {
+  if (!costCentreApplies(code.category)) return `category:${code.category}`;
+  const costCentre = groupingCostCentre(code);
+  return costCentre === null ? NO_COST_CENTRE_KEY : `cc:${foldCostCentre(costCentre)}`;
+}
+
+const labelCollator = new Intl.Collator("en-CA", { sensitivity: "base", numeric: true });
+
+/**
+ * Codes grouped by case-folded cost centre: named cost centres A–Z (numeric-aware, so OPS-2 sorts
+ * before OPS-10), then "No cost centre" (expense codes without one — the to-do pile), then one
+ * bucket per category a cost centre does not apply to (Revenue). Empty groups are skipped; within
+ * a group the input order (the server's, by code) is kept. Retired codes are grouped like any other.
+ */
+export function groupBudgetCodesByCostCentre(codes: BudgetCode[]): BudgetCodeGroup[] {
+  const named = new Map<string, { codes: BudgetCode[]; counts: Map<string, number> }>();
+  const none: BudgetCode[] = [];
+  const categories = new Map<string, BudgetCode[]>();
+
+  for (const code of codes) {
+    const key = budgetCodeGroupKey(code);
+    if (key === NO_COST_CENTRE_KEY) {
+      none.push(code);
+    } else if (key.startsWith("category:")) {
+      const bucket = categories.get(code.category) ?? [];
+      bucket.push(code);
+      categories.set(code.category, bucket);
+    } else {
+      const spelling = groupingCostCentre(code)!;
+      const entry = named.get(key) ?? { codes: [], counts: new Map<string, number>() };
+      entry.codes.push(code);
+      entry.counts.set(spelling, (entry.counts.get(spelling) ?? 0) + 1);
+      named.set(key, entry);
+    }
+  }
+
+  const namedGroups: BudgetCodeGroup[] = [...named].map(([key, entry]) => {
+    const spellings = [...entry.counts]
+      .sort(([a, an], [b, bn]) => bn - an || (a < b ? -1 : a > b ? 1 : 0))
+      .map(([spelling]) => spelling);
+    return { key, kind: "costCentre", label: spellings[0], spellings, codes: entry.codes };
+  });
+  namedGroups.sort(
+    (a, b) => labelCollator.compare(a.label, b.label) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0),
+  );
+
+  const groups = namedGroups;
+  if (none.length > 0) {
+    groups.push({
+      key: NO_COST_CENTRE_KEY,
+      kind: "noCostCentre",
+      label: "No cost centre",
+      spellings: [],
+      codes: none,
+    });
+  }
+  for (const category of [...categories.keys()].sort()) {
+    groups.push({
+      key: `category:${category}`,
+      kind: "category",
+      label: category,
+      spellings: [],
+      codes: categories.get(category)!,
+    });
+  }
+  return groups;
+}
+
+/**
+ * The codes-list search: a trimmed, case-insensitive substring of the code or the name — nothing
+ * else. Retired codes are not filtered out on purpose: the server's uniqueness check counts them,
+ * so a planner has to see a retired code before trying to recreate it.
+ */
+export function matchesBudgetCodeQuery(
+  code: Pick<BudgetCode, "code" | "name">,
+  query: string,
+): boolean {
+  const q = query.trim().toLocaleLowerCase("en-CA");
+  if (q.length === 0) return true;
+  return (
+    code.code.toLocaleLowerCase("en-CA").includes(q) ||
+    code.name.toLocaleLowerCase("en-CA").includes(q)
+  );
+}
+
 /**
  * Category → status kind, here rather than in the screen for the same reason as periodKind: the
  * mapping is decided once, next to the data, so every screen agrees. Revenue is money coming in
@@ -2053,4 +2184,309 @@ export interface VendorRollup {
 /** GET periods/{periodId}/rollups/vendors → 200; 404 Budgeting.Period.NotFound. */
 export function getVendorRollup(periodId: string): Promise<VendorRollup> {
   return request<VendorRollup>(`/api/budgeting/periods/${periodId}/rollups/vendors`);
+}
+
+// ---------------------------------------------------------------------------
+// Actual transactions — what was really spent or received, and the rollup that
+// sets a period's plan against it. Mirrors the backend's
+// ActualTransactionResponse, BudgetRollupRowResponse and
+// RecordActualTransactionRequest.
+//
+// The single design point to carry over from the backend: **there is no period
+// id on a transaction.** The period is derived from occurredOn and never
+// stored, so moving a transaction between periods is a date correction and
+// nothing else. That is why every write here is addressed to /actuals rather
+// than to a period, and why the date field needs its own client-side check
+// (actualDateError) — a date in no period is refused, not stored orphaned.
+//
+// Codes belong to a period, so the transaction's budgetCodeId must be a code
+// OF THE PERIOD COVERING occurredOn (CoveringPeriodRule returns that period
+// and the handlers look the code up in it); another period's code — even one
+// with the same string — is 404 Budgeting.Code.NotFound. Moving a date across
+// a period boundary therefore means re-picking the code from the new period's
+// chart; the form does exactly that.
+// ---------------------------------------------------------------------------
+
+/** Wire enum. Fixed at creation server-side; nothing in this app can set it. */
+export type ActualTransactionSource = "Manual" | "QuickBooks";
+
+/**
+ * Mirrors ActualTransactionResponse. Rendered directly, field for field, with no view type of
+ * its own — the same reason BudgetAllocationRecord has none: nothing on it needs renaming, and a
+ * mapper that only copied fields would be one more place for the contract to drift.
+ *
+ * `name`, `category`, `serviceLine` and `isCodeActive` describe the *code* and are resolved from
+ * the chart on every read; `code` is the transaction's own snapshot of the code string, which is
+ * what lets a row whose code was deleted and recreated still read.
+ */
+export interface ActualTransactionRecord {
+  id: string;
+  budgetCodeId: string;
+  /** Immutable string snapshot of the code, re-taken only when the row is moved to another code. */
+  code: string;
+  name: string;
+  category: BudgetCodeCategory;
+  serviceLine: BudgetServiceLine | null;
+  /** False once the code is retired — the row stays correctable, but cannot move onto that code. */
+  isCodeActive: boolean;
+  amountCad: number;
+  /** ISO date. The only thing that says which period this counts in. */
+  occurredOn: string;
+  description: string;
+  source: ActualTransactionSource;
+  /** The originating system's id — null for everything entered here. */
+  externalReference: string | null;
+  createdBy: string | null;
+  createdByEmail: string | null;
+  modifiedBy: string | null;
+  modifiedByEmail: string | null;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+}
+
+/**
+ * Mirrors BudgetRollupRowResponse — one row per code, both sides of the outer join included: a
+ * planned code with no spend comes back with actualCad 0, and a code spent against but never
+ * planned comes back with plannedCad 0. That second row is the one zero-based budgeting exists
+ * to surface, so nothing here filters it out.
+ *
+ * `deltaCad` is the server's own actual − planned. **No band, no percentage, no status** — those
+ * thresholds are the console's (varianceKind in lib/data.ts), and a server that shipped its own
+ * would put two answers to one question in the product.
+ */
+export interface BudgetRollupRowRecord {
+  budgetCodeId: string;
+  code: string;
+  name: string;
+  category: BudgetCodeCategory;
+  plannedCad: number;
+  actualCad: number;
+  /** actualCad − plannedCad, as the server computed it. */
+  deltaCad: number;
+}
+
+/**
+ * POST /api/budgeting/actuals and PUT /api/budgeting/actuals/{id} body
+ * (RecordActualTransactionRequest) — one shape for both, because a correction rewrites exactly
+ * the fields an entry supplies.
+ *
+ * No period id (the date decides it), no source and no external reference (everything entered
+ * here is Manual, and a caller that could name its own source could claim a QuickBooks id and
+ * defeat the re-import guard). **And no tax field of any kind** — the platform never computes
+ * tax; amountCad is the amount exactly as recorded.
+ */
+export interface ActualTransactionInput {
+  budgetCodeId: string;
+  /** 0 ≤ x ≤ 999,999,999.99; the server rounds to 2 dp. */
+  amountCad: number;
+  /** ISO date (YYYY-MM-DD). Must fall inside an existing period — see actualDateError. */
+  occurredOn: string;
+  description: string;
+}
+
+/** GET → 200, ordered by date then code server-side; 404 when the period does not exist. */
+export function listActualTransactions(periodId: string): Promise<ActualTransactionRecord[]> {
+  return request<ActualTransactionRecord[]>(`/api/budgeting/periods/${periodId}/actuals`);
+}
+
+/** GET → 200, one row per code, ordered by code; 404 when the period does not exist. */
+export function budgetRollup(periodId: string): Promise<BudgetRollupRowRecord[]> {
+  return request<BudgetRollupRowRecord[]>(`/api/budgeting/periods/${periodId}/rollup`);
+}
+
+/**
+ * POST → 201 { id } (id only; the row lands on the next projection read). 400 on validation
+ * (Budgeting.Actual.AmountRequired / AmountNegative / AmountTooLarge / OccurredOnRequired /
+ * DescriptionRequired / DescriptionTooLong), 404 Budgeting.Code.NotFound for a code that is not
+ * in the period covering occurredOn, 409
+ * Budgeting.Actual.NoPeriodCoversDate / CodeRetired — show the server's message verbatim.
+ */
+export async function recordActualTransaction(input: ActualTransactionInput): Promise<string> {
+  const res = await request<{ id: string }>("/api/budgeting/actuals", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return res.id;
+}
+
+/**
+ * PUT → 204. Same body and the same refusals as recording, plus 404
+ * Budgeting.Actual.NotFound — with one narrowing: CodeRetired applies only when the edit moves
+ * the transaction *onto* a retired code. A row already sitting on one stays correctable in
+ * place, because a retired code must never stand between anyone and fixing a fact.
+ */
+export function updateActualTransaction(id: string, input: ActualTransactionInput): Promise<void> {
+  return request<void>(`/api/budgeting/actuals/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+/** DELETE → 204; 404 Budgeting.Actual.NotFound. */
+export function removeActualTransaction(id: string): Promise<void> {
+  return request<void>(`/api/budgeting/actuals/${id}`, { method: "DELETE" });
+}
+
+/** Mirrors ActualTransaction.DescriptionMaxLength. */
+export const ACTUAL_DESCRIPTION_MAX_LENGTH = 300;
+
+/** Mirrors ActualTransaction.AmountMax (decimal(12,2)). */
+export const ACTUAL_AMOUNT_MAX = 999_999_999.99;
+
+/** How a transaction's origin reads. Manual is everything this console records. */
+export const ACTUAL_SOURCE_LABELS: Record<ActualTransactionSource, string> = {
+  Manual: "Entered here",
+  QuickBooks: "QuickBooks",
+};
+
+/**
+ * Client-side check of the amount text before a round trip, mirroring ActualTransaction.Validate
+ * (AmountRequired / AmountNegative / AmountTooLarge). Amounts are numeric(12,2) and may carry
+ * cents — a transaction is copied off an invoice, and an invoice lands on cents. The one rule
+ * stricter than the server's: more than two decimal places is refused rather than sent, because
+ * the server would round it (ActualTransaction.Round) and a silently-rounded entry is worse than
+ * a refused one. The server re-checks and its answer is the one that counts.
+ *
+ * "Negative" is worth its own message rather than a generic one: the server refuses a minus sign
+ * because the code's category — not the sign — says which side of the ledger a figure lands on,
+ * so an expense is a positive amount on an expense code.
+ */
+export function actualAmountError(text: string): string | null {
+  if (text.trim() === "") return "Enter an amount.";
+  const n = Number(text);
+  if (!Number.isFinite(n)) return "Enter an amount.";
+  if (n < 0) {
+    return "The amount cannot be negative — record an expense as a positive amount on an expense code.";
+  }
+  if (toHundredths(n) / 100 !== n) return "Enter the amount to the cent — at most two decimal places.";
+  if (n > ACTUAL_AMOUNT_MAX) return "The amount is too large.";
+  return null;
+}
+
+/** Mirrors ActualTransaction.Validate's DescriptionRequired / DescriptionTooLong. */
+export function actualDescriptionError(text: string): string | null {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return "Say what this transaction was for.";
+  if (trimmed.length > ACTUAL_DESCRIPTION_MAX_LENGTH) {
+    return `The description must be ${ACTUAL_DESCRIPTION_MAX_LENGTH} characters or fewer.`;
+  }
+  return null;
+}
+
+/**
+ * The period a date counts in, or null. Mirrors BudgetPeriod.Covers — inclusive on both ends —
+ * and relies, exactly as CoveringPeriodRule does, on CreateBudgetPeriodCommandHandler refusing
+ * any period that shares a day with an existing one: a date is covered at most once, so "the
+ * first match" is "the match".
+ *
+ * ISO date strings are compared as strings on purpose. YYYY-MM-DD sorts lexicographically the
+ * same way it sorts chronologically, and constructing a Date here would reintroduce the
+ * timezone shift lib/period.ts exists to avoid.
+ */
+export function periodCovering(periods: BudgetPeriod[], occurredOn: string): BudgetPeriod | null {
+  if (!occurredOn) return null;
+  return periods.find((p) => p.startsOn <= occurredOn && occurredOn <= p.endsOn) ?? null;
+}
+
+/**
+ * The date rule, said before the save rather than discovered by a 409. Mirrors
+ * CoveringPeriodRule.ValidateAsync (ActualTransactionErrors.NoPeriodCoversDate): a transaction
+ * whose date falls in no period is refused, because the period view is the only place actuals
+ * are ever listed and an orphan row is one nothing in the product could ever show again.
+ *
+ * The form knows every period, so it can say this while the date is being typed. The server
+ * still re-checks — it sees periods this client may not have refetched — and its message is
+ * shown verbatim when it does.
+ */
+export function actualDateError(occurredOn: string, periods: BudgetPeriod[]): string | null {
+  if (occurredOn.trim() === "") return "Enter the date the money moved.";
+  if (periodCovering(periods, occurredOn) === null) {
+    return "No budget period covers that date, so this transaction would never show up anywhere. Create the period first, or check the date.";
+  }
+  return null;
+}
+
+/**
+ * The codes the transaction picker may offer, mirroring the two handlers' asymmetric retired
+ * check. RecordActualTransactionCommandHandler refuses a retired code outright
+ * (ActualTransactionErrors.CodeRetired): new spend is a new decision against a code nobody
+ * offers any more. UpdateActualTransactionCommandHandler refuses only a *move onto* a retired
+ * code, so the row's own code stays selectable however long ago it was retired — otherwise a
+ * typo in a description on historical data would be unfixable without restoring a code the
+ * tenant deliberately took out of use.
+ *
+ * Both categories are offered: a transaction is revenue or expense according to its code, and
+ * the entry form does not make the user pick a side first. Order is the caller's (the chart, by
+ * code).
+ */
+export function actualCodeCandidates(
+  codes: BudgetCode[],
+  currentCodeId: string | null,
+): BudgetCode[] {
+  return codes.filter((c) => c.active || c.id === currentCodeId);
+}
+
+/** One category's rollup rows and their totals. */
+export interface BudgetRollupGroup {
+  category: BudgetCodeCategory;
+  /** In the server's order (by code). */
+  rows: BudgetRollupRowRecord[];
+  plannedCad: number;
+  actualCad: number;
+  /** Sum of the rows' own deltas, so the total can never disagree with the column above it. */
+  deltaCad: number;
+}
+
+/** The rollup as the screen renders it: revenue and expense, never summed together. */
+export interface BudgetRollup {
+  revenue: BudgetRollupGroup;
+  expense: BudgetRollupGroup;
+  /** Nothing planned and nothing spent — the screen's empty state. */
+  empty: boolean;
+}
+
+/**
+ * Groups the rollup by category, the way the period dashboard groups its lines, and totals each
+ * side separately.
+ *
+ * **The two sides are never added together.** A single "planned" figure spanning revenue and
+ * expense is a number with no meaning — it would read as a budget while being the sum of money
+ * coming in and money going out — and the period dashboard's "Left to assign" tile is the one
+ * place those two totals are compared, deliberately, as a difference rather than a sum.
+ *
+ * Every row lands in one of the two groups: the wire category is a two-member union, and the
+ * server falls back to Expense for a row whose code the chart no longer has.
+ */
+export function toBudgetRollup(rows: BudgetRollupRowRecord[]): BudgetRollup {
+  const group = (category: BudgetCodeCategory): BudgetRollupGroup => {
+    const groupRows = rows.filter((r) => r.category === category);
+    return {
+      category,
+      rows: groupRows,
+      // Summed in integer cents (sumCad): planned figures carry cents now, and a float sum
+      // would print $0.30000000000000004 beside the rows it totals.
+      plannedCad: sumCad(groupRows.map((r) => r.plannedCad)),
+      actualCad: sumCad(groupRows.map((r) => r.actualCad)),
+      deltaCad: sumCad(groupRows.map((r) => r.deltaCad)),
+    };
+  };
+
+  return { revenue: group("Revenue"), expense: group("Expense"), empty: rows.length === 0 };
+}
+
+/**
+ * A rollup figure's delta as a share of what was planned, ×100 — the input to varianceKind's
+ * bands. Null when nothing was planned, which is the case that matters: a code spent against
+ * but never planned has no baseline to vary from, so it reports "no baseline" rather than an
+ * infinite overrun. The other end — planned but never spent — is a plain −100%, which is a real
+ * and reportable figure, not a missing one.
+ *
+ * Client-side arithmetic with no server counterpart: the rollup endpoint ships the two amounts
+ * and the signed difference and deliberately ships no band or percentage.
+ */
+export function rollupDeltaPct(row: {
+  plannedCad: number;
+  deltaCad: number;
+}): number | null {
+  return row.plannedCad === 0 ? null : (row.deltaCad / row.plannedCad) * 100;
 }

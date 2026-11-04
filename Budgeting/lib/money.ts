@@ -52,10 +52,16 @@ export function formatDeltaPct(deltaPct: number | null): string {
   return `${sign}${Math.abs(deltaPct).toFixed(1)}%`;
 }
 
-/** Signed dollar delta, same rule as formatDeltaPct: the sign is text, not a colour. */
+/**
+ * Signed dollar delta, same rule as formatDeltaPct: the sign is text, not a colour. The magnitude
+ * prints through formatCadPrecise, so a delta beside cents-bearing figures reads to the cent
+ * ("−$0.03", "−$0.30") rather than as whole dollars or a bare "−$0.3"; whole-dollar deltas keep
+ * the short form. The sign is taken from the rounded cents, so float residue never prints "+$0".
+ */
 export function formatDeltaCad(delta: number): string {
-  const sign = delta > 0 ? "+" : delta < 0 ? "−" : "";
-  return `${sign}$${Math.abs(delta).toLocaleString("en-CA")}`;
+  const cents = toHundredths(delta);
+  const sign = cents > 0 ? "+" : cents < 0 ? "−" : "";
+  return `${sign}${formatCadPrecise(Math.abs(cents) / 100)}`;
 }
 
 const cadWhole = new Intl.NumberFormat("en-CA", {

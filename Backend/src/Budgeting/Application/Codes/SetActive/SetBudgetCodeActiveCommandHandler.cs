@@ -9,9 +9,22 @@ namespace NorthernLink.Budgeting.Application.Codes.SetActive;
 /// Handles <see cref="SetBudgetCodeActiveCommand"/>. Idempotent: asking for the state a code is
 /// already in changes nothing and still succeeds, so a repeated click is not an error.
 /// <para>
+/// <b>Retiring is guarded; restoring is not.</b> A code cannot be retired while its own period
+/// uses it — items must be removed first, and a code with spend recorded in its period cannot be
+/// retired at all; see <see cref="BudgetCodeRetirementRule"/>. Restoring a code takes nothing
+/// away from anyone, so the <c>activate</c> direction carries no check at all.
+/// </para>
+/// <para>
+/// The guard runs only on an actual transition to retired, not on every retire request. Asking a
+/// code that is already retired to retire again is the idempotent no-op above, and re-checking it
+/// would start refusing a request that changes nothing — including on codes retired before this
+/// rule existed.
+/// </para>
+/// <para>
 /// Retiring a parent does <b>not</b> cascade to its children. Retirement is a statement about
 /// one code's availability for new work, and silently retiring a branch would hide codes a
-/// planner never touched.
+/// planner never touched. (It follows that the rule above is not checked for the children
+/// either — nothing happens to them.)
 /// </para>
 /// <para>
 /// Retirement is per period: retiring FUEL in Q4 leaves Q3's FUEL (another row) untouched, and
@@ -20,6 +33,8 @@ namespace NorthernLink.Budgeting.Application.Codes.SetActive;
 /// </summary>
 public sealed class SetBudgetCodeActiveCommandHandler(
     IBudgetCodeRepository repository,
+    IBudgetAllocationRepository allocations,
+    IActualTransactionRepository actuals,
     IBudgetPeriodRepository periods)
     : ICommandHandler<SetBudgetCodeActiveCommand>
 {
@@ -35,6 +50,18 @@ public sealed class SetBudgetCodeActiveCommandHandler(
         if (budgetCode is null)
         {
             return Result.Failure(BudgetCodeErrors.NotFound);
+        }
+
+        var isRetiring = !command.IsActive && budgetCode.IsActive;
+        if (isRetiring)
+        {
+            var retirable = await BudgetCodeRetirementRule.ValidateAsync(
+                allocations, actuals, periods, budgetCode.PeriodId, budgetCode.Id, budgetCode.Code, cancellationToken);
+
+            if (retirable.IsFailure)
+            {
+                return retirable;
+            }
         }
 
         var result = budgetCode.SetActive(command.IsActive, command.ActorId);

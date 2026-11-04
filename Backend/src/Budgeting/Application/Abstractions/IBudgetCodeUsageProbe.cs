@@ -8,13 +8,14 @@ namespace NorthernLink.Budgeting.Application.Abstractions;
 /// It takes <b>both</b> the id and the code string on purpose. An allocation line carries the
 /// code's id <em>and</em> an immutable copy of its string, and the probe matches on either: a
 /// code deleted and recreated under the same string has a new id, and its old lines must still
-/// count. When actual transactions arrive they plug into the same implementation
-/// (<c>AllocationBudgetCodeUsageProbe</c>) without touching this interface or its caller.
+/// count. Actual transactions carry the same pair and are matched the same way
+/// (<c>BudgetCodeUsageProbe</c>).
 /// </para>
 /// <para>
 /// <b>Scoped to the code's period.</b> Codes belong to a period, and the string is the
 /// cross-period identity — so an unscoped string match would refuse to delete Q4's unused FUEL
-/// because Q3 planned against <em>its</em> FUEL. Each period's chart answers for its own items.
+/// because Q3 planned against <em>its</em> FUEL. Each period's chart answers for its own items,
+/// and for the transactions dated inside it — a transaction stores no period, only a date.
 /// </para>
 /// </summary>
 public interface IBudgetCodeUsageProbe

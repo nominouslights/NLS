@@ -3,9 +3,9 @@
 Next.js 16 app on port **3003**, consuming the shared API. Scaffolded by US-6.0.1 (Track 6,
 Stage 6.0). Budget **periods**, **codes**, **budget items** (with **vendor shares** on expense
 items and budget by vendor) and the **vendor register** are real — including the period lifecycle
-and the period dashboard — and so is the read-only **QuickBooks Online connection**; actuals and
-variance are still mock — see
-[Data](#data-periods-codes-and-budget-items-are-real-actuals-and-variance-are-still-mock).
+and the period dashboard — and so is the read-only **QuickBooks Online connection** and
+**actual transactions** (entered by hand, with the plan-against-spend rollup). **Variance is the
+last mock screen** — see [Data](#data-everything-but-variance-is-real).
 
 ## Commands
 
@@ -67,7 +67,7 @@ Run it before touching anything on the list, and whenever a Dispatcher UI story 
 | `components/TopBar.tsx`, `AuthGate.tsx`, `LoginScreen.tsx`, `Console.tsx` | same paths | **no** — adapted |
 | `lib/nav.ts`, `lib/data.ts`, `lib/money.ts`, `lib/types.ts`, `lib/claims.ts`, `lib/roles.ts`, `lib/workingPeriod.ts`, `lib/periodHold.ts`, `lib/legal.ts`, `lib/landing.ts`, `lib/api/budgeting.ts`, `lib/api/identity.ts`, `lib/api/qbo.ts` | — | new |
 | `app/qbo/callback/page.tsx` | — | new — the QuickBooks OAuth callback, the one page outside the console |
-| `components/Brandmark.tsx`, `ErrorNotice.tsx`, `LegalLinks.tsx`, `RoleGate.tsx`, `QboCallback.tsx`, `AccessDeniedScreen.tsx`, `SetupPendingScreen.tsx`, `PeriodBanner.tsx`, `BudgetPeriodFormModal.tsx`, `BudgetCodeFormModal.tsx`, `BudgetItemFormModal.tsx`, `VendorSharesEditor.tsx`, `ProfileForm.tsx`, `screens/*`, `screens/periods/*` (incl. `PeriodChooser.tsx`, `PriorityBreakdown.tsx`), `screens/codes/*` (`CopyCodesPanel.tsx`) | — | new |
+| `components/Brandmark.tsx`, `ErrorNotice.tsx`, `LegalLinks.tsx`, `RoleGate.tsx`, `QboCallback.tsx`, `AccessDeniedScreen.tsx`, `SetupPendingScreen.tsx`, `PeriodBanner.tsx`, `BudgetPeriodFormModal.tsx`, `BudgetCodeFormModal.tsx`, `BudgetItemFormModal.tsx`, `ActualTransactionFormModal.tsx`, `VendorSharesEditor.tsx`, `ProfileForm.tsx`, `screens/*`, `screens/periods/*` (incl. `PeriodChooser.tsx`, `PriorityBreakdown.tsx`), `screens/codes/*` (`CopyCodesPanel.tsx`) | — | new |
 
 `theme.ts` and the 12 `ui/` files are copied **unpruned**, including parts this app never uses
 (`ServiceType`, `DutyStatus`, `CorridorStepper`, the two upload fields). Pruning them would break
@@ -151,7 +151,7 @@ it. Config is `vitest.config.mts` — the `.mts` extension is load-bearing (Vite
 `.ts` config as CommonJS and warns), and it must therefore use `import.meta.dirname` for the
 `@` alias, never `__dirname`. `@types/node` declares `__dirname` globally, so TypeScript and
 `next build` both stay green while every `@/lib/...` import in the suite fails to resolve at
-run time. Thirty-one files; seventeen need a DOM (the sixteen component tests, plus `workingPeriod`'s
+run time. Thirty-two files; eighteen need a DOM (the seventeen component tests, plus `workingPeriod`'s
 storage tests, which need `sessionStorage`):
 
 - `lib/roles.test.ts` — US-6.0.1's acceptance criterion: a Dispatcher account is rejected.
@@ -208,6 +208,22 @@ storage tests, which need `sessionStorage`):
   items counts once) and `planningProgress` (the dashboard's zero-based checklist and stepper
   derive from one tested function; a test pins that no row says a budget is "set").
 
+  For actuals: `periodCovering` / `actualDateError` against `CoveringPeriodRule` +
+  `BudgetPeriod.Covers`, `actualCodeCandidates` against the *asymmetric* retired check (refused
+  outright when recording, refused only for a move **onto** a retired code when correcting), and
+  `actualAmountError` / `actualDescriptionError` against `ActualTransaction.Validate` (cents
+  accepted; a third decimal place refused rather than left for `ActualTransaction.Round`).
+  `toBudgetRollup` (summed in cents via `sumCad`, pinned with `$0.10 + $0.20` and a `$3.03`
+  plan against a `$3` actual) / `rollupDeltaPct` mirror no server rule — the rollup ships no band — so what
+  is pinned there is the console's own half: the category split, the per-side totals, and both
+  outer-join arms (a code with actuals but no plan reports *no baseline*, never an infinite
+  overrun; a code with a plan but no actuals reports a plain −100%). And the codes list's grouping
+  helpers — `budgetCodeGroupKey`, `groupBudgetCodesByCostCentre`, `matchesBudgetCodeQuery` — which
+  mirror no server rule except through `costCentreApplies` (revenue codes get their own bucket):
+  the case-folded key, the bucket order, numeric-aware sorting, the most-common-spelling label,
+  search on code/name only with retired codes included, and that every code lands in the group
+  its key names.
+
   `netCad` / `netKind` / `netLabel` and their tests were **deleted**, not adapted, when the Net
   tile became "Left to assign": `netKind(0)` was `info` and `balanced` is now `ontime`, because
   under zero-based budgeting $0 is the goal rather than the neutral case. Adapting an assertion
@@ -244,6 +260,29 @@ storage tests, which need `sessionStorage`):
   chosen, both a client-side and a server-side refusal show the server's words, and a period with
   no active code of the category gets a note naming the period and OPEN BUDGET CODES instead of
   an empty picker.
+- `components/screens/BudgetCodes.test.tsx` — the screen's slower initial cost-centre register
+  load never lands on top of a newer one pushed up by an inline create; and the grouped list: the
+  selected code's group open and locked while the others start collapsed, "· 2 spellings" for
+  `Fleet` / `FLEET`, Revenue last, a header click toggling its group, the fallback selection never
+  tagged "· selected", a search opening and locking every group with "n of total" counts, the
+  "selected but not in these results" line and the no-match note, a group keeping its
+  whole-group label ("Fleet", "· 2 spellings", "1 of 3") when a search leaves only its minority
+  spelling, a retired code found by the screen-level search, a refused delete (`InUse`)
+  keeping the selection, `PeriodNotClosed` and `PeriodNotEditable` refusals shown verbatim, and
+  the retire confirm naming what blocks a retire (items to remove first, recorded spend) while
+  keeping "the server may still refuse".
+- `components/ActualTransactionFormModal.test.tsx` — the per-period code rule: a date inside the
+  entered period uses its chart with no fetch; a date in another period fetches **that** period's
+  chart, offers only its rows, and follows the code string onto its own row; with no active code
+  of that string the selection empties and the save is refused client-side; the POST carries the
+  covering period's code id and the post-save refetch reads the covering period's transactions;
+  when the followed row's name or category differs from the picked one the note says so; and a
+  row on a retired code opens on that code, explains it, and saves a cents correction against it
+  in place.
+- `components/screens/ActualsVsBudget.test.tsx` — the rollup and the entered period's chart load
+  under one error state: a chart failure stays shown after the rollup succeeds, RECORD is
+  disabled with a note saying why, a row click opens nothing, and RETRY refetches the chart; and
+  a `$3.03` plan against a `$3` actual prints `$3.03` / `$3` / `−$0.03`.
 - `components/screens/codes/CopyCodesPanel.test.tsx` — `vi.fn()` props: last period (a Closed
   one) is pre-selected, the first click only asks to confirm, the confirm note names both
   periods, the second click copies from the chosen source and shows the outcome summary, a
@@ -268,7 +307,8 @@ storage tests, which need `sessionStorage`):
   authorize URL, 503 `NotConfigured` shown verbatim with no navigation, DISCONNECT needing two
   clicks (then a refetch), CANCEL, and a failed load with RETRY.
 - `lib/money.test.ts` — `formatDeltaCad` / `formatDeltaPct` always write the sign out, so a
-  signed figure never rests on colour; `formatCadPrecise` prints cents only when there are cents
+  signed figure never rests on colour; `formatDeltaCad` prints cents to the cent (`−$0.30`, never
+  `−$0.3`) and never signs float residue; `formatCadPrecise` prints cents only when there are cents
   (the copied `formatCad` is whole-dollar and would print a `$3.03` item as `$3`).
 - `lib/workingPeriod.test.ts` — the "enter a period" contract, which mirrors no server rule (the
   backend scopes by route id and has no idea which period a tab is in): `suggestedPeriodId`
@@ -417,7 +457,7 @@ silently.
   Cost Centres render with or without an entered period; there the banner says "This screen isn't
   tied to a period." or offers CHOOSE A PERIOD.
 
-## Data: periods, codes and budget items are real; actuals and variance are still mock
+## Data: everything but Variance is real
 
 **Budget periods come from the real API** (`GET/POST /api/budgeting/periods` via
 `lib/api/budgeting.ts`; `Console.tsx` owns the fetch and threads the list down as props) — the
@@ -499,6 +539,86 @@ The modal shows those shares read-only under a "Kept shares" chip with REMOVE SH
 `null` until that is clicked, after which it sends `[]`. `budgetItemError(input, category, item)` then checks the
 kept shares the way `BudgetAllocation.Update` does: re-summed against the new amount, and refused
 on revenue only when the code changes.
+
+### Actuals are real, by hand — not by QuickBooks
+
+**Actual transactions are entered in this console** (Actuals vs Budget → `+ RECORD TRANSACTION`).
+That is worth stating plainly because the old `lib/data.ts` header promised they would arrive
+"when the QuickBooks reconciliation slice lands": they did not wait for it. The QBO connection
+(below) is read-only and its expense import is a later slice; until it exists every actual on
+this platform was typed by a person.
+
+One transaction is *this much, against this code, on this day, for this reason*. Five things about
+it are not guessable from the form, and all five are the server's:
+
+- **There is no period on a transaction.** The period is *derived* from `occurredOn` and never
+  stored — `CreateBudgetPeriodCommandHandler` refuses overlapping periods, so a date maps to at
+  most one period, and "the period's actuals" is a range query that can never disagree with the
+  period's own dates. Correcting the date is therefore the only way to move a transaction between
+  periods, and it is why the writes are addressed to `/actuals` rather than to a period.
+- **A date in no period is refused** (409 `Budgeting.Actual.NoPeriodCoversDate`), not stored
+  orphaned — the period view is the only place actuals are listed, so such a row is one the
+  product could never show again. The form knows every period, so it names the period a date
+  counts in *while the date is being picked* (`periodCovering`) and refuses an uncovered one
+  before the round trip; the server still re-checks and its message is shown verbatim.
+- **The code must be a code of the period covering the date.** Codes belong to a period
+  (below), so `CoveringPeriodRule` returns the covering period and the record/update handlers
+  look the code up **in it**: another period's code — even one with the same string — is 404
+  `Budgeting.Code.NotFound`. The modal therefore offers the **covering period's** chart: the
+  entered period's comes from the screen, and when the date moves into another period it fetches
+  that period's chart (`listBudgetCodes(coveringId)`), follows the picked code **string** onto
+  that period's own active row if there is one, and otherwise empties the picker so the user
+  re-picks — it never keeps an id the server would refuse. Moving a date across a period boundary
+  means re-picking the code.
+- **Expenses are positive amounts on expense codes.** The code's category says which side of the
+  ledger a figure lands on, so the minus sign has no second job and a negative amount is refused
+  (`Budgeting.Actual.AmountNegative`). Amounts are `numeric(12,2)` and may carry cents — the
+  whole-dollar rule this console used to impose is gone, as it is for budget items. The one
+  console-only rule (`actualAmountError`): more than two decimal places is refused rather than
+  sent, because the server would round it. Actuals vs Budget prints every figure through
+  `formatCadPrecise` and `formatDeltaCad`, and `toBudgetRollup` totals in cents (`sumCad`).
+- **Actuals are not frozen by the period lifecycle.** A closed period still takes and still
+  corrects transactions, deliberately: an invoice dated the 30th lands on the 6th, and a closed
+  period's actuals are exactly what a review is reading. Only the *plan* is frozen.
+
+The retired-code rule is **asymmetric**, and the form mirrors both halves (`actualCodeCandidates`):
+new spend cannot go on a retired code, but a row already sitting on one stays correctable in place
+as long as the edit does not move it to another code — a retired code must never stand between
+anyone and fixing a fact.
+
+The actuals routes (`BudgetAccess` group, `BudgetingEndpoints.cs`):
+
+| Route | |
+|---|---|
+| `GET /api/budgeting/periods/{id}/actuals` | the period's transactions, by date then code (404) |
+| `GET /api/budgeting/periods/{id}/rollup` | one row per code: `plannedCad`, `actualCad`, `deltaCad` (404) |
+| `POST /api/budgeting/actuals` | `{ budgetCodeId, amountCad, occurredOn, description }` → 201 `{ id }`; 404 `Budgeting.Code.NotFound` when the code is not in the covering period; 409 `NoPeriodCoversDate` / `CodeRetired` |
+| `PUT /api/budgeting/actuals/{id}` | same body; 204. 404 `NotFound` / `Budgeting.Code.NotFound`, 409 `NoPeriodCoversDate` / `CodeRetired` |
+| `DELETE /api/budgeting/actuals/{id}` | 204 |
+
+**No period id, no source, no external reference, and no tax field of any kind** on that body. The
+first three are the server's to decide (everything entered here is `Manual`, and a caller that
+could name its own source could claim a QuickBooks id and defeat the re-import guard); the last is
+the platform rule — the platform never computes tax, and `amountCad` is the amount exactly as
+recorded.
+
+The rollup is the whole of Actuals vs Budget. It includes **both sides of the outer join** — a
+code planned but not spent against, and a code spent against but never planned — and that second
+row is what a planner opens the screen to find. Its `plannedCad` is the sum of the code's budget
+items. It ships **no variance band and no percentage**: those thresholds are the console's
+(`varianceKind` / `varianceLabel`), and a server that shipped its own would put two answers to
+one question in the product. `toBudgetRollup` groups the rows by category and **never adds the two
+sides together** — a "total planned" spanning revenue and expense would be money in and money out
+in one figure. The only place the two totals meet is the dashboard's "Left to assign" tile, as a
+difference.
+
+The screen (`screens/ActualsVsBudget.tsx`) is period-scoped like the dashboard: it shows the
+entered period only, has no picker of its own, fetches the entered period's rollup, transactions
+and chart, and takes the period hold while a remove runs (the modal takes it while saving).
+Writes follow the same eventual-consistency discipline as items: the modal refetches the
+**target** period's transactions until the new values are visible — the target, because a
+corrected date may have moved the row out of the period on screen — and only then does the screen
+refresh the rollup, whose totals read from the same projection.
 
 ### Vendor shares and budget by vendor
 
@@ -606,7 +726,7 @@ reports and future QuickBooks actuals will join on it.
 | `POST /api/budgeting/periods/{id}/codes` | 201 `{ id }` |
 | `PUT /api/budgeting/periods/{id}/codes/{codeId}` | 204; no `code` in the body — see below |
 | `POST /api/budgeting/periods/{id}/codes/{codeId}/activate\|deactivate` | 204 |
-| `DELETE /api/budgeting/periods/{id}/codes/{codeId}` | narrow; 409 when the code has children, or `Budgeting.Code.InUse` when this period has items on it |
+| `DELETE /api/budgeting/periods/{id}/codes/{codeId}` | narrow; 409 when the code has children, or `Budgeting.Code.InUse` when this period has items on it **or** spend dated inside this period is recorded against it |
 | `POST /api/budgeting/periods/{id}/codes/starter-set` | idempotent per period; 200 `{ created }` |
 | `POST /api/budgeting/periods/{id}/codes/copy` | body `{ sourcePeriodId }` → 200 `{ copied, skippedExisting, skippedRetired, sourceCodeCount }` (the first three sum to the fourth); 400 `CopySourceRequired` / `CopySourceIsTarget`, then the target's 404 `Budgeting.Period.NotFound` / 409 `PeriodNotEditable`, then 404 `CopySourceNotFound` (the **source**) |
 | `GET /api/budgeting/codes/owners` | the owner picker's options, from the user replica — **tenant-wide**, since it lists people, not codes |
@@ -657,6 +777,15 @@ guessable from the form:
   that has no items in this period; `IBudgetCodeUsageProbe` turns it into a 409 the moment that
   stops being true, and the server's message names retirement as the alternative. Both are
   two-click, and both confirms name the period.
+  **`deactivate` can also answer 409 `Budgeting.Code.PeriodNotClosed`** (`BudgetCodeRetirementRule`,
+  from the actuals branch): a code can only be retired once its period is `Closed` if anything in
+  that period references it — a budget item **or** an actual transaction dated in it. The message
+  names the blocking period, so it is shown verbatim, exactly like `PeriodNotEditable`. Composed
+  with the per-period chart rule above (writes only in Draft/Open), the literal intersection is
+  strict: a code its own period references cannot be retired at all — a planned code is released
+  by removing its items first, a code with spend recorded has no way out. That is left strict on
+  purpose **pending an owner decision** on which rule gives; the console does not try to reconcile
+  them and shows whichever refusal the server sends.
 - **The hierarchy is one level deep**, guarded from both directions: a parent must be top-level,
   *and* a code that already has children cannot be given a parent (otherwise the chain is built
   bottom-up), and a parent must be in the **same period** (`ParentNotFound` otherwise — the
@@ -672,6 +801,27 @@ guessable from the form:
   to one. `BudgetCode.Validate` rejects the combination outright, the form hides the field when
   the category is Revenue, and the detail panel hides the row. `costCentreApplies` in
   `lib/api/budgeting.ts` is the single mirror both screens read.
+
+**The codes list is grouped by cost centre, with a search box.** `groupBudgetCodesByCostCentre`
+groups on the code's own **free-text `costCentre` string, case-folded**
+(`trim().toLocaleUpperCase("en-CA")`) — **not** on the cost-centre register (below): the register
+is what the code form now picks from, but a code may still carry a retired or unregistered value,
+and the list must group every row it shows. `Fleet` and `FLEET` share one group, labelled with the
+most common exact spelling (ties by code-point order), and the header reads "· N spellings" so the
+drift is shown rather than silently merged — the server keeps the exact strings. Order: named cost
+centres A–Z (numeric-aware, `OPS-2` before `OPS-10`), then "No cost centre", then a Revenue bucket
+— routed by `costCentreApplies`, so a stray cost centre on a revenue row still lands there. Keys
+are prefixed (`cc:<FOLDED>`, `none`, `category:<Category>`) so a cost centre typed as "Revenue"
+cannot collide with the bucket; DOM ids come from `useId()` + index, never the string. **All groups
+start collapsed; the selected code's group is open and locked** (derived from the selection, never
+set in an effect; the fallback selection is the first card of the first group and is never tagged
+"· selected"); **typing in "Find a code" opens and locks every group**, with "n of total" counts
+and labels taken from the full list so they do not jump while typing. The search matches code or
+name only, case-insensitively, and **includes retired codes**, because the unique code index
+counts them. A selected code filtered out by the search stays in the detail pane with one line
+saying so. Group headers carry no status colour and no chip. Open/closed state is component state
+only. The branch's `<datalist>` of existing spellings (`costCentreSuggestions`) was **dropped in
+the merge** — the form picks from the register now, which converges spellings better.
 
 `serviceLine`'s six revenue members are **byte-identical to the backend's `TripServiceType`**
 (`ContractCrew, Community, Nihb, Charter, Cargo, Grocery`) so Stage 6.2's revenue-mix report joins
@@ -700,8 +850,12 @@ name is the future import's match key. `lib/vendors.ts` mirrors `Vendor.Normaliz
 form). Tests: `lib/vendors.test.ts`, the vendor block in `budgeting.requests.test.ts`, and
 `components/screens/Vendors.test.tsx` (screen and modal, `api` prop injected).
 
-`lib/data.ts` holds the not-yet-real remainder: actuals and variance. Its `budgetCodes` array
-survives **only** as the name-and-category lookup those two still need — the Budget Codes screen
+`lib/data.ts` holds the not-yet-real remainder, and it is down to **one array**: `variance`. The
+`actuals` array is gone — actuals are real — and `variance` carries its own literal planned/actual
+pairs, filling `delta`, `deltaPct` and `vk` from one function so a row's colour can never disagree
+with its own numbers. Reports' revenue-mix card reads the same pairs off `variance` and stays mock
+until it is rebuilt on the rollup endpoint. Its `budgetCodes` array
+survives **only** as the name-and-category lookup Variance and Reports still need — the Budget Codes screen
 no longer reads it, and the array is typed `Pick<BudgetCode, "id" | "code" | "name" | "category">`
 so it does not have to grow a plausible-looking value for every field the real entity gains.
 Conventions follow `Dispatcher/lib/data.ts`: flat exported const arrays, string ids, ISO date
@@ -710,8 +864,9 @@ strings (never `Date` objects), whole-dollar numbers rendered through `formatCad
 keyed to mock period ids no real period will match, so screens on real periods show their empty
 states rather than fake figures — those screens keep their `MockTag`.
 
-No screen invents an API shape. Each remaining array is replaced by additions to
-`lib/api/budgeting.ts` as its Stage 6.1 slice lands, and the screens keep their props.
+No screen invents an API shape. The last array is replaced by additions to
+`lib/api/budgeting.ts` when Variance is rebuilt on `GET periods/{id}/rollup`, and the screens keep
+their props.
 
 ### QuickBooks Online connection (live: backend, QuickBooks screen and callback page)
 
@@ -773,8 +928,10 @@ settings are `appsettings.json` `Budgeting:Qbo` (`Environment` Sandbox|Productio
 the API host — the Intuit URLs, `RedirectUri`, `MinorVersion` 75, `BackfillMonths`,
 `PollInterval`). The owner registers the Intuit app and supplies the client id and secret.
 
-Variance thresholds (`varianceKind`) live in `lib/data.ts`, not in the Variance screen, so any
-future report agrees with the screen by construction. The signed formatters
+Variance thresholds (`varianceKind` / `varianceLabel`) live in `lib/data.ts`, not in the Variance
+screen, so any future report agrees with the screen by construction. **They are not mock**:
+Actuals vs Budget, on real data, reads them from there — the one sanctioned import of the mock
+module from a real screen, ending when the last mock array does. The signed formatters
 (`formatDeltaCad` / `formatDeltaPct`) live in `lib/money.ts`, **not** in `lib/data.ts`, so a
 screen on real data (the dashboard's Net tile) never imports the mock module.
 
@@ -837,8 +994,11 @@ grep -rn "statusMeta(" components lib | grep -v components/ui/
 grep -rn "#009E73\|#E1B000\|#D55E00\|#7A8899" components lib app | grep -v lib/theme.ts
 ```
 
-`components/screens/Variance.tsx` is the file to re-check hardest after any edit: a coloured
-delta with no sign and no glyph is the exact failure this rule exists to prevent.
+`components/screens/Variance.tsx` and `components/screens/ActualsVsBudget.tsx` are the files to
+re-check hardest after any edit: both are full of signed figures, and a coloured delta with no
+sign and no glyph is the exact failure this rule exists to prevent. Actuals vs Budget calls
+`statusMeta` nowhere — every band goes through `StatusChip` — and every delta prints through
+`formatDeltaCad`.
 
 Known hazards documented in `theme.ts`: `colors.amber` is a fill/border/icon colour only — use
 `colors.amberText` when amber must be text; `colors.textFaint` is decorative only.
@@ -855,6 +1015,9 @@ Known hazards documented in `theme.ts`: `colors.amber` is a fill/border/icon col
 | 2026-10-08 | Code audit after the cost-centre register | **Pass** — no new `statusMeta` call and no new protected hex; status on the register rows/detail, the code form's kept value and the rollup's retired/unregistered rows is always a `StatusChip` (glyph + written label) |
 | 2026-10-08 | Code audit after the QuickBooks screen and callback | **Pass** — no new `statusMeta` call and no new protected hex; the connection status and the "Reconnect by" warning are `StatusChip`s with a glyph (✓ / ! / —) and a written label; the callback's refusals use `ErrorNotice` |
 | 2026-10-11 | Code audit after vendor shares | **Pass** — no new `statusMeta` call and no new protected hex; the split's Remaining / Over by / Fully assigned line is a `StatusChip` (glyph + written label, the figure in the label) beside a sentence; a kept retired vendor and the rollup's retired rows carry a `StatusChip`; an item row writes "(retired)" in text |
+| 2026-09-18 | Code audit after wiring Actuals vs Budget to the rollup | **Pass** — no new `statusMeta` call and no new protected hex; every band is a `StatusChip`, every delta goes through `formatDeltaCad` |
+| 2026-10-24 | Code audit after grouping the codes list | **Pass** — no new `statusMeta` call and no new protected hex; group headers carry no status colour or chip (text tags only) |
+| 2026-10-30 | Code audit after merging main into the actuals/grouped-codes branch | **Pass** — both greps show nothing new |
 | — | Grayscale (DevTools → Rendering → Achromatopsia) | **Not yet run** |
 | — | Deuteranopia / Protanopia / Tritanopia | **Not yet run** |
 | — | Side-by-side against Dispatcher at equal width | **Not yet run** |
@@ -898,8 +1061,13 @@ Not used here on purpose: axe-core / pa11y / Lighthouse. They catch the automata
   migration `AddBudgetAllocations`), and with it `AllocationBudgetCodeUsageProbe` replaced
   `NeverReferencedBudgetCodeUsageProbe`, so `DELETE periods/{id}/codes/{codeId}` answers 409
   `Budgeting.Code.InUse` for a code with items in its period (codes are per period now, so the
-  probe is too). Still open: the
-  `ActualTransaction` table and its RLS policies; QuickBooks actuals reconciliation.
+  probe is too) — and, since actuals shipped, for one with spend dated in its period.
+- ~~The `ActualTransaction` table and its RLS policies~~ — **shipped**
+  (`budgeting.actual_transactions` + `rm_actual_transactions`, migration `AddActualTransactions`),
+  with the five routes above and `BudgetCodeRetirementRule` alongside them. Still open:
+  QuickBooks actuals reconciliation (the QBO expense import), and rebuilding Variance on the
+  rollup endpoint. Owner decision pending: how `PeriodNotClosed` should compose with the
+  per-period `PeriodNotEditable` rule (see Budget codes above).
 - ~~Any QuickBooks automation~~ — **reversed by the owner on 2026-10-08**: Budgeting now owns a
   read-only QuickBooks Online connection (see "QuickBooks Online connection" above). Still out
   of scope: **writing anything to QuickBooks** (never — the platform reads QBO and nothing
@@ -914,9 +1082,37 @@ Not used here on purpose: axe-core / pa11y / Lighthouse. They catch the automata
   contracts, POs and work orders) against this chart. They are unrelated strings today, not
   replicas of these rows; wiring them together is a cross-module story and needs an integration
   event, not a project reference.
-- Filtering the codes list — it is small enough to render whole. (~~Hiding retired codes from
+- ~~Filtering the codes list~~ — done: grouped by case-folded cost centre, with a code/name
+  search that includes retired codes (because uniqueness does). (~~Hiding retired codes from
   the item picker~~ — done: `allocationCandidates` offers only active codes of the
   section's category — planned codes included, since a code may carry many items.)
+- **The codes list groups by the free-text `costCentre` string, not by the register.** Grouping
+  by register entry (its name as the label, parent/child nesting as on the dashboard rollup) is a
+  follow-up. Other grouping follow-ups, none started: server-side case-folding or a merge
+  migration for existing spellings; per-user persistence of open groups; search on cost centre,
+  description or GL account code; a shared collapsible `ui/` component (Dispatcher first); a
+  service-line view; a toggle to hide retired codes; a cost-centre filter on the item and actuals
+  pickers.
 - CI/CD and the OVHcloud deployment target — there is no `.github/` anywhere in this repo yet;
   that is a platform-wide story covering every app at once.
 - OIDC/OpenIddict; the `SuperUser` claim from architecture Section 6.1.
+
+## Superseded in the 2026-10 merge of main into the actuals branch
+
+Recorded so nothing either side documented disappears silently. Main's version won each of these:
+
+- **The branch's period list/full-view take-over** (`screens/periods/PeriodList.tsx`,
+  `openPeriodId` in Console, `← ALL PERIODS`) — superseded by main's period workspace
+  (`PeriodChooser`, `PeriodBanner`, the entered period). `PeriodList.tsx` is deleted.
+- **The branch's ZBB balance banner** (`zbbBalance` / `zbbBalanceDisplay` / `hasPlannedAmounts` /
+  `ZBB_BALANCE_KINDS`, a `BalanceStep` checklist row, a finalize-confirm sentence) — superseded
+  by main's "Left to assign" tile (`leftToAssignCad` / `assignmentState` / `planBalanced`), its
+  "Every dollar assigned" checklist row and its finalize warning. Same rule (a surplus is money
+  with no job, an empty plan is not balanced, warn never block), main's implementation.
+- **`BudgetAllocationFormModal.tsx`** (one line per code, upsert by code) — deleted; main's
+  `BudgetItemFormModal.tsx` (many items per code) replaces it.
+- **"Retiring is unconditional / codes are tenant-wide"** wording on the branch — superseded by
+  main's per-period chart; the branch's `PeriodNotClosed` rule survives alongside it (above).
+- **The cost-centre `<datalist>`** (`costCentreSuggestions`, and the hint "pick an existing one to
+  keep groups together") — superseded by main's register picker. The `list` prop added to the
+  copied `ui/Field.tsx` stays (it is in the Dispatcher source too).

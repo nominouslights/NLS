@@ -1,21 +1,25 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { colors, fonts, rowSurface } from "@/lib/theme";
 import type { BudgetCode, BudgetPeriod } from "@/lib/types";
 import { MonoTag, StatusChip } from "@/components/ui/Chip";
 import { ActionButton } from "@/components/ui/Button";
 import { DetailRow, Panel, SectionLabel } from "@/components/ui/Panel";
+import { TextField } from "@/components/ui/Field";
 import { ApiError } from "@/lib/api/transport";
 import {
   budgetCodeCategoryKind,
+  budgetCodeGroupKey,
   canEditPlan,
   copyBudgetCodes,
   costCentreApplies,
   deleteBudgetCode,
+  groupBudgetCodesByCostCentre,
   listBudgetCodes,
   listBudgetOwnerCandidates,
   listCostCentres,
+  matchesBudgetCodeQuery,
   refetchUntil,
   seedStarterBudgetCodes,
   setBudgetCodeActive,
@@ -26,6 +30,7 @@ import {
   SERVICE_LINE_LABELS,
   TAX_TREATMENT_LABELS,
   type BudgetCodeCopyResult,
+  type BudgetCodeGroup,
   type BudgetCodeRecord,
   type BudgetOwnerOption,
   type CostCentreRecord,
@@ -63,6 +68,27 @@ import { EmptyNote, Screen } from "@/components/screens/shared";
 // stays listed, because the period's items on it must keep resolving. Deleting exists only for a
 // code created in error that has no items in this period, and the server answers 409 the moment
 // that stops being true.
+//
+// A retire can be refused, and the server's message is the only thing that says why, so every
+// refusal reaches the banner verbatim (with its code). Two 409s matter here:
+// Budgeting.Code.PeriodNotEditable (this period is past Open), and Budgeting.Code.PeriodNotClosed
+// (the server's retirement rule: a code is retired only once the periods using it have closed —
+// its message names the blocking periods by label). The screen does not pre-judge either rule;
+// it shows what the server said.
+//
+// **The list is grouped by cost centre** (groupBudgetCodesByCostCentre in lib/api/budgeting.ts),
+// so a growing chart is not one long scroll. The grouping axis is the code's own free-text
+// `costCentre` string, case-folded — NOT the tenant-wide cost-centre register the code form picks
+// from, because a code may still carry a retired or unregistered value and every row must land
+// somewhere; grouping by the register is a follow-up. `Fleet` and `FLEET` are one group, labelled
+// with the most common spelling, and the header says "· N spellings" rather than hiding the drift
+// (the server keeps the exact strings). Named cost centres come A–Z, then "No cost centre"
+// (expense codes still to be filed), then Revenue, which sits in its own bucket because
+// costCentreApplies says a revenue code never has one. Groups start collapsed; the selected
+// code's group is always open and locked (derived, not set in an effect — so the detail pane
+// always matches a visible card); and typing in "Find a code" opens and locks every group. The
+// search matches code or name only, retired codes included, because the server's uniqueness
+// check counts them too. Open/closed state is component state only.
 //
 // While a retire, restore, delete, starter set or copy is in flight (`busy`), the screen holds
 // the period (lib/periodHold.ts) so SWITCH PERIOD refuses until the request settles; the code
@@ -109,6 +135,10 @@ export default function BudgetCodes({
    */
   const [showCopy, setShowCopy] = useState(false);
   const [confirmAction, setConfirmAction] = useState<PendingConfirm>(null);
+  /** The code/name search. While it is non-blank every group is forced open. */
+  const [query, setQuery] = useState("");
+  /** Group keys the user opened. Empty = all collapsed; the selected group opens regardless. */
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
 
   usePeriodHold(busy);
 
@@ -165,13 +195,54 @@ export default function BudgetCodes({
     };
   }, [periodId, applyLoaded, applyLoadError]);
 
-  const list = codes ?? [];
+  const list = useMemo(() => codes ?? [], [codes]);
+  const groups = useMemo(() => groupBudgetCodesByCostCentre(list), [list]);
   const loaded = codes !== null;
   const empty = loaded && list.length === 0 && !error;
   // selId can point at a code that has since been deleted — or, when Variance jumps here, at a
-  // mock id that never existed (its rows come from lib/data.ts). Falling back to the first row
-  // keeps the pane populated either way.
-  const selected = list.find((c) => c.id === selId) ?? list[0] ?? null;
+  // mock id that never existed (its rows come from lib/data.ts). Falling back to the first
+  // card of the first group (not list[0], which may sit in a later group) keeps the pane
+  // populated with a card that is on screen. Display-only: onSelect is not called, and the
+  // fallback is never *named* as selected ("· selected", the hidden-by-search line) — nobody
+  // picked it.
+  const explicitSelection = list.find((c) => c.id === selId) ?? null;
+  const selected = explicitSelection ?? groups[0]?.codes[0] ?? null;
+  const selectedKey = selected ? budgetCodeGroupKey(selected) : null;
+  const searching = query.trim().length > 0;
+  // Search filters inside the full-list groups rather than regrouping the matches, so a group's
+  // label, its "· N spellings" note and its "n of total" stay those of the whole group.
+  const visibleGroups = useMemo(
+    () =>
+      searching
+        ? groups
+            .map((g) => ({ ...g, codes: g.codes.filter((c) => matchesBudgetCodeQuery(c, query)) }))
+            .filter((g) => g.codes.length > 0)
+        : groups,
+    [searching, query, groups],
+  );
+  const selectedVisible =
+    selected !== null && visibleGroups.some((g) => g.codes.some((c) => c.id === selected.id));
+  const groupIdPrefix = useId();
+  /** Group size before the search, for the "n of total" count. */
+  const totalByKey = useMemo(() => new Map(groups.map((g) => [g.key, g.codes.length])), [groups]);
+
+  const isOpen = (key: string) => searching || expanded.has(key) || key === selectedKey;
+
+  function toggleGroup(key: string) {
+    // While searching every group is forced open; a click then must not leak into the collapsed
+    // state the user gets back when the search is cleared.
+    if (searching) return;
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      // The selected group is open by derivation alone; pin it into the set first so toggling a
+      // different group never makes it jump shut once the selection moves elsewhere.
+      if (selectedKey !== null) next.add(selectedKey);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
   const selectedHasChildren = selected !== null && list.some((c) => c.parentCodeId === selected.id);
   const confirmingRetire =
     selected !== null && confirmAction?.kind === "retire" && confirmAction.id === selected.id;
@@ -202,16 +273,19 @@ export default function BudgetCodes({
     setShowForm(true);
   }
 
-  async function runAction(action: () => Promise<unknown>) {
-    if (busy) return;
+  /** Resolves true when the action succeeded, false when it was refused (or already busy). */
+  async function runAction(action: () => Promise<unknown>): Promise<boolean> {
+    if (busy) return false;
     setBusy(true);
     setError(null);
     try {
       await action();
       // Re-read rather than patching local state, so the row reflects what the server stored.
       applyLoaded(await listBudgetCodes(periodId));
+      return true;
     } catch (e) {
       applyLoadError(e);
+      return false;
     } finally {
       setBusy(false);
     }
@@ -225,6 +299,7 @@ export default function BudgetCodes({
       }
       setConfirmAction(null);
     }
+    // A refused retire (PeriodNotEditable or PeriodNotClosed) lands in the banner verbatim.
     await runAction(() => setBudgetCodeActive(periodId, target.id, !target.active));
   }
 
@@ -258,8 +333,9 @@ export default function BudgetCodes({
     setConfirmAction(null);
     // A 409 (children, or the code has items in this period) surfaces through applyLoadError
     // with the server's own message, which already names retirement as the alternative.
-    await runAction(() => deleteBudgetCode(periodId, target.id));
-    onSelect(null);
+    // Only a successful delete clears the selection — a refused one keeps the pane on the code
+    // the error banner is talking about.
+    if (await runAction(() => deleteBudgetCode(periodId, target.id))) onSelect(null);
   }
 
   /**
@@ -396,52 +472,118 @@ export default function BudgetCodes({
         >
           <div
             style={{
-              overflowY: "auto",
-              padding: "16px 18px 16px 0",
-              borderRight: `1px solid ${colors.border}`,
               display: "flex",
               flexDirection: "column",
-              gap: 8,
+              minHeight: 0,
+              borderRight: `1px solid ${colors.border}`,
             }}
           >
-            {list.map((c) => {
-              const active = selected?.id === c.id;
-              return (
-                <div
-                  key={c.id}
-                  onClick={() => selectCode(c.id)}
-                  style={{ ...rowSurface(active), padding: "11px 13px" }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 4 }}>
-                    <MonoTag>{c.code}</MonoTag>
-                    <StatusChip kind={budgetCodeCategoryKind(c.category)} label={c.category} />
-                    {!c.active && <StatusChip kind="off" label="Retired" />}
-                  </div>
-                  <div
-                    style={{
-                      fontFamily: fonts.body,
-                      fontWeight: 600,
-                      fontSize: 12.5,
-                      color: colors.textPrimary,
-                    }}
-                  >
-                    {c.name}
-                  </div>
-                  <div
-                    style={{
-                      fontFamily: fonts.body,
-                      fontSize: 11,
-                      color: colors.textDim,
-                      marginTop: 2,
-                    }}
-                  >
-                    {c.serviceLine ? SERVICE_LINE_LABELS[c.serviceLine] : "No service line"}
-                    {/* Makes the one-level hierarchy visible in an otherwise flat list. */}
-                    {c.parentCode && ` · ↳ ${c.parentCode}`}
-                  </div>
+            <div style={{ flexShrink: 0, padding: "16px 18px 10px 0" }}>
+              <TextField
+                label="Find a code"
+                value={query}
+                onChange={setQuery}
+                placeholder="Code or name"
+              />
+            </div>
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                overflowY: "auto",
+                padding: "6px 18px 16px 0",
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+              }}
+            >
+              {searching && explicitSelection !== null && !selectedVisible && (
+                <div style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim }}>
+                  {explicitSelection.code} is selected but not in these results.
                 </div>
-              );
-            })}
+              )}
+
+              {searching && visibleGroups.length === 0 && (
+                <EmptyNote>
+                  No code or name matches “{query.trim()}” — retired codes included, so it is free
+                  to create.
+                </EmptyNote>
+              )}
+
+              {visibleGroups.map((g, index) => {
+                const open = isOpen(g.key);
+                // Never derived from the cost centre: free text can hold spaces, quotes or `#`.
+                const panelId = `${groupIdPrefix}-group-${index}`;
+                return (
+                  <div key={g.key} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <GroupHeader
+                      group={g}
+                      open={open}
+                      panelId={panelId}
+                      isSelectedGroup={
+                        explicitSelection !== null &&
+                        g.codes.some((c) => c.id === explicitSelection.id)
+                      }
+                      locked={searching || g.key === selectedKey}
+                      total={searching ? (totalByKey.get(g.key) ?? g.codes.length) : null}
+                      onToggle={() => toggleGroup(g.key)}
+                    />
+                    {open && (
+                      <div id={panelId} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {g.codes.map((c) => {
+                          const active = selected?.id === c.id;
+                          return (
+                            <div
+                              key={c.id}
+                              role="button"
+                              tabIndex={0}
+                              aria-pressed={active}
+                              onClick={() => selectCode(c.id)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  selectCode(c.id);
+                                }
+                              }}
+                              style={{ ...rowSurface(active), padding: "11px 13px" }}
+                            >
+                              <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 4 }}>
+                                <MonoTag>{c.code}</MonoTag>
+                                <StatusChip kind={budgetCodeCategoryKind(c.category)} label={c.category} />
+                                {!c.active && <StatusChip kind="off" label="Retired" />}
+                              </div>
+                              <div
+                                style={{
+                                  fontFamily: fonts.body,
+                                  fontWeight: 600,
+                                  fontSize: 12.5,
+                                  color: colors.textPrimary,
+                                }}
+                              >
+                                {c.name}
+                              </div>
+                              <div
+                                style={{
+                                  fontFamily: fonts.body,
+                                  fontSize: 11,
+                                  color: colors.textDim,
+                                  marginTop: 2,
+                                }}
+                              >
+                                {c.serviceLine ? SERVICE_LINE_LABELS[c.serviceLine] : "No service line"}
+                                {/* Keeps the one-level hierarchy visible — a child may sit in a
+                                    different cost-centre group than its parent. */}
+                                {c.parentCode && ` · ↳ ${c.parentCode}`}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           <div
@@ -509,10 +651,12 @@ export default function BudgetCodes({
                 {confirmingRetire && (
                   <ConfirmNote>
                     Retiring {selected.code} in {period.label} changes {period.label}&apos;s chart
-                    only — other periods keep their own {selected.code}. Items already planned on
-                    it here stay and still count, but no item in {period.label} can be added to it
-                    or changed on it until it is restored. Click CONFIRM RETIRE to proceed;
-                    selecting another code cancels.
+                    only — other periods keep their own {selected.code}. A retired code stays
+                    listed but takes no new items until it is restored. It can be retired only
+                    while nothing in {period.label} uses it: budget items planned on it here have
+                    to be removed first, and a code with spend recorded in {period.label} cannot
+                    be retired. The server may still refuse, and its reason is shown above as
+                    given. Click CONFIRM RETIRE to proceed; selecting another code cancels.
                   </ConfirmNote>
                 )}
 
@@ -616,7 +760,8 @@ export default function BudgetCodes({
                 {!selected.active && (
                   <Note>
                     Retired codes stay listed on purpose — {period.label}&apos;s items already
-                    tagged with this code still resolve to it.
+                    tagged with this code still resolve to it. A transaction already on this
+                    code stays correctable; no new one can be recorded against it.
                   </Note>
                 )}
 
@@ -693,5 +838,98 @@ function Note({ children }: { children: React.ReactNode }) {
     >
       {children}
     </div>
+  );
+}
+
+/**
+ * A collapsible group's header: a real button (so Tab reaches it and Space/Enter toggle it) with
+ * the browser's button styling reset. Deliberately colourless — no status colour and no category
+ * chip, even on the Revenue bucket, because colour must never carry meaning on its own.
+ * Cost-centre labels keep the user's own casing (no textTransform): the label is one of their
+ * spellings, and uppercasing it would hide which one.
+ */
+function GroupHeader({
+  group,
+  open,
+  panelId,
+  isSelectedGroup,
+  locked,
+  total,
+  onToggle,
+}: {
+  group: BudgetCodeGroup;
+  open: boolean;
+  panelId: string;
+  isSelectedGroup: boolean;
+  /** Forced open (a search is typed, or it holds the selected code): it does not toggle, and
+   *  says so with aria-disabled rather than claiming to. */
+  locked: boolean;
+  /** The group's size before the search, or null when not searching. */
+  total: number | null;
+  onToggle: () => void;
+}) {
+  const [focused, setFocused] = useState(false);
+  const tags = [
+    isSelectedGroup && "· selected",
+    group.spellings.length > 1 && `· ${group.spellings.length} spellings`,
+    group.kind === "category" && "· cost centres don't apply",
+  ].filter((t): t is string => typeof t === "string");
+  const labelStyle: React.CSSProperties =
+    group.kind === "costCentre"
+      ? { fontFamily: fonts.body, fontWeight: 600, fontSize: 12, color: colors.textPrimary }
+      : {
+          // The SectionLabel look, inline — SectionLabel itself carries a marginBottom.
+          fontFamily: fonts.semiCondensed,
+          fontSize: 9.5,
+          letterSpacing: ".14em",
+          textTransform: "uppercase",
+          color: colors.textLabel,
+        };
+  return (
+    <button
+      type="button"
+      aria-expanded={open}
+      // The panel is only rendered while open, so a collapsed header points at nothing.
+      aria-controls={open ? panelId : undefined}
+      aria-disabled={locked || undefined}
+      onClick={locked ? undefined : onToggle}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      style={{
+        all: "unset",
+        boxSizing: "border-box",
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        width: "100%",
+        cursor: locked ? "default" : "pointer",
+        padding: "8px 2px 6px",
+        borderBottom: `1px solid ${colors.border}`,
+        outline: focused ? `2px solid ${colors.borderActive}` : "none",
+        outlineOffset: 2,
+        borderRadius: focused ? 4 : 0,
+      }}
+    >
+      <span style={labelStyle}>{group.label}</span>
+      {tags.map((t) => (
+        <span key={t} style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textDim }}>
+          {t}
+        </span>
+      ))}
+      <span
+        style={{
+          marginLeft: "auto",
+          fontFamily: fonts.mono,
+          fontSize: 11,
+          color: colors.textDim,
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {total === null ? group.codes.length : `${group.codes.length} of ${total}`}
+      </span>
+      <span aria-hidden="true" style={{ fontSize: 10, color: colors.textDim, width: 10 }}>
+        {open ? "▾" : "▸"}
+      </span>
+    </button>
   );
 }

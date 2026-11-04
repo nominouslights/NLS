@@ -39,7 +39,8 @@ public class BudgetCodePeriodScopeTests
         _periods.Add(_q4);
         _create = new CreateBudgetCodeCommandHandler(_codes, _periods, _users, _costCentres);
         _update = new UpdateBudgetCodeCommandHandler(_codes, _periods, _users, _costCentres);
-        _setActive = new SetBudgetCodeActiveCommandHandler(_codes, _periods);
+        _setActive = new SetBudgetCodeActiveCommandHandler(
+            _codes, new InMemoryBudgetAllocationRepository(), new InMemoryActualTransactionRepository(), _periods);
         _delete = new DeleteBudgetCodeCommandHandler(_codes, _periods, _usageProbe);
         _seed = new SeedStarterBudgetCodesCommandHandler(_codes, _periods);
     }

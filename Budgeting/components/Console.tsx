@@ -56,7 +56,8 @@ import { clearLandingScreen, readLandingScreen } from "@/lib/landing";
 //
 // Periods are fetched once on mount and threaded down as props so every screen agrees on the
 // list. Budget codes and budget items are real too but are NOT hoisted: the screens that read
-// them (the dashboard and Budget Codes, each for the entered period) own their own fetches. Actuals and variance remain mock until their Stage 6.1 slice lands.
+// them (the dashboard and Budget Codes, each for the entered period) own their own fetches. Actuals are real too (Actuals vs Budget owns its rollup, transaction
+// and chart fetches for the entered period); only variance remains mock.
 //
 // The signed-in user's profile is hoisted for a different reason than periods: two places render
 // it — Settings edits it, the TopBar shows it — and getClaims() cannot carry it. That is
@@ -293,7 +294,9 @@ export default function Console() {
                   {screen === "vendors" && <Vendors />}
                   {/* Tenant-wide, like Settings: renders with or without an entered period. */}
                   {screen === "costCentres" && <CostCentres />}
-                  {screen === "actuals" && period && <ActualsVsBudget period={period} />}
+                  {screen === "actuals" && period && (
+                    <ActualsVsBudget period={period} periods={periodList} />
+                  )}
                   {screen === "variance" && period && (
                     <Variance period={period} onOpenCode={openCode} />
                   )}
