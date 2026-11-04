@@ -56,12 +56,6 @@ public static class DriversEndpoints
         driverAdmin.MapPost("{id:guid}/user", LinkDriverUser);
         driverAdmin.MapDelete("{id:guid}/user", UnlinkDriverUser);
 
-        // Motive (ELD) mapping — whose Motive duty-status logs the HOS sync will mirror onto this
-        // driver's ledger. Roster administration, so dispatch-only like the Identity link, and its
-        // own pair of routes rather than a field on the roster form.
-        driverAdmin.MapPut("{id:guid}/motive", SetDriverMotiveUserId);
-        driverAdmin.MapDelete("{id:guid}/motive", ClearDriverMotiveUserId);
-
         // Compliance credentials — nested under their driver. Writes are dispatch-only.
         driverAdmin.MapPost("{driverId:guid}/credentials", AddDriverCredential);
         driverAdmin.MapDelete("{driverId:guid}/credentials/{credentialId:guid}", RemoveDriverCredential);
@@ -84,6 +78,19 @@ public static class DriversEndpoints
         roster.MapGet("{id:guid}", GetDriverById);
         roster.MapGet("hos/status", HosEndpoints.GetRosterHosStatus);
         roster.MapGet("hos/alerts/today", HosEndpoints.GetTodayAlerts);
+
+        // Motive (ELD) mapping — whose Motive duty-status logs the HOS sync will mirror onto this
+        // driver's ledger. The one roster WRITE a compliance officer may make (owner decision,
+        // 2026-11): the ELD mapping is a records-of-duty-status concern as much as roster admin.
+        // Its own group, on DriverRosterAccess (dispatch + ComplianceOfficer, never Driver or
+        // Accountant), so the read-only roster group above stays read-only and the dispatch-only
+        // writes in driverAdmin never admit a compliance officer. Its own pair of routes rather
+        // than a field on the roster form.
+        var motiveMapping = app.MapGroup("/api/drivers")
+            .RequireAuthorization(AuthorizationPolicies.DriverRosterAccess);
+
+        motiveMapping.MapPut("{id:guid}/motive", SetDriverMotiveUserId);
+        motiveMapping.MapDelete("{id:guid}/motive", ClearDriverMotiveUserId);
 
         // The Driver Field App's own surface. DriverAccess admits every Driver, so it is a
         // route-level gate ONLY: each {driverId} route below additionally runs the

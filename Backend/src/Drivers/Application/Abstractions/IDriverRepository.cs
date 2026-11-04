@@ -19,13 +19,21 @@ public interface IDriverRepository
     Task<Driver?> GetByUserIdAsync(Guid userId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// The driver carrying this Motive user id in the current tenant, or null — the uniqueness
-    /// check today, and the Motive sync's driver lookup later. Write side, so a mapping made
-    /// moments ago is visible.
+    /// True when a driver other than <paramref name="excludeDriverId"/> in the current tenant
+    /// already carries this Motive user id. An existence query (nothing loaded or tracked), write
+    /// side so a mapping made moments ago is visible.
     /// </summary>
-    Task<Driver?> GetByMotiveUserIdAsync(string motiveUserId, CancellationToken cancellationToken = default);
+    Task<bool> ExistsByMotiveUserIdAsync(string motiveUserId, Guid excludeDriverId, CancellationToken cancellationToken = default);
 
     void Add(Driver driver);
 
     Task SaveChangesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Saves pending changes, returning false (and persisting nothing) when the per-tenant Motive
+    /// user id unique index refuses the write — i.e. another driver took the id between the
+    /// handler's <see cref="ExistsByMotiveUserIdAsync"/> check and this commit. Only that
+    /// constraint is translated; any other failure still throws.
+    /// </summary>
+    Task<bool> TrySaveMotiveUserIdAsync(CancellationToken cancellationToken = default);
 }

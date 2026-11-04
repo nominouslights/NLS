@@ -60,4 +60,23 @@ internal sealed class InMemoryVehicleRepository : IVehicleRepository
         SaveChangesCallCount++;
         return Task.CompletedTask;
     }
+
+    /// <summary>
+    /// Simulates losing the check-then-save race: when set, the next
+    /// <see cref="TrySaveMotiveVehicleIdAsync"/> reports the unique-index conflict (persisting
+    /// nothing), as the real repository does when Postgres raises 23505 on the Motive index.
+    /// </summary>
+    public bool MotiveIdRaceOnNextSave { get; set; }
+
+    public Task<bool> TrySaveMotiveVehicleIdAsync(CancellationToken cancellationToken = default)
+    {
+        if (MotiveIdRaceOnNextSave)
+        {
+            MotiveIdRaceOnNextSave = false;
+            return Task.FromResult(false);
+        }
+
+        SaveChangesCallCount++;
+        return Task.FromResult(true);
+    }
 }

@@ -84,6 +84,75 @@ public class DriverMotiveUserIdTests
         Assert.Equal(DriverErrors.MotiveUserIdTooLong, NewDriver().SetMotiveUserId(atCap + "9").Error);
     }
 
+    [Fact]
+    public void Deactivating_clears_the_mapping_and_raises_the_change_event()
+    {
+        var driver = NewDriver();
+        driver.SetMotiveUserId("90210");
+        driver.ClearDomainEvents();
+
+        Assert.True(driver.ChangeStatus(DriverStatus.Deactivated).IsSuccess);
+
+        Assert.Null(driver.MotiveUserId);
+        var raised = Assert.Single(driver.DomainEvents.OfType<DriverMotiveUserIdChangedDomainEvent>());
+        Assert.Equal("90210", raised.PreviousMotiveUserId);
+        Assert.Null(raised.MotiveUserId);
+        Assert.Single(driver.DomainEvents.OfType<DriverStatusChangedDomainEvent>());
+    }
+
+    [Fact]
+    public void Going_inactive_keeps_the_mapping()
+    {
+        // Inactive is a pause (leave, seasonal), not a departure.
+        var driver = NewDriver();
+        driver.SetMotiveUserId("90210");
+        driver.ClearDomainEvents();
+
+        Assert.True(driver.ChangeStatus(DriverStatus.Inactive).IsSuccess);
+
+        Assert.Equal("90210", driver.MotiveUserId);
+        Assert.Empty(driver.DomainEvents.OfType<DriverMotiveUserIdChangedDomainEvent>());
+    }
+
+    [Fact]
+    public void Deactivating_an_unmapped_driver_raises_no_motive_event()
+    {
+        var driver = NewDriver();
+
+        Assert.True(driver.ChangeStatus(DriverStatus.Deactivated).IsSuccess);
+
+        Assert.Empty(driver.DomainEvents.OfType<DriverMotiveUserIdChangedDomainEvent>());
+    }
+
+    [Fact]
+    public void A_deactivated_driver_cannot_be_mapped_but_clearing_is_allowed()
+    {
+        var driver = NewDriver();
+        Assert.True(driver.ChangeStatus(DriverStatus.Deactivated).IsSuccess);
+        driver.ClearDomainEvents();
+
+        var result = driver.SetMotiveUserId("90210");
+
+        Assert.Equal(DriverErrors.MotiveUserIdOnDeactivatedDriver, result.Error);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
+        Assert.Null(driver.MotiveUserId);
+        Assert.True(driver.SetMotiveUserId(null).IsSuccess);
+        Assert.Empty(driver.DomainEvents);
+    }
+
+    [Fact]
+    public void A_reinstated_driver_is_mapped_again_by_hand()
+    {
+        var driver = NewDriver();
+        driver.SetMotiveUserId("90210");
+        driver.ChangeStatus(DriverStatus.Deactivated);
+
+        Assert.True(driver.ChangeStatus(DriverStatus.Active).IsSuccess);
+        Assert.Null(driver.MotiveUserId);
+        Assert.True(driver.SetMotiveUserId("90210").IsSuccess);
+        Assert.Equal("90210", driver.MotiveUserId);
+    }
+
     // ---- Handler ----
 
     [Fact]
@@ -125,6 +194,37 @@ public class DriverMotiveUserIdTests
         Assert.Equal(DriverErrors.DuplicateMotiveUserId, result.Error);
         Assert.Equal(ErrorType.Conflict, result.Error.Type);
         Assert.Equal(0, repository.Saves);
+    }
+
+    [Fact]
+    public async Task Losing_the_check_then_save_race_is_a_conflict_not_a_crash()
+    {
+        // Both requests passed the existence check; the unique index refused this one at save.
+        var driver = NewDriver();
+        var repository = new HosTestSupport.FakeDriverRepository(driver) { MotiveUserIdRaceOnNextSave = true };
+
+        var result = await new SetDriverMotiveUserIdCommandHandler(repository).Handle(
+            new SetDriverMotiveUserIdCommand(TestDrivers.TenantId, driver.Id, "90210"), CancellationToken.None);
+
+        Assert.Equal(DriverErrors.DuplicateMotiveUserId, result.Error);
+        Assert.Equal(ErrorType.Conflict, result.Error.Type);
+        Assert.Equal(0, repository.Saves);
+    }
+
+    [Fact]
+    public async Task A_departed_drivers_motive_user_can_be_mapped_to_their_replacement()
+    {
+        var departed = NewDriver("A. One");
+        departed.SetMotiveUserId("90210");
+        var replacement = NewDriver("B. Two");
+        var repository = new HosTestSupport.FakeDriverRepository(departed, replacement);
+        Assert.True(departed.ChangeStatus(DriverStatus.Deactivated).IsSuccess);
+
+        var result = await new SetDriverMotiveUserIdCommandHandler(repository).Handle(
+            new SetDriverMotiveUserIdCommand(TestDrivers.TenantId, replacement.Id, "90210"), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("90210", replacement.MotiveUserId);
     }
 
     [Fact]

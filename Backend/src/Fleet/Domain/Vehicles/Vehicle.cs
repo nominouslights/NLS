@@ -275,6 +275,17 @@ public sealed class Vehicle : AggregateRoot, ITenantScoped
 
         Raise(new VehicleStatusChangedDomainEvent(Id, previous, Status, StatusReason));
         Raise(new VehicleDisposedDomainEvent(Id, method, SalePriceCad));
+
+        // A sold or recycled bus leaves the fleet with its gateway pulled: clear the Motive link
+        // in the same operation, so the gateway can move to the replacement bus without a 409
+        // from the per-tenant unique index, and a disposed vehicle never reads as regulated.
+        // SetMotiveVehicleId still refuses a NEW link on a disposed vehicle.
+        if (MotiveVehicleId is { } previousMotiveVehicleId)
+        {
+            MotiveVehicleId = null;
+            Raise(new VehicleMotiveIdChangedDomainEvent(Id, TenantId, previousMotiveVehicleId, null));
+        }
+
         return Result.Success();
     }
 
@@ -282,7 +293,8 @@ public sealed class Vehicle : AggregateRoot, ITenantScoped
     /// Sets (non-null) or clears (null) the vehicle's Motive id. The value is trimmed; a blank
     /// value is refused rather than read as "clear", so a half-filled form cannot silently
     /// de-regulate a bus. Setting the current value again is a no-op (no event, no write).
-    /// A disposed vehicle may still be cleared — its gateway gets pulled — but not newly set.
+    /// A disposed vehicle may still be cleared but not newly set; <see cref="Dispose"/> itself
+    /// clears the link, so in practice a disposed vehicle has none.
     /// Per-tenant uniqueness is the handler's check (it needs the repository) backed by a
     /// partial unique index.
     /// </summary>

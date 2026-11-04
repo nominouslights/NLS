@@ -409,8 +409,9 @@ public class DriverUserLinkTests
             return Task.FromResult(_drivers.FirstOrDefault(d => d.UserId == userId));
         }
 
-        public Task<Driver?> GetByMotiveUserIdAsync(string motiveUserId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(_drivers.FirstOrDefault(d => d.MotiveUserId == motiveUserId));
+        public Task<bool> ExistsByMotiveUserIdAsync(
+            string motiveUserId, Guid excludeDriverId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(_drivers.Any(d => d.MotiveUserId == motiveUserId && d.Id != excludeDriverId));
 
         public void Add(Driver driver) => _drivers.Add(driver);
 
@@ -418,6 +419,12 @@ public class DriverUserLinkTests
         {
             Saved = true;
             return Task.CompletedTask;
+        }
+
+        public Task<bool> TrySaveMotiveUserIdAsync(CancellationToken cancellationToken = default)
+        {
+            Saved = true;
+            return Task.FromResult(true);
         }
     }
 

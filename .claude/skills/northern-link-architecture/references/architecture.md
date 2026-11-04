@@ -508,12 +508,20 @@ mapping keys are:
 
 - Fleet's `Vehicle.MotiveVehicleId`: present means regulated. Routes are `PUT`/`DELETE
   /api/fleet/vehicles/{id}/motive` on `DispatchAccess`.
-- Drivers' `Driver.MotiveUserId`. Routes are `PUT`/`DELETE /api/drivers/{id}/motive` on the
-  dispatch-only roster-admin group.
+- Drivers' `Driver.MotiveUserId`. Routes are `PUT`/`DELETE /api/drivers/{id}/motive` on
+  `DriverRosterAccess` (dispatch plus Compliance Officer, never Driver or Accountant), in their
+  own small route group. This is the one roster write a Compliance Officer may make (owner
+  decision, 2026-11); every other roster write stays dispatch-only.
 
 Both are trimmed strings of at most 64 characters, unique per tenant through a partial unique
-index plus a 409 from the handler. Each sits on its own transition and raises its own internal
-domain event, never part of the roster form. Auth goes through `IMotiveCredentialProvider`
+index plus a 409 from the handler. The handler checks first, and the repository also translates
+the index's own 23505 into the same 409 (matched by constraint name), so losing the
+check-then-save race is never a 500. Each sits on its own transition and raises its own internal
+domain event, never part of the roster form. Disposing a vehicle (sold or recycled) clears its
+`MotiveVehicleId`, and deactivating a driver clears their `MotiveUserId`, each raising the change
+event in the same operation, so the gateway or Motive user moves to a replacement without a 409.
+Neither a disposed vehicle nor a deactivated driver can be newly linked. A reinstated driver is
+re-mapped by hand. Auth goes through `IMotiveCredentialProvider`
 (`Drivers/Infrastructure/Motive/`), which applies the credential to an outgoing
 `HttpRequestMessage`. `ApiKeyMotiveCredentialProvider` reads `Motive__ApiKey` lazily on each call,
 so the API boots without it. Motive events win for the windows they cover, and the tablet fills

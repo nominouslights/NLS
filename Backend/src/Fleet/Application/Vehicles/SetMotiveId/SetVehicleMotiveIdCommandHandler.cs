@@ -22,17 +22,20 @@ public sealed class SetVehicleMotiveIdCommandHandler(IVehicleRepository reposito
             return result;
         }
 
-        // Unique per tenant. The partial unique index enforces this in the database too, but a
-        // raw unique violation would surface as a 500; checking here turns it into a 409. Write
-        // side (tenant-filtered), so a link made seconds ago is already visible. Checked after
-        // the aggregate has validated and trimmed the value, so " 123 " collides with "123".
+        // Unique per tenant. Write side (tenant-filtered), so a link made seconds ago is already
+        // visible. Checked after the aggregate has validated and trimmed the value, so " 123 "
+        // collides with "123".
         if (vehicle.MotiveVehicleId is { } motiveVehicleId
             && await repository.ExistsByMotiveVehicleIdAsync(motiveVehicleId, vehicle.Id, cancellationToken))
         {
             return Result.Failure(VehicleErrors.DuplicateMotiveVehicleId);
         }
 
-        await repository.SaveChangesAsync(cancellationToken);
-        return Result.Success();
+        // The check and the save are not atomic: two concurrent links can both pass it. The
+        // partial unique index then refuses the loser, and the repository translates that one
+        // constraint into the same 409 rather than letting it surface as a 500.
+        return await repository.TrySaveMotiveVehicleIdAsync(cancellationToken)
+            ? Result.Success()
+            : Result.Failure(VehicleErrors.DuplicateMotiveVehicleId);
     }
 }

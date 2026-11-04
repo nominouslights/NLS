@@ -167,7 +167,7 @@ public class AuthorizationPolicyTests
     public async Task HosAccess_denies_the_back_office_roles(string role) =>
         Assert.False(await Allows(AuthorizationPolicies.HosAccess, role));
 
-    /// <summary>DriverRosterAccess is DispatchAccess widened with ComplianceOfficer, for the roster's read routes only.</summary>
+    /// <summary>DriverRosterAccess is DispatchAccess widened with ComplianceOfficer, for the roster's read routes and the driver Motive mapping.</summary>
     [Theory]
     [InlineData(Roles.Owner)]
     [InlineData(Roles.Dispatcher)]

@@ -47,6 +47,10 @@ public static class DriverErrors
         "Drivers.Driver.MotiveUserIdTooLong",
         $"A Motive user id may be at most {Driver.MotiveUserIdMaxLength} characters.");
 
+    public static readonly Error MotiveUserIdOnDeactivatedDriver = Error.Validation(
+        "Drivers.Driver.MotiveUserIdOnDeactivatedDriver",
+        "A deactivated driver cannot be mapped to a Motive user. Reinstate the driver first.");
+
     public static readonly Error DuplicateMotiveUserId = Error.Conflict(
         "Drivers.Driver.DuplicateMotiveUserId", "Another driver in this tenant already has this Motive user id.");
 

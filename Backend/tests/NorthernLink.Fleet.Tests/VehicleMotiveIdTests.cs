@@ -107,15 +107,63 @@ public class VehicleMotiveIdTests
     }
 
     [Fact]
-    public void A_disposed_vehicle_cannot_be_linked_but_can_be_cleared()
+    public void A_disposed_vehicle_cannot_be_newly_linked_and_clearing_it_is_a_no_op()
     {
         var vehicle = TestVehicles.InStatus(VehicleStatus.Retired);
-        vehicle.SetMotiveVehicleId("4821");
-        vehicle.Dispose(DisposalMethod.Recycled);
+        Assert.True(vehicle.Dispose(DisposalMethod.Recycled).IsSuccess);
 
         Assert.Equal(VehicleErrors.Disposed, vehicle.SetMotiveVehicleId("9999").Error);
-        Assert.True(vehicle.SetMotiveVehicleId(null).IsSuccess);
         Assert.Null(vehicle.MotiveVehicleId);
+        Assert.True(vehicle.SetMotiveVehicleId(null).IsSuccess);
+    }
+
+    [Theory]
+    [InlineData(DisposalMethod.Sold)]
+    [InlineData(DisposalMethod.Recycled)]
+    public void Disposing_clears_the_link_and_raises_the_change_event(DisposalMethod method)
+    {
+        var vehicle = TestVehicles.InStatus(VehicleStatus.Retired);
+        Assert.True(vehicle.SetMotiveVehicleId("4821").IsSuccess);
+        vehicle.ClearDomainEvents();
+
+        Assert.True(vehicle.Dispose(method, method == DisposalMethod.Sold ? 12_000m : null).IsSuccess);
+
+        Assert.Null(vehicle.MotiveVehicleId);
+        Assert.False(vehicle.IsRegulated);
+        var raised = Assert.Single(vehicle.DomainEvents.OfType<VehicleMotiveIdChangedDomainEvent>());
+        Assert.Equal("4821", raised.PreviousMotiveVehicleId);
+        Assert.Null(raised.MotiveVehicleId);
+        Assert.Equal(vehicle.TenantId, raised.TenantId);
+        Assert.Single(vehicle.DomainEvents.OfType<VehicleDisposedDomainEvent>());
+    }
+
+    [Fact]
+    public void Disposing_an_unlinked_vehicle_raises_no_motive_event()
+    {
+        var vehicle = TestVehicles.InStatus(VehicleStatus.Retired);
+        vehicle.ClearDomainEvents();
+
+        Assert.True(vehicle.Dispose(DisposalMethod.Recycled).IsSuccess);
+
+        Assert.Empty(vehicle.DomainEvents.OfType<VehicleMotiveIdChangedDomainEvent>());
+    }
+
+    [Fact]
+    public async Task The_gateway_moves_to_a_replacement_bus_once_the_old_one_is_disposed()
+    {
+        var repository = new InMemoryVehicleRepository();
+        var old = TestVehicles.InStatus(VehicleStatus.Retired);
+        old.SetMotiveVehicleId("4821");
+        var replacement = NewVehicle("U-2", "2HGFC2F59JH542841");
+        repository.Add(old);
+        repository.Add(replacement);
+        Assert.True(old.Dispose(DisposalMethod.Sold, 9_000m).IsSuccess);
+
+        var result = await new SetVehicleMotiveIdCommandHandler(repository).Handle(
+            new SetVehicleMotiveIdCommand(TestVehicles.TenantId, replacement.Id, "4821"), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("4821", replacement.MotiveVehicleId);
     }
 
     // ---- Handler ----
@@ -159,6 +207,22 @@ public class VehicleMotiveIdTests
         // Padded on purpose: the collision is checked on the trimmed value.
         var result = await new SetVehicleMotiveIdCommandHandler(repository).Handle(
             new SetVehicleMotiveIdCommand(TestVehicles.TenantId, second.Id, " 4821 "), CancellationToken.None);
+
+        Assert.Equal(VehicleErrors.DuplicateMotiveVehicleId, result.Error);
+        Assert.Equal(ErrorType.Conflict, result.Error.Type);
+        Assert.Equal(0, repository.SaveChangesCallCount);
+    }
+
+    [Fact]
+    public async Task Losing_the_check_then_save_race_is_a_conflict_not_a_crash()
+    {
+        // Both requests passed the existence check; the unique index refused this one at save.
+        var repository = new InMemoryVehicleRepository { MotiveIdRaceOnNextSave = true };
+        var vehicle = NewVehicle();
+        repository.Add(vehicle);
+
+        var result = await new SetVehicleMotiveIdCommandHandler(repository).Handle(
+            new SetVehicleMotiveIdCommand(TestVehicles.TenantId, vehicle.Id, "4821"), CancellationToken.None);
 
         Assert.Equal(VehicleErrors.DuplicateMotiveVehicleId, result.Error);
         Assert.Equal(ErrorType.Conflict, result.Error.Type);

@@ -23,19 +23,19 @@ public sealed class SetDriverMotiveUserIdCommandHandler(IDriverRepository reposi
         }
 
         // Unique per tenant: two drivers sharing one Motive user would have one person's logs
-        // mirrored onto both ledgers. The partial unique index enforces it too; checking here
-        // turns the violation into a 409 instead of a 500. Write side (tenant-filtered), after
-        // the aggregate has trimmed the value.
-        if (driver.MotiveUserId is { } motiveUserId)
+        // mirrored onto both ledgers. Write side (tenant-filtered), after the aggregate has
+        // trimmed the value.
+        if (driver.MotiveUserId is { } motiveUserId
+            && await repository.ExistsByMotiveUserIdAsync(motiveUserId, driver.Id, cancellationToken))
         {
-            var existing = await repository.GetByMotiveUserIdAsync(motiveUserId, cancellationToken);
-            if (existing is not null && existing.Id != driver.Id)
-            {
-                return Result.Failure(DriverErrors.DuplicateMotiveUserId);
-            }
+            return Result.Failure(DriverErrors.DuplicateMotiveUserId);
         }
 
-        await repository.SaveChangesAsync(cancellationToken);
-        return Result.Success();
+        // The check and the save are not atomic: two concurrent mappings can both pass it. The
+        // partial unique index then refuses the loser, and the repository translates that one
+        // constraint into the same 409 rather than letting it surface as a 500.
+        return await repository.TrySaveMotiveUserIdAsync(cancellationToken)
+            ? Result.Success()
+            : Result.Failure(DriverErrors.DuplicateMotiveUserId);
     }
 }

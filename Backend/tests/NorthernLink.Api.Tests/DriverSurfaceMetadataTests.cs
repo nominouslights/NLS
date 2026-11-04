@@ -1,13 +1,16 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using NorthernLink.Api.Auth;
 using NorthernLink.Billing.Infrastructure.Endpoints;
 using NorthernLink.Clients.Infrastructure.Endpoints;
 using NorthernLink.Drivers.Application.Drivers.SelfAccess;
 using NorthernLink.Drivers.Infrastructure.Endpoints;
 using NorthernLink.Fleet.Infrastructure.Endpoints;
+using NorthernLink.Identity.Infrastructure.Auth;
 using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Shared.Storage;
@@ -201,10 +204,8 @@ public class DriverSurfaceMetadataTests : IAsyncLifetime
     [InlineData("POST", "/api/drivers/{driverId:guid}/clearances")]
     [InlineData("POST", "/api/drivers/{id:guid}/user")]
     [InlineData("DELETE", "/api/drivers/{id:guid}/user")]
-    // The Motive (ELD) mappings: which Motive user's logs land on a driver's ledger, and whether a
-    // bus is regulated. A driver must not be able to re-point either.
-    [InlineData("PUT", "/api/drivers/{id:guid}/motive")]
-    [InlineData("DELETE", "/api/drivers/{id:guid}/motive")]
+    // Whether a bus is regulated (its Motive link). A driver must not be able to re-point it.
+    // The DRIVER Motive mapping is not here: it admits a compliance officer too, pinned below.
     [InlineData("PUT", "/api/fleet/vehicles/{id:guid}/motive")]
     [InlineData("DELETE", "/api/fleet/vehicles/{id:guid}/motive")]
     public void Dispatch_only_routes_never_carry_the_wider_DriverAccess_policy(string method, string pattern)
@@ -332,14 +333,15 @@ public class DriverSurfaceMetadataTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// The roster's read routes admit a compliance officer (DriverRosterAccess), and nothing
-    /// else does: the write routes stay on DispatchAccess (pinned above) and the Driver role is
-    /// not in this list, so a tablet still cannot list the roster. The two tenant-wide HOS
+    /// The roster's read routes, plus the driver Motive mapping (its own small group), admit a
+    /// compliance officer (DriverRosterAccess), and nothing else does: every other roster write
+    /// stays on DispatchAccess (pinned above) and the Driver role is not in this list, so a
+    /// tablet still cannot list the roster. The two tenant-wide HOS
     /// reads (the roster batch and today's compliance alerts) sit here rather than on HosAccess
     /// because HosAccess contains Driver and neither route names a {driverId} to own-check.
     /// </summary>
     [Fact]
-    public void The_DriverRosterAccess_surface_is_exactly_the_roster_reads()
+    public void The_DriverRosterAccess_surface_is_exactly_the_roster_reads_and_the_motive_mapping()
     {
         var roster = _endpoints
             .Where(endpoint => endpoint.Metadata.GetMetadata<IAuthorizeData>()?.Policy == AuthorizationPolicies.DriverRosterAccess)
@@ -349,12 +351,52 @@ public class DriverSurfaceMetadataTests : IAsyncLifetime
 
         Assert.Equal(
         [
+            "DELETE /api/drivers/{id:guid}/motive",
             "GET /api/drivers",
             "GET /api/drivers/hos/alerts/today",
             "GET /api/drivers/hos/status",
             "GET /api/drivers/{id:guid}",
+            "PUT /api/drivers/{id:guid}/motive",
         ], roster);
     }
+
+    /// <summary>
+    /// The driver's Motive (ELD) mapping — which Motive user's duty-status logs land on this
+    /// driver's ledger — is the one roster WRITE a compliance officer may make (owner decision,
+    /// 2026-11). Evaluated against the gateway's real policy registration, not just the policy
+    /// name: a compliance officer is admitted, and a Driver (who must never re-point whose logs
+    /// land on a ledger) or an Accountant is refused. The Fleet vehicle Motive link stays on
+    /// DispatchAccess (pinned in the dispatch-only theory above).
+    /// </summary>
+    [Theory]
+    [InlineData("PUT", "/api/drivers/{id:guid}/motive")]
+    [InlineData("DELETE", "/api/drivers/{id:guid}/motive")]
+    public async Task The_driver_motive_mapping_admits_a_compliance_officer_and_never_a_driver(string method, string pattern)
+    {
+        var policy = Endpoint(method, pattern).Metadata.GetMetadata<IAuthorizeData>()?.Policy;
+        Assert.Equal(AuthorizationPolicies.DriverRosterAccess, policy);
+
+        var authorization = new ServiceCollection()
+            .AddLogging()
+            .AddAuthorization(AuthorizationPolicyRegistration.Add)
+            .BuildServiceProvider()
+            .GetRequiredService<IAuthorizationService>();
+
+        async Task<bool> Allows(string role) =>
+            (await authorization.AuthorizeAsync(PrincipalWithRole(role), resource: null, policy!)).Succeeded;
+
+        Assert.True(await Allows(Roles.ComplianceOfficer));
+        Assert.True(await Allows(Roles.Dispatcher));
+        Assert.False(await Allows(Roles.Driver));
+        Assert.False(await Allows(Roles.Accountant));
+    }
+
+    private static ClaimsPrincipal PrincipalWithRole(string role) =>
+        new(new ClaimsIdentity(
+            [new Claim(JwtAccessTokenIssuer.RoleClaimType, role)],
+            authenticationType: "test",
+            nameType: null,
+            roleType: JwtAccessTokenIssuer.RoleClaimType));
 
     /// <summary>
     /// Certification is the driver's own act: the route carries the own-driver-only marker the

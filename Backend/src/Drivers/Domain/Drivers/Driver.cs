@@ -177,6 +177,18 @@ public sealed class Driver : AggregateRoot, ITenantScoped
         UpdatedAtUtc = DateTimeOffset.UtcNow;
 
         Raise(new DriverStatusChangedDomainEvent(Id, previous, newStatus));
+
+        // A departed driver drops their Motive mapping in the same operation, so it never blocks
+        // the per-tenant unique index for whoever takes over that Motive user, and a future
+        // Motive sync never mirrors logs onto an off-roster driver. Reinstatement (Deactivated →
+        // Active) does NOT restore it: the mapping is simply re-set by hand through
+        // SetMotiveUserId, which a dispatcher should confirm anyway.
+        if (newStatus == DriverStatus.Deactivated && MotiveUserId is { } previousMotiveUserId)
+        {
+            MotiveUserId = null;
+            Raise(new DriverMotiveUserIdChangedDomainEvent(Id, previousMotiveUserId, null));
+        }
+
         return Result.Success();
     }
 
@@ -243,8 +255,10 @@ public sealed class Driver : AggregateRoot, ITenantScoped
     /// <summary>
     /// Sets (non-null) or clears (null) the driver's Motive user id. The value is trimmed; a
     /// blank value is refused rather than read as "clear". Setting the current value again is a
-    /// no-op (no event, no write). Per-tenant uniqueness is the handler's check (it needs the
-    /// repository), backed by a partial unique index.
+    /// no-op (no event, no write). A Deactivated driver may be cleared but not newly mapped
+    /// (mirroring the disposed-vehicle guard); <see cref="ChangeStatus"/> clears the mapping on
+    /// deactivation, so in practice a deactivated driver has none. Per-tenant uniqueness is the
+    /// handler's check (it needs the repository), backed by a partial unique index.
     /// </summary>
     public Result SetMotiveUserId(string? motiveUserId)
     {
@@ -266,6 +280,11 @@ public sealed class Driver : AggregateRoot, ITenantScoped
         if (string.Equals(MotiveUserId, clean, StringComparison.Ordinal))
         {
             return Result.Success();
+        }
+
+        if (clean is not null && Status == DriverStatus.Deactivated)
+        {
+            return Result.Failure(DriverErrors.MotiveUserIdOnDeactivatedDriver);
         }
 
         var previous = MotiveUserId;

@@ -79,6 +79,38 @@ public class ApiKeyMotiveCredentialProviderTests
     }
 
     [Fact]
+    public async Task Surrounding_whitespace_and_a_trailing_newline_are_trimmed()
+    {
+        var provider = new ApiKeyMotiveCredentialProvider { ReadSecret = _ => "  test-key-123\r\n" };
+        using var request = NewRequest();
+
+        await provider.ApplyAsync(request);
+
+        Assert.Equal(["test-key-123"], request.Headers.GetValues("X-API-Key"));
+    }
+
+    [Theory]
+    [InlineData("secret-part\nX-Injected: yes")]
+    [InlineData("secret-part\r\nsecond")]
+    [InlineData("secret part")]
+    [InlineData("secret\tpart")]
+    [InlineData("secret\u0000part")]
+    [InlineData("secret\u007Fpart")]
+    [InlineData("   ")]
+    [InlineData("")]
+    public async Task A_malformed_key_fails_loudly_naming_the_variable_without_leaking_the_value(string raw)
+    {
+        var provider = new ApiKeyMotiveCredentialProvider { ReadSecret = _ => raw };
+        using var request = NewRequest();
+
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() => provider.ApplyAsync(request).AsTask());
+
+        Assert.Contains("Motive__ApiKey", thrown.Message);
+        Assert.DoesNotContain("secret", thrown.Message);
+        Assert.False(request.Headers.Contains("X-API-Key"));
+    }
+
+    [Fact]
     public void The_default_reader_is_the_environment_only_secret_reader()
     {
         // Never IConfiguration/appsettings: the key can only come from the process environment.

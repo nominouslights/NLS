@@ -29,11 +29,33 @@ public sealed class ApiKeyMotiveCredentialProvider : IMotiveCredentialProvider
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        // Read before touching the request, so a missing key leaves it unmodified.
-        var apiKey = ReadSecret(ApiKeyVariable);
+        // Read and validate before touching the request, so a missing or malformed key leaves it
+        // unmodified.
+        var apiKey = Sanitize(ReadSecret(ApiKeyVariable));
 
         request.Headers.Remove(HeaderName);
-        request.Headers.TryAddWithoutValidation(HeaderName, apiKey);
+
+        // Validated add (never TryAddWithoutValidation): the header parser is a second line of
+        // defence against a value that could split or smuggle headers.
+        request.Headers.Add(HeaderName, apiKey);
         return ValueTask.CompletedTask;
+    }
+
+    /// <summary>
+    /// Trims the key (a trailing newline from a pasted secret or an env file is the usual
+    /// culprit) and refuses anything that is empty, or still carries whitespace or a control
+    /// character, with the same loud configuration error a missing key gets. The message names
+    /// the variable and never includes the value.
+    /// </summary>
+    private static string Sanitize(string? raw)
+    {
+        var key = raw?.Trim() ?? string.Empty;
+        if (key.Length == 0 || key.Any(c => char.IsWhiteSpace(c) || char.IsControl(c)))
+        {
+            throw new InvalidOperationException(
+                $"The {ApiKeyVariable} environment variable is malformed: it is empty or contains whitespace or control characters.");
+        }
+
+        return key;
     }
 }
