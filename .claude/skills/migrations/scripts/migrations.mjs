@@ -92,12 +92,21 @@ function loadEnv() {
   if (fromShell) {
     // Pass only the keys this tool needs. Spreading all of process.env here would hand the
     // redactor every unrelated token on the machine to scan for.
-    return { ConnectionStrings__Postgres: fromShell };
+    return { vars: { ConnectionStrings__Postgres: fromShell } };
   }
-  if (!fs.existsSync(launchSettings)) return null;
-  const profiles = JSON.parse(fs.readFileSync(launchSettings, 'utf8').replace(/^﻿/, '')).profiles ?? {};
+  if (!fs.existsSync(launchSettings)) return { fatal: noConnectionStringMessage() };
+  let profiles;
+  try {
+    profiles = JSON.parse(fs.readFileSync(launchSettings, 'utf8').replace(/^﻿/, '')).profiles ?? {};
+  } catch {
+    // `dotnet run` tolerates comments and trailing commas that JSON.parse does not. Exit 2 with a
+    // reason rather than an unhandled rejection, whose exit code 1 reads as "pending migrations".
+    return { fatal: `${path.relative(repoRoot, launchSettings)} is not plain JSON (comments or a `
+      + 'trailing comma?), so no connection string could be read from it. Export '
+      + 'ConnectionStrings__Postgres in your shell instead.' };
+  }
   const vars = (profiles.http ?? Object.values(profiles)[0])?.environmentVariables;
-  return vars && vars['ConnectionStrings__Postgres'] ? vars : null;
+  return vars && vars['ConnectionStrings__Postgres'] ? { vars } : { fatal: noConnectionStringMessage() };
 }
 
 /**
@@ -299,16 +308,27 @@ async function pendingSql(module, report, vars, redact) {
 
 // ── Cache ──────────────────────────────────────────────────────────────────
 // A new migration means a new filename, so the set of migration filenames is a sound cache key
-// for "nothing new to apply". `apply` clears it; --force bypasses it.
+// for "nothing new to apply" — for ONE database. The key also carries the connection target
+// (host, port, database; never the credentials), so pointing at another database is a cache miss
+// rather than an answer remembered from the old one. `apply` clears it; --force bypasses it.
 
-function fingerprint(modules) {
+function connectionTarget(vars) {
+  const parts = Object.fromEntries(String(vars?.ConnectionStrings__Postgres ?? '')
+    .split(';')
+    .map((kv) => kv.split('='))
+    .filter(([k, v]) => k && v !== undefined)
+    .map(([k, v]) => [k.trim().toLowerCase(), v.trim()]));
+  return [parts.host ?? parts.server, parts.port, parts.database ?? parts.db].join('|');
+}
+
+function fingerprint(modules, vars) {
   const names = modules
     .flatMap((m) => (fs.existsSync(m.migrationsDir) ? fs.readdirSync(m.migrationsDir) : [])
       .filter((f) => f.endsWith('.cs') && !f.endsWith('.Designer.cs'))
       .map((f) => `${m.name}/${f}`))
     .sort()
     .join('\n');
-  return crypto.createHash('sha1').update(names).digest('hex');
+  return crypto.createHash('sha1').update(`${connectionTarget(vars)}\n${names}`).digest('hex');
 }
 
 const readCache = () => {
@@ -324,13 +344,12 @@ const clearCache = () => { try { fs.unlinkSync(cacheFile); } catch { /* already 
 
 // ── Commands ───────────────────────────────────────────────────────────────
 
-async function gather() {
+const noConnectionStringMessage = () =>
+  `No connection string found. Export ConnectionStrings__Postgres in your shell (the platform `
+  + `convention), or put it in ${path.relative(repoRoot, launchSettings)}, which is gitignored.`;
+
+async function gather(vars) {
   const modules = discoverModules();
-  const vars = loadEnv();
-  if (!vars) {
-    const rel = path.relative(repoRoot, launchSettings);
-    return { fatal: `No connection string found. Export ConnectionStrings__Postgres in your shell (the platform convention), or put it in ${rel}, which is gitignored.` };
-  }
   const redact = makeRedactor(vars);
   const reports = [];
   // Four at a time: each `dotnet ef` loads the whole API startup project.
@@ -343,16 +362,20 @@ async function gather() {
 
 async function check({ force = false, quiet = false } = {}) {
   const modules = discoverModules();
-  const print = fingerprint(modules);
+  // Credentials BEFORE the cache: with none, a matching clean entry would return "current"
+  // without the database ever being contacted — the same false all-clear the per-module-error
+  // path below is written to prevent.
+  const env = loadEnv();
+  if (env.fatal) {
+    if (!quiet) console.error(env.fatal);
+    return 2;
+  }
+  const print = fingerprint(modules, env.vars);
   if (!force) {
     const cached = readCache();
     if (cached?.fingerprint === print && cached.pending?.length === 0) return 0;
   }
-  const state = await gather();
-  if (state.fatal) {
-    if (!quiet) console.error(state.fatal);
-    return 2;
-  }
+  const state = await gather(env.vars);
   const pending = state.reports.flatMap((r) => (r.pending ?? []).map((id) => ({ module: r.module, id })));
   const errors = state.reports.filter((r) => r.error);
   // Never cache a run with per-module errors: an unreachable database would otherwise be
@@ -367,12 +390,12 @@ async function check({ force = false, quiet = false } = {}) {
 }
 
 async function explain({ json = false } = {}) {
-  const state = await gather();
-  if (state.fatal) {
-    console.error(state.fatal);
+  const env = loadEnv();
+  if (env.fatal) {
+    console.error(env.fatal);
     return 2;
   }
-  const { modules, vars, redact, reports } = state;
+  const { modules, vars, redact, reports } = await gather(env.vars);
   const out = [];
   for (const report of reports) {
     if (report.error) { out.push({ module: report.module, error: report.error }); continue; }
@@ -385,11 +408,15 @@ async function explain({ json = false } = {}) {
     });
     out.push({ module: report.module, migrations, sql: await pendingSql(module, report, vars, redact) });
   }
-  writeCache({
-    fingerprint: fingerprint(modules),
-    pending: out.flatMap((m) => (m.migrations ?? []).map((x) => ({ module: m.module, id: x.id }))),
-    checkedAt: new Date().toISOString(),
-  });
+  // Same rule as `check`: an errored module would otherwise be cached as "pending: []".
+  if (out.some((m) => m.error)) clearCache();
+  else {
+    writeCache({
+      fingerprint: fingerprint(modules, vars),
+      pending: out.flatMap((m) => (m.migrations ?? []).map((x) => ({ module: m.module, id: x.id }))),
+      checkedAt: new Date().toISOString(),
+    });
+  }
 
   if (json) { console.log(JSON.stringify(out, null, 2)); return out.length ? 1 : 0; }
   if (!out.length) { console.log('Every module schema is current — nothing to apply.'); return 0; }
@@ -428,8 +455,9 @@ async function apply(moduleName) {
     console.error(`Unknown module "${moduleName}". Known: ${modules.map((m) => m.name).join(', ')}`);
     return 2;
   }
-  const vars = loadEnv();
-  if (!vars) { console.error('No connection string — export ConnectionStrings__Postgres, or put it in the gitignored launchSettings.json.'); return 2; }
+  const env = loadEnv();
+  if (env.fatal) { console.error(env.fatal); return 2; }
+  const { vars } = env;
   const redact = makeRedactor(vars);
 
   const before = await listMigrations(module, vars, redact);
@@ -486,9 +514,23 @@ function prHook() {
           : /\bgit\s+(pull|merge)\b/.test(command) ? 'main moved' : null;
       if (!trigger) return;
       const code = await check({ quiet: true });
-      if (code !== 1) return;
-      const pending = readCache()?.pending ?? [];
-      if (!pending.length) return;
+      if (code === 0) return;
+      const pending = code === 1 ? readCache()?.pending ?? [] : [];
+      if (!pending.length) {
+        // Exit 2 (no usable credentials) or 1 with only per-module errors: the check never reached
+        // a verdict. Silence here would read as "current" — the false all-clear again.
+        process.stdout.write(JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: 'PostToolUse',
+            additionalContext:
+              `Migration check: ${trigger}, but the check could not reach a verdict `
+              + '(no usable connection string, or a module errored — often a stale DigitalOcean '
+              + 'Trusted Sources entry). Do not assume the schema is current: run '
+              + '`node .claude/skills/migrations/scripts/migrations.mjs check` and report what it says.',
+          },
+        }));
+        return;
+      }
       const summary = pending.map((p) => `${p.module}/${p.id}`).join(', ');
       process.stdout.write(JSON.stringify({
         hookSpecificOutput: {
