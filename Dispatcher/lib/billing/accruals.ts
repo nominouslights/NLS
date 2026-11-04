@@ -194,12 +194,12 @@ export function accrualBucketFor(t: TripRecord): AccrualBucketId | null {
  * too and never carry. The screen fetches exactly these (one listTrips call per
  * status), and the builder re-applies the rule, so it lives in one place.
  *
- * The ORDER matters: it is lifecycle order, the forward-only path through the
- * open statuses in the backend's Trip.CanTransition (Scheduled → InProgress →
+ * The ORDER matters: it is lifecycle order, the forward path through the open
+ * statuses in the backend's Trip.CanTransition (Scheduled → InProgress →
  * ReadyForBilling → Invoiced, with Scheduled/InProgress → ReadyForBilling jumps;
  * Invoiced → ReadyForBilling is deliberately absent). fetchCarriedTrips queries
- * one status at a time in this order, so a trip that moves between two queries
- * always lands in a status queried LATER and is still caught.
+ * in CARRY_FORWARD_QUERY_ORDER, which is this order plus a closing Scheduled
+ * pass for the one backward move (reopen) — see there.
  */
 export const ACCRUAL_OPEN_STATUSES: readonly TripStatus[] = [
   "Scheduled",
@@ -219,6 +219,17 @@ export function isCarriedForwardTrip(t: TripRecord, period: Period): boolean {
   return t.serviceDate < period.start && isOpenAccrualStatus(t.status);
 }
 
+/**
+ * The exact call sequence of fetchCarriedTrips: the open statuses in lifecycle
+ * order, then Scheduled ONCE MORE. Forward moves between two calls land in a
+ * status asked for later. The only backward moves are the trip reopen
+ * (Trip.ReopenTargetFor: InProgress / ReadyForBilling — and the closed
+ * Cancelled / WrittenOff — back to Scheduled), and they all land in ONE status,
+ * Scheduled — so a single closing Scheduled pass catches a trip reopened after
+ * the first Scheduled call. Invoiced and Completed are never reopened.
+ */
+export const CARRY_FORWARD_QUERY_ORDER: readonly TripStatus[] = [...ACCRUAL_OPEN_STATUSES, "Scheduled"];
+
 /** The last day the carry-forward fetch covers — the day before period.start,
  *  as an ISO date (the trips list's `to` bound is inclusive). */
 export function carryForwardThrough(period: Pick<Period, "start">): string {
@@ -230,19 +241,21 @@ export function carryForwardThrough(period: Pick<Period, "start">): string {
  * The carry-forward fetch: every trip of the client dated before the period
  * that is not yet completed. The trips list takes `to` without `from`
  * (open-ended back) and ONE exact status, so this is one UNPAGED call per
- * ACCRUAL_OPEN_STATUSES entry, `to` = carryForwardThrough(period).
+ * CARRY_FORWARD_QUERY_ORDER entry, `to` = carryForwardThrough(period).
  *
- * The calls run ONE AT A TIME in lifecycle order (ACCRUAL_OPEN_STATUSES), not
- * in parallel. Transitions inside the open set only move forward, so a trip
- * that changes status between two calls lands in a status a LATER call asks
- * for — it can come back twice, never zero times. Parallel calls could run in
+ * The calls run ONE AT A TIME in CARRY_FORWARD_QUERY_ORDER, not in parallel.
+ * A forward move between two calls lands in a status a LATER call asks for; a
+ * reopen (any move back to Scheduled, including a Cancelled / WrittenOff trip
+ * re-entering the open set) is caught by the closing Scheduled pass. Either way
+ * the trip can come back twice, never zero times. Parallel calls could run in
  * any order on the server, and a trip moving ReadyForBilling → Invoiced after
  * the Invoiced query but before the ReadyForBilling one would vanish from both
  * while the result still looked complete. Results are deduped by id, last write
- * wins (= the later status); the builder dedupes too. A trip LEAVING the open
- * set mid-fetch (Completed/WrittenOff/Cancelled) is rightly dropped; the only
- * way back in (Completed → Invoiced, a payment confirmation cleared in error)
- * no query order can catch, and is accepted as a snapshot.
+ * wins (= the latest observation); the builder dedupes too. A trip LEAVING the
+ * open set mid-fetch (Completed/WrittenOff/Cancelled) is rightly dropped. Not
+ * caught, and accepted as a snapshot: Completed → Invoiced (a payment
+ * confirmation cleared in error), and two moves by one trip inside a single
+ * fetch (e.g. reopened and then started again before the closing pass).
  *
  * The calls fail as ONE group: any rejection → null, never a partial list. A
  * partial set would understate what is owed while looking complete, so the
@@ -259,9 +272,9 @@ export async function fetchCarriedTrips(
   try {
     const byId = new Map<string, TripRecord>();
     // Sequential on purpose — see the doc comment. Never Promise.all here.
-    for (const status of ACCRUAL_OPEN_STATUSES) {
+    for (const status of CARRY_FORWARD_QUERY_ORDER) {
       const p = await list({ to, clientId: args.clientId, status });
-      for (const t of p.items) byId.set(t.id, t); // later call = later status, so the last write wins
+      for (const t of p.items) byId.set(t.id, t); // later call = later observation, so the last write wins
     }
     return [...byId.values()];
   } catch {

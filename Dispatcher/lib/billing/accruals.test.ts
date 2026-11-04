@@ -6,6 +6,7 @@ import type { Period } from "@/lib/period";
 import {
   ACCRUAL_BUCKET_ORDER,
   ACCRUAL_OPEN_STATUSES,
+  CARRY_FORWARD_QUERY_ORDER,
   ACCRUAL_SECTION_ORDER,
   AMOUNT_FLAG_META,
   PO_FLAG_META,
@@ -2015,11 +2016,12 @@ describe("fetchCarriedTrips", () => {
     return { list, calls };
   }
 
-  it("asks for exactly the four open statuses, up to the day before the period, unpaged", async () => {
+  it("asks for exactly the four open statuses (Scheduled again last), up to the day before the period, unpaged", async () => {
     const { list, calls } = fakeList();
     await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD });
-    expect(calls.map((c) => c.status)).toEqual([...ACCRUAL_OPEN_STATUSES]);
-    expect(calls.map((c) => c.status).sort()).toEqual(["InProgress", "Invoiced", "ReadyForBilling", "Scheduled"]);
+    expect(calls.map((c) => c.status)).toEqual([...CARRY_FORWARD_QUERY_ORDER]);
+    expect(calls.map((c) => c.status)).toEqual(["Scheduled", "InProgress", "ReadyForBilling", "Invoiced", "Scheduled"]);
+    expect([...new Set(calls.map((c) => c.status))].sort()).toEqual(["InProgress", "Invoiced", "ReadyForBilling", "Scheduled"]);
     for (const c of calls) {
       // Exactly { to, clientId, status } — no `from` (open-ended back), no
       // paging params (unpaged = the complete match), nothing else.
@@ -2047,7 +2049,18 @@ describe("fetchCarriedTrips", () => {
     const b = trip({ status: "Scheduled", serviceDate: "2026-08-11" });
     const { list, calls } = fakeList({ ReadyForBilling: [a], Scheduled: [b], Invoiced: "reject" });
     expect(await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD })).toBeNull();
-    expect(calls).toHaveLength(ACCRUAL_OPEN_STATUSES.length);
+    // Invoiced is the 4th call — it stops there, before the closing Scheduled pass.
+    expect(calls.map((c) => c.status)).toEqual(["Scheduled", "InProgress", "ReadyForBilling", "Invoiced"]);
+  });
+
+  it("a rejection on the closing Scheduled pass still nulls the whole set", async () => {
+    let scheduledCalls = 0;
+    const a = trip({ status: "Invoiced", serviceDate: "2026-08-10" });
+    const list = async (p: TripListParams): Promise<TripPage> => {
+      if (p.status === "Scheduled" && ++scheduledCalls === 2) throw new Error("503");
+      return page(p.status === "Invoiced" ? [a] : []);
+    };
+    expect(await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD })).toBeNull();
   });
 
   it("stops at the first rejection — the calls are sequential", async () => {
@@ -2131,6 +2144,43 @@ describe("fetchCarriedTrips", () => {
     }
   });
 
+  it("every REOPEN (back to Scheduled) after every call is caught — once, as Scheduled", async () => {
+    // Trip.ReopenTargetFor: InProgress / ReadyForBilling / Cancelled / WrittenOff
+    // → Scheduled. The closed two re-ENTER the open set, so they must be caught
+    // too. Exhaustive over the call index (not the status), because Scheduled
+    // is asked twice and a reopen after the FIRST Scheduled call is the case
+    // the closing pass exists for.
+    for (const from of ["InProgress", "ReadyForBilling", "Cancelled", "WrittenOff"] as const) {
+      for (let gap = 0; gap < CARRY_FORWARD_QUERY_ORDER.length - 1; gap++) {
+        const x = trip({ status: from, serviceDate: "2026-08-12" });
+        let n = 0;
+        const list = liveServer(x, () => (n++ === gap ? "Scheduled" : null));
+        const got = await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD });
+        const mine = got!.filter((t) => t.id === x.id);
+        expect(mine, `${from}→Scheduled after call #${gap + 1}`).toHaveLength(1);
+        expect(mine[0].status).toBe("Scheduled");
+      }
+    }
+  });
+
+  it("without the closing pass a reopen after the first Scheduled call would be missed", async () => {
+    // Pins WHY CARRY_FORWARD_QUERY_ORDER ends with Scheduled: replay the old
+    // four-call order against the same server and the trip vanishes.
+    const x = trip({ status: "ReadyForBilling", serviceDate: "2026-08-12" });
+    const list = liveServer(x, (asked) => (asked === "Scheduled" ? "Scheduled" : null));
+    const seen: TripRecord[] = [];
+    for (const status of ACCRUAL_OPEN_STATUSES) {
+      seen.push(...(await list({ to: "2026-08-31", clientId: "c1", status })).items);
+    }
+    expect(seen.filter((t) => t.id === x.id)).toHaveLength(0);
+    // …while the real fetch (fresh server, same move) catches it.
+    const got = await fetchCarriedTrips(liveServer(x, (asked) => (asked === "Scheduled" ? "Scheduled" : null)), {
+      clientId: "c1",
+      period: PERIOD,
+    });
+    expect(got!.filter((t) => t.id === x.id)).toHaveLength(1);
+  });
+
   it("returns null when the list function throws synchronously", async () => {
     const list = (): Promise<TripPage> => {
       throw new Error("boom");
@@ -2146,7 +2196,7 @@ describe("fetchCarriedTrips", () => {
   it("crosses a year boundary for `to`", async () => {
     const { list, calls } = fakeList();
     await fetchCarriedTrips(list, { clientId: "c9", period: { start: "2027-01-01" } });
-    expect(calls).toHaveLength(4);
+    expect(calls).toHaveLength(CARRY_FORWARD_QUERY_ORDER.length);
     expect(calls.every((c) => c.to === "2026-12-31" && c.clientId === "c9")).toBe(true);
   });
 });
