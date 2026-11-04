@@ -105,13 +105,15 @@ function trip(overrides: Partial<TripRecord> = {}): TripRecord {
 
 const page = (items: TripRecord[]): TripPage => ({ items, page: null, pageSize: null, totalCount: items.length });
 
-/** listTrips: the month call (no `status`) answers `own`; the carry-forward
- *  calls (one per open status) reject while `carryFails()` says so. */
+/** listTrips: the month call (no `statuses`) answers `own`; the single
+ *  carry-forward call (filtered by `statuses`) rejects while `carryFails()`
+ *  says so. */
 function wireTrips(own: TripRecord[], carried: TripRecord[], carryFails: () => boolean) {
   listTrips.mockImplementation(async (p) => {
-    if (!p.status) return page(own);
+    const statuses = p.statuses;
+    if (!statuses) return page(own);
     if (carryFails()) throw new Error("503");
-    return page(carried.filter((t) => t.status === p.status));
+    return page(carried.filter((t) => statuses.includes(t.status)));
   });
 }
 

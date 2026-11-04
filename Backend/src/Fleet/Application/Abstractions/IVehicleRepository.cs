@@ -22,6 +22,17 @@ public interface IVehicleRepository
     /// <summary>True when another vehicle (excluding <paramref name="excludeVehicleId"/>) already uses this unit number.</summary>
     Task<bool> ExistsByUnitNumberAsync(string unitNumber, Guid? excludeVehicleId = null, CancellationToken cancellationToken = default);
 
+    /// <summary>True when another vehicle (excluding <paramref name="excludeVehicleId"/>) already carries this Motive vehicle id.</summary>
+    Task<bool> ExistsByMotiveVehicleIdAsync(string motiveVehicleId, Guid? excludeVehicleId = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Saves pending changes, returning false (and persisting nothing) when the per-tenant Motive
+    /// vehicle id unique index refuses the write — i.e. another vehicle took the id between the
+    /// handler's <see cref="ExistsByMotiveVehicleIdAsync"/> check and this commit. Only that
+    /// constraint is translated; any other failure still throws.
+    /// </summary>
+    Task<bool> TrySaveMotiveVehicleIdAsync(CancellationToken cancellationToken = default);
+
     void Add(Vehicle vehicle);
 
     void AddCertificate(RetirementCertificate certificate);

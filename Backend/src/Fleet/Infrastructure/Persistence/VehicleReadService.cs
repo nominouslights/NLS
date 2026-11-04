@@ -78,5 +78,6 @@ internal sealed class VehicleReadService(FleetDbContext context) : IVehicleReadS
         v.SalePriceCad,
         v.DisposedAtUtc,
         v.CreatedAtUtc,
-        v.UpdatedAtUtc);
+        v.UpdatedAtUtc,
+        v.MotiveVehicleId);
 }

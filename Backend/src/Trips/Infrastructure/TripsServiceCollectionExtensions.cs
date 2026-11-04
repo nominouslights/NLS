@@ -65,6 +65,7 @@ using NorthernLink.Trips.Application.Trips.GetTripById;
 using NorthernLink.Trips.Application.Trips.GetTrips;
 using NorthernLink.Trips.Application.Trips.MergeRoundTrip;
 using NorthernLink.Trips.Application.Trips.RecordDemand;
+using NorthernLink.Trips.Application.Trips.Reopen;
 using NorthernLink.Trips.Application.Trips.UnpairRoundTrip;
 using NorthernLink.Trips.Application.Trips.Update;
 using NorthernLink.Trips.Domain.Manifests.Events;
@@ -181,6 +182,7 @@ public static class TripsServiceCollectionExtensions
         services.AddScoped<ICommandHandler<FinishTripOperationsCommand>, FinishTripOperationsCommandHandler>();
         services.AddScoped<ICommandHandler<CloseTripWithoutBillingCommand>, CloseTripWithoutBillingCommandHandler>();
         services.AddScoped<ICommandHandler<CorrectTripDriverCommand>, CorrectTripDriverCommandHandler>();
+        services.AddScoped<ICommandHandler<ReopenTripCommand>, ReopenTripCommandHandler>();
         services.AddScoped<ICommandHandler<RecordTripDemandCommand>, RecordTripDemandCommandHandler>();
         services.AddScoped<ICommandHandler<AttachManifestToTripCommand>, AttachManifestToTripCommandHandler>();
         services.AddScoped<ICommandHandler<MergeRoundTripCommand>, MergeRoundTripCommandHandler>();

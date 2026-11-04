@@ -31,30 +31,28 @@ public sealed class TripClosedWithoutBillingIntegrationEventHandler(
     {
         using var tenantScope = AmbientTenant.Push(integrationEvent.TenantId);
 
-        var trip = await repository.GetAsync(integrationEvent.TenantId, integrationEvent.TripId, cancellationToken);
-        if (trip is null)
+        var removal = await BillablePoolRemoval.RemoveUninvoicedAsync(
+            repository, integrationEvent.TenantId, integrationEvent.TripId, cancellationToken);
+
+        switch (removal.Outcome)
         {
-            logger.LogDebug(
-                "Billing has no billable trip {TripId} to remove ({EventId}); skipping",
-                integrationEvent.TripId, integrationEvent.EventId);
-            return;
+            case BillablePoolRemovalOutcome.Absent:
+                logger.LogDebug(
+                    "Billing has no billable trip {TripId} to remove ({EventId}); skipping",
+                    integrationEvent.TripId, integrationEvent.EventId);
+                break;
+            case BillablePoolRemovalOutcome.KeptClaimed:
+                logger.LogWarning(
+                    "Trip {TripNumber} ({TripId}) was closed without billing but invoice {InvoiceId} already claims it ({EventId}); keeping the claim.",
+                    integrationEvent.TripNumber, integrationEvent.TripId, removal.ClaimingInvoiceId, integrationEvent.EventId);
+                break;
+            case BillablePoolRemovalOutcome.Removed:
+                logger.LogInformation(
+                    "Billing removed billable trip {TripNumber} ({EventId}) — closed without billing: {Reason}",
+                    integrationEvent.TripNumber,
+                    integrationEvent.EventId,
+                    integrationEvent.Reason);
+                break;
         }
-
-        if (trip.InvoiceId is not null)
-        {
-            logger.LogWarning(
-                "Trip {TripNumber} ({TripId}) was closed without billing but invoice {InvoiceId} already claims it ({EventId}); keeping the claim.",
-                integrationEvent.TripNumber, integrationEvent.TripId, trip.InvoiceId, integrationEvent.EventId);
-            return;
-        }
-
-        repository.Remove(trip);
-        await repository.SaveChangesAsync(cancellationToken);
-
-        logger.LogInformation(
-            "Billing removed billable trip {TripNumber} ({EventId}) — closed without billing: {Reason}",
-            integrationEvent.TripNumber,
-            integrationEvent.EventId,
-            integrationEvent.Reason);
     }
 }

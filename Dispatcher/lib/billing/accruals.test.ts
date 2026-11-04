@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { ClientRecord, PurchaseOrderRecord } from "@/lib/api/clients";
 import type { InvoiceDetailRecord, InvoiceLineRecord } from "@/lib/api/billing";
-import { shortDateLabel, type TripDirection, type TripListParams, type TripPage, type TripRecord } from "@/lib/api/trips";
+import { shortDateLabel, TripListParamsError, type TripDirection, type TripListParams, type TripPage, type TripRecord } from "@/lib/api/trips";
+import { ApiError } from "@/lib/api/transport";
 import type { Period } from "@/lib/period";
 import {
   ACCRUAL_BUCKET_ORDER,
@@ -1101,8 +1102,7 @@ describe("carry forward", () => {
   }
 
   it("pins the open statuses — everything not yet Completed, nothing closed", () => {
-    // Lifecycle order — fetchCarriedTrips relies on it (see the race tests).
-    expect([...ACCRUAL_OPEN_STATUSES]).toEqual(["Scheduled", "InProgress", "ReadyForBilling", "Invoiced"]);
+    expect([...ACCRUAL_OPEN_STATUSES].sort()).toEqual(["InProgress", "Invoiced", "ReadyForBilling", "Scheduled"]);
     const aug = (status: TripRecord["status"]) => trip({ status, serviceDate: "2026-08-20" });
     expect(isCarriedForwardTrip(aug("Invoiced"), PERIOD)).toBe(true);
     expect(isCarriedForwardTrip(aug("Completed"), PERIOD)).toBe(false);
@@ -2003,132 +2003,34 @@ describe("fetchCarriedTrips", () => {
     totalCount: items.length,
   });
 
-  /** A fake listTrips: records every call, answers from `byStatus`. */
-  function fakeList(byStatus: Partial<Record<string, TripRecord[] | "reject">> = {}) {
+  /** A fake listTrips: records every call, answers `items` (or rejects). */
+  function fakeList(items: TripRecord[] | "reject" = []) {
     const calls: TripListParams[] = [];
     const list = async (p: TripListParams): Promise<TripPage> => {
       calls.push(p);
-      const answer = byStatus[p.status ?? ""] ?? [];
-      if (answer === "reject") throw new Error("403");
-      return page(answer);
+      if (items === "reject") throw new Error("403");
+      return page(items);
     };
     return { list, calls };
   }
 
-  it("asks for exactly the four open statuses, up to the day before the period, unpaged", async () => {
+  it("makes exactly ONE call: { to, clientId, statuses: the four open statuses }, unpaged, no `status`", async () => {
     const { list, calls } = fakeList();
     await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD });
-    expect(calls.map((c) => c.status)).toEqual([...ACCRUAL_OPEN_STATUSES]);
-    expect(calls.map((c) => c.status).sort()).toEqual(["InProgress", "Invoiced", "ReadyForBilling", "Scheduled"]);
-    for (const c of calls) {
-      // Exactly { to, clientId, status } — no `from` (open-ended back), no
-      // paging params (unpaged = the complete match), nothing else.
-      expect(c).toEqual({ to: "2026-08-31", clientId: "c1", status: c.status });
-      expect(c.to).toBe(carryForwardThrough(PERIOD));
-      expect("from" in c).toBe(false);
-      expect("page" in c).toBe(false);
-      expect("pageSize" in c).toBe(false);
-    }
+    expect(calls).toHaveLength(1);
+    const [c] = calls;
+    // Exactly these keys — no `from` (open-ended back), no paging params
+    // (unpaged = the complete match), no single `status` (the API rejects
+    // status + statuses together).
+    expect(c).toEqual({ to: "2026-08-31", clientId: "c1", statuses: ACCRUAL_OPEN_STATUSES });
+    expect(c.to).toBe(carryForwardThrough(PERIOD));
+    expect([...(c.statuses ?? [])].sort()).toEqual(["InProgress", "Invoiced", "ReadyForBilling", "Scheduled"]);
+    for (const k of ["from", "page", "pageSize", "status"]) expect(k in c, k).toBe(false);
   });
 
-  it("dedupes a trip returned by two of the calls", async () => {
-    const a = trip({ status: "Invoiced", serviceDate: "2026-08-10" });
-    const b = trip({ status: "ReadyForBilling", serviceDate: "2026-08-11" });
-    // `a` changed status between calls and came back under both.
-    const { list } = fakeList({ Invoiced: [a], ReadyForBilling: [b, { ...a, status: "ReadyForBilling" }] });
-    const got = await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD });
-    expect(got).not.toBeNull();
-    expect(got!.map((t) => t.id).sort()).toEqual([a.id, b.id].sort());
-  });
-
-  it("fails as ONE group: any rejected call → null, never a partial list", async () => {
-    // The LAST call rejects after three succeeded with data — still null.
-    const a = trip({ status: "ReadyForBilling", serviceDate: "2026-08-10" });
-    const b = trip({ status: "Scheduled", serviceDate: "2026-08-11" });
-    const { list, calls } = fakeList({ ReadyForBilling: [a], Scheduled: [b], Invoiced: "reject" });
+  it("returns null when the call rejects", async () => {
+    const { list } = fakeList("reject");
     expect(await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD })).toBeNull();
-    expect(calls).toHaveLength(ACCRUAL_OPEN_STATUSES.length);
-  });
-
-  it("stops at the first rejection — the calls are sequential", async () => {
-    const { list, calls } = fakeList({ Scheduled: "reject" });
-    expect(await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD })).toBeNull();
-    expect(calls.map((c) => c.status)).toEqual(["Scheduled"]);
-  });
-
-  it("never runs two calls at once", async () => {
-    let inFlight = 0;
-    let maxInFlight = 0;
-    const list = async (): Promise<TripPage> => {
-      inFlight++;
-      maxInFlight = Math.max(maxInFlight, inFlight);
-      await new Promise((r) => setTimeout(r, 0));
-      inFlight--;
-      return page([]);
-    };
-    await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD });
-    expect(maxInFlight).toBe(1);
-  });
-
-  /** A fake server holding ONE mutable trip: each call answers from the trip's
-   *  CURRENT status, then `afterCall` may move it (a status change landing
-   *  between two of the calls). */
-  function liveServer(start: TripRecord, afterCall: (asked: string, t: TripRecord) => TripRecord["status"] | null) {
-    let current = { ...start };
-    const list = async (p: TripListParams): Promise<TripPage> => {
-      const answer = current.status === p.status ? [{ ...current }] : [];
-      const next = afterCall(p.status ?? "", current);
-      if (next) current = { ...current, status: next };
-      return page(answer);
-    };
-    return list;
-  }
-
-  it("catches a trip that moves ReadyForBilling → Invoiced between calls — once, as Invoiced", async () => {
-    const x = trip({ status: "ReadyForBilling", serviceDate: "2026-08-12" });
-    const list = liveServer(x, (asked) => (asked === "ReadyForBilling" ? "Invoiced" : null));
-    const got = await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD });
-    expect(got).not.toBeNull();
-    expect(got!.filter((t) => t.id === x.id)).toHaveLength(1);
-    expect(got!.find((t) => t.id === x.id)!.status).toBe("Invoiced");
-  });
-
-  it("dedupes a trip seen twice after a forward jump (Scheduled → ReadyForBilling) — last status wins", async () => {
-    // Scheduled when Scheduled is asked → returned; then jumps straight to
-    // ReadyForBilling (a legal move) — the later call returns it again.
-    const x = trip({ status: "Scheduled", serviceDate: "2026-08-12" });
-    const list = liveServer(x, (asked) => (asked === "Scheduled" ? "ReadyForBilling" : null));
-    const got = await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD });
-    expect(got!.filter((t) => t.id === x.id)).toHaveLength(1);
-    expect(got!.find((t) => t.id === x.id)!.status).toBe("ReadyForBilling");
-  });
-
-  it("every forward move at every gap is still caught (exhaustive over the open path)", async () => {
-    // For each gap between two calls and each legal forward target, the trip
-    // must come back exactly once.
-    const forward: Record<string, TripRecord["status"][]> = {
-      Scheduled: ["InProgress", "ReadyForBilling"],
-      InProgress: ["ReadyForBilling"],
-      ReadyForBilling: ["Invoiced"],
-      Invoiced: [],
-    };
-    for (const from of ACCRUAL_OPEN_STATUSES) {
-      for (const gap of ACCRUAL_OPEN_STATUSES) {
-        for (const to of forward[from]) {
-          const x = trip({ status: from, serviceDate: "2026-08-12" });
-          let moved = false;
-          const list = liveServer(x, (asked) => {
-            if (!moved && asked === gap) {
-              moved = true;
-              return to;
-            }
-            return null;
-          });
-          const got = await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD });
-          expect(got!.filter((t) => t.id === x.id), `${from}→${to} after the ${gap} call`).toHaveLength(1);
-        }
-      }
-    }
   });
 
   it("returns null when the list function throws synchronously", async () => {
@@ -2138,15 +2040,39 @@ describe("fetchCarriedTrips", () => {
     expect(await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD })).toBeNull();
   });
 
-  it("returns [] — not null — when every call comes back empty", async () => {
-    const { list } = fakeList();
+  it("returns [] — not null — when the call comes back empty", async () => {
+    const { list } = fakeList([]);
     expect(await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD })).toEqual([]);
+  });
+
+  it("rethrows a TripListParamsError — a bug in the call, not an outage, must not hide behind the banner", async () => {
+    const list = async (): Promise<TripPage> => {
+      throw new TripListParamsError("`statuses` must not be empty — omit it for no status filter.");
+    };
+    await expect(fetchCarriedTrips(list, { clientId: "c1", period: PERIOD })).rejects.toBeInstanceOf(
+      TripListParamsError,
+    );
+  });
+
+  it("still degrades to null on an API error", async () => {
+    const list = async (): Promise<TripPage> => {
+      throw new ApiError("Trips.Trip.InvalidStatusFilter", "The status filter is not a known trip status.", 400);
+    };
+    expect(await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD })).toBeNull();
+  });
+
+  it("takes the set from `items`, never from `totalCount`", async () => {
+    // totalCount is a separate COUNT on the server and can disagree with the
+    // rows if a trip moves between the two; the rows are the snapshot.
+    const a = trip({ status: "Scheduled", serviceDate: "2026-08-10" });
+    const list = async (): Promise<TripPage> => ({ items: [a], page: null, pageSize: null, totalCount: 2 });
+    expect(await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD })).toEqual([a]);
   });
 
   it("crosses a year boundary for `to`", async () => {
     const { list, calls } = fakeList();
     await fetchCarriedTrips(list, { clientId: "c9", period: { start: "2027-01-01" } });
-    expect(calls).toHaveLength(4);
-    expect(calls.every((c) => c.to === "2026-12-31" && c.clientId === "c9")).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual({ to: "2026-12-31", clientId: "c9", statuses: ACCRUAL_OPEN_STATUSES });
   });
 });

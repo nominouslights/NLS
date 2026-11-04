@@ -781,8 +781,9 @@ public sealed class Trip : AggregateRoot, ITenantScoped
     }
 
     /// <summary>
-    /// Longest free-text reason a dispatcher may record against a trip correction. Today only
-    /// <see cref="CorrectDriver"/> enforces it; it lives on the aggregate so the other
+    /// Longest free-text reason a dispatcher may record against a trip correction — the same
+    /// 500 characters as the cancel and written-off reason columns. <see cref="CorrectDriver"/>
+    /// and <see cref="Reopen"/> enforce it; it lives on the aggregate so the other
     /// reason-carrying trip commands (cancel, close without billing, ...) can adopt the same cap
     /// later — they do not apply it yet.
     /// </summary>
@@ -997,6 +998,112 @@ public sealed class Trip : AggregateRoot, ITenantScoped
         // Not TripWrittenOffDomainEvent: this write-off originates here, so Billing has to be
         // told to drop the trip from its billable pool — the mapper publishes exactly this event.
         Raise(new TripClosedWithoutBillingDomainEvent(Id));
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Where <see cref="Reopen"/> sends a trip from each status — or why it refuses. Reopening is
+    /// its own command with its own explicit source → target map, deliberately NOT a set of new
+    /// <see cref="CanTransition"/> edges (the same reasoning as <see cref="FinishOperations"/>):
+    /// widening the matrix would make these backward moves reachable through every other path
+    /// that consults it, and the billing-driven transitions must stay unreachable by hand.
+    /// <list type="bullet">
+    /// <item>Every reopenable status lands in <see cref="TripStatus.Scheduled"/> — Cancelled
+    /// (cancelled by mistake), InProgress (started by mistake), ReadyForBilling (finished by
+    /// mistake), and WrittenOff (closed without billing by mistake). Never InProgress: that
+    /// would skip the en-route gate (a passenger manifest, or a shipment for a cargo run) that
+    /// starting a trip enforces, and a trip finished straight from Scheduled may never have
+    /// passed it. From Scheduled the dispatcher can start again through the gate, or finish
+    /// directly (Scheduled → finish is a legal edge), which re-raises ReadyForBilling.</item>
+    /// <item>The aggregate cannot tell a dispatcher close-out from an invoice write-off — the
+    /// reopen command's billing-claim guard does, because an invoice write-off's claim is never
+    /// released.</item>
+    /// <item>Completed, Invoiced, Scheduled → refused.</item>
+    /// </list>
+    /// </summary>
+    public static Result<TripStatus> ReopenTargetFor(TripStatus status) => status switch
+    {
+        TripStatus.Cancelled or TripStatus.InProgress or TripStatus.ReadyForBilling or TripStatus.WrittenOff
+            => Result.Success(TripStatus.Scheduled),
+
+        // THE PAID RULE — the one place it lives. Completed means paid: for a client trip, Billing
+        // confirmed payment against the QuickBooks invoice; for a clientless run (community,
+        // walk-up charter) the fare was collected at booking. Either way money has changed hands,
+        // so no Completed trip is ever reopened. To loosen this for clientless runs later, branch
+        // here on the trip's ClientId (make this an instance check) — clientless Completed trips
+        // never entered the billing arc, so they have no claim for the command handler to trip on.
+        TripStatus.Completed => Result.Failure<TripStatus>(TripErrors.PaidCannotReopen),
+
+        // Its worksheet is in QuickBooks; Billing owns it from here.
+        TripStatus.Invoiced => Result.Failure<TripStatus>(TripErrors.InvoicedCannotReopen),
+
+        TripStatus.Scheduled => Result.Failure<TripStatus>(TripErrors.NothingToReopen),
+
+        // An out-of-range value cast in from outside the enum, or a member added later and not yet
+        // placed in this map — refused generically rather than claiming the trip is Scheduled.
+        _ => Result.Failure<TripStatus>(TripErrors.CannotReopen(status)),
+    };
+
+    /// <summary>
+    /// The dispatcher's undo for a lifecycle mistake — a trip cancelled, started, finished, or
+    /// closed without billing in error — with a required reason. The landing status comes from
+    /// <see cref="ReopenTargetFor"/>; a paid trip is never reopened.
+    /// <para>
+    /// Clears what the undone step stamped: <see cref="CancelledReason"/> (from Cancelled),
+    /// <see cref="OperationsFinishedAtUtc"/> (from ReadyForBilling or WrittenOff — finishing again
+    /// re-stamps it), and <see cref="WrittenOffReason"/> (from WrittenOff). The cleared reason travels on the
+    /// <see cref="TripReopenedDomainEvent"/> so the journal still holds it. Driver, vehicle,
+    /// demand, manifest, pairing, and the post-trip inspection flag are left exactly as they were.
+    /// </para>
+    /// <para>
+    /// What the aggregate cannot see — whether Billing still claims the trip, or its round-trip
+    /// partner — is guarded by the reopen command handler before this is called.
+    /// </para>
+    /// </summary>
+    public Result Reopen(string reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return Result.Failure(TripErrors.ReopenReasonRequired);
+        }
+
+        if (reason.Trim().Length > MaxReasonLength)
+        {
+            return Result.Failure(TripErrors.ReopenReasonTooLong);
+        }
+
+        var target = ReopenTargetFor(Status);
+        if (target.IsFailure)
+        {
+            return Result.Failure(target.Error);
+        }
+
+        var previous = Status;
+        string? clearedReason = null;
+
+        switch (previous)
+        {
+            case TripStatus.Cancelled:
+                clearedReason = CancelledReason;
+                CancelledReason = null;
+                break;
+            case TripStatus.ReadyForBilling:
+                OperationsFinishedAtUtc = null;
+                break;
+            case TripStatus.WrittenOff:
+                // A dispatcher close-out only ever follows ReadyForBilling, so the trip carries
+                // a finish stamp too; landing back in Scheduled, it must not keep claiming the
+                // run ended.
+                clearedReason = WrittenOffReason;
+                WrittenOffReason = null;
+                OperationsFinishedAtUtc = null;
+                break;
+        }
+
+        Status = target.Value;
+        UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        Raise(new TripReopenedDomainEvent(Id, previous, target.Value, reason.Trim(), clearedReason));
         return Result.Success();
     }
 

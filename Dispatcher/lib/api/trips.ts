@@ -124,12 +124,12 @@ export interface TripBilling {
   paymentConfirmedDate: string | null;
 }
 
-/** GET /api/trips query filters (TripFilter). */
-export interface TripListParams {
+/** GET /api/trips query filters (TripFilter), minus the status filter — see
+ *  TripListParams, which adds exactly one of `status` / `statuses`. */
+interface TripListBaseParams {
   date?: string;
   from?: string;
   to?: string;
-  status?: TripStatus;
   serviceType?: TripServiceType;
   clientId?: string;
   driverId?: string;
@@ -141,6 +141,24 @@ export interface TripListParams {
   page?: number;
   pageSize?: number;
 }
+
+/**
+ * GET /api/trips query filters. The status filter is EITHER `status` (one exact
+ * TripStatus) OR `statuses` (any of several, sent as ONE comma-joined
+ * `statuses` param and answered by one query — one consistent snapshot), never
+ * both: the API rejects the pair with 400 Trips.Trip.ConflictingStatusFilters,
+ * so the type forbids it and listTrips throws if a cast slips it through.
+ *
+ * `statuses: []` is a caller bug and listTrips THROWS on it rather than
+ * dropping the param: omitting it would silently widen the query to every
+ * status, the opposite of "match none". Leave `statuses` undefined for no
+ * status filter.
+ */
+export type TripListParams = TripListBaseParams &
+  (
+    | { status?: TripStatus; statuses?: never }
+    | { status?: never; statuses?: readonly TripStatus[] }
+  );
 
 /**
  * The `GET /api/trips` envelope (backend `PagedResponse<TripResponse>`).
@@ -208,14 +226,33 @@ export interface TripUpdateInput {
 // Trip endpoints
 // ---------------------------------------------------------------------------
 
+/** A listTrips call built wrong — a programming error, never a transient
+ *  failure. Its own class so a caller that degrades on network/API errors (the
+ *  accruals carry-forward) can still let a bug fail loudly. */
+export class TripListParamsError extends Error {
+  constructor(message: string) {
+    super(`listTrips: ${message}`);
+    this.name = "TripListParamsError";
+  }
+}
+
 /** Omitting page/pageSize returns every match in the same envelope — the server
  *  never applies a default page size, so whole-set callers are not truncated. */
 export async function listTrips(params?: TripListParams): Promise<TripPage> {
+  // Caller bugs, caught before the wire — see TripListParams. The tests mirror
+  // serialisation below (a blank/null `status` is never sent, so it is absent).
+  if (params?.status && params.statuses != null) {
+    throw new TripListParamsError("pass either `status` or `statuses`, never both.");
+  }
+  if (params?.statuses != null && params.statuses.length === 0) {
+    throw new TripListParamsError("`statuses` must not be empty — omit it for no status filter.");
+  }
   const q = new URLSearchParams();
   if (params?.date) q.set("date", params.date);
   if (params?.from) q.set("from", params.from);
   if (params?.to) q.set("to", params.to);
   if (params?.status) q.set("status", params.status);
+  if (params?.statuses) q.set("statuses", params.statuses.join(","));
   if (params?.serviceType) q.set("serviceType", params.serviceType);
   if (params?.clientId) q.set("clientId", params.clientId);
   if (params?.driverId) q.set("driverId", params.driverId);
@@ -305,6 +342,21 @@ export function closeTripWithoutBilling(id: string, reason: string): Promise<voi
   return request<void>(`/api/trips/${id}/close-without-billing`, {
     method: "POST",
     body: JSON.stringify({ reason }),
+  });
+}
+
+/** POST /api/trips/{id}/reopen → 204. Undoes a dispatcher mistake; reason is
+ *  required and kept in the trip's history. Every reopen lands in Scheduled.
+ *  `expectedStatus` (optional) is the trip's status exactly as TripResponse
+ *  delivered it — passed through unmapped — so the server can 409 when the trip
+ *  moved since the dispatcher opened it. Refusals (problems): paid, invoiced,
+ *  on a billing worksheet or written off with its invoice, already Scheduled,
+ *  the partner leg already claimed, status changed — surface the server's
+ *  message, never hardcode it. */
+export function reopenTrip(id: string, reason: string, expectedStatus?: TripStatus): Promise<void> {
+  return request<void>(`/api/trips/${id}/reopen`, {
+    method: "POST",
+    body: JSON.stringify(expectedStatus === undefined ? { reason } : { reason, expectedStatus }),
   });
 }
 
@@ -992,6 +1044,32 @@ export function canPairRoundTrip(t: TripRecord): boolean {
   );
 }
 
+/** Where REOPEN TRIP lands a trip of this status — UI copy only, mirroring the
+ *  reopen contract (every reopen lands in Scheduled; the backend stays the
+ *  final authority). Null for statuses the console never offers to reopen:
+ *  Scheduled (nothing to undo), Completed (paid) and Invoiced (refused). */
+export function reopenLanding(status: TripStatus): TripStatus | null {
+  switch (status) {
+    case "Cancelled":
+    case "InProgress":
+    case "ReadyForBilling":
+    case "WrittenOff":
+      return "Scheduled";
+    default:
+      return null;
+  }
+}
+
+/** Whether the console shows REOPEN TRIP. Any trip a billing worksheet claims
+ *  (`billing` non-null, in any status — on a worksheet, invoiced, paid or
+ *  written off with its invoice) is hidden rather than offered and always
+ *  refused. The refusals the console cannot see (partner leg already claimed,
+ *  status changed) are left to the server's message. */
+export function canReopenTrip(t: TripRecord): boolean {
+  if (reopenLanding(t.status) === null) return false;
+  return t.billing === null;
+}
+
 const normPlace = (s: string) => s.trim().toLowerCase();
 
 /** What the strict matcher would object to about pairing `other` with `trip` —
@@ -1319,17 +1397,31 @@ export interface TripActivityEntry {
   source: ManifestSource | null;
   /** Who entered it — manifest events, and trip events too since driver correction. */
   enteredBy: string | null;
-  /** Free-text reason the actor gave (e.g. a driver correction). Optional on the wire. */
+  /** Free-text reason the actor gave (e.g. a driver correction, or a
+   *  "trip-reopened" entry's reason). Optional on the wire. */
   reason?: string | null;
   /** Server-written one-line detail, e.g. "Driver: Old → New". Optional on the wire. */
   detail?: string | null;
+  /** The cancel / close-out reason a reopen cleared
+   *  (TripActivityEntryResponse.previousReason); null or absent otherwise. */
+  previousReason?: string | null;
 }
+
+const nonBlank = (s: string | null | undefined): string | null => {
+  const t = s?.trim();
+  return t ? t : null;
+};
 
 /** The entry's reason, trimmed, when it has a non-blank one — for ANY event
  *  type (not gated to a particular event), else null. */
 export function tripActivityReason(e: Pick<TripActivityEntry, "reason">): string | null {
-  const r = e.reason?.trim();
-  return r ? r : null;
+  return nonBlank(e.reason);
+}
+
+/** The reason a reopen cleared, for the "Previously: …" line — for ANY event
+ *  type, trimmed, null when absent or blank. */
+export function tripActivityPreviousReason(e: Pick<TripActivityEntry, "previousReason">): string | null {
+  return nonBlank(e.previousReason);
 }
 
 export function listTripActivity(id: string): Promise<TripActivityEntry[]> {

@@ -15,7 +15,9 @@ namespace NorthernLink.Drivers.Application.Drivers;
 /// driver has Field App access, and it is what <c>GET /api/drivers/me</c> resolves against.
 /// <paramref name="PriorRecordsCoveredThroughDate"/> / <paramref name="PriorRecordsAttestedAtUtc"/>
 /// are the compliance officer's prior-records attestation (null until one exists) and
-/// <paramref name="WorksForOtherCarriers"/> the flag declared with it.
+/// <paramref name="WorksForOtherCarriers"/> the flag declared with it. <paramref name="MotiveUserId"/>
+/// is the driver's user id in Motive (the ELD provider), or null when unmapped — the key the
+/// Motive HOS sync matches on.
 /// </summary>
 public sealed record DriverResponse(
     Guid Id,
@@ -36,4 +38,5 @@ public sealed record DriverResponse(
     DateTimeOffset UpdatedAtUtc,
     DateOnly? PriorRecordsCoveredThroughDate = null,
     DateTimeOffset? PriorRecordsAttestedAtUtc = null,
-    bool WorksForOtherCarriers = false);
+    bool WorksForOtherCarriers = false,
+    string? MotiveUserId = null);

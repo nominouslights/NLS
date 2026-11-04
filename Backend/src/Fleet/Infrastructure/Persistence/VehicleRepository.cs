@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using NorthernLink.Fleet.Application.Abstractions;
 using NorthernLink.Fleet.Domain.Vehicles;
 
@@ -31,6 +32,43 @@ internal sealed class VehicleRepository(FleetDbContext context) : IVehicleReposi
         context.Vehicles.AnyAsync(
             v => v.UnitNumber == unitNumber && (excludeVehicleId == null || v.Id != excludeVehicleId),
             cancellationToken);
+
+    public Task<bool> ExistsByMotiveVehicleIdAsync(
+        string motiveVehicleId,
+        Guid? excludeVehicleId = null,
+        CancellationToken cancellationToken = default) =>
+        context.Vehicles.AnyAsync(
+            v => v.MotiveVehicleId == motiveVehicleId && (excludeVehicleId == null || v.Id != excludeVehicleId),
+            cancellationToken);
+
+    /// <summary>The partial unique index on (tenant_id, motive_vehicle_id).</summary>
+    internal const string MotiveVehicleIdIndexName = "IX_vehicles_tenant_id_motive_vehicle_id";
+
+    public async Task<bool> TrySaveMotiveVehicleIdAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await context.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException
+        {
+            SqlState: PostgresErrorCodes.UniqueViolation,
+            ConstraintName: MotiveVehicleIdIndexName,
+        })
+        {
+            // Another vehicle took this Motive id between the handler's existence check and
+            // this commit. The single failed SaveChanges persisted nothing; detach the failed
+            // entries so the context stays usable and report the race as a domain conflict,
+            // not a 500 (the PlanAssignmentRepository.TryAddAsync pattern).
+            foreach (var entry in ex.Entries)
+            {
+                entry.State = EntityState.Detached;
+            }
+
+            return false;
+        }
+    }
 
     public void Add(Vehicle vehicle) => context.Vehicles.Add(vehicle);
 

@@ -112,9 +112,9 @@ public static class Roles
     public static readonly string[] HosRecordOverride = [Owner, Dispatcher, Supervisor, ComplianceOfficer];
 
     /// <summary>
-    /// The driver roster's read routes: <see cref="DispatchAccess"/> plus
-    /// <see cref="ComplianceOfficer"/>, so the console's Drivers screen works for a compliance
-    /// officer without widening <see cref="DispatchAccess"/> itself.
+    /// The driver roster's read routes, and the driver's Motive (ELD) mapping:
+    /// <see cref="DispatchAccess"/> plus <see cref="ComplianceOfficer"/>, so the console's Drivers
+    /// screen works for a compliance officer without widening <see cref="DispatchAccess"/> itself.
     /// </summary>
     public static readonly string[] DriverRosterAccess = [Owner, Dispatcher, Supervisor, ComplianceOfficer];
 

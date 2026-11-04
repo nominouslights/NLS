@@ -27,6 +27,12 @@ public interface ITripReadService
 /// <see cref="OpenOnly"/> keeps only Scheduled trips with no driver ("needs coverage");
 /// <see cref="AssignedOnly"/> is its counterpart (a driver is on the trip).
 /// <para>
+/// <see cref="Status"/> is one exact status; <see cref="Statuses"/> is a set matched as one
+/// <c>IN</c> in the same query, so a multi-status read is a single snapshot. Both are ANDed
+/// with everything else. The endpoint never sends both (that is a 400), and never an empty
+/// <see cref="Statuses"/> — a direct caller that does gets the set-theoretic answer, nothing.
+/// </para>
+/// <para>
 /// <see cref="Page"/>/<see cref="PageSize"/> are all-or-nothing: both set pages the result,
 /// either absent returns every match. Callers that need a whole set (a driver's full history,
 /// a dispatch day) simply omit them.
@@ -44,4 +50,5 @@ public sealed record TripFilter(
     bool AssignedOnly = false,
     bool ExcludeCancelled = false,
     int? Page = null,
-    int? PageSize = null);
+    int? PageSize = null,
+    IReadOnlyList<TripStatus>? Statuses = null);

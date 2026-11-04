@@ -21,6 +21,7 @@ using NorthernLink.Drivers.Application.Drivers.GetDrivers;
 using NorthernLink.Drivers.Application.Drivers.LinkUser;
 using NorthernLink.Drivers.Application.Drivers.Register;
 using NorthernLink.Drivers.Application.Drivers.SelfAccess;
+using NorthernLink.Drivers.Application.Drivers.SetMotiveUser;
 using NorthernLink.Drivers.Application.Drivers.UnlinkUser;
 using NorthernLink.Drivers.Application.Drivers.Update;
 using NorthernLink.Drivers.Application.Hos;
@@ -51,6 +52,7 @@ using NorthernLink.Drivers.Application.Hos.OutOfService.Record;
 using NorthernLink.Drivers.Application.Hos.Record;
 using NorthernLink.Drivers.Application.Hos.Alerts;
 using NorthernLink.Drivers.Application.Hos.Status;
+using NorthernLink.Drivers.Infrastructure.Motive;
 using NorthernLink.Drivers.Infrastructure.Persistence;
 using NorthernLink.Drivers.Infrastructure.Persistence.Projections;
 using NorthernLink.Shared.Kernel;
@@ -118,6 +120,11 @@ public static class DriversServiceCollectionExtensions
         // never reaches a command handler at all.
         services.AddScoped<IDriverSelfAccess, DriverSelfAccess>();
 
+        // The Motive (ELD) credential seam. Registering it reads nothing: the key is read from
+        // Motive__ApiKey on first use, so the API boots without it. Nothing calls Motive yet —
+        // the user-pressed sync (never a background poller) arrives in a later PR.
+        services.AddSingleton<IMotiveCredentialProvider, ApiKeyMotiveCredentialProvider>();
+
         // 3. Command/query handlers — registered explicitly, one line per handler.
         services.AddScoped<ICommandHandler<RegisterDriverCommand, Guid>, RegisterDriverCommandHandler>();
         services.AddScoped<ICommandHandler<UpdateDriverCommand>, UpdateDriverCommandHandler>();
@@ -127,6 +134,7 @@ public static class DriversServiceCollectionExtensions
         services.AddScoped<IQueryHandler<GetDriverByUserQuery, DriverResponse>, GetDriverByUserQueryHandler>();
         services.AddScoped<ICommandHandler<LinkDriverUserCommand>, LinkDriverUserCommandHandler>();
         services.AddScoped<ICommandHandler<UnlinkDriverUserCommand>, UnlinkDriverUserCommandHandler>();
+        services.AddScoped<ICommandHandler<SetDriverMotiveUserIdCommand>, SetDriverMotiveUserIdCommandHandler>();
         services.AddScoped<ICommandHandler<AddDriverCredentialCommand, Guid>, AddDriverCredentialCommandHandler>();
         services.AddScoped<ICommandHandler<RemoveDriverCredentialCommand>, RemoveDriverCredentialCommandHandler>();
         services.AddScoped<ICommandHandler<SetDriverCredentialImageCommand>, SetDriverCredentialImageCommandHandler>();

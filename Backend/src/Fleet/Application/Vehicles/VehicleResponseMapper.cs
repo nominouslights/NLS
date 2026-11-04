@@ -28,7 +28,8 @@ public static class VehicleResponseMapper
         vehicle.SalePriceCad,
         vehicle.DisposedAtUtc,
         vehicle.CreatedAtUtc,
-        vehicle.UpdatedAtUtc);
+        vehicle.UpdatedAtUtc,
+        vehicle.MotiveVehicleId);
 
     public static RetirementCertificateResponse ToResponse(RetirementCertificate certificate) => new(
         certificate.Id,
