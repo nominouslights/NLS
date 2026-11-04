@@ -128,6 +128,54 @@ public static class TripErrors
     public static readonly Error DriverUnchanged = Error.Conflict(
         "Trips.Trip.DriverUnchanged", "That driver is already recorded on this trip.");
 
+    // ---- Reopen (Trip.Reopen + ReopenTripCommandHandler) ----
+
+    public static readonly Error ReopenReasonRequired = Error.Validation(
+        "Trips.Trip.ReopenReasonRequired", "Reopening a trip requires a reason.");
+
+    /// <summary>Same 500-character ceiling as the cancel and written-off reason columns.</summary>
+    public static readonly Error ReopenReasonTooLong = Error.Validation(
+        "Trips.Trip.ReopenReasonTooLong", $"A reopen reason can be at most {Trip.MaxReasonLength} characters.");
+
+    /// <summary>Completed means paid (or, for a clientless run, fare collected at booking).</summary>
+    public static readonly Error PaidCannotReopen = Error.Conflict(
+        "Trips.Trip.PaidCannotReopen", "This trip has been paid — a paid trip can never be reopened.");
+
+    public static readonly Error InvoicedCannotReopen = Error.Conflict(
+        "Trips.Trip.InvoicedCannotReopen",
+        "This trip's worksheet is already in QuickBooks, so Billing owns it — adjust or write off the invoice in Billing instead of reopening the trip.");
+
+    public static readonly Error InvoiceWrittenOffCannotReopen = Error.Conflict(
+        "Trips.Trip.InvoiceWrittenOffCannotReopen",
+        "This trip was written off with its invoice in Billing — that write-off is final, so the trip cannot be reopened.");
+
+    public static readonly Error NothingToReopen = Error.Conflict(
+        "Trips.Trip.NothingToReopen", "This trip is still Scheduled — there is nothing to reopen.");
+
+    /// <summary>The reopen map's catch-all — a status it does not place (see Trip.ReopenTargetFor).</summary>
+    public static Error CannotReopen(TripStatus status) => Error.Conflict(
+        "Trips.Trip.CannotReopen", $"A trip in status {status} cannot be reopened.");
+
+    /// <summary>
+    /// The caller's optimistic check failed: the trip is no longer in the status the dispatcher
+    /// saw — a double click, or another dispatcher got there first.
+    /// </summary>
+    public static readonly Error ReopenStatusChanged = Error.Conflict(
+        "Trips.Trip.ReopenStatusChanged", "This trip's status changed since you opened it — refresh and try again.");
+
+    public static readonly Error OnWorksheetCannotReopen = Error.Conflict(
+        "Trips.Trip.OnWorksheetCannotReopen",
+        "A Billing worksheet claims this trip — void the draft in Billing first, then reopen the trip.");
+
+    /// <summary>
+    /// Reopening a cancelled or closed-out leg puts it back on the road to billing, and the
+    /// draft builder prices each round-trip group at a full round-trip rate — so with its partner
+    /// already claimed, the same run would be billed twice.
+    /// </summary>
+    public static Error PartnerLegClaimedCannotReopen(string partnerTripNumber) => Error.Conflict(
+        "Trips.Trip.PartnerLegClaimedCannotReopen",
+        $"The other leg of this round trip ({partnerTripNumber}) is already on a Billing worksheet, so reopening this leg would bill the run twice — void that draft in Billing, or unpair the round trip, first.");
+
     public static readonly Error BillingStateOnClientlessTrip = Error.Conflict(
         "Trips.Trip.BillingStateOnClientlessTrip", "A run with no client never enters the billing arc, so no invoice can speak for it.");
 

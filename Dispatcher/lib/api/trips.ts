@@ -297,6 +297,21 @@ export function closeTripWithoutBilling(id: string, reason: string): Promise<voi
   });
 }
 
+/** POST /api/trips/{id}/reopen → 204. Undoes a dispatcher mistake; reason is
+ *  required and kept in the trip's history. Every reopen lands in Scheduled.
+ *  `expectedStatus` (optional) is the trip's status exactly as TripResponse
+ *  delivered it — passed through unmapped — so the server can 409 when the trip
+ *  moved since the dispatcher opened it. Refusals (problems): paid, invoiced,
+ *  on a billing worksheet or written off with its invoice, already Scheduled,
+ *  the partner leg already claimed, status changed — surface the server's
+ *  message, never hardcode it. */
+export function reopenTrip(id: string, reason: string, expectedStatus?: TripStatus): Promise<void> {
+  return request<void>(`/api/trips/${id}/reopen`, {
+    method: "POST",
+    body: JSON.stringify(expectedStatus === undefined ? { reason } : { reason, expectedStatus }),
+  });
+}
+
 export function recordTripDemand(
   id: string,
   seatsConfirmed: number,
@@ -977,6 +992,32 @@ export function canPairRoundTrip(t: TripRecord): boolean {
   );
 }
 
+/** Where REOPEN TRIP lands a trip of this status — UI copy only, mirroring the
+ *  reopen contract (every reopen lands in Scheduled; the backend stays the
+ *  final authority). Null for statuses the console never offers to reopen:
+ *  Scheduled (nothing to undo), Completed (paid) and Invoiced (refused). */
+export function reopenLanding(status: TripStatus): TripStatus | null {
+  switch (status) {
+    case "Cancelled":
+    case "InProgress":
+    case "ReadyForBilling":
+    case "WrittenOff":
+      return "Scheduled";
+    default:
+      return null;
+  }
+}
+
+/** Whether the console shows REOPEN TRIP. Any trip a billing worksheet claims
+ *  (`billing` non-null, in any status — on a worksheet, invoiced, paid or
+ *  written off with its invoice) is hidden rather than offered and always
+ *  refused. The refusals the console cannot see (partner leg already claimed,
+ *  status changed) are left to the server's message. */
+export function canReopenTrip(t: TripRecord): boolean {
+  if (reopenLanding(t.status) === null) return false;
+  return t.billing === null;
+}
+
 const normPlace = (s: string) => s.trim().toLowerCase();
 
 /** What the strict matcher would object to about pairing `other` with `trip` —
@@ -1304,17 +1345,31 @@ export interface TripActivityEntry {
   source: ManifestSource | null;
   /** Who entered it — manifest events, and trip events too since driver correction. */
   enteredBy: string | null;
-  /** Free-text reason the actor gave (e.g. a driver correction). Optional on the wire. */
+  /** Free-text reason the actor gave (e.g. a driver correction, or a
+   *  "trip-reopened" entry's reason). Optional on the wire. */
   reason?: string | null;
   /** Server-written one-line detail, e.g. "Driver: Old → New". Optional on the wire. */
   detail?: string | null;
+  /** The cancel / close-out reason a reopen cleared
+   *  (TripActivityEntryResponse.previousReason); null or absent otherwise. */
+  previousReason?: string | null;
 }
+
+const nonBlank = (s: string | null | undefined): string | null => {
+  const t = s?.trim();
+  return t ? t : null;
+};
 
 /** The entry's reason, trimmed, when it has a non-blank one — for ANY event
  *  type (not gated to a particular event), else null. */
 export function tripActivityReason(e: Pick<TripActivityEntry, "reason">): string | null {
-  const r = e.reason?.trim();
-  return r ? r : null;
+  return nonBlank(e.reason);
+}
+
+/** The reason a reopen cleared, for the "Previously: …" line — for ANY event
+ *  type, trimmed, null when absent or blank. */
+export function tripActivityPreviousReason(e: Pick<TripActivityEntry, "previousReason">): string | null {
+  return nonBlank(e.previousReason);
 }
 
 export function listTripActivity(id: string): Promise<TripActivityEntry[]> {

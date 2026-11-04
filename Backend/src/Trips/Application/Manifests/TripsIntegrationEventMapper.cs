@@ -38,6 +38,7 @@ public sealed class TripsIntegrationEventMapper : IIntegrationEventMapper
             TripReadyForBillingDomainEvent => MapReadyForBilling((Trip)aggregate),
             TripClosedWithoutBillingDomainEvent => MapClosedWithoutBilling((Trip)aggregate),
             TripDriverCorrectedDomainEvent corrected => MapDriverCorrected(corrected, (Trip)aggregate),
+            TripReopenedDomainEvent reopened => MapReopened(reopened, (Trip)aggregate),
             TripRoundTripChangedDomainEvent => MapRoundTripChanged((Trip)aggregate),
             TripScheduledFromBookingDomainEvent => MapScheduledFromBooking((Trip)aggregate),
             RouteCreatedDomainEvent => MapRouteChanged((Route)aggregate),
@@ -92,6 +93,19 @@ public sealed class TripsIntegrationEventMapper : IIntegrationEventMapper
     {
         OccurredAtUtc = corrected.OccurredAtUtc,
     };
+
+    /// <summary>
+    /// A dispatcher undid a lifecycle mistake. Built from the domain event, not the aggregate, for
+    /// the reason and both statuses — the aggregate no longer remembers where it came from.
+    /// Billing drops the trip from its uninvoiced pool (a no-op unless it was ReadyForBilling).
+    /// </summary>
+    private static TripReopenedIntegrationEvent MapReopened(TripReopenedDomainEvent reopened, Trip trip) => new(
+        trip.Id,
+        trip.TenantId,
+        trip.TripNumber,
+        reopened.Reason,
+        reopened.PreviousStatus.ToString(),
+        reopened.NewStatus.ToString());
 
     /// <summary>
     /// Defence in depth: the aggregate only raises the ready-for-billing event on the client

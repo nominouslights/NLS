@@ -35,6 +35,9 @@ import {
   listTrips,
   mergeRoundTrip,
   refetchUntil,
+  canReopenTrip,
+  reopenLanding,
+  reopenTrip,
   roundTripManualCandidates,
   roundTripMergeCandidates,
   roundTripMismatch,
@@ -44,6 +47,7 @@ import {
   svcForTrip,
   tripBillingChip,
   tripChip,
+  tripActivityPreviousReason,
   tripStatusLabel,
   tripWindowLabel,
   unpairRoundTrip,
@@ -51,6 +55,7 @@ import {
   type TripInput,
   type TripRecord,
   type TripServiceType,
+  type TripStatus,
   type TripStop,
   type TripUpdateInput,
 } from "@/lib/api/trips";
@@ -124,7 +129,6 @@ function fmtUtcDateTime(iso: string | null): string {
     hour12: true,
   });
 }
-
 
 // ---------------------------------------------------------------------------
 // Pre-data states (Drivers.tsx conventions)
@@ -1182,6 +1186,82 @@ function CloseWithoutBillingModal({
 }
 
 // ---------------------------------------------------------------------------
+// Reopen modal — POST /reopen with a REQUIRED reason, to undo a dispatcher
+// mistake. Not destructive (it undoes one), so no destructive styling. Every
+// reopen lands in Scheduled. The backend stays the authority and its refusal
+// message (paid, invoiced, on a worksheet or written off with its invoice,
+// already scheduled, partner leg already claimed, status changed since the
+// modal opened) is shown verbatim.
+// ---------------------------------------------------------------------------
+
+/** What happens next — plain-language modal copy. */
+function reopenLandingCopy(from: TripStatus, to: TripStatus): string {
+  const fromLabel = tripStatusLabel(from).toLowerCase();
+  return `This ${fromLabel} trip goes back to ${tripStatusLabel(to)} — finish it again (or start it) once the records are right.`;
+}
+
+function ReopenTripModal({
+  trip,
+  onClose,
+  onConfirmed,
+}: {
+  trip: TripRecord;
+  onClose: () => void;
+  onConfirmed: (reason: string) => Promise<void>;
+}) {
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const landing = reopenLanding(trip.status);
+  const hasReason = reason.trim().length > 0;
+
+  async function submit() {
+    if (busy || !hasReason) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onConfirmed(reason.trim());
+      onClose();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Failed to reopen the trip — please try again.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ModalShell
+      eyebrow={`Operations · ${trip.tripNumber} · ${corridorLabel(trip)}`}
+      title="Reopen Trip"
+      onClose={onClose}
+      error={error}
+      footer={
+        <>
+          <ActionButton onClick={onClose}>KEEP AS IS</ActionButton>
+          <ActionButton variant="primary" onClick={submit} disabled={busy || !hasReason}>
+            {busy ? "REOPENING…" : "REOPEN TRIP"}
+          </ActionButton>
+        </>
+      }
+    >
+      <div style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textSecondary, lineHeight: 1.6, marginBottom: 12 }}>
+        {landing
+          ? reopenLandingCopy(trip.status, landing)
+          : "This trip cannot be reopened from its current status."}{" "}
+        The reason is kept in the trip&apos;s history. A paid or invoiced trip, or one a billing worksheet claims, can
+        never be reopened — if the server refuses, it will say why.
+      </div>
+      <TextAreaField
+        label="Reason (required — kept in the trip's history)"
+        value={reason}
+        onChange={setReason}
+        rows={3}
+        placeholder="Cancelled the wrong date · the run is still going ahead"
+      />
+    </ModalShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Remove-inspection confirm — DELETE /api/fleet/inspections/{id} is a hard
 // delete. Removing a post-trip inspection re-gates trip completion.
 // ---------------------------------------------------------------------------
@@ -1407,6 +1487,7 @@ export default function Trips({
     | "changeRoute"
     | "cancel"
     | "closeWithoutBilling"
+    | "reopen"
     | "manifest"
     | "sendEmail"
   >(null);
@@ -2757,8 +2838,11 @@ export default function Trips({
                       {activity.map((ev, i) => {
                         // Manifest events already name their author in the label
                         // (Dispatcher (name)); trip events get a "by" line instead.
-                        // Null reason/detail/enteredBy → that line is just omitted.
+                        // Null reason/detail/previousReason/enteredBy → that line
+                        // is just omitted.
                         const { isManifest, label, detail, reason, by } = activityEntryView(ev);
+                        // The cancel / close-out reason a reopen cleared.
+                        const previousReason = tripActivityPreviousReason(ev);
                         const sub = { fontFamily: fonts.body, fontSize: 11.5, color: colors.textMuted, lineHeight: 1.45 };
                         return (
                           <div key={`${ev.eventType}-${ev.occurredAtUtc}-${i}`} style={{ display: "flex", alignItems: "flex-start", gap: 9 }}>
@@ -2770,6 +2854,7 @@ export default function Trips({
                               </span>
                               {detail && <span style={sub}>{detail}</span>}
                               {reason && <span style={sub}>Reason: {reason}</span>}
+                              {previousReason && <span style={sub}>Previously: {previousReason}</span>}
                               {by && <span style={{ ...sub, color: colors.textDim }}>by {by}</span>}
                             </div>
                             <span style={{ fontFamily: fonts.mono, fontSize: 10.5, color: colors.textDim }}>
@@ -2878,6 +2963,14 @@ export default function Trips({
                 {t.status === "ReadyForBilling" && (
                   <ActionButton variant="destructive" onClick={() => setModal("closeWithoutBilling")}>
                     CLOSE WITHOUT BILLING
+                  </ActionButton>
+                )}
+                {/* Undo a dispatcher mistake — secondary, not destructive. Hidden
+                    for Scheduled / Completed / Invoiced, and for a written-off trip
+                    a worksheet still claims; the server owns every other refusal. */}
+                {canReopenTrip(t) && (
+                  <ActionButton onClick={() => setModal("reopen")} disabled={busy}>
+                    REOPEN TRIP
                   </ActionButton>
                 )}
                 {/* Printable whenever a manifest can exist: the loaded manifest
@@ -3042,6 +3135,37 @@ export default function Trips({
                   onConfirmed={async (reason) => {
                     await closeTripWithoutBilling(t.id, reason);
                     await reloadUntil(t.id, (trip) => trip !== undefined && trip.status === "WrittenOff");
+                  }}
+                />
+              )}
+              {modal === "reopen" && (
+                <ReopenTripModal
+                  trip={t}
+                  onClose={() => setModal(null)}
+                  onConfirmed={async (reason) => {
+                    const from = t.status;
+                    // Page-level busy keeps REOPEN TRIP (and the other actions)
+                    // disabled for the whole request + poll, even if the modal is
+                    // dismissed mid-flight. A later double-submit against a stale
+                    // status is caught server-side by expectedStatus (409).
+                    setBusy(true);
+                    try {
+                      // expectedStatus: the status exactly as TripResponse sent it.
+                      await reopenTrip(t.id, reason, from);
+                      // The reopen has been accepted from here on. A failed refresh must not
+                      // surface as "failed to reopen" — a retry would then hit the stale
+                      // expectedStatus 409. Swallow it; the next load shows the new status.
+                      try {
+                        // Poll until the status moves off where it was, then re-read
+                        // the history the reason was written to.
+                        await reloadUntil(t.id, (trip) => trip !== undefined && trip.status !== from);
+                        await refreshActivity(t.id);
+                      } catch {
+                        // Intentionally ignored — see above.
+                      }
+                    } finally {
+                      setBusy(false);
+                    }
                   }}
                 />
               )}
