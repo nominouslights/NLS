@@ -115,6 +115,7 @@ import {
   corridorLabel,
   shortDateLabel,
   sortTrips,
+  TripListParamsError,
   type TripListParams,
   type TripPage,
   type TripRecord,
@@ -225,17 +226,25 @@ export function carryForwardThrough(period: Pick<Period, "start">): string {
  * The carry-forward fetch: every trip of the client dated before the period
  * that is not yet completed — ONE unpaged listTrips call with
  * `to` = carryForwardThrough(period) (no `from`: open-ended back) and
- * `statuses` = ACCRUAL_OPEN_STATUSES. One query is one database snapshot, so a
- * trip changing status while the report loads is seen exactly once, in one
- * status. (This replaced one call per status: any sequence of separate calls
- * could still lose a trip that moved twice mid-fetch, or keep one already
- * cancelled.) The set is read from `items` only — never reconciled against
- * `totalCount`, which the server computes as a separate COUNT. Results are
- * deduped by id defensively; the builder dedupes too.
+ * `statuses` = ACCRUAL_OPEN_STATUSES. The trip ROWS come from one SQL
+ * statement, so a trip changing status while the report loads is seen exactly
+ * once, in one status. (This replaced one call per status: any sequence of
+ * separate calls could still lose a trip that moved twice mid-fetch, or keep
+ * one already cancelled.) Each row's `billing` is NOT part of that snapshot —
+ * it comes from the trip_billings replica, eventually consistent with Billing
+ * as it is on every trips screen. The set is read from `items` only — never
+ * reconciled against `totalCount`, a separate COUNT.
  *
- * Any failure → null, never a partial list. A partial set would understate
- * what is owed while looking complete, so the caller degrades to the month
- * only and says so (carriedTripsUnavailable).
+ * Accepted gap: the month's own trips are a SECOND query (ClientAccruals runs
+ * both at once), so a trip rescheduled across the period's first day in the
+ * instant between them can be missed by both. Closing it would mean fetching
+ * the client's whole history in one call.
+ *
+ * Any API/network failure → null, never a partial list. A partial set would
+ * understate what is owed while looking complete, so the caller degrades to
+ * the month only and says so (carriedTripsUnavailable). A TripListParamsError
+ * is a bug in how this call is built, not an outage — it is rethrown so it
+ * fails loudly instead of hiding behind that banner.
  *
  * `list` is injected (the screen passes listTrips) so the request shape and
  * the failure rule are testable without a network.
@@ -246,11 +255,11 @@ export async function fetchCarriedTrips(
 ): Promise<TripRecord[] | null> {
   const to = carryForwardThrough(args.period);
   try {
-    const p = await list({ to, clientId: args.clientId, statuses: ACCRUAL_OPEN_STATUSES });
-    const byId = new Map<string, TripRecord>();
-    for (const t of p.items) byId.set(t.id, t);
-    return [...byId.values()];
-  } catch {
+    // One statement over a primary-keyed table: no duplicates to remove (the
+    // builder dedupes carried against month trips anyway).
+    return (await list({ to, clientId: args.clientId, statuses: ACCRUAL_OPEN_STATUSES })).items;
+  } catch (e) {
+    if (e instanceof TripListParamsError) throw e;
     return null;
   }
 }

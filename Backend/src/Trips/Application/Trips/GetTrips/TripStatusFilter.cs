@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using NorthernLink.Shared.Kernel;
 using NorthernLink.Trips.Domain.Trips;
 
@@ -81,6 +82,10 @@ public sealed record TripStatusFilter(TripStatus? Status, IReadOnlyList<TripStat
         return Result.Success(new TripStatusFilter(null, parsed));
     }
 
-    private static bool IsStatusName(string name) =>
-        Enum.GetNames<TripStatus>().Contains(name, StringComparer.Ordinal);
+    // Built once: this runs per segment on every GET /api/trips. Ordinal, names only —
+    // "2" or "scheduled" are not statuses, exactly as the original single-status check.
+    private static readonly FrozenSet<string> StatusNames =
+        Enum.GetNames<TripStatus>().ToFrozenSet(StringComparer.Ordinal);
+
+    private static bool IsStatusName(string name) => StatusNames.Contains(name);
 }

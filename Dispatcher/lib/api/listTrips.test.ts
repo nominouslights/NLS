@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { listTrips, type TripListParams, type TripStatus } from "./trips";
+import { listTrips, TripListParamsError, type TripListParams, type TripStatus } from "./trips";
 
 // listTrips on the wire: the multi-status filter serialises as ONE comma-joined
 // `statuses` param, and the two caller bugs the API would 400 on (status AND
@@ -70,7 +70,22 @@ describe("listTrips — statuses filter", () => {
 
   it("throws on an empty statuses list rather than widening to every status", async () => {
     await expect(listTrips({ statuses: [] })).rejects.toThrow(/must not be empty/);
+    await expect(listTrips({ statuses: [] })).rejects.toBeInstanceOf(TripListParamsError);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("guards on what is actually SENT: a blank/null status beside statuses is no conflict", async () => {
+    // Serialisation drops a falsy `status`, so it is not 'both'.
+    await listTrips({ status: null, statuses: OPEN } as unknown as TripListParams);
+    await listTrips({ status: "", statuses: OPEN } as unknown as TripListParams);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("treats statuses: null as absent, never a .length crash", async () => {
+    await listTrips({ status: "Scheduled", statuses: null } as unknown as TripListParams);
+    const url = callUrl();
+    expect(url.searchParams.get("status")).toBe("Scheduled");
+    expect(url.searchParams.has("statuses")).toBe(false);
   });
 
   it("rejects status + statuses at the type level", () => {

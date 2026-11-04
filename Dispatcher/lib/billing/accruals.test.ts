@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { ClientRecord, PurchaseOrderRecord } from "@/lib/api/clients";
 import type { InvoiceDetailRecord, InvoiceLineRecord } from "@/lib/api/billing";
-import { shortDateLabel, type TripDirection, type TripListParams, type TripPage, type TripRecord } from "@/lib/api/trips";
+import { shortDateLabel, TripListParamsError, type TripDirection, type TripListParams, type TripPage, type TripRecord } from "@/lib/api/trips";
+import { ApiError } from "@/lib/api/transport";
 import type { Period } from "@/lib/period";
 import {
   ACCRUAL_BUCKET_ORDER,
@@ -2044,13 +2045,20 @@ describe("fetchCarriedTrips", () => {
     expect(await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD })).toEqual([]);
   });
 
-  it("returns the items, deduped by id", async () => {
-    const a = trip({ status: "Invoiced", serviceDate: "2026-08-10" });
-    const b = trip({ status: "ReadyForBilling", serviceDate: "2026-08-11" });
-    const { list } = fakeList([a, b, { ...a }]);
-    const got = await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD });
-    expect(got).not.toBeNull();
-    expect(got!.map((t) => t.id).sort()).toEqual([a.id, b.id].sort());
+  it("rethrows a TripListParamsError — a bug in the call, not an outage, must not hide behind the banner", async () => {
+    const list = async (): Promise<TripPage> => {
+      throw new TripListParamsError("`statuses` must not be empty — omit it for no status filter.");
+    };
+    await expect(fetchCarriedTrips(list, { clientId: "c1", period: PERIOD })).rejects.toBeInstanceOf(
+      TripListParamsError,
+    );
+  });
+
+  it("still degrades to null on an API error", async () => {
+    const list = async (): Promise<TripPage> => {
+      throw new ApiError("Trips.Trip.InvalidStatusFilter", "The status filter is not a known trip status.", 400);
+    };
+    expect(await fetchCarriedTrips(list, { clientId: "c1", period: PERIOD })).toBeNull();
   });
 
   it("takes the set from `items`, never from `totalCount`", async () => {

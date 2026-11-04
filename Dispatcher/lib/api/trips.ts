@@ -215,15 +215,26 @@ export interface TripUpdateInput {
 // Trip endpoints
 // ---------------------------------------------------------------------------
 
+/** A listTrips call built wrong — a programming error, never a transient
+ *  failure. Its own class so a caller that degrades on network/API errors (the
+ *  accruals carry-forward) can still let a bug fail loudly. */
+export class TripListParamsError extends Error {
+  constructor(message: string) {
+    super(`listTrips: ${message}`);
+    this.name = "TripListParamsError";
+  }
+}
+
 /** Omitting page/pageSize returns every match in the same envelope — the server
  *  never applies a default page size, so whole-set callers are not truncated. */
 export async function listTrips(params?: TripListParams): Promise<TripPage> {
-  // Caller bugs, caught before the wire — see TripListParams.
-  if (params?.status !== undefined && params.statuses !== undefined) {
-    throw new Error("listTrips: pass either `status` or `statuses`, never both.");
+  // Caller bugs, caught before the wire — see TripListParams. The tests mirror
+  // serialisation below (a blank/null `status` is never sent, so it is absent).
+  if (params?.status && params.statuses != null) {
+    throw new TripListParamsError("pass either `status` or `statuses`, never both.");
   }
-  if (params?.statuses !== undefined && params.statuses.length === 0) {
-    throw new Error("listTrips: `statuses` must not be empty — omit it for no status filter.");
+  if (params?.statuses != null && params.statuses.length === 0) {
+    throw new TripListParamsError("`statuses` must not be empty — omit it for no status filter.");
   }
   const q = new URLSearchParams();
   if (params?.date) q.set("date", params.date);
