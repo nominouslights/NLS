@@ -173,6 +173,10 @@ public static class HosTestSupport
         public Task<Driver?> GetByUserIdAsync(Guid userId, CancellationToken cancellationToken = default) =>
             Task.FromResult(Drivers.FirstOrDefault(d => d.UserId == userId));
 
+        public Task<bool> ExistsByMotiveUserIdAsync(
+            string motiveUserId, Guid excludeDriverId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Drivers.Any(d => d.MotiveUserId == motiveUserId && d.Id != excludeDriverId));
+
         public void Add(Driver driver) => Drivers.Add(driver);
 
         public Task SaveChangesAsync(CancellationToken cancellationToken = default)
@@ -184,6 +188,25 @@ public static class HosTestSupport
             }
 
             return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Simulates losing the check-then-save race: when set, the next
+        /// <see cref="TrySaveMotiveUserIdAsync"/> reports the unique-index conflict (persisting
+        /// nothing), as the real repository does when Postgres raises 23505 on the Motive index.
+        /// </summary>
+        public bool MotiveUserIdRaceOnNextSave { get; set; }
+
+        public async Task<bool> TrySaveMotiveUserIdAsync(CancellationToken cancellationToken = default)
+        {
+            if (MotiveUserIdRaceOnNextSave)
+            {
+                MotiveUserIdRaceOnNextSave = false;
+                return false;
+            }
+
+            await SaveChangesAsync(cancellationToken);
+            return true;
         }
     }
 

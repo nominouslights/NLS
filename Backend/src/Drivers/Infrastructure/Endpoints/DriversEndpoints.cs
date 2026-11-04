@@ -16,6 +16,7 @@ using NorthernLink.Drivers.Application.Drivers.GetDrivers;
 using NorthernLink.Drivers.Application.Drivers.LinkUser;
 using NorthernLink.Drivers.Application.Drivers.Register;
 using NorthernLink.Drivers.Application.Drivers.SelfAccess;
+using NorthernLink.Drivers.Application.Drivers.SetMotiveUser;
 using NorthernLink.Drivers.Application.Drivers.UnlinkUser;
 using NorthernLink.Drivers.Application.Drivers.Update;
 using NorthernLink.Drivers.Domain.Drivers;
@@ -77,6 +78,19 @@ public static class DriversEndpoints
         roster.MapGet("{id:guid}", GetDriverById);
         roster.MapGet("hos/status", HosEndpoints.GetRosterHosStatus);
         roster.MapGet("hos/alerts/today", HosEndpoints.GetTodayAlerts);
+
+        // Motive (ELD) mapping — whose Motive duty-status logs the HOS sync will mirror onto this
+        // driver's ledger. The one roster WRITE a compliance officer may make (owner decision,
+        // 2026-11): the ELD mapping is a records-of-duty-status concern as much as roster admin.
+        // Its own group, on DriverRosterAccess (dispatch + ComplianceOfficer, never Driver or
+        // Accountant), so the read-only roster group above stays read-only and the dispatch-only
+        // writes in driverAdmin never admit a compliance officer. Its own pair of routes rather
+        // than a field on the roster form.
+        var motiveMapping = app.MapGroup("/api/drivers")
+            .RequireAuthorization(AuthorizationPolicies.DriverRosterAccess);
+
+        motiveMapping.MapPut("{id:guid}/motive", SetDriverMotiveUserId);
+        motiveMapping.MapDelete("{id:guid}/motive", ClearDriverMotiveUserId);
 
         // The Driver Field App's own surface. DriverAccess admits every Driver, so it is a
         // route-level gate ONLY: each {driverId} route below additionally runs the
@@ -157,6 +171,33 @@ public static class DriversEndpoints
         }
 
         var result = await sender.Send(new UnlinkDriverUserCommand(tenantId, id), cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> SetDriverMotiveUserId(
+        Guid id, SetDriverMotiveUserIdRequest request, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        // A missing value is sent as "" so the aggregate refuses it (MotiveUserIdRequired)
+        // instead of reading it as "clear" — clearing is the DELETE.
+        var result = await sender.Send(
+            new SetDriverMotiveUserIdCommand(tenantId, id, request.MotiveUserId ?? string.Empty), cancellationToken);
+        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+    }
+
+    private static async Task<IResult> ClearDriverMotiveUserId(
+        Guid id, ITenantContext tenantContext, ISender sender, CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Send(new SetDriverMotiveUserIdCommand(tenantId, id, null), cancellationToken);
         return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
     }
 
@@ -477,3 +518,10 @@ public sealed record DriverClearanceRequest(
 
 /// <summary>Request body for POST /api/drivers/{id}/user — the account's <c>sub</c>.</summary>
 public sealed record LinkDriverUserRequest(Guid UserId);
+
+/// <summary>
+/// Request body for PUT /api/drivers/{id}/motive — the driver's Motive user id as a string
+/// (Motive's JSON carries an integer; send it as text). Trimmed, at most 64 characters, unique per
+/// tenant. DELETE on the same route clears it.
+/// </summary>
+public sealed record SetDriverMotiveUserIdRequest(string? MotiveUserId);

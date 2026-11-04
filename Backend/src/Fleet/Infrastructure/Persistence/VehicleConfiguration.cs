@@ -46,8 +46,18 @@ public sealed class VehicleConfiguration : IEntityTypeConfiguration<Vehicle>
         builder.Property(v => v.CreatedAtUtc).HasColumnName("created_at_utc");
         builder.Property(v => v.UpdatedAtUtc).HasColumnName("updated_at_utc");
 
+        builder.Property(v => v.MotiveVehicleId)
+            .HasColumnName("motive_vehicle_id")
+            .HasMaxLength(Vehicle.MotiveVehicleIdMaxLength);
+
         builder.HasIndex(v => new { v.TenantId, v.UnitNumber }).IsUnique();
         builder.HasIndex(v => new { v.TenantId, v.Vin }).IsUnique();
+
+        // One Motive gateway, one vehicle, per tenant. PARTIAL on NOT NULL: most of the fleet
+        // is unregulated, and only the linked rows need the constraint.
+        builder.HasIndex(v => new { v.TenantId, v.MotiveVehicleId })
+            .IsUnique()
+            .HasFilter("motive_vehicle_id IS NOT NULL");
 
         // DomainEvents ignore + Version concurrency token come from ModuleDbContext's
         // central aggregate conventions.

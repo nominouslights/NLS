@@ -54,8 +54,9 @@ public static class AuthorizationPolicies
 
     /// <summary>
     /// The driver roster's read routes — <see cref="DispatchAccess"/> widened with
-    /// ComplianceOfficer (<see cref="Roles.DriverRosterAccess"/>). Reads only; the write routes
-    /// keep <see cref="DispatchAccess"/>.
+    /// ComplianceOfficer (<see cref="Roles.DriverRosterAccess"/>). Reads, plus one write: the
+    /// driver's Motive (ELD) mapping (PUT/DELETE <c>/api/drivers/{id}/motive</c>). Every other
+    /// roster write keeps <see cref="DispatchAccess"/>.
     /// </summary>
     public const string DriverRosterAccess = "DriverRosterAccess";
 }

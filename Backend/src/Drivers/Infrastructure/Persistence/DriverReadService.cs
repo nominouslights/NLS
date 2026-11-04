@@ -56,5 +56,6 @@ internal sealed class DriverReadService(DriversDbContext context) : IDriverReadS
         d.UpdatedAtUtc,
         d.PriorRecordsCoveredThroughDate,
         d.PriorRecordsAttestedAtUtc,
-        d.WorksForOtherCarriers);
+        d.WorksForOtherCarriers,
+        d.MotiveUserId);
 }
