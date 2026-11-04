@@ -21,6 +21,7 @@ import {
   type TripRouteChangeLeg,
   type TripRouteChangePreview,
 } from "@/lib/api/trips";
+import { departuresLine } from "@/lib/timetable";
 import { listTripEmailDispatches } from "@/lib/api/notifications";
 import {
   latestPickupEmail,
@@ -260,6 +261,9 @@ function LegCard({ leg }: { leg: TripRouteChangeLeg }) {
   const current = `${leg.currentOrigin} → ${leg.currentDestination}`;
   const next =
     leg.newOrigin !== null && leg.newDestination !== null ? `${leg.newOrigin} → ${leg.newDestination}` : "—";
+  // The new corridor's stop times, as the preview resolved them for this leg's window and
+  // direction — the same line the Dispatch Board shows. Nothing on an untimed route.
+  const runLine = leg.willChange && leg.newStops ? departuresLine({ stops: leg.newStops }) : null;
   return (
     <div
       data-testid="route-change-leg"
@@ -291,6 +295,22 @@ function LegCard({ leg }: { leg: TripRouteChangeLeg }) {
         )}
       </div>
       <div style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.textDim }}>{windowEndLine(leg)}</div>
+      {runLine && (
+        <div
+          data-testid="route-change-leg-times"
+          title={runLine}
+          style={{
+            fontFamily: fonts.mono,
+            fontSize: 11,
+            color: colors.textSecondary,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {runLine}
+        </div>
+      )}
     </div>
   );
 }

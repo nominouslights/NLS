@@ -14,8 +14,19 @@ import type { TripManifest, TripRecord, TripStop } from "@/lib/api/trips";
 // catalogue and header, Bookeo-imported passengers, and the en-route defect
 // report that replaced the post-trip sheet.
 
-function stop(name: string, order: number, outbound: number): TripStop {
-  return { name, order, stopId: `stop-${order}`, outboundOffsetMinutes: outbound, returnOffsetMinutes: null };
+/** A trip stop as the API returns it: the offsets plus the clock time it resolved from them. */
+function stop(name: string, order: number, outbound: number, at: string): TripStop {
+  return {
+    name,
+    order,
+    stopId: `stop-${order}`,
+    outboundDepartureOffsetMinutes: outbound,
+    outboundArrivalOffsetMinutes: null,
+    returnDepartureOffsetMinutes: null,
+    returnArrivalOffsetMinutes: null,
+    scheduledArrival: at,
+    scheduledDeparture: at,
+  };
 }
 
 function trip(over: Partial<TripRecord> = {}): TripRecord {
@@ -30,7 +41,7 @@ function trip(over: Partial<TripRecord> = {}): TripRecord {
     routeName: "Leaf Rapids to Lynn Lake",
     origin: "Leaf Rapids",
     destination: "Lynn Lake",
-    stops: [stop("Leaf Rapids", 1, 0), stop("Lynn Lake", 2, 120)],
+    stops: [stop("Leaf Rapids", 1, 0, "06:30:00"), stop("Lynn Lake", 2, 120, "08:30:00")],
     distanceKm: 214,
     scheduleTemplateId: null,
     roundTripKey: null,

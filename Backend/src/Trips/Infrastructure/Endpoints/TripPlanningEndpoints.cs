@@ -618,8 +618,10 @@ internal static class TripPlanningEndpoints
     private static IReadOnlyList<RouteStopInput> ToStopInputs(IReadOnlyList<RouteStopRequest>? stops) =>
         [.. (stops ?? []).Select(stop => new RouteStopInput(
             stop.StopId,
-            stop.OutboundOffsetMinutes,
-            stop.ReturnOffsetMinutes))];
+            OutboundDepartureOffsetMinutes: stop.OutboundDepartureOffsetMinutes,
+            ReturnDepartureOffsetMinutes: stop.ReturnDepartureOffsetMinutes,
+            OutboundArrivalOffsetMinutes: stop.OutboundArrivalOffsetMinutes,
+            ReturnArrivalOffsetMinutes: stop.ReturnArrivalOffsetMinutes))];
 
     // ---- Stops ----
 
@@ -1147,15 +1149,19 @@ public sealed record UpdateRouteRequest(
     bool Active);
 
 /// <summary>
-/// One stop in a create/update route body, in corridor order. Both offsets are optional — omit
-/// them on every stop for a route with no timetable. Within one leg they are all-or-nothing:
-/// supply them for every stop or none, starting at 0 and increasing along that leg's direction
-/// of travel (the return leg travels the list backwards, so its zero is the last stop).
+/// One stop in a create/update route body, in corridor order. Every offset is optional — omit
+/// them on every stop for a route with no timetable. Within one leg the departure offsets are
+/// all-or-nothing: supply them for every stop or none, starting at 0 and increasing along that
+/// leg's direction of travel (the return leg travels the list backwards, so its zero is the
+/// last stop). Arrival offsets are optional per stop (null = arrives when it departs); one that
+/// is set must come after the previous stop's departure and no later than its own.
 /// </summary>
 public sealed record RouteStopRequest(
     Guid StopId,
-    int? OutboundOffsetMinutes,
-    int? ReturnOffsetMinutes);
+    int? OutboundDepartureOffsetMinutes,
+    int? OutboundArrivalOffsetMinutes,
+    int? ReturnDepartureOffsetMinutes,
+    int? ReturnArrivalOffsetMinutes);
 
 /// <summary>
 /// Request body for POST /api/trips/schedule-templates. <c>RecurrenceKind</c> takes an

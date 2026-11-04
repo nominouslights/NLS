@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using NorthernLink.Trips.Application.Abstractions;
 using NorthernLink.Trips.Application.Integration;
 using NorthernLink.Trips.Application.Trips;
+using NorthernLink.Trips.Domain.Manifests;
 using NorthernLink.Trips.Infrastructure.Persistence.ReadModels;
 
 namespace NorthernLink.Trips.Infrastructure.Persistence;
@@ -152,15 +153,10 @@ internal sealed class TripReadService(TripsDbContext context) : ITripReadService
         t.OriginProvince,
         t.Destination,
         t.DestinationProvince,
-        t.Stops.Select(stop => new TripStopResponse(
-            stop.Name,
-            stop.Order,
-            stop.StopId,
-            stop.Latitude,
-            stop.Longitude,
-            stop.EffectiveProvince,
-            stop.OutboundOffsetMinutes,
-            stop.ReturnOffsetMinutes)).ToList(),
+        TripStopResponse.From(
+            t.Stops,
+            t.WindowStart,
+            Enum.TryParse<TripDirection>(t.Direction, out var direction) ? direction : null),
         t.DistanceKm,
         t.ScheduleTemplateId,
         t.RoundTripKey,

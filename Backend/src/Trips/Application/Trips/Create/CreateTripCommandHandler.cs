@@ -1,6 +1,7 @@
 using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Trips.Application.Abstractions;
+using NorthernLink.Trips.Domain.Manifests;
 using NorthernLink.Trips.Domain.Routes;
 using NorthernLink.Trips.Domain.Trips;
 
@@ -34,13 +35,17 @@ public sealed class CreateTripCommandHandler(
                 return Result.Failure<Guid>(RouteErrors.NotFound);
             }
 
+            // Oriented for the leg exactly as Trip.RouteSnapshotFor does: an Inbound trip runs
+            // the corridor backwards, so its endpoints swap and its stops are reversed — the
+            // order StopTimetable reads the return-leg offsets in.
+            var inbound = command.Direction == TripDirection.Inbound;
             routeId = route.Id;
             routeName = route.Name;
-            origin = route.Origin;
-            originProvince = route.OriginProvince;
-            destination = route.Destination;
-            destinationProvince = route.DestinationProvince;
-            stops = route.Stops;
+            origin = inbound ? route.Destination : route.Origin;
+            originProvince = inbound ? route.DestinationProvince : route.OriginProvince;
+            destination = inbound ? route.Origin : route.Destination;
+            destinationProvince = inbound ? route.OriginProvince : route.DestinationProvince;
+            stops = RouteStop.OrientedFor(route.Stops, command.Direction);
             distanceKm = route.DistanceKm;
         }
 

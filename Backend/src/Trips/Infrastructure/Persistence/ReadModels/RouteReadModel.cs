@@ -37,7 +37,7 @@ public sealed class RouteReadModelConfiguration : IEntityTypeConfiguration<Route
         builder.Property(r => r.Id).HasColumnName("id");
         builder.Property(r => r.TenantId).HasColumnName("tenant_id");
         builder.Property(r => r.Name).HasColumnName("name");
-        builder.OwnsMany(r => r.Stops, stop => stop.ToJson("stops"));
+        builder.OwnsMany(r => r.Stops, stop => stop.Configure());
         builder.Property(r => r.Origin).HasColumnName("origin");
         builder.Property(r => r.Destination).HasColumnName("destination");
         builder.Property(r => r.DistanceKm).HasColumnName("distance_km");

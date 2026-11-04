@@ -12,13 +12,13 @@ public class RouteStopOrientationTests
     // Deliberately out of Order in the list, to prove the helper sorts by Order, not position.
     private static List<RouteStop> Stops() =>
     [
-        new RouteStop { Name = "Lynn Lake", Order = 2, OutboundOffsetMinutes = 105, ReturnOffsetMinutes = 0 },
+        new RouteStop { Name = "Lynn Lake", Order = 2, OutboundDepartureOffsetMinutes = 105, ReturnDepartureOffsetMinutes = 0 },
         new RouteStop
         {
             StopId = ThompsonId, Name = "Thompson", Order = 0, Latitude = 55.74, Longitude = -97.86,
-            OutboundOffsetMinutes = 0, ReturnOffsetMinutes = 110,
+            OutboundDepartureOffsetMinutes = 0, ReturnDepartureOffsetMinutes = 110,
         },
-        new RouteStop { Name = "Leaf Rapids", Order = 1, OutboundOffsetMinutes = 60, ReturnOffsetMinutes = 45 },
+        new RouteStop { Name = "Leaf Rapids", Order = 1, OutboundDepartureOffsetMinutes = 60, ReturnDepartureOffsetMinutes = 45 },
     ];
 
     [Fact]
@@ -29,8 +29,8 @@ public class RouteStopOrientationTests
         Assert.Equal(["Lynn Lake", "Leaf Rapids", "Thompson"], reversed.Select(s => s.Name));
         Assert.Equal([0, 1, 2], reversed.Select(s => s.Order));
         // Both offsets stay attached to their own stop — never swapped.
-        Assert.Equal([105, 60, 0], reversed.Select(s => s.OutboundOffsetMinutes!.Value));
-        Assert.Equal([0, 45, 110], reversed.Select(s => s.ReturnOffsetMinutes!.Value));
+        Assert.Equal([105, 60, 0], reversed.Select(s => s.OutboundDepartureOffsetMinutes!.Value));
+        Assert.Equal([0, 45, 110], reversed.Select(s => s.ReturnDepartureOffsetMinutes!.Value));
         var thompson = reversed[2];
         Assert.Equal(ThompsonId, thompson.StopId);
         Assert.Equal(55.74, thompson.Latitude);

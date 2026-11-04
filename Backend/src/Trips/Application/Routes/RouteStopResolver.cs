@@ -47,8 +47,10 @@ internal static class RouteStopResolver
                 Latitude = stop.Coordinate.Latitude,
                 Longitude = stop.Coordinate.Longitude,
                 Province = CanadianProvince.Normalize(stop.Address.Province) ?? stop.Address.Province,
-                OutboundOffsetMinutes = input.OutboundOffsetMinutes,
-                ReturnOffsetMinutes = input.ReturnOffsetMinutes,
+                OutboundDepartureOffsetMinutes = input.OutboundDepartureOffsetMinutes,
+                OutboundArrivalOffsetMinutes = input.OutboundArrivalOffsetMinutes,
+                ReturnDepartureOffsetMinutes = input.ReturnDepartureOffsetMinutes,
+                ReturnArrivalOffsetMinutes = input.ReturnArrivalOffsetMinutes,
             });
         }
 

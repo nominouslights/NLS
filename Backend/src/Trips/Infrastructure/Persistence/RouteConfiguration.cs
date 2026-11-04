@@ -20,7 +20,7 @@ public sealed class RouteConfiguration : IEntityTypeConfiguration<Route>
         builder.Property(r => r.TenantId).HasColumnName("tenant_id");
         builder.Property(r => r.Name).HasColumnName("name").HasMaxLength(200);
 
-        builder.OwnsMany(r => r.Stops, stop => stop.ToJson("stops"));
+        builder.OwnsMany(r => r.Stops, stop => stop.Configure());
 
         builder.Property(r => r.DistanceKm).HasColumnName("distance_km");
         builder.Property(r => r.EstimatedDuration).HasColumnName("estimated_duration");

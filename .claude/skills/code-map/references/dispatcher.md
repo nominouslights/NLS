@@ -28,7 +28,7 @@ is inline style objects driven by lib/theme.ts tokens — no Tailwind/CSS module
 | Manifests.tsx | ~500 |
 | Reports.tsx | ~100 |
 | Riders.tsx | ~400 |
-| RoutesSchedules.tsx | ~1600 — LARGE, read in targeted slices |
+| RoutesSchedules.tsx | ~1700 — LARGE, read in targeted slices |
 | Settings.tsx | ~400 |
 | Stops.tsx | ~300 |
 | Trips.tsx | ~3200 — LARGE, read in targeted slices |
@@ -64,7 +64,7 @@ manifest/ (4): PassengerCsvImport, RiderPickerModal, manifestRows.test, manifest
 <!-- gen:dispatcher-lib:start -->
 api/ (23): billing, bookeoImport, bookeoImport.test, booking, clients, correctTripDriver.test, deadheadConversion.test, drivers, fleet, format, hos, hos.requests.test, maintenance, notifications, pm, reopenTrip.test, riders, shared, shipments, stops, timeInputValue.test, transport, trips
 documents/ (PDF generators): accrualsPdf, bookingPassPdf, defectReportPdf, driverPackagePdf, inspectionPdf, invoicePdf, itineraryPdf, terminusPdf, tripManifestPdf, workOrderPdf (each index/sections/styles)
-Top-level: api, appState, apps.test, apps, auth, bookeoImport.fixtures, bookeoImport.test, bookeoImport, claims, clientStore, clipboard, company, data, defect.fixtures, driverCompliance, driverStore, format, generation.test, generation, googleMaps, inspectionForm.test, inspectionForm, inspectionWorkOrder.test, inspectionWorkOrder, legal, maintenanceStore, nav, period.test, period, pmDisplay, roles.test, roles, routeChange.test, routeChange, schedule.test, schedule, theme.test, theme, timetable, tripActivity.test, tripActivity, tripManifestChecklist, types, useDriverRoster.test, useDriverRoster, useToday, useTodayIso, workOrderCompletion.test, workOrderCompletion, workOrderDisplay.test, workOrderDisplay
+Top-level: api, appState, apps.test, apps, auth, bookeoImport.fixtures, bookeoImport.test, bookeoImport, claims, clientStore, clipboard, company, data, defect.fixtures, driverCompliance, driverStore, format, generation.test, generation, googleMaps, inspectionForm.test, inspectionForm, inspectionWorkOrder.test, inspectionWorkOrder, legal, maintenanceStore, nav, period.test, period, pmDisplay, roles.test, roles, routeChange.test, routeChange, schedule.test, schedule, theme.test, theme, timetable.test, timetable, tripActivity.test, tripActivity, tripManifestChecklist, types, useDriverRoster.test, useDriverRoster, useToday, useTodayIso, workOrderCompletion.test, workOrderCompletion, workOrderDisplay.test, workOrderDisplay
 billing/ (3)
 booking/ (1)
 hos/ (10)

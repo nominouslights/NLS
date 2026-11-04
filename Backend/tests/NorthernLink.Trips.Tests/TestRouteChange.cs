@@ -25,7 +25,7 @@ internal static class TestRouteChange
         }
     }
 
-    /// <summary>A catalogue route over <paramref name="names"/> with both timetables, 105 min end to end.</summary>
+    /// <summary>A catalogue route over <paramref name="names"/> with both timetables (each non-origin stop arriving 5 min before it departs), 105 min end to end.</summary>
     public static Route CreateRoute(int durationMinutes, params string[] names) =>
         Route.Create(
             TestPlanning.TenantId,
@@ -35,8 +35,10 @@ internal static class TestRouteChange
                 StopId = StopId(name),
                 Name = name,
                 Order = index,
-                OutboundOffsetMinutes = index * 30,
-                ReturnOffsetMinutes = (names.Length - 1 - index) * 40,
+                OutboundDepartureOffsetMinutes = index * 30,
+                OutboundArrivalOffsetMinutes = index == 0 ? null : index * 30 - 5,
+                ReturnDepartureOffsetMinutes = (names.Length - 1 - index) * 40,
+                ReturnArrivalOffsetMinutes = index == names.Length - 1 ? null : (names.Length - 1 - index) * 40 - 5,
             })],
             distanceKm: 100 * names.Length,
             estimatedDuration: TimeSpan.FromMinutes(durationMinutes),

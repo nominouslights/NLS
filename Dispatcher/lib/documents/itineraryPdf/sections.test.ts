@@ -5,16 +5,19 @@ import { COMPANY } from "@/lib/company";
 import type { ShipmentRecord } from "@/lib/api/shipments";
 import type { TripRecord, TripStop } from "@/lib/api/trips";
 
-// The itinerary's two load-bearing rules: scheduled times come from the
-// timetable helper (never from arithmetic here), and the actuals columns are
-// blank paper because the platform holds no per-stop timestamps at all.
+// The itinerary's two load-bearing rules: scheduled times are the trip's own
+// stored stop times (never arithmetic here), and the actuals columns are blank
+// paper because the platform holds no per-stop timestamps at all.
 
-function stop(name: string, order: number, outbound?: number): TripStop {
+/** A trip stop as the API returns it: offsets plus the times it resolved. */
+function stop(name: string, order: number, times?: { arrive: string; depart: string }): TripStop {
   return {
     name,
     order,
     stopId: `stop-${order}`,
-    ...(outbound === undefined ? {} : { outboundOffsetMinutes: outbound, returnOffsetMinutes: null }),
+    ...(times === undefined
+      ? { scheduledArrival: null, scheduledDeparture: null }
+      : { scheduledArrival: `${times.arrive}:00`, scheduledDeparture: `${times.depart}:00` }),
   };
 }
 
@@ -30,7 +33,11 @@ function trip(over: Partial<TripRecord> = {}): TripRecord {
     routeName: "Leaf Rapids → Lynn Lake",
     origin: "Leaf Rapids",
     destination: "Lynn Lake",
-    stops: [stop("Leaf Rapids", 1, 0), stop("Granville Lake Jct", 2, 45), stop("Lynn Lake", 3, 120)],
+    stops: [
+      stop("Leaf Rapids", 1, { arrive: "06:30", depart: "06:30" }),
+      stop("Granville Lake Jct", 2, { arrive: "07:10", depart: "07:15" }),
+      stop("Lynn Lake", 3, { arrive: "08:30", depart: "08:30" }),
+    ],
     distanceKm: 214,
     scheduleTemplateId: null,
     roundTripKey: null,
@@ -107,18 +114,61 @@ function shipment(over: Partial<ShipmentRecord> & { shipmentNumber: string }): S
   };
 }
 
-/** Every Scheduled cell, in row order. */
-function scheduledCells(html: string): string[] {
-  return [...html.matchAll(/<td class="time">(.*?)<\/td>/g)].map((m) => m[1]);
+/** Every Sched. cell, in row order: [arrive, depart] per row. */
+function scheduledCells(html: string): [string, string][] {
+  const cells = [...html.matchAll(/<td class="time">(.*?)<\/td>/g)].map((m) => m[1]);
+  const rows: [string, string][] = [];
+  for (let i = 0; i < cells.length; i += 2) rows.push([cells[i], cells[i + 1]]);
+  return rows;
 }
 
 describe("itineraryHtml — stops with a timetable", () => {
   const html = itineraryHtml(trip(), [], COMPANY);
 
-  it("resolves each stop's scheduled time from the route offsets", () => {
-    // 06:30 departure + 0 / 45 / 120 minutes. Resolved by stopTimeOnTrip —
-    // there is no time arithmetic in the document builders.
-    expect(scheduledCells(html).slice(0, 3)).toEqual(["06:30", "07:15", "08:30"]);
+  it("prints both scheduled columns from the trip's stored stop times", () => {
+    expect(html).toContain("Sched. Arrive");
+    expect(html).toContain("Sched. Depart");
+    // A mid-route stop shows its dwell: arrives 07:10, leaves 07:15.
+    expect(scheduledCells(html)[1]).toEqual(["07:10", "07:15"]);
+  });
+
+  it("dashes the origin's arrival and the destination's departure", () => {
+    const [origin, , destination] = scheduledCells(html);
+    expect(origin).toEqual(["—", "06:30"]);
+    expect(destination).toEqual(["08:30", "—"]);
+  });
+
+  it("does no arithmetic — a shifted stored time prints as stored", () => {
+    // Offsets on the stop are deliberately inconsistent with the stored times:
+    // only the stored time may reach the sheet.
+    const shifted = trip({
+      stops: [
+        { ...stop("Leaf Rapids", 1, { arrive: "09:00", depart: "09:00" }), outboundDepartureOffsetMinutes: 0 },
+        { ...stop("Lynn Lake", 2, { arrive: "11:05", depart: "11:05" }), outboundDepartureOffsetMinutes: 120 },
+      ],
+    });
+    expect(scheduledCells(itineraryHtml(shifted, [], COMPANY)).slice(0, 2)).toEqual([
+      ["—", "09:00"],
+      ["11:05", "—"],
+    ]);
+  });
+
+  it("prints each visit's own time when a corridor visits the same stop twice", () => {
+    // A loop that passes back through Granville Lake Jct — same name, same catalog
+    // id. Reading by id/name would print the first visit's time on both rows.
+    const loop = trip({
+      stops: [
+        stop("Leaf Rapids", 1, { arrive: "06:30", depart: "06:30" }),
+        { ...stop("Granville Lake Jct", 2, { arrive: "07:10", depart: "07:15" }), stopId: "stop-gl" },
+        stop("Lynn Lake", 3, { arrive: "08:30", depart: "08:45" }),
+        { ...stop("Granville Lake Jct", 4, { arrive: "09:55", depart: "10:00" }), stopId: "stop-gl" },
+        stop("Leaf Rapids", 5, { arrive: "10:40", depart: "10:40" }),
+      ],
+    });
+    const cells = scheduledCells(itineraryHtml(loop, [], COMPANY));
+    expect(cells[1]).toEqual(["07:10", "07:15"]);
+    expect(cells[3]).toEqual(["09:55", "10:00"]);
+    expect(cells[4]).toEqual(["10:40", "—"]);
   });
 
   it("prints the stop names in route order", () => {
@@ -142,8 +192,16 @@ describe("itineraryHtml — stops without a timetable", () => {
   });
   const html = itineraryHtml(noOffsets, [], COMPANY);
 
-  it("prints an em dash in every Scheduled cell", () => {
-    expect(scheduledCells(html).slice(0, 3)).toEqual(["—", "—", "—"]);
+  it("prints an em dash in every Sched. Arrive and Sched. Depart cell", () => {
+    expect(scheduledCells(html).slice(0, 3)).toEqual([
+      ["—", "—"],
+      ["—", "—"],
+      ["—", "—"],
+    ]);
+  });
+
+  it("leaves the padding rows below the stops blank", () => {
+    expect(scheduledCells(html)[3]).toEqual(["&nbsp;", "&nbsp;"]);
   });
 
   it("says the trip window is the only scheduled time", () => {

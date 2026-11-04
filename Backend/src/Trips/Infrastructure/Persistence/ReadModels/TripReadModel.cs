@@ -90,7 +90,7 @@ public sealed class TripReadModelConfiguration : IEntityTypeConfiguration<TripRe
         builder.Property(t => t.DestinationProvince)
             .HasColumnName("destination_province")
             .HasDefaultValue(CanadianProvince.Manitoba);
-        builder.OwnsMany(t => t.Stops, stop => stop.ToJson("stops"));
+        builder.OwnsMany(t => t.Stops, stop => stop.Configure());
         builder.Property(t => t.DistanceKm).HasColumnName("distance_km");
 
         builder.Property(t => t.ScheduleTemplateId).HasColumnName("schedule_template_id");

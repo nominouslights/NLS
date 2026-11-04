@@ -27,8 +27,8 @@ public class UpdateTripCommandHandlerTests
             {
                 Name = name,
                 Order = index,
-                OutboundOffsetMinutes = index * 30,
-                ReturnOffsetMinutes = (names.Length - 1 - index) * 40,
+                OutboundDepartureOffsetMinutes = index * 30,
+                ReturnDepartureOffsetMinutes = (names.Length - 1 - index) * 40,
             })],
             distanceKm: 320,
             estimatedDuration: TimeSpan.FromMinutes(105),

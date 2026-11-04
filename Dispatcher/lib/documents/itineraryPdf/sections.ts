@@ -3,10 +3,10 @@
 //
 // TWO RULES THIS FILE EXISTS TO HOLD:
 //
-// 1. Scheduled times come from `stopTimeOnTrip()` in lib/timetable.ts and
-//    NOWHERE else. A route stores minutes-after-departure offsets, not clock
-//    times, and that helper is the single place that resolves an offset against
-//    the trip's own departure and direction. No time arithmetic here.
+// 1. Scheduled times come from the trip's own stored stop times
+//    (`scheduledArrival` / `scheduledDeparture`, resolved by the API from the
+//    trip's window start and direction) via lib/timetable.ts, and NOWHERE else.
+//    No time arithmetic here, and none in lib/timetable.ts either.
 //
 // 2. THERE ARE NO PER-STOP TIMESTAMPS IN THIS PLATFORM. Actual arrive, actual
 //    depart, passengers on/off and per-stop notes are blank ruled cells on
@@ -17,7 +17,7 @@
 import type { ShipmentRecord } from "@/lib/api/shipments";
 import type { TripRecord } from "@/lib/api/trips";
 import type { CompanyInfo } from "@/lib/company";
-import { hasTimetable, stopTimeOnTrip } from "@/lib/timetable";
+import { hasTimetable, stopTimetable } from "@/lib/timetable";
 import { box, check, esc, field, grid, sectionBar } from "../workOrderPdf/html";
 
 /** Blank stop rows on a trip carrying fewer stops than this (a manual trip). */
@@ -105,23 +105,28 @@ export function tripInfoBlock(trip: TripRecord): string {
 /**
  * The stop table.
  *
- * Scheduled resolves through `stopTimeOnTrip`; a stop the helper cannot resolve
- * — and every stop on a route with no timetable at all — prints an em dash,
- * which is exactly the trip-level fallback the helper's doc comment specifies.
+ * Sched. Arrive / Sched. Depart come straight from `stopTimetable(trip)` — one
+ * row per stop in order, read positionally, so a corridor that visits the same
+ * stop twice prints each visit's own time. That helper already blanks the
+ * origin's arrival and the destination's departure; every null prints as an em
+ * dash, which also covers every stop on a route with no timetable at all — the
+ * trip window is then the only scheduled time.
  * Actual Arrive / Actual Depart / Pax On/Off / Notes are always blank.
  */
 export function stopsBlock(trip: TripRecord): string {
   const timetabled = hasTimetable(trip);
-  const stops = [...trip.stops].sort((a, b) => a.order - b.order);
+  const stops = stopTimetable(trip);
   const rowCount = Math.max(MIN_STOP_ROWS, stops.length);
 
   const rows = Array.from({ length: rowCount }, (_, i) => {
     const s = stops[i] ?? null;
-    const scheduled = s && timetabled ? (stopTimeOnTrip(trip, s.stopId, s.name) ?? "—") : s ? "—" : "";
+    const arrive = !s ? "" : (s.arrive ?? "—");
+    const depart = !s ? "" : (s.depart ?? "—");
     return `<tr>
       <td class="num">${i + 1}</td>
       <td>${esc(s?.name) || "&nbsp;"}</td>
-      <td class="time">${esc(scheduled) || "&nbsp;"}</td>
+      <td class="time">${esc(arrive) || "&nbsp;"}</td>
+      <td class="time">${esc(depart) || "&nbsp;"}</td>
       <td class="hand blank">&nbsp;</td>
       <td class="hand blank">&nbsp;</td>
       <td class="hand blank">&nbsp;</td>
@@ -139,7 +144,7 @@ export function stopsBlock(trip: TripRecord): string {
     timetableNote +
     `<table>
        <thead><tr>
-         <th class="num">#</th><th>Stop</th><th class="time">Scheduled</th>
+         <th class="num">#</th><th>Stop</th><th class="time">Sched. Arrive</th><th class="time">Sched. Depart</th>
          <th class="hand">Actual Arrive</th><th class="hand">Actual Depart</th>
          <th class="hand">Pax On/Off</th><th>Notes</th>
        </tr></thead>

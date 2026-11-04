@@ -49,7 +49,7 @@ export const ITINERARY_STYLES = `
 .itin table th { background: #eef2f6; font-size: 8px; text-transform: uppercase; letter-spacing: .04em; color: #333; }
 .itin table td.num, .itin table th.num { width: 22px; text-align: center; color: #666; }
 .itin table td.time, .itin table th.time {
-  width: 54px; text-align: center; white-space: nowrap;
+  width: 50px; text-align: center; white-space: nowrap;
   font-family: "Cascadia Mono", Consolas, ui-monospace, monospace;
 }
 .itin table td.hand, .itin table th.hand { width: 58px; }

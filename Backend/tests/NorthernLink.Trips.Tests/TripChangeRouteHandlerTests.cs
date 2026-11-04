@@ -444,6 +444,20 @@ public class TripChangeRouteHandlerTests
         Assert.Equal(["Flin Flon", "Snow Lake", "Thompson"], returnLeg.NewStops!.Select(s => s.Name));
         Assert.Equal(new TimeOnly(17, 45), returnLeg.CurrentWindowEnd);
         Assert.Equal(new TimeOnly(18, 30), returnLeg.NewWindowEnd);
+        // Each leg's new stops arrive timed from the new route, in its own direction's column.
+        var outboundLeg = preview.Legs[0];
+        Assert.Equal(
+            [new TimeOnly(6, 30), new TimeOnly(7, 0), new TimeOnly(7, 30)],
+            outboundLeg.NewStops!.Select(s => s.ScheduledDeparture!.Value));
+        Assert.Equal(
+            [new TimeOnly(6, 30), new TimeOnly(6, 55), new TimeOnly(7, 25)],
+            outboundLeg.NewStops!.Select(s => s.ScheduledArrival!.Value));
+        Assert.Equal(
+            [new TimeOnly(16, 0), new TimeOnly(16, 40), new TimeOnly(17, 20)],
+            returnLeg.NewStops!.Select(s => s.ScheduledDeparture!.Value));
+        Assert.Equal(
+            [new TimeOnly(16, 0), new TimeOnly(16, 35), new TimeOnly(17, 15)],
+            returnLeg.NewStops!.Select(s => s.ScheduledArrival!.Value));
         // A preview persists nothing.
         Assert.Equal(_original.Id, inbound.RouteId);
         Assert.Equal(0, _trips.SaveCount);

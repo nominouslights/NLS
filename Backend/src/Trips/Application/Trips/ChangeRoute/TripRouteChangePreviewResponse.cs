@@ -108,15 +108,7 @@ public sealed record TripRouteChangeLegResponse(
             snapshot?.DistanceKm,
             snapshot is null
                 ? null
-                : [.. snapshot.Stops.OrderBy(stop => stop.Order).Select(stop => new TripStopResponse(
-                    stop.Name,
-                    stop.Order,
-                    stop.StopId,
-                    stop.Latitude,
-                    stop.Longitude,
-                    stop.EffectiveProvince,
-                    stop.OutboundOffsetMinutes,
-                    stop.ReturnOffsetMinutes))],
+                : TripStopResponse.From(snapshot.Stops, trip.WindowStart, trip.Direction),
             trip.WindowStart,
             trip.WindowEnd,
             snapshot is null || !leg.WillChange ? trip.WindowEnd : snapshot.WindowEnd);

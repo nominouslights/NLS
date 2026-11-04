@@ -1,3 +1,7 @@
+using NorthernLink.Trips.Domain.Manifests;
+using NorthernLink.Trips.Domain.Routes;
+using NorthernLink.Trips.Domain.Trips;
+
 namespace NorthernLink.Trips.Application.Trips;
 
 /// <summary>
@@ -79,11 +83,12 @@ public sealed record TripBillingResponse(
 /// One ordered stop on a trip's route snapshot. <see cref="StopId"/> and the coordinates come
 /// from the catalog stop the route was built from and are null for legacy free-text stops.
 /// <see cref="Province"/> is the stop's two-letter province code, never null ("MB" for a
-/// snapshot written before provinces were recorded). The two offsets are the stop's timetable
-/// entry (minutes after the leg's departure); the caller picks the one matching the trip's
-/// <c>Direction</c> — <see cref="ReturnOffsetMinutes"/> for an Inbound leg,
-/// <see cref="OutboundOffsetMinutes"/> otherwise — and adds it to <c>WindowStart</c> to get the
-/// time this trip reaches this stop.
+/// snapshot written before provinces were recorded). The four offsets are the stop's timetable
+/// entry as authored on the route (minutes after the leg's departure). Callers never do the
+/// arithmetic themselves: <see cref="ScheduledArrival"/> / <see cref="ScheduledDeparture"/> are
+/// this trip's clock times at this stop, resolved by <c>StopTimetable</c> from the trip's own
+/// <c>WindowStart</c>, <c>Direction</c> and offsets — the departure is the stop's pickup time,
+/// the arrival its drop-off time. Both are null when the trip's leg has no timetable.
 /// </summary>
 public sealed record TripStopResponse(
     string Name,
@@ -92,5 +97,36 @@ public sealed record TripStopResponse(
     double? Latitude,
     double? Longitude,
     string Province,
-    int? OutboundOffsetMinutes,
-    int? ReturnOffsetMinutes);
+    int? OutboundDepartureOffsetMinutes,
+    int? OutboundArrivalOffsetMinutes,
+    int? ReturnDepartureOffsetMinutes,
+    int? ReturnArrivalOffsetMinutes,
+    TimeOnly? ScheduledArrival,
+    TimeOnly? ScheduledDeparture)
+{
+    /// <summary>
+    /// Maps a trip's stop snapshot onto the contract, ordered by <c>Order</c>, with each stop's
+    /// scheduled times resolved by <see cref="StopTimetable"/> from the leg's
+    /// <paramref name="windowStart"/> and <paramref name="direction"/>. The single mapping both
+    /// the trip read side and the change-route preview use.
+    /// </summary>
+    public static List<TripStopResponse> From(
+        IEnumerable<RouteStop> stops, TimeOnly windowStart, TripDirection? direction)
+    {
+        var ordered = stops.OrderBy(stop => stop.Order).ToList();
+        var times = StopTimetable.Resolve(ordered, windowStart, direction);
+        return [.. ordered.Select((stop, index) => new TripStopResponse(
+            stop.Name,
+            stop.Order,
+            stop.StopId,
+            stop.Latitude,
+            stop.Longitude,
+            stop.EffectiveProvince,
+            OutboundDepartureOffsetMinutes: stop.OutboundDepartureOffsetMinutes,
+            OutboundArrivalOffsetMinutes: stop.OutboundArrivalOffsetMinutes,
+            ReturnDepartureOffsetMinutes: stop.ReturnDepartureOffsetMinutes,
+            ReturnArrivalOffsetMinutes: stop.ReturnArrivalOffsetMinutes,
+            ScheduledArrival: times[index].Arrival,
+            ScheduledDeparture: times[index].Departure))];
+    }
+}

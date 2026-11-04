@@ -45,7 +45,7 @@ public sealed class TripConfiguration : IEntityTypeConfiguration<Trip>
             .HasColumnName("destination_province")
             .HasMaxLength(2)
             .HasDefaultValue(CanadianProvince.Manitoba);
-        builder.OwnsMany(t => t.Stops, stop => stop.ToJson("stops"));
+        builder.OwnsMany(t => t.Stops, stop => stop.Configure());
         builder.Property(t => t.DistanceKm).HasColumnName("distance_km");
 
         builder.Property(t => t.BookingDayId).HasColumnName("booking_day_id");
