@@ -23,6 +23,9 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.ServiceDiscovery" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
+    <!-- Version alignment only: lifts JwtBearer's Protocols.OpenIdConnect to the IdentityModel version
+         System.IdentityModel.Tokens.Jwt uses. See Directory.Packages.props. -->
+    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" />
     <!-- Design-time only: `dotnet ef` needs it in the startup project, the running app does not.
          PrivateAssets keeps the Roslyn design-time assemblies out of the published container. -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design">

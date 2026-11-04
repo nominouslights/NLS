@@ -1,21 +1,27 @@
 <Project>
 
   <ItemGroup Label="Abstractions">
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.13" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.13" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.14" />
   </ItemGroup>
 
   <ItemGroup Label="Data">
-    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.13" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.13" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.14" />
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
   </ItemGroup>
 
   <ItemGroup Label="Auth">
-    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.14" />
     <PackageVersion Include="System.IdentityModel.Tokens.Jwt" Version="8.23.0" />
+    <!-- Keeps the IdentityModel family on ONE version, which Microsoft requires (mixed versions fail at
+         runtime with type-load / MissingMethod errors, and no test runs the real JWT pipeline).
+         JwtBearer 10.0.14 only asks for Protocols.OpenIdConnect 8.19.2, while Tokens.Jwt 8.23.0 lifts
+         Tokens/JsonWebTokens/Logging to 8.23.0; referenced directly by the Api project to lift Protocols
+         and Protocols.OpenIdConnect to match. Bump it together with System.IdentityModel.Tokens.Jwt. -->
+    <PackageVersion Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.23.0" />
   </ItemGroup>
 
   <ItemGroup Label="Messaging">
@@ -24,17 +30,10 @@
 
   <ItemGroup Label="Aspire (local dev orchestration)">
     <PackageVersion Include="Microsoft.Extensions.ServiceDiscovery" Version="10.11.0" />
-    <PackageVersion Include="Aspire.Hosting.AppHost" Version="13.6.1" />
-    <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.6.1" />
-    <PackageVersion Include="Aspire.Hosting.RabbitMQ" Version="13.6.1" />
-    <PackageVersion Include="Aspire.Hosting.JavaScript" Version="13.6.1" />
-    <!-- Security pin, referenced directly by the AppHost only. Aspire.Hosting 13.6.1 still pulls
-         MessagePack 2.5.302 (via StreamJsonRpc), which carries GHSA-qhrr-8q5h-9q3h (moderate,
-         nested arrays bypass buffer length limits) and fails restore as NU1902 under
-         TreatWarningsAsErrors. 2.5.303 is the first patched 2.x; 2.5.307 is the newest 2.x — the
-         3.x major is not taken because StreamJsonRpc is built against 2.x. Drop this (and the
-         AppHost reference) once Aspire's own chain resolves a patched MessagePack. -->
-    <PackageVersion Include="MessagePack" Version="2.5.307" />
+    <PackageVersion Include="Aspire.Hosting.AppHost" Version="13.6.4" />
+    <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.6.4" />
+    <PackageVersion Include="Aspire.Hosting.RabbitMQ" Version="13.6.4" />
+    <PackageVersion Include="Aspire.Hosting.JavaScript" Version="13.6.4" />
   </ItemGroup>
 
   <ItemGroup Label="Object Storage">
@@ -44,7 +43,7 @@
   <ItemGroup Label="Content sanitization">
     <!-- Vetted allowlist HTML sanitizer (Ganss, namespace Ganss.Xss) — used by the Notifications
          module to strip script/event-handler/js-URL injection from stored email-template bodies. -->
-    <PackageVersion Include="HtmlSanitizer" Version="9.2.1039" />
+    <PackageVersion Include="HtmlSanitizer" Version="10.0.1120" />
   </ItemGroup>
 
   <ItemGroup Label="PDF generation">
