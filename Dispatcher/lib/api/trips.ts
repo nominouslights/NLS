@@ -113,12 +113,12 @@ export interface TripBilling {
   paymentConfirmedDate: string | null;
 }
 
-/** GET /api/trips query filters (TripFilter). */
-export interface TripListParams {
+/** GET /api/trips query filters (TripFilter), minus the status filter — see
+ *  TripListParams, which adds exactly one of `status` / `statuses`. */
+interface TripListBaseParams {
   date?: string;
   from?: string;
   to?: string;
-  status?: TripStatus;
   serviceType?: TripServiceType;
   clientId?: string;
   driverId?: string;
@@ -130,6 +130,24 @@ export interface TripListParams {
   page?: number;
   pageSize?: number;
 }
+
+/**
+ * GET /api/trips query filters. The status filter is EITHER `status` (one exact
+ * TripStatus) OR `statuses` (any of several, sent as ONE comma-joined
+ * `statuses` param and answered by one query — one consistent snapshot), never
+ * both: the API rejects the pair with 400 Trips.Trip.ConflictingStatusFilters,
+ * so the type forbids it and listTrips throws if a cast slips it through.
+ *
+ * `statuses: []` is a caller bug and listTrips THROWS on it rather than
+ * dropping the param: omitting it would silently widen the query to every
+ * status, the opposite of "match none". Leave `statuses` undefined for no
+ * status filter.
+ */
+export type TripListParams = TripListBaseParams &
+  (
+    | { status?: TripStatus; statuses?: never }
+    | { status?: never; statuses?: readonly TripStatus[] }
+  );
 
 /**
  * The `GET /api/trips` envelope (backend `PagedResponse<TripResponse>`).
@@ -197,14 +215,33 @@ export interface TripUpdateInput {
 // Trip endpoints
 // ---------------------------------------------------------------------------
 
+/** A listTrips call built wrong — a programming error, never a transient
+ *  failure. Its own class so a caller that degrades on network/API errors (the
+ *  accruals carry-forward) can still let a bug fail loudly. */
+export class TripListParamsError extends Error {
+  constructor(message: string) {
+    super(`listTrips: ${message}`);
+    this.name = "TripListParamsError";
+  }
+}
+
 /** Omitting page/pageSize returns every match in the same envelope — the server
  *  never applies a default page size, so whole-set callers are not truncated. */
 export async function listTrips(params?: TripListParams): Promise<TripPage> {
+  // Caller bugs, caught before the wire — see TripListParams. The tests mirror
+  // serialisation below (a blank/null `status` is never sent, so it is absent).
+  if (params?.status && params.statuses != null) {
+    throw new TripListParamsError("pass either `status` or `statuses`, never both.");
+  }
+  if (params?.statuses != null && params.statuses.length === 0) {
+    throw new TripListParamsError("`statuses` must not be empty — omit it for no status filter.");
+  }
   const q = new URLSearchParams();
   if (params?.date) q.set("date", params.date);
   if (params?.from) q.set("from", params.from);
   if (params?.to) q.set("to", params.to);
   if (params?.status) q.set("status", params.status);
+  if (params?.statuses) q.set("statuses", params.statuses.join(","));
   if (params?.serviceType) q.set("serviceType", params.serviceType);
   if (params?.clientId) q.set("clientId", params.clientId);
   if (params?.driverId) q.set("driverId", params.driverId);

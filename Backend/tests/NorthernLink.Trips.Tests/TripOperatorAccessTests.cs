@@ -94,6 +94,19 @@ public class TripOperatorAccessTests
     }
 
     [Fact]
+    public async Task Narrowing_a_driver_to_their_own_trips_keeps_the_status_set()
+    {
+        SeedOneTripEach();
+        TripStatus[] statuses = [TripStatus.Scheduled, TripStatus.InProgress];
+
+        await ListHandler(FakeCurrentActor.Driver(DriverAUserId)).Handle(
+            new GetTripsQuery(TestPlanning.TenantId, new TripFilter(Statuses: statuses)), CancellationToken.None);
+
+        Assert.Equal(TestPlanning.DriverId, _reads.LastFilter!.DriverId);
+        Assert.Same(statuses, _reads.LastFilter.Statuses);
+    }
+
+    [Fact]
     public async Task A_driver_asking_for_another_drivers_history_gets_an_empty_page_not_theirs()
     {
         // ?driverId= is ANDed with ownership, never overridden to the caller's own id — a wrong

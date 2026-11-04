@@ -186,6 +186,14 @@ public static class TripErrors
     public static readonly Error InvalidStatusFilter = Error.Validation(
         "Trips.Trip.InvalidStatusFilter", "The status filter is not a known trip status.");
 
+    public static readonly Error EmptyStatusesFilter = Error.Validation(
+        "Trips.Trip.EmptyStatusesFilter",
+        "The statuses filter must name at least one trip status — omit it to list every status.");
+
+    public static readonly Error ConflictingStatusFilters = Error.Validation(
+        "Trips.Trip.ConflictingStatusFilters",
+        "Filter by status or by statuses, not both.");
+
     public static readonly Error RoundTripSameTrip = Error.Validation(
         "Trips.Trip.RoundTripSameTrip", "A trip cannot be merged with itself.");
 

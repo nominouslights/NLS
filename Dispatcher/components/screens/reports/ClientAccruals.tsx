@@ -445,9 +445,10 @@ export default function ClientAccruals({
       // pricing with a banner (null below) — it never blanks the report.
       //
       // Carry forward: every earlier trip of the client that is not yet
-      // completed — one unpaged call per open status, deduped, failing as ONE
-      // group (null → this month only, with a banner; never a partial set that
-      // understates what is owed). See fetchCarriedTrips.
+      // completed — one unpaged call filtered by every open status (one
+      // consistent snapshot); a failure is null → this month only, with a
+      // banner, never a partial set that understates what is owed. See
+      // fetchCarriedTrips.
       const [page, purchaseOrders, carriedTrips] = await Promise.all([
         listTrips({ from, to, clientId: cid }),
         listPurchaseOrders(cid).catch((): PurchaseOrderRecord[] | null => null),
