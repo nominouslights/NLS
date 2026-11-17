@@ -37,7 +37,7 @@ public class CompleteWorkOrderCommandHandlerTests
         var services = new InMemoryServiceRecordRepository();
         var inspections = new InMemoryVehicleInspectionRepository();
 
-        return (new CompleteWorkOrderCommandHandler(workOrders, services, inspections, new InMemoryVehicleRepository()),
+        return (new CompleteWorkOrderCommandHandler(workOrders, services, inspections, TestDuplicateCascade.Over(inspections)),
             workOrders, services, inspections);
     }
 
@@ -307,7 +307,7 @@ public class CompleteWorkOrderCommandHandlerTests
         var source = TestInspections.PreTrip(vehicleId: vehicleId, defects: [Defect("Brakes"), Defect("Defroster")]);
         Assert.True(source.LinkWorkOrder(workOrder.Id).IsSuccess);
         var earlier = TestInspections.PreTrip(
-            vehicleId: vehicleId, defects: [Defect(" brakes"), Defect("Defroster")], performedAt: DateTimeOffset.UtcNow.AddDays(-1));
+            vehicleId: vehicleId, defects: [Defect(" brakes"), Defect("Defroster")], performedAt: DateTimeOffset.UtcNow.AddDays(-2));
         var otherTruck = TestInspections.PreTrip(vehicleId: Guid.NewGuid(), unit: "U-07", defects: [Defect("Brakes")]);
         inspections.Add(source);
         inspections.Add(earlier);
@@ -327,6 +327,32 @@ public class CompleteWorkOrderCommandHandlerTests
         // Not resolved by this work order on the source, so not cascaded either.
         Assert.False(earlier.FindDefect("Defroster")!.IsResolved);
         Assert.False(otherTruck.FindDefect("Brakes")!.IsResolved);
+        // Phase 1 is the work order's save; the duplicates commit in their own.
         Assert.Equal(1, workOrders.SaveChangesCallCount);
+        Assert.Equal(1, inspections.TrySaveChangesCallCount);
+    }
+
+    [Fact]
+    public async Task The_legacy_path_leaves_a_report_made_on_the_service_day_open()
+    {
+        var (handler, workOrders, _, inspections) = Setup();
+        var vehicleId = Guid.NewGuid();
+        var workOrder = OpenWorkOrder(vehicleId, ["Brakes — Major: as found"]);
+        workOrders.Add(workOrder);
+
+        var source = TestInspections.PreTrip(vehicleId: vehicleId, defects: [Defect("Brakes")],
+            performedAt: DateTimeOffset.UtcNow.AddDays(-5));
+        Assert.True(source.LinkWorkOrder(workOrder.Id).IsSuccess);
+        // Reported a minute ago: the same operating day as the service record (dated now).
+        var sameDay = TestInspections.PreTrip(vehicleId: vehicleId, defects: [Defect("Brakes")],
+            performedAt: DateTimeOffset.UtcNow.AddMinutes(-1), tripNumber: "TR-TODAY");
+        inspections.Add(source);
+        inspections.Add(sameDay);
+
+        var result = await handler.Handle(Command(workOrder.Id), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.True(source.FindDefect("Brakes")!.IsResolved);
+        Assert.False(sameDay.FindDefect("Brakes")!.IsResolved);
     }
 }

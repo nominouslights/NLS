@@ -50,6 +50,16 @@ public static class InspectionErrors
         "That resolution reason is set only by completing a work order — choose another reason to resolve the defect by hand.");
 
     /// <summary>
+    /// A resolve asked to clear other reports of the component (<c>clearDuplicates</c>) with a
+    /// reason that is not a repair. Only a repair fixes the part for every report of it;
+    /// ReportedInError / AcceptedMonitoring are judgements about one report — resolve each of the
+    /// others on its own merits instead.
+    /// </summary>
+    public static readonly Error DuplicatesOnlyClearedByRepair = Error.Validation(
+        "Fleet.Inspection.DuplicatesOnlyClearedByRepair",
+        "Other reports of this defect are cleared only by a repair (Previously repaired) — resolve them individually, or send no duplicates to clear.");
+
+    /// <summary>
     /// A defect is on at most one active work order. Attaching it to a second one is refused
     /// until the first completes (and defers it) or is cancelled.
     /// </summary>

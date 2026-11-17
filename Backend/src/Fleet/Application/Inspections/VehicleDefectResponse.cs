@@ -17,8 +17,9 @@ namespace NorthernLink.Fleet.Application.Inspections;
 /// <see cref="Recurrence"/> points at the earlier one that was cleared, so the original record
 /// stays intact. Completing a work order resolves exactly the defects attached to it whose
 /// outcome was Repaired or NoFaultFound, each attributed to that work order; a Deferred one stays
-/// open and is released. Either way of resolving a defect also resolves the same component's
-/// still-open defects on this vehicle's other inspections (see
+/// open and is released. A REPAIR (hand-recorded PreviouslyRepaired with the reports the
+/// dispatcher chose, or a Repaired work-order line) can also resolve the same component's
+/// still-open defects reported on this vehicle's other inspections before it (see
 /// <see cref="ResolvedWithInspectionId"/>).</para>
 ///
 /// <para><b>No <c>since</c> or <c>limit</c> parameter, deliberately.</b> The most dangerous row

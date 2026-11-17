@@ -7,14 +7,21 @@ namespace NorthernLink.Fleet.Application.Inspections.ResolveDefect;
 /// Clears one open defect, addressed by <paramref name="InspectionId"/> + <paramref name="Item"/>
 /// — there is no defect id, so the item travels in the request body rather than the path (it is
 /// free text). Resolution is final: a second resolve of the same defect fails with
-/// <c>DefectAlreadyResolved</c>. Every still-open defect for the same component on the vehicle's
-/// other inspections is cleared with it (see <see cref="DuplicateDefects"/>), and the response
-/// lists everything that was cleared.
+/// <c>DefectAlreadyResolved</c>.
 /// </summary>
 /// <param name="ResolvedBy">
 /// Client-supplied, following the existing <c>EnteredBy</c> convention on this aggregate rather
 /// than reading the JWT. Server-side attribution would be better and is a documented follow-up
 /// across the whole module, not something to change on this one path.
+/// </param>
+/// <param name="ClearDuplicates">
+/// The other open reports of the same component the dispatcher was SHOWN (by
+/// <c>GET …/defects/duplicates</c>) and chose to clear with this one. Only a repair
+/// (<see cref="DefectResolutionReason.PreviouslyRepaired"/>) may carry a non-empty list —
+/// anything else fails with <c>DuplicatesOnlyClearedByRepair</c>. At write time only the listed
+/// reports that are STILL valid duplicates are cleared (the intersection with
+/// <see cref="DuplicateDefects.Find"/>); one that no longer qualifies is skipped silently. Null or
+/// empty clears no duplicates.
 /// </param>
 public sealed record ResolveInspectionDefectCommand(
     Guid TenantId,
@@ -22,12 +29,21 @@ public sealed record ResolveInspectionDefectCommand(
     string Item,
     DefectResolutionReason Reason,
     string? Note,
-    string? ResolvedBy) : ICommand<ResolveInspectionDefectResponse>;
+    string? ResolvedBy,
+    IReadOnlyList<DuplicateDefectReference>? ClearDuplicates = null) : ICommand<ResolveInspectionDefectResponse>;
+
+/// <summary>
+/// One other report to clear alongside the addressed defect, keyed the way every defect is:
+/// <c>(InspectionId, Item)</c>. <see cref="Item"/> matches by the domain's item rule (trimmed,
+/// case-insensitive).
+/// </summary>
+public sealed record DuplicateDefectReference(Guid InspectionId, string? Item);
 
 /// <summary>
 /// Body of a successful <c>POST /api/fleet/inspections/{id}/defects/resolve</c>: every defect the
-/// call cleared. The addressed defect is ALWAYS first; the duplicates cleared alongside it follow,
-/// oldest report first. A resolve with no duplicates returns a one-element list.
+/// call ACTUALLY cleared. The addressed defect is always first; the duplicates cleared alongside
+/// it follow, oldest report first. A resolve that cleared no duplicates — none requested, none
+/// still valid, or the duplicate save lost every retry — returns a one-element list.
 /// </summary>
 public sealed record ResolveInspectionDefectResponse(IReadOnlyList<ResolvedDefectResponse> Resolved);
 

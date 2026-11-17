@@ -686,14 +686,17 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
     /// <summary>
     /// Resolves this inspection's still-OPEN defect for the same component as
     /// <paramref name="source"/> — a defect on ANOTHER inspection of the same vehicle that has
-    /// just been resolved — as a duplicate of it. "Same component" is the item key every other
-    /// defect path uses: trimmed, case-insensitive.
+    /// just been REPAIRED — as a duplicate of it. "Same component" is <see cref="IsSameItem"/>.
     ///
     /// The resolution stamp is COPIED from <paramref name="source"/> (reason, note, resolvedBy,
     /// instant, resolving work order), never supplied by the caller, so this cannot become an
     /// unaudited back door around <see cref="ResolveDefect"/> or work-order completion: a source
-    /// that is not itself resolved throws. <see cref="InspectionDefect.ResolvedWithInspectionId"/>
-    /// records <paramref name="sourceInspectionId"/> as the provenance.
+    /// that is not itself resolved, or was resolved for a reason that does not
+    /// <see cref="DefectResolutionReasonExtensions.ClearsDuplicates">clear duplicates</see>
+    /// (anything but a repair), throws. <see cref="InspectionDefect.ResolvedWithInspectionId"/>
+    /// records <paramref name="sourceInspectionId"/> as the provenance. WHICH defects qualify
+    /// (vehicle, reported before the repair, not on the work order's own lines) is decided by
+    /// <see cref="DuplicateDefects"/> before this is called.
     ///
     /// The active work-order link follows the same rule as a hand-resolve: a duplicate on some
     /// OTHER open work order is resolved but KEEPS its <see cref="InspectionDefect.WorkOrderId"/>
@@ -713,6 +716,13 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
         if (!source.IsResolved)
         {
             throw new ArgumentException("Only a resolved defect can resolve its duplicates.", nameof(source));
+        }
+
+        if (source.ResolutionReason is not { } reason || !reason.ClearsDuplicates())
+        {
+            throw new ArgumentException(
+                $"Only a repair clears duplicates; a {source.ResolutionReason} resolution is a judgement about one report.",
+                nameof(source));
         }
 
         if (sourceInspectionId == Id)
@@ -745,11 +755,7 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
         return resolved;
     }
 
-    private int IndexOfDefect(string? item)
-    {
-        var key = NormalizeItem(item);
-        return Defects.FindIndex(d => NormalizeItem(d.Item).Equals(key, StringComparison.OrdinalIgnoreCase));
-    }
+    private int IndexOfDefect(string? item) => Defects.FindIndex(d => IsSameItem(d.Item, item));
 
     private void ReplaceDefect(int index, InspectionDefect replacement)
     {
@@ -963,6 +969,15 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
             .Count() != defects.Count;
 
     private static string NormalizeItem(string? item) => item?.Trim() ?? string.Empty;
+
+    /// <summary>
+    /// THE item rule — whether two Item texts name the same component: trimmed, then compared
+    /// <see cref="StringComparison.OrdinalIgnoreCase"/>. Every defect address in this aggregate
+    /// uses it, and code outside it (duplicate matching) must call this rather than re-implement
+    /// it, so no second normalisation (a SQL <c>lower(btrim())</c>, say) can ever disagree.
+    /// </summary>
+    public static bool IsSameItem(string? left, string? right) =>
+        NormalizeItem(left).Equals(NormalizeItem(right), StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The derivation rule: Pass / PassWithDefects (all Minor) / Fail (any Major or OutOfService).</summary>
     public static InspectionResult DeriveResult(IReadOnlyList<InspectionDefect> defects)

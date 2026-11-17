@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Http;
 using NorthernLink.Fleet.Application.Inspections.AcknowledgeCarrier;
 using NorthernLink.Fleet.Application.Inspections.Enter;
 using NorthernLink.Fleet.Application.Inspections.GetDefects;
+using NorthernLink.Fleet.Application.Inspections.GetDuplicates;
 using NorthernLink.Fleet.Application.Inspections.GetInspections;
 using NorthernLink.Fleet.Application.Inspections.Remove;
 using NorthernLink.Fleet.Application.Inspections.ResolveDefect;
@@ -142,12 +143,15 @@ public static partial class FleetEndpoints
     /// 409 when it was already resolved (resolution is final — in practice this is a
     /// double-click guard, since the panel removes the row optimistically), 400
     /// (<c>Fleet.Inspection.ResolutionReasonReservedForWorkOrder</c>) for
-    /// <c>RepairedUnderWorkOrder</c> or <c>NoFaultFound</c>, which only work-order completion sets.
+    /// <c>RepairedUnderWorkOrder</c> or <c>NoFaultFound</c>, which only work-order completion sets,
+    /// and 400 (<c>Fleet.Inspection.DuplicatesOnlyClearedByRepair</c>) for a non-empty
+    /// <c>clearDuplicates</c> with any reason but <c>PreviouslyRepaired</c>.
     ///
     /// 200 with <see cref="ResolveInspectionDefectResponse"/>: <c>{ "resolved": [ { inspectionId,
-    /// item, tripNumber, severity } ] }</c> — the addressed defect first, then every open duplicate
-    /// of the same component on the vehicle's other inspections that was cleared with it, oldest
-    /// report first. Duplicates never turn a success into an error.
+    /// item, tripNumber, severity } ] }</c> — the addressed defect first, then the duplicates
+    /// ACTUALLY cleared with it, oldest report first: those listed in <c>clearDuplicates</c> (from
+    /// <see cref="GetDefectDuplicates"/>) that were still open duplicates at write time.
+    /// Duplicates never turn a success into an error.
     /// </summary>
     private static async Task<IResult> ResolveInspectionDefect(
         Guid id,
@@ -167,9 +171,34 @@ public static partial class FleetEndpoints
             request.Item ?? string.Empty,
             request.Reason,
             request.Note,
-            request.ResolvedBy);
+            request.ResolvedBy,
+            request.ClearDuplicates);
 
         var result = await sender.Send(command, cancellationToken);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
+    }
+
+    /// <summary>
+    /// The open duplicates a repair-type resolve of this defect would clear right now:
+    /// <c>200 { "duplicates": [ { inspectionId, item, tripNumber, severity, reportedAt } ] }</c>,
+    /// oldest report first; <c>{ "duplicates": [] }</c> when the defect is already resolved or has
+    /// none. 404 when the inspection or the item is unknown — the same errors as resolve.
+    /// </summary>
+    private static async Task<IResult> GetDefectDuplicates(
+        Guid id,
+        string? item,
+        ITenantContext tenantContext,
+        ISender sender,
+        CancellationToken cancellationToken)
+    {
+        if (tenantContext.TenantId is not { } tenantId)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await sender.Query(
+            new GetDefectDuplicatesQuery(tenantId, id, item ?? string.Empty), cancellationToken);
+
         return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
     }
 
@@ -255,12 +284,17 @@ public sealed record InspectionRequest(
 /// element addressed by <c>(InspectionId, Item)</c>. <see cref="ResolvedBy"/> follows the same
 /// client-supplied convention as <c>EnteredBy</c> and defaults to "Dispatch"; the resolution
 /// timestamp is stamped server-side and is never taken from the body.
+///
+/// <see cref="ClearDuplicates"/> lists the other reports of the same component the dispatcher was
+/// shown by <c>GET …/defects/duplicates</c> and chose to clear too — <c>[{ inspectionId, item }]</c>.
+/// Only <c>PreviouslyRepaired</c> may carry a non-empty list; null or empty clears no duplicates.
 /// </summary>
 public sealed record ResolveDefectRequest(
     string? Item,
     DefectResolutionReason Reason,
     string? Note,
-    string? ResolvedBy);
+    string? ResolvedBy,
+    IReadOnlyList<DuplicateDefectReference>? ClearDuplicates = null);
 
 /// <summary>
 /// Request body for POST /api/fleet/inspections/{id}/carrier-acknowledgement.

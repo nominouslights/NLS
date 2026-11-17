@@ -103,6 +103,11 @@ public static partial class FleetEndpoints
         // DVIR, not part of the driver's own circle check.
         inspectionRecords.MapPost("{id:guid}/defects/resolve", ResolveInspectionDefect);
 
+        // Preview for the resolve dialog: the other open reports of the same component a repair
+        // would clear. Same group and policy as resolve; the item is a query parameter here
+        // because a GET has no body.
+        inspectionRecords.MapGet("{id:guid}/defects/duplicates", GetDefectDuplicates);
+
         // Sign the NL-PTI-01 carrier acknowledgement line. DispatchAccess, and never
         // DriverAccess: the field exists to record that the CARRIER was shown a report the
         // driver wrote. A driver able to sign it would be acknowledging their own defect report,

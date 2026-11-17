@@ -17,8 +17,9 @@ public sealed record InspectionDefect
     // the intended clean slate: the whole existing backlog reads back as unresolved, with no
     // data migration. Resolution is FINAL — there is no reopen. A fault that comes back is a
     // new defect on a later inspection, pointed at this one via RecurrenceOfInspectionId.
-    // Resolving one defect also resolves every still-open defect for the same component on the
-    // vehicle's other inspections (DuplicateDefects), each stamped ResolvedWithInspectionId.
+    // REPAIRING one defect can also resolve the same component's still-open defects reported on
+    // the vehicle's other inspections before the repair (DuplicateDefects), each stamped
+    // ResolvedWithInspectionId.
     public DefectResolutionReason? ResolutionReason { get; init; }
     public string? ResolutionNote { get; init; }
     public string? ResolvedBy { get; init; }

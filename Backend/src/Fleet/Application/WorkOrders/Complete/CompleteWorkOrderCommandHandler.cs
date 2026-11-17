@@ -31,20 +31,35 @@ namespace NorthernLink.Fleet.Application.WorkOrders.Complete;
 /// Both paths attribute the resolution to the service record's PerformedBy (trimmed), so the
 /// defect history and the service log always name the same person.
 ///
-/// Both paths then clear DUPLICATES: for every defect this completion actually resolved, the
-/// same component's still-open defects on the vehicle's other inspections are resolved with the
-/// same stamp (reason, outcome note, performer, instant, this work order) — see
-/// <see cref="DuplicateDefects"/>. A Deferred line resolves nothing and so cascades nothing; a
-/// line whose defect had already been cleared by hand only detaches, and cascades nothing either
-/// (its own hand-resolve already did). The cascade runs only after EVERY line's own outcome has
-/// been applied, so a defect that has its own line on this work order gets that line's stamp
-/// rather than another line's.
+/// Two phases. Phase 1 is everything above — the service record, the work order's completion and
+/// each line's own outcome — committed in one save, exactly as before duplicates existed; every
+/// failure mode of the call is phase 1's.
+///
+/// Phase 2 then clears DUPLICATES, server-decided (there is no preview for a completion), in a
+/// separate save that retries version conflicts and otherwise leaves them open — it can never
+/// fail the call (<see cref="DuplicateDefectCascade"/>). For every defect this completion
+/// actually REPAIRED (a Repaired line, or the legacy path's RepairedUnderWorkOrder), the same
+/// component's still-open defects on the work order's vehicle are resolved with that stamp —
+/// <see cref="DuplicateDefects"/> — but only:
+/// <list type="bullet">
+/// <item>NoFaultFound and Deferred never cascade: they are judgements about one report
+/// (<see cref="DefectResolutionReasonExtensions.ClearsDuplicates"/>);</item>
+/// <item>a defect on ANY line of this work order is never touched by the cascade, whatever that
+/// line's outcome — each line's outcome is authoritative for its own defect, so a Deferred
+/// sibling stays open;</item>
+/// <item>only reports made strictly before the START of the service date (in the operating
+/// zone) are cleared — a same-day report may postdate the repair, so it stays open
+/// (<see cref="DefectRepairCutoff.ForServiceDate"/>);</item>
+/// <item>the scope is computed once from the work order's vehicle and the candidates for every
+/// repaired item come from one query.</item>
+/// </list>
+/// A line whose defect had already been cleared by hand only detaches, and cascades nothing.
 /// </summary>
 public sealed class CompleteWorkOrderCommandHandler(
     IWorkOrderRepository workOrderRepository,
     IServiceRecordRepository serviceRepository,
     IVehicleInspectionRepository inspectionRepository,
-    IVehicleRepository vehicleRepository)
+    DuplicateDefectCascade duplicates)
     : ICommandHandler<CompleteWorkOrderCommand, Guid>
 {
     public async Task<Result<Guid>> Handle(CompleteWorkOrderCommand command, CancellationToken cancellationToken)
@@ -119,14 +134,20 @@ public sealed class CompleteWorkOrderCommandHandler(
             ? ApplyOutcomes(workOrder, inspections, resolvedBy, now)
             : await ResolveLegacyAsync(workOrder, resolvedBy, now, cancellationToken);
 
-        foreach (var (inspection, defect) in resolvedHere)
+        // ---- Phase 1: all aggregates live on the same scoped DbContext — one save commits together. ----
+        await workOrderRepository.SaveChangesAsync(cancellationToken);
+
+        // ---- Phase 2: duplicates of what this work order repaired; never fails the call. ----
+        if (resolvedHere.Count > 0)
         {
-            await DuplicateDefectCascade.ResolveAsync(
-                inspectionRepository, vehicleRepository, inspection, defect.Item, cancellationToken);
+            await duplicates.ClearForVehicleAsync(
+                workOrder.VehicleId,
+                resolvedHere,
+                DefectRepairCutoff.ForServiceDate(service.Date, now),
+                candidate => !workOrder.Defects.Any(line => line.Addresses(candidate.Inspection.Id, candidate.Defect.Item)),
+                cancellationToken);
         }
 
-        // All aggregates live on the same scoped DbContext — one save commits together.
-        await workOrderRepository.SaveChangesAsync(cancellationToken);
         return Result.Success(service.Id);
     }
 
