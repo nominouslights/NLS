@@ -44,6 +44,12 @@ export interface InspectionDefectWire {
   /** A `DefectResolutionReasonWire` name; with `resolvedAtUtc`, null while open. */
   resolutionReason: DefectResolutionReasonWire | null;
   resolvedAtUtc: string | null;
+  /** Set when this defect was cleared AS A DUPLICATE: the inspection id of the
+   *  report of the same fault (same vehicle, same item) that was resolved — by
+   *  hand, or by a work order's Repaired / NoFaultFound — and took this one with
+   *  it. Null on a directly resolved defect and while open. Read with `!= null`:
+   *  an API from before the cascade omits it. */
+  resolvedWithInspectionId: string | null;
 }
 
 export interface VehicleInspection {
@@ -251,6 +257,9 @@ export interface VehicleDefectWire {
   resolvedBy: string | null;
   resolvedAtUtc: string | null;
   resolvedByWorkOrderId: string | null;
+  /** See `InspectionDefectWire.resolvedWithInspectionId` — the report this one
+   *  was cleared with, when it was cleared as a duplicate. */
+  resolvedWithInspectionId: string | null;
   recurrence: PreviousResolutionWire | null;
 }
 
@@ -261,19 +270,54 @@ export function listVehicleDefects(vehicleId: string, includeResolved = false): 
   return request<VehicleDefectWire[]>(`/api/fleet/vehicles/${vehicleId}/defects${qs}`);
 }
 
-/** POST /api/fleet/inspections/{id}/defects/resolve — clears one defect. The
- *  item travels in the BODY, not the path: it is free text, and half the row's
- *  key. 404 for an unknown inspection or item, 409 when already resolved
- *  (resolution is final). `resolvedBy` is client-supplied, following the same
- *  convention as an inspection's `enteredBy`; it defaults to "Dispatch". */
-export function resolveInspectionDefect(
+/** One defect a resolve cleared, as `POST …/defects/resolve` reports it. */
+export interface ResolvedDefectWire {
+  inspectionId: string;
+  item: string;
+  tripNumber: string | null;
+  severity: DefectSeverityWire;
+}
+
+/** A cleared defect as the client holds it. `severity` is null ONLY on the
+ *  stand-in for an older API that answered with no body (see
+ *  `resolveInspectionDefect`) — the client did not see what it cleared. */
+export type ResolvedDefect = Omit<ResolvedDefectWire, "severity"> & { severity: DefectSeverityWire | null };
+
+/** POST /api/fleet/inspections/{id}/defects/resolve — clears one defect AND every
+ *  open duplicate of it: another open defect on the same vehicle whose `item`
+ *  matches, trimmed and case-insensitive (`sameDefectItem`). A known fault is
+ *  re-reported on every daily pre-trip until it is fixed, so one repair clears
+ *  them all. The item travels in the BODY, not the path: it is free text, and
+ *  half the row's key. 404 for an unknown inspection or item, 409 when already
+ *  resolved (resolution is final). `resolvedBy` is client-supplied, following the
+ *  same convention as an inspection's `enteredBy`; it defaults to "Dispatch".
+ *
+ *  Returns every defect cleared: the addressed one first, then the duplicates,
+ *  oldest first. An API from before the cascade answers with no body; that is
+ *  read as "just the addressed defect", which is exactly what it cleared. */
+export async function resolveInspectionDefect(
   inspectionId: string,
   body: { item: string; reason: DefectResolutionReasonWire; note?: string | null; resolvedBy?: string | null },
-): Promise<void> {
-  return request<void>(`/api/fleet/inspections/${inspectionId}/defects/resolve`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+): Promise<ResolvedDefect[]> {
+  const res = await request<{ resolved?: ResolvedDefectWire[] | null } | undefined | null>(
+    `/api/fleet/inspections/${inspectionId}/defects/resolve`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+  const resolved = res?.resolved;
+  if (Array.isArray(resolved) && resolved.length > 0) return resolved;
+  return [{ inspectionId, item: body.item, tripNumber: null, severity: null }];
+}
+
+/** The backend's duplicate rule for a defect item: trimmed, case-insensitive.
+ *  The ONE place the client compares two reports' items — the resolve preview
+ *  and the inspection forms' known-fault hints both use it, so neither can drift
+ *  from what the cascade actually clears. */
+export function normaliseDefectItem(item: string): string {
+  return item.trim().toLowerCase();
+}
+
+export function sameDefectItem(a: string, b: string): boolean {
+  return normaliseDefectItem(a) === normaliseDefectItem(b);
 }
 
 /** POST /api/fleet/inspections/{id}/carrier-acknowledgement — signs the NL-PTI-01

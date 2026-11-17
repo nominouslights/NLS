@@ -15,7 +15,13 @@ import {
   prefillFromInspection,
   type WorkOrderPrefillWire,
 } from "@/lib/inspectionWorkOrder";
-import { DEFECT_SEVERITY_LABEL, INSPECTION_RESULT_META, resolvedDefectChip } from "@/lib/workOrderDisplay";
+import {
+  DEFECT_SEVERITY_LABEL,
+  INSPECTION_RESULT_META,
+  clearedWithText,
+  resolvedDefectChip,
+  type LinkedReport,
+} from "@/lib/workOrderDisplay";
 import type { VehicleOption } from "@/components/screens/fleet/vehicle-detail/shared";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { MonoTag, StatusChip } from "@/components/ui/Chip";
@@ -46,6 +52,7 @@ export default function InspectionDetailModal({
   woNumber,
   workOrderNumberOf,
   workOrderStatusOf,
+  linkedReportOf,
   vehicles,
   onWorkOrderCreated,
   onChanged,
@@ -61,6 +68,9 @@ export default function InspectionDetailModal({
    *  which holds the inspection's defects only while it is not Completed/Cancelled.
    *  Unknown (absent, or the id is not found) counts as still open. */
   workOrderStatusOf?: (id: string) => WorkOrderStatusWire | undefined;
+  /** Finds, in data the parent already holds, the report a duplicate defect was
+   *  cleared with (`resolvedWithInspectionId`) — for its trip number. */
+  linkedReportOf?: (inspectionId: string) => LinkedReport | undefined;
   vehicles: VehicleOption[];
   onWorkOrderCreated: () => void;
   /** A defect was resolved here — the parent refetches. */
@@ -186,6 +196,11 @@ export default function InspectionDetailModal({
                         : null
                     }
                     workOrderNumberOf={workOrderNumberOf}
+                    clearedWith={
+                      c.defect?.resolvedWithInspectionId != null
+                        ? clearedWithText(linkedReportOf?.(c.defect.resolvedWithInspectionId), inspection.performedAt)
+                        : null
+                    }
                     onResolve={() => setResolving(c)}
                     onCreateWorkOrder={(d) => setWoPrefill(prefillFromInspection(inspection, inspection.unit, [d]))}
                   />
@@ -198,13 +213,17 @@ export default function InspectionDetailModal({
 
       {resolving && (
         <ResolveDefectModal
+          vehicleId={inspection.vehicleId ?? vehicleId}
           inspectionId={inspection.id}
           item={resolving.item}
           unit={inspection.unit}
           severity={resolving.severity}
           onClose={() => setResolving(null)}
-          onResolved={() => {
-            setResolvedHere((prev) => new Set([...prev, resolving.item]));
+          onResolved={(resolved) => {
+            // Only this inspection's rows are overlaid here; duplicates cleared on
+            // other inspections reach their own surfaces through lib/defectSync.
+            const here = resolved.filter((r) => r.inspectionId === inspection.id).map((r) => r.item);
+            setResolvedHere((prev) => new Set([...prev, resolving.item, ...here]));
             setResolving(null);
             onChanged?.();
           }}
@@ -241,6 +260,7 @@ function DefectState({
   overlay,
   workOrderId,
   workOrderNumberOf,
+  clearedWith,
   onResolve,
   onCreateWorkOrder,
 }: {
@@ -249,6 +269,8 @@ function DefectState({
   /** The open work order holding this defect — its own, or the inspection's legacy one. */
   workOrderId: string | null;
   workOrderNumberOf?: (id: string) => string | undefined;
+  /** "cleared with the earlier report on …" when it was cleared as a duplicate. */
+  clearedWith: string | null;
   onResolve: () => void;
   onCreateWorkOrder: (d: InspectionDefectWire) => void;
 }) {
@@ -266,7 +288,14 @@ function DefectState({
   if (!d) return null;
   if (d.resolvedAtUtc != null) {
     const chip = resolvedDefectChip(d.resolutionReason);
-    return <StatusChip kind={chip.kind} glyph={chip.glyph} label={chip.label} />;
+    return (
+      <>
+        <StatusChip kind={chip.kind} glyph={chip.glyph} label={chip.label} />
+        {clearedWith && (
+          <span style={{ fontFamily: fonts.body, fontSize: 11.5, color: colors.textDim }}>· {clearedWith}</span>
+        )}
+      </>
+    );
   }
   if (workOrderId != null) {
     return <StatusChip kind="soon" label={`On ${workOrderNumberOf?.(workOrderId) ?? "open work order"}`} />;

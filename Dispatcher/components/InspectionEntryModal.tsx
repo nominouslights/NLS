@@ -15,6 +15,8 @@ import { itemsFor } from "@/lib/inspectionForm";
 import { DEFECT_SEVERITY_LABEL, INSPECTION_RESULT_META } from "@/lib/workOrderDisplay";
 import { listDrivers } from "@/lib/api/drivers";
 import { notifyDefectsChanged } from "@/lib/defectSync";
+import { knownDefectFor, knownDefectsByItem } from "@/lib/defectDuplicates";
+import { useVehicleOpenDefects } from "@/lib/useVehicleOpenDefects";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { NumberField, SelectField, TextField } from "@/components/ui/Field";
 import { ActionButton } from "@/components/ui/Button";
@@ -34,6 +36,7 @@ import {
 } from "@/components/inspection/checklistRows";
 import NewDefectsEditor from "@/components/inspection/NewDefectsEditor";
 import RetiredKeyNote from "@/components/inspection/RetiredKeyNote";
+import { KnownDefectHint, KnownDefectsSummary } from "@/components/inspection/KnownDefectHint";
 
 /** NL-PTI-01 classifies a defect Minor or Major; OutOfService stays in the wire
  *  enum for legacy rows but this form never offers it. */
@@ -90,6 +93,12 @@ export default function InspectionEntryModal({
 
   const groups = useMemo(() => itemsFor(unit, type), [unit, type]);
   const legendKeys = useMemo(() => areaLegendKeys(groups), [groups]);
+
+  // The unit's open defects, so a known fault reads as known on its row.
+  // INFORMATIONAL ONLY: nothing below reads it to set, block or report anything.
+  // This modal only ever creates a record, so there is no own inspection to leave out.
+  const openDefects = useVehicleOpenDefects(vehicleId);
+  const knownDefects = openDefects.status === "ready" ? knownDefectsByItem(openDefects.rows) : null;
 
   // Driver roster from the real Drivers API (Active drivers only).
   const [driverNames, setDriverNames] = useState<string[]>([]);
@@ -340,6 +349,16 @@ export default function InspectionEntryModal({
         </div>
       </div>
 
+      <KnownDefectsSummary
+        unit={unit}
+        load={openDefects}
+        formItemKeys={[
+          ...rows.map((r) => r.itemKey),
+          ...(extra ? [extra.item] : []),
+          ...(isPost ? defectOptions.map((o) => o.key) : []),
+        ]}
+      />
+
       {extra && (
         <div style={{ marginBottom: 16 }}>
           <div
@@ -367,6 +386,7 @@ export default function InspectionEntryModal({
             </div>
             {/* Filed under the stored item string, never the replacement row's key. */}
             <RetiredKeyNote item={extra.item} />
+            <KnownDefectHint known={knownDefectFor(knownDefects, extra.item)} />
             <div style={{ display: "grid", gridTemplateColumns: "180px 1fr", gap: 10, marginTop: 9 }}>
               <SelectField
                 label="Severity"
@@ -404,6 +424,7 @@ export default function InspectionEntryModal({
           rows={rows.filter((r) => r.groupKey === g.key)}
           onPatch={patchRow}
           legend={legendKeys.has(g.key)}
+          knownDefects={knownDefects}
         />
       ))}
 
@@ -428,6 +449,7 @@ export default function InspectionEntryModal({
             onChange={setNewDefects}
             options={defectOptions}
             preTripReported={0}
+            knownDefects={knownDefects}
           />
         </>
       )}

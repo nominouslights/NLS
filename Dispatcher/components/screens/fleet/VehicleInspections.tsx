@@ -14,8 +14,10 @@ import { isAttachable, prefillFromInspection, type WorkOrderPrefillWire } from "
 import {
   DEFECT_SEVERITY_LABEL,
   INSPECTION_RESULT_META,
+  clearedWithText,
   inspectionDefectStatus,
   resolvedDefectChip,
+  type LinkedReport,
 } from "@/lib/workOrderDisplay";
 import { useDefectsChanged } from "@/lib/defectSync";
 import type { VehicleOption } from "@/components/screens/fleet/vehicle-detail/shared";
@@ -96,6 +98,12 @@ export default function VehicleInspections({
     (woFetch?.vehicleId === vehicleId ? woFetch.rows : []).map((w) => [w.id, w.status]),
   );
   const woLink = (id: string) => woNumberById.get(id) ?? "work order";
+  // The report a duplicate defect was cleared with — looked up in the list
+  // already loaded for this unit, never fetched per row.
+  const linkedReportOf = (inspectionId: string): LinkedReport | undefined => {
+    const i = fetchedRows?.find((r) => r.id === inspectionId);
+    return i ? { tripNumber: i.tripNumber, at: i.performedAt } : undefined;
+  };
   const detail = detailId ? (rows?.find((r) => r.id === detailId) ?? null) : null;
 
   // A defect changed anywhere in the console — resolved, attached to or
@@ -216,6 +224,11 @@ export default function VehicleInspections({
                           {chip ? (
                             <span style={{ marginLeft: 8, display: "inline-block", verticalAlign: "middle" }}>
                               <StatusChip kind={chip.kind} glyph={chip.glyph} label={chip.label} />
+                              {d.resolvedWithInspectionId != null && (
+                                <span style={{ marginLeft: 6, fontSize: 11.5, color: colors.textDim }}>
+                                  · {clearedWithText(linkedReportOf(d.resolvedWithInspectionId), insp.performedAt)}
+                                </span>
+                              )}
                             </span>
                           ) : (
                             d.workOrderId && (
@@ -256,6 +269,7 @@ export default function VehicleInspections({
           woNumber={detail.generatedWorkOrderId ? woLink(detail.generatedWorkOrderId) : undefined}
           workOrderNumberOf={(id) => woNumberById.get(id)}
           workOrderStatusOf={(id) => woStatusById.get(id)}
+          linkedReportOf={linkedReportOf}
           vehicles={vehicles}
           onWorkOrderCreated={refreshSoon}
           onChanged={refreshSoon}

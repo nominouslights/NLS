@@ -19,7 +19,7 @@ import { vehicleDefect } from "./defect.fixtures";
 // unattached defects.
 
 function defect(over: Partial<InspectionDefectWire> & { item: string }): InspectionDefectWire {
-  return { severity: "Major", note: null, workOrderId: null, resolutionReason: null, resolvedAtUtc: null, ...over };
+  return { severity: "Major", note: null, workOrderId: null, resolutionReason: null, resolvedAtUtc: null, resolvedWithInspectionId: null, ...over };
 }
 
 function inspection(defects: InspectionDefectWire[], over: Partial<VehicleInspection> = {}): VehicleInspection {

@@ -35,6 +35,7 @@ const defect = (over: Partial<InspectionDefectWire> & { item: string }): Inspect
   workOrderId: null,
   resolutionReason: null,
   resolvedAtUtc: null,
+  resolvedWithInspectionId: null,
   ...over,
 });
 
@@ -92,5 +93,25 @@ describe("VehicleInspections — live defect state", () => {
     await screen.findByText("Defects resolved");
     expect(screen.getByText("Fail")).toBeTruthy();
     await waitFor(() => expect(listInspections).toHaveBeenCalledTimes(2));
+  });
+
+  it("says a duplicate was cleared with another report, naming the trip from the loaded list", async () => {
+    listVehicleWorkOrders.mockResolvedValue([]);
+    const resolved = { resolutionReason: "PreviouslyRepaired" as const, resolvedAtUtc: "2026-10-06T00:00:00Z" };
+    listInspections.mockResolvedValue([
+      // The report that was resolved by hand — the LATER one.
+      {
+        ...inspection([defect({ item: "Brakes", ...resolved })]),
+        id: "insp-2",
+        tripNumber: "NL-2026-0050",
+        performedAt: "2026-10-05T12:00:00Z",
+      },
+      // Its duplicate, cleared with it.
+      inspection([defect({ item: "brakes", ...resolved, resolvedWithInspectionId: "insp-2" })]),
+    ]);
+    render(<VehicleInspections vehicle={vehicle} vehicles={[]} />);
+
+    expect(await screen.findByText("· cleared with the later report on NL-2026-0050")).toBeTruthy();
+    expect(screen.getAllByText(/cleared with/)).toHaveLength(1);
   });
 });

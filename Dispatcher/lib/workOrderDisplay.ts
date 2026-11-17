@@ -13,6 +13,7 @@ import type {
   WorkOrderWire,
 } from "./api/maintenance";
 import type { ServiceCategory, Shop, WorkOrder } from "./types";
+import { formatUtcDate } from "./api/format";
 
 // Wire ↔ display boundary for the live maintenance contract. Wire enums travel
 // as backend enum names ("InProgress", "PreTripInspection"); everything shown
@@ -136,6 +137,31 @@ export function resolvedDefectChip(reason: DefectResolutionReasonWire | string |
     glyph: meta?.glyph,
     label: `Resolved · ${DEFECT_RESOLUTION_LABEL[reason as DefectResolutionReasonWire] ?? reason}`,
   };
+}
+
+/** The report a duplicate was cleared with, as far as the caller's already-loaded
+ *  data can say — never fetched per row. */
+export interface LinkedReport {
+  tripNumber: string | null;
+  /** When that report was made (the inspection's performedAt / reportedAt). */
+  at: string;
+}
+
+/**
+ * The words for a defect cleared AS A DUPLICATE (`resolvedWithInspectionId` set):
+ * a known fault re-reported on several inspections is cleared by resolving any one
+ * of them. Says whether the resolved report was earlier or later than this one and
+ * names its trip when the caller can find it; otherwise says only that it went
+ * with another report of the same fault. The caller prefixes "· ".
+ */
+export function clearedWithText(linked: LinkedReport | null | undefined, ownAt: string | null | undefined): string {
+  if (!linked) return "cleared with another report of this fault";
+  const theirs = Date.parse(linked.at);
+  const mine = ownAt ? Date.parse(ownAt) : NaN;
+  const when = theirs < mine ? "earlier" : theirs > mine ? "later" : null;
+  if (linked.tripNumber) return `cleared with ${when ? `the ${when}` : "the"} report on ${linked.tripNumber}`;
+  const article = when === "earlier" ? "an earlier" : when === "later" ? "a later" : "another";
+  return `cleared with ${article} report (${formatUtcDate(linked.at)})`;
 }
 
 /** What the mechanic found for one defect line, as the dispatcher reads it. */

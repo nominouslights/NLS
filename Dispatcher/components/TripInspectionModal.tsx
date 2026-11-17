@@ -20,6 +20,8 @@ import type { TripRecord } from "@/lib/api/trips";
 import { listDrivers } from "@/lib/api/drivers";
 import { listVehicles } from "@/lib/api/fleet";
 import { notifyDefectsChanged } from "@/lib/defectSync";
+import { knownDefectsByItem } from "@/lib/defectDuplicates";
+import { useVehicleOpenDefects } from "@/lib/useVehicleOpenDefects";
 import { NL_PTI_01_CERTIFICATION, itemsFor, type InspectionFormMode } from "@/lib/inspectionForm";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { ActionButton } from "@/components/ui/Button";
@@ -50,6 +52,7 @@ import {
 } from "@/components/inspection/checklistRows";
 import NewDefectsEditor from "@/components/inspection/NewDefectsEditor";
 import RetiredFormChecklist from "@/components/inspection/RetiredFormChecklist";
+import { KnownDefectsSummary } from "@/components/inspection/KnownDefectHint";
 
 // Trip-context Fleet inspection entry. Posts a real Fleet VehicleInspection
 // (POST /api/fleet/inspections) tagged with the trip's tripNumber + vehicleId,
@@ -140,6 +143,9 @@ export default function TripInspectionModal({
   // rebuilt against, or rows it really answered would render unanswered.
   const [unit, setUnit] = useState(existing?.unit || trip.vehicleUnit || "");
   const [unitOptions, setUnitOptions] = useState<string[]>(unit ? [unit] : []);
+  // unit → vehicle id from the same roster, so the known-fault hints can ask about
+  // whichever unit is picked — not only the trip's own.
+  const [vehicleIdByUnit, setVehicleIdByUnit] = useState<ReadonlyMap<string, string>>(new Map());
 
   useEffect(() => {
     let active = true;
@@ -150,6 +156,7 @@ export default function TripInspectionModal({
         // entered late for a vehicle that has since been laid up, and a missing
         // option would leave the dispatcher unable to record it at all.
         const units = rows.map((v) => v.unitNumber).filter(Boolean);
+        setVehicleIdByUnit(new Map(rows.filter((v) => v.unitNumber).map((v) => [v.unitNumber, v.id])));
         const seeded = existing?.unit || trip.vehicleUnit || "";
         const merged = seeded && !units.includes(seeded) ? [seeded, ...units] : units;
         setUnitOptions(merged);
@@ -165,6 +172,23 @@ export default function TripInspectionModal({
   // purpose — never the narrower NL-01 form (see its docblock). An empty select
   // is exactly that unknown, so it maps to null rather than "".
   const groups = useMemo(() => itemsFor(unit || null, mode), [unit, mode]);
+
+  // The picked unit's open defects, so a known fault reads as known on its row.
+  // INFORMATIONAL ONLY: nothing below reads it to set, block or report anything.
+  // Re-loaded whenever the unit changes; the hook tags its result by vehicle id,
+  // so the previous unit's defects never paint under the new one.
+  const hintVehicleId = !unit
+    ? null
+    : existing && unit === existing.unit && existing.vehicleId
+      ? existing.vehicleId
+      : unit === trip.vehicleUnit && trip.vehicleId
+        ? trip.vehicleId
+        : (vehicleIdByUnit.get(unit) ?? null);
+  const openDefects = useVehicleOpenDefects(hintVehicleId);
+  // Editing: this record's own defects are what the form shows — left out, or
+  // every row it marked would flag itself as a known fault.
+  const knownDefects =
+    openDefects.status === "ready" ? knownDefectsByItem(openDefects.rows, existing?.id) : null;
   const legendKeys = useMemo(() => areaLegendKeys(groups), [groups]);
 
   // A record written against a retired checklist (NL-TM-01, or NL-PTI-01 keys that
@@ -465,6 +489,13 @@ export default function TripInspectionModal({
             />
           </div>
 
+          <KnownDefectsSummary
+            unit={unit}
+            load={openDefects}
+            excludeInspectionId={existing?.id}
+            formItemKeys={[...checklist.map((r) => r.itemKey), ...(isPre ? [] : pickable.map((o) => o.key))]}
+          />
+
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 18 }}>
             <NumberField
               label={isPre ? "Odometer start (km)" : "Odometer end (km)"}
@@ -497,6 +528,7 @@ export default function TripInspectionModal({
               rows={checklist.filter((r) => r.groupKey === g.key)}
               onPatch={patchRow}
               legend={legendKeys.has(g.key)}
+              knownDefects={knownDefects}
             />
           ))}
 
@@ -570,6 +602,7 @@ export default function TripInspectionModal({
                 onChange={setNewDefects}
                 options={pickable}
                 preTripReported={preTripReported}
+                knownDefects={knownDefects}
               />
 
               <SectionLabel>Other issues (not a vehicle defect)</SectionLabel>

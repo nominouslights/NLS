@@ -8,9 +8,11 @@ import {
   resolveInspectionDefect,
   type DefectResolutionReasonWire,
   type DefectSeverityWire,
+  type ResolvedDefect,
   type VehicleDefectWire,
   type WorkOrderStatusWire,
 } from "@/lib/api/maintenance";
+import { moreSevereDuplicate, openDuplicatesOf } from "@/lib/defectDuplicates";
 import {
   isVehicleDefectAttachable,
   settledPendingWorkOrders,
@@ -24,6 +26,8 @@ import {
   DEFECT_SEVERITY_RANK,
   DEFECT_WO_KIND,
   WO_STATUS_LABEL,
+  clearedWithText,
+  type LinkedReport,
 } from "@/lib/workOrderDisplay";
 import { Panel, SectionLabel } from "@/components/ui/Panel";
 import { MonoTag, StatusChip } from "@/components/ui/Chip";
@@ -143,12 +147,12 @@ export default function DefectsPanel({
   // announces the change, so one resolve means exactly one reload.
   useDefectsChanged(() => setReload((n) => n + 1));
 
-  function onResolved(defect: VehicleDefectWire) {
+  function onResolved(resolved: readonly ResolvedDefect[]) {
     // Optimistic: the projection has not caught up yet — the reconcile reload
-    // comes from useDefectsChanged above.
-    setFetched((prev) =>
-      prev ? { ...prev, rows: prev.rows.filter((r) => defectKey(r) !== defectKey(defect)) } : prev,
-    );
+    // comes from useDefectsChanged above. EVERY row the resolve cleared drops,
+    // not just the one addressed: its open duplicates went with it.
+    const cleared = new Set(resolved.map(defectKey));
+    setFetched((prev) => (prev ? { ...prev, rows: prev.rows.filter((r) => !cleared.has(defectKey(r))) } : prev));
   }
 
   // Rows arrive PRE-ORDERED (OutOfService → Major → Minor, newest first within
@@ -159,6 +163,13 @@ export default function DefectsPanel({
   const hidden = rows === null ? 0 : rows.length - (shown?.length ?? 0);
 
   const heading = title ?? "Open defects";
+
+  // The report a duplicate was cleared with, from the rows already loaded (with
+  // SHOW RESOLVED on, the resolved report is among them) — never fetched per row.
+  const linkedReportOf = (inspectionId: string): LinkedReport | undefined => {
+    const r = rows?.find((x) => x.inspectionId === inspectionId);
+    return r ? { tripNumber: r.tripNumber, at: r.reportedAt } : undefined;
+  };
 
   const canCreate = (d: VehicleDefectWire) =>
     !!onCreateWorkOrder && isVehicleDefectAttachable(d) && !pendingWorkOrders?.has(defectKey(d));
@@ -245,6 +256,7 @@ export default function DefectsPanel({
               canResolve={canResolve}
               onResolve={() => setResolving(d)}
               onReReport={onReReport}
+              linkedReportOf={linkedReportOf}
               pendingWorkOrder={isVehicleDefectAttachable(d) && !!pendingWorkOrders?.has(defectKey(d))}
               onCreateWorkOrder={canCreate(d) ? () => create([d]) : undefined}
               selectable={canCreate(d) && attachableCount > 1}
@@ -260,15 +272,16 @@ export default function DefectsPanel({
         </div>
       )}
 
-      {resolving && (
+      {resolving && vehicleId && (
         <ResolveDefectModal
+          vehicleId={vehicleId}
           inspectionId={resolving.inspectionId}
           item={resolving.item}
           unit={resolving.unit}
           severity={resolving.severity}
           onClose={() => setResolving(null)}
-          onResolved={() => {
-            onResolved(resolving);
+          onResolved={(resolved) => {
+            onResolved(resolved);
             setResolving(null);
           }}
         />
@@ -306,6 +319,7 @@ function DefectRow({
   canResolve,
   onResolve,
   onReReport,
+  linkedReportOf,
   pendingWorkOrder = false,
   onCreateWorkOrder,
   selectable = false,
@@ -316,6 +330,7 @@ function DefectRow({
   canResolve: boolean;
   onResolve: () => void;
   onReReport?: (defect: VehicleDefectWire) => void;
+  linkedReportOf?: (inspectionId: string) => LinkedReport | undefined;
   pendingWorkOrder?: boolean;
   onCreateWorkOrder?: () => void;
   selectable?: boolean;
@@ -409,6 +424,11 @@ function DefectRow({
             glyph={resolutionMeta.glyph}
             label={`${reasonLabel(d.resolutionReason)} · ${d.resolvedBy ?? "Dispatch"} · ${formatUtcDate(d.resolvedAtUtc)}`}
           />
+          {d.resolvedWithInspectionId != null && (
+            <span style={{ ...dim, fontSize: 11.5, marginLeft: 8 }}>
+              · {clearedWithText(linkedReportOf?.(d.resolvedWithInspectionId), d.reportedAt)}
+            </span>
+          )}
           {d.resolutionNote && <div style={{ ...dim, marginTop: 4 }}>{d.resolutionNote}</div>}
         </div>
       )}
@@ -477,12 +497,26 @@ const MANUAL_REASONS: DefectResolutionReasonWire[] = [
   "AcceptedMonitoring",
 ];
 
+/** How long the duplicate preview may take before the modal stops waiting for
+ *  it and says it could not check. The preview must never block a resolve. */
+export const RESOLVE_PREVIEW_TIMEOUT_MS = 8000;
+
+type Preview = { status: "loading" } | { status: "error" } | { status: "ready"; rows: VehicleDefectWire[] };
+
 /**
- * Clears one defect, addressed by (inspectionId, item) — there is no defect id.
+ * Clears one defect, addressed by (inspectionId, item) — there is no defect id —
+ * AND every open duplicate of it: the same fault re-reported on other inspections
+ * of this vehicle (`sameDefectItem`). Before the confirm it previews what else
+ * will clear, says plainly when that includes a more severe report (an
+ * Out-of-Service report is never cleared silently), and puts the count on the
+ * confirm. If the preview cannot load it says so and the resolve stays
+ * available — it is a preview, never a gate.
+ *
  * Exported on its own so InspectionDetailModal can offer a per-defect resolve
  * beside its "create work order" action without mounting the whole panel.
  */
 export function ResolveDefectModal({
+  vehicleId,
   inspectionId,
   item,
   unit,
@@ -490,31 +524,66 @@ export function ResolveDefectModal({
   onClose,
   onResolved,
 }: {
+  /** The vehicle the defect is on — the preview lists its open defects. */
+  vehicleId: string;
   inspectionId: string;
   item: string;
   unit: string;
   severity?: DefectSeverityWire;
   onClose: () => void;
-  onResolved: () => void;
+  /** Every defect the resolve cleared: the addressed one first, then its duplicates. */
+  onResolved: (resolved: ResolvedDefect[]) => void;
 }) {
   const [reason, setReason] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<Preview>({ status: "loading" });
+
+  useEffect(() => {
+    let active = true;
+    // A preview that never answers must not hold the confirm for long.
+    const timer = setTimeout(() => {
+      if (active) setPreview((p) => (p.status === "loading" ? { status: "error" } : p));
+    }, RESOLVE_PREVIEW_TIMEOUT_MS);
+    listVehicleDefects(vehicleId).then(
+      (rows) => {
+        if (active) setPreview({ status: "ready", rows });
+      },
+      () => {
+        if (active) setPreview({ status: "error" });
+      },
+    );
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [vehicleId]);
+
+  // Server order (severity first) — filtered, never re-sorted.
+  const duplicates = preview.status === "ready" ? openDuplicatesOf(preview.rows, { inspectionId, item }) : [];
+  const addressedSeverity =
+    severity ??
+    (preview.status === "ready"
+      ? preview.rows.find((r) => r.inspectionId === inspectionId && r.item === item)?.severity
+      : undefined);
+  const moreSevere = moreSevereDuplicate(duplicates, addressedSeverity);
+  const clears = 1 + duplicates.length;
+  const checking = preview.status === "loading";
 
   async function submit() {
-    if (busy) return;
+    if (busy || checking) return;
     if (!reason) return setError("Choose why this defect is being cleared.");
     setBusy(true);
     setError(null);
     try {
-      await resolveInspectionDefect(inspectionId, {
+      const resolved = await resolveInspectionDefect(inspectionId, {
         item,
         reason: reason as DefectResolutionReasonWire,
         note: note.trim() || null,
         resolvedBy: "Dispatch",
       });
-      onResolved();
+      onResolved(resolved);
       // The one emit for every resolve, whichever surface opened this modal
       // (DefectsPanel or InspectionDetailModal) — after the parent's own
       // optimistic update, so listeners schedule their re-read from here.
@@ -531,14 +600,20 @@ export function ResolveDefectModal({
       title="Resolve Defect"
       onClose={onClose}
       error={error}
-      maxWidth={520}
+      maxWidth={560}
       footer={
         <>
           <ActionButton onClick={onClose} disabled={busy}>
             CANCEL
           </ActionButton>
-          <ActionButton variant="primary" onClick={submit} disabled={busy}>
-            {busy ? "RESOLVING…" : "RESOLVE DEFECT"}
+          <ActionButton variant="primary" onClick={submit} disabled={busy || checking}>
+            {busy
+              ? "RESOLVING…"
+              : checking
+                ? "CHECKING…"
+                : clears > 1
+                  ? `RESOLVE ${clears} REPORTS`
+                  : "RESOLVE DEFECT"}
           </ActionButton>
         </>
       }
@@ -555,6 +630,15 @@ export function ResolveDefectModal({
           {item}
         </span>
       </div>
+
+      <DuplicatePreview
+        preview={preview}
+        duplicates={duplicates}
+        moreSevere={moreSevere}
+        addressedSeverity={addressedSeverity}
+        item={item}
+        unit={unit}
+      />
 
       <div style={{ ...dim, marginBottom: 16 }}>
         Resolution is final — there is no reopen. If this fault comes back, it is recorded as a new
@@ -581,5 +665,98 @@ export function ResolveDefectModal({
         />
       </div>
     </ModalShell>
+  );
+}
+
+/** "a Major" / "an Out-of-Service" — the article a severity label takes. */
+function withArticle(severity: DefectSeverityWire): string {
+  const label = DEFECT_SEVERITY_LABEL[severity] ?? severity;
+  return `${/^[aeiou]/i.test(label) ? "an" : "a"} ${label}`;
+}
+
+/** What else a resolve will clear, shown before the dispatcher confirms it. */
+function DuplicatePreview({
+  preview,
+  duplicates,
+  moreSevere,
+  addressedSeverity,
+  item,
+  unit,
+}: {
+  preview: Preview;
+  duplicates: VehicleDefectWire[];
+  moreSevere: DefectSeverityWire | null;
+  addressedSeverity: DefectSeverityWire | undefined;
+  item: string;
+  unit: string;
+}) {
+  if (preview.status === "loading") {
+    return <div style={{ ...dim, marginBottom: 12 }}>Checking for other open reports of {item} on {unit}…</div>;
+  }
+  if (preview.status === "error") {
+    // Honest, and never a block: the resolve still clears any duplicates.
+    const m = statusMeta("soon");
+    return (
+      <div style={{ ...dim, color: m.t, fontWeight: 600, marginBottom: 12 }}>
+        {m.g} Couldn&apos;t check for duplicate reports — resolving also clears any other open report of {item} on{" "}
+        {unit}.
+      </div>
+    );
+  }
+  if (duplicates.length === 0) {
+    return (
+      <div style={{ ...dim, marginBottom: 12 }}>
+        No other open reports of {item} on {unit} — this clears this report only.
+      </div>
+    );
+  }
+
+  const n = duplicates.length;
+  const sm = moreSevere ? DEFECT_SEVERITY_META[moreSevere] : null;
+  return (
+    <div
+      style={{
+        marginBottom: 14,
+        padding: "10px 12px",
+        borderRadius: 9,
+        border: `1px solid ${colors.borderSubtle}`,
+        background: colors.cardBg,
+      }}
+    >
+      <div style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: 700, color: colors.textPrimary }}>
+        This also clears {n} other open report{n === 1 ? "" : "s"} of {item} on {unit}
+      </div>
+      {moreSevere && sm && (
+        // Plain words on a line of their own: a resolve never clears a worse
+        // report silently.
+        <div
+          style={{ fontFamily: fonts.body, fontSize: 12, fontWeight: 700, color: statusMeta(sm.kind).t, marginTop: 5 }}
+        >
+          {sm.glyph ?? statusMeta(sm.kind).g} Includes {withArticle(moreSevere)} report
+          {addressedSeverity
+            ? ` — more severe than the ${DEFECT_SEVERITY_LABEL[addressedSeverity]} one being resolved`
+            : ""}
+          .
+        </div>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 8 }}>
+        {duplicates.map((d) => {
+          const meta = DEFECT_SEVERITY_META[d.severity] ?? DEFECT_SEVERITY_META.Major;
+          return (
+            <div
+              key={defectKey(d)}
+              data-testid="duplicate-report"
+              style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
+            >
+              <StatusChip kind={meta.kind} glyph={meta.glyph} label={DEFECT_SEVERITY_LABEL[d.severity] ?? d.severity} />
+              {d.tripNumber ? <MonoTag color={colors.skyBlue}>{d.tripNumber}</MonoTag> : <MonoTag>no trip</MonoTag>}
+              <span style={{ ...dim, fontSize: 11.5 }}>
+                {d.inspectionType === "PreTrip" ? "Pre-Trip" : "Post-Trip"} · reported {formatUtcDate(d.reportedAt)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }

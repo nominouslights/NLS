@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import DefectsPanel from "./DefectsPanel";
-import type { VehicleDefectWire } from "@/lib/api/maintenance";
+import DefectsPanel, { RESOLVE_PREVIEW_TIMEOUT_MS, ResolveDefectModal } from "./DefectsPanel";
+import type { ResolvedDefect, VehicleDefectWire } from "@/lib/api/maintenance";
 import { vehicleDefect } from "@/lib/defect.fixtures";
 import { DEFECTS_CHANGED_EVENT, PROJECTION_RECONCILE_MS, notifyDefectsChanged } from "@/lib/defectSync";
 
@@ -11,7 +11,7 @@ import { DEFECTS_CHANGED_EVENT, PROJECTION_RECONCILE_MS, notifyDefectsChanged } 
 
 const { listVehicleDefects, resolveInspectionDefect } = vi.hoisted(() => ({
   listVehicleDefects: vi.fn<(vehicleId: string, includeResolved?: boolean) => Promise<VehicleDefectWire[]>>(),
-  resolveInspectionDefect: vi.fn<(inspectionId: string, body: unknown) => Promise<void>>(),
+  resolveInspectionDefect: vi.fn<(inspectionId: string, body: unknown) => Promise<ResolvedDefect[]>>(),
 }));
 
 vi.mock("@/lib/api/maintenance", async (importOriginal) => ({
@@ -125,7 +125,9 @@ describe("DefectsPanel — linked resolve", () => {
   it("drops the row now, announces it once, and reloads once after the projector window", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     listVehicleDefects.mockResolvedValue(rows);
-    resolveInspectionDefect.mockResolvedValueOnce(undefined);
+    resolveInspectionDefect.mockResolvedValueOnce([
+      { inspectionId: "i-1", item: "Brakes", tripNumber: "NL-2026-0042", severity: "OutOfService" },
+    ]);
     const announced = vi.fn();
     window.addEventListener(DEFECTS_CHANGED_EVENT, announced);
     try {
@@ -134,6 +136,9 @@ describe("DefectsPanel — linked resolve", () => {
       expect(listVehicleDefects).toHaveBeenCalledTimes(1);
 
       fireEvent.click(screen.getAllByText("RESOLVE")[0]);
+      // The modal's duplicate preview is the second read.
+      await screen.findByText(/No other open reports of Brakes/);
+      expect(listVehicleDefects).toHaveBeenCalledTimes(2);
       fireEvent.change(screen.getByRole("combobox"), { target: { value: "ReportedInError" } });
       fireEvent.click(screen.getByText("RESOLVE DEFECT"));
 
@@ -141,16 +146,16 @@ describe("DefectsPanel — linked resolve", () => {
       expect(resolveInspectionDefect).toHaveBeenCalledWith("i-1", expect.objectContaining({ item: "Brakes" }));
       expect(announced).toHaveBeenCalledTimes(1);
       // Not immediately — the projection is still stale.
-      expect(listVehicleDefects).toHaveBeenCalledTimes(1);
+      expect(listVehicleDefects).toHaveBeenCalledTimes(2);
 
       await act(async () => {
         vi.advanceTimersByTime(PROJECTION_RECONCILE_MS);
       });
-      await waitFor(() => expect(listVehicleDefects).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(listVehicleDefects).toHaveBeenCalledTimes(3));
       await act(async () => {
         vi.advanceTimersByTime(PROJECTION_RECONCILE_MS * 2);
       });
-      expect(listVehicleDefects).toHaveBeenCalledTimes(2);
+      expect(listVehicleDefects).toHaveBeenCalledTimes(3);
     } finally {
       window.removeEventListener(DEFECTS_CHANGED_EVENT, announced);
     }
@@ -171,5 +176,212 @@ describe("DefectsPanel — linked resolve", () => {
     });
     await waitFor(() => expect(screen.queryByText("Brakes")).toBeNull());
     expect(listVehicleDefects).toHaveBeenCalledTimes(2);
+  });
+});
+
+// A known fault is re-reported on every daily pre-trip until it is fixed, so
+// resolving one report clears every open duplicate of it (same vehicle, same
+// item trimmed and case-insensitive). The modal previews that BEFORE the
+// confirm, and never clears a more severe report without saying so.
+describe("ResolveDefectModal — duplicate preview", () => {
+  const addressed = vehicleDefect({ inspectionId: "i-1", item: "Brakes", severity: "Minor", tripNumber: "NL-2026-0050" });
+
+  function renderModal(severity: VehicleDefectWire["severity"] | undefined = "Minor") {
+    const onResolved = vi.fn();
+    render(
+      <ResolveDefectModal
+        vehicleId="veh-1"
+        inspectionId="i-1"
+        item="Brakes"
+        unit="NL-02"
+        severity={severity}
+        onClose={() => {}}
+        onResolved={onResolved}
+      />,
+    );
+    return { onResolved };
+  }
+
+  it("says plainly when there is nothing else to clear", async () => {
+    listVehicleDefects.mockResolvedValueOnce([addressed, vehicleDefect({ inspectionId: "i-2", item: "Wipers" })]);
+    renderModal();
+
+    await screen.findByText("No other open reports of Brakes on NL-02 — this clears this report only.");
+    expect(listVehicleDefects).toHaveBeenCalledWith("veh-1");
+    expect(screen.queryAllByTestId("duplicate-report")).toHaveLength(0);
+    expect(screen.getByText("RESOLVE DEFECT")).toBeTruthy();
+  });
+
+  it("lists every open duplicate (trimmed, case-insensitive) in server order, and counts them on the confirm", async () => {
+    listVehicleDefects.mockResolvedValueOnce([
+      vehicleDefect({ inspectionId: "i-3", item: " brakes ", severity: "Minor", tripNumber: "NL-2026-0048" }),
+      addressed,
+      vehicleDefect({ inspectionId: "i-2", item: "BRAKES", severity: "Minor", tripNumber: null }),
+      // Not duplicates: another component, and a report already resolved.
+      vehicleDefect({ inspectionId: "i-4", item: "Brake lights", severity: "Minor" }),
+      vehicleDefect({
+        inspectionId: "i-5",
+        item: "Brakes",
+        resolvedAtUtc: "2026-09-01T00:00:00Z",
+        resolutionReason: "ReportedInError",
+      }),
+    ]);
+    renderModal();
+
+    await screen.findByText("This also clears 2 other open reports of Brakes on NL-02");
+    const listed = screen.getAllByTestId("duplicate-report");
+    expect(listed).toHaveLength(2);
+    // Server order kept, never re-sorted.
+    expect(listed[0].textContent).toContain("NL-2026-0048");
+    expect(listed[1].textContent).toContain("no trip");
+    // Each one carries its severity chip: colour + glyph + words.
+    expect(listed[0].textContent).toContain("◐");
+    expect(listed[0].textContent).toContain("Minor");
+    expect(screen.getByText("RESOLVE 3 REPORTS")).toBeTruthy();
+    // Same severity: no "more severe" warning.
+    expect(screen.queryByText(/Includes/)).toBeNull();
+  });
+
+  it("never clears a more severe report silently", async () => {
+    listVehicleDefects.mockResolvedValueOnce([
+      vehicleDefect({ inspectionId: "i-2", item: "Brakes", severity: "OutOfService", tripNumber: "NL-2026-0049" }),
+      vehicleDefect({ inspectionId: "i-3", item: "brakes", severity: "Major" }),
+      addressed,
+    ]);
+    renderModal("Minor");
+
+    await screen.findByText("This also clears 2 other open reports of Brakes on NL-02");
+    // The worst one is named, with Out-of-Service's own ✕ glyph.
+    const warning = screen.getByText(/Includes an Out-of-Service report/);
+    expect(warning.textContent).toBe(
+      "✕ Includes an Out-of-Service report — more severe than the Minor one being resolved.",
+    );
+    expect(screen.getByText("RESOLVE 3 REPORTS")).toBeTruthy();
+  });
+
+  it("names a Major duplicate when that is the worst", async () => {
+    listVehicleDefects.mockResolvedValueOnce([
+      vehicleDefect({ inspectionId: "i-2", item: "Brakes", severity: "Major" }),
+      addressed,
+    ]);
+    renderModal("Minor");
+    await screen.findByText("This also clears 1 other open report of Brakes on NL-02");
+    expect(screen.getByText(/Includes a Major report/)).toBeTruthy();
+    expect(screen.getByText("RESOLVE 2 REPORTS")).toBeTruthy();
+  });
+
+  it("keeps the resolve available with an honest line when the preview fails", async () => {
+    listVehicleDefects.mockRejectedValueOnce(new Error("offline"));
+    resolveInspectionDefect.mockResolvedValueOnce([
+      { inspectionId: "i-1", item: "Brakes", tripNumber: null, severity: "Minor" },
+    ]);
+    const { onResolved } = renderModal();
+
+    await screen.findByText(/Couldn.t check for duplicate reports/);
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "PreviouslyRepaired" } });
+    fireEvent.click(screen.getByText("RESOLVE DEFECT"));
+    await waitFor(() => expect(onResolved).toHaveBeenCalledTimes(1));
+    expect(resolveInspectionDefect).toHaveBeenCalledWith("i-1", expect.objectContaining({ item: "Brakes" }));
+  });
+
+  it("holds the confirm only while checking, and stops waiting after the timeout", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    listVehicleDefects.mockReturnValueOnce(new Promise(() => {}));
+    renderModal();
+
+    expect(screen.getByText("CHECKING…")).toBeTruthy();
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "PreviouslyRepaired" } });
+    fireEvent.click(screen.getByText("CHECKING…"));
+    expect(resolveInspectionDefect).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(RESOLVE_PREVIEW_TIMEOUT_MS);
+    });
+    await screen.findByText(/Couldn.t check for duplicate reports/);
+    expect(screen.getByText("RESOLVE DEFECT")).toBeTruthy();
+  });
+});
+
+describe("DefectsPanel — a resolve clears the duplicates too", () => {
+  const brakes = [
+    vehicleDefect({ inspectionId: "i-1", item: "Brakes", severity: "Major", tripNumber: "NL-2026-0050" }),
+    vehicleDefect({ inspectionId: "i-2", item: "Wipers", severity: "Minor" }),
+    vehicleDefect({ inspectionId: "i-3", item: "brakes", severity: "Minor", tripNumber: "NL-2026-0049" }),
+    vehicleDefect({ inspectionId: "i-4", item: "Brakes ", severity: "Minor", tripNumber: "NL-2026-0048" }),
+  ];
+  const brakeRows = () => screen.queryAllByText(/^brakes\s*$/i);
+
+  it("drops every row in the response at once, not just the addressed one", async () => {
+    listVehicleDefects.mockResolvedValue(brakes);
+    resolveInspectionDefect.mockResolvedValueOnce([
+      { inspectionId: "i-1", item: "Brakes", tripNumber: "NL-2026-0050", severity: "Major" },
+      { inspectionId: "i-4", item: "Brakes ", tripNumber: "NL-2026-0048", severity: "Minor" },
+      { inspectionId: "i-3", item: "brakes", tripNumber: "NL-2026-0049", severity: "Minor" },
+    ]);
+    render(<DefectsPanel vehicleId="veh-1" unit="NL-02" canResolve />);
+    await screen.findByText("Wipers");
+    expect(brakeRows()).toHaveLength(3);
+
+    fireEvent.click(screen.getAllByText("RESOLVE")[0]);
+    await screen.findByText("This also clears 2 other open reports of Brakes on NL-02");
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "PreviouslyRepaired" } });
+    fireEvent.click(screen.getByText("RESOLVE 3 REPORTS"));
+
+    await waitFor(() => expect(brakeRows()).toHaveLength(0));
+    expect(screen.getByText("Wipers")).toBeTruthy();
+  });
+
+  it("drops just the addressed row when an older API answers with no body", async () => {
+    listVehicleDefects.mockResolvedValue(brakes);
+    // What resolveInspectionDefect hands back for an empty body (see its own test).
+    resolveInspectionDefect.mockResolvedValueOnce([
+      { inspectionId: "i-1", item: "Brakes", tripNumber: null, severity: null },
+    ]);
+    render(<DefectsPanel vehicleId="veh-1" unit="NL-02" canResolve />);
+    await screen.findByText("Wipers");
+
+    fireEvent.click(screen.getAllByText("RESOLVE")[0]);
+    await screen.findByText(/This also clears/);
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "PreviouslyRepaired" } });
+    fireEvent.click(screen.getByText("RESOLVE 3 REPORTS"));
+
+    await waitFor(() => expect(brakeRows()).toHaveLength(2));
+  });
+
+  it("says a resolved row was cleared with another report, naming its trip from the loaded rows", async () => {
+    listVehicleDefects.mockResolvedValue([
+      vehicleDefect({
+        inspectionId: "i-1",
+        item: "Brakes",
+        tripNumber: "NL-2026-0050",
+        reportedAt: "2026-10-05T12:00:00Z",
+        resolutionReason: "PreviouslyRepaired",
+        resolvedAtUtc: "2026-10-06T00:00:00Z",
+      }),
+      vehicleDefect({
+        inspectionId: "i-3",
+        item: "brakes",
+        tripNumber: "NL-2026-0049",
+        reportedAt: "2026-10-03T12:00:00Z",
+        resolutionReason: "PreviouslyRepaired",
+        resolvedAtUtc: "2026-10-06T00:00:00Z",
+        resolvedWithInspectionId: "i-1",
+      }),
+      vehicleDefect({
+        inspectionId: "i-9",
+        item: "Horn",
+        resolutionReason: "PreviouslyRepaired",
+        resolvedAtUtc: "2026-10-06T00:00:00Z",
+        resolvedWithInspectionId: "i-unloaded",
+      }),
+    ]);
+    render(<DefectsPanel vehicleId="veh-1" unit="NL-02" showResolvedToggle />);
+    await screen.findByText("Horn");
+
+    expect(screen.getByText("· cleared with the later report on NL-2026-0050")).toBeTruthy();
+    // Not among the loaded rows: said generically, never fetched per row.
+    expect(screen.getByText("· cleared with another report of this fault")).toBeTruthy();
+    expect(screen.getAllByText(/cleared with/)).toHaveLength(2);
+    expect(listVehicleDefects).toHaveBeenCalledTimes(1);
   });
 });

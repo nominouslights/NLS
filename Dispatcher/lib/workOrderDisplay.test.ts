@@ -105,6 +105,7 @@ describe("inspectionDefectStatus", () => {
     workOrderId: null,
     resolutionReason: null,
     resolvedAtUtc: null,
+    resolvedWithInspectionId: null,
     ...over,
   });
   const resolved = { resolutionReason: "ReportedInError" as const, resolvedAtUtc: "2026-10-02T00:00:00Z" };

@@ -34,6 +34,7 @@ function inspection(checklist: InspectionChecklistItemWire[], defectFixtures: De
     workOrderId: null,
     resolutionReason: null,
     resolvedAtUtc: null,
+    resolvedWithInspectionId: null,
     ...d,
   }));
   return {
