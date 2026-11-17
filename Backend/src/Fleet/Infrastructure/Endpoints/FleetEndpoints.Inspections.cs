@@ -143,6 +143,11 @@ public static partial class FleetEndpoints
     /// double-click guard, since the panel removes the row optimistically), 400
     /// (<c>Fleet.Inspection.ResolutionReasonReservedForWorkOrder</c>) for
     /// <c>RepairedUnderWorkOrder</c> or <c>NoFaultFound</c>, which only work-order completion sets.
+    ///
+    /// 200 with <see cref="ResolveInspectionDefectResponse"/>: <c>{ "resolved": [ { inspectionId,
+    /// item, tripNumber, severity } ] }</c> — the addressed defect first, then every open duplicate
+    /// of the same component on the vehicle's other inspections that was cleared with it, oldest
+    /// report first. Duplicates never turn a success into an error.
     /// </summary>
     private static async Task<IResult> ResolveInspectionDefect(
         Guid id,
@@ -165,7 +170,7 @@ public static partial class FleetEndpoints
             request.ResolvedBy);
 
         var result = await sender.Send(command, cancellationToken);
-        return result.IsSuccess ? Results.NoContent() : EndpointResults.Problem(result.Error);
+        return result.IsSuccess ? Results.Ok(result.Value) : EndpointResults.Problem(result.Error);
     }
 
     /// <summary>

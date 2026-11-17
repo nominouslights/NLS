@@ -132,7 +132,7 @@ public static class FleetServiceCollectionExtensions
         services.AddScoped<ICommandHandler<UpdateInspectionCommand>, UpdateInspectionCommandHandler>();
         services.AddScoped<ICommandHandler<RemoveInspectionCommand>, RemoveInspectionCommandHandler>();
         services.AddScoped<IQueryHandler<GetVehicleDefectsQuery, IReadOnlyList<VehicleDefectResponse>>, GetVehicleDefectsQueryHandler>();
-        services.AddScoped<ICommandHandler<ResolveInspectionDefectCommand>, ResolveInspectionDefectCommandHandler>();
+        services.AddScoped<ICommandHandler<ResolveInspectionDefectCommand, ResolveInspectionDefectResponse>, ResolveInspectionDefectCommandHandler>();
         services.AddScoped<ICommandHandler<AcknowledgeInspectionCarrierCommand>, AcknowledgeInspectionCarrierCommandHandler>();
         services.AddScoped<ICommandHandler<PropagateInspectionOdometerCommand>, PropagateInspectionOdometerCommandHandler>();
         services.AddScoped<ICommandHandler<RegisterShopCommand, Guid>, RegisterShopCommandHandler>();

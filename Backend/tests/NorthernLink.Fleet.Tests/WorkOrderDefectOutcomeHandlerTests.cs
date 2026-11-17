@@ -21,9 +21,10 @@ public class WorkOrderDefectOutcomeHandlerTests
         public InMemoryWorkOrderRepository WorkOrders { get; } = new();
         public InMemoryServiceRecordRepository Services { get; } = new();
         public InMemoryVehicleInspectionRepository Inspections { get; } = new();
+        public InMemoryVehicleRepository Vehicles { get; } = new();
         public Guid VehicleId { get; } = Guid.NewGuid();
 
-        public CompleteWorkOrderCommandHandler Complete => new(WorkOrders, Services, Inspections);
+        public CompleteWorkOrderCommandHandler Complete => new(WorkOrders, Services, Inspections, Vehicles);
 
         public ChangeWorkOrderStatusCommandHandler ChangeStatus => new(WorkOrders, Inspections);
 
@@ -388,5 +389,130 @@ public class WorkOrderDefectOutcomeHandlerTests
         var removed = await remove.Handle(new RemoveInspectionCommand(inspection.Id), CancellationToken.None);
         Assert.True(removed.IsSuccess);
         Assert.Empty(f.Inspections.Inspections);
+    }
+
+    // ---- Duplicates: the same component, still open, on the vehicle's other inspections ----
+
+    [Theory]
+    [InlineData(DefectRepairOutcome.Repaired, DefectResolutionReason.RepairedUnderWorkOrder)]
+    [InlineData(DefectRepairOutcome.NoFaultFound, DefectResolutionReason.NoFaultFound)]
+    public async Task A_resolving_outcome_clears_the_lines_duplicates_under_this_work_order(
+        DefectRepairOutcome outcome, DefectResolutionReason expectedReason)
+    {
+        var f = new Fixture();
+        var addressed = f.Inspection(Defect("Mirrors"));
+        var day2 = f.Inspection(Defect("mirrors"), Defect("Wipers"));
+        var day3 = f.Inspection(Defect(" MIRRORS "));
+        var workOrder = f.WorkOrderFor((addressed, "Mirrors"));
+
+        var result = await f.Complete.Handle(
+            Command(workOrder.Id, [Outcome(addressed, "Mirrors", outcome, "glass replaced")]),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(1, f.WorkOrders.SaveChangesCallCount);
+        Assert.Null(addressed.FindDefect("Mirrors")!.ResolvedWithInspectionId);
+
+        foreach (var duplicate in new[] { day2.FindDefect("Mirrors")!, day3.FindDefect("Mirrors")! })
+        {
+            Assert.Equal(expectedReason, duplicate.ResolutionReason);
+            Assert.Equal(workOrder.Id, duplicate.ResolvedByWorkOrderId);
+            Assert.Equal("glass replaced", duplicate.ResolutionNote);
+            Assert.Equal("M. Cardinal", duplicate.ResolvedBy);
+            Assert.Equal(addressed.Id, duplicate.ResolvedWithInspectionId);
+            Assert.Null(duplicate.WorkOrderId);
+        }
+
+        Assert.False(day2.FindDefect("Wipers")!.IsResolved);
+    }
+
+    [Fact]
+    public async Task Deferred_cascades_nothing()
+    {
+        var f = new Fixture();
+        var addressed = f.Inspection(Defect("Mirrors", InspectionDefectSeverity.Minor));
+        var duplicate = f.Inspection(Defect("Mirrors", InspectionDefectSeverity.Minor));
+        var workOrder = f.WorkOrderFor((addressed, "Mirrors"));
+
+        var result = await f.Complete.Handle(
+            Command(workOrder.Id, [Outcome(addressed, "Mirrors", DefectRepairOutcome.Deferred, "no glass in stock")]),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.False(addressed.FindDefect("Mirrors")!.IsResolved);
+        Assert.False(duplicate.FindDefect("Mirrors")!.IsResolved);
+        Assert.Equal(0, f.Inspections.GetWithOpenDefectCallCount);
+    }
+
+    [Fact]
+    public async Task A_duplicate_on_another_open_work_order_is_resolved_but_keeps_that_work_order()
+    {
+        var f = new Fixture();
+        var addressed = f.Inspection(Defect("Mirrors"));
+        var duplicate = f.Inspection(Defect("Mirrors"));
+        var otherWorkOrder = Guid.NewGuid();
+        Assert.True(duplicate.AssignDefectToWorkOrder("Mirrors", otherWorkOrder, generatedWorkOrderIsOpen: false).IsSuccess);
+        var workOrder = f.WorkOrderFor((addressed, "Mirrors"));
+
+        await f.Complete.Handle(
+            Command(workOrder.Id, [Outcome(addressed, "Mirrors", DefectRepairOutcome.Repaired)]),
+            CancellationToken.None);
+
+        var mirrors = duplicate.FindDefect("Mirrors")!;
+        Assert.True(mirrors.IsResolved);
+        Assert.Equal(workOrder.Id, mirrors.ResolvedByWorkOrderId);
+        Assert.Equal(otherWorkOrder, mirrors.WorkOrderId);
+    }
+
+    [Fact]
+    public async Task Two_lines_for_the_same_component_each_keep_their_own_lines_stamp()
+    {
+        var f = new Fixture();
+        var day1 = f.Inspection(Defect("Mirrors"));
+        var day2 = f.Inspection(Defect("Mirrors"));
+        var day3 = f.Inspection(Defect("Mirrors"));
+        var workOrder = f.WorkOrderFor((day1, "Mirrors"), (day2, "Mirrors"));
+
+        var result = await f.Complete.Handle(
+            Command(workOrder.Id, [
+                Outcome(day1, "Mirrors", DefectRepairOutcome.Repaired, "left mirror"),
+                Outcome(day2, "Mirrors", DefectRepairOutcome.NoFaultFound, "right mirror fine"),
+            ]),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+
+        // Each line's own defect is stamped by its own line, not swept up by the other.
+        Assert.Equal("left mirror", day1.FindDefect("Mirrors")!.ResolutionNote);
+        Assert.Null(day1.FindDefect("Mirrors")!.ResolvedWithInspectionId);
+        Assert.Equal(DefectResolutionReason.NoFaultFound, day2.FindDefect("Mirrors")!.ResolutionReason);
+        Assert.Null(day2.FindDefect("Mirrors")!.ResolvedWithInspectionId);
+
+        // The one with no line of its own is a duplicate of the first line that resolved.
+        var third = day3.FindDefect("Mirrors")!;
+        Assert.Equal(day1.Id, third.ResolvedWithInspectionId);
+        Assert.Equal("left mirror", third.ResolutionNote);
+        Assert.Null(third.WorkOrderId);
+    }
+
+    [Fact]
+    public async Task A_line_whose_defect_was_cleared_by_hand_meanwhile_cascades_nothing_more()
+    {
+        var f = new Fixture();
+        var addressed = f.Inspection(Defect("Mirrors"));
+        var workOrder = f.WorkOrderFor((addressed, "Mirrors"));
+        Assert.True(addressed
+            .ResolveDefect("Mirrors", DefectResolutionReason.PreviouslyRepaired, null, "Dispatch", DateTimeOffset.UtcNow)
+            .IsSuccess);
+        // Reported AFTER that hand-resolve: a recurrence, not a duplicate of it.
+        var later = f.Inspection(Defect("Mirrors"));
+
+        var result = await f.Complete.Handle(
+            Command(workOrder.Id, [Outcome(addressed, "Mirrors", DefectRepairOutcome.Repaired)]),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Null(addressed.FindDefect("Mirrors")!.WorkOrderId);
+        Assert.False(later.FindDefect("Mirrors")!.IsResolved);
     }
 }

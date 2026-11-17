@@ -19,18 +19,20 @@ internal static class TestInspections
         InspectionFuelLevel? fuelLevel = InspectionFuelLevel.Full,
         IReadOnlyList<InspectionChecklistItem>? checklistItems = null,
         string? certificationStatement = null,
-        string? location = null)
+        string? location = null,
+        DateTimeOffset? performedAt = null,
+        string? tripNumber = "TR-4818")
     {
         var result = VehicleInspection.Enter(
             TestVehicles.TenantId,
             source,
             InspectionType.PreTrip,
-            tripNumber: "TR-4818",
+            tripNumber,
             vehicleId,
             unit,
             driverName: "J. Spence",
             enteredBy: null,
-            performedAt: DateTimeOffset.UtcNow,
+            performedAt: performedAt ?? DateTimeOffset.UtcNow,
             odometerKm,
             checklistItems: checklistItems
                 ?? [new InspectionChecklistItem { Group = "Exterior & Mechanical", Item = "Tires", Passed = true }],

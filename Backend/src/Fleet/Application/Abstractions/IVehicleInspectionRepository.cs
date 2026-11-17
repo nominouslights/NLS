@@ -42,6 +42,19 @@ public interface IVehicleInspectionRepository
         Guid workOrderId,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// The duplicate-clearing candidate set: TRACKED inspections (tenant-filtered, like
+    /// <see cref="GetByIdAsync"/>) of the vehicle <paramref name="scope"/> describes that carry an
+    /// OPEN defect whose Item matches <paramref name="item"/> (trimmed, case-insensitive). The
+    /// result may include the addressed inspection itself; <c>DuplicateDefects.Resolve</c>
+    /// re-applies the whole rule in memory and skips anything that does not qualify, so this is a
+    /// narrowing query, not the source of truth.
+    /// </summary>
+    Task<IReadOnlyList<VehicleInspection>> GetWithOpenDefectAsync(
+        DefectVehicleScope scope,
+        string item,
+        CancellationToken cancellationToken = default);
+
     void Add(VehicleInspection inspection);
 
     /// <summary>Hard-deletes an inspection. The aggregate must raise its removal event first.</summary>

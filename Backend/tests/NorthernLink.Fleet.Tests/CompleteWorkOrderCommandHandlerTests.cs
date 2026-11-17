@@ -37,7 +37,7 @@ public class CompleteWorkOrderCommandHandlerTests
         var services = new InMemoryServiceRecordRepository();
         var inspections = new InMemoryVehicleInspectionRepository();
 
-        return (new CompleteWorkOrderCommandHandler(workOrders, services, inspections),
+        return (new CompleteWorkOrderCommandHandler(workOrders, services, inspections, new InMemoryVehicleRepository()),
             workOrders, services, inspections);
     }
 
@@ -293,5 +293,40 @@ public class CompleteWorkOrderCommandHandlerTests
         // work order so a dispatcher sees a repair was attempted and called off.
         Assert.False(Assert.Single(inspection.Defects).IsResolved);
         Assert.Equal(0, workOrders.SaveChangesCallCount);
+    }
+
+    [Fact]
+    public async Task The_legacy_path_also_clears_the_duplicates_of_each_defect_it_resolved()
+    {
+        var (handler, workOrders, _, inspections) = Setup();
+        var vehicleId = Guid.NewGuid();
+        // A one-defect work order: only Brakes is resolved by it, so only Brakes cascades.
+        var workOrder = OpenWorkOrder(vehicleId, ["Brakes — Major: as found"]);
+        workOrders.Add(workOrder);
+
+        var source = TestInspections.PreTrip(vehicleId: vehicleId, defects: [Defect("Brakes"), Defect("Defroster")]);
+        Assert.True(source.LinkWorkOrder(workOrder.Id).IsSuccess);
+        var earlier = TestInspections.PreTrip(
+            vehicleId: vehicleId, defects: [Defect(" brakes"), Defect("Defroster")], performedAt: DateTimeOffset.UtcNow.AddDays(-1));
+        var otherTruck = TestInspections.PreTrip(vehicleId: Guid.NewGuid(), unit: "U-07", defects: [Defect("Brakes")]);
+        inspections.Add(source);
+        inspections.Add(earlier);
+        inspections.Add(otherTruck);
+
+        var result = await handler.Handle(Command(workOrder.Id), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        var brakes = earlier.FindDefect("Brakes")!;
+        Assert.Equal(DefectResolutionReason.RepairedUnderWorkOrder, brakes.ResolutionReason);
+        Assert.Equal(workOrder.Id, brakes.ResolvedByWorkOrderId);
+        Assert.Equal("M. Cardinal", brakes.ResolvedBy);
+        Assert.Null(brakes.ResolutionNote);
+        Assert.Equal(source.Id, brakes.ResolvedWithInspectionId);
+        Assert.Null(source.FindDefect("Brakes")!.ResolvedWithInspectionId);
+
+        // Not resolved by this work order on the source, so not cascaded either.
+        Assert.False(earlier.FindDefect("Defroster")!.IsResolved);
+        Assert.False(otherTruck.FindDefect("Brakes")!.IsResolved);
+        Assert.Equal(1, workOrders.SaveChangesCallCount);
     }
 }

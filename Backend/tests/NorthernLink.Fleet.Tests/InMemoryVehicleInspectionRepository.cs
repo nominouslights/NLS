@@ -34,6 +34,27 @@ internal sealed class InMemoryVehicleInspectionRepository : IVehicleInspectionRe
         CancellationToken cancellationToken = default) =>
         Task.FromResult(Inspections.FirstOrDefault(i => i.GeneratedWorkOrderId == workOrderId));
 
+    /// <summary>
+    /// Mirrors the SQL narrowing (scope + an open defect for the item); the canonical rule is
+    /// re-applied by <c>DuplicateDefects.Resolve</c> either way.
+    /// </summary>
+    public Task<IReadOnlyList<VehicleInspection>> GetWithOpenDefectAsync(
+        DefectVehicleScope scope,
+        string item,
+        CancellationToken cancellationToken = default)
+    {
+        GetWithOpenDefectCallCount++;
+        var key = item.Trim();
+        IReadOnlyList<VehicleInspection> matches = Inspections
+            .Where(scope.Includes)
+            .Where(i => i.Defects.Any(d =>
+                !d.IsResolved && string.Equals(d.Item.Trim(), key, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+        return Task.FromResult(matches);
+    }
+
+    public int GetWithOpenDefectCallCount { get; private set; }
+
     public void Add(VehicleInspection inspection) => Inspections.Add(inspection);
 
     public void Remove(VehicleInspection inspection) => Inspections.Remove(inspection);
