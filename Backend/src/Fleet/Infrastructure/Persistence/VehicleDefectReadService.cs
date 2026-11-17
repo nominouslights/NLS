@@ -108,6 +108,7 @@ internal sealed class VehicleDefectReadService(FleetDbContext context) : IVehicl
                         defect.ResolvedBy,
                         defect.ResolvedAtUtc,
                         defect.ResolvedByWorkOrderId,
+                        defect.ResolvedWithInspectionId,
                         DeriveRecurrence(inspection, defect, cleared, workOrdersById))));
             }
         }

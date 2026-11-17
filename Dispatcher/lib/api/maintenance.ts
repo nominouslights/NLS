@@ -44,6 +44,12 @@ export interface InspectionDefectWire {
   /** A `DefectResolutionReasonWire` name; with `resolvedAtUtc`, null while open. */
   resolutionReason: DefectResolutionReasonWire | null;
   resolvedAtUtc: string | null;
+  /** Set when this defect was cleared AS A DUPLICATE: the inspection id of the
+   *  report of the same fault (same vehicle, same item) that was resolved — by
+   *  hand, or by a work order's Repaired / NoFaultFound — and took this one with
+   *  it. Null on a directly resolved defect and while open. Read with `!= null`:
+   *  an API from before the cascade omits it. */
+  resolvedWithInspectionId: string | null;
 }
 
 export interface VehicleInspection {
@@ -251,6 +257,9 @@ export interface VehicleDefectWire {
   resolvedBy: string | null;
   resolvedAtUtc: string | null;
   resolvedByWorkOrderId: string | null;
+  /** See `InspectionDefectWire.resolvedWithInspectionId` — the report this one
+   *  was cleared with, when it was cleared as a duplicate. */
+  resolvedWithInspectionId: string | null;
   recurrence: PreviousResolutionWire | null;
 }
 
@@ -261,19 +270,86 @@ export function listVehicleDefects(vehicleId: string, includeResolved = false): 
   return request<VehicleDefectWire[]>(`/api/fleet/vehicles/${vehicleId}/defects${qs}`);
 }
 
-/** POST /api/fleet/inspections/{id}/defects/resolve — clears one defect. The
- *  item travels in the BODY, not the path: it is free text, and half the row's
- *  key. 404 for an unknown inspection or item, 409 when already resolved
- *  (resolution is final). `resolvedBy` is client-supplied, following the same
- *  convention as an inspection's `enteredBy`; it defaults to "Dispatch". */
-export function resolveInspectionDefect(
+/** One defect a resolve cleared, as `POST …/defects/resolve` reports it. */
+export interface ResolvedDefectWire {
+  inspectionId: string;
+  item: string;
+  tripNumber: string | null;
+  severity: DefectSeverityWire;
+}
+
+/** A cleared defect as the client holds it. `severity` is null ONLY on the
+ *  stand-in for an older API that answered with no body (see
+ *  `resolveInspectionDefect`) — the client did not see what it cleared. */
+export type ResolvedDefect = Omit<ResolvedDefectWire, "severity"> & { severity: DefectSeverityWire | null };
+
+/** Another open report of the same fault, as the duplicate preview lists it. */
+export interface DefectDuplicateWire {
+  inspectionId: string;
+  item: string;
+  tripNumber: string | null;
+  severity: DefectSeverityWire;
+  reportedAt: string;
+}
+
+/** GET /api/fleet/inspections/{id}/defects/duplicates?item= — the OTHER open
+ *  reports of (inspectionId, item) on the same vehicle that a repair would clear
+ *  with it, oldest first. Read from the write model with the cascade's own scope,
+ *  so it never lags the projector the way `listVehicleDefects` does. 404 for an
+ *  unknown inspection or item (like resolve); `{ duplicates: [] }` when there are
+ *  none. A body without the list is thrown as an error rather than read as
+ *  "none": a preview that cannot say must never claim there is nothing to clear. */
+export async function previewDefectDuplicates(inspectionId: string, item: string): Promise<DefectDuplicateWire[]> {
+  const res = await request<{ duplicates?: DefectDuplicateWire[] | null } | undefined | null>(
+    `/api/fleet/inspections/${inspectionId}/defects/duplicates?item=${encodeURIComponent(item)}`,
+  );
+  if (!Array.isArray(res?.duplicates)) throw new Error("The duplicate preview returned no list.");
+  return res.duplicates;
+}
+
+/** POST /api/fleet/inspections/{id}/defects/resolve — clears one defect, plus
+ *  exactly the duplicates listed in `clearDuplicates`. Only a REPAIR clears other
+ *  reports: a non-empty `clearDuplicates` is accepted with `PreviouslyRepaired`
+ *  only (400 otherwise), and the server clears only those listed that are still
+ *  valid duplicates (same vehicle, same `item` trimmed and case-insensitive,
+ *  still open). Null or empty clears none. The item travels in the BODY, not the
+ *  path: it is free text, and half the row's key. 404 for an unknown inspection
+ *  or item, 409 when already resolved (resolution is final). `resolvedBy` is
+ *  client-supplied, following the same convention as an inspection's
+ *  `enteredBy`; it defaults to "Dispatch".
+ *
+ *  Returns every defect ACTUALLY cleared: the addressed one first, then the
+ *  duplicates. An API from before the cascade answers with no body; that is read
+ *  as "just the addressed defect", which is exactly what it cleared. */
+export async function resolveInspectionDefect(
   inspectionId: string,
-  body: { item: string; reason: DefectResolutionReasonWire; note?: string | null; resolvedBy?: string | null },
-): Promise<void> {
-  return request<void>(`/api/fleet/inspections/${inspectionId}/defects/resolve`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+  body: {
+    item: string;
+    reason: DefectResolutionReasonWire;
+    note?: string | null;
+    resolvedBy?: string | null;
+    clearDuplicates?: { inspectionId: string; item: string }[] | null;
+  },
+): Promise<ResolvedDefect[]> {
+  const res = await request<{ resolved?: ResolvedDefectWire[] | null } | undefined | null>(
+    `/api/fleet/inspections/${inspectionId}/defects/resolve`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+  const resolved = res?.resolved;
+  if (Array.isArray(resolved) && resolved.length > 0) return resolved;
+  return [{ inspectionId, item: body.item, tripNumber: null, severity: null }];
+}
+
+/** The backend's duplicate rule for a defect item: trimmed, case-insensitive.
+ *  The ONE place the client compares two reports' items — the inspection forms'
+ *  known-fault hints use it. The resolve preview does NOT: it asks the server
+ *  (`previewDefectDuplicates`), which applies the cascade's own scope. */
+export function normaliseDefectItem(item: string): string {
+  return item.trim().toLowerCase();
+}
+
+export function sameDefectItem(a: string, b: string): boolean {
+  return normaliseDefectItem(a) === normaliseDefectItem(b);
 }
 
 /** POST /api/fleet/inspections/{id}/carrier-acknowledgement — signs the NL-PTI-01

@@ -67,7 +67,10 @@ public sealed record InspectionChecklistItemResponse(
 /// One defect. Severity is "Minor", "Major", or "OutOfService". <see cref="WorkOrderId"/> is the
 /// ACTIVE work order the defect is attached to (null when none). <see cref="ResolutionReason"/>
 /// is a <c>DefectResolutionReason</c> name and, with <see cref="ResolvedAtUtc"/>, is null while
-/// the defect is open.
+/// the defect is open. <see cref="ResolvedWithInspectionId"/> is set only on a defect cleared as a
+/// DUPLICATE — the same component, still open on this inspection, when the same vehicle's defect
+/// on another inspection was resolved — and names that other inspection; it is null on a defect
+/// resolved directly and on every open one.
 /// </summary>
 public sealed record InspectionDefectResponse(
     string Item,
@@ -75,7 +78,8 @@ public sealed record InspectionDefectResponse(
     string? Note,
     Guid? WorkOrderId,
     string? ResolutionReason,
-    DateTimeOffset? ResolvedAtUtc)
+    DateTimeOffset? ResolvedAtUtc,
+    Guid? ResolvedWithInspectionId)
 {
     public static InspectionDefectResponse From(Domain.Inspections.InspectionDefect defect) => new(
         defect.Item,
@@ -83,5 +87,6 @@ public sealed record InspectionDefectResponse(
         defect.Note,
         defect.WorkOrderId,
         defect.ResolutionReason?.ToString(),
-        defect.ResolvedAtUtc);
+        defect.ResolvedAtUtc,
+        defect.ResolvedWithInspectionId);
 }

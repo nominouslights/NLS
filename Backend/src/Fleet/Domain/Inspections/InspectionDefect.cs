@@ -17,11 +17,24 @@ public sealed record InspectionDefect
     // the intended clean slate: the whole existing backlog reads back as unresolved, with no
     // data migration. Resolution is FINAL — there is no reopen. A fault that comes back is a
     // new defect on a later inspection, pointed at this one via RecurrenceOfInspectionId.
+    // REPAIRING one defect can also resolve the same component's still-open defects reported on
+    // the vehicle's other inspections before the repair (DuplicateDefects), each stamped
+    // ResolvedWithInspectionId.
     public DefectResolutionReason? ResolutionReason { get; init; }
     public string? ResolutionNote { get; init; }
     public string? ResolvedBy { get; init; }
     public DateTimeOffset? ResolvedAtUtc { get; init; }
     public Guid? ResolvedByWorkOrderId { get; init; }
+
+    /// <summary>
+    /// Provenance of a duplicate clearance: set when this defect was resolved ALONGSIDE the same
+    /// component's defect on another inspection of the same vehicle (a known fault re-reported on
+    /// every DVIR until it is fixed), and names that other — the addressed — inspection. Null on
+    /// a defect resolved directly, whether by hand or by its own work-order line. Part of the
+    /// resolution stamp: never settable from the wire, carried across an amend with the rest of
+    /// it. See <see cref="VehicleInspection.ResolveAsDuplicateOf"/>.
+    /// </summary>
+    public Guid? ResolvedWithInspectionId { get; init; }
 
     /// <summary>
     /// The ACTIVE work order this defect is attached to, or null. Set when a work order is

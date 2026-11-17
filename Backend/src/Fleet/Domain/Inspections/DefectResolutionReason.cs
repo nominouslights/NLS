@@ -27,3 +27,21 @@ public enum DefectResolutionReason
     /// </summary>
     NoFaultFound,
 }
+
+/// <summary>Rules attached to a <see cref="DefectResolutionReason"/>.</summary>
+public static class DefectResolutionReasonExtensions
+{
+    /// <summary>
+    /// THE duplicate-clearing rule: true only for a resolution that asserts the COMPONENT was
+    /// fixed — <see cref="DefectResolutionReason.PreviouslyRepaired"/> (by hand) and
+    /// <see cref="DefectResolutionReason.RepairedUnderWorkOrder"/> (a Repaired work-order line).
+    /// A repair fixes the part, so every other still-open report of that part made before the
+    /// repair is moot. <see cref="DefectResolutionReason.ReportedInError"/>,
+    /// <see cref="DefectResolutionReason.AcceptedMonitoring"/> and
+    /// <see cref="DefectResolutionReason.NoFaultFound"/> are judgements about ONE report — that
+    /// this driver was wrong, that this report is being run with, that a mechanic found nothing
+    /// on this occasion — and say nothing about the others, so they never cascade.
+    /// </summary>
+    public static bool ClearsDuplicates(this DefectResolutionReason reason) =>
+        reason is DefectResolutionReason.PreviouslyRepaired or DefectResolutionReason.RepairedUnderWorkOrder;
+}

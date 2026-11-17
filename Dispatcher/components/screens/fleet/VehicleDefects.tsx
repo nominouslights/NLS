@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import type { Vehicle } from "@/lib/api";
 import type { VehicleDefectWire } from "@/lib/api/maintenance";
 import { prefillFromDefects, type PendingWorkOrder, type WorkOrderPrefillWire } from "@/lib/inspectionWorkOrder";
@@ -8,6 +8,7 @@ import type { VehicleOption } from "@/components/screens/fleet/vehicle-detail/sh
 import DefectsPanel from "@/components/fleet/DefectsPanel";
 import InspectionEntryModal from "@/components/InspectionEntryModal";
 import WorkOrderModal from "@/components/WorkOrderModal";
+import { PROJECTION_RECONCILE_MS } from "@/lib/defectSync";
 
 // The vehicle's defect backlog — the only surface with the resolved-history
 // toggle, the Re-report button and CREATE WORK ORDER. Re-reporting opens the
@@ -15,9 +16,6 @@ import WorkOrderModal from "@/components/WorkOrderModal";
 // inspection whose resolution it supersedes: a fault that comes back is a NEW
 // defect, never a reopen of the old one. Creating a work order opens the
 // ordinary work-order modal with the chosen defects attached.
-
-/** The defect read model catches up on the projector's 5s poll. */
-const PROJECTION_RECONCILE_MS = 6000;
 
 const defectKey = (d: { inspectionId: string; item: string }) => `${d.inspectionId}:${d.item}`;
 
@@ -31,25 +29,15 @@ export default function VehicleDefects({ vehicle, vehicles = [] }: { vehicle: Ve
   // came after the mark's own recheck window — whichever action triggered it).
   // Nothing here clears marks wholesale on a timer, so a later refresh (a
   // re-report, say) can never strand one.
+  //
+  // There is deliberately NO refresh timer here. Both writes this tab starts
+  // announce themselves through lib/defectSync AFTER calling onSaved
+  // (WorkOrderModal, InspectionEntryModal), and DefectsPanel's
+  // useDefectsChanged turns that into the one delayed reload,
+  // PROJECTION_RECONCILE_MS later — which, because the mark is set first, always
+  // lands past the mark's recheck window and settles it. A second timer here
+  // only doubled that reload.
   const [pending, setPending] = useState<ReadonlyMap<string, PendingWorkOrder>>(new Map());
-  const [refresh, setRefresh] = useState(0);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (timer.current) clearTimeout(timer.current);
-    };
-  }, []);
-
-  function scheduleRefresh() {
-    // Refresh once now (in case the projection is already there) and again
-    // after the projector has certainly run. Replacing an earlier timer is
-    // safe: the new one fires later, so it is still past every older mark's
-    // recheck window.
-    setRefresh((n) => n + 1);
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => setRefresh((n) => n + 1), PROJECTION_RECONCILE_MS);
-  }
 
   function onWorkOrderCreated(keys: string[], workOrderId: string) {
     const mark: PendingWorkOrder = { workOrderId, recheckAfter: Date.now() + PROJECTION_RECONCILE_MS };
@@ -58,7 +46,6 @@ export default function VehicleDefects({ vehicle, vehicles = [] }: { vehicle: Ve
       for (const k of keys) next.set(k, mark);
       return next;
     });
-    scheduleRefresh();
   }
 
   function onSettled(keys: string[]) {
@@ -85,7 +72,6 @@ export default function VehicleDefects({ vehicle, vehicles = [] }: { vehicle: Ve
         canResolve
         showResolvedToggle
         maxRows={null}
-        refreshKey={refresh}
         onReReport={setReReport}
         onCreateWorkOrder={(rows) =>
           setWoPrefill({ prefill: prefillFromDefects(rows, vehicle.unitNumber), keys: rows.map(defectKey) })
@@ -107,7 +93,8 @@ export default function VehicleDefects({ vehicle, vehicles = [] }: { vehicle: Ve
             recurrenceOfInspectionId: reReport.inspectionId,
           }}
           onClose={() => setReReport(null)}
-          onSaved={() => scheduleRefresh()}
+          // The reload comes from the modal's own defectSync announcement.
+          onSaved={() => {}}
         />
       )}
 

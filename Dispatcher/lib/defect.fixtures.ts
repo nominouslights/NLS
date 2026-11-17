@@ -22,6 +22,7 @@ export function vehicleDefect(over: Partial<VehicleDefectWire> & { item: string 
     resolvedBy: null,
     resolvedAtUtc: null,
     resolvedByWorkOrderId: null,
+    resolvedWithInspectionId: null,
     recurrence: null,
     ...over,
   };

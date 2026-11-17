@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type {
   DefectRepairOutcomeWire,
   DefectResolutionReasonWire,
+  InspectionDefectWire,
   WorkOrderWire,
 } from "./api/maintenance";
 import {
@@ -11,7 +12,10 @@ import {
   DEFECT_OUTCOMES,
   DEFECT_RESOLUTION_LABEL,
   DEFECT_RESOLUTION_META,
+  inspectionDefectStatus,
+  resolvedDefectChip,
   toPrintableWorkOrder,
+  worstSeverity,
 } from "./workOrderDisplay";
 import { statusMeta } from "./theme";
 
@@ -91,5 +95,114 @@ describe("toPrintableWorkOrder", () => {
       { item: "Brakes", severity: "Out-of-Service", note: "Grinding" },
       { item: "Horn", severity: "Minor", note: undefined },
     ]);
+  });
+});
+
+// The live defect chip beside an inspection's frozen result chip.
+// The ONE worst-severity pick, shared by the trip/inspection chip
+// (inspectionDefectStatus), the Open Defects summary chip and the inspection
+// forms' known-defects line.
+describe("worstSeverity", () => {
+  const sev = (...severities: string[]) => severities.map((severity) => ({ severity }));
+
+  it("picks the worst present, whatever order the rows come in", () => {
+    expect(worstSeverity(sev("Minor", "OutOfService", "Major"))).toBe("OutOfService");
+    expect(worstSeverity(sev("Minor", "Major", "Minor"))).toBe("Major");
+    expect(worstSeverity(sev("Minor"))).toBe("Minor");
+    expect(worstSeverity(sev("OutOfService", "Minor"))).toBe("OutOfService");
+  });
+
+  it("is null for no defects", () => {
+    expect(worstSeverity([])).toBeNull();
+  });
+
+  it("reads an unknown severity as Major: above Minor, never above Out-of-Service", () => {
+    expect(worstSeverity(sev("Catastrophic"))).toBe("Major");
+    expect(worstSeverity(sev("Minor", "Catastrophic"))).toBe("Major");
+    expect(worstSeverity(sev("Catastrophic", "OutOfService"))).toBe("OutOfService");
+    // Not fooled by an inherited property name.
+    expect(worstSeverity(sev("toString"))).toBe("Major");
+  });
+
+  it("never reorders the list it reads", () => {
+    const rows = sev("Minor", "OutOfService", "Major");
+    const before = rows.map((r) => r.severity);
+    worstSeverity(rows);
+    expect(rows.map((r) => r.severity)).toEqual(before);
+  });
+});
+
+describe("inspectionDefectStatus", () => {
+  const d = (over: Partial<InspectionDefectWire> & { item: string }): InspectionDefectWire => ({
+    severity: "Major",
+    note: null,
+    workOrderId: null,
+    resolutionReason: null,
+    resolvedAtUtc: null,
+    resolvedWithInspectionId: null,
+    ...over,
+  });
+  const resolved = { resolutionReason: "ReportedInError" as const, resolvedAtUtc: "2026-10-02T00:00:00Z" };
+
+  it("says nothing when the inspection reported no defects", () => {
+    expect(inspectionDefectStatus({ defects: [] })).toBeNull();
+  });
+
+  it("all open: counts them in the WORST severity's colour + glyph", () => {
+    expect(
+      inspectionDefectStatus({
+        defects: [d({ item: "Wipers", severity: "Minor" }), d({ item: "Brakes", severity: "OutOfService" }), d({ item: "Mirror" })],
+      }),
+    ).toEqual({ kind: "over", glyph: "✕", label: "3 open defects" });
+    expect(inspectionDefectStatus({ defects: [d({ item: "Mirror" }), d({ item: "Wipers", severity: "Minor" })] })).toEqual({
+      kind: "over",
+      glyph: undefined,
+      label: "2 open defects",
+    });
+    expect(inspectionDefectStatus({ defects: [d({ item: "Wipers", severity: "Minor" })] })).toEqual({
+      kind: "soon",
+      glyph: undefined,
+      label: "1 open defect",
+    });
+  });
+
+  it("a defect on an open work order is still open", () => {
+    expect(inspectionDefectStatus({ defects: [d({ item: "Brakes", workOrderId: "wo-1" })] })?.label).toBe("1 open defect");
+  });
+
+  it("all resolved: teal, with words", () => {
+    const s = inspectionDefectStatus({
+      defects: [d({ item: "Brakes", severity: "OutOfService", ...resolved }), d({ item: "Wipers", ...resolved })],
+    });
+    expect(s).toEqual({ kind: "ontime", label: "Defects resolved" });
+    expect(statusMeta(s!.kind).g).toBeTruthy();
+  });
+
+  it("mixed: counts only the open ones, and a resolved Out-of-Service no longer sets the colour", () => {
+    expect(
+      inspectionDefectStatus({
+        defects: [d({ item: "Brakes", severity: "OutOfService", ...resolved }), d({ item: "Wipers", severity: "Minor" })],
+      }),
+    ).toEqual({ kind: "soon", glyph: undefined, label: "1 open defect" });
+  });
+});
+
+describe("resolvedDefectChip", () => {
+  it("is teal and names the reason, with that reason's glyph", () => {
+    expect(resolvedDefectChip("ReportedInError")).toEqual({
+      kind: "ontime",
+      glyph: undefined,
+      label: "Resolved · Reported in error",
+    });
+    expect(resolvedDefectChip("NoFaultFound")).toEqual({
+      kind: "ontime",
+      glyph: "○",
+      label: "Resolved · No fault found under work order",
+    });
+  });
+
+  it("falls back to plain Resolved, and prints an unmapped reason as-is", () => {
+    expect(resolvedDefectChip(null)).toEqual({ kind: "ontime", label: "Resolved" });
+    expect(resolvedDefectChip("SomethingNew")).toEqual({ kind: "ontime", glyph: undefined, label: "Resolved · SomethingNew" });
   });
 });

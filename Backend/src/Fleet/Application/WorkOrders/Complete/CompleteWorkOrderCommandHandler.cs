@@ -1,6 +1,7 @@
 using NorthernLink.Shared.Kernel;
 using NorthernLink.Shared.Messaging;
 using NorthernLink.Fleet.Application.Abstractions;
+using NorthernLink.Fleet.Application.Inspections;
 using NorthernLink.Fleet.Domain.Inspections;
 using NorthernLink.Fleet.Domain.Services;
 using NorthernLink.Fleet.Domain.WorkOrders;
@@ -29,11 +30,36 @@ namespace NorthernLink.Fleet.Application.WorkOrders.Complete;
 /// </list>
 /// Both paths attribute the resolution to the service record's PerformedBy (trimmed), so the
 /// defect history and the service log always name the same person.
+///
+/// Two phases. Phase 1 is everything above — the service record, the work order's completion and
+/// each line's own outcome — committed in one save, exactly as before duplicates existed; every
+/// failure mode of the call is phase 1's.
+///
+/// Phase 2 then clears DUPLICATES, server-decided (there is no preview for a completion), in a
+/// separate save that retries version conflicts and otherwise leaves them open — it can never
+/// fail the call (<see cref="DuplicateDefectCascade"/>). For every defect this completion
+/// actually REPAIRED (a Repaired line, or the legacy path's RepairedUnderWorkOrder), the same
+/// component's still-open defects on the work order's vehicle are resolved with that stamp —
+/// <see cref="DuplicateDefects"/> — but only:
+/// <list type="bullet">
+/// <item>NoFaultFound and Deferred never cascade: they are judgements about one report
+/// (<see cref="DefectResolutionReasonExtensions.ClearsDuplicates"/>);</item>
+/// <item>a defect on ANY line of this work order is never touched by the cascade, whatever that
+/// line's outcome — each line's outcome is authoritative for its own defect, so a Deferred
+/// sibling stays open;</item>
+/// <item>only reports made strictly before the START of the service date (in the operating
+/// zone) are cleared — a same-day report may postdate the repair, so it stays open
+/// (<see cref="DefectRepairCutoff.ForServiceDate"/>);</item>
+/// <item>the scope is computed once from the work order's vehicle and the candidates for every
+/// repaired item come from one query.</item>
+/// </list>
+/// A line whose defect had already been cleared by hand only detaches, and cascades nothing.
 /// </summary>
 public sealed class CompleteWorkOrderCommandHandler(
     IWorkOrderRepository workOrderRepository,
     IServiceRecordRepository serviceRepository,
-    IVehicleInspectionRepository inspectionRepository)
+    IVehicleInspectionRepository inspectionRepository,
+    DuplicateDefectCascade duplicates)
     : ICommandHandler<CompleteWorkOrderCommand, Guid>
 {
     public async Task<Result<Guid>> Handle(CompleteWorkOrderCommand command, CancellationToken cancellationToken)
@@ -104,17 +130,24 @@ public sealed class CompleteWorkOrderCommandHandler(
         // One normalized attribution for both paths — the service record's (trimmed) PerformedBy.
         var resolvedBy = service.PerformedBy;
 
-        if (workOrder.HasDefectLines)
+        var resolvedHere = workOrder.HasDefectLines
+            ? ApplyOutcomes(workOrder, inspections, resolvedBy, now)
+            : await ResolveLegacyAsync(workOrder, resolvedBy, now, cancellationToken);
+
+        // ---- Phase 1: all aggregates live on the same scoped DbContext — one save commits together. ----
+        await workOrderRepository.SaveChangesAsync(cancellationToken);
+
+        // ---- Phase 2: duplicates of what this work order repaired; never fails the call. ----
+        if (resolvedHere.Count > 0)
         {
-            ApplyOutcomes(workOrder, inspections, resolvedBy, now);
-        }
-        else
-        {
-            await ResolveLegacyAsync(workOrder, resolvedBy, now, cancellationToken);
+            await duplicates.ClearForVehicleAsync(
+                workOrder.VehicleId,
+                resolvedHere,
+                DefectRepairCutoff.ForServiceDate(service.Date, now),
+                candidate => !workOrder.Defects.Any(line => line.Addresses(candidate.Inspection.Id, candidate.Defect.Item)),
+                cancellationToken);
         }
 
-        // All aggregates live on the same scoped DbContext — one save commits together.
-        await workOrderRepository.SaveChangesAsync(cancellationToken);
         return Result.Success(service.Id);
     }
 
@@ -133,12 +166,15 @@ public sealed class CompleteWorkOrderCommandHandler(
         return inspections;
     }
 
-    private static void ApplyOutcomes(
+    /// <summary>Applies each line's outcome to its own defect; returns the defects actually resolved here.</summary>
+    private static List<DefectOnInspection> ApplyOutcomes(
         WorkOrder workOrder,
         IReadOnlyDictionary<Guid, VehicleInspection?> inspections,
         string resolvedBy,
         DateTimeOffset now)
     {
+        var resolved = new List<DefectOnInspection>();
+
         foreach (var line in workOrder.Defects)
         {
             var inspection = inspections.GetValueOrDefault(line.InspectionId);
@@ -151,25 +187,28 @@ public sealed class CompleteWorkOrderCommandHandler(
             }
 
             // Each method is a no-op when the item is gone or no longer on this work order.
-            switch (line.Outcome)
+            var reason = line.Outcome switch
             {
-                case DefectRepairOutcome.Repaired:
-                    inspection.ResolveDefectUnderWorkOrder(
-                        line.Item, workOrder.Id, DefectResolutionReason.RepairedUnderWorkOrder,
-                        line.OutcomeNote, resolvedBy, now);
-                    break;
+                DefectRepairOutcome.Repaired => DefectResolutionReason.RepairedUnderWorkOrder,
+                DefectRepairOutcome.NoFaultFound => DefectResolutionReason.NoFaultFound,
+                _ => (DefectResolutionReason?)null,
+            };
 
-                case DefectRepairOutcome.NoFaultFound:
-                    inspection.ResolveDefectUnderWorkOrder(
-                        line.Item, workOrder.Id, DefectResolutionReason.NoFaultFound,
-                        line.OutcomeNote, resolvedBy, now);
-                    break;
-
-                case DefectRepairOutcome.Deferred:
-                    inspection.ReleaseDefectFromWorkOrder(line.Item, workOrder.Id);
-                    break;
+            if (reason is { } resolution)
+            {
+                if (inspection.ResolveDefectUnderWorkOrder(
+                    line.Item, workOrder.Id, resolution, line.OutcomeNote, resolvedBy, now))
+                {
+                    resolved.Add(new DefectOnInspection(inspection, inspection.FindDefect(line.Item)!));
+                }
+            }
+            else if (line.Outcome == DefectRepairOutcome.Deferred)
+            {
+                inspection.ReleaseDefectFromWorkOrder(line.Item, workOrder.Id);
             }
         }
+
+        return resolved;
     }
 
     /// <summary>
@@ -177,8 +216,9 @@ public sealed class CompleteWorkOrderCommandHandler(
     /// generating inspection that the free-text line items name (null coverage = unrecognisable
     /// line items = every open defect). No source inspection is the normal case for a directly
     /// raised work order, not an error. Already-resolved defects are skipped inside the aggregate.
+    /// Returns the defects actually resolved here.
     /// </summary>
-    private async Task ResolveLegacyAsync(
+    private async Task<List<DefectOnInspection>> ResolveLegacyAsync(
         WorkOrder workOrder,
         string performedBy,
         DateTimeOffset now,
@@ -187,10 +227,17 @@ public sealed class CompleteWorkOrderCommandHandler(
         var sourceInspection = await inspectionRepository.GetByGeneratedWorkOrderIdAsync(
             workOrder.Id, cancellationToken);
 
-        sourceInspection?.ResolveDefectsForWorkOrder(
+        if (sourceInspection is null)
+        {
+            return [];
+        }
+
+        var resolved = sourceInspection.ResolveDefectsForWorkOrder(
             workOrder.Id,
             performedBy,
             now,
             sourceInspection.DefectItemsCoveredBy(workOrder.LineItems));
+
+        return [.. resolved.Select(d => new DefectOnInspection(sourceInspection, d))];
     }
 }

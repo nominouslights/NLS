@@ -281,7 +281,8 @@ public class VehicleDefectReadServiceTests(PostgresFixture fixture)
             var handler = new CompleteWorkOrderCommandHandler(
                 new WorkOrderRepository(writer),
                 new ServiceRecordRepository(writer),
-                new VehicleInspectionRepository(writer));
+                new VehicleInspectionRepository(writer),
+                TestDuplicateCascade.Over(writer));
 
             var result = await handler.Handle(
                 new CompleteWorkOrderCommand(
@@ -377,7 +378,8 @@ public class VehicleDefectReadServiceTests(PostgresFixture fixture)
             var handler = new CompleteWorkOrderCommandHandler(
                 new WorkOrderRepository(writer),
                 new ServiceRecordRepository(writer),
-                new VehicleInspectionRepository(writer));
+                new VehicleInspectionRepository(writer),
+                TestDuplicateCascade.Over(writer));
 
             var completed = await handler.Handle(
                 new CompleteWorkOrderCommand(

@@ -6,6 +6,8 @@ import { ActionButton } from "@/components/ui/Button";
 import { SelectField, TextField } from "@/components/ui/Field";
 import { OptChip } from "@/components/manifest/manifestRows";
 import type { NewDefect, NewDefectOption } from "./checklistRows";
+import { knownDefectFor, type KnownDefect } from "@/lib/defectDuplicates";
+import { KnownDefectHint } from "./KnownDefectHint";
 
 // The post-trip's "New defects since the pre-trip" section (NL-PTI-01 rev 4). It
 // replaces the old 21-row re-check and the single "Defects noticed while driving"
@@ -28,6 +30,7 @@ export default function NewDefectsEditor({
   onChange,
   options,
   preTripReported,
+  knownDefects,
 }: {
   /** The No/Yes answer. */
   found: boolean;
@@ -39,6 +42,11 @@ export default function NewDefectsEditor({
   /** How many pre-trip defects were left out of `options` — shown so the
    *  dispatcher knows why those items are missing. */
   preTripReported: number;
+  /** The unit's open defects by normalised item KEY (`knownDefectsByItem`). A
+   *  picked item that is already a known fault shows a hint under its line —
+   *  display only: it neither removes the item from the picker nor blocks the
+   *  save, because a fault found again is correctly reported again. */
+  knownDefects?: ReadonlyMap<string, KnownDefect> | null;
 }) {
   function patch(i: number, p: Partial<NewDefect>) {
     onChange(defects.map((d, x) => (x === i ? { ...d, ...p } : d)));
@@ -73,56 +81,57 @@ export default function NewDefectsEditor({
             const taken = new Set(defects.filter((_, x) => x !== i).map((o) => o.itemKey));
             const itemOptions = options.filter((o) => !taken.has(o.key));
             return (
-              <div
-                key={i}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 110px 1fr auto",
-                  gap: 10,
-                  alignItems: "end",
-                  marginBottom: 8,
-                }}
-              >
-                <SelectField
-                  label={`Defect ${i + 1} — item`}
-                  value={d.itemKey}
-                  onChange={(v) => patch(i, { itemKey: v })}
-                  options={[
-                    ...(d.itemKey ? [] : [{ value: "", label: "— select the item —" }]),
-                    ...itemOptions.map((o) => ({ value: o.key, label: o.label })),
-                  ]}
-                />
-                <SelectField
-                  label="Severity"
-                  value={d.severity}
-                  onChange={(v) => patch(i, { severity: v as DefectSeverityWire })}
-                  options={SEVERITY_OPTIONS}
-                />
-                <TextField
-                  label="Note (required)"
-                  value={d.note}
-                  onChange={(v) => patch(i, { note: v })}
-                  placeholder="What was found, and where"
-                />
-                <div style={{ paddingBottom: 6 }}>
-                  <span
-                    onClick={() => onChange(defects.filter((_, x) => x !== i))}
-                    style={{
-                      width: 30,
-                      height: 30,
-                      borderRadius: 7,
-                      border: `1px solid ${colors.borderStrong}`,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      color: colors.textMuted,
-                      cursor: "pointer",
-                      fontSize: 14,
-                    }}
-                  >
-                    ✕
-                  </span>
+              <div key={i} style={{ marginBottom: 8 }}>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 110px 1fr auto",
+                    gap: 10,
+                    alignItems: "end",
+                  }}
+                >
+                  <SelectField
+                    label={`Defect ${i + 1} — item`}
+                    value={d.itemKey}
+                    onChange={(v) => patch(i, { itemKey: v })}
+                    options={[
+                      ...(d.itemKey ? [] : [{ value: "", label: "— select the item —" }]),
+                      ...itemOptions.map((o) => ({ value: o.key, label: o.label })),
+                    ]}
+                  />
+                  <SelectField
+                    label="Severity"
+                    value={d.severity}
+                    onChange={(v) => patch(i, { severity: v as DefectSeverityWire })}
+                    options={SEVERITY_OPTIONS}
+                  />
+                  <TextField
+                    label="Note (required)"
+                    value={d.note}
+                    onChange={(v) => patch(i, { note: v })}
+                    placeholder="What was found, and where"
+                  />
+                  <div style={{ paddingBottom: 6 }}>
+                    <span
+                      onClick={() => onChange(defects.filter((_, x) => x !== i))}
+                      style={{
+                        width: 30,
+                        height: 30,
+                        borderRadius: 7,
+                        border: `1px solid ${colors.borderStrong}`,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: colors.textMuted,
+                        cursor: "pointer",
+                        fontSize: 14,
+                      }}
+                    >
+                      ✕
+                    </span>
+                  </div>
                 </div>
+                {d.itemKey && <KnownDefectHint known={knownDefectFor(knownDefects, d.itemKey)} />}
               </div>
             );
           })}

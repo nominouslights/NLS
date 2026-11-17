@@ -19,7 +19,7 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
 #pragma warning disable 612, 618
             modelBuilder
                 .HasDefaultSchema("fleet")
-                .HasAnnotation("ProductVersion", "10.0.0")
+                .HasAnnotation("ProductVersion", "10.0.14")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -1987,7 +1987,9 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
 
                             b1.ToTable("vehicle_inspections", "fleet");
 
-                            b1.ToJson("checklist_items");
+                            b1
+                                .ToJson("checklist_items")
+                                .HasColumnType("jsonb");
 
                             b1.WithOwner()
                                 .HasForeignKey("VehicleInspectionId");
@@ -2017,6 +2019,8 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
 
                             b1.Property<Guid?>("ResolvedByWorkOrderId");
 
+                            b1.Property<Guid?>("ResolvedWithInspectionId");
+
                             b1.Property<string>("Severity")
                                 .IsRequired();
 
@@ -2026,7 +2030,9 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
 
                             b1.ToTable("vehicle_inspections", "fleet");
 
-                            b1.ToJson("defects");
+                            b1
+                                .ToJson("defects")
+                                .HasColumnType("jsonb");
 
                             b1.WithOwner()
                                 .HasForeignKey("VehicleInspectionId");
@@ -2077,7 +2083,9 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
 
                             b1.ToTable("maintenance_plans", "fleet");
 
-                            b1.ToJson("items");
+                            b1
+                                .ToJson("items")
+                                .HasColumnType("jsonb");
 
                             b1.WithOwner()
                                 .HasForeignKey("MaintenancePlanId");
@@ -2123,7 +2131,9 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
 
                             b1.ToTable("maintenance_plans", "fleet");
 
-                            b1.ToJson("overhauls");
+                            b1
+                                .ToJson("overhauls")
+                                .HasColumnType("jsonb");
 
                             b1.WithOwner()
                                 .HasForeignKey("MaintenancePlanId");
@@ -2152,7 +2162,9 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
 
                             b1.ToTable("service_records", "fleet");
 
-                            b1.ToJson("parts_used");
+                            b1
+                                .ToJson("parts_used")
+                                .HasColumnType("jsonb");
 
                             b1.WithOwner()
                                 .HasForeignKey("ServiceRecordId");
@@ -2188,7 +2200,9 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
 
                             b1.ToTable("work_orders", "fleet");
 
-                            b1.ToJson("defects");
+                            b1
+                                .ToJson("defects")
+                                .HasColumnType("jsonb");
 
                             b1.WithOwner()
                                 .HasForeignKey("WorkOrderId");
@@ -2237,7 +2251,9 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
 
                             b1.ToTable("rm_maintenance_plans", "fleet");
 
-                            b1.ToJson("items");
+                            b1
+                                .ToJson("items")
+                                .HasColumnType("jsonb");
 
                             b1.WithOwner()
                                 .HasForeignKey("MaintenancePlanReadModelId");
@@ -2283,7 +2299,9 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
 
                             b1.ToTable("rm_maintenance_plans", "fleet");
 
-                            b1.ToJson("overhauls");
+                            b1
+                                .ToJson("overhauls")
+                                .HasColumnType("jsonb");
 
                             b1.WithOwner()
                                 .HasForeignKey("MaintenancePlanReadModelId");
@@ -2312,7 +2330,9 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
 
                             b1.ToTable("rm_service_records", "fleet");
 
-                            b1.ToJson("parts_used");
+                            b1
+                                .ToJson("parts_used")
+                                .HasColumnType("jsonb");
 
                             b1.WithOwner()
                                 .HasForeignKey("ServiceRecordReadModelId");
@@ -2345,7 +2365,9 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
 
                             b1.ToTable("rm_vehicle_inspections", "fleet");
 
-                            b1.ToJson("checklist_items");
+                            b1
+                                .ToJson("checklist_items")
+                                .HasColumnType("jsonb");
 
                             b1.WithOwner()
                                 .HasForeignKey("VehicleInspectionReadModelId");
@@ -2375,6 +2397,8 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
 
                             b1.Property<Guid?>("ResolvedByWorkOrderId");
 
+                            b1.Property<Guid?>("ResolvedWithInspectionId");
+
                             b1.Property<string>("Severity")
                                 .IsRequired();
 
@@ -2384,7 +2408,9 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
 
                             b1.ToTable("rm_vehicle_inspections", "fleet");
 
-                            b1.ToJson("defects");
+                            b1
+                                .ToJson("defects")
+                                .HasColumnType("jsonb");
 
                             b1.WithOwner()
                                 .HasForeignKey("VehicleInspectionReadModelId");
@@ -2422,7 +2448,9 @@ namespace NorthernLink.Fleet.Infrastructure.Persistence.Migrations
 
                             b1.ToTable("rm_work_orders", "fleet");
 
-                            b1.ToJson("defects");
+                            b1
+                                .ToJson("defects")
+                                .HasColumnType("jsonb");
 
                             b1.WithOwner()
                                 .HasForeignKey("WorkOrderReadModelId");

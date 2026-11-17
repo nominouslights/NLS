@@ -81,6 +81,36 @@ public class AuditPipelineTests(PostgresFixture fixture)
     }
 
     [Fact]
+    public async Task A_stale_scalar_save_surfaces_as_a_concurrency_conflict_not_a_snapshot_unique_violation()
+    {
+        // EF runs the stale writer's aggregate_snapshots INSERT (same aggregate_id + version as
+        // the winner's) before its own UPDATE can report zero rows; ModuleDbContext re-raises that
+        // collision as the DbUpdateConcurrencyException every lost-race handler catches.
+        var vehicle = TestVehicleFactory.Create(PostgresFixture.TenantA);
+        await using (var seed = fixture.CreateContext(PostgresFixture.TenantA))
+        {
+            seed.Vehicles.Add(vehicle);
+            await seed.SaveChangesAsync();
+        }
+
+        await using var loser = fixture.CreateContext(PostgresFixture.TenantA);
+        var stale = await loser.Vehicles.SingleAsync(v => v.Id == vehicle.Id);
+
+        await using (var winner = fixture.CreateContext(PostgresFixture.TenantA))
+        {
+            var fresh = await winner.Vehicles.SingleAsync(v => v.Id == vehicle.Id);
+            Assert.True(fresh.ChangeStatus(VehicleStatus.InMaintenance, "Winner").IsSuccess);
+            await winner.SaveChangesAsync();
+        }
+
+        Assert.True(stale.ChangeStatus(VehicleStatus.OutOfService, "Loser").IsSuccess);
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => loser.SaveChangesAsync());
+
+        await using var reader = fixture.CreateContext(PostgresFixture.TenantA);
+        Assert.Equal(VehicleStatus.InMaintenance, (await reader.Vehicles.SingleAsync(v => v.Id == vehicle.Id)).Status);
+    }
+
+    [Fact]
     public async Task Rolled_back_transaction_leaves_no_state_and_no_audit_rows()
     {
         var vehicle = TestVehicleFactory.Create(PostgresFixture.TenantA);

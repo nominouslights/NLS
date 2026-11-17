@@ -29,6 +29,7 @@ using NorthernLink.Fleet.Application.Maintenance.Status.GetVehicleStatus;
 using NorthernLink.Fleet.Application.Inspections.AcknowledgeCarrier;
 using NorthernLink.Fleet.Application.Inspections.Enter;
 using NorthernLink.Fleet.Application.Inspections.GetDefects;
+using NorthernLink.Fleet.Application.Inspections.GetDuplicates;
 using NorthernLink.Fleet.Application.Inspections.GetInspections;
 using NorthernLink.Fleet.Application.Inspections.PropagateOdometer;
 using NorthernLink.Fleet.Application.Inspections.Remove;
@@ -115,6 +116,8 @@ public static class FleetServiceCollectionExtensions
         services.AddScoped<IPlanAssignmentRepository, PlanAssignmentRepository>();
         services.AddScoped<IPmCompletionRepository, PmCompletionRepository>();
         services.AddScoped<IPmReadService, PmReadService>();
+        // Duplicate-defect scope/query/clear, shared by resolve, completion and the preview.
+        services.AddScoped<DuplicateDefectCascade>();
 
         // 3. Command/query handlers — registered explicitly, one line per handler.
         services.AddScoped<ICommandHandler<RegisterVehicleCommand, Guid>, RegisterVehicleCommandHandler>();
@@ -132,7 +135,8 @@ public static class FleetServiceCollectionExtensions
         services.AddScoped<ICommandHandler<UpdateInspectionCommand>, UpdateInspectionCommandHandler>();
         services.AddScoped<ICommandHandler<RemoveInspectionCommand>, RemoveInspectionCommandHandler>();
         services.AddScoped<IQueryHandler<GetVehicleDefectsQuery, IReadOnlyList<VehicleDefectResponse>>, GetVehicleDefectsQueryHandler>();
-        services.AddScoped<ICommandHandler<ResolveInspectionDefectCommand>, ResolveInspectionDefectCommandHandler>();
+        services.AddScoped<ICommandHandler<ResolveInspectionDefectCommand, ResolveInspectionDefectResponse>, ResolveInspectionDefectCommandHandler>();
+        services.AddScoped<IQueryHandler<GetDefectDuplicatesQuery, DefectDuplicatesResponse>, GetDefectDuplicatesQueryHandler>();
         services.AddScoped<ICommandHandler<AcknowledgeInspectionCarrierCommand>, AcknowledgeInspectionCarrierCommandHandler>();
         services.AddScoped<ICommandHandler<PropagateInspectionOdometerCommand>, PropagateInspectionOdometerCommandHandler>();
         services.AddScoped<ICommandHandler<RegisterShopCommand, Guid>, RegisterShopCommandHandler>();

@@ -468,6 +468,10 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
     /// <see cref="DefectResolutionReason.NoFaultFound"/> are reserved for work-order completion
     /// (<see cref="ResolveDefectUnderWorkOrder"/>) and fail with
     /// <see cref="InspectionErrors.ResolutionReasonReservedForWorkOrder"/>.
+    ///
+    /// This touches THIS inspection only. Clearing the same component's still-open defects on the
+    /// vehicle's other inspections is <see cref="DuplicateDefects.Resolve"/>, which the caller runs
+    /// after a successful resolve — a duplicate can never make this call fail.
     /// </summary>
     public Result ResolveDefect(
         string item,
@@ -502,6 +506,7 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
             ResolvedBy = Normalize(resolvedBy),
             ResolvedAtUtc = atUtc,
             ResolvedByWorkOrderId = null,
+            ResolvedWithInspectionId = null,
         };
 
         Defects = updated;
@@ -637,8 +642,12 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
     ///
     /// A defect that was already resolved by hand keeps its own resolution stamp (resolution is
     /// final); it is only detached from the work order.
+    ///
+    /// Returns true only when this call actually stamped a resolution — the signal the caller
+    /// uses to clear the same component's duplicates (<see cref="DuplicateDefects.Resolve"/>).
+    /// A no-op or a detach-only call returns false.
     /// </summary>
-    public void ResolveDefectUnderWorkOrder(
+    public bool ResolveDefectUnderWorkOrder(
         string item,
         Guid workOrderId,
         DefectResolutionReason reason,
@@ -649,7 +658,7 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
         var index = IndexOfDefect(item);
         if (index < 0 || Defects[index].WorkOrderId != workOrderId)
         {
-            return;
+            return false;
         }
 
         var defect = Defects[index];
@@ -657,7 +666,7 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
         {
             ReplaceDefect(index, defect with { WorkOrderId = null });
             Raise(new VehicleInspectionDefectWorkOrderChangedDomainEvent(Id, TenantId, defect.Item, null));
-            return;
+            return false;
         }
 
         ReplaceDefect(index, defect with
@@ -668,15 +677,85 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
             ResolvedBy = Normalize(resolvedBy),
             ResolvedAtUtc = atUtc,
             ResolvedByWorkOrderId = workOrderId,
+            ResolvedWithInspectionId = null,
         });
         Raise(new VehicleInspectionDefectsResolvedDomainEvent(Id, TenantId));
+        return true;
     }
 
-    private int IndexOfDefect(string? item)
+    /// <summary>
+    /// Resolves this inspection's still-OPEN defect for the same component as
+    /// <paramref name="source"/> — a defect on ANOTHER inspection of the same vehicle that has
+    /// just been REPAIRED — as a duplicate of it. "Same component" is <see cref="IsSameItem"/>.
+    ///
+    /// The resolution stamp is COPIED from <paramref name="source"/> (reason, note, resolvedBy,
+    /// instant, resolving work order), never supplied by the caller, so this cannot become an
+    /// unaudited back door around <see cref="ResolveDefect"/> or work-order completion: a source
+    /// that is not itself resolved, or was resolved for a reason that does not
+    /// <see cref="DefectResolutionReasonExtensions.ClearsDuplicates">clear duplicates</see>
+    /// (anything but a repair), throws. <see cref="InspectionDefect.ResolvedWithInspectionId"/>
+    /// records <paramref name="sourceInspectionId"/> as the provenance. WHICH defects qualify
+    /// (vehicle, reported before the repair, not on the work order's own lines) is decided by
+    /// <see cref="DuplicateDefects"/> before this is called.
+    ///
+    /// The active work-order link follows the same rule as a hand-resolve: a duplicate on some
+    /// OTHER open work order is resolved but KEEPS its <see cref="InspectionDefect.WorkOrderId"/>
+    /// ("resolved by hand or not — the work order still lists it"; that work order's completion
+    /// just detaches it). Only a duplicate on the very work order whose completion resolved
+    /// <paramref name="source"/> is detached, since that work order is closing — which keeps
+    /// "WorkOrderId set ⇔ on an open work order" true.
+    ///
+    /// Returns the resolved defect, or null — with no change and no event, so a no-op is also a
+    /// no-write for the audit pipeline — when this IS the source inspection (within one
+    /// inspection there are no duplicates) or it has no open defect for that component (none at
+    /// all, or already resolved: resolution is final).
+    /// </summary>
+    public InspectionDefect? ResolveAsDuplicateOf(Guid sourceInspectionId, InspectionDefect source)
     {
-        var key = NormalizeItem(item);
-        return Defects.FindIndex(d => NormalizeItem(d.Item).Equals(key, StringComparison.OrdinalIgnoreCase));
+        ArgumentNullException.ThrowIfNull(source);
+        if (!source.IsResolved)
+        {
+            throw new ArgumentException("Only a resolved defect can resolve its duplicates.", nameof(source));
+        }
+
+        if (source.ResolutionReason is not { } reason || !reason.ClearsDuplicates())
+        {
+            throw new ArgumentException(
+                $"Only a repair clears duplicates; a {source.ResolutionReason} resolution is a judgement about one report.",
+                nameof(source));
+        }
+
+        if (sourceInspectionId == Id)
+        {
+            return null;
+        }
+
+        var index = IndexOfDefect(source.Item);
+        if (index < 0 || Defects[index].IsResolved)
+        {
+            return null;
+        }
+
+        var duplicate = Defects[index];
+        var resolved = duplicate with
+        {
+            ResolutionReason = source.ResolutionReason,
+            ResolutionNote = source.ResolutionNote,
+            ResolvedBy = source.ResolvedBy,
+            ResolvedAtUtc = source.ResolvedAtUtc,
+            ResolvedByWorkOrderId = source.ResolvedByWorkOrderId,
+            ResolvedWithInspectionId = sourceInspectionId,
+            WorkOrderId = duplicate.WorkOrderId is { } attached && attached == source.ResolvedByWorkOrderId
+                ? null
+                : duplicate.WorkOrderId,
+        };
+
+        ReplaceDefect(index, resolved);
+        Raise(new VehicleInspectionDefectsResolvedDomainEvent(Id, TenantId));
+        return resolved;
     }
+
+    private int IndexOfDefect(string? item) => Defects.FindIndex(d => IsSameItem(d.Item, item));
 
     private void ReplaceDefect(int index, InspectionDefect replacement)
     {
@@ -697,8 +776,11 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
     /// Idempotent by construction: already-resolved defects are skipped, and a run that changes
     /// nothing mutates nothing and raises no event (which matters — the audit pipeline rejects an
     /// eventless write, so a no-op must also be a no-write).
+    ///
+    /// Returns the defects this call actually resolved (empty on a no-op), in list order — the
+    /// set whose duplicates the caller then clears with <see cref="DuplicateDefects.Resolve"/>.
     /// </summary>
-    public void ResolveDefectsForWorkOrder(
+    public IReadOnlyList<InspectionDefect> ResolveDefectsForWorkOrder(
         Guid workOrderId,
         string resolvedBy,
         DateTimeOffset atUtc,
@@ -718,21 +800,32 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
 
         if (!Defects.Any(InScope))
         {
-            return;
+            return [];
         }
 
-        Defects = [.. Defects.Select(d => !InScope(d)
-            ? d
-            : d with
+        var resolved = new List<InspectionDefect>();
+        Defects = [.. Defects.Select(d =>
+        {
+            if (!InScope(d))
+            {
+                return d;
+            }
+
+            var stamped = d with
             {
                 ResolutionReason = DefectResolutionReason.RepairedUnderWorkOrder,
                 ResolutionNote = null,
                 ResolvedBy = Normalize(resolvedBy),
                 ResolvedAtUtc = atUtc,
                 ResolvedByWorkOrderId = workOrderId,
-            })];
+                ResolvedWithInspectionId = null,
+            };
+            resolved.Add(stamped);
+            return stamped;
+        })];
 
         Raise(new VehicleInspectionDefectsResolvedDomainEvent(Id, TenantId));
+        return resolved;
     }
 
     /// <summary>
@@ -822,6 +915,7 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
                 ResolvedBy = prior.ResolvedBy,
                 ResolvedAtUtc = prior.ResolvedAtUtc,
                 ResolvedByWorkOrderId = prior.ResolvedByWorkOrderId,
+                ResolvedWithInspectionId = prior.ResolvedWithInspectionId,
                 // The active work-order link is maintenance history too: an amend that keeps the
                 // item keeps it on its work order.
                 WorkOrderId = prior.WorkOrderId,
@@ -852,8 +946,9 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
             : item)];
 
     /// <summary>
-    /// Nulls the five resolution fields and the active work-order link — none of them can ever be
-    /// set from the wire; <c>RecurrenceOfInspectionId</c> is left alone.
+    /// Nulls the six resolution fields (the five-field stamp plus its duplicate provenance) and
+    /// the active work-order link — none of them can ever be set from the wire;
+    /// <c>RecurrenceOfInspectionId</c> is left alone.
     /// </summary>
     private static InspectionDefect StripResolution(InspectionDefect defect) => defect with
     {
@@ -862,6 +957,7 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
         ResolvedBy = null,
         ResolvedAtUtc = null,
         ResolvedByWorkOrderId = null,
+        ResolvedWithInspectionId = null,
         WorkOrderId = null,
     };
 
@@ -873,6 +969,15 @@ public sealed class VehicleInspection : AggregateRoot, ITenantScoped
             .Count() != defects.Count;
 
     private static string NormalizeItem(string? item) => item?.Trim() ?? string.Empty;
+
+    /// <summary>
+    /// THE item rule — whether two Item texts name the same component: trimmed, then compared
+    /// <see cref="StringComparison.OrdinalIgnoreCase"/>. Every defect address in this aggregate
+    /// uses it, and code outside it (duplicate matching) must call this rather than re-implement
+    /// it, so no second normalisation (a SQL <c>lower(btrim())</c>, say) can ever disagree.
+    /// </summary>
+    public static bool IsSameItem(string? left, string? right) =>
+        NormalizeItem(left).Equals(NormalizeItem(right), StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The derivation rule: Pass / PassWithDefects (all Minor) / Fail (any Major or OutOfService).</summary>
     public static InspectionResult DeriveResult(IReadOnlyList<InspectionDefect> defects)

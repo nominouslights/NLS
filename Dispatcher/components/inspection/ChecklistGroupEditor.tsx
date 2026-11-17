@@ -6,6 +6,8 @@ import type { InspectionItem, InspectionSubGroup } from "@/lib/inspectionForm";
 import { MonoTag, StatusChip } from "@/components/ui/Chip";
 import { SelectField, TextField } from "@/components/ui/Field";
 import { ActionButton } from "@/components/ui/Button";
+import { knownDefectFor, type KnownDefect } from "@/lib/defectDuplicates";
+import { KnownDefectHint } from "./KnownDefectHint";
 
 // One NL-PTI-01 sub-group. Each row is the paper form's three boxes — OK /
 // Defect / N-A — and starts UNANSWERED: with 28–64 rows, defaulting them to OK
@@ -82,10 +84,14 @@ export default function ChecklistGroupEditor({
   onPatch,
   legend = false,
   readOnly = false,
+  knownDefects,
 }: {
   group: InspectionSubGroup;
   rows: ChecklistRow[];
   onPatch: (itemKey: string, patch: Partial<ChecklistRow>) => void;
+  /** The unit's open defects by normalised item KEY (`knownDefectsByItem`). Display
+   *  only — a matching row shows a "known fault" hint and nothing else changes. */
+  knownDefects?: ReadonlyMap<string, KnownDefect> | null;
   /** Print the marker legend under this sub-group — set on the last sub-group of
    *  each area so the legend appears once per area rather than thirteen times. */
   legend?: boolean;
@@ -144,7 +150,18 @@ export default function ChecklistGroupEditor({
         {group.items.map((item) => {
           const r = byKey.get(item.key);
           if (!r) return null;
-          return <ItemRow key={item.key} item={item} row={r} onPatch={onPatch} readOnly={readOnly} />;
+          return (
+            <ItemRow
+              key={item.key}
+              item={item}
+              row={r}
+              onPatch={onPatch}
+              readOnly={readOnly}
+              // Matched on the row's wire KEY, never its label — they differ on
+              // some NL-PTI-01 rows, and the key is what a defect's `item` stores.
+              known={knownDefectFor(knownDefects, r.itemKey)}
+            />
+          );
         })}
       </div>
 
@@ -172,11 +189,14 @@ function ItemRow({
   row,
   onPatch,
   readOnly,
+  known,
 }: {
   item: InspectionItem;
   row: ChecklistRow;
   onPatch: (itemKey: string, patch: Partial<ChecklistRow>) => void;
   readOnly: boolean;
+  /** Informational only — never read by anything that sets the row's state. */
+  known?: KnownDefect;
 }) {
   const isDefect = row.state === "Defect";
   const isNa = row.state === "NotApplicable";
@@ -226,6 +246,7 @@ function ItemRow({
               {statusMeta("soon").g} {item.categoryNote}
             </div>
           )}
+          <KnownDefectHint known={known} />
         </div>
         <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }}>
           <StateToggle

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
 namespace NorthernLink.Api.Diagnostics;
@@ -42,7 +43,15 @@ public sealed class UnhandledExceptionHandler(
         // in the message rather than only inside the exception's own rendering.
         var postgresCode = FindPostgresErrorCode(exception);
 
-        logger.LogError(
+        // A lost optimistic-concurrency race (ModuleDbContext's version token — including the
+        // snapshot-key collision it re-raises as one) is not a server fault: someone else saved
+        // the same record first, and the caller only has to reload and retry. 409, logged as a
+        // warning. The body stays as vague as a 500's — it names no record and no table.
+        var lostRace = exception is DbUpdateConcurrencyException;
+        var status = lostRace ? StatusCodes.Status409Conflict : StatusCodes.Status500InternalServerError;
+
+        logger.Log(
+            lostRace ? LogLevel.Warning : LogLevel.Error,
             exception,
             "Unhandled exception on {Method} {Path}{Query} — {ExceptionType}{PostgresCode}. traceId={TraceId}",
             httpContext.Request.Method,
@@ -54,10 +63,14 @@ public sealed class UnhandledExceptionHandler(
 
         var problem = new ProblemDetails
         {
-            Status = StatusCodes.Status500InternalServerError,
-            Title = "An unexpected error occurred.",
+            Status = status,
+            Title = lostRace
+                ? "This record was changed by someone else."
+                : "An unexpected error occurred.",
             // Deliberately vague in the body; the traceId is how a reader finds the real line.
-            Detail = $"The request could not be completed. Quote traceId {traceId} when reporting this.",
+            Detail = lostRace
+                ? $"Reload and try again. Quote traceId {traceId} if it keeps happening."
+                : $"The request could not be completed. Quote traceId {traceId} when reporting this.",
             Instance = httpContext.Request.Path,
         };
 
@@ -75,7 +88,7 @@ public sealed class UnhandledExceptionHandler(
             }
         }
 
-        httpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        httpContext.Response.StatusCode = status;
         await httpContext.Response.WriteAsJsonAsync(problem, cancellationToken);
 
         return true;

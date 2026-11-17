@@ -2,22 +2,34 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import InspectionDetailModal from "./InspectionDetailModal";
 import { ApiError } from "@/lib/api";
-import type { InspectionDefectWire, ShopWire, VehicleInspection, WorkOrderStatusWire } from "@/lib/api/maintenance";
+import type {
+  DefectDuplicateWire,
+  InspectionDefectWire,
+  ResolvedDefect,
+  ShopWire,
+  VehicleInspection,
+  WorkOrderStatusWire,
+} from "@/lib/api/maintenance";
+import { DEFECTS_CHANGED_EVENT } from "@/lib/defectSync";
 
 // The inspection list is a projected read model, so for ~5s after a work order
 // is raised from this modal the reloaded inspection still shows the defect as
 // open. The modal must not offer it again in that gap (a second click is a 409),
 // and must let the overlay go once the refreshed data carries the link.
 
-const { createWorkOrder, listShops } = vi.hoisted(() => ({
+const { createWorkOrder, listShops, previewDefectDuplicates, resolveInspectionDefect } = vi.hoisted(() => ({
   createWorkOrder: vi.fn<(input: unknown) => Promise<string>>(),
   listShops: vi.fn<() => Promise<ShopWire[]>>(),
+  previewDefectDuplicates: vi.fn<(inspectionId: string, item: string) => Promise<DefectDuplicateWire[]>>(),
+  resolveInspectionDefect: vi.fn<(inspectionId: string, body: unknown) => Promise<ResolvedDefect[]>>(),
 }));
 
 vi.mock("@/lib/api/maintenance", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/maintenance")>()),
   createWorkOrder,
   listShops,
+  previewDefectDuplicates,
+  resolveInspectionDefect,
 }));
 
 afterEach(() => {
@@ -31,6 +43,7 @@ const defect = (over: Partial<InspectionDefectWire> & { item: string }): Inspect
   workOrderId: null,
   resolutionReason: null,
   resolvedAtUtc: null,
+  resolvedWithInspectionId: null,
   ...over,
 });
 
@@ -184,5 +197,130 @@ describe("InspectionDetailModal — legacy inspection-level work order", () => {
     expect(screen.getByText("On WO-7")).toBeTruthy();
     expect(screen.getAllByText("CREATE WORK ORDER")).toHaveLength(1);
     expect(screen.queryByText(/CREATE WORK ORDER FOR ALL/)).toBeNull();
+  });
+});
+
+// Whatever changes a defect from HERE is announced to every other surface
+// (lib/defectSync) exactly once — the trip detail's inspection list and the
+// vehicle's tabs re-read from that.
+describe("InspectionDetailModal — linked to every other defect surface", () => {
+  function listen() {
+    const announced = vi.fn();
+    window.addEventListener(DEFECTS_CHANGED_EVENT, announced);
+    return { announced, stop: () => window.removeEventListener(DEFECTS_CHANGED_EVENT, announced) };
+  }
+
+  it("announces a resolve once, and shows it here at once", async () => {
+    // The resolve preview finds one open duplicate on another inspection.
+    previewDefectDuplicates.mockResolvedValueOnce([
+      {
+        inspectionId: "insp-0",
+        item: "brakes",
+        tripNumber: "NL-2026-0041",
+        severity: "Major",
+        reportedAt: "2026-10-01T12:00:00Z",
+      },
+    ]);
+    resolveInspectionDefect.mockResolvedValueOnce([
+      { inspectionId: "insp-1", item: "Brakes", tripNumber: "NL-2026-0042", severity: "Major" },
+      { inspectionId: "insp-0", item: "brakes", tripNumber: "NL-2026-0041", severity: "Major" },
+    ]);
+    const { announced, stop } = listen();
+    try {
+      const onChanged = vi.fn();
+      render(
+        <InspectionDetailModal
+          inspection={stale}
+          vehicleId="veh-1"
+          vehicles={[{ id: "veh-1", unit: "NL-02", label: "NL-02" }]}
+          onWorkOrderCreated={vi.fn()}
+          onChanged={onChanged}
+          onClose={vi.fn()}
+        />,
+      );
+      fireEvent.click(screen.getAllByText("RESOLVE")[0]);
+      // Previewed by the server for this inspection's defect before the confirm.
+      await screen.findByText("1 other open report of Brakes on NL-02");
+      expect(previewDefectDuplicates).toHaveBeenCalledWith("insp-1", "Brakes");
+      fireEvent.change(screen.getByRole("combobox"), { target: { value: "PreviouslyRepaired" } });
+      await screen.findByText("This also clears 1 other open report of Brakes on NL-02");
+      fireEvent.click(screen.getByText("RESOLVE 2 REPORTS"));
+      expect(resolveInspectionDefect).toHaveBeenCalledWith(
+        "insp-1",
+        expect.objectContaining({ clearDuplicates: [{ inspectionId: "insp-0", item: "brakes" }] }),
+      );
+
+      // Only this inspection's row is overlaid; the duplicate on insp-0 lives elsewhere.
+      await screen.findByText("Resolved · updating");
+      expect(screen.getAllByText("Resolved · updating")).toHaveLength(1);
+      expect(onChanged).toHaveBeenCalledTimes(1);
+      expect(announced).toHaveBeenCalledTimes(1);
+    } finally {
+      stop();
+    }
+  });
+
+  it("announces a work order raised against its defects once", async () => {
+    listShops.mockResolvedValue([]);
+    createWorkOrder.mockResolvedValueOnce("wo-new");
+    const { announced, stop } = listen();
+    try {
+      renderModal(stale);
+      await createForFirstDefect();
+      await screen.findByText("Work order created · updating");
+      expect(announced).toHaveBeenCalledTimes(1);
+    } finally {
+      stop();
+    }
+  });
+
+  it("does not announce a failed write", async () => {
+    listShops.mockResolvedValue([]);
+    createWorkOrder.mockRejectedValueOnce(new ApiError("Fleet.Inspection.DefectAlreadyOnWorkOrder", "Already on one.", 409));
+    const { announced, stop } = listen();
+    try {
+      renderModal(stale);
+      await createForFirstDefect();
+      await screen.findByText("Already on one.");
+      expect(announced).not.toHaveBeenCalled();
+    } finally {
+      stop();
+    }
+  });
+
+  it("names the reason on a resolved defect", () => {
+    renderModal(
+      inspectionWith([
+        defect({ item: "Brakes", resolutionReason: "ReportedInError", resolvedAtUtc: "2026-10-02T00:00:00Z" }),
+        defect({ item: "Wipers", severity: "Minor" }),
+      ]),
+    );
+    expect(screen.getByText("Resolved · Reported in error")).toBeTruthy();
+    expect(screen.getAllByText("RESOLVE")).toHaveLength(1);
+    expect(screen.queryByText(/cleared with/)).toBeNull();
+  });
+
+  it("says a duplicate was cleared with another report, naming its trip from the parent's data", () => {
+    const linkedReportOf = vi.fn((id: string) =>
+      id === "insp-0" ? { tripNumber: "NL-2026-0041", at: "2026-09-30T12:00:00Z" } : undefined,
+    );
+    render(
+      <InspectionDetailModal
+        inspection={inspectionWith([
+          defect({
+            item: "Brakes",
+            resolutionReason: "PreviouslyRepaired",
+            resolvedAtUtc: "2026-10-02T00:00:00Z",
+            resolvedWithInspectionId: "insp-0",
+          }),
+        ])}
+        vehicleId="veh-1"
+        linkedReportOf={linkedReportOf}
+        vehicles={[{ id: "veh-1", unit: "NL-02", label: "NL-02" }]}
+        onWorkOrderCreated={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("· cleared with the earlier report on NL-2026-0041")).toBeTruthy();
   });
 });

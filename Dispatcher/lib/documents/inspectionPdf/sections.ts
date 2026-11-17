@@ -287,11 +287,16 @@ export function retiredFormBlock(
 /**
  * The defect log.
  *
- * "Reported To / When", "Repair Completed (Date)" and "Re-inspected" have NO
- * backing field on `VehicleInspection` — a defect's resolution is derived per
- * vehicle (`VehicleDefectWire.resolvedAtUtc`), not carried on the inspection
- * this sheet prints. All three are therefore blank ruled cells for hand
- * completion. Nothing here fabricates a repair date.
+ * "Reported To / When", "Repair Completed (Date)" and "Re-inspected" stay blank
+ * ruled cells for hand completion — deliberately, even though each
+ * `InspectionDefectWire` now carries its resolution (`resolutionReason`,
+ * `resolvedAtUtc`, `workOrderId`). A resolution date is not a repair date:
+ * "ReportedInError", "AcceptedMonitoring" and "PreviouslyRepaired" clear a
+ * defect without anyone repairing anything on that date, and even
+ * "RepairedUnderWorkOrder" records when the resolution was entered, not who
+ * the defect was reported to or who re-inspected the unit. Printing any of
+ * them in these columns would put a fabricated repair date on a compliance
+ * form. Nothing here does.
  */
 export function defectLogBlock(insp: VehicleInspection | null): string {
   const defects = insp?.defects ?? [];
@@ -319,6 +324,8 @@ export function defectLogBlock(insp: VehicleInspection | null): string {
   return (
     sectionBar("Defect Log") +
     noneFound +
+    // Still accurate, and printed as-is: the platform holds a per-defect
+    // RESOLUTION date, never a repair date (see the doc comment above).
     `<div class="note">Record every Defect row above. Repair follow-up is completed by hand — the platform does not hold a per-defect repair date on this report.</div>
      <table>
        <thead><tr>

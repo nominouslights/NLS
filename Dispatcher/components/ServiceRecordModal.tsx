@@ -25,6 +25,7 @@ import { NumberField, SelectField, TextAreaField, TextField } from "@/components
 import { ActionButton } from "@/components/ui/Button";
 import { StatusChip } from "@/components/ui/Chip";
 import DefectOutcomesSection from "@/components/fleet/DefectOutcomesSection";
+import { notifyDefectsChanged } from "@/lib/defectSync";
 
 const CATEGORIES: ServiceCategory[] = ["Preventive", "Repair", "Inspection Fix", "Recall"];
 
@@ -162,6 +163,11 @@ export default function ServiceRecordModal({
       }
 
       onSaved();
+      // Completion resolves exactly this work order's defects (Repaired / No
+      // fault found) and releases Deferred ones back to open — every surface
+      // listing them re-reads. Unconditional: completing a legacy
+      // whole-inspection work order changes what is attachable too.
+      notifyDefectsChanged();
       if (vehicle && OFFLINE_STATUSES.includes(vehicle.status)) {
         // Fail-soft: if the defect list cannot be read, no offer is made — the
         // Overview tab's own "return to service" action is always there.

@@ -87,6 +87,8 @@ import ChangeRouteModal from "@/components/ChangeRouteModal";
 import CorrectDriverModal from "@/components/CorrectDriverModal";
 import ConvertToDeadheadModal from "@/components/ConvertToDeadheadModal";
 import DefectsPanel from "@/components/fleet/DefectsPanel";
+import { notifyDefectsChanged, useDefectsChanged } from "@/lib/defectSync";
+import { inspectionDefectStatus } from "@/lib/workOrderDisplay";
 
 /** Label attributed to dispatcher-entered manifests/inspections (no user id yet). */
 const DISPATCHER_LABEL = "Dispatch";
@@ -1800,6 +1802,30 @@ export default function Trips({
     };
   }, [tripId, tripNumber, tripDriverId, tripClientId, tripClientName, tripClearanceAsOf, tripManifestId, tripIsCargo]);
 
+  // The trip on screen NOW — read after an await, so a refetch started for one
+  // trip never lands on another (the rows are tagged with their tripId too).
+  const currentTripId = useRef(tripId);
+  useEffect(() => {
+    currentTripId.current = tripId;
+  });
+
+  // A defect changed somewhere (resolved in the Open Defects panel below, on
+  // the vehicle's tabs, a work order created or completed…): re-read this
+  // trip's inspections so their live defect chips follow. Fires once, after the
+  // projector has run (lib/defectSync). Refresh only — never a gate.
+  useDefectsChanged(() => {
+    if (!tripId || !tripNumber) return;
+    const forTrip = tripId;
+    listInspections({ tripNumber }).then(
+      (fresh) => {
+        if (currentTripId.current === forTrip) setInspectionsState({ tripId: forTrip, rows: fresh });
+      },
+      () => {
+        // best-effort — keep what is shown; the next detail load refetches.
+      },
+    );
+  });
+
   async function runAction(fn: () => Promise<void>) {
     if (busy) return;
     setBusy(true);
@@ -1977,6 +2003,8 @@ export default function Trips({
    *  until HasPostTripInspection flips back to false so COMPLETE re-gates. */
   async function onInspectionRemoved(id: string, num: string, insp: VehicleInspection) {
     await deleteInspection(insp.id);
+    // Removing a DVIR removes its defects from every surface that lists them.
+    notifyDefectsChanged();
     try {
       const fresh = await listInspections({ tripNumber: num });
       setInspectionsState({ tripId: id, rows: fresh });
@@ -2707,6 +2735,7 @@ export default function Trips({
                           : insp.result === "PassWithDefects"
                             ? { kind: "soon" as const, label: "Pass with defects" }
                             : { kind: "ontime" as const, label: "Pass" };
+                      const defectStatus = inspectionDefectStatus(insp);
                       return (
                         <div
                           key={insp.id}
@@ -2724,7 +2753,13 @@ export default function Trips({
                           <span style={{ fontFamily: fonts.body, fontSize: 12.5, fontWeight: 700, color: colors.headingBright }}>
                             {insp.type === "PreTrip" ? "Pre-Trip" : "Post-Trip"}
                           </span>
+                          {/* The result is the compliance record of what the driver
+                              found — frozen. The defect chip beside it is live:
+                              open (worst severity) or resolved. */}
                           <StatusChip kind={rm.kind} label={rm.label} />
+                          {defectStatus && (
+                            <StatusChip kind={defectStatus.kind} glyph={defectStatus.glyph} label={defectStatus.label} />
+                          )}
                           <StatusChip
                             kind={insp.source === "Dispatcher" ? "soon" : "info"}
                             label={insp.source === "Dispatcher" ? "Dispatcher" : "Driver App"}

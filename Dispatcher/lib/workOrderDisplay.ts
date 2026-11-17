@@ -3,6 +3,7 @@ import type {
   DefectRepairOutcomeWire,
   DefectResolutionReasonWire,
   DefectSeverityWire,
+  InspectionDefectWire,
   InspectionResultWire,
   ServiceCategoryWire,
   ShopWire,
@@ -12,6 +13,7 @@ import type {
   WorkOrderWire,
 } from "./api/maintenance";
 import type { ServiceCategory, Shop, WorkOrder } from "./types";
+import { formatUtcDate } from "./api/format";
 
 // Wire ↔ display boundary for the live maintenance contract. Wire enums travel
 // as backend enum names ("InProgress", "PreTripInspection"); everything shown
@@ -53,6 +55,58 @@ export const DEFECT_SEVERITY_META: Record<DefectSeverityWire, { kind: StatusKind
   OutOfService: { kind: "over", glyph: "✕" },
 };
 
+/** Worst first — the order the server already returns defect rows in. Used to
+ *  PICK the worst severity present, never to re-sort a list. */
+export const DEFECT_SEVERITY_RANK: Record<DefectSeverityWire, number> = { OutOfService: 0, Major: 1, Minor: 2 };
+
+/**
+ * The worst severity among `defects`, or null when there are none. The ONE
+ * fallback: a severity this client does not know (a newer API, a bad row) ranks
+ * and reads as Major — serious enough to be seen, never silently promoted to
+ * Out-of-Service nor demoted to Minor. Picks a value; never sorts the list.
+ */
+export function worstSeverity(
+  defects: readonly { severity: DefectSeverityWire | string }[],
+): DefectSeverityWire | null {
+  let worst: DefectSeverityWire | null = null;
+  for (const d of defects) {
+    const known = Object.prototype.hasOwnProperty.call(DEFECT_SEVERITY_RANK, d.severity);
+    const s: DefectSeverityWire = known ? (d.severity as DefectSeverityWire) : "Major";
+    if (worst === null || DEFECT_SEVERITY_RANK[s] < DEFECT_SEVERITY_RANK[worst]) worst = s;
+  }
+  return worst;
+}
+
+/** A chip's worth of status: colour kind + optional glyph override + words. */
+export interface DefectChip {
+  kind: StatusKind;
+  glyph?: string;
+  label: string;
+}
+
+/**
+ * The LIVE defect state of one inspection, beside its frozen result chip.
+ * "Fail" / "Pass with defects" is the compliance record of what the driver
+ * found and never changes; this says whether those defects are still open.
+ *
+ *  - null when the inspection reported no defects (nothing to say);
+ *  - "N open defect(s)" in the WORST open severity's colour + glyph — a defect
+ *    on an open work order is still open until that work order completes;
+ *  - teal "Defects resolved" once every reported defect is cleared.
+ */
+export function inspectionDefectStatus(insp: { defects: readonly InspectionDefectWire[] }): DefectChip | null {
+  if (insp.defects.length === 0) return null;
+  const open = insp.defects.filter((d) => d.resolvedAtUtc == null);
+  const worst = worstSeverity(open);
+  if (worst === null) return { kind: "ontime", label: "Defects resolved" };
+  const meta = DEFECT_SEVERITY_META[worst];
+  return {
+    kind: meta.kind,
+    glyph: meta.glyph,
+    label: `${open.length} open defect${open.length === 1 ? "" : "s"}`,
+  };
+}
+
 /** Work-order status → chip colour for a defect row's "repair underway" tag.
  *  Status-only sibling of workOrderKindWire: VehicleDefectWire carries the
  *  status string but no priority. Anything still in the shop reads as caution —
@@ -86,6 +140,44 @@ export const DEFECT_RESOLUTION_META: Record<DefectResolutionReasonWire, { kind: 
   AcceptedMonitoring: { kind: "ontime" },
   NoFaultFound: { kind: "ontime", glyph: "○" },
 };
+
+/** The chip for a resolved inspection defect: teal, the reason's glyph, and
+ *  "Resolved · <reason>" — plain "Resolved" when no reason came back. An
+ *  unmapped reason prints as-is rather than vanishing. */
+export function resolvedDefectChip(reason: DefectResolutionReasonWire | string | null): DefectChip {
+  if (!reason) return { kind: "ontime", label: "Resolved" };
+  const meta = DEFECT_RESOLUTION_META[reason as DefectResolutionReasonWire];
+  return {
+    kind: meta?.kind ?? "ontime",
+    glyph: meta?.glyph,
+    label: `Resolved · ${DEFECT_RESOLUTION_LABEL[reason as DefectResolutionReasonWire] ?? reason}`,
+  };
+}
+
+/** The report a duplicate was cleared with, as far as the caller's already-loaded
+ *  data can say — never fetched per row. */
+export interface LinkedReport {
+  tripNumber: string | null;
+  /** When that report was made (the inspection's performedAt / reportedAt). */
+  at: string;
+}
+
+/**
+ * The words for a defect cleared AS A DUPLICATE (`resolvedWithInspectionId` set):
+ * a known fault re-reported on several inspections is cleared by resolving any one
+ * of them. Says whether the resolved report was earlier or later than this one and
+ * names its trip when the caller can find it; otherwise says only that it went
+ * with another report of the same fault. The caller prefixes "· ".
+ */
+export function clearedWithText(linked: LinkedReport | null | undefined, ownAt: string | null | undefined): string {
+  if (!linked) return "cleared with another report of this fault";
+  const theirs = Date.parse(linked.at);
+  const mine = ownAt ? Date.parse(ownAt) : NaN;
+  const when = theirs < mine ? "earlier" : theirs > mine ? "later" : null;
+  if (linked.tripNumber) return `cleared with ${when ? `the ${when}` : "the"} report on ${linked.tripNumber}`;
+  const article = when === "earlier" ? "an earlier" : when === "later" ? "a later" : "another";
+  return `cleared with ${article} report (${formatUtcDate(linked.at)})`;
+}
 
 /** What the mechanic found for one defect line, as the dispatcher reads it. */
 export const DEFECT_OUTCOME_LABEL: Record<DefectRepairOutcomeWire, string> = {

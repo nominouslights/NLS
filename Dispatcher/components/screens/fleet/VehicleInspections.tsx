@@ -11,7 +11,15 @@ import {
   type WorkOrderWire,
 } from "@/lib/api/maintenance";
 import { isAttachable, prefillFromInspection, type WorkOrderPrefillWire } from "@/lib/inspectionWorkOrder";
-import { DEFECT_SEVERITY_LABEL, INSPECTION_RESULT_META } from "@/lib/workOrderDisplay";
+import {
+  DEFECT_SEVERITY_LABEL,
+  INSPECTION_RESULT_META,
+  clearedWithText,
+  inspectionDefectStatus,
+  resolvedDefectChip,
+  type LinkedReport,
+} from "@/lib/workOrderDisplay";
+import { useDefectsChanged } from "@/lib/defectSync";
 import type { VehicleOption } from "@/components/screens/fleet/vehicle-detail/shared";
 import { Panel, SectionLabel } from "@/components/ui/Panel";
 import { MonoTag, StatusChip } from "@/components/ui/Chip";
@@ -24,7 +32,10 @@ import WorkOrderModal from "@/components/WorkOrderModal";
 // inspections and dispatcher paper-backup entries in one list. Open a row for
 // the full checklist, turn defects into work orders (per-defect or all at
 // once), and a Major / Out-of-Service entry auto-offers a prefilled work order
-// right after saving.
+// right after saving. Each row's result chip is the frozen record of what the
+// driver found; the defect chip beside it, and each defect line, say whether
+// those defects are still open — and follow resolves made anywhere else in the
+// console (lib/defectSync).
 
 export default function VehicleInspections({
   vehicle,
@@ -87,13 +98,27 @@ export default function VehicleInspections({
     (woFetch?.vehicleId === vehicleId ? woFetch.rows : []).map((w) => [w.id, w.status]),
   );
   const woLink = (id: string) => woNumberById.get(id) ?? "work order";
+  // The report a duplicate defect was cleared with — looked up in the list
+  // already loaded for this unit, never fetched per row.
+  const linkedReportOf = (inspectionId: string): LinkedReport | undefined => {
+    const i = fetchedRows?.find((r) => r.id === inspectionId);
+    return i ? { tripNumber: i.tripNumber, at: i.performedAt } : undefined;
+  };
   const detail = detailId ? (rows?.find((r) => r.id === detailId) ?? null) : null;
 
+  // A defect changed anywhere in the console — resolved, attached to or
+  // released by a work order, an inspection entered — so re-read the list once
+  // the projector (5s poll) has certainly run. Fires PROJECTION_RECONCILE_MS
+  // after the last change, never immediately, and is torn down on unmount.
+  useDefectsChanged(() => setReload((n) => n + 1));
+
   function refreshSoon() {
-    // The inspection list is a projected read model: refetch now, and again
-    // once the projector (5s poll) has certainly run.
+    // The inspection list is a projected read model: refetch now (in case it
+    // has already caught up). The certain re-read after the projector has run
+    // comes from useDefectsChanged above — every write that lands here (a
+    // resolve, a work order raised against defects) announces itself, so a
+    // second timer here would only fetch the same list twice.
     setReload((n) => n + 1);
-    setTimeout(() => setReload((n) => n + 1), 6000);
   }
 
   async function onInspectionSaved(id: string) {
@@ -146,6 +171,7 @@ export default function VehicleInspections({
         rows.map((insp) => {
           const rm = INSPECTION_RESULT_META[insp.result] ?? INSPECTION_RESULT_META.Pass;
           const hasDefects = insp.defects.length > 0;
+          const defectStatus = inspectionDefectStatus(insp);
           return (
             <Panel key={insp.id} style={{ marginBottom: 10, cursor: "pointer" }}>
               <div onClick={() => setDetailId(insp.id)}>
@@ -155,6 +181,9 @@ export default function VehicleInspections({
                     {insp.type === "PreTrip" ? "Pre-Trip" : "Post-Trip"}
                   </span>
                   <StatusChip kind={rm.kind} label={rm.label} />
+                  {defectStatus && (
+                    <StatusChip kind={defectStatus.kind} glyph={defectStatus.glyph} label={defectStatus.label} />
+                  )}
                   <MonoTag color={insp.source === "Dispatcher" ? colors.amberText : colors.textDim}>
                     {insp.source === "Dispatcher" ? "Dispatcher" : "Driver App"}
                   </MonoTag>
@@ -169,20 +198,48 @@ export default function VehicleInspections({
                   {insp.enteredBy ? ` · entered by ${insp.enteredBy}` : ""}
                 </div>
 
+                {/* Server order (safety severity) — never re-sorted. */}
                 {hasDefects && (
                   <ul style={{ margin: "0 0 4px", paddingLeft: 18 }}>
-                    {insp.defects.map((d, i) => (
-                      <li key={i} style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textMuted, lineHeight: 1.6 }}>
-                        <span style={{ fontWeight: 600, color: colors.textSecondary }}>{d.item}</span> —{" "}
-                        {DEFECT_SEVERITY_LABEL[d.severity]}
-                        {d.note ? `: ${d.note}` : ""}
-                        {d.resolvedAtUtc == null && d.workOrderId && (
-                          <span style={{ marginLeft: 6 }}>
-                            <MonoTag color={colors.skyBlue}>→ {woLink(d.workOrderId)}</MonoTag>
-                          </span>
-                        )}
-                      </li>
-                    ))}
+                    {insp.defects.map((d, i) => {
+                      const resolved = d.resolvedAtUtc != null;
+                      const chip = resolved ? resolvedDefectChip(d.resolutionReason) : null;
+                      return (
+                        <li
+                          key={i}
+                          style={{
+                            fontFamily: fonts.body,
+                            fontSize: 12,
+                            // A cleared defect stays on the record, quieter — the
+                            // teal chip says it is cleared, not the dimming.
+                            color: resolved ? colors.textDim : colors.textMuted,
+                            lineHeight: 1.6,
+                          }}
+                        >
+                          <span style={{ fontWeight: 600, color: resolved ? colors.textDim : colors.textSecondary }}>
+                            {d.item}
+                          </span>{" "}
+                          — {DEFECT_SEVERITY_LABEL[d.severity]}
+                          {d.note ? `: ${d.note}` : ""}
+                          {chip ? (
+                            <span style={{ marginLeft: 8, display: "inline-block", verticalAlign: "middle" }}>
+                              <StatusChip kind={chip.kind} glyph={chip.glyph} label={chip.label} />
+                              {d.resolvedWithInspectionId != null && (
+                                <span style={{ marginLeft: 6, fontSize: 11.5, color: colors.textDim }}>
+                                  · {clearedWithText(linkedReportOf(d.resolvedWithInspectionId), insp.performedAt)}
+                                </span>
+                              )}
+                            </span>
+                          ) : (
+                            d.workOrderId && (
+                              <span style={{ marginLeft: 6 }}>
+                                <MonoTag color={colors.skyBlue}>→ {woLink(d.workOrderId)}</MonoTag>
+                              </span>
+                            )
+                          )}
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
 
@@ -212,6 +269,7 @@ export default function VehicleInspections({
           woNumber={detail.generatedWorkOrderId ? woLink(detail.generatedWorkOrderId) : undefined}
           workOrderNumberOf={(id) => woNumberById.get(id)}
           workOrderStatusOf={(id) => woStatusById.get(id)}
+          linkedReportOf={linkedReportOf}
           vehicles={vehicles}
           onWorkOrderCreated={refreshSoon}
           onChanged={refreshSoon}
