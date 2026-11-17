@@ -21,6 +21,7 @@ import {
   DEFECT_RESOLUTION_META,
   DEFECT_SEVERITY_LABEL,
   DEFECT_SEVERITY_META,
+  DEFECT_SEVERITY_RANK,
   DEFECT_WO_KIND,
   WO_STATUS_LABEL,
 } from "@/lib/workOrderDisplay";
@@ -30,6 +31,7 @@ import { ActionButton } from "@/components/ui/Button";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { SelectField, TextAreaField } from "@/components/ui/Field";
 import RetiredKeyNote from "@/components/inspection/RetiredKeyNote";
+import { notifyDefectsChanged, useDefectsChanged } from "@/lib/defectSync";
 
 // One component, four surfaces: the trip detail, the create-trip wizard, the
 // vehicle's Open Defects tab, and (via ResolveDefectModal alone) the inspection
@@ -40,24 +42,18 @@ import RetiredKeyNote from "@/components/inspection/RetiredKeyNote";
 //
 // WARN ONLY. There is deliberately no callback reporting "this vehicle has
 // defects" to a parent, so no mount point can grow into a block on trip
-// creation or vehicle assignment without a considered prop change.
+// creation or vehicle assignment without a considered prop change. The
+// cross-surface seam (lib/defectSync) keeps that true: this panel LISTENS for
+// "defect state changed somewhere" and refetches — the event carries no
+// vehicle, no count, nothing a caller could gate on.
 //
 // `onCreateWorkOrder` is an ACTION, not a report: when passed (the vehicle's
 // Open Defects tab only — never the trip detail), every open row with no open
 // work order gets a CREATE WORK ORDER button, plus a checkbox so several open
 // defects can go on one work order. A defect is on at most one open work order.
 
-/** Read models are projector-maintained on a 5s poll (Backend
- *  Shared/Persistence/Projections/ProjectionOptions.cs), so a defect resolved a
- *  moment ago still reads back as open. The row is dropped optimistically and
- *  reconciled once the projector has certainly run — do NOT "fix" this into a
- *  tight poll; it would hammer the API to win a second. */
-const PROJECTION_RECONCILE_MS = 6000;
-
 /** No defect id exists — a row is addressed by (inspectionId, item). */
 const defectKey = (d: { inspectionId: string; item: string }) => `${d.inspectionId}:${d.item}`;
-
-const SEVERITY_RANK: Record<DefectSeverityWire, number> = { OutOfService: 0, Major: 1, Minor: 2 };
 
 export default function DefectsPanel({
   vehicleId,
@@ -103,7 +99,6 @@ export default function DefectsPanel({
   const [loadError, setLoadError] = useState<{ vehicleId: string; message: string } | null>(null);
   const [fetched, setFetched] = useState<{ vehicleId: string; rows: VehicleDefectWire[] } | null>(null);
   const [resolving, setResolving] = useState<VehicleDefectWire | null>(null);
-  const reconcileTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The load effect must not re-run when the marks change, so it reads the
   // latest marks and callback through a ref.
   const pendingRef = useRef({ pendingWorkOrders, onPendingWorkOrdersSettled });
@@ -141,19 +136,19 @@ export default function DefectsPanel({
     };
   }, [vehicleId, includeResolved, reload, refreshKey]);
 
-  useEffect(() => {
-    return () => {
-      if (reconcileTimer.current) clearTimeout(reconcileTimer.current);
-    };
-  }, []);
+  // A defect changed anywhere — here, the inspection detail, a work order, an
+  // inspection entered or amended — so re-read once the projector has run
+  // (PROJECTION_RECONCILE_MS after the last change; never immediately). This is
+  // also this panel's own reconcile after a resolve: ResolveDefectModal
+  // announces the change, so one resolve means exactly one reload.
+  useDefectsChanged(() => setReload((n) => n + 1));
 
   function onResolved(defect: VehicleDefectWire) {
-    // Optimistic: the projection has not caught up yet (see the constant).
+    // Optimistic: the projection has not caught up yet — the reconcile reload
+    // comes from useDefectsChanged above.
     setFetched((prev) =>
       prev ? { ...prev, rows: prev.rows.filter((r) => defectKey(r) !== defectKey(defect)) } : prev,
     );
-    if (reconcileTimer.current) clearTimeout(reconcileTimer.current);
-    reconcileTimer.current = setTimeout(() => setReload((n) => n + 1), PROJECTION_RECONCILE_MS);
   }
 
   // Rows arrive PRE-ORDERED (OutOfService → Major → Minor, newest first within
@@ -298,7 +293,7 @@ function SummaryChip({ open }: { open: VehicleDefectWire[] }) {
     return acc;
   }, {});
   const severities = (Object.keys(counts) as DefectSeverityWire[]).sort(
-    (a, b) => SEVERITY_RANK[a] - SEVERITY_RANK[b],
+    (a, b) => DEFECT_SEVERITY_RANK[a] - DEFECT_SEVERITY_RANK[b],
   );
   const worst = severities[0];
   const meta = DEFECT_SEVERITY_META[worst];
@@ -520,6 +515,10 @@ export function ResolveDefectModal({
         resolvedBy: "Dispatch",
       });
       onResolved();
+      // The one emit for every resolve, whichever surface opened this modal
+      // (DefectsPanel or InspectionDetailModal) — after the parent's own
+      // optimistic update, so listeners schedule their re-read from here.
+      notifyDefectsChanged();
     } catch (e) {
       setBusy(false);
       setError(e instanceof ApiError ? e.message : "Failed to resolve the defect — please try again.");

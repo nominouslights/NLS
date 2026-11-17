@@ -16,6 +16,7 @@ import { ModalShell } from "@/components/ui/ModalShell";
 import { NumberField, SelectField, TextAreaField, TextField } from "@/components/ui/Field";
 import { ActionButton } from "@/components/ui/Button";
 import WorkOrderDefectLines from "@/components/fleet/WorkOrderDefectLines";
+import { notifyDefectsChanged } from "@/lib/defectSync";
 
 const PRIORITIES: WorkOrderPriorityWire[] = ["Low", "Medium", "High", "Critical"];
 
@@ -104,6 +105,10 @@ export default function WorkOrderModal({
         ...(attached.length ? { defects: defectRefs(attached) } : {}),
       });
       onSaved(id);
+      // Attaching defects flips them to "On WO-x" on every surface that lists
+      // them. Announced after onSaved, so a parent's pending mark is already in
+      // place (and its recheck window started) before any listener's re-read.
+      if (attached.length) notifyDefectsChanged();
       onClose();
     } catch (e) {
       setBusy(false);

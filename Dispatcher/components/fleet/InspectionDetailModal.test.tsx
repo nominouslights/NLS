@@ -3,21 +3,24 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import InspectionDetailModal from "./InspectionDetailModal";
 import { ApiError } from "@/lib/api";
 import type { InspectionDefectWire, ShopWire, VehicleInspection, WorkOrderStatusWire } from "@/lib/api/maintenance";
+import { DEFECTS_CHANGED_EVENT } from "@/lib/defectSync";
 
 // The inspection list is a projected read model, so for ~5s after a work order
 // is raised from this modal the reloaded inspection still shows the defect as
 // open. The modal must not offer it again in that gap (a second click is a 409),
 // and must let the overlay go once the refreshed data carries the link.
 
-const { createWorkOrder, listShops } = vi.hoisted(() => ({
+const { createWorkOrder, listShops, resolveInspectionDefect } = vi.hoisted(() => ({
   createWorkOrder: vi.fn<(input: unknown) => Promise<string>>(),
   listShops: vi.fn<() => Promise<ShopWire[]>>(),
+  resolveInspectionDefect: vi.fn<(inspectionId: string, body: unknown) => Promise<void>>(),
 }));
 
 vi.mock("@/lib/api/maintenance", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/maintenance")>()),
   createWorkOrder,
   listShops,
+  resolveInspectionDefect,
 }));
 
 afterEach(() => {
@@ -184,5 +187,82 @@ describe("InspectionDetailModal — legacy inspection-level work order", () => {
     expect(screen.getByText("On WO-7")).toBeTruthy();
     expect(screen.getAllByText("CREATE WORK ORDER")).toHaveLength(1);
     expect(screen.queryByText(/CREATE WORK ORDER FOR ALL/)).toBeNull();
+  });
+});
+
+// Whatever changes a defect from HERE is announced to every other surface
+// (lib/defectSync) exactly once — the trip detail's inspection list and the
+// vehicle's tabs re-read from that.
+describe("InspectionDetailModal — linked to every other defect surface", () => {
+  function listen() {
+    const announced = vi.fn();
+    window.addEventListener(DEFECTS_CHANGED_EVENT, announced);
+    return { announced, stop: () => window.removeEventListener(DEFECTS_CHANGED_EVENT, announced) };
+  }
+
+  it("announces a resolve once, and shows it here at once", async () => {
+    resolveInspectionDefect.mockResolvedValueOnce(undefined);
+    const { announced, stop } = listen();
+    try {
+      const onChanged = vi.fn();
+      render(
+        <InspectionDetailModal
+          inspection={stale}
+          vehicleId="veh-1"
+          vehicles={[{ id: "veh-1", unit: "NL-02", label: "NL-02" }]}
+          onWorkOrderCreated={vi.fn()}
+          onChanged={onChanged}
+          onClose={vi.fn()}
+        />,
+      );
+      fireEvent.click(screen.getAllByText("RESOLVE")[0]);
+      fireEvent.change(screen.getByRole("combobox"), { target: { value: "ReportedInError" } });
+      fireEvent.click(screen.getByText("RESOLVE DEFECT"));
+
+      await screen.findByText("Resolved · updating");
+      expect(onChanged).toHaveBeenCalledTimes(1);
+      expect(announced).toHaveBeenCalledTimes(1);
+    } finally {
+      stop();
+    }
+  });
+
+  it("announces a work order raised against its defects once", async () => {
+    listShops.mockResolvedValue([]);
+    createWorkOrder.mockResolvedValueOnce("wo-new");
+    const { announced, stop } = listen();
+    try {
+      renderModal(stale);
+      await createForFirstDefect();
+      await screen.findByText("Work order created · updating");
+      expect(announced).toHaveBeenCalledTimes(1);
+    } finally {
+      stop();
+    }
+  });
+
+  it("does not announce a failed write", async () => {
+    listShops.mockResolvedValue([]);
+    createWorkOrder.mockRejectedValueOnce(new ApiError("Fleet.Inspection.DefectAlreadyOnWorkOrder", "Already on one.", 409));
+    const { announced, stop } = listen();
+    try {
+      renderModal(stale);
+      await createForFirstDefect();
+      await screen.findByText("Already on one.");
+      expect(announced).not.toHaveBeenCalled();
+    } finally {
+      stop();
+    }
+  });
+
+  it("names the reason on a resolved defect", () => {
+    renderModal(
+      inspectionWith([
+        defect({ item: "Brakes", resolutionReason: "ReportedInError", resolvedAtUtc: "2026-10-02T00:00:00Z" }),
+        defect({ item: "Wipers", severity: "Minor" }),
+      ]),
+    );
+    expect(screen.getByText("Resolved · Reported in error")).toBeTruthy();
+    expect(screen.getAllByText("RESOLVE")).toHaveLength(1);
   });
 });

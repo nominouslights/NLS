@@ -8,6 +8,7 @@ import type { VehicleOption } from "@/components/screens/fleet/vehicle-detail/sh
 import DefectsPanel from "@/components/fleet/DefectsPanel";
 import InspectionEntryModal from "@/components/InspectionEntryModal";
 import WorkOrderModal from "@/components/WorkOrderModal";
+import { PROJECTION_RECONCILE_MS } from "@/lib/defectSync";
 
 // The vehicle's defect backlog — the only surface with the resolved-history
 // toggle, the Re-report button and CREATE WORK ORDER. Re-reporting opens the
@@ -15,9 +16,6 @@ import WorkOrderModal from "@/components/WorkOrderModal";
 // inspection whose resolution it supersedes: a fault that comes back is a NEW
 // defect, never a reopen of the old one. Creating a work order opens the
 // ordinary work-order modal with the chosen defects attached.
-
-/** The defect read model catches up on the projector's 5s poll. */
-const PROJECTION_RECONCILE_MS = 6000;
 
 const defectKey = (d: { inspectionId: string; item: string }) => `${d.inspectionId}:${d.item}`;
 

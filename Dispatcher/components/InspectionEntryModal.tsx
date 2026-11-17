@@ -14,6 +14,7 @@ import {
 import { itemsFor } from "@/lib/inspectionForm";
 import { DEFECT_SEVERITY_LABEL, INSPECTION_RESULT_META } from "@/lib/workOrderDisplay";
 import { listDrivers } from "@/lib/api/drivers";
+import { notifyDefectsChanged } from "@/lib/defectSync";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { NumberField, SelectField, TextField } from "@/components/ui/Field";
 import { ActionButton } from "@/components/ui/Button";
@@ -245,6 +246,8 @@ export default function InspectionEntryModal({
         defects,
       });
       onSaved(id);
+      // A new DVIR (or a re-report) can add defects to the vehicle.
+      notifyDefectsChanged();
       onClose();
     } catch (e) {
       setBusy(false);

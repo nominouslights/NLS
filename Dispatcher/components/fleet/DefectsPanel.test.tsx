@@ -1,24 +1,28 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import DefectsPanel from "./DefectsPanel";
 import type { VehicleDefectWire } from "@/lib/api/maintenance";
 import { vehicleDefect } from "@/lib/defect.fixtures";
+import { DEFECTS_CHANGED_EVENT, PROJECTION_RECONCILE_MS, notifyDefectsChanged } from "@/lib/defectSync";
 
 // CREATE WORK ORDER is an action, offered only where the parent passes
 // onCreateWorkOrder (the vehicle's Open Defects tab — never the trip detail), and
 // only on an open defect that is not already on an open work order.
 
-const { listVehicleDefects } = vi.hoisted(() => ({
+const { listVehicleDefects, resolveInspectionDefect } = vi.hoisted(() => ({
   listVehicleDefects: vi.fn<(vehicleId: string, includeResolved?: boolean) => Promise<VehicleDefectWire[]>>(),
+  resolveInspectionDefect: vi.fn<(inspectionId: string, body: unknown) => Promise<void>>(),
 }));
 
 vi.mock("@/lib/api/maintenance", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/maintenance")>()),
   listVehicleDefects,
+  resolveInspectionDefect,
 }));
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.clearAllMocks();
 });
 
@@ -110,5 +114,62 @@ describe("DefectsPanel — create work order", () => {
     await screen.findByText("Brakes");
     expect(screen.getAllByText("CREATE WORK ORDER")).toHaveLength(1);
     expect(screen.getByText("Work order created · updating")).toBeTruthy();
+  });
+});
+
+// Resolving is announced to every other surface (lib/defectSync), and this
+// panel's own reconcile rides the same seam: the row drops at once, and the
+// panel re-reads ONCE, only after the projector has run — an immediate re-read
+// would see the stale projection and bring the row back.
+describe("DefectsPanel — linked resolve", () => {
+  it("drops the row now, announces it once, and reloads once after the projector window", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    listVehicleDefects.mockResolvedValue(rows);
+    resolveInspectionDefect.mockResolvedValueOnce(undefined);
+    const announced = vi.fn();
+    window.addEventListener(DEFECTS_CHANGED_EVENT, announced);
+    try {
+      render(<DefectsPanel vehicleId="veh-1" unit="NL-02" canResolve />);
+      await screen.findByText("Brakes");
+      expect(listVehicleDefects).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getAllByText("RESOLVE")[0]);
+      fireEvent.change(screen.getByRole("combobox"), { target: { value: "ReportedInError" } });
+      fireEvent.click(screen.getByText("RESOLVE DEFECT"));
+
+      await waitFor(() => expect(screen.queryByText("Brakes")).toBeNull());
+      expect(resolveInspectionDefect).toHaveBeenCalledWith("i-1", expect.objectContaining({ item: "Brakes" }));
+      expect(announced).toHaveBeenCalledTimes(1);
+      // Not immediately — the projection is still stale.
+      expect(listVehicleDefects).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        vi.advanceTimersByTime(PROJECTION_RECONCILE_MS);
+      });
+      await waitFor(() => expect(listVehicleDefects).toHaveBeenCalledTimes(2));
+      await act(async () => {
+        vi.advanceTimersByTime(PROJECTION_RECONCILE_MS * 2);
+      });
+      expect(listVehicleDefects).toHaveBeenCalledTimes(2);
+    } finally {
+      window.removeEventListener(DEFECTS_CHANGED_EVENT, announced);
+    }
+  });
+
+  it("re-reads when a defect changes on another surface", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    listVehicleDefects.mockResolvedValue(rows);
+    render(<DefectsPanel vehicleId="veh-1" unit="NL-02" />);
+    await screen.findByText("Brakes");
+
+    // e.g. resolved from the inspection detail, or a work order completed.
+    act(() => notifyDefectsChanged());
+    expect(listVehicleDefects).toHaveBeenCalledTimes(1);
+    listVehicleDefects.mockResolvedValue(rows.filter((r) => r.item !== "Brakes"));
+    await act(async () => {
+      vi.advanceTimersByTime(PROJECTION_RECONCILE_MS);
+    });
+    await waitFor(() => expect(screen.queryByText("Brakes")).toBeNull());
+    expect(listVehicleDefects).toHaveBeenCalledTimes(2);
   });
 });

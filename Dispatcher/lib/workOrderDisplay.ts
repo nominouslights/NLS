@@ -3,6 +3,7 @@ import type {
   DefectRepairOutcomeWire,
   DefectResolutionReasonWire,
   DefectSeverityWire,
+  InspectionDefectWire,
   InspectionResultWire,
   ServiceCategoryWire,
   ShopWire,
@@ -53,6 +54,43 @@ export const DEFECT_SEVERITY_META: Record<DefectSeverityWire, { kind: StatusKind
   OutOfService: { kind: "over", glyph: "✕" },
 };
 
+/** Worst first — the order the server already returns defect rows in. Used to
+ *  PICK the worst severity present, never to re-sort a list. */
+export const DEFECT_SEVERITY_RANK: Record<DefectSeverityWire, number> = { OutOfService: 0, Major: 1, Minor: 2 };
+
+/** A chip's worth of status: colour kind + optional glyph override + words. */
+export interface DefectChip {
+  kind: StatusKind;
+  glyph?: string;
+  label: string;
+}
+
+/**
+ * The LIVE defect state of one inspection, beside its frozen result chip.
+ * "Fail" / "Pass with defects" is the compliance record of what the driver
+ * found and never changes; this says whether those defects are still open.
+ *
+ *  - null when the inspection reported no defects (nothing to say);
+ *  - "N open defect(s)" in the WORST open severity's colour + glyph — a defect
+ *    on an open work order is still open until that work order completes;
+ *  - teal "Defects resolved" once every reported defect is cleared.
+ */
+export function inspectionDefectStatus(insp: { defects: readonly InspectionDefectWire[] }): DefectChip | null {
+  if (insp.defects.length === 0) return null;
+  const open = insp.defects.filter((d) => d.resolvedAtUtc == null);
+  if (open.length === 0) return { kind: "ontime", label: "Defects resolved" };
+  const worst = open.reduce(
+    (w, d) => ((DEFECT_SEVERITY_RANK[d.severity] ?? 1) < (DEFECT_SEVERITY_RANK[w] ?? 1) ? d.severity : w),
+    open[0].severity,
+  );
+  const meta = DEFECT_SEVERITY_META[worst] ?? DEFECT_SEVERITY_META.Major;
+  return {
+    kind: meta.kind,
+    glyph: meta.glyph,
+    label: `${open.length} open defect${open.length === 1 ? "" : "s"}`,
+  };
+}
+
 /** Work-order status → chip colour for a defect row's "repair underway" tag.
  *  Status-only sibling of workOrderKindWire: VehicleDefectWire carries the
  *  status string but no priority. Anything still in the shop reads as caution —
@@ -86,6 +124,19 @@ export const DEFECT_RESOLUTION_META: Record<DefectResolutionReasonWire, { kind: 
   AcceptedMonitoring: { kind: "ontime" },
   NoFaultFound: { kind: "ontime", glyph: "○" },
 };
+
+/** The chip for a resolved inspection defect: teal, the reason's glyph, and
+ *  "Resolved · <reason>" — plain "Resolved" when no reason came back. An
+ *  unmapped reason prints as-is rather than vanishing. */
+export function resolvedDefectChip(reason: DefectResolutionReasonWire | string | null): DefectChip {
+  if (!reason) return { kind: "ontime", label: "Resolved" };
+  const meta = DEFECT_RESOLUTION_META[reason as DefectResolutionReasonWire];
+  return {
+    kind: meta?.kind ?? "ontime",
+    glyph: meta?.glyph,
+    label: `Resolved · ${DEFECT_RESOLUTION_LABEL[reason as DefectResolutionReasonWire] ?? reason}`,
+  };
+}
 
 /** What the mechanic found for one defect line, as the dispatcher reads it. */
 export const DEFECT_OUTCOME_LABEL: Record<DefectRepairOutcomeWire, string> = {

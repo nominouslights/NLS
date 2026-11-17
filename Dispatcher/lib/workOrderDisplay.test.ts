@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type {
   DefectRepairOutcomeWire,
   DefectResolutionReasonWire,
+  InspectionDefectWire,
   WorkOrderWire,
 } from "./api/maintenance";
 import {
@@ -11,6 +12,8 @@ import {
   DEFECT_OUTCOMES,
   DEFECT_RESOLUTION_LABEL,
   DEFECT_RESOLUTION_META,
+  inspectionDefectStatus,
+  resolvedDefectChip,
   toPrintableWorkOrder,
 } from "./workOrderDisplay";
 import { statusMeta } from "./theme";
@@ -91,5 +94,80 @@ describe("toPrintableWorkOrder", () => {
       { item: "Brakes", severity: "Out-of-Service", note: "Grinding" },
       { item: "Horn", severity: "Minor", note: undefined },
     ]);
+  });
+});
+
+// The live defect chip beside an inspection's frozen result chip.
+describe("inspectionDefectStatus", () => {
+  const d = (over: Partial<InspectionDefectWire> & { item: string }): InspectionDefectWire => ({
+    severity: "Major",
+    note: null,
+    workOrderId: null,
+    resolutionReason: null,
+    resolvedAtUtc: null,
+    ...over,
+  });
+  const resolved = { resolutionReason: "ReportedInError" as const, resolvedAtUtc: "2026-10-02T00:00:00Z" };
+
+  it("says nothing when the inspection reported no defects", () => {
+    expect(inspectionDefectStatus({ defects: [] })).toBeNull();
+  });
+
+  it("all open: counts them in the WORST severity's colour + glyph", () => {
+    expect(
+      inspectionDefectStatus({
+        defects: [d({ item: "Wipers", severity: "Minor" }), d({ item: "Brakes", severity: "OutOfService" }), d({ item: "Mirror" })],
+      }),
+    ).toEqual({ kind: "over", glyph: "✕", label: "3 open defects" });
+    expect(inspectionDefectStatus({ defects: [d({ item: "Mirror" }), d({ item: "Wipers", severity: "Minor" })] })).toEqual({
+      kind: "over",
+      glyph: undefined,
+      label: "2 open defects",
+    });
+    expect(inspectionDefectStatus({ defects: [d({ item: "Wipers", severity: "Minor" })] })).toEqual({
+      kind: "soon",
+      glyph: undefined,
+      label: "1 open defect",
+    });
+  });
+
+  it("a defect on an open work order is still open", () => {
+    expect(inspectionDefectStatus({ defects: [d({ item: "Brakes", workOrderId: "wo-1" })] })?.label).toBe("1 open defect");
+  });
+
+  it("all resolved: teal, with words", () => {
+    const s = inspectionDefectStatus({
+      defects: [d({ item: "Brakes", severity: "OutOfService", ...resolved }), d({ item: "Wipers", ...resolved })],
+    });
+    expect(s).toEqual({ kind: "ontime", label: "Defects resolved" });
+    expect(statusMeta(s!.kind).g).toBeTruthy();
+  });
+
+  it("mixed: counts only the open ones, and a resolved Out-of-Service no longer sets the colour", () => {
+    expect(
+      inspectionDefectStatus({
+        defects: [d({ item: "Brakes", severity: "OutOfService", ...resolved }), d({ item: "Wipers", severity: "Minor" })],
+      }),
+    ).toEqual({ kind: "soon", glyph: undefined, label: "1 open defect" });
+  });
+});
+
+describe("resolvedDefectChip", () => {
+  it("is teal and names the reason, with that reason's glyph", () => {
+    expect(resolvedDefectChip("ReportedInError")).toEqual({
+      kind: "ontime",
+      glyph: undefined,
+      label: "Resolved · Reported in error",
+    });
+    expect(resolvedDefectChip("NoFaultFound")).toEqual({
+      kind: "ontime",
+      glyph: "○",
+      label: "Resolved · No fault found under work order",
+    });
+  });
+
+  it("falls back to plain Resolved, and prints an unmapped reason as-is", () => {
+    expect(resolvedDefectChip(null)).toEqual({ kind: "ontime", label: "Resolved" });
+    expect(resolvedDefectChip("SomethingNew")).toEqual({ kind: "ontime", glyph: undefined, label: "Resolved · SomethingNew" });
   });
 });

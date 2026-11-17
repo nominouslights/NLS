@@ -19,6 +19,7 @@ import {
 import type { TripRecord } from "@/lib/api/trips";
 import { listDrivers } from "@/lib/api/drivers";
 import { listVehicles } from "@/lib/api/fleet";
+import { notifyDefectsChanged } from "@/lib/defectSync";
 import { NL_PTI_01_CERTIFICATION, itemsFor, type InspectionFormMode } from "@/lib/inspectionForm";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { ActionButton } from "@/components/ui/Button";
@@ -353,6 +354,10 @@ export default function TripInspectionModal({
       } else {
         await createInspection(buildInput());
       }
+      // Entering or amending a trip's DVIR can add, drop or re-grade defects.
+      // Announced as soon as the write lands — not after onSaved, which polls
+      // the trip and could fail on its own without undoing the write.
+      notifyDefectsChanged();
       await onSaved();
       onClose();
     } catch (e) {

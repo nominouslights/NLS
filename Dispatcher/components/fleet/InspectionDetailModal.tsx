@@ -15,12 +15,7 @@ import {
   prefillFromInspection,
   type WorkOrderPrefillWire,
 } from "@/lib/inspectionWorkOrder";
-import {
-  DEFECT_RESOLUTION_LABEL,
-  DEFECT_RESOLUTION_META,
-  DEFECT_SEVERITY_LABEL,
-  INSPECTION_RESULT_META,
-} from "@/lib/workOrderDisplay";
+import { DEFECT_SEVERITY_LABEL, INSPECTION_RESULT_META, resolvedDefectChip } from "@/lib/workOrderDisplay";
 import type { VehicleOption } from "@/components/screens/fleet/vehicle-detail/shared";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { MonoTag, StatusChip } from "@/components/ui/Chip";
@@ -270,15 +265,8 @@ function DefectState({
   // A checklist failure with no defect entry cannot be addressed by the API.
   if (!d) return null;
   if (d.resolvedAtUtc != null) {
-    const reason = d.resolutionReason;
-    const m = reason ? DEFECT_RESOLUTION_META[reason] : undefined;
-    return (
-      <StatusChip
-        kind={m?.kind ?? "ontime"}
-        glyph={m?.glyph}
-        label={reason ? `Resolved · ${DEFECT_RESOLUTION_LABEL[reason] ?? reason}` : "Resolved"}
-      />
-    );
+    const chip = resolvedDefectChip(d.resolutionReason);
+    return <StatusChip kind={chip.kind} glyph={chip.glyph} label={chip.label} />;
   }
   if (workOrderId != null) {
     return <StatusChip kind="soon" label={`On ${workOrderNumberOf?.(workOrderId) ?? "open work order"}`} />;
