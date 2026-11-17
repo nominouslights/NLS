@@ -15,6 +15,7 @@ import {
   inspectionDefectStatus,
   resolvedDefectChip,
   toPrintableWorkOrder,
+  worstSeverity,
 } from "./workOrderDisplay";
 import { statusMeta } from "./theme";
 
@@ -98,6 +99,39 @@ describe("toPrintableWorkOrder", () => {
 });
 
 // The live defect chip beside an inspection's frozen result chip.
+// The ONE worst-severity pick, shared by the trip/inspection chip
+// (inspectionDefectStatus), the Open Defects summary chip and the inspection
+// forms' known-defects line.
+describe("worstSeverity", () => {
+  const sev = (...severities: string[]) => severities.map((severity) => ({ severity }));
+
+  it("picks the worst present, whatever order the rows come in", () => {
+    expect(worstSeverity(sev("Minor", "OutOfService", "Major"))).toBe("OutOfService");
+    expect(worstSeverity(sev("Minor", "Major", "Minor"))).toBe("Major");
+    expect(worstSeverity(sev("Minor"))).toBe("Minor");
+    expect(worstSeverity(sev("OutOfService", "Minor"))).toBe("OutOfService");
+  });
+
+  it("is null for no defects", () => {
+    expect(worstSeverity([])).toBeNull();
+  });
+
+  it("reads an unknown severity as Major: above Minor, never above Out-of-Service", () => {
+    expect(worstSeverity(sev("Catastrophic"))).toBe("Major");
+    expect(worstSeverity(sev("Minor", "Catastrophic"))).toBe("Major");
+    expect(worstSeverity(sev("Catastrophic", "OutOfService"))).toBe("OutOfService");
+    // Not fooled by an inherited property name.
+    expect(worstSeverity(sev("toString"))).toBe("Major");
+  });
+
+  it("never reorders the list it reads", () => {
+    const rows = sev("Minor", "OutOfService", "Major");
+    const before = rows.map((r) => r.severity);
+    worstSeverity(rows);
+    expect(rows.map((r) => r.severity)).toEqual(before);
+  });
+});
+
 describe("inspectionDefectStatus", () => {
   const d = (over: Partial<InspectionDefectWire> & { item: string }): InspectionDefectWire => ({
     severity: "Major",

@@ -59,6 +59,24 @@ export const DEFECT_SEVERITY_META: Record<DefectSeverityWire, { kind: StatusKind
  *  PICK the worst severity present, never to re-sort a list. */
 export const DEFECT_SEVERITY_RANK: Record<DefectSeverityWire, number> = { OutOfService: 0, Major: 1, Minor: 2 };
 
+/**
+ * The worst severity among `defects`, or null when there are none. The ONE
+ * fallback: a severity this client does not know (a newer API, a bad row) ranks
+ * and reads as Major — serious enough to be seen, never silently promoted to
+ * Out-of-Service nor demoted to Minor. Picks a value; never sorts the list.
+ */
+export function worstSeverity(
+  defects: readonly { severity: DefectSeverityWire | string }[],
+): DefectSeverityWire | null {
+  let worst: DefectSeverityWire | null = null;
+  for (const d of defects) {
+    const known = Object.prototype.hasOwnProperty.call(DEFECT_SEVERITY_RANK, d.severity);
+    const s: DefectSeverityWire = known ? (d.severity as DefectSeverityWire) : "Major";
+    if (worst === null || DEFECT_SEVERITY_RANK[s] < DEFECT_SEVERITY_RANK[worst]) worst = s;
+  }
+  return worst;
+}
+
 /** A chip's worth of status: colour kind + optional glyph override + words. */
 export interface DefectChip {
   kind: StatusKind;
@@ -79,12 +97,9 @@ export interface DefectChip {
 export function inspectionDefectStatus(insp: { defects: readonly InspectionDefectWire[] }): DefectChip | null {
   if (insp.defects.length === 0) return null;
   const open = insp.defects.filter((d) => d.resolvedAtUtc == null);
-  if (open.length === 0) return { kind: "ontime", label: "Defects resolved" };
-  const worst = open.reduce(
-    (w, d) => ((DEFECT_SEVERITY_RANK[d.severity] ?? 1) < (DEFECT_SEVERITY_RANK[w] ?? 1) ? d.severity : w),
-    open[0].severity,
-  );
-  const meta = DEFECT_SEVERITY_META[worst] ?? DEFECT_SEVERITY_META.Major;
+  const worst = worstSeverity(open);
+  if (worst === null) return { kind: "ontime", label: "Defects resolved" };
+  const meta = DEFECT_SEVERITY_META[worst];
   return {
     kind: meta.kind,
     glyph: meta.glyph,

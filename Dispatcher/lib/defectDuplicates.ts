@@ -1,19 +1,18 @@
-import {
-  normaliseDefectItem,
-  sameDefectItem,
-  type DefectSeverityWire,
-  type VehicleDefectWire,
-} from "./api/maintenance";
+import { normaliseDefectItem, type DefectSeverityWire, type VehicleDefectWire } from "./api/maintenance";
 import { DEFECT_SEVERITY_RANK } from "./workOrderDisplay";
 
 // A known fault is re-reported on every daily pre-trip until it is fixed, so one
 // component can carry several OPEN defects on several inspections. They are
 // duplicates of each other — same vehicle, same `item` trimmed and
-// case-insensitive (`sameDefectItem`, the backend's rule) — and resolving any one
-// of them clears them all. Pure derivations over `listVehicleDefects` rows, shared
-// by the resolve preview (ResolveDefectModal) and the inspection forms'
-// known-fault hints, so the two can never disagree with each other or with what
-// the backend cascade actually clears.
+// case-insensitive (`normaliseDefectItem`, the backend's rule) — and a REPAIR of
+// any one of them clears them all. ("Reported in error" and "Accepted,
+// monitoring" clear only the report they address.)
+//
+// What a resolve will actually clear is NOT derived here: ResolveDefectModal asks
+// the server (`previewDefectDuplicates`), which reads the write model with the
+// cascade's own scope. The derivations below are over `listVehicleDefects` rows
+// (the projection, ≈5s behind) and feed the inspection forms' known-fault hints,
+// which are informational only.
 //
 // WARN ONLY. Nothing here decides anything — it says what is already open so a
 // dispatcher reads a row as "known fault" rather than "new fault". Never filter
@@ -22,30 +21,13 @@ import { DEFECT_SEVERITY_RANK } from "./workOrderDisplay";
 const isOpen = (d: VehicleDefectWire) => d.resolvedAtUtc == null;
 
 /**
- * The OTHER open reports a resolve of (inspectionId, item) will clear with it, in
- * the server's order. The addressed defect itself is excluded by its exact
- * address — a defect has no id, (inspectionId, item) is the address.
- */
-export function openDuplicatesOf(
-  rows: readonly VehicleDefectWire[],
-  addressed: { inspectionId: string; item: string },
-): VehicleDefectWire[] {
-  return rows.filter(
-    (r) =>
-      isOpen(r) &&
-      sameDefectItem(r.item, addressed.item) &&
-      !(r.inspectionId === addressed.inspectionId && r.item === addressed.item),
-  );
-}
-
-/**
  * The worst severity among `duplicates` that is strictly MORE severe than the
  * defect being resolved, or null when none is. With the addressed severity
- * unknown, an Out-of-Service duplicate still counts — a resolve must never clear
+ * unknown, an Out-of-Service duplicate still counts — a repair must never clear
  * an Out-of-Service report without saying so.
  */
 export function moreSevereDuplicate(
-  duplicates: readonly VehicleDefectWire[],
+  duplicates: readonly { severity: DefectSeverityWire }[],
   addressed: DefectSeverityWire | null | undefined,
 ): DefectSeverityWire | null {
   const bar = addressed ? DEFECT_SEVERITY_RANK[addressed] : DEFECT_SEVERITY_RANK.OutOfService + 1;

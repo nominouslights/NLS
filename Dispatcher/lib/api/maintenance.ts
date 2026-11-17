@@ -283,21 +283,53 @@ export interface ResolvedDefectWire {
  *  `resolveInspectionDefect`) — the client did not see what it cleared. */
 export type ResolvedDefect = Omit<ResolvedDefectWire, "severity"> & { severity: DefectSeverityWire | null };
 
-/** POST /api/fleet/inspections/{id}/defects/resolve — clears one defect AND every
- *  open duplicate of it: another open defect on the same vehicle whose `item`
- *  matches, trimmed and case-insensitive (`sameDefectItem`). A known fault is
- *  re-reported on every daily pre-trip until it is fixed, so one repair clears
- *  them all. The item travels in the BODY, not the path: it is free text, and
- *  half the row's key. 404 for an unknown inspection or item, 409 when already
- *  resolved (resolution is final). `resolvedBy` is client-supplied, following the
- *  same convention as an inspection's `enteredBy`; it defaults to "Dispatch".
+/** Another open report of the same fault, as the duplicate preview lists it. */
+export interface DefectDuplicateWire {
+  inspectionId: string;
+  item: string;
+  tripNumber: string | null;
+  severity: DefectSeverityWire;
+  reportedAt: string;
+}
+
+/** GET /api/fleet/inspections/{id}/defects/duplicates?item= — the OTHER open
+ *  reports of (inspectionId, item) on the same vehicle that a repair would clear
+ *  with it, oldest first. Read from the write model with the cascade's own scope,
+ *  so it never lags the projector the way `listVehicleDefects` does. 404 for an
+ *  unknown inspection or item (like resolve); `{ duplicates: [] }` when there are
+ *  none. A body without the list is thrown as an error rather than read as
+ *  "none": a preview that cannot say must never claim there is nothing to clear. */
+export async function previewDefectDuplicates(inspectionId: string, item: string): Promise<DefectDuplicateWire[]> {
+  const res = await request<{ duplicates?: DefectDuplicateWire[] | null } | undefined | null>(
+    `/api/fleet/inspections/${inspectionId}/defects/duplicates?item=${encodeURIComponent(item)}`,
+  );
+  if (!Array.isArray(res?.duplicates)) throw new Error("The duplicate preview returned no list.");
+  return res.duplicates;
+}
+
+/** POST /api/fleet/inspections/{id}/defects/resolve — clears one defect, plus
+ *  exactly the duplicates listed in `clearDuplicates`. Only a REPAIR clears other
+ *  reports: a non-empty `clearDuplicates` is accepted with `PreviouslyRepaired`
+ *  only (400 otherwise), and the server clears only those listed that are still
+ *  valid duplicates (same vehicle, same `item` trimmed and case-insensitive,
+ *  still open). Null or empty clears none. The item travels in the BODY, not the
+ *  path: it is free text, and half the row's key. 404 for an unknown inspection
+ *  or item, 409 when already resolved (resolution is final). `resolvedBy` is
+ *  client-supplied, following the same convention as an inspection's
+ *  `enteredBy`; it defaults to "Dispatch".
  *
- *  Returns every defect cleared: the addressed one first, then the duplicates,
- *  oldest first. An API from before the cascade answers with no body; that is
- *  read as "just the addressed defect", which is exactly what it cleared. */
+ *  Returns every defect ACTUALLY cleared: the addressed one first, then the
+ *  duplicates. An API from before the cascade answers with no body; that is read
+ *  as "just the addressed defect", which is exactly what it cleared. */
 export async function resolveInspectionDefect(
   inspectionId: string,
-  body: { item: string; reason: DefectResolutionReasonWire; note?: string | null; resolvedBy?: string | null },
+  body: {
+    item: string;
+    reason: DefectResolutionReasonWire;
+    note?: string | null;
+    resolvedBy?: string | null;
+    clearDuplicates?: { inspectionId: string; item: string }[] | null;
+  },
 ): Promise<ResolvedDefect[]> {
   const res = await request<{ resolved?: ResolvedDefectWire[] | null } | undefined | null>(
     `/api/fleet/inspections/${inspectionId}/defects/resolve`,
@@ -309,9 +341,9 @@ export async function resolveInspectionDefect(
 }
 
 /** The backend's duplicate rule for a defect item: trimmed, case-insensitive.
- *  The ONE place the client compares two reports' items — the resolve preview
- *  and the inspection forms' known-fault hints both use it, so neither can drift
- *  from what the cascade actually clears. */
+ *  The ONE place the client compares two reports' items — the inspection forms'
+ *  known-fault hints use it. The resolve preview does NOT: it asks the server
+ *  (`previewDefectDuplicates`), which applies the cascade's own scope. */
 export function normaliseDefectItem(item: string): string {
   return item.trim().toLowerCase();
 }

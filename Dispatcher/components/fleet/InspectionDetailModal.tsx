@@ -213,15 +213,15 @@ export default function InspectionDetailModal({
 
       {resolving && (
         <ResolveDefectModal
-          vehicleId={inspection.vehicleId ?? vehicleId}
           inspectionId={inspection.id}
           item={resolving.item}
           unit={inspection.unit}
           severity={resolving.severity}
           onClose={() => setResolving(null)}
           onResolved={(resolved) => {
-            // Only this inspection's rows are overlaid here; duplicates cleared on
-            // other inspections reach their own surfaces through lib/defectSync.
+            // Only this inspection's rows are overlaid here, and only those the
+            // response lists; duplicates a repair cleared on other inspections
+            // reach their own surfaces through lib/defectSync.
             const here = resolved.filter((r) => r.inspectionId === inspection.id).map((r) => r.item);
             setResolvedHere((prev) => new Set([...prev, resolving.item, ...here]));
             setResolving(null);

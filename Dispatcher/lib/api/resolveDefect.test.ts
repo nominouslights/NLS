@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { resolveInspectionDefect } from "./maintenance";
+import { previewDefectDuplicates, resolveInspectionDefect } from "./maintenance";
 
 // POST /api/fleet/inspections/{id}/defects/resolve answers with every defect it
 // cleared — the addressed one first, then its open duplicates, oldest first. An
@@ -54,5 +54,48 @@ describe("resolveInspectionDefect", () => {
     const err = new Error("409");
     request.mockRejectedValueOnce(err);
     await expect(resolveInspectionDefect("i-1", body)).rejects.toBe(err);
+  });
+  it("sends the clear list in the body, exactly as given", async () => {
+    request.mockResolvedValueOnce({ resolved: [] });
+    const withList = { ...body, clearDuplicates: [{ inspectionId: "i-3", item: " brakes " }] };
+    await resolveInspectionDefect("i-1", withList);
+    expect(request).toHaveBeenCalledWith("/api/fleet/inspections/i-1/defects/resolve", {
+      method: "POST",
+      body: JSON.stringify(withList),
+    });
+  });
+});
+
+// GET /api/fleet/inspections/{id}/defects/duplicates?item= — what a repair would
+// clear with the addressed defect, read from the write model by the server.
+describe("previewDefectDuplicates", () => {
+  it("asks for the item in the query string, encoded, and returns the list as ordered", async () => {
+    const duplicates = [
+      { inspectionId: "i-3", item: "brakes", tripNumber: null, severity: "Minor", reportedAt: "2026-10-01T12:00:00Z" },
+      { inspectionId: "i-2", item: "BRAKES", tripNumber: "T-2", severity: "Major", reportedAt: "2026-10-02T12:00:00Z" },
+    ];
+    request.mockResolvedValueOnce({ duplicates });
+    await expect(previewDefectDuplicates("i-1", "Brakes & lights / rear")).resolves.toEqual(duplicates);
+    expect(request).toHaveBeenCalledWith(
+      "/api/fleet/inspections/i-1/defects/duplicates?item=Brakes%20%26%20lights%20%2F%20rear",
+    );
+  });
+
+  it("returns an empty list when there are none", async () => {
+    request.mockResolvedValueOnce({ duplicates: [] });
+    await expect(previewDefectDuplicates("i-1", "Brakes")).resolves.toEqual([]);
+  });
+
+  it("never reads a missing list as \"none\"", async () => {
+    request.mockResolvedValueOnce(undefined);
+    await expect(previewDefectDuplicates("i-1", "Brakes")).rejects.toThrow();
+    request.mockResolvedValueOnce({});
+    await expect(previewDefectDuplicates("i-1", "Brakes")).rejects.toThrow();
+  });
+
+  it("lets an error (a 404) through unchanged", async () => {
+    const err = new Error("404");
+    request.mockRejectedValueOnce(err);
+    await expect(previewDefectDuplicates("i-1", "Brakes")).rejects.toBe(err);
   });
 });

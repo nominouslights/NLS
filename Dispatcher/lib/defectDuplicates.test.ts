@@ -4,7 +4,6 @@ import {
   knownDefectFor,
   knownDefectsByItem,
   moreSevereDuplicate,
-  openDuplicatesOf,
   openReports,
 } from "./defectDuplicates";
 import { vehicleDefect } from "./defect.fixtures";
@@ -16,27 +15,6 @@ describe("sameDefectItem — the backend's duplicate rule", () => {
     expect(sameDefectItem("Passenger seats", "PASSENGER SEATS")).toBe(true);
     expect(sameDefectItem("Brakes", "Brake lights")).toBe(false);
     expect(sameDefectItem("Passenger seats", "Passenger seats (NL-02)")).toBe(false);
-  });
-});
-
-describe("openDuplicatesOf", () => {
-  const rows = [
-    vehicleDefect({ inspectionId: "i-3", item: "brakes", severity: "OutOfService" }),
-    vehicleDefect({ inspectionId: "i-1", item: "Brakes", severity: "Minor" }),
-    vehicleDefect({ inspectionId: "i-2", item: " BRAKES", severity: "Minor" }),
-    vehicleDefect({ inspectionId: "i-4", item: "Brakes", resolvedAtUtc: "2026-09-01T00:00:00Z" }),
-    vehicleDefect({ inspectionId: "i-5", item: "Wipers" }),
-  ];
-
-  it("returns the other OPEN reports of the same item, in server order", () => {
-    expect(openDuplicatesOf(rows, { inspectionId: "i-1", item: "Brakes" }).map((r) => r.inspectionId)).toEqual([
-      "i-3",
-      "i-2",
-    ]);
-  });
-
-  it("is empty when the fault was reported once", () => {
-    expect(openDuplicatesOf(rows, { inspectionId: "i-5", item: "Wipers" })).toEqual([]);
   });
 });
 

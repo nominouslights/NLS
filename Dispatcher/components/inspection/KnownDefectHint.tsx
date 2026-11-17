@@ -5,7 +5,7 @@ import { formatUtcDate } from "@/lib/api/format";
 import { normaliseDefectItem } from "@/lib/api/maintenance";
 import { openReports, type KnownDefect } from "@/lib/defectDuplicates";
 import type { OpenDefectsLoad } from "@/lib/useVehicleOpenDefects";
-import { DEFECT_SEVERITY_LABEL, DEFECT_SEVERITY_META, DEFECT_SEVERITY_RANK } from "@/lib/workOrderDisplay";
+import { DEFECT_SEVERITY_LABEL, DEFECT_SEVERITY_META, worstSeverity } from "@/lib/workOrderDisplay";
 import { StatusChip } from "@/components/ui/Chip";
 
 // "This component already has an open defect on this unit" — beside a checklist
@@ -14,9 +14,11 @@ import { StatusChip } from "@/components/ui/Chip";
 //
 // INFORMATIONAL ONLY. It never ticks, fills, blocks or changes a row: the driver
 // still marks Defect / OK themselves, and a fresh Defect mark on a known fault is
-// correct NSC practice — it is exactly the duplicate a later resolve clears with
-// the rest. No prop here reports "has defects" back up; same warn-only rule as
-// DefectsPanel.
+// correct NSC practice — it is exactly the duplicate a repair clears with every
+// other report of that component. Built on the projection (≈5s behind), which is
+// fine for a hint and is why nothing here is a promise about what a resolve will
+// clear — ResolveDefectModal asks the server for that. No prop here reports "has
+// defects" back up; same warn-only rule as DefectsPanel.
 
 const dim = {
   fontFamily: fonts.body,
@@ -82,7 +84,8 @@ export function KnownDefectsSummary({
   }
 
   const open = openReports(load.rows, excludeInspectionId);
-  if (open.length === 0) {
+  const worst = worstSeverity(open);
+  if (worst === null) {
     return (
       <div style={{ marginBottom: 12 }}>
         <StatusChip kind="ontime" label={`No open defects on ${unit}`} />
@@ -90,11 +93,7 @@ export function KnownDefectsSummary({
     );
   }
 
-  const worst = open.reduce(
-    (w, d) => ((DEFECT_SEVERITY_RANK[d.severity] ?? 1) < (DEFECT_SEVERITY_RANK[w] ?? 1) ? d.severity : w),
-    open[0].severity,
-  );
-  const meta = DEFECT_SEVERITY_META[worst] ?? DEFECT_SEVERITY_META.Major;
+  const meta = DEFECT_SEVERITY_META[worst];
   const components = new Set(open.map((d) => normaliseDefectItem(d.item)));
   const onForm = new Set(formItemKeys.map(normaliseDefectItem));
   // Server order, first spelling of each component — never re-sorted.
