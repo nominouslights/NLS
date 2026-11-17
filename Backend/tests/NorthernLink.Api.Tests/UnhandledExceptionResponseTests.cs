@@ -120,6 +120,24 @@ public sealed class UnhandledExceptionResponseTests
         Assert.Equal("42703", problem.GetProperty("postgresCode").GetString());
     }
 
+    [Fact]
+    public async Task A_lost_concurrency_race_is_a_409_conflict_not_a_500()
+    {
+        // Two dispatchers saving the same record: the loser gets "reload and retry", not a
+        // server-fault page — and the body still leaks nothing.
+        var (body, status) = await HandleAsync(
+            Environments.Production,
+            new Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException(Secret));
+
+        Assert.Equal(StatusCodes.Status409Conflict, status);
+        Assert.DoesNotContain(Secret, body, StringComparison.OrdinalIgnoreCase);
+
+        var problem = JsonSerializer.Deserialize<JsonElement>(body);
+        Assert.Equal(409, problem.GetProperty("status").GetInt32());
+        Assert.Contains("changed by someone else", problem.GetProperty("title").GetString()!);
+        Assert.Equal("trace-0HN7ABCDEF", problem.GetProperty("traceId").GetString());
+    }
+
     private sealed class StubEnvironment(string environmentName) : IHostEnvironment
     {
         public string EnvironmentName { get; set; } = environmentName;

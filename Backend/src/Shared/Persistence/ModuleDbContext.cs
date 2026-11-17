@@ -1,5 +1,8 @@
 using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.EntityFrameworkCore.Metadata;
+using Npgsql;
 using NorthernLink.Shared.EventBus;
 using NorthernLink.Shared.Events;
 using NorthernLink.Shared.Kernel;
@@ -101,7 +104,17 @@ public abstract class ModuleDbContext : DbContext
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         AppendAuditEntries();
-        var result = base.SaveChanges(acceptAllChangesOnSuccess);
+
+        int result;
+        try
+        {
+            result = base.SaveChanges(acceptAllChangesOnSuccess);
+        }
+        catch (DbUpdateException exception) when (IsSnapshotVersionCollision(exception))
+        {
+            throw AsLostRace(exception);
+        }
+
         ClearDomainEvents();
         return result;
     }
@@ -111,24 +124,71 @@ public abstract class ModuleDbContext : DbContext
         CancellationToken cancellationToken = default)
     {
         AppendAuditEntries();
-        var result = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+
+        int result;
+        try
+        {
+            result = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        }
+        catch (DbUpdateException exception) when (IsSnapshotVersionCollision(exception))
+        {
+            throw AsLostRace(exception);
+        }
+
         ClearDomainEvents();
         return result;
     }
 
     /// <summary>
+    /// A stale writer computes the same next Version as the writer that beat it, so its
+    /// <c>aggregate_snapshots</c> row collides with the winner's on the (aggregate_id, version)
+    /// primary key. EF orders independent commands by table name, so that INSERT usually runs —
+    /// and fails — before the aggregate's own UPDATE ever gets to report zero rows affected. The
+    /// collision can only mean two writers produced the same version of one aggregate, which is
+    /// exactly an optimistic-concurrency loss; the transaction has already rolled back either way.
+    /// </summary>
+    private bool IsSnapshotVersionCollision(DbUpdateException exception) =>
+        exception is not DbUpdateConcurrencyException
+        && exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation } postgres
+        && postgres.ConstraintName is { } constraint
+        && constraint == Model.FindEntityType(typeof(AggregateSnapshot))?.FindPrimaryKey()?.GetName();
+
+    /// <summary>
+    /// Re-raises a snapshot version collision as the <see cref="DbUpdateConcurrencyException"/>
+    /// every repository's lost-race path already catches. Its <c>Entries</c> is EMPTY: the
+    /// database does not say which aggregate collided, and building the list would need EF's
+    /// internal entry API. A caller that branches on <c>Entries</c> (Trips'
+    /// <c>BookeoImportRepository</c>) therefore takes its generic-conflict arm — the same
+    /// outcome it reached before, when this surfaced as a raw unique violation.
+    /// </summary>
+    private static DbUpdateConcurrencyException AsLostRace(DbUpdateException exception) =>
+        new(
+            "An aggregate was modified by another writer since it was loaded: this save's aggregate_snapshots row " +
+            "collided with the version that writer already committed. Nothing from this save was persisted.",
+            exception);
+
+    /// <summary>
     /// The audit pipeline. Runs before base.SaveChanges so every row it adds commits in
     /// the same implicit transaction as the aggregate state — the whole atomicity
     /// guarantee. Saves that touch no aggregates (e.g. the outbox dispatcher marking
-    /// rows dispatched) fall through untouched.
+    /// rows dispatched) fall through untouched. "Touch" includes an aggregate whose only
+    /// change is to an owned entity (a jsonb owned collection, an OwnsOne): its owner is
+    /// promoted to Modified first, so it is versioned, snapshotted and journaled like any
+    /// other write.
     /// </summary>
     private void AppendAuditEntries()
     {
         StampTenantId();
 
+        // Entries() runs DetectChanges, so edits to owned collections are visible from here on.
         // Materialize before appending audit rows below mutates the tracker.
-        var aggregates = ChangeTracker.Entries<AggregateRoot>()
-            .Where(e => e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+        var tracked = ChangeTracker.Entries().ToList();
+
+        TouchOwnersOfChangedOwnedEntities(tracked);
+
+        var aggregates = tracked
+            .Where(e => e.Entity is AggregateRoot
+                && e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
             .ToList();
 
         if (aggregates.Count == 0)
@@ -141,13 +201,17 @@ public abstract class ModuleDbContext : DbContext
 
         foreach (var entry in aggregates)
         {
-            var aggregate = entry.Entity;
+            var aggregate = (AggregateRoot)entry.Entity;
 
             // Guard: every insert/update of an aggregate must raise at least one domain
             // event. An eventless write produces no event_journal row, so the projection
             // worker never sees it and the read model silently goes stale — this converts
             // that silent-staleness bug class into an immediate, loud failure. Deletes are
-            // exempt: the synthetic aggregate-deleted journal row below covers them.
+            // exempt: the synthetic aggregate-deleted journal row below covers them. A save
+            // that changes ONLY an owned entity (an OwnsMany(...).ToJson(...) collection, an
+            // OwnsOne) reaches this guard too: TouchOwnersOfChangedOwnedEntities has already
+            // promoted its Unchanged owner to Modified, so that write can no longer slip past
+            // the version check, the snapshot, the journal or this guard.
             if (entry.State is EntityState.Added or EntityState.Modified && aggregate.DomainEvents.Count == 0)
             {
                 throw new InvalidOperationException(
@@ -227,6 +291,123 @@ public abstract class ModuleDbContext : DbContext
                     });
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Promotes the root owner of every changed owned entity to Modified when that owner is an
+    /// <see cref="AggregateRoot"/> EF still considers Unchanged.
+    ///
+    /// EF tracks owned types as entities of their own. When a save changes ONLY an owned
+    /// collection mapped with <c>OwnsMany(...).ToJson(...)</c> (or an <c>OwnsOne</c>), the owned
+    /// entries go Added / Modified / Deleted while the owning aggregate stays Unchanged — yet EF
+    /// still rewrites the owner's row (the jsonb column, or the table-split columns). Left alone,
+    /// that write would skip everything the pipeline guarantees: no Version bump and so no
+    /// optimistic-concurrency check (a stale writer silently wins), no snapshot, no journal row
+    /// (the read model never learns), no outbox row, and the eventless-write guard never fires.
+    ///
+    /// Only the Version property is marked modified — that is enough to move the owner to
+    /// Modified (EF then puts <c>version = @original</c> in the UPDATE's WHERE clause and writes
+    /// the incremented value), without forcing every scalar column into the SET list.
+    /// Ownership can nest (an owned type inside a jsonb collection item), so each changed owned
+    /// entry is walked up through its ownership chain to the first non-owned entity.
+    /// </summary>
+    private static void TouchOwnersOfChangedOwnedEntities(IReadOnlyList<EntityEntry> tracked)
+    {
+        // Fast path: nothing to promote unless some aggregate is Unchanged AND some owned entry
+        // changed. Bulk inserts (every aggregate Added) never build the index below.
+        if (!tracked.Any(e => e.Entity is AggregateRoot && e.State == EntityState.Unchanged))
+        {
+            return;
+        }
+
+        var changedOwned = tracked
+            .Where(e => e.Metadata.IsOwned()
+                && e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+            .ToList();
+
+        if (changedOwned.Count == 0)
+        {
+            return;
+        }
+
+        // Owned entries are found by key, not by navigation: a Deleted owned item is no longer
+        // reachable from its owner's collection, but its key still holds the owner's key.
+        var byPrimaryKey = new Dictionary<TrackedKey, EntityEntry>();
+        foreach (var entry in tracked)
+        {
+            if (entry.Metadata.FindPrimaryKey() is { } primaryKey)
+            {
+                byPrimaryKey.TryAdd(
+                    new TrackedKey(entry.Metadata.GetRootType(), ValuesOf(entry, primaryKey.Properties)),
+                    entry);
+            }
+        }
+
+        foreach (var owned in changedOwned)
+        {
+            if (FindRootOwner(owned, byPrimaryKey) is { Entity: AggregateRoot, State: EntityState.Unchanged } owner)
+            {
+                owner.Property(nameof(AggregateRoot.Version)).IsModified = true;
+            }
+        }
+    }
+
+    private static EntityEntry? FindRootOwner(EntityEntry owned, Dictionary<TrackedKey, EntityEntry> byPrimaryKey)
+    {
+        var current = owned;
+
+        while (current.Metadata.FindOwnership() is { } ownership)
+        {
+            var principalKey = new TrackedKey(
+                ownership.PrincipalEntityType.GetRootType(),
+                ValuesOf(current, ownership.Properties));
+
+            if (!byPrimaryKey.TryGetValue(principalKey, out var principal))
+            {
+                return null;
+            }
+
+            current = principal;
+        }
+
+        return current;
+    }
+
+    private static object?[] ValuesOf(EntityEntry entry, IReadOnlyList<IProperty> properties)
+    {
+        var values = new object?[properties.Count];
+        for (var i = 0; i < properties.Count; i++)
+        {
+            values[i] = entry.Property(properties[i].Name).CurrentValue;
+        }
+
+        return values;
+    }
+
+    /// <summary>An entity's identity in the tracker: its hierarchy root type plus key values.</summary>
+    private sealed class TrackedKey(IEntityType rootType, object?[] values) : IEquatable<TrackedKey>
+    {
+        private readonly IEntityType _rootType = rootType;
+        private readonly object?[] _values = values;
+
+        public bool Equals(TrackedKey? other) =>
+            other is not null
+            && ReferenceEquals(_rootType, other._rootType)
+            && _values.SequenceEqual(other._values);
+
+        public override bool Equals(object? obj) => Equals(obj as TrackedKey);
+
+        public override int GetHashCode()
+        {
+            var hash = new HashCode();
+            hash.Add(_rootType);
+            foreach (var value in _values)
+            {
+                hash.Add(value);
+            }
+
+            return hash.ToHashCode();
         }
     }
 
